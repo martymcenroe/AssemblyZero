@@ -1,0 +1,28 @@
+{
+  "// INSTRUCTIONS": "Copy this file to your project's .claude/project.json and customize the values below.",
+
+  "variables": {
+    "PROJECT_ROOT": "/c/Users/mcwiz/Projects/YOUR_PROJECT",
+    "PROJECT_NAME": "YourProject",
+    "GITHUB_REPO": "your-username/your-repo",
+    "TOOLS_DIR": "/c/Users/mcwiz/Projects/YOUR_PROJECT/tools",
+    "WORKTREE_PATTERN": "YourProject-{ID}"
+  },
+
+  "inherit_from": "C:\\Users\\mcwiz\\Projects",
+
+  "// VARIABLE REFERENCE": {
+    "PROJECT_ROOT": "Unix-style absolute path to the project (for Bash commands)",
+    "PROJECT_NAME": "Human-readable project name (used in worktree patterns and messages)",
+    "GITHUB_REPO": "GitHub repository in owner/repo format (for gh CLI commands)",
+    "TOOLS_DIR": "Unix-style path to the project's tools directory",
+    "WORKTREE_PATTERN": "Pattern for naming worktrees (e.g., ProjectName-{ID})"
+  },
+
+  "// USAGE": [
+    "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
+    "2. Edit the values in 'variables' section",
+    "3. Run the generator: python tools/agentos-generate.py --project YourProject",
+    "4. The generator will create concrete configs from templates"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash {{PROJECT_ROOT}}/.claude/hooks/pre-edit-check.sh",
+            "timeout": 5,
+            "description": "Branch Protection (Worktree Isolation)"
+          },
+          {
+            "type": "command",
+            "command": "bash {{PROJECT_ROOT}}/.claude/hooks/pre-edit-security-warn.sh",
+            "timeout": 10,
+            "description": "Security Pattern Warning (OWASP)"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash {{PROJECT_ROOT}}/.claude/hooks/pre-commit-report-check.sh",
+            "timeout": 5,
+            "description": "PRE-COMMIT GATE: Report Existence"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash {{PROJECT_ROOT}}/.claude/hooks/post-edit-lint.sh",
+            "timeout": 30,
+            "description": "Security Lint (eslint/ruff)"
+          }
+        ]
+      }
+    ]
+  }
+}

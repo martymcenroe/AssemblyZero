@@ -1,0 +1,71 @@
+#!/bin/bash
+# Pre-Edit Hook: Enforce Worktree Isolation
+#
+# HARD BLOCK: Code files on main branch
+# ALLOW: Documentation and staging files on main branch
+#
+# Environment: $CLAUDE_TOOL_INPUT_FILE_PATH contains the target file path
+
+set -e
+
+file="$CLAUDE_TOOL_INPUT_FILE_PATH"
+branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+
+# If not on main branch, allow everything
+if [ "$branch" != "main" ]; then
+    exit 0
+fi
+
+# === ON MAIN BRANCH ===
+
+# ALLOW: Documentation files (by extension)
+case "$file" in
+    *.md|*.txt|*.rst|*.adoc)
+        exit 0
+        ;;
+esac
+
+# ALLOW: Files in docs/ directory
+if [[ "$file" == */docs/* ]]; then
+    exit 0
+fi
+
+# ALLOW: Files in claude-staging/ directory
+if [[ "$file" == */claude-staging/* ]]; then
+    exit 0
+fi
+
+# ALLOW: Git config files (not "code")
+case "$file" in
+    *.gitignore|*.gitattributes|*.editorconfig|*.prettierrc*|*.eslintignore)
+        exit 0
+        ;;
+esac
+
+# BLOCK: Code files
+case "$file" in
+    *.js|*.jsx|*.ts|*.tsx|*.mjs|*.cjs|\
+    *.py|*.pyi|\
+    *.css|*.scss|*.sass|*.less|\
+    *.html|*.htm|*.vue|*.svelte|\
+    *.json|*.yaml|*.yml|*.toml|*.ini|*.cfg|\
+    *.sh|*.bash|*.zsh|*.fish|\
+    *.sql|*.graphql|*.gql)
+        echo "" >&2
+        echo "========================================" >&2
+        echo "BLOCKED: Code edit on main branch" >&2
+        echo "========================================" >&2
+        echo "" >&2
+        echo "File: $file" >&2
+        echo "" >&2
+        echo "You MUST create a worktree first:" >&2
+        echo "  git worktree add ../{{PROJECT_NAME}}-{ID} -b {ID}-description" >&2
+        echo "" >&2
+        echo "See CLAUDE.md for worktree isolation rationale." >&2
+        echo "" >&2
+        exit 1
+        ;;
+esac
+
+# DEFAULT: Allow unknown file types (conservative)
+exit 0
