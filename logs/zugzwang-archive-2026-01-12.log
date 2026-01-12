@@ -1,0 +1,13 @@
+2026-01-12T02:51:07 | chrome-webstore-upload --help 2>&1 | Test hook with chrome-webstore-upload command | Do you want to proceed? | ❯ 1. Yes | 2. Yes, and don't ask again for chrome-webstore-upload commands in C:\Users\mcwiz\Projects\Aletheia | 3. No
+2026-01-12T02:57:30 | CLAUDE_TOOL_INPUT_COMMAND="chrome-webstore-upload --source dist/aletheia-chrome-v1.0.zip" bash | /c/Users/mcwiz/Projects/Aletheia/.claude/hooks/pre-store-submit.sh | Test hook script directly with stale artifacts
+2026-01-12T02:57:50 | Do you want to create lld-review.txt.template? | ❯ 1. Yes | 2. Yes, allow all edits during this session (shift+tab) | 3. No
+2026-01-12T02:58:05 | Do you want to create implementation-review.txt.template? | ❯ 1. Yes | 2. Yes, allow all edits during this session (shift+tab) | 3. No
+2026-01-12T02:58:17 | Do you want to create issue-review.txt.template? | ❯ 1. Yes | 2. Yes, allow all edits during this session (shift+tab) | 3. No
+2026-01-12T02:58:56 | ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ | Do you want to create gemini-model-check.sh.template? | ❯ 1. Yes | 2. Yes, allow all edits during this session (shift+tab) | 3. No
+2026-01-12T02:59:37 | Do you want to overwrite project.json.example? | ❯ 1. Yes | 2. Yes, allow all edits in .claude/ during this session (shift+tab) | 3. No
+2026-01-12T03:00:41 | Do you want to overwrite project.json.example? | ❯ 1. Yes | 2. Yes, allow all edits in .claude/ during this session (shift+tab) | 3. No
+2026-01-12T03:01:50 | git -C /c/Users/mcwiz/Projects/Aletheia commit -m "docs: normal cleanup $(powershell.exe -Command "Get-Date | -Format 'yyyy-MM-dd'")" | Commit session log with timestamp | Do you want to proceed? | ❯ 1. Yes | 2. No
+2026-01-12T03:02:28 | chmod +x /c/Users/mcwiz/Projects/Talos/.claude/tools/gemini-model-check.sh | Make gemini-model-check.sh executable | Do you want to proceed? | ❯ 1. Yes | 2. Yes, and don't ask again for chmod commands in C:\Users\mcwiz\Projects\Talos | 3. No
+2026-01-12T03:04:13 | Do you want to make this edit to stop-session-log.sh? | ❯ 1. Yes | 2. Yes, allow all edits during this session (shift+tab) | 3. No
+2026-01-12T03:04:49 | /c/Users/mcwiz/Projects/Talos/.claude/tools/gemini-model-check.sh "$(cat /c/Users/mcwiz/AppData/Local/Temp/claude/ | C--Users-mcwiz-Projects-Talos/97b5fdbd-a0a0-4997-adaa-08ca7dc06915/scratchpad/gemini-review-prompt.txt)" | Invoke Gemini LLD review on heuristic engine doc | Do you want to proceed? | ❯ 1. Yes | 2. No
+2026-01-12T03:06:43 | git -C /c/Users/mcwiz/Projects/Aletheia commit -m "docs: full cleanup $(powershell.exe -Command "Get-Date -Format | 'yyyy-MM-dd'")" | Commit all staged changes

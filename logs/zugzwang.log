@@ -1,0 +1,2 @@
+2026-01-12T09:33:31 | /c/Users/mcwiz/Projects/Talos/.claude/tools/gemini-model-check.sh "$(cat /c/Users/mcwiz/AppData/Local/Temp/claude/ | C--Users-mcwiz-Projects-Talos/97b5fdbd-a0a0-4997-adaa-08ca7dc06915/scratchpad/gemini-review-prompt-v2.txt)" | Re-run Gemini LLD review on updated heuristic engine doc
+2026-01-12T09:35:40 | powershell.exe -Command "Get-WinEvent -LogName 'Microsoft-Windows-PrintService/Operational' -MaxEvents 10 2>$null | | Select-Object TimeCreated, Id, Message | Format-List"

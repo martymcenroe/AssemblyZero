@@ -13,16 +13,40 @@
 
   "// VARIABLE REFERENCE": {
     "PROJECT_ROOT": "Unix-style absolute path to the project (for Bash commands)",
-    "PROJECT_NAME": "Human-readable project name (used in worktree patterns and messages)",
+    "PROJECT_NAME": "Human-readable project name (used in Gemini prompts, worktree patterns, and messages)",
     "GITHUB_REPO": "GitHub repository in owner/repo format (for gh CLI commands)",
     "TOOLS_DIR": "Unix-style path to the project's tools directory",
     "WORKTREE_PATTERN": "Pattern for naming worktrees (e.g., ProjectName-{ID})"
   },
 
+  "// GENERATED FILES": {
+    "commands/cleanup.md": "Session cleanup skill",
+    "hooks/*.sh": "Pre/post edit hooks for safety checks",
+    "settings.json": "Claude Code settings",
+    "gemini-prompts/lld-review.txt": "Gemini LLD review prompt",
+    "gemini-prompts/implementation-review.txt": "Gemini implementation review prompt",
+    "gemini-prompts/issue-review.txt": "Gemini issue review prompt",
+    "tools/gemini-model-check.sh": "Gemini CLI wrapper with model validation"
+  },
+
+  "// GEMINI INTEGRATION": {
+    "description": "The generator creates Gemini prompts and tools for dual-AI review",
+    "prerequisites": [
+      "Gemini CLI v0.23.0+ installed and authenticated",
+      "Google AI Pro subscription (for gemini-3-pro access)",
+      "jq installed for JSON parsing"
+    ],
+    "usage": [
+      "LLD Review: ./tools/gemini-model-check.sh \"$(cat gemini-prompts/lld-review.txt)\"",
+      "Replace {{LLD_PATH}} and {{LLD_CONTENT}} placeholders before invoking"
+    ]
+  },
+
   "// USAGE": [
     "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
     "2. Edit the values in 'variables' section",
-    "3. Run the generator: python tools/agentos-generate.py --project YourProject",
-    "4. The generator will create concrete configs from templates"
+    "3. Run the generator: poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py --project YourProject",
+    "4. The generator will create concrete configs from templates",
+    "5. Make tools/gemini-model-check.sh executable: chmod +x tools/gemini-model-check.sh"
   ]
 }

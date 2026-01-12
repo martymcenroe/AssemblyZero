@@ -1,6 +1,6 @@
 ---
 description: Real-time permission friction logger - track every permission prompt
-argument-hint: "[--help] [--tail N] [--clear]"
+argument-hint: "[--help] [--tail N] [--clear] [--review] [--blast]"
 aliases: ["/zz"]
 ---
 
@@ -14,19 +14,23 @@ aliases: ["/zz"]
 
 ## Help
 
-Usage: `/zugzwang [--help] [--tail N] [--clear]`
+Usage: `/zugzwang [--help] [--tail N] [--clear] [--review] [--blast]`
 
 | Argument | Description |
 |----------|-------------|
 | `--help` | Show this help message and exit |
 | `--tail N` | Show last N log entries (default: 10) |
 | `--clear` | Clear the log file and start fresh |
+| `--review` | Show full log with analysis, do NOT clear |
+| `--blast` | Post to GitHub #17637, then clear log |
 
 **Examples:**
 - `/zugzwang --help` - show this help
 - `/zugzwang` or `/zz` - activate logger, show recent entries
 - `/zugzwang --tail 20` - show last 20 entries
 - `/zugzwang --clear` - clear log file
+- `/zugzwang --review` - review all entries without clearing
+- `/zugzwang --blast` - post to GitHub and clear
 
 **What it does:**
 1. Activates real-time logging of all permission-related events
@@ -35,7 +39,7 @@ Usage: `/zugzwang [--help] [--tail N] [--clear]`
 4. Propagates logging to spawned agents
 
 **Log location:**
-`C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\zugzwang.log`
+`C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log`
 
 **Why "zugzwang"?**
 Chess term: a position where any move worsens your situation. Perfect metaphor for permission friction - you're stuck waiting for approval, unable to proceed.
@@ -47,6 +51,8 @@ Chess term: a position where any move worsens your situation. Perfect metaphor f
 ### Step 1: Determine Mode
 
 Parse `$ARGUMENTS`:
+- `--blast` flag present → Blast mode (post to GitHub, then clear)
+- `--review` flag present → Review mode (show full log, no clear)
 - `--clear` flag present → Clear mode
 - `--tail N` present → Show N entries (extract number)
 - No flags → Default mode (activate + show last 10)
@@ -54,10 +60,40 @@ Parse `$ARGUMENTS`:
 ### Step 2: Log File Path
 
 ```
-LOG_PATH = C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\zugzwang.log
+LOG_PATH = C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
+(Bash path: /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log)
 ```
 
 ### Step 3: Execute Based on Mode
+
+**If `--blast`:**
+1. Read full log from LOG_PATH
+2. If empty: Output "No friction events to blast." and STOP
+3. Count unique patterns and total events
+4. Post to GitHub:
+   ```bash
+   gh issue comment 17637 --repo anthropics/claude-code --body "## Friction Batch
+
+   [List each unique pattern with:
+   - The prompt/command that triggered it
+   - The pattern that SHOULD have matched]
+
+   Total events: [count]"
+   ```
+5. Clear the log file
+6. Output: "Blasted [N] events to GitHub #17637. Log cleared."
+7. STOP
+
+**If `--review`:**
+1. Read full log from LOG_PATH
+2. If empty: Output "No friction events logged yet." and STOP
+3. Display ALL entries with analysis:
+   - Group by event type (PATTERN_RISKY, TOOL_BLOCKED, etc.)
+   - Count occurrences of each pattern
+   - Identify most frequent friction points
+4. Output summary table
+5. Do NOT clear the log
+6. STOP
 
 **If `--clear`:**
 1. Use Write tool to create empty file at LOG_PATH
@@ -79,7 +115,7 @@ Output to user:
 **Zugzwang Active**
 
 From this point forward, I will log all permission-related events to:
-`C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\zugzwang.log`
+`C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log`
 
 Events logged:
 - PATTERN_RISKY: Commands with |, &&, ; before execution
@@ -154,7 +190,7 @@ TIMESTAMP | TOOL_DENIED | agent:opus | tool:unknown | context:"user indicated de
 **ZUGZWANG LOGGING ACTIVE:**
 
 You MUST log permission-related events to:
-C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\zugzwang.log
+C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
 
 **Before ANY Bash command that:**
 - Contains | (pipe), && (chain), or ; (separator)
@@ -207,12 +243,12 @@ TIMESTAMP | EVENT_TYPE | agent:MODEL | tool:TOOL | context:"DESCRIPTION" | statu
 
 **Manual check anytime:**
 ```
-Read: C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\zugzwang.log
+Read: C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
 ```
 
 **From Bash (no pipes!):**
 ```bash
-cat /c/Users/mcwiz/.claude/projects/C--Users-mcwiz-Projects-AgentOS/zugzwang.log
+cat /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
 ```
 
 ---
