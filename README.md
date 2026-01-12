@@ -46,6 +46,44 @@ This generates:
 - `.claude/commands/*.md` - Slash commands
 - `.claude/hooks/*.sh` - Pre/post tool hooks
 
+## Tools
+
+### agentos-generate.py - Config Generator
+
+Generates project-specific configs from templates:
+
+```bash
+poetry run python tools/agentos-generate.py --project YourProject
+```
+
+### agentos-permissions.py - Permission Propagation
+
+Syncs friction-free permissions across projects. Removes redundant and stale permissions:
+
+```bash
+# Audit a project's permissions
+poetry run python tools/agentos-permissions.py --audit --project Aletheia
+
+# Clean redundancies (dry-run first)
+poetry run python tools/agentos-permissions.py --clean --project Aletheia --dry-run
+poetry run python tools/agentos-permissions.py --clean --project Aletheia
+
+# Sync all projects with auto-promote
+poetry run python tools/agentos-permissions.py --sync --all-projects
+
+# Quick check for cleanup integration
+poetry run python tools/agentos-permissions.py --quick-check --project Aletheia
+```
+
+**Modes:**
+| Mode | Description |
+|------|-------------|
+| `--audit` | Read-only analysis of redundant/stale permissions |
+| `--clean` | Remove redundancies and stale session vends |
+| `--sync` | Full sync, auto-promotes patterns found in 3+ projects |
+| `--quick-check` | Fast check for cleanup integration (exit code 0/1) |
+| `--restore` | Restore from backup after --clean |
+
 ## Structure
 
 ```
@@ -53,7 +91,8 @@ AgentOS/
 ├── CLAUDE.md                    # Core agent rules (read by all projects)
 ├── pyproject.toml               # Poetry project
 ├── tools/
-│   └── agentos-generate.py      # Template pre-processor
+│   ├── agentos-generate.py      # Template pre-processor
+│   └── agentos-permissions.py   # Permission propagation
 └── .claude/
     ├── project.json.example     # Variable template for new projects
     └── templates/

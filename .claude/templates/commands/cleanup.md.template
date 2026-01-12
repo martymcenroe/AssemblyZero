@@ -43,6 +43,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | **POST-MERGE cleanup** | | YES | YES |
 | **Auto-delete orphans** | | YES | YES |
 | Inventory audit | | | YES |
+| **Permission check** | | | YES |
 
 **Quick mode philosophy:** Record what happened (session log), but don't commit. Changes accumulate until a normal/full cleanup commits them. Protects contribution graph from trivial commits.
 
@@ -100,9 +101,10 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 - git -C {{PROJECT_ROOT}} worktree list
 - gh issue list --state open --repo {{GITHUB_REPO}}
 
-**Full mode adds (9 parallel calls total):**
+**Full mode adds (10 parallel calls total):**
 - git -C {{PROJECT_ROOT}} branch -vv
 - git -C {{PROJECT_ROOT}} branch -r
+- poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-permissions.py --quick-check --project {{PROJECT_NAME}}
 
 ## Phase 2: Conditional Fixes
 
@@ -134,6 +136,10 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 3. **Open PRs** - Should be 0. Flag if any exist.
 
 4. **Stashes** - Document any stash entries found.
+
+5. **Permission Check** (Full mode only) - If the permission quick-check returned exit code 1:
+   - Report: "Stale permissions detected in settings.local.json"
+   - Suggest: "Run `poetry run python tools/agentos-permissions.py --clean --project {{PROJECT_NAME}}` to clean"
 
 ## Phase 3: Session Log
 
@@ -200,6 +206,7 @@ Return a summary table:
 | Worktrees | Only main / {list} |
 | Auto-Deleted | {count} branches / Skipped |
 | Stashes | None / {count} |
+| Permissions | Clean / Stale (Full mode only) |
 | Commit | Pushed / Failed |
 
 Flag any unexpected conditions.
