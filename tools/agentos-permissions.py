@@ -441,8 +441,17 @@ def merge_up(projects: list[str], dry_run: bool = True) -> dict:
     print()
 
     if dry_run:
+        # Preview what clean/dedupe would do
+        preview_allow = list(master_allow) + list(to_merge_allow.keys())
+        vends_in_master = sum(1 for p in master_allow if is_session_vend(p)[0])
+        dupes_count = len(preview_allow) - len(set(preview_allow))
+
         print("## DRY RUN - No changes made")
-        print(f"Run without --dry-run to merge {len(to_merge_allow)} allow + {len(to_merge_deny)} deny patterns")
+        print(f"Would merge: +{len(to_merge_allow)} allow, +{len(to_merge_deny)} deny")
+        if vends_in_master:
+            print(f"Would clean: -{vends_in_master} vends from master")
+        if dupes_count:
+            print(f"Would dedupe: -{dupes_count} duplicates")
         return {
             "merged_allow": len(to_merge_allow),
             "merged_deny": len(to_merge_deny),
@@ -468,19 +477,52 @@ def merge_up(projects: list[str], dry_run: bool = True) -> dict:
     new_allow = list(master_allow) + list(to_merge_allow.keys())
     new_deny = list(master_deny) + list(to_merge_deny.keys())
 
-    master_settings["permissions"]["allow"] = new_allow
-    master_settings["permissions"]["deny"] = new_deny
+    # Clean: remove vends from the merged result
+    cleaned_allow = []
+    removed_vends = []
+    for perm in new_allow:
+        is_vend, reason = is_session_vend(perm)
+        if is_vend:
+            removed_vends.append((perm, reason))
+        else:
+            cleaned_allow.append(perm)
+
+    # Dedupe: remove duplicates while preserving order
+    seen = set()
+    deduped_allow = []
+    for perm in cleaned_allow:
+        if perm not in seen:
+            seen.add(perm)
+            deduped_allow.append(perm)
+
+    seen_deny = set()
+    deduped_deny = []
+    for perm in new_deny:
+        if perm not in seen_deny:
+            seen_deny.add(perm)
+            deduped_deny.append(perm)
+
+    duplicates_removed = len(cleaned_allow) - len(deduped_allow)
+
+    master_settings["permissions"]["allow"] = deduped_allow
+    master_settings["permissions"]["deny"] = deduped_deny
     save_settings(master_path, master_settings)
 
     print(f"\n## Merged into master:")
-    print(f"  +{len(to_merge_allow)} allow patterns")
-    print(f"  +{len(to_merge_deny)} deny patterns")
-    print(f"  Master now has {len(new_allow)} allow, {len(new_deny)} deny")
+    print(f"  +{len(to_merge_allow)} allow patterns merged")
+    print(f"  +{len(to_merge_deny)} deny patterns merged")
+    if removed_vends:
+        print(f"  -{len(removed_vends)} vends cleaned from master")
+    if duplicates_removed:
+        print(f"  -{duplicates_removed} duplicates removed")
+    print(f"  Master now has {len(deduped_allow)} allow, {len(deduped_deny)} deny")
 
     return {
         "merged_allow": len(to_merge_allow),
         "merged_deny": len(to_merge_deny),
         "skipped_vends": len(skipped_vends),
+        "cleaned_vends": len(removed_vends),
+        "duplicates_removed": duplicates_removed,
         "dry_run": False
     }
 
