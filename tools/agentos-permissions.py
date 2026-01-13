@@ -5,19 +5,20 @@ AgentOS Permission Propagation Tool
 IMPORTANT: Claude Code permissions DO NOT INHERIT - they REPLACE.
 When a project has its own permissions block, it completely overrides the parent.
 
-This tool ONLY removes true session vends (one-time specific commands).
-It does NOT remove permissions just because they exist in the parent.
+This tool manages permissions across the master (user-level) and project-level files.
 
 Modes:
   --audit        Read-only analysis of session vends
   --clean        Remove ONLY session vends (keeps all reusable patterns)
   --quick-check  Fast check for cleanup integration (exit code 0/1)
+  --merge-up     Collect unique reusable patterns from projects into master
   --restore      Restore from backup
 
 Usage:
   poetry run python tools/agentos-permissions.py --audit --project Aletheia
   poetry run python tools/agentos-permissions.py --clean --project AgentOS --dry-run
   poetry run python tools/agentos-permissions.py --quick-check --project Aletheia
+  poetry run python tools/agentos-permissions.py --merge-up --all-projects
 """
 import argparse
 import json
@@ -31,6 +32,11 @@ from typing import Optional
 def get_projects_dir() -> Path:
     """Get the Projects directory path."""
     return Path.home() / "Projects"
+
+
+def get_master_settings_path() -> Path:
+    """Get path to master (user-level) settings.local.json."""
+    return Path.home() / ".claude" / "settings.local.json"
 
 
 def get_project_settings_path(project_name: str) -> Path:
@@ -328,6 +334,157 @@ def quick_check(project_name: str) -> int:
     return 0
 
 
+def merge_up(projects: list[str], dry_run: bool = True) -> dict:
+    """
+    Merge unique reusable patterns from project files into master.
+
+    Only merges patterns that are:
+    - NOT already in master
+    - NOT session vends
+    - Ideally reusable patterns (wildcards, Skills, etc.)
+
+    Returns dict with merge statistics.
+    """
+    master_path = get_master_settings_path()
+    master_settings = load_settings(master_path)
+
+    if not master_settings:
+        return {"error": f"Could not load master settings from {master_path}"}
+
+    master_allow = set(master_settings.get("permissions", {}).get("allow", []))
+    master_deny = set(master_settings.get("permissions", {}).get("deny", []))
+
+    # Collect unique patterns from all projects
+    to_merge_allow = {}  # permission -> (source_project, category)
+    to_merge_deny = {}
+    skipped_vends = []
+
+    for project in projects:
+        settings_path = get_project_settings_path(project)
+        settings = load_settings(settings_path)
+
+        if not settings:
+            print(f"  Skipping {project}: no settings file")
+            continue
+
+        project_allow = settings.get("permissions", {}).get("allow", [])
+        project_deny = settings.get("permissions", {}).get("deny", [])
+
+        # Check allow list
+        for perm in project_allow:
+            if perm in master_allow:
+                continue  # Already in master
+            if perm in to_merge_allow:
+                continue  # Already collected from another project
+
+            # Check if it's a vend (skip vends)
+            is_vend, vend_reason = is_session_vend(perm)
+            if is_vend:
+                skipped_vends.append((perm, project, vend_reason))
+                continue
+
+            # Categorize the permission
+            is_reuse, category = is_reusable_pattern(perm)
+            if is_reuse:
+                to_merge_allow[perm] = (project, category)
+            else:
+                # Not clearly reusable, but not a vend either
+                # Include with "unclear" category - user can review
+                to_merge_allow[perm] = (project, "unclear")
+
+        # Check deny list (simpler - just merge unique entries)
+        for perm in project_deny:
+            if perm not in master_deny and perm not in to_merge_deny:
+                to_merge_deny[perm] = project
+
+    # Print report
+    print(f"\n{'='*60}")
+    print("Merge Up Report")
+    print(f"{'='*60}")
+    print(f"Master: {master_path}")
+    print(f"Projects scanned: {len(projects)}")
+    print()
+
+    print(f"### New Allow Patterns to Merge: {len(to_merge_allow)}")
+    if to_merge_allow:
+        # Group by category
+        by_category = {}
+        for perm, (proj, cat) in to_merge_allow.items():
+            by_category.setdefault(cat, []).append((perm, proj))
+
+        for cat, items in sorted(by_category.items()):
+            print(f"\n  {cat}: {len(items)}")
+            for perm, proj in items[:5]:
+                print(f"    [{proj}] {perm[:60]}{'...' if len(perm) > 60 else ''}")
+            if len(items) > 5:
+                print(f"    ... and {len(items) - 5} more")
+    else:
+        print("  (none - master is up to date)")
+    print()
+
+    print(f"### New Deny Patterns to Merge: {len(to_merge_deny)}")
+    if to_merge_deny:
+        for perm, proj in list(to_merge_deny.items())[:5]:
+            print(f"  [{proj}] {perm[:60]}{'...' if len(perm) > 60 else ''}")
+        if len(to_merge_deny) > 5:
+            print(f"  ... and {len(to_merge_deny) - 5} more")
+    else:
+        print("  (none)")
+    print()
+
+    print(f"### Skipped Session Vends: {len(skipped_vends)}")
+    if skipped_vends:
+        for perm, proj, reason in skipped_vends[:3]:
+            print(f"  [{proj}] ({reason}) {perm[:50]}...")
+        if len(skipped_vends) > 3:
+            print(f"  ... and {len(skipped_vends) - 3} more")
+    print()
+
+    if dry_run:
+        print("## DRY RUN - No changes made")
+        print(f"Run without --dry-run to merge {len(to_merge_allow)} allow + {len(to_merge_deny)} deny patterns")
+        return {
+            "merged_allow": len(to_merge_allow),
+            "merged_deny": len(to_merge_deny),
+            "skipped_vends": len(skipped_vends),
+            "dry_run": True
+        }
+
+    if not to_merge_allow and not to_merge_deny:
+        print("## Nothing to merge - master is up to date")
+        return {
+            "merged_allow": 0,
+            "merged_deny": 0,
+            "skipped_vends": len(skipped_vends),
+            "dry_run": False
+        }
+
+    # Create backup
+    backup_path = master_path.with_suffix('.local.json.bak')
+    shutil.copy(master_path, backup_path)
+    print(f"Backup created: {backup_path}")
+
+    # Merge into master
+    new_allow = list(master_allow) + list(to_merge_allow.keys())
+    new_deny = list(master_deny) + list(to_merge_deny.keys())
+
+    master_settings["permissions"]["allow"] = new_allow
+    master_settings["permissions"]["deny"] = new_deny
+    save_settings(master_path, master_settings)
+
+    print(f"\n## Merged into master:")
+    print(f"  +{len(to_merge_allow)} allow patterns")
+    print(f"  +{len(to_merge_deny)} deny patterns")
+    print(f"  Master now has {len(new_allow)} allow, {len(new_deny)} deny")
+
+    return {
+        "merged_allow": len(to_merge_allow),
+        "merged_deny": len(to_merge_deny),
+        "skipped_vends": len(skipped_vends),
+        "dry_run": False
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AgentOS Permission Propagation Tool",
@@ -342,6 +499,8 @@ def main():
                            help="Remove ONLY session vends (keeps reusable patterns)")
     mode_group.add_argument("--quick-check", action="store_true",
                            help="Fast check for cleanup integration")
+    mode_group.add_argument("--merge-up", action="store_true",
+                           help="Collect unique reusable patterns from projects into master")
     mode_group.add_argument("--restore", action="store_true",
                            help="Restore from backup")
 
@@ -380,6 +539,18 @@ def main():
             parser.error("--quick-check requires --project")
         exit_code = quick_check(args.project)
         sys.exit(exit_code)
+
+    elif args.merge_up:
+        if args.project:
+            projects = [args.project]
+        elif args.all_projects:
+            projects = find_all_projects()
+        else:
+            parser.error("--merge-up requires --project or --all-projects")
+        result = merge_up(projects, dry_run=args.dry_run)
+        if "error" in result:
+            print(f"ERROR: {result['error']}")
+            sys.exit(1)
 
     elif args.restore:
         if not args.project:
