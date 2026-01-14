@@ -167,24 +167,24 @@ class InputReader:
                         # Handle Windows special keys (arrows, function keys, etc.)
                         # They come as two-char sequences: \xe0 or \x00 followed by scan code
                         if char in ('\xe0', '\x00'):
-                            if msvcrt.kbhit():
-                                scan = msvcrt.getwch()
-                                # Convert to ANSI escape sequences
-                                key_map = {
-                                    'H': '\x1b[A',  # Up
-                                    'P': '\x1b[B',  # Down
-                                    'K': '\x1b[D',  # Left
-                                    'M': '\x1b[C',  # Right
-                                    'G': '\x1b[H',  # Home
-                                    'O': '\x1b[F',  # End
-                                    'I': '\x1b[5~', # Page Up
-                                    'Q': '\x1b[6~', # Page Down
-                                    'R': '\x1b[2~', # Insert
-                                    'S': '\x1b[3~', # Delete
-                                }
-                                if scan in key_map:
-                                    self.queue.put(key_map[scan])
-                                # else: unknown scan code, drop it
+                            # Read scan code immediately - it's already buffered
+                            scan = msvcrt.getwch()
+                            # Convert to ANSI escape sequences
+                            key_map = {
+                                'H': '\x1b[A',  # Up
+                                'P': '\x1b[B',  # Down
+                                'K': '\x1b[D',  # Left
+                                'M': '\x1b[C',  # Right
+                                'G': '\x1b[H',  # Home
+                                'O': '\x1b[F',  # End
+                                'I': '\x1b[5~', # Page Up
+                                'Q': '\x1b[6~', # Page Down
+                                'R': '\x1b[2~', # Insert
+                                'S': '\x1b[3~', # Delete
+                            }
+                            if scan in key_map:
+                                self.queue.put(key_map[scan])
+                            # else: unknown scan code, drop it
                         else:
                             self.queue.put(char)
                     else:
