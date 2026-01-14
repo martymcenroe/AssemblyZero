@@ -23,6 +23,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Import AgentOS config for path management
+try:
+    from agentos_config import config
+except ImportError:
+    # Fallback if running outside AgentOS context
+    config = None
+
 
 # AgentOS root (where this script lives)
 AGENTOS_ROOT = Path(__file__).parent.parent.resolve()
@@ -211,8 +218,10 @@ def scan_project_permissions(project_path: Path, project_name: str) -> list:
     for pattern in allow_patterns:
         if pattern not in agentos_allow:
             # Check if it looks generic (not project-specific path)
+            # Use config for path if available, otherwise fallback to default
+            projects_path = config.projects_root_unix() if config else "/c/Users/mcwiz/Projects"
             is_generic = project_name.lower() not in pattern.lower() and \
-                         "/c/Users/mcwiz/Projects/" not in pattern
+                         projects_path not in pattern
 
             if is_generic:
                 candidates.append(PromotionCandidate(

@@ -71,7 +71,33 @@ This workspace uses **AgentOS** - a parameterized agent configuration system. Ea
 
 To generate configs for a new project:
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py --project YOUR_PROJECT
+poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/agentos-generate.py --project YOUR_PROJECT
+```
+
+Where `$AGENTOS_ROOT` is configured in `~/.agentos/config.json` (default: `/c/Users/mcwiz/Projects/AgentOS`).
+
+## Path Configuration
+
+AgentOS paths are configured in `~/.agentos/config.json`:
+
+| Variable | Default (Unix) | Used For |
+|----------|----------------|----------|
+| `agentos_root` | `/c/Users/mcwiz/Projects/AgentOS` | Tool execution, config source |
+| `projects_root` | `/c/Users/mcwiz/Projects` | Project detection |
+| `user_claude_dir` | `/c/Users/mcwiz/.claude` | User-level commands |
+
+**If the config file doesn't exist, defaults are used.**
+
+To customize paths:
+1. Copy `AgentOS/.agentos/config.example.json` to `~/.agentos/config.json`
+2. Edit paths for your machine
+3. Both Windows and Unix formats are required (tools use different formats)
+
+Python tools import paths via:
+```python
+from agentos_config import config
+root = config.agentos_root()       # Windows format
+root_unix = config.agentos_root_unix()  # Unix format
 ```
 
 ---

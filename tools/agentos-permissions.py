@@ -32,6 +32,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Import AgentOS config for path management
+try:
+    from agentos_config import config
+except ImportError:
+    # Fallback if running outside AgentOS context
+    config = None
+
 
 # Permissions that should NEVER be in deny - too important to accidentally block
 # This is a hard-coded protection that cannot be overridden
@@ -224,7 +231,10 @@ def is_session_vend(permission: str) -> tuple[bool, str]:
         # These are specific one-off commands, likely vends
         # But we need to be careful - some might be intentional
         # Only flag if it has a very specific path
-        if re.search(r'Bash\(git -C /c/Users/mcwiz/Projects/[^/]+-\d+ ', permission):
+        # Use config for path if available, otherwise fallback to default
+        projects_path = config.projects_root_unix() if config else "/c/Users/mcwiz/Projects"
+        pattern = rf'Bash\(git -C {re.escape(projects_path)}/[^/]+-\d+ '
+        if re.search(pattern, permission):
             return True, "git command on worktree (has issue ID)"
         # Don't flag commands on main project dirs - those might be intentional
 
