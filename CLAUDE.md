@@ -33,6 +33,30 @@ REQUIRED:   One command per Bash call, absolute paths only
 
 **NEVER use `~` - Windows doesn't expand it.**
 
+### COMPACTION DETECTION (AUTO-REFRESH)
+
+**If you see ANY of these signals, you were compacted - run `/onboard --refresh` IMMEDIATELY:**
+
+1. Message contains: "This session is being continued from a previous conversation"
+2. Message contains: "ran out of context" or "context limit"
+3. You see a "Summary:" or "Analysis:" block describing prior work
+4. You don't remember the visible self-check protocol
+5. You're uncertain whether `&&` is allowed in Bash commands
+
+**Auto-refresh trigger:** If ANY of the above is true, your FIRST action must be:
+```
+/onboard --refresh
+```
+
+**Why:** Compaction loses context. The summary preserves facts but not operational constraints. Refresh reloads the rules that keep you safe.
+
+**Sentinel test:** Can you complete this without looking?
+- Bash banned patterns: `&&`, `|`, `;`
+- Path format for Read tool: Windows (`C:\...`)
+- Code changes require: worktree isolation
+
+If you hesitated, refresh.
+
 ---
 
 ## First Action
