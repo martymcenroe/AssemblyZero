@@ -488,6 +488,9 @@ class Unleashed:
             self.logger.close()
             print(f"\n[UNLEASHED] Logs saved to: {self.logger.log_dir}", file=sys.stderr)
 
+        # Force exit - daemon threads may be blocking on I/O
+        sys.exit(0)
+
 
 # =============================================================================
 # Signal Handlers
