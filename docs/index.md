@@ -10,8 +10,9 @@
 | Need to... | Go to |
 |------------|-------|
 | Set up a new project | [0901-new-project-setup.md](runbooks/0901-new-project-setup.md) |
-| Look up a command | [0600-command-reference.md](skills/0600-command-reference.md) |
+| Look up a command | [0600-command-index.md](skills/0600-command-index.md) |
 | Create a new runbook | [0109-runbook-template.md](templates/0109-runbook-template.md) |
+| Document a new tool | [0008-documentation-convention.md](standards/0008-documentation-convention.md) |
 | Understand core rules | [CLAUDE.md](../CLAUDE.md) |
 
 ---
@@ -102,6 +103,7 @@ Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementatio
 | [0005](standards/0005-session-closeout-protocol.md) | Session Closeout | End-of-session procedures |
 | [0006](standards/0006-standard-labels.md) | Standard Labels | GitHub labels convention |
 | [0007](standards/0007-testing-strategy.md) | Testing Strategy | Test-first philosophy |
+| [0008](standards/0008-documentation-convention.md) | Documentation Convention | c/p pattern for CLI vs Prompt docs |
 
 ### Templates (01xx)
 
@@ -261,3 +263,4 @@ See `.claude/project-registry.json` for current list.
 | 2.0 | 2026-01-13 | Full document catalog after numbering audit (47 docs) |
 | 2.1 | 2026-01-13 | Added parent-child numbering scheme (4-digit AgentOS, 5-digit projects) |
 | 2.2 | 2026-01-13 | ADR 0206: Bidirectional sync architecture, project registry created |
+| 2.3 | 2026-01-14 | Added 0008 Documentation Convention (c/p pattern) |

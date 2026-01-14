@@ -362,6 +362,24 @@ The documentation system exists so you don't need persistent memory. USE IT.
 
 ---
 
+## Documentation Convention (c/p Pattern)
+
+**Every reusable component MUST have two documentation files:**
+- **`c` (CLI)** - How to run manually from terminal (saves tokens)
+- **`p` (Prompt)** - How to use via Claude conversation
+
+This applies to: skills, Python tools, runbooks, any reusable procedure.
+
+See: `AgentOS/docs/standards/0008-documentation-convention.md`
+
+**Quick template:**
+```
+{num}c-{name}-cli.md      # Copy-pasteable commands
+{num}p-{name}-prompt.md   # Natural language examples
+```
+
+---
+
 ## You Are Not Alone
 
 Other agents may work on this project. Check session logs for recent context. Coordinate via the project's issue tracker.
