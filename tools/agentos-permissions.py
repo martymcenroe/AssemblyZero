@@ -40,6 +40,29 @@ PROTECTED_FROM_DENY = [
     "Bash(python3:*)",
 ]
 
+# Giant permission detection - permissions longer than this are almost certainly
+# one-time garbage (e.g., Gemini prompts saved as permissions)
+MAX_PERMISSION_LENGTH = 300
+
+# Markers that indicate embedded content (prompts, scripts, etc.)
+# If a permission contains any of these, it's corrupted/one-time
+EMBEDDED_CONTENT_MARKERS = [
+    '\n',           # Actual newlines (not escaped \n)
+    '```',          # Markdown code blocks
+    '\\`\\`\\`',    # Escaped markdown code blocks
+    '## ',          # Markdown headers
+    '\\n\\n',       # Double escaped newlines (embedded text)
+    '[BLOCKING]',   # Review markers
+    '[HIGH]',       # Review markers
+    '[SUGGESTION]', # Review markers
+    'QUESTION:',    # Prompt markers
+    'CRITICAL INSTRUCTIONS:', # Prompt markers
+    'OUTPUT FORMAT:', # Prompt markers
+    'def ',         # Python function definitions (code in permission)
+    'function ',    # JS function definitions
+    'import ',      # Import statements
+]
+
 
 def get_projects_dir() -> Path:
     """Get the Projects directory path."""
@@ -72,9 +95,82 @@ def load_settings(path: Path) -> Optional[dict]:
         return None
 
 
+def validate_json_content(content: str) -> tuple[bool, str]:
+    """
+    Validate that content is valid JSON.
+
+    Returns (is_valid, error_message) tuple.
+    """
+    try:
+        json.loads(content)
+        return True, ""
+    except json.JSONDecodeError as e:
+        return False, str(e)
+
+
 def save_settings(path: Path, settings: dict):
-    """Save settings to path with pretty formatting."""
-    path.write_text(json.dumps(settings, indent=2) + "\n", encoding='utf-8')
+    """
+    Save settings to path with pretty formatting and JSON validation.
+
+    Validates the JSON before writing to prevent corruption.
+    """
+    # Serialize to JSON first
+    try:
+        content = json.dumps(settings, indent=2) + "\n"
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Cannot serialize settings to JSON: {e}")
+
+    # Validate the serialized JSON (paranoid check)
+    valid, error = validate_json_content(content)
+    if not valid:
+        raise ValueError(f"Generated invalid JSON: {error}")
+
+    # Write to temp file first, then rename (atomic on most systems)
+    temp_path = path.with_suffix('.json.tmp')
+    temp_path.write_text(content, encoding='utf-8')
+
+    # Final validation of written file
+    try:
+        json.loads(temp_path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as e:
+        temp_path.unlink()
+        raise ValueError(f"Written file failed validation: {e}")
+
+    # Safe to move
+    temp_path.replace(path)
+
+
+def is_giant_permission(permission: str) -> tuple[bool, str]:
+    """
+    Detect permissions that are too long to be useful patterns.
+
+    Permissions over MAX_PERMISSION_LENGTH chars are almost certainly one-time
+    commands that got saved (like Gemini prompts passed as arguments).
+
+    Returns (is_giant, reason) tuple.
+    """
+    if len(permission) > MAX_PERMISSION_LENGTH:
+        return True, f"giant ({len(permission)} chars)"
+    return False, ""
+
+
+def has_embedded_content(permission: str) -> tuple[bool, str]:
+    """
+    Detect permissions with embedded prompts/scripts/content.
+
+    These are corrupted permissions where a long prompt or script was
+    accidentally saved as a permission string.
+
+    Returns (has_embedded, reason) tuple.
+    """
+    for marker in EMBEDDED_CONTENT_MARKERS:
+        if marker in permission:
+            # Truncate marker for display if it's long
+            display_marker = marker[:15] + '...' if len(marker) > 15 else marker
+            # Escape for display
+            display_marker = display_marker.replace('\n', '\\n')
+            return True, f"embedded content ({display_marker})"
+    return False, ""
 
 
 def is_session_vend(permission: str) -> tuple[bool, str]:
@@ -85,10 +181,22 @@ def is_session_vend(permission: str) -> tuple[bool, str]:
 
     Session vends are SPECIFIC one-time permissions, not reusable patterns.
     We identify them by looking for:
+    - Giant permissions (>300 chars) - almost certainly garbage
+    - Embedded content (newlines, markdown, code) - corrupted permissions
     - Embedded commit messages (heredocs, specific text)
     - Specific file paths in commands (not wildcards)
     - One-time git operations (specific commits, pushes, merges)
     """
+
+    # NEW: Check for giant permissions first (catches Gemini prompts, etc.)
+    is_giant, giant_reason = is_giant_permission(permission)
+    if is_giant:
+        return True, giant_reason
+
+    # NEW: Check for embedded content (newlines, markdown, code)
+    has_embedded, embedded_reason = has_embedded_content(permission)
+    if has_embedded:
+        return True, embedded_reason
 
     # Git commits with embedded messages (heredocs)
     if re.search(r'Bash\(git.* commit -m "\$\(cat <<', permission):
