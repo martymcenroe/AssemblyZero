@@ -162,6 +162,7 @@ Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementatio
 | [0815](audits/0815-permission-friction.md) | Permission Friction | Approval overhead |
 | [0816](audits/0816-permission-permissiveness.md) | Permission Permissiveness | Access control |
 | [0817](audits/0817-agentos-audit.md) | AgentOS Audit | Self-audit framework |
+| [0832](audits/0832-audit-cost-optimization.md) | Cost Optimization | Skill/tool token efficiency |
 | [0899](audits/0899-meta-audit.md) | Meta Audit | Audit the audits |
 
 ### Runbooks (09xx)

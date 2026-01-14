@@ -89,10 +89,10 @@ Audits exist because:
 | Category | Count | Auto-Fix | Focus |
 |----------|-------|----------|-------|
 | Documentation Health | 7 | 6 | Docs-code alignment, inventory, terminology |
-| Core Development | 16 | 3 | Code quality, security, privacy, accessibility |
+| Core Development | 17 | 4 | Code quality, security, privacy, accessibility, cost |
 | AI Governance | 7 | 0 | AI-specific controls and compliance |
 | Meta | 2 | 0 | Audit system governance |
-| **Total** | **32** | **9** | |
+| **Total** | **33** | **10** | |
 
 ### 3.2 Quick Reference
 
@@ -129,6 +129,7 @@ Audits exist because:
 | 0829 | Lambda Failure Remediation (proactive fix or draft issue) | No |
 | 0830 | Architecture Freshness (documentation completeness and currency) | **Yes** |
 | 0831 | Web Assets (icons, buttons, responsive design, accessibility) | No |
+| 0832 | Cost Optimization (model hints, context loading, spawn efficiency) | Partial |
 | 0898 | Horizon Scanning Protocol | No |
 | 0899 | Meta-Audit (validation & execution) | No |
 
@@ -173,6 +174,7 @@ Audits for code quality, security, and development practices.
 | 0829 | Lambda Failure Remediation | On-demand / cleanup --full | No |
 | 0830 | Architecture Freshness | Monthly + on change | **Yes** |
 | 0831 | Web Assets | On landing page change | No |
+| 0832 | Cost Optimization | Monthly | Partial |
 
 ### 4.2 AI Governance Audits
 
@@ -389,6 +391,7 @@ Standard format for all audits:
 - [0829 - Lambda Failure Remediation](0829-audit-lambda-failure-remediation.md)
 - [0830 - Architecture Freshness](0830-audit-architecture-freshness.md) ✨
 - [0831 - Web Assets](0831-audit-web-assets.md)
+- [0832 - Cost Optimization](0832-audit-cost-optimization.md) ✨
 
 **AI Governance (0818-0825)**
 - [0818 - AI Management System](0818-audit-ai-management-system.md)
@@ -513,3 +516,4 @@ By using appropriate models instead of Opus for all audits:
 | 2026-01-08 | Split 0809 per ADR 0213. Created 0825 (AI Safety) with LLM, Agentic, NIST AI RMF sections. 0809 now focused on app security. Total audits: 20. |
 | 2026-01-08 | Index consistency audit. Fixed broken links (0811-0814, 0815, 0817). Corrected audit names/descriptions to match actual files. Added 0817 Wiki Alignment. Total audits: 19. |
 | 2026-01-06 | Major update. Added AI Governance audits (0818-0823), split meta-audit into 0898 (horizon scanning) and 0899 (validation). Merged 0800-common-audits.md into this file (preserved Audit Philosophy section). Total audits: 17. |
+| 2026-01-14 | Created 0832 (Cost Optimization) for skill/command token efficiency analysis. Total audits: 33. |
