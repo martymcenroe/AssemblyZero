@@ -2,6 +2,47 @@
 
 **For agents stuck on Gemini quota exhaustion errors.**
 
+---
+
+## ⛔ HARD GATE: Model Verification Required (READ FIRST)
+
+**EVERY Gemini review MUST include model verification in your response to the user.**
+
+### After EVERY Gemini call, you MUST state:
+
+```
+**Gemini Review Model:** [gemini-3-pro-preview | gemini-3-pro | OTHER]
+```
+
+### VALID models (proceed with workflow):
+- `gemini-3-pro-preview` ✅
+- `gemini-3-pro` ✅
+
+### INVALID models (DEAD STOP - DO NOT PROCEED):
+- `gemini-2.0-flash` ❌ INVALID
+- `gemini-2.5-flash` ❌ INVALID
+- `gemini-*-lite` ❌ INVALID
+- Any model not containing `3-pro` ❌ INVALID
+
+### If you used an INVALID model:
+
+1. **STOP IMMEDIATELY** - Do not proceed with workflow
+2. **TELL THE USER:**
+   > "⚠️ Gemini review was performed with [model name], which is INVALID for reviews. This review does not count. Gemini 3 Pro is required. Cannot proceed until Pro model is available."
+3. **DO NOT create issues, merge PRs, or take any action based on the invalid review**
+4. **Use rotation tool to retry with Pro model:**
+   ```bash
+   python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "..."
+   ```
+
+### Why This Matters
+
+Flash/Lite models lack the reasoning depth for quality reviews. A Flash review that says "APPROVE" may miss critical issues that Pro would catch. **A review by the wrong model is worse than no review** because it creates false confidence.
+
+**The orchestrator (user) cares deeply about review quality. Do not cheat.**
+
+---
+
 ## The Problem
 
 When you see errors like:
