@@ -129,25 +129,62 @@ class AgentOSConfig:
         """
         Sanitize path to prevent path traversal attacks.
 
-        Security mitigation: Remove/neutralize '../' sequences.
+        Security fix: Use loop-until-stable approach to prevent bypass.
+        Single-pass regex can be bypassed (e.g., '....//'' -> '../').
 
         Args:
             path: The path string from config
 
         Returns:
-            Sanitized path string
+            Sanitized path string, or default path if suspicious
         """
-        # Remove path traversal patterns
-        # Match ../ or ..\ (both forward and back slashes)
-        sanitized = re.sub(r'\.\.[\\/]', '', path)
+        original = path
+        sanitized = path
 
-        # Also remove standalone .. at end
-        sanitized = re.sub(r'\.\.$', '', sanitized)
+        # Loop until no more traversal patterns found (prevents bypass)
+        # Example bypass without loop: '....//'' -> '../' after one pass
+        max_iterations = 10  # Safety limit
+        for _ in range(max_iterations):
+            prev = sanitized
+
+            # Remove ../ and ..\ patterns (standard traversal)
+            sanitized = re.sub(r'\.\.[\\/]', '', sanitized)
+
+            # Remove standalone .. at end
+            sanitized = re.sub(r'\.\.$', '', sanitized)
+
+            # Remove .. at start of path (e.g., '..secret' from '..../secret')
+            sanitized = re.sub(r'^\.\.', '', sanitized)
+
+            # Remove .. after path separator (e.g., '/..foo' patterns)
+            sanitized = re.sub(r'([\\/])\.\.(?=[^\\/.]|$)', r'\1', sanitized)
+
+            if sanitized == prev:
+                break  # No more patterns found
+
+        # Additional check: normalize path using pathlib for Windows paths
+        # This catches cases like 'C:\foo\..\bar' -> 'C:\bar'
+        if sanitized and not sanitized.startswith('/'):
+            # Looks like Windows path - use pathlib normalization
+            try:
+                normalized = str(Path(sanitized).resolve())
+                # Only use normalized if it doesn't escape (sanity check)
+                if '..' not in normalized:
+                    sanitized = normalized
+            except (ValueError, OSError):
+                pass  # Keep the regex-sanitized version
+
+        # Final safety check: if '..' still present anywhere, path is suspicious
+        if '..' in sanitized:
+            logger.warning(
+                f"Path still contains '..' after sanitization, using empty string"
+            )
+            sanitized = ""
 
         # Log if we modified the path (potential attack indicator)
-        if sanitized != path:
+        if sanitized != original:
             logger.warning(
-                "Path traversal pattern detected and removed from config path"
+                "Path sanitization modified config path (potential traversal attempt)"
             )
 
         return sanitized

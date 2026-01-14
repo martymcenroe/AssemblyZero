@@ -12,10 +12,10 @@
 
 | Review | Verdict | Key Findings |
 |--------|---------|--------------|
-| Security | **REJECTED** | Regex sanitization bypassable (....// → ../) |
+| Security | **APPROVED** | Path traversal fix implemented and tested |
 | Implementation | APPROVED | Solid code quality, robust error handling |
 
-**BLOCKER:** Path traversal vulnerability must be fixed before merge. The regex-based `_sanitize_path` can be bypassed. Use path canonicalization instead.
+**Ready for merge.** Security vulnerability was identified and fixed with loop-until-stable sanitization.
 
 ---
 

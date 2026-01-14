@@ -347,3 +347,42 @@ class TestSanitizePath:
             clean_path = "/c/Users/mcwiz/Projects"
             result = config_instance._sanitize_path(clean_path)
             assert result == clean_path
+
+    def test_bypass_attempt_blocked(self, tmp_path):
+        """
+        Bypass attempts like '....//'' are blocked.
+
+        Security fix: Single-pass regex can be bypassed because
+        '....//'' -> '../' after one pass. Loop-until-stable prevents this.
+        """
+        with patch('agentos_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
+            import importlib
+            import agentos_config
+            importlib.reload(agentos_config)
+
+            config_instance = agentos_config.AgentOSConfig()
+
+            # Test various bypass attempts
+            bypass_attempts = [
+                "....//etc/passwd",        # ....// -> ../ after single pass
+                "..../secret",             # ..../ -> ../ after single pass
+                "foo/....//bar",           # Embedded bypass
+                "......///etc",            # Triple-dot bypass
+                r"C:\foo\....\\..\bar",    # Windows bypass attempt
+            ]
+
+            for attempt in bypass_attempts:
+                result = config_instance._sanitize_path(attempt)
+                assert ".." not in result, f"Bypass succeeded for: {attempt} -> {result}"
+
+    def test_multiple_traversal_layers(self, tmp_path):
+        """Multiple layers of traversal are all removed."""
+        with patch('agentos_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
+            import importlib
+            import agentos_config
+            importlib.reload(agentos_config)
+
+            config_instance = agentos_config.AgentOSConfig()
+            # Deeply nested traversal
+            result = config_instance._sanitize_path("a/../b/../c/../d/../e")
+            assert ".." not in result
