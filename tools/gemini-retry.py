@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-gemini-retry.py - Retry Gemini CLI with exponential backoff
+gemini-retry.py - Retry Gemini CLI with credential rotation and backoff
 
 AgentOS Core Tool - Ensures gemini-3-pro-preview reviews succeed even under load.
 
@@ -9,11 +9,16 @@ Usage:
     python gemini-retry.py --prompt-file /path/to/prompt.txt [--model gemini-3-pro-preview]
 
 Features:
-    - Exponential backoff with jitter (avoids thundering herd)
-    - Distinguishes capacity vs quota errors
+    - Credential rotation when account quota is exhausted
+    - Exponential backoff for temporary capacity issues
     - Logs all attempts to logs/gemini-retry-TIMESTAMP.jsonl
     - Validates model used (rejects silent downgrades)
     - Returns response on success, exits 1 on permanent failure
+
+Key Insight:
+    - QUOTA_EXHAUSTED (account limit) → Try other credentials via rotation
+    - CAPACITY_EXHAUSTED (Google servers) → Exponential backoff makes sense
+    - Exponential backoff is USELESS for account quota - rotation is the answer
 
 Environment Variables:
     GEMINI_RETRY_MAX         Max retry attempts (default: 20)
@@ -23,7 +28,7 @@ Environment Variables:
 
 Exit Codes:
     0 - Success (response printed to stdout)
-    1 - Permanent failure (quota exhausted, max retries exceeded)
+    1 - Permanent failure (all credentials exhausted, max retries exceeded)
     2 - Invalid arguments
 """
 
@@ -418,6 +423,78 @@ def validate_model(result: GeminiResult, required_model: str) -> bool:
 
 
 # =============================================================================
+# Credential Rotation
+# =============================================================================
+
+def try_credential_rotation(prompt: str, model: str, logger: RetryLogger) -> tuple[bool, str]:
+    """
+    Try to get a response using credential rotation.
+
+    When the current credential's quota is exhausted, this function
+    uses gemini-rotate.py to try other available credentials.
+
+    Args:
+        prompt: The prompt to send
+        model: The model to use
+        logger: Logger for events
+
+    Returns:
+        (success, response_or_error)
+    """
+    import shutil
+
+    # Find the rotation script
+    script_dir = Path(__file__).parent
+    rotate_script = script_dir / "gemini-rotate.py"
+
+    if not rotate_script.exists():
+        return False, f"Rotation script not found: {rotate_script}"
+
+    python_path = shutil.which("python") or shutil.which("python3") or sys.executable
+
+    # Create a temp file for the prompt (handles long prompts better)
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+        f.write(prompt)
+        prompt_file = f.name
+
+    try:
+        cmd = [
+            python_path,
+            str(rotate_script),
+            "--model", model,
+        ]
+
+        # Use stdin for the prompt
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            result = subprocess.run(
+                cmd,
+                stdin=f,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+        if result.returncode == 0 and result.stdout.strip():
+            logger.log("ROTATION_SUCCESS", model=model)
+            return True, result.stdout.strip()
+        else:
+            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown rotation error"
+            return False, error_msg
+
+    except subprocess.TimeoutExpired:
+        return False, "Rotation timeout after 300 seconds"
+    except Exception as e:
+        return False, str(e)
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(prompt_file)
+        except OSError:
+            pass
+
+
+# =============================================================================
 # Main Retry Loop
 # =============================================================================
 
@@ -480,6 +557,35 @@ def retry_gemini(prompt: str, model: str, logger: RetryLogger) -> tuple[bool, st
         )
 
         if not classification.retryable:
+            # Quota exhausted - try credential rotation instead of giving up
+            if classification.error_type == "quota":
+                logger.log(
+                    "QUOTA_EXHAUSTED_TRY_ROTATION",
+                    attempt=attempt,
+                    error_type=classification.error_type
+                )
+                print(
+                    f"[GEMINI-RETRY] Quota exhausted - attempting credential rotation...",
+                    file=sys.stderr
+                )
+
+                # Try rotation
+                rotation_success, rotation_response = try_credential_rotation(prompt, model, logger)
+                if rotation_success:
+                    return True, rotation_response
+                else:
+                    logger.log(
+                        "ROTATION_FAILED",
+                        attempt=attempt,
+                        message=rotation_response
+                    )
+                    print(
+                        f"[GEMINI-RETRY] Rotation failed: {rotation_response}",
+                        file=sys.stderr
+                    )
+                    return False, f"All credentials exhausted: {rotation_response}"
+
+            # Non-quota permanent failure
             logger.log(
                 "PERMANENT_FAILURE",
                 attempt=attempt,
