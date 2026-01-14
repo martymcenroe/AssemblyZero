@@ -488,6 +488,11 @@ class Unleashed:
             self.logger.close()
             print(f"\n[UNLEASHED] Logs saved to: {self.logger.log_dir}", file=sys.stderr)
 
+        # Reset terminal state
+        sys.stdout.write('\x1b[0m')  # Reset attributes
+        sys.stdout.write('\x1bc')     # Full terminal reset (RIS)
+        sys.stdout.flush()
+
         # Force exit - daemon threads may be blocking on I/O
         sys.exit(0)
 
