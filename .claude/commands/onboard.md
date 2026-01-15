@@ -82,13 +82,17 @@ Detect the current project from working directory:
 
 3. Read current project CLAUDE.md (detected from working directory)
 
-4. Optionally scan current permissions:
+4. Read Gemini rotation instructions (CRITICAL for reviews):
+   `C:\Users\mcwiz\Projects\AgentOS\docs\prompts\gemini-rotation-instructions.md`
+
+5. Optionally scan current permissions:
    `C:\Users\mcwiz\Projects\.claude\settings.local.json` (just the `allow` array)
 
 **Report format:**
 ```
 ✓ Rules refreshed for {PROJECT}
 • AgentOS core: Bash constraints, worktree isolation, visible self-check
+• Gemini: Rotation tool, encoding rules, model verification
 • Project rules: {one-line summary}
 • Session permissions: {count} active allows
 Ready to continue.

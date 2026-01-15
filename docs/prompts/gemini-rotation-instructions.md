@@ -43,7 +43,55 @@ Flash/Lite models lack the reasoning depth for quality reviews. A Flash review t
 
 ---
 
-## The Problem
+---
+
+## ⚠️ Windows Encoding Issue (COMMON FAILURE)
+
+**If your Gemini call fails with encoding errors, garbled output, or truncated responses - READ THIS.**
+
+### The Problem
+
+Windows console cannot handle Unicode box-drawing characters in prompts:
+- `│` `─` `┌` `┐` `└` `┘` `├` `┤` `┬` `┴` `┼` `◀` `▶`
+
+These characters cause `UnicodeEncodeError` or garbled output on Windows.
+
+### Symptoms
+
+- Error mentions `encoding`, `charmap`, or `codec`
+- Output shows `?????` or garbled characters
+- Python crashes with `UnicodeEncodeError`
+- Prompt gets truncated at the first special character
+
+### The Fix
+
+**Option 1: Remove Unicode characters from prompts**
+Use ASCII alternatives:
+- `|` instead of `│`
+- `-` instead of `─`
+- `+` instead of `└` `┌` `┐` `┘`
+- `<` `>` instead of `◀` `▶`
+
+**Option 2: Use stdin with UTF-8 file**
+Write your prompt to a file (UTF-8 encoded), then pipe it:
+```bash
+python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
+```
+
+**Option 3: Use the Write tool first**
+```
+1. Use Write tool to save prompt to scratchpad (UTF-8)
+2. Then use Bash to pipe the file to gemini-rotate.py
+```
+
+### Prevention
+
+**When creating prompts for Gemini, NEVER use box-drawing characters.**
+Stick to basic ASCII: `| - + * # = _ [ ] ( ) < >`
+
+---
+
+## Quota Exhaustion Problem
 
 When you see errors like:
 - `TerminalQuotaError`
