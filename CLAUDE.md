@@ -33,6 +33,39 @@ REQUIRED:   One command per Bash call, absolute paths only
 
 **NEVER use `~` - Windows doesn't expand it.**
 
+### DANGEROUS PATH CONSTRAINTS (I/O SAFETY)
+
+**NEVER search or traverse these paths:**
+
+| Path | Risk | Why |
+|------|------|-----|
+| `C:\Users\<user>\OneDrive\` | CRITICAL | Files On-Demand triggers massive downloads |
+| `C:\Users\<user>\` (root) | HIGH | Contains OneDrive, AppData, 100K+ files |
+| `C:\Users\<user>\AppData\` | HIGH | Hundreds of thousands of small files |
+| `*.cloud` or cloud-synced dirs | HIGH | Any cloud sync triggers downloads |
+
+**BANNED SEARCH PATTERNS:**
+```
+find "C:\Users\mcwiz" ...           # Traverses OneDrive
+find /c/Users/mcwiz ...             # Same, Unix format
+grep -r /c/Users/mcwiz/ ...         # Same problem
+rg /c/Users/mcwiz/ ...              # Ripgrep also triggers downloads
+```
+
+**SAFE ALTERNATIVE:**
+```
+# Scope to Projects directory only
+find /c/Users/mcwiz/Projects ...    # OK - no cloud sync
+Glob("C:\Users\mcwiz\Projects\...") # OK - uses Glob tool
+```
+
+**If you need to search user home:**
+1. List specific subdirectories first
+2. Exclude OneDrive and AppData explicitly
+3. Or ask user for the specific path
+
+**2026-01-15 Incident:** Explore agents ran `find` on entire user home, triggering 30GB OneDrive download. System became unresponsive for hours.
+
 ### COMPACTION DETECTION (AUTO-REFRESH)
 
 **If you see ANY of these signals, you were compacted - run `/onboard --refresh` IMMEDIATELY:**
@@ -246,6 +279,12 @@ When spawning to Sonnet/Haiku, ALWAYS include these additional instructions:
 >    - Reading file contents? Use `Read` tool
 >    - Searching file contents? Use `Grep` tool
 >    - Listing files? Use `Glob` tool
+>
+> 5. **NEVER search these paths (I/O disaster):**
+>    - `C:\Users\mcwiz\OneDrive\` - triggers massive cloud downloads
+>    - `C:\Users\mcwiz\` (root) - contains OneDrive, AppData
+>    - `C:\Users\mcwiz\AppData\` - hundreds of thousands of files
+>    - Always scope searches to `C:\Users\mcwiz\Projects\` or narrower
 
 **Include this VERBATIM in every agent spawn prompt.**
 
