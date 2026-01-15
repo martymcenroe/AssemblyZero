@@ -50,13 +50,25 @@ except ImportError:
 # Constants
 # =============================================================================
 
-VERSION = "1.1.1"  # Banner to stderr, skill --version/--help
+VERSION = "1.2.0"  # Added dangerous path detection (2026-01-15)
 DEFAULT_DELAY = 10  # seconds
 FOOTER_PATTERN = re.compile(
     r'Esc to cancel[-·–—\s]+Tab to add additional instructions',
     re.IGNORECASE
 )
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+# Default dangerous path patterns (can be overridden by excluded_paths.txt)
+DEFAULT_DANGEROUS_PATTERNS = [
+    r'/c/Users/\w+$',           # User home root (Unix format)
+    r'C:\\Users\\\w+$',         # User home root (Windows format)
+    r'OneDrive',                # OneDrive cloud sync
+    r'AppData',                 # Application data
+    r'\.cache',                 # Cache directories
+    r'Dropbox',                 # Dropbox cloud sync
+    r'Google Drive',            # Google Drive cloud sync
+    r'iCloud Drive',            # iCloud cloud sync
+]
 
 # ANSI escape sequences for overlay
 CURSOR_SAVE = '\x1b[s'
@@ -88,6 +100,59 @@ def is_printable_key(char: str) -> bool:
 def get_timestamp() -> str:
     """Get ISO 8601 timestamp."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def load_excluded_paths() -> list[re.Pattern]:
+    """Load dangerous path patterns from config file or use defaults."""
+    patterns = []
+    config_path = Path.home() / '.agentos' / 'excluded_paths.txt'
+
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith('#'):
+                        continue
+                    # Convert to regex pattern (escape special chars, allow partial match)
+                    escaped = re.escape(line)
+                    patterns.append(re.compile(escaped, re.IGNORECASE))
+        except Exception as e:
+            print(f"[UNLEASHED] Warning: Could not load excluded_paths.txt: {e}", file=sys.stderr)
+
+    # Always include default patterns
+    for pattern in DEFAULT_DANGEROUS_PATTERNS:
+        patterns.append(re.compile(pattern, re.IGNORECASE))
+
+    return patterns
+
+
+def check_dangerous_path(text: str, patterns: list[re.Pattern]) -> tuple[bool, str]:
+    """
+    Check if text contains commands targeting dangerous paths.
+
+    Returns (is_dangerous, matched_pattern) tuple.
+    """
+    # Look for common command patterns that access paths
+    # find, grep, rg, ls, cat, head, tail with path arguments
+    path_commands = [
+        r'find\s+["\']?([^"\']+)',              # find /path
+        r'grep\s+.*?["\']?(/[^\s"\']+)',        # grep ... /path
+        r'\brg\s+.*?["\']?(/[^\s"\']+)',        # rg ... /path
+        r'ls\s+.*?["\']?([A-Za-z]:\\[^"\']+)',  # ls C:\path (Windows)
+        r'ls\s+.*?["\']?(/[^\s"\']+)',          # ls /path
+        r'Search:\s*([^\n]+)',                   # Claude's Search: pattern
+    ]
+
+    for cmd_pattern in path_commands:
+        matches = re.findall(cmd_pattern, text, re.IGNORECASE)
+        for match in matches:
+            for danger_pattern in patterns:
+                if danger_pattern.search(match):
+                    return (True, match)
+
+    return (False, '')
 
 
 # =============================================================================
@@ -291,6 +356,18 @@ class CountdownOverlay:
         message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED] Cancelled by user{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
+    def show_dangerous_warning(self, matched_path: str):
+        """Show warning for dangerous path - requires explicit confirmation."""
+        RED = '\x1b[31m'
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED] DANGEROUS PATH: {matched_path[:50]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        self.writer(message)
+
+    def show_confirmation_prompt(self):
+        """Show prompt requiring 'yes' to proceed."""
+        RED = '\x1b[31m'
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED] Type 'yes' + Enter to proceed, any other key to cancel: {RESET}"
+        self.writer(message)
+
 
 # =============================================================================
 # Main Unleashed Wrapper
@@ -312,6 +389,7 @@ class Unleashed:
         self.in_countdown = False
         self.screen_buffer = ""  # Recent screen content for context
         self.buffer_max_size = 8192  # Keep last 8KB for context
+        self.dangerous_patterns = load_excluded_paths()  # Load at startup
 
     def _write_stdout(self, data: str):
         """Write to stdout and flush."""
@@ -348,6 +426,13 @@ class Unleashed:
 
         self.logger.log_event("FOOTER_DETECTED")
         self.logger.log_event("SCREEN_CAPTURED", context_length=len(screen_context))
+
+        # Check for dangerous paths in screen content
+        is_dangerous, matched_path = check_dangerous_path(screen_context, self.dangerous_patterns)
+
+        if is_dangerous:
+            return self._handle_dangerous_confirmation(screen_context, matched_path)
+
         self.logger.log_event("COUNTDOWN_START", delay=self.delay)
 
         for remaining in range(self.delay, 0, -1):
@@ -396,6 +481,84 @@ class Unleashed:
             self.logger.log_event("AUTO_APPROVED_DRY_RUN", option=2 if has_three else 1, context=screen_context[:500])
 
         return True
+
+    def _handle_dangerous_confirmation(self, screen_context: str, matched_path: str) -> bool:
+        """
+        Handle dangerous path - requires explicit 'yes' confirmation.
+        NO auto-approval. User must type 'yes' + Enter.
+        """
+        self.logger.log_event("DANGEROUS_PATH_DETECTED", path=matched_path)
+
+        # Show warning
+        self.overlay.show_dangerous_warning(matched_path)
+        time.sleep(1.0)
+
+        # Show confirmation prompt
+        self.overlay.show_confirmation_prompt()
+
+        # Collect user input until Enter is pressed
+        user_response = ""
+        timeout_seconds = 60  # Give user 60 seconds to respond
+        start_time = time.time()
+
+        while time.time() - start_time < timeout_seconds:
+            user_input = self.input_reader.read_nowait()
+            if user_input:
+                for char in user_input:
+                    if char == '\r' or char == '\n':
+                        # User pressed Enter - check response
+                        self.overlay.hide()
+                        self.in_countdown = False
+
+                        if user_response.strip().lower() == 'yes':
+                            # User explicitly confirmed
+                            self.logger.log_event("DANGEROUS_PATH_CONFIRMED", path=matched_path, response=user_response)
+
+                            # Send Enter to approve (don't use "remember" for dangerous paths)
+                            if not self.dry_run and self.pty_process and self.pty_process.isalive():
+                                self.pty_process.write('\r')
+
+                            return True
+                        else:
+                            # User did not confirm - cancel
+                            self.overlay.show_cancelled()
+                            time.sleep(0.5)
+                            self.overlay.hide()
+                            self.logger.log_event("DANGEROUS_PATH_REJECTED", path=matched_path, response=user_response)
+
+                            # Send Escape to cancel the prompt
+                            if self.pty_process and self.pty_process.isalive():
+                                self.pty_process.write('\x1b')  # Escape
+
+                            return False
+                    elif char == '\x1b':
+                        # User pressed Escape - cancel immediately
+                        self.overlay.show_cancelled()
+                        time.sleep(0.5)
+                        self.overlay.hide()
+                        self.in_countdown = False
+                        self.logger.log_event("DANGEROUS_PATH_ESCAPED", path=matched_path)
+
+                        # Pass Escape through
+                        if self.pty_process and self.pty_process.isalive():
+                            self.pty_process.write('\x1b')
+
+                        return False
+                    elif is_printable_key(char):
+                        user_response += char
+
+            time.sleep(0.05)
+
+        # Timeout - cancel
+        self.overlay.hide()
+        self.in_countdown = False
+        self.logger.log_event("DANGEROUS_PATH_TIMEOUT", path=matched_path)
+
+        # Send Escape to cancel
+        if self.pty_process and self.pty_process.isalive():
+            self.pty_process.write('\x1b')
+
+        return False
 
     def _show_banner(self):
         """Display startup banner to stderr (avoids Claude's stdout cursor positioning)."""
