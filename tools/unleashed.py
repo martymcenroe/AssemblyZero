@@ -50,7 +50,7 @@ except ImportError:
 # Constants
 # =============================================================================
 
-VERSION = "1.2.0"  # Added dangerous path detection (2026-01-15)
+VERSION = "1.3.0"  # Added hard block for destructive commands (2026-01-15)
 DEFAULT_DELAY = 10  # seconds
 FOOTER_PATTERN = re.compile(
     r'Esc to cancel[-·–—\s]+Tab to add additional instructions',
@@ -68,6 +68,48 @@ DEFAULT_DANGEROUS_PATTERNS = [
     r'Dropbox',                 # Dropbox cloud sync
     r'Google Drive',            # Google Drive cloud sync
     r'iCloud Drive',            # iCloud cloud sync
+]
+
+# Hard block command patterns - NEVER auto-approve outside safe paths
+DEFAULT_HARD_BLOCK_PATTERNS = [
+    # Unix/Linux/Mac file deletion
+    r'\brm\s',                  # rm (any variant)
+    r'\brmdir\s',               # rmdir
+    r'\bunlink\s',              # unlink
+    r'\btruncate\s',            # truncate
+    # Windows CMD
+    r'\bdel\s',                 # del
+    r'\berase\s',               # erase
+    r'\brd\s',                  # rd
+    r'\bdeltree\s',             # deltree
+    # PowerShell
+    r'\bRemove-Item\b',         # Remove-Item
+    r'\bClear-Content\b',       # Clear-Content
+]
+
+# ALWAYS hard blocked (regardless of path) - catastrophic commands
+DEFAULT_ALWAYS_BLOCKED_PATTERNS = [
+    r'\bdd\s+if=',              # dd disk operations
+    r'\bmkfs\b',                # filesystem creation
+    r'\bshred\s',               # secure delete
+    r'\bformat\s',              # format disk
+]
+
+# Git destructive patterns - require explicit confirmation in Projects, hard block elsewhere
+DEFAULT_GIT_DESTRUCTIVE_PATTERNS = [
+    r'\bgit\s+reset\s+--hard\b',
+    r'\bgit\s+clean\s+-fd',
+    r'\bgit\s+push\s+--force\b',
+    r'\bgit\s+push\s+-f\s',
+    r'\bgit\s+branch\s+-D\b',
+]
+
+# Default safe paths where destructive commands are allowed
+DEFAULT_SAFE_PATHS = [
+    r'/c/Users/\w+/Projects/',      # Unix format Projects
+    r'C:\\Users\\\w+\\Projects\\',  # Windows format Projects
+    r'/Users/\w+/Projects/',        # Mac format Projects
+    r'/home/\w+/Projects/',         # Linux format Projects
 ]
 
 # ANSI escape sequences for overlay
@@ -151,6 +193,142 @@ def check_dangerous_path(text: str, patterns: list[re.Pattern]) -> tuple[bool, s
             for danger_pattern in patterns:
                 if danger_pattern.search(match):
                     return (True, match)
+
+    return (False, '')
+
+
+def load_hard_block_patterns() -> tuple[list[re.Pattern], list[re.Pattern], list[re.Pattern]]:
+    """
+    Load hard block command patterns.
+    Returns (hard_block_patterns, always_blocked_patterns, git_destructive_patterns)
+    """
+    hard_block = []
+    always_blocked = []
+    git_destructive = []
+
+    config_path = Path.home() / '.agentos' / 'hard_block_commands.txt'
+
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    hard_block.append(re.compile(line, re.IGNORECASE))
+        except Exception as e:
+            print(f"[UNLEASHED] Warning: Could not load hard_block_commands.txt: {e}", file=sys.stderr)
+
+    # Always include defaults
+    for pattern in DEFAULT_HARD_BLOCK_PATTERNS:
+        hard_block.append(re.compile(pattern, re.IGNORECASE))
+
+    for pattern in DEFAULT_ALWAYS_BLOCKED_PATTERNS:
+        always_blocked.append(re.compile(pattern, re.IGNORECASE))
+
+    for pattern in DEFAULT_GIT_DESTRUCTIVE_PATTERNS:
+        git_destructive.append(re.compile(pattern, re.IGNORECASE))
+
+    return (hard_block, always_blocked, git_destructive)
+
+
+def load_safe_paths() -> list[re.Pattern]:
+    """Load safe paths where destructive commands are allowed."""
+    patterns = []
+    config_path = Path.home() / '.agentos' / 'safe_paths.txt'
+
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    escaped = re.escape(line)
+                    patterns.append(re.compile(escaped, re.IGNORECASE))
+        except Exception as e:
+            print(f"[UNLEASHED] Warning: Could not load safe_paths.txt: {e}", file=sys.stderr)
+
+    # Always include defaults
+    for pattern in DEFAULT_SAFE_PATHS:
+        patterns.append(re.compile(pattern, re.IGNORECASE))
+
+    return patterns
+
+
+def extract_command_path(text: str) -> str:
+    """Extract the target path from a command in screen context."""
+    # Look for path-like arguments in the command
+    path_patterns = [
+        r'(?:rm|del|erase|rd|rmdir|Remove-Item|unlink)\s+.*?(["\']?)(/[^\s"\']+|[A-Za-z]:\\[^\s"\']+)\1',
+        r'(?:rm|del|erase|rd|rmdir|Remove-Item|unlink)\s+(-\w+\s+)*(["\']?)(/[^\s"\']+|[A-Za-z]:\\[^\s"\']+)\2',
+    ]
+
+    for pattern in path_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # Return the path group (last captured group)
+            groups = [g for g in match.groups() if g and (g.startswith('/') or ':' in g)]
+            if groups:
+                return groups[-1]
+
+    return ''
+
+
+def check_hard_block(text: str, hard_block_patterns: list, always_blocked: list,
+                     safe_paths: list) -> tuple[bool, str, str]:
+    """
+    Check if command should be hard blocked.
+    Returns (should_block, matched_command, reason)
+    """
+    clean_text = strip_ansi(text)
+
+    # First check ALWAYS blocked commands (catastrophic, regardless of path)
+    for pattern in always_blocked:
+        match = pattern.search(clean_text)
+        if match:
+            return (True, match.group(0), "ALWAYS_BLOCKED: Catastrophic command")
+
+    # Then check path-dependent hard block commands
+    for pattern in hard_block_patterns:
+        match = pattern.search(clean_text)
+        if match:
+            matched_cmd = match.group(0)
+            # Extract the target path from the command
+            target_path = extract_command_path(clean_text)
+
+            if not target_path:
+                # No path found - could be operating on current directory
+                # Be conservative and block
+                return (True, matched_cmd, "NO_PATH: Cannot determine target path")
+
+            # Check if target path is in safe paths
+            is_safe = False
+            for safe_pattern in safe_paths:
+                if safe_pattern.search(target_path):
+                    is_safe = True
+                    break
+
+            if not is_safe:
+                return (True, matched_cmd, f"UNSAFE_PATH: {target_path}")
+
+    return (False, '', '')
+
+
+def check_git_destructive(text: str, git_patterns: list, safe_paths: list) -> tuple[bool, str]:
+    """
+    Check if command is a git destructive command.
+    Returns (is_git_destructive, matched_command)
+
+    Git destructive commands require explicit confirmation in Projects,
+    and are hard blocked outside Projects.
+    """
+    clean_text = strip_ansi(text)
+
+    for pattern in git_patterns:
+        match = pattern.search(clean_text)
+        if match:
+            return (True, match.group(0))
 
     return (False, '')
 
@@ -368,6 +546,26 @@ class CountdownOverlay:
         message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED] Type 'yes' + Enter to proceed, any other key to cancel: {RESET}"
         self.writer(message)
 
+    def show_hard_block(self, command: str, reason: str):
+        """Show hard block message - command is NEVER approved."""
+        RED = '\x1b[31m'
+        BG_RED = '\x1b[41m'
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{BG_RED}[UNLEASHED] HARD BLOCKED: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        self.writer(message)
+
+    def show_hard_block_reason(self, reason: str):
+        """Show the reason for hard block."""
+        RED = '\x1b[31m'
+        # Show on line 2
+        message = f"{CURSOR_SAVE}\x1b[2H{BOLD}{RED}  Reason: {reason[:60]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        self.writer(message)
+
+    def show_git_warning(self, command: str):
+        """Show warning for git destructive command - requires explicit confirmation."""
+        MAGENTA = '\x1b[35m'
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{MAGENTA}[UNLEASHED] GIT DESTRUCTIVE: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        self.writer(message)
+
 
 # =============================================================================
 # Main Unleashed Wrapper
@@ -390,6 +588,9 @@ class Unleashed:
         self.screen_buffer = ""  # Recent screen content for context
         self.buffer_max_size = 8192  # Keep last 8KB for context
         self.dangerous_patterns = load_excluded_paths()  # Load at startup
+        # Load hard block patterns
+        self.hard_block_patterns, self.always_blocked, self.git_destructive = load_hard_block_patterns()
+        self.safe_paths = load_safe_paths()
 
     def _write_stdout(self, data: str):
         """Write to stdout and flush."""
@@ -420,6 +621,12 @@ class Unleashed:
         """
         Handle the countdown sequence.
         Returns True if auto-approved, False if cancelled.
+
+        Safety check order:
+        1. HARD BLOCK - destructive commands outside Projects (never approve)
+        2. GIT DESTRUCTIVE - require explicit 'yes' confirmation
+        3. DANGEROUS PATH - require explicit 'yes' confirmation
+        4. NORMAL - auto-approve after countdown
         """
         self.in_countdown = True
         screen_context = self._capture_screen_context()
@@ -427,7 +634,22 @@ class Unleashed:
         self.logger.log_event("FOOTER_DETECTED")
         self.logger.log_event("SCREEN_CAPTURED", context_length=len(screen_context))
 
-        # Check for dangerous paths in screen content
+        # FIRST: Check hard block (destructive commands outside Projects)
+        is_blocked, blocked_cmd, reason = check_hard_block(
+            screen_context,
+            self.hard_block_patterns,
+            self.always_blocked,
+            self.safe_paths
+        )
+        if is_blocked:
+            return self._handle_hard_block(blocked_cmd, reason)
+
+        # SECOND: Check git destructive (require explicit confirmation)
+        is_git, git_cmd = check_git_destructive(screen_context, self.git_destructive, self.safe_paths)
+        if is_git:
+            return self._handle_git_confirmation(screen_context, git_cmd)
+
+        # THIRD: Check for dangerous paths in screen content
         is_dangerous, matched_path = check_dangerous_path(screen_context, self.dangerous_patterns)
 
         if is_dangerous:
@@ -553,6 +775,106 @@ class Unleashed:
         self.overlay.hide()
         self.in_countdown = False
         self.logger.log_event("DANGEROUS_PATH_TIMEOUT", path=matched_path)
+
+        # Send Escape to cancel
+        if self.pty_process and self.pty_process.isalive():
+            self.pty_process.write('\x1b')
+
+        return False
+
+    def _handle_hard_block(self, command: str, reason: str) -> bool:
+        """
+        Hard block - NEVER approve.
+        Shows error message and cancels after brief display.
+        """
+        self.logger.log_event("HARD_BLOCK_TRIGGERED", command=command, reason=reason)
+
+        # Show hard block message (red background, prominent)
+        self.overlay.show_hard_block(command, reason)
+        time.sleep(1.0)
+        self.overlay.show_hard_block_reason(reason)
+        time.sleep(2.0)
+
+        # Hide and send Escape to cancel
+        self.overlay.hide()
+        self.in_countdown = False
+
+        if self.pty_process and self.pty_process.isalive():
+            self.pty_process.write('\x1b')  # Escape
+
+        return False  # Always returns False (never approved)
+
+    def _handle_git_confirmation(self, screen_context: str, git_cmd: str) -> bool:
+        """
+        Handle git destructive command - requires explicit 'yes' confirmation.
+        Similar to dangerous path confirmation but with different messaging.
+        """
+        self.logger.log_event("GIT_DESTRUCTIVE_DETECTED", command=git_cmd)
+
+        # Show warning
+        self.overlay.show_git_warning(git_cmd)
+        time.sleep(1.0)
+
+        # Show confirmation prompt
+        self.overlay.show_confirmation_prompt()
+
+        # Collect user input until Enter is pressed
+        user_response = ""
+        timeout_seconds = 60  # Give user 60 seconds to respond
+        start_time = time.time()
+
+        while time.time() - start_time < timeout_seconds:
+            user_input = self.input_reader.read_nowait()
+            if user_input:
+                for char in user_input:
+                    if char == '\r' or char == '\n':
+                        # User pressed Enter - check response
+                        self.overlay.hide()
+                        self.in_countdown = False
+
+                        if user_response.strip().lower() == 'yes':
+                            # User explicitly confirmed
+                            self.logger.log_event("GIT_DESTRUCTIVE_CONFIRMED", command=git_cmd, response=user_response)
+
+                            # Send Enter to approve
+                            if not self.dry_run and self.pty_process and self.pty_process.isalive():
+                                self.pty_process.write('\r')
+
+                            return True
+                        else:
+                            # User did not confirm - cancel
+                            self.overlay.show_cancelled()
+                            time.sleep(0.5)
+                            self.overlay.hide()
+                            self.logger.log_event("GIT_DESTRUCTIVE_REJECTED", command=git_cmd, response=user_response)
+
+                            # Send Escape to cancel the prompt
+                            if self.pty_process and self.pty_process.isalive():
+                                self.pty_process.write('\x1b')  # Escape
+
+                            return False
+                    elif char == '\x1b':
+                        # User pressed Escape - cancel immediately
+                        self.overlay.show_cancelled()
+                        time.sleep(0.5)
+                        self.overlay.hide()
+                        self.in_countdown = False
+                        self.logger.log_event("GIT_DESTRUCTIVE_ESCAPED", command=git_cmd)
+
+                        # Pass Escape through
+                        if self.pty_process and self.pty_process.isalive():
+                            self.pty_process.write('\x1b')
+
+                        return False
+                    elif is_printable_key(char):
+                        user_response += char
+
+            time.sleep(0.05)
+
+        # Timeout - cancel
+        self.overlay.hide()
+        self.in_countdown = False
+        self.logger.log_event("GIT_DESTRUCTIVE_TIMEOUT", command=git_cmd)
 
         # Send Escape to cancel
         if self.pty_process and self.pty_process.isalive():
