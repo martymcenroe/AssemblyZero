@@ -66,6 +66,46 @@ Glob("C:\Users\mcwiz\Projects\...") # OK - uses Glob tool
 
 **2026-01-15 Incident:** Explore agents ran `find` on entire user home, triggering 30GB OneDrive download. System became unresponsive for hours.
 
+### DESTRUCTIVE COMMAND CONSTRAINTS (DATA SAFETY)
+
+**Destructive commands are ONLY allowed within `C:\Users\mcwiz\Projects\`**
+
+| Command Type | Within Projects | Outside Projects |
+|--------------|-----------------|------------------|
+| `rm` (any variant) | Normal approval | **HARD BLOCK** |
+| `del`, `Remove-Item` | Normal approval | **HARD BLOCK** |
+| `git reset --hard` | Explicit "yes" | **HARD BLOCK** |
+| `git push --force` | Explicit "yes" | **HARD BLOCK** |
+| `dd`, `shred`, `mkfs` | **HARD BLOCK** | **HARD BLOCK** |
+
+**ALWAYS HARD BLOCKED (catastrophic commands):**
+```
+dd if=...           # Disk operations - NEVER allowed
+mkfs                # Filesystem creation - NEVER allowed
+shred               # Secure delete - NEVER allowed
+format              # Format disk - NEVER allowed
+```
+
+**PATH-SCOPED HARD BLOCK (allowed only in Projects):**
+```
+rm, rm -r, rm -rf   # File deletion
+del, erase          # Windows deletion
+rd, rmdir           # Directory removal
+Remove-Item         # PowerShell deletion
+```
+
+**GIT DESTRUCTIVE (require explicit "yes" in Projects):**
+```
+git reset --hard    # Discards all changes
+git clean -fd       # Deletes untracked files
+git push --force    # Overwrites remote history
+git branch -D       # Force deletes branch
+```
+
+**Configuration files:**
+- `~/.agentos/hard_block_commands.txt` - Additional patterns to block
+- `~/.agentos/safe_paths.txt` - Paths where destructive commands allowed
+
 ### COMPACTION DETECTION (AUTO-REFRESH)
 
 **If you see ANY of these signals, you were compacted - run `/onboard --refresh` IMMEDIATELY:**
