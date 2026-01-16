@@ -50,7 +50,7 @@ except ImportError:
 # Constants
 # =============================================================================
 
-VERSION = "1.3.0"  # Added hard block for destructive commands (2026-01-15)
+VERSION = "1.4.0"  # Fix: Conditional stdin reader for mintty (Shift+Tab fix) (2026-01-15)
 DEFAULT_DELAY = 10  # seconds
 FOOTER_PATTERN = re.compile(
     r'Esc to cancel[-·–—\s]+Tab to add additional instructions',
@@ -391,8 +391,19 @@ class PtyReader:
 # Input Reader (for user keyboard input)
 # =============================================================================
 
+def is_mintty() -> bool:
+    """Detect if running in mintty (Git Bash) terminal.
+
+    Mintty sends ANSI escape sequences to stdin instead of using Windows
+    console input buffer. msvcrt cannot read these sequences, so we need
+    to use a different input method.
+    """
+    # MSYSTEM is set in Git Bash/MSYS2 environments
+    return bool(os.environ.get('MSYSTEM'))
+
+
 class InputReader:
-    """Non-blocking stdin reader."""
+    """Non-blocking input reader using msvcrt (for native Windows console)."""
 
     def __init__(self):
         self.queue = queue.Queue()
@@ -401,7 +412,7 @@ class InputReader:
         self.thread.start()
 
     def _reader_thread(self):
-        """Background thread for reading stdin."""
+        """Background thread for reading stdin via msvcrt."""
         while self.running:
             try:
                 if HAS_MSVCRT:
@@ -440,6 +451,107 @@ class InputReader:
                         char = sys.stdin.read(1)
                         if char:
                             self.queue.put(char)
+            except Exception:
+                time.sleep(0.01)
+
+    def read_nowait(self) -> str:
+        """Read all available input without blocking."""
+        result = ''
+        while True:
+            try:
+                char = self.queue.get_nowait()
+                result += char
+            except queue.Empty:
+                break
+        return result
+
+    def stop(self):
+        self.running = False
+
+
+class StdinReader:
+    """Non-blocking input reader using stdin (for mintty/Git Bash).
+
+    This reader is used when running in mintty because msvcrt cannot read
+    the ANSI escape sequences that mintty sends for special keys like Shift+Tab.
+
+    Key difference from InputReader:
+    - Reads directly from sys.stdin.buffer (binary mode)
+    - Can receive \x1b[Z (Shift+Tab escape sequence) from mintty
+    - Does NOT mix with msvcrt (which was the cause of v1.3.8 failure)
+    """
+
+    def __init__(self):
+        self.queue = queue.Queue()
+        self.running = True
+        # Get the stdin file descriptor for select (works in mintty)
+        self.stdin_fd = sys.stdin.fileno()
+        self.thread = threading.Thread(target=self._reader_thread, daemon=True)
+        self.thread.start()
+
+    def _reader_thread(self):
+        """Background thread for reading stdin directly.
+
+        In mintty, stdin is a proper file descriptor that works with select().
+        This is different from native Windows console where select() on stdin fails.
+        """
+        stdin = sys.stdin.buffer
+
+        while self.running:
+            try:
+                # In mintty, select works on stdin (it's a pty, not console)
+                # Use a short timeout so we can check self.running
+                readable, _, _ = select.select([self.stdin_fd], [], [], 0.1)
+                if not readable:
+                    continue
+
+                # Read available byte
+                byte = stdin.read(1)
+                if not byte:
+                    continue
+
+                char = byte.decode('utf-8', errors='replace')
+
+                # Handle escape sequences
+                if char == '\x1b':
+                    # Start of escape sequence - read more bytes
+                    # Mintty sends escape sequences atomically, so more bytes
+                    # should be immediately available
+                    seq_bytes = byte
+                    max_seq_len = 16  # Reasonable max for any escape sequence
+
+                    # Read more bytes with short timeout
+                    for _ in range(max_seq_len):
+                        readable, _, _ = select.select([self.stdin_fd], [], [], 0.02)
+                        if not readable:
+                            break
+                        next_byte = stdin.read(1)
+                        if not next_byte:
+                            break
+                        seq_bytes += next_byte
+                        # Check if sequence is complete
+                        seq = seq_bytes.decode('utf-8', errors='replace')
+                        if len(seq) >= 3:
+                            last = seq[-1]
+                            # Most escape sequences end with a letter or ~
+                            if last.isalpha() or last == '~':
+                                break
+
+                    seq = seq_bytes.decode('utf-8', errors='replace')
+
+                    # Filter terminal responses (not user input)
+                    if seq.startswith('\x1b[?') and seq.endswith('c'):
+                        # DA1 response - discard
+                        continue
+                    if len(seq) > 3 and seq[-1] == 'R' and seq[2].isdigit():
+                        # Cursor position report - discard
+                        continue
+
+                    # Queue the escape sequence (e.g., \x1b[Z for Shift+Tab)
+                    self.queue.put(seq)
+                else:
+                    self.queue.put(char)
+
             except Exception:
                 time.sleep(0.01)
 
@@ -884,7 +996,8 @@ class Unleashed:
 
     def _show_banner(self):
         """Display startup banner to stderr (avoids Claude's stdout cursor positioning)."""
-        banner = f"{BOLD}{YELLOW}[UNLEASHED v{VERSION}] Auto-approval | {self.delay}s | Dir: {self.cwd}{RESET}\n"
+        term_type = "mintty" if is_mintty() else "console"
+        banner = f"{BOLD}{YELLOW}[UNLEASHED v{VERSION}] Auto-approval | {self.delay}s | {term_type} | Dir: {self.cwd}{RESET}\n"
         sys.stderr.write(banner)
         sys.stderr.flush()
 
@@ -915,7 +1028,17 @@ class Unleashed:
             )
 
             self.pty_reader = PtyReader(self.pty_process)
-            self.input_reader = InputReader()
+
+            # Choose input reader based on terminal environment
+            # Key fix for Issue #20: mintty sends Shift+Tab as \x1b[Z to stdin,
+            # which msvcrt cannot see. Use StdinReader for mintty.
+            if is_mintty():
+                self.input_reader = StdinReader()
+                self.logger.log_event("INPUT_READER", reader="StdinReader", reason="mintty detected")
+            else:
+                self.input_reader = InputReader()
+                self.logger.log_event("INPUT_READER", reader="InputReader", reason="native Windows console")
+
             self.running = True
 
             # Main loop
@@ -1049,8 +1172,21 @@ Security Note:
         default=None,
         help="Working directory for Claude (use when poetry changes cwd)"
     )
+    parser.add_argument(
+        "--version", "-v",
+        action="store_true",
+        help="Show version and exit"
+    )
 
     args = parser.parse_args()
+
+    # Handle --version flag
+    if args.version:
+        print(f"unleashed.py {VERSION}")
+        sys.exit(0)
+
+    # Set environment variable for /unleashed-version skill
+    os.environ['UNLEASHED_VERSION'] = VERSION
 
     # Determine delay
     delay = args.delay
