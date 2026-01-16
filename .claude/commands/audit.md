@@ -1,6 +1,6 @@
 ---
 description: Full 08xx audit suite with project-specific extensions
-argument-hint: "[--help] [--deep] [NNNN] [NNNN] ..."
+argument-hint: "[--help] [--deep] [--ultimate] [NNNN] [NNNN] ..."
 ---
 
 # Full Audit Suite
@@ -11,22 +11,25 @@ argument-hint: "[--help] [--deep] [NNNN] [NNNN] ..."
 
 ## Help
 
-Usage: `/audit [--help] [--deep] [NNNN] [NNNN] ...`
+Usage: `/audit [--help] [--deep] [--ultimate] [NNNN] [NNNN] ...`
 
 | Argument | Description |
 |----------|-------------|
 | `--help` | Show this help message and exit |
 | `--deep` | Enable web search for external research (CVEs, GDPR, etc.) |
+| `--ultimate` | Include expensive/rare audits (e.g., 0833 Gitignore Encryption) |
 | `NNNN` | Run specific audit(s) by number (e.g., `0809`, `0810`) |
-| (none) | Run ALL audits in sequence (internal analysis only) |
+| (none) | Run ALL standard audits in sequence (excludes ultimate tier) |
 
 **Examples:**
 - `/audit --help` - show this help
-- `/audit` - run full suite (standard mode)
+- `/audit` - run full suite (standard mode, excludes ultimate)
 - `/audit --deep` - run full suite with web research
+- `/audit --ultimate` - run full suite INCLUDING expensive audits
 - `/audit 0809` - run just security audit
 - `/audit 0809 0810 0811` - run security, privacy, accessibility
 - `/audit --deep 0809` - run security audit with CVE lookups
+- `/audit 0833` - run gitignore encryption review (ultimate tier)
 
 **Output:** Results saved to `docs/audit-results/YYYY-MM-DD.md`
 
@@ -44,11 +47,13 @@ This is **explicit approval** to execute all audits autonomously.
 
 | Arg | Effect |
 |-----|--------|
-| (none) | Run ALL audits - internal analysis only |
-| `--deep` | Run ALL audits with web search for external research |
-| `NNNN` | Run SINGLE audit by number (e.g., `0801`, `0809`) |
+| (none) | Run ALL standard audits - excludes ultimate tier |
+| `--deep` | Run ALL standard audits with web search for external research |
+| `--ultimate` | Run ALL audits INCLUDING ultimate tier (expensive/rare audits) |
+| `NNNN` | Run SINGLE audit by number (e.g., `0801`, `0809`, `0833`) |
 | `NNNN NNNN ...` | Run MULTIPLE audits by number (space-separated) |
 | `--deep NNNN ...` | Run specified audit(s) with web search |
+| `--ultimate --deep` | Run ALL audits including ultimate tier with web search |
 
 ## Deep Mode
 
@@ -59,6 +64,18 @@ This is **explicit approval** to execute all audits autonomously.
 - Capabilities: Anthropic changelog, Claude Code releases
 - AI Governance: ISO/IEC 42001 updates, OWASP Agentic Top 10
 - Horizon Scanning: Framework discovery (**REQUIRES deep**)
+
+## Ultimate Mode
+
+**Ultimate mode includes expensive or rarely-needed audits:**
+- 0833: Gitignore Encryption Review (scans all .gitignore entries, recommends encrypt vs ignore)
+
+These audits are excluded from standard runs because:
+- They may take longer to execute
+- They require human judgment for many findings
+- They're typically run once per project setup, not routinely
+
+**Direct invocation always works:** `/audit 0833` runs the specific audit regardless of tier.
 
 ## Rules
 
@@ -156,6 +173,15 @@ These audits apply to ALL projects using AgentOS:
 **Purpose:** Discover patterns in child projects worth promoting to AgentOS.
 **Tool:** `poetry run python tools/agentos-harvest.py`
 **Check:** Commands, tools, templates, permissions that appeared in multiple projects.
+
+### 0833 - Gitignore Encryption Review (Ultimate Tier)
+**Purpose:** Review .gitignore entries and recommend encrypt vs ignore.
+**Standard mode:** SKIP (ultimate tier only)
+**Ultimate mode:** ENABLED - Scan all .gitignore patterns.
+**Check:** For each gitignored path, categorize as:
+- ENCRYPT: Sensitive data that should travel with repo (use git-crypt)
+- IGNORE: Build artifacts, caches, truly local files (keep in .gitignore)
+- REVIEW: Unknown pattern, needs human decision
 
 ### 0898 - Horizon Scanning
 **Purpose:** Discover emerging AI governance frameworks and threats.

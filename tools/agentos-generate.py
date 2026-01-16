@@ -44,6 +44,71 @@ def find_unsubstituted(content: str) -> list:
     return re.findall(r'\{\{[A-Z_]+\}\}', content)
 
 
+def setup_ideas_folder(project_path: Path, encrypt: bool = True) -> None:
+    """
+    Create ideas folder with optional encryption setup.
+
+    Args:
+        project_path: Root of the project
+        encrypt: Whether to set up git-crypt encryption
+    """
+    ideas_path = project_path / "ideas"
+    ideas_path.mkdir(exist_ok=True)
+
+    # Create README placeholder
+    readme = ideas_path / "README.md"
+    readme.write_text("""# Ideas
+
+This folder contains pre-issue ideation - half-formed thoughts,
+patent concepts, exploratory ideas not ready for the issue tracker.
+
+**Encrypted:** This folder's contents are encrypted in git.
+Only authorized users with the key can read these files.
+
+## Naming Convention
+
+- `YYYY-MM-slug.md` - Dated ideas
+- `someday/` - "Maybe never" concepts
+- Freeform names for evergreen ideas
+
+## Security
+
+**NEVER** use `echo "KEY" | base64 -d > file` - this leaks the key to shell history.
+
+Use clipboard methods or save directly from your password manager.
+""", encoding='utf-8')
+
+    # Create someday subfolder
+    someday_path = ideas_path / "someday"
+    someday_path.mkdir(exist_ok=True)
+    (someday_path / ".gitkeep").touch()
+
+    if encrypt:
+        # Add encryption rules to root .gitattributes
+        gitattributes = project_path / ".gitattributes"
+        rules = """
+# Encrypt ideas folder (git-crypt)
+ideas/** filter=git-crypt diff=git-crypt
+ideas/**/* filter=git-crypt diff=git-crypt
+"""
+        if gitattributes.exists():
+            content = gitattributes.read_text(encoding='utf-8')
+            if "ideas/**" not in content:
+                gitattributes.write_text(content.rstrip() + "\n" + rules, encoding='utf-8')
+        else:
+            gitattributes.write_text(rules.strip() + "\n", encoding='utf-8')
+
+        print(f"Created ideas/ folder with encryption rules at {ideas_path}")
+        print("Next steps:")
+        print("  1. git-crypt init")
+        print("  2. git-crypt export-key ../your-project-ideas.key")
+        print("  3. Store key in 1Password, then DELETE the .key file")
+        print("  4. git add .gitattributes ideas/")
+        print("  5. git commit -m 'feat: add encrypted ideas folder'")
+    else:
+        print(f"Created ideas/ folder (no encryption) at {ideas_path}")
+
+
 def generate_configs(project_path: Path, templates_path: Path, variables: dict):
     """Generate concrete configs from templates."""
     generated = []
@@ -100,6 +165,16 @@ Examples:
         action="store_true",
         help="Show what would be generated without writing files"
     )
+    parser.add_argument(
+        "--ideas",
+        action="store_true",
+        help="Create ideas/ folder with git-crypt encryption setup"
+    )
+    parser.add_argument(
+        "--no-encrypt",
+        action="store_true",
+        help="With --ideas: skip encryption setup (not recommended for public repos)"
+    )
 
     args = parser.parse_args()
 
@@ -115,7 +190,15 @@ Examples:
         print(f"ERROR: Project directory not found: {project_path}")
         sys.exit(1)
 
-    # Load project configuration
+    # Handle --ideas standalone (no project.json required)
+    if args.ideas:
+        print(f"Project: {project_path}")
+        setup_ideas_folder(project_path, encrypt=not args.no_encrypt)
+        if not (project_path / ".claude" / "project.json").exists():
+            # No project.json, just created ideas folder, we're done
+            return
+
+    # Load project configuration (required for template generation)
     config = load_project_config(project_path)
     variables = config.get("variables", {})
 

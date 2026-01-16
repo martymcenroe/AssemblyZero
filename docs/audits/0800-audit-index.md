@@ -89,10 +89,11 @@ Audits exist because:
 | Category | Count | Auto-Fix | Focus |
 |----------|-------|----------|-------|
 | Documentation Health | 7 | 6 | Docs-code alignment, inventory, terminology |
-| Core Development | 17 | 4 | Code quality, security, privacy, accessibility, cost |
+| Core Development | 18 | 4 | Code quality, security, privacy, accessibility, cost |
 | AI Governance | 7 | 0 | AI-specific controls and compliance |
 | Meta | 2 | 0 | Audit system governance |
-| **Total** | **33** | **10** | |
+| Ultimate | 1 | 0 | Expensive/rare audits (--ultimate only) |
+| **Total** | **34** | **10** | |
 
 ### 3.2 Quick Reference
 
@@ -130,6 +131,7 @@ Audits exist because:
 | 0830 | Architecture Freshness (documentation completeness and currency) | **Yes** |
 | 0831 | Web Assets (icons, buttons, responsive design, accessibility) | No |
 | 0832 | Cost Optimization (model hints, context loading, spawn efficiency) | Partial |
+| 0833 | Gitignore Encryption Review (encrypt vs ignore) | No (Ultimate) |
 | 0898 | Horizon Scanning Protocol | No |
 | 0899 | Meta-Audit (validation & execution) | No |
 
@@ -175,6 +177,22 @@ Audits for code quality, security, and development practices.
 | 0830 | Architecture Freshness | Monthly + on change | **Yes** |
 | 0831 | Web Assets | On landing page change | No |
 | 0832 | Cost Optimization | Monthly | Partial |
+
+### 4.1.1 Ultimate Tier Audits
+
+Expensive or rarely-needed audits that only run on explicit request.
+
+| Number | Name | Trigger | Auto-Fix |
+|--------|------|---------|----------|
+| 0833 | Gitignore Encryption Review | `--ultimate` or direct | No |
+
+**Trigger conditions:**
+- `/audit 0833` - Direct invocation
+- `/audit --ultimate` - Runs all standard + ultimate audits
+
+**NOT triggered by:**
+- `/audit` (standard)
+- `/audit --full` (all standard, no ultimate)
 
 ### 4.2 AI Governance Audits
 
@@ -393,6 +411,9 @@ Standard format for all audits:
 - [0831 - Web Assets](0831-audit-web-assets.md)
 - [0832 - Cost Optimization](0832-audit-cost-optimization.md) ✨
 
+**Ultimate Tier (--ultimate only)**
+- [0833 - Gitignore Encryption Review](0833-audit-gitignore-encryption.md) 🔒
+
 **AI Governance (0818-0825)**
 - [0818 - AI Management System](0818-audit-ai-management-system.md)
 - [0819 - AI Supply Chain](0819-audit-ai-supply-chain.md)
@@ -407,6 +428,7 @@ Standard format for all audits:
 - [0899 - Meta-Audit](0899-meta-audit.md)
 
 ✨ = Auto-fix capability (audit automatically fixes findings rather than just reporting)
+🔒 = Ultimate tier (only runs with `--ultimate` flag or direct invocation)
 
 ### 10.2 By Topic
 
@@ -507,6 +529,7 @@ By using appropriate models instead of Opus for all audits:
 
 | Date | Change |
 |------|--------|
+| 2026-01-16 | Created 0833 (Gitignore Encryption Review) for encrypt vs ignore recommendations. Added Ultimate tier for expensive/rare audits (--ultimate flag). Part of Issue #18 (git-crypt ideas folder). Total audits: 34. |
 | 2026-01-12 | Added auto-fix capability to 9 audits (0802, 0804, 0805, 0806, 0807, 0808, 0824, 0828, 0830). Added Documentation Health category (0801-0807) to index. Total audits: 32. |
 | 2026-01-11 | Renumbered 0827-audit-web-assets.md to 0831 (resolved duplicate with 0827-infrastructure-integration). Total audits: 25. |
 | 2026-01-11 | Created 0830 (Architecture Freshness) for documentation completeness and currency. Part of Architectural Depth Model (#308). Total audits: 24. |
