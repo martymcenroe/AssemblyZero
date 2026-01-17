@@ -22,6 +22,7 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | 0901 | [New Project Setup](0901-new-project-setup.md) | Manual | On new project | - |
 | 0902 | [Nightly AgentOS Audit](0902-nightly-agentos-audit.md) | PowerShell | Nightly | Opus + ultrathink |
 | 0903 | [Windows Scheduled Tasks](0903-windows-scheduled-tasks.md) | Reference | - | Sonnet |
+| 0904 | [Sentinel](0904-sentinel.md) | Manual | On demand | Haiku (gating) |
 
 ## Model Selection Guide
 
