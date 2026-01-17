@@ -130,6 +130,106 @@ git branch -D       # Force deletes branch
 
 If you hesitated, refresh.
 
+### GEMINI SUBMISSION GATE (MANDATORY)
+
+**NEVER call `gemini` CLI directly. ALWAYS use `gemini-retry.py`.**
+
+Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
+- Rotates credentials when account quota exhausted
+- Applies exponential backoff for capacity issues
+- Validates model (prevents silent downgrades to Flash)
+- Logs all attempts for audit trail
+
+**Required command pattern:**
+```bash
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+```
+
+**If all credentials exhausted (exit code 1):**
+1. STOP - Do not bypass the review
+2. Report to user: "Gemini quota exhausted across all credentials"
+3. Wait for user decision
+
+**BANNED patterns:**
+- `gemini --prompt "..."` (direct CLI)
+- `gemini < prompt.txt` (direct CLI with stdin)
+- `gemini --model X ...` (any direct CLI invocation)
+
+### LLD REVIEW GATE (BEFORE CODING)
+
+**Before writing ANY code for an issue, execute this gate:**
+
+```
+LLD Review Gate Check:
+├── Does an LLD exist for this issue?
+│   ├── YES → Submit to Gemini for review
+│   └── NO → Ask user: Create LLD or waive requirement?
+│
+├── Submit LLD to Gemini:
+│   └── Use gemini-retry.py with LLD review prompt
+│
+├── Parse Gemini response:
+│   ├── [APPROVE] → Gate PASSED, proceed to coding
+│   ├── [BLOCK] → Gate FAILED, fix issues before coding
+│   └── Quota exhausted → STOP, report to user
+```
+
+**State the gate explicitly:**
+> "Executing LLD REVIEW GATE: Submitting LLD to Gemini before coding."
+
+**LLD location:** `docs/reports/{issue-id}/lld-*.md`
+
+**Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
+
+### REPORT GENERATION GATE (AFTER CODING)
+
+**Before implementation review, generate required reports:**
+
+Required files:
+- `docs/reports/{issue-id}/implementation-report.md`
+- `docs/reports/{issue-id}/test-report.md`
+
+Where `{issue-id}` is the GitHub issue integer (e.g., `docs/reports/27/`).
+
+**Implementation Report minimum content:**
+- Issue reference (link)
+- Files changed
+- Design decisions
+- Known limitations
+
+**Test Report minimum content:**
+- Test command executed
+- Full test output (not paraphrased)
+- Skipped tests with reasons
+- Coverage metrics (if available)
+
+**State the gate explicitly:**
+> "Executing REPORT GENERATION GATE: Creating implementation and test reports."
+
+### IMPLEMENTATION REVIEW GATE (BEFORE PR)
+
+**Before creating ANY PR, execute this gate:**
+
+```
+Implementation Review Gate Check:
+├── Do reports exist?
+│   ├── YES → Proceed
+│   └── NO → Execute REPORT GENERATION GATE first
+│
+├── Submit to Gemini:
+│   └── Use gemini-retry.py with implementation-review prompt
+│
+├── Parse Gemini response:
+│   ├── [APPROVE] → Gate PASSED, create PR
+│   ├── [BLOCK] → Gate FAILED, fix issues before PR
+│   └── Quota exhausted → STOP, report to user, do NOT create PR
+```
+
+**State the gate explicitly:**
+> "Executing IMPLEMENTATION REVIEW GATE: Submitting to Gemini before PR."
+
+**CRITICAL:** If Gemini returns [BLOCK], you MUST NOT create the PR.
+
 ---
 
 ## First Action
