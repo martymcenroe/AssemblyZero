@@ -30,6 +30,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Import secure credential manager (handles keychain + legacy file)
+try:
+    from agentos_credentials import CredentialManager as SecureCredentialManager
+    HAS_SECURE_CREDENTIALS = True
+except ImportError:
+    HAS_SECURE_CREDENTIALS = False
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -84,7 +91,37 @@ class RotationState:
 # =============================================================================
 
 def load_credentials() -> list[Credential]:
-    """Load credentials from config file."""
+    """Load credentials from secure storage or legacy config file.
+
+    Priority:
+    1. Secure credential manager (keychain + env vars) if available
+    2. Legacy plaintext file (~/.agentos/gemini-credentials.json)
+
+    Note: OAuth credentials are handled separately by gemini CLI.
+    """
+    credentials = []
+
+    # Try secure credential manager first (handles env vars + keychain + legacy)
+    if HAS_SECURE_CREDENTIALS:
+        try:
+            manager = SecureCredentialManager()
+            secure_creds = manager.get_credentials()
+            for cred in secure_creds:
+                credentials.append(Credential(
+                    name=cred.name,
+                    cred_type="api_key",
+                    key=cred.key,
+                    enabled=cred.enabled,
+                    notes="",
+                    account_name="",
+                ))
+            if credentials:
+                return credentials
+        except Exception as e:
+            print(f"[WARNING] Secure credential manager error: {e}", file=sys.stderr)
+            # Fall through to legacy loading
+
+    # Legacy: Load from plaintext file
     if not CREDENTIALS_FILE.exists():
         print(f"ERROR: Credentials file not found: {CREDENTIALS_FILE}", file=sys.stderr)
         print("Create it with your API keys. See AgentOS docs.", file=sys.stderr)
@@ -97,7 +134,6 @@ def load_credentials() -> list[Credential]:
         print(f"ERROR: Invalid JSON in {CREDENTIALS_FILE}: {e}", file=sys.stderr)
         sys.exit(2)
 
-    credentials = []
     for cred_data in data.get("credentials", []):
         credentials.append(Credential(
             name=cred_data.get("name", "unnamed"),
