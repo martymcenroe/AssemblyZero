@@ -181,6 +181,19 @@ LLD Review Gate Check:
 
 **Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
 
+**Prompt formatting (MANDATORY):**
+1. Include FULL LLD content in the prompt file (not just a reference)
+2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
+3. End with: "END OF LLD. Respond with JSON only."
+4. Read back prompt file before submission to verify content is correct
+
+**Post-review validation:**
+1. Gemini's response must reference the correct issue number
+2. Gemini's response must mention sections from YOUR submitted LLD
+3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
+
+**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+
 ### REPORT GENERATION GATE (AFTER CODING)
 
 **Before implementation review, generate required reports:**
@@ -229,6 +242,19 @@ Implementation Review Gate Check:
 > "Executing IMPLEMENTATION REVIEW GATE: Submitting to Gemini before PR."
 
 **CRITICAL:** If Gemini returns [BLOCK], you MUST NOT create the PR.
+
+**Prompt formatting (MANDATORY):**
+1. Include FULL implementation report and test report in the prompt
+2. Include the git diff of changes
+3. Start with: "REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES."
+4. End with: "END OF IMPLEMENTATION. Respond with JSON only."
+
+**Post-review validation:**
+1. Gemini's response must reference the correct issue/PR
+2. Gemini's response must mention files from YOUR diff
+3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
+
+**ACCOUNTABILITY:** If Gemini reviews wrong code, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
 
 ---
 
