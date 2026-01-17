@@ -1,0 +1,41 @@
+REVIEW THE FOLLOWING DOCUMENTATION CHANGE ONLY.
+
+This is a DOCUMENTATION change to CLAUDE.md (not code). No code files need to be searched.
+
+COMMIT: 30f8482
+FILE CHANGED: CLAUDE.md (documentation rules file)
+CHANGE TYPE: Added text to two existing sections
+
+CONTEXT: Claude agent blamed Gemini for reviewing wrong content when Claude had provided unclear prompts. This fix adds accountability rules.
+
+THE ACTUAL DIFF TO REVIEW:
+
+```diff
+@@ -181,6 +181,19 @@ LLD Review Gate Check:
+ **Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
+
++**Prompt formatting (MANDATORY):**
++1. Include FULL LLD content in the prompt file (not just a reference)
++2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
++3. End with: "END OF LLD. Respond with JSON only."
++4. Read back prompt file before submission to verify content is correct
++
++**Post-review validation:**
++1. Gemini's response must reference the correct issue number
++2. Gemini's response must mention sections from YOUR submitted LLD
++3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
++
++**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
++
+ ### REPORT GENERATION GATE (AFTER CODING)
+```
+
+And similar additions to IMPLEMENTATION REVIEW GATE section.
+
+REVIEW CRITERIA:
+1. Is the accountability language clear and unambiguous?
+2. Are the prompt formatting rules sufficient?
+3. Are there any logical issues with the validation steps?
+
+Respond with JSON:
+{"verdict": "[APPROVE]" or "[BLOCK]", "commit": "30f8482", "file": "CLAUDE.md", "summary": "assessment", "concerns": [], "blocking_issues": []}

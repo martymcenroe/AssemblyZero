@@ -1,0 +1,29 @@
+REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES.
+
+Commit: 30f8482
+File: CLAUDE.md
+Issue: Claude blamed Gemini for reviewing wrong LLD; fix adds accountability
+
+CHANGES MADE (git diff):
++**Prompt formatting (MANDATORY):**
++1. Include FULL LLD content in the prompt file (not just a reference)
++2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
++3. End with: "END OF LLD. Respond with JSON only."
++4. Read back prompt file before submission to verify content is correct
++
++**Post-review validation:**
++1. Gemini's response must reference the correct issue number
++2. Gemini's response must mention sections from YOUR submitted LLD
++3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
++
++**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+
+Same changes added to IMPLEMENTATION REVIEW GATE.
+
+DESIGN DECISIONS:
+1. Place in COMPACTION-SAFE section (survives context limits)
+2. Use "CLAUDE'S FAULT" language (unambiguous blame)
+3. Require FULL content (prevents wrong file lookups)
+
+END OF IMPLEMENTATION. Respond with JSON only:
+{"verdict": "[APPROVE]" or "[BLOCK]", "commit_reviewed": "30f8482", "summary": "one sentence", "concerns": [], "blocking_issues": []}
