@@ -1,8 +1,8 @@
 # AgentOS - File Inventory & Status Map
 
 **Document:** 0003
-**Version:** 1.0
-**Last Updated:** 2026-01-13
+**Version:** 1.1
+**Last Updated:** 2026-01-16
 
 ## 1. Status Taxonomy
 
@@ -98,16 +98,41 @@
 
 ---
 
-## 3. Tools Inventory
+## 3. Tools Inventory (14 files)
+
+### Core Tools
 
 | File | Status | Description |
 |------|--------|-------------|
-| `tools/agentos-generate.py` | Stable | Config generator |
-| `tools/agentos-permissions.py` | Stable | Permission manager |
-| `tools/zugzwang.py` | Stable | Friction logger |
+| `tools/agentos-generate.py` | Stable | Config generator from templates |
+| `tools/agentos-permissions.py` | Stable | Permission manager (sync, clean, merge-up) |
+| `tools/agentos_config.py` | Stable | Config loader for path parameterization |
+| `tools/agentos-harvest.py` | Beta | Pattern harvester for permission discovery |
+
+### Gemini Integration
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/gemini-retry.py` | Stable | Exponential backoff for MODEL_CAPACITY_EXHAUSTED |
+| `tools/gemini-rotate.py` | Stable | Credential rotation for quota management |
+
+### Unleashed (PTY Wrapper)
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/unleashed.py` | Stable | Production PTY wrapper for auto-approval |
+| `tools/unleashed-test.py` | Stable | Test mode (simulated approvals) |
+| `tools/unleashed-danger.py` | Stable | Dangerous command detection |
+| `tools/unleashed-danger-test.py` | Stable | Test mode for danger detection |
+
+### Utilities
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/zugzwang.py` | Stable | Permission friction logger |
 | `tools/append_session_log.py` | Stable | Session tracking |
-| `tools/bash-gate.sh` | Stable | Pre-execution blocking |
-| `tools/claude-usage-scraper.py` | Stable | Quota visibility |
+| `tools/update-doc-refs.py` | Beta | Documentation reference updater |
+| `tools/claude-usage-scraper.py` | Stable | Quota visibility via TUI scraping |
 
 ---
 
@@ -117,8 +142,23 @@
 |------|--------|-------------|
 | `CLAUDE.md` | Stable | Core agent rules |
 | `.claude/project.json.example` | Stable | Project config template |
-| `.claude/commands/*.md` | Stable | 8 canonical skills |
+| `.claude/commands/*.md` | Stable | 10 skill definitions (see below) |
 | `.claude/templates/*.template` | Stable | Config templates |
+
+### Skills/Commands (10 files)
+
+| File | Status | Description |
+|------|--------|-------------|
+| `.claude/commands/audit.md` | Stable | Full audit suite |
+| `.claude/commands/cleanup.md` | Stable | Session cleanup |
+| `.claude/commands/code-review.md` | Stable | Parallel code review |
+| `.claude/commands/commit-push-pr.md` | Stable | Git workflow |
+| `.claude/commands/friction.md` | Stable | Permission friction analysis |
+| `.claude/commands/onboard.md` | Stable | Agent onboarding |
+| `.claude/commands/promote.md` | Stable | Pattern promotion to AgentOS |
+| `.claude/commands/test-gaps.md` | Stable | Test gap mining |
+| `.claude/commands/unleashed.md` | Stable | Unleashed version check |
+| `.claude/commands/zugzwang.md` | Stable | Real-time friction logger |
 
 ---
 
@@ -127,10 +167,10 @@
 | Category | Count | Status |
 |----------|-------|--------|
 | Documentation | 47 | All numbered |
-| Tools | 6 | All stable |
-| Commands | 8 | All stable |
+| Tools | 14 | 12 stable, 2 beta |
+| Commands | 10 | All stable |
 | Templates | 7 | All stable |
-| **Total** | **68** | |
+| **Total** | **78** | |
 
 ---
 
@@ -142,4 +182,4 @@
 
 ---
 
-*Last audit: 2026-01-13*
+*Last audit: 2026-01-16*

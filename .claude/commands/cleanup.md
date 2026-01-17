@@ -40,6 +40,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Stash list | | YES | YES |
 | Worktree list | | YES | YES |
 | **Auto-delete orphans** | | YES | YES |
+| **Purge tmpclaude files** | YES | YES | YES |
 | Inventory audit | | | YES |
 
 **Quick mode philosophy:** Record what happened (session log), but don't commit. Changes accumulate until a normal/full cleanup commits them.
@@ -135,6 +136,11 @@ Session: {SESSION_NAME}
 
 4. **Stashes** - Document any found
 
+5. **Purge tmpclaude Files** (ALL modes):
+   - Claude Code leaves orphaned `tmpclaude-*-cwd` files (temp CWD markers)
+   - Delete them: `find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete`
+   - Report count in results
+
 ## Phase 3: Session Log
 
 Create/append session log:
@@ -194,6 +200,7 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -r
 | Worktrees | Only main / {list} |
 | Auto-Deleted | {count} branches / Skipped |
 | Stashes | None / {count} |
+| tmpclaude Purged | {count} files / 0 |
 | Commit | Pushed / Skipped (quick) |
 
 Flag any unexpected conditions.

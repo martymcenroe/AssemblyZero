@@ -130,6 +130,132 @@ git branch -D       # Force deletes branch
 
 If you hesitated, refresh.
 
+### GEMINI SUBMISSION GATE (MANDATORY)
+
+**NEVER call `gemini` CLI directly. ALWAYS use `gemini-retry.py`.**
+
+Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
+- Rotates credentials when account quota exhausted
+- Applies exponential backoff for capacity issues
+- Validates model (prevents silent downgrades to Flash)
+- Logs all attempts for audit trail
+
+**Required command pattern:**
+```bash
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+```
+
+**If all credentials exhausted (exit code 1):**
+1. STOP - Do not bypass the review
+2. Report to user: "Gemini quota exhausted across all credentials"
+3. Wait for user decision
+
+**BANNED patterns:**
+- `gemini --prompt "..."` (direct CLI)
+- `gemini < prompt.txt` (direct CLI with stdin)
+- `gemini --model X ...` (any direct CLI invocation)
+
+### LLD REVIEW GATE (BEFORE CODING)
+
+**Before writing ANY code for an issue, execute this gate:**
+
+```
+LLD Review Gate Check:
+├── Does an LLD exist for this issue?
+│   ├── YES → Submit to Gemini for review
+│   └── NO → Ask user: Create LLD or waive requirement?
+│
+├── Submit LLD to Gemini:
+│   └── Use gemini-retry.py with LLD review prompt
+│
+├── Parse Gemini response:
+│   ├── [APPROVE] → Gate PASSED, proceed to coding
+│   ├── [BLOCK] → Gate FAILED, fix issues before coding
+│   └── Quota exhausted → STOP, report to user
+```
+
+**State the gate explicitly:**
+> "Executing LLD REVIEW GATE: Submitting LLD to Gemini before coding."
+
+**LLD location:** `docs/reports/{issue-id}/lld-*.md`
+
+**Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
+
+**Prompt formatting (MANDATORY):**
+1. Include FULL LLD content in the prompt file (not just a reference)
+2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
+3. End with: "END OF LLD. Respond with JSON only."
+4. Read back prompt file before submission to verify content is correct
+
+**Post-review validation:**
+1. Gemini's response must reference the correct issue number
+2. Gemini's response must mention sections from YOUR submitted LLD
+3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
+
+**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+
+### REPORT GENERATION GATE (AFTER CODING)
+
+**Before implementation review, generate required reports:**
+
+Required files:
+- `docs/reports/{issue-id}/implementation-report.md`
+- `docs/reports/{issue-id}/test-report.md`
+
+Where `{issue-id}` is the GitHub issue integer (e.g., `docs/reports/27/`).
+
+**Implementation Report minimum content:**
+- Issue reference (link)
+- Files changed
+- Design decisions
+- Known limitations
+
+**Test Report minimum content:**
+- Test command executed
+- Full test output (not paraphrased)
+- Skipped tests with reasons
+- Coverage metrics (if available)
+
+**State the gate explicitly:**
+> "Executing REPORT GENERATION GATE: Creating implementation and test reports."
+
+### IMPLEMENTATION REVIEW GATE (BEFORE PR)
+
+**Before creating ANY PR, execute this gate:**
+
+```
+Implementation Review Gate Check:
+├── Do reports exist?
+│   ├── YES → Proceed
+│   └── NO → Execute REPORT GENERATION GATE first
+│
+├── Submit to Gemini:
+│   └── Use gemini-retry.py with implementation-review prompt
+│
+├── Parse Gemini response:
+│   ├── [APPROVE] → Gate PASSED, create PR
+│   ├── [BLOCK] → Gate FAILED, fix issues before PR
+│   └── Quota exhausted → STOP, report to user, do NOT create PR
+```
+
+**State the gate explicitly:**
+> "Executing IMPLEMENTATION REVIEW GATE: Submitting to Gemini before PR."
+
+**CRITICAL:** If Gemini returns [BLOCK], you MUST NOT create the PR.
+
+**Prompt formatting (MANDATORY):**
+1. Include FULL implementation report and test report in the prompt
+2. Include the git diff of changes
+3. Start with: "REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES."
+4. End with: "END OF IMPLEMENTATION. Respond with JSON only."
+
+**Post-review validation:**
+1. Gemini's response must reference the correct issue/PR
+2. Gemini's response must mention files from YOUR diff
+3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
+
+**ACCOUNTABILITY:** If Gemini reviews wrong code, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+
 ---
 
 ## First Action
@@ -171,6 +297,48 @@ Python tools import paths via:
 from agentos_config import config
 root = config.agentos_root()       # Windows format
 root_unix = config.agentos_root_unix()  # Unix format
+```
+
+## Ideas Folder (Encrypted Pre-Issue Ideation)
+
+Every repo can have an `ideas/` folder for capturing thoughts before they're ready to become issues.
+
+**Setup (using generator):**
+```bash
+poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/agentos-generate.py --project YOUR_PROJECT --ideas
+```
+
+**Setup (manual for git-crypt):**
+```bash
+# 1. Initialize git-crypt in repo
+git-crypt init
+
+# 2. Export and store key securely
+git-crypt export-key ../your-project-ideas.key
+# Store in 1Password as "your-project-ideas-key"
+# Then DELETE the .key file!
+
+# 3. Commit the setup
+git add .gitattributes ideas/
+git commit -m "feat: add encrypted ideas folder"
+```
+
+**Unlocking on a new machine:**
+```bash
+# Get key from 1Password, save to temp file via clipboard (NOT echo!)
+pbpaste | base64 -d > /tmp/repo.key   # macOS
+# OR: xclip -selection clipboard -o | base64 -d > /tmp/repo.key   # Linux
+# OR: powershell -c "Get-Clipboard" | base64 -d > /tmp/repo.key   # Windows
+
+git-crypt unlock /tmp/repo.key
+rm /tmp/repo.key
+```
+
+**SECURITY WARNING:** Never use `echo "KEY" | base64 -d > file` - this leaks the key to shell history.
+
+**Windows Installation:**
+```bash
+choco install git-crypt   # or: scoop install git-crypt
 ```
 
 ---

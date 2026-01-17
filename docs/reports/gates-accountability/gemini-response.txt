@@ -1,0 +1,3 @@
+[GEMINI-RETRY] Attempt 1/20...
+[GEMINI-RETRY] Success on attempt 1 (model: None)
+I am ready. Please provide the implementation you would like me to review.

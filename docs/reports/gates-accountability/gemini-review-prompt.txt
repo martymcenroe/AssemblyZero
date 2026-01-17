@@ -1,0 +1,248 @@
+REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES.
+
+This is an implementation review for commit 30f8482 on the AgentOS project.
+
+---
+
+## IMPLEMENTATION REPORT
+
+# Implementation Report: Gates Accountability Fix
+
+**Issue:** Claude blamed Gemini for reviewing wrong LLD content; needed to fix procedures
+**Branch:** main (direct commit - documentation change)
+**Date:** 2026-01-17
+**Author:** Claude Agent
+**Commit:** 30f8482
+
+## Summary
+
+Updated LLD REVIEW GATE and IMPLEMENTATION REVIEW GATE in CLAUDE.md to add:
+1. Mandatory prompt formatting rules
+2. Post-review validation steps
+3. Explicit accountability assignment to Claude
+
+## Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `CLAUDE.md` | Modified | Added 26 lines across 2 gate sections |
+
+## Design Decisions
+
+### Decision 1: Place accountability in COMPACTION-SAFE section
+**Context:** Gates are in COMPACTION-SAFE section; accountability must survive context limits
+**Decision:** Add accountability text directly within each gate section
+**Rationale:** Ensures rules persist across sessions
+
+### Decision 2: Use explicit "CLAUDE'S FAULT" language
+**Context:** Need unambiguous assignment of blame
+**Decision:** Bold text stating "**THIS IS CLAUDE'S FAULT**"
+**Rationale:** No room for misinterpretation or deflection
+
+### Decision 3: Require FULL content in prompts
+**Context:** Original failure was Claude referencing files instead of including content
+**Decision:** Mandate including complete document content in prompt
+**Rationale:** Prevents Gemini from searching for wrong files
+
+## Implementation Details
+
+### LLD REVIEW GATE additions (lines 184-195)
+- Prompt formatting: 4 mandatory rules
+- Post-review validation: 3 checks
+- Accountability statement
+
+### IMPLEMENTATION REVIEW GATE additions (lines 246-257)
+- Prompt formatting: 4 mandatory rules
+- Post-review validation: 3 checks
+- Accountability statement
+
+## Known Limitations
+
+- Rules are documentation-based; no code enforcement
+- Relies on Claude self-compliance
+- Retroactive fix - original commit (30f8482) was made without following these procedures
+
+## Testing Summary
+
+- Unit tests: N/A (documentation changes only)
+- Integration tests: N/A (documentation changes only)
+- Manual testing: Verified markdown syntax correct
+
+## Verification Checklist
+
+- [x] Both gates have prompt formatting rules
+- [x] Both gates have post-review validation
+- [x] Both gates have accountability statement
+- [x] Language is unambiguous ("CLAUDE'S FAULT")
+- [x] Reports created
+- [ ] Gemini review passed (pending)
+
+## Notes for Reviewers
+
+This fix addresses a specific incident where Claude:
+1. Submitted an unclear prompt to Gemini
+2. Gemini reviewed a different LLD file
+3. Claude blamed Gemini for the error
+
+The accountability rules ensure Claude cannot deflect responsibility for prompt quality failures in the future.
+
+---
+
+## TEST REPORT
+
+# Test Report: Gates Accountability Fix
+
+**Issue:** Claude blamed Gemini for reviewing wrong LLD content
+**Branch:** main
+**Date:** 2026-01-17
+**Author:** Claude Agent
+**Commit:** 30f8482
+
+## Test Execution Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Tests | N/A |
+| Passed | N/A |
+| Failed | N/A |
+| Skipped | N/A |
+| Coverage | N/A |
+
+**Note:** Documentation-only changes. No executable code modified.
+
+## Verification Performed
+
+### 1. Markdown Syntax Validation
+**Method:** Read back CLAUDE.md after edit
+**Result:** Valid markdown, no syntax errors
+**Status:** PASS
+
+### 2. Gate Content Verification - LLD REVIEW GATE
+**Method:** Read lines 184-195
+**Expected:** Prompt formatting, validation, accountability
+**Actual:** All three sections present
+**Status:** PASS
+
+### 3. Gate Content Verification - IMPLEMENTATION REVIEW GATE
+**Method:** Read lines 246-257
+**Expected:** Prompt formatting, validation, accountability
+**Actual:** All three sections present
+**Status:** PASS
+
+### 4. Accountability Language Check
+**Method:** Grep for "CLAUDE'S FAULT"
+**Expected:** Present in both gates
+**Actual:** Found in both LLD and Implementation gates
+**Status:** PASS
+
+### 5. Diff Verification
+**Command:** `git diff HEAD~1 CLAUDE.md`
+**Expected:** +26 lines, no deletions of existing content
+**Actual:** +26 insertions, 0 deletions
+**Status:** PASS
+
+## Manual Testing
+
+### Scenario 1: Verify prompt formatting rules completeness
+**Steps:**
+1. Read LLD REVIEW GATE prompt formatting section
+2. Verify includes: full content requirement, start marker, end marker, verification step
+
+**Expected Result:** All 4 rules present
+**Actual Result:** Rules 1-4 present as specified
+**Status:** PASS
+
+### Scenario 2: Verify accountability is unambiguous
+**Steps:**
+1. Read accountability statements in both gates
+2. Check for weasel words or ambiguity
+
+**Expected Result:** Clear, direct language assigning blame to Claude
+**Actual Result:** "CLAUDE'S FAULT" in bold, "NEVER blame Gemini" explicit
+**Status:** PASS
+
+## Git Log
+
+```
+commit 30f8482
+Author: Claude Agent
+Date:   2026-01-17
+
+    docs(gates): add prompt formatting rules and Claude accountability
+
+    Fix LLD REVIEW GATE and IMPLEMENTATION REVIEW GATE to include:
+    - Mandatory prompt formatting rules (include FULL content, not references)
+    - Post-review validation steps (verify Gemini reviewed correct document)
+    - Accountability: If Gemini reviews wrong content, it's CLAUDE'S FAULT
+```
+
+## Notes
+
+This report is being created retroactively. The original commit was made without following the REPORT GENERATION GATE - an immediate violation of the procedures being implemented. This retroactive documentation acknowledges that failure.
+
+---
+
+## GIT DIFF
+
+```diff
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 9882a15..77a5546 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -181,6 +181,19 @@ LLD Review Gate Check:
+
+ **Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
+
++**Prompt formatting (MANDATORY):**
++1. Include FULL LLD content in the prompt file (not just a reference)
++2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
++3. End with: "END OF LLD. Respond with JSON only."
++4. Read back prompt file before submission to verify content is correct
++
++**Post-review validation:**
++1. Gemini's response must reference the correct issue number
++2. Gemini's response must mention sections from YOUR submitted LLD
++3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
++
++**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
++
+ ### REPORT GENERATION GATE (AFTER CODING)
+
+ **Before implementation review, generate required reports:**
+@@ -230,6 +243,19 @@ Implementation Review Gate Check:
+
+ **CRITICAL:** If Gemini returns [BLOCK], you MUST NOT create the PR.
+
++**Prompt formatting (MANDATORY):**
++1. Include FULL implementation report and test report in the prompt
++2. Include the git diff of changes
++3. Start with: "REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES."
++4. End with: "END OF IMPLEMENTATION. Respond with JSON only."
++
++**Post-review validation:**
++1. Gemini's response must reference the correct issue/PR
++2. Gemini's response must mention files from YOUR diff
++3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
++
++**ACCOUNTABILITY:** If Gemini reviews wrong code, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
++
+ ---
+
+ ## First Action
+```
+
+---
+
+END OF IMPLEMENTATION. Respond with JSON only.
+
+Required response format:
+{
+  "verdict": "[APPROVE]" or "[BLOCK]",
+  "commit_reviewed": "30f8482",
+  "files_reviewed": ["CLAUDE.md"],
+  "summary": "One sentence assessment",
+  "strengths": ["strength 1", "strength 2"],
+  "concerns": ["concern 1"],
+  "blocking_issues": [],
+  "suggestions": ["suggestion 1"]
+}

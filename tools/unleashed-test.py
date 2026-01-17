@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Unleashed - PTY Wrapper for Claude Code Auto-Approval
+Unleashed Test - PTY Wrapper for Claude Code Auto-Approval (Test Version)
 
-A convenience wrapper that auto-approves Claude Code permission prompts
-after a 10-second countdown, giving users a window to cancel.
+Test version of unleashed with --debug flag for verbose logging.
+Deploy changes here first, test, then promote to production.
 
 Usage:
-  python tools/unleashed.py [--dry-run] [--help]
+  python tools/unleashed-test.py [--debug] [--dry-run] [--help]
 
 Environment Variables:
   UNLEASHED_DELAY=N  Override default 10-second countdown (default: 10)
@@ -33,11 +33,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Version constant (defined early for --version flag)
-VERSION = "1.4.0"  # Clean production version - no debug output
+VERSION = "1.4.0-t"  # Test version - deploy changes here first
+
+# Global debug flag
+DEBUG = False
 
 # Handle --version before heavy imports
 if "--version" in sys.argv or "-v" in sys.argv:
-    print(f"unleashed.py {VERSION}")
+    print(f"unleashed-test.py {VERSION}")
     sys.exit(0)
 
 try:
@@ -52,6 +55,13 @@ try:
     HAS_MSVCRT = True
 except ImportError:
     HAS_MSVCRT = False
+
+
+def debug_log(msg: str):
+    """Log debug message to stderr if DEBUG is enabled."""
+    if DEBUG:
+        sys.stderr.write(f"[DEBUG] {msg}\n")
+        sys.stderr.flush()
 
 
 # =============================================================================
@@ -183,14 +193,17 @@ def detect_tool_type(text: str, full_buffer: str = '') -> str:
         clean_start = strip_ansi(full_buffer)[:1000]
         for tool_name, pattern in TOOL_TYPE_PATTERNS.items():
             if pattern.search(clean_start):
+                debug_log(f"detect_tool_type: found {tool_name} in buffer start")
                 return tool_name
 
     # Fall back to checking the provided context
     clean_text = strip_ansi(text)
     for tool_name, pattern in TOOL_TYPE_PATTERNS.items():
         if pattern.search(clean_text):
+            debug_log(f"detect_tool_type: found {tool_name} in context")
             return tool_name
 
+    debug_log("detect_tool_type: unknown")
     return 'unknown'
 
 
@@ -487,19 +500,8 @@ class PtyReader:
 # Input Reader (for user keyboard input)
 # =============================================================================
 
-def is_mintty() -> bool:
-    """Detect if running in mintty (Git Bash) terminal.
-
-    Mintty sends ANSI escape sequences to stdin instead of using Windows
-    console input buffer. msvcrt cannot read these sequences, so we need
-    to use a different input method.
-    """
-    # MSYSTEM is set in Git Bash/MSYS2 environments
-    return bool(os.environ.get('MSYSTEM'))
-
-
 class InputReader:
-    """Non-blocking input reader using msvcrt (for native Windows console)."""
+    """Non-blocking stdin reader using msvcrt."""
 
     def __init__(self):
         self.queue = queue.Queue()
@@ -508,18 +510,20 @@ class InputReader:
         self.thread.start()
 
     def _reader_thread(self):
-        """Background thread for reading stdin via msvcrt."""
+        """Background thread for reading stdin."""
         while self.running:
             try:
                 if HAS_MSVCRT:
                     # Windows: use msvcrt for non-blocking input
                     if msvcrt.kbhit():
                         char = msvcrt.getwch()
+                        debug_log(f"input: char={repr(char)} ord={ord(char) if len(char)==1 else 'N/A'}")
                         # Handle Windows special keys (arrows, function keys, etc.)
                         # They come as two-char sequences: \xe0 or \x00 followed by scan code
                         if char in ('\xe0', '\x00'):
                             # Read scan code immediately - it's already buffered
                             scan = msvcrt.getwch()
+                            debug_log(f"input: scan={repr(scan)} ord={ord(scan) if len(scan)==1 else 'N/A'}")
                             # Convert to ANSI escape sequences
                             key_map = {
                                 'H': '\x1b[A',  # Up
@@ -536,22 +540,25 @@ class InputReader:
                             }
                             if scan in key_map:
                                 self.queue.put(key_map[scan])
+                            else:
+                                debug_log(f"input: unknown scan code - not in key_map")
                         elif char == '\x1b':
                             # Escape character - might be start of escape sequence from mintty
                             # Try to read more characters for the sequence
                             seq = char
                             while msvcrt.kbhit():
                                 seq += msvcrt.getwch()
+                            debug_log(f"input: escape_seq={repr(seq)}")
                             # Filter out terminal responses - they're NOT user input
                             # DA1 response: \x1b[?...c  (device attributes)
                             # CPR response: \x1b[...R   (cursor position report)
                             # These should NOT be passed to Claude
                             if seq.startswith('\x1b[?') and seq.endswith('c'):
                                 # Terminal DA1 response - discard
-                                pass
+                                debug_log("input: FILTERED (DA1 response)")
                             elif len(seq) > 3 and seq[-1] == 'R' and seq[2].isdigit():
                                 # Cursor position report - discard
-                                pass
+                                debug_log("input: FILTERED (CPR response)")
                             else:
                                 # User input escape sequence - pass through
                                 self.queue.put(seq)
@@ -565,107 +572,6 @@ class InputReader:
                         char = sys.stdin.read(1)
                         if char:
                             self.queue.put(char)
-            except Exception:
-                time.sleep(0.01)
-
-    def read_nowait(self) -> str:
-        """Read all available input without blocking."""
-        result = ''
-        while True:
-            try:
-                char = self.queue.get_nowait()
-                result += char
-            except queue.Empty:
-                break
-        return result
-
-    def stop(self):
-        self.running = False
-
-
-class StdinReader:
-    """Non-blocking input reader using stdin (for mintty/Git Bash).
-
-    This reader is used when running in mintty because msvcrt cannot read
-    the ANSI escape sequences that mintty sends for special keys like Shift+Tab.
-
-    Key difference from InputReader:
-    - Reads directly from sys.stdin.buffer (binary mode)
-    - Can receive \x1b[Z (Shift+Tab escape sequence) from mintty
-    - Does NOT mix with msvcrt (which was the cause of v1.3.8 failure)
-    """
-
-    def __init__(self):
-        self.queue = queue.Queue()
-        self.running = True
-        # Get the stdin file descriptor for select (works in mintty)
-        self.stdin_fd = sys.stdin.fileno()
-        self.thread = threading.Thread(target=self._reader_thread, daemon=True)
-        self.thread.start()
-
-    def _reader_thread(self):
-        """Background thread for reading stdin directly.
-
-        In mintty, stdin is a proper file descriptor that works with select().
-        This is different from native Windows console where select() on stdin fails.
-        """
-        stdin = sys.stdin.buffer
-
-        while self.running:
-            try:
-                # In mintty, select works on stdin (it's a pty, not console)
-                # Use a short timeout so we can check self.running
-                readable, _, _ = select.select([self.stdin_fd], [], [], 0.1)
-                if not readable:
-                    continue
-
-                # Read available byte
-                byte = stdin.read(1)
-                if not byte:
-                    continue
-
-                char = byte.decode('utf-8', errors='replace')
-
-                # Handle escape sequences
-                if char == '\x1b':
-                    # Start of escape sequence - read more bytes
-                    # Mintty sends escape sequences atomically, so more bytes
-                    # should be immediately available
-                    seq_bytes = byte
-                    max_seq_len = 16  # Reasonable max for any escape sequence
-
-                    # Read more bytes with short timeout
-                    for _ in range(max_seq_len):
-                        readable, _, _ = select.select([self.stdin_fd], [], [], 0.02)
-                        if not readable:
-                            break
-                        next_byte = stdin.read(1)
-                        if not next_byte:
-                            break
-                        seq_bytes += next_byte
-                        # Check if sequence is complete
-                        seq = seq_bytes.decode('utf-8', errors='replace')
-                        if len(seq) >= 3:
-                            last = seq[-1]
-                            # Most escape sequences end with a letter or ~
-                            if last.isalpha() or last == '~':
-                                break
-
-                    seq = seq_bytes.decode('utf-8', errors='replace')
-
-                    # Filter terminal responses (not user input)
-                    if seq.startswith('\x1b[?') and seq.endswith('c'):
-                        # DA1 response - discard
-                        continue
-                    if len(seq) > 3 and seq[-1] == 'R' and seq[2].isdigit():
-                        # Cursor position report - discard
-                        continue
-
-                    # Queue the escape sequence (e.g., \x1b[Z for Shift+Tab)
-                    self.queue.put(seq)
-                else:
-                    self.queue.put(char)
-
             except Exception:
                 time.sleep(0.01)
 
@@ -739,7 +645,7 @@ class CountdownOverlay:
     def show(self, seconds_remaining: int):
         """Show countdown overlay."""
         self.active = True
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED] Auto-approving in {seconds_remaining}s... (Press any key to cancel){RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED-TEST] Auto-approving in {seconds_remaining}s... (Press any key to cancel){RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
     def hide(self):
@@ -752,31 +658,31 @@ class CountdownOverlay:
 
     def show_approved(self):
         """Show approval message briefly."""
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED] Auto-approved!{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED-TEST] Auto-approved!{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
     def show_cancelled(self):
         """Show cancellation message briefly."""
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED] Cancelled by user{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{YELLOW}[UNLEASHED-TEST] Cancelled by user{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
     def show_dangerous_warning(self, matched_path: str):
         """Show warning for dangerous path - requires explicit confirmation."""
         RED = '\x1b[31m'
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED] DANGEROUS PATH: {matched_path[:50]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED-TEST] DANGEROUS PATH: {matched_path[:50]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
     def show_confirmation_prompt(self):
         """Show prompt requiring 'yes' to proceed."""
         RED = '\x1b[31m'
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED] Type 'yes' + Enter to proceed, any other key to cancel: {RESET}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{RED}[UNLEASHED-TEST] Type 'yes' + Enter to proceed, any other key to cancel: {RESET}"
         self.writer(message)
 
     def show_hard_block(self, command: str, reason: str):
         """Show hard block message - command is NEVER approved."""
         RED = '\x1b[31m'
         BG_RED = '\x1b[41m'
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{BG_RED}[UNLEASHED] HARD BLOCKED: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{BG_RED}[UNLEASHED-TEST] HARD BLOCKED: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
     def show_hard_block_reason(self, reason: str):
@@ -789,7 +695,7 @@ class CountdownOverlay:
     def show_git_warning(self, command: str):
         """Show warning for git destructive command - requires explicit confirmation."""
         MAGENTA = '\x1b[35m'
-        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{MAGENTA}[UNLEASHED] GIT DESTRUCTIVE: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
+        message = f"{CURSOR_SAVE}{CURSOR_HOME}{BOLD}{MAGENTA}[UNLEASHED-TEST] GIT DESTRUCTIVE: {command[:40]}{RESET}{CLEAR_LINE}{CURSOR_RESTORE}"
         self.writer(message)
 
 
@@ -826,7 +732,10 @@ class Unleashed:
     def _detect_footer(self, text: str) -> bool:
         """Check if the permission footer is present in text."""
         clean_text = strip_ansi(text)
-        return bool(FOOTER_PATTERN.search(clean_text))
+        result = bool(FOOTER_PATTERN.search(clean_text))
+        if result:
+            debug_log("footer detected in text")
+        return result
 
     def _detect_three_options(self) -> bool:
         """Check if the current prompt has 3 options (includes 'remember' option).
@@ -859,6 +768,7 @@ class Unleashed:
         screen_context = self._capture_screen_context()
 
         self.logger.log_event("FOOTER_DETECTED")
+        debug_log("starting countdown handler")
 
         # FIRST: Detect tool type from permission prompt
         # This determines which safety checks to apply
@@ -868,6 +778,7 @@ class Unleashed:
             tool_type=tool_type,
             context_preview=screen_context[:300]
         )
+        debug_log(f"tool_type={tool_type}")
 
         # Hard block and git destructive checks apply to Bash AND unknown tools
         # SECURITY: Fail closed - if we can't identify the tool, assume dangerous
@@ -882,11 +793,13 @@ class Unleashed:
                 self.safe_paths
             )
             if is_blocked:
+                debug_log(f"hard block triggered: {blocked_cmd} - {reason}")
                 return self._handle_hard_block(blocked_cmd, reason)
 
             # Check git destructive (require explicit confirmation)
             is_git, git_cmd = check_git_destructive(screen_context, self.git_destructive, self.safe_paths)
             if is_git:
+                debug_log(f"git destructive detected: {git_cmd}")
                 return self._handle_git_confirmation(screen_context, git_cmd)
 
         # Dangerous PATH check - different logic for different tools
@@ -902,15 +815,18 @@ class Unleashed:
                 target_path=target_path,
                 is_dangerous=is_dangerous
             )
+            debug_log(f"path check: target={target_path} dangerous={is_dangerous}")
         else:
             # For Bash and unknown tool types, check full screen for command patterns
             # SECURITY: Unknown = assume dangerous (fail closed)
             is_dangerous, matched_path = check_dangerous_path(screen_context, self.dangerous_patterns)
+            debug_log(f"dangerous path check: dangerous={is_dangerous} path={matched_path}")
 
         if is_dangerous:
             return self._handle_dangerous_confirmation(screen_context, matched_path)
 
         self.logger.log_event("COUNTDOWN_START", delay=self.delay)
+        debug_log(f"starting countdown: {self.delay}s")
 
         for remaining in range(self.delay, 0, -1):
             self.overlay.show(remaining)
@@ -928,6 +844,7 @@ class Unleashed:
                             self.overlay.hide()
                             self.in_countdown = False
                             self.logger.log_event("CANCELLED_BY_USER", key=repr(char))
+                            debug_log(f"cancelled by user: {repr(char)}")
 
                             # Pass the keypress through to Claude
                             if self.pty_process and self.pty_process.isalive():
@@ -945,6 +862,7 @@ class Unleashed:
 
         # Check if 3-option prompt (has "remember" option)
         has_three = self._detect_three_options()
+        debug_log(f"auto-approving, has_three={has_three}")
 
         if not self.dry_run:
             if self.pty_process and self.pty_process.isalive():
@@ -1139,8 +1057,9 @@ class Unleashed:
 
     def _show_banner(self):
         """Display startup banner to stderr (avoids Claude's stdout cursor positioning)."""
-        term_type = "mintty" if is_mintty() else "console"
-        banner = f"{BOLD}{YELLOW}[UNLEASHED v{VERSION}] Auto-approval | {self.delay}s | {term_type} | Dir: {self.cwd}{RESET}\n"
+        CYAN = '\x1b[36m'
+        debug_mode = " [DEBUG]" if DEBUG else ""
+        banner = f"{BOLD}{CYAN}[UNLEASHED-TEST v{VERSION}]{debug_mode}{YELLOW} Auto-approval | {self.delay}s | Dir: {self.cwd}{RESET}\n"
         sys.stderr.write(banner)
         sys.stderr.flush()
 
@@ -1150,7 +1069,7 @@ class Unleashed:
         log_dir = Path(__file__).parent.parent / "logs"
 
         self.logger = EventLogger(log_dir, session_id)
-        self.logger.log_event("START", version=VERSION, delay=self.delay, dry_run=self.dry_run)
+        self.logger.log_event("START", version=VERSION, delay=self.delay, dry_run=self.dry_run, debug=DEBUG)
 
         # Set environment variable so Claude can check version via /unleashed-version
         os.environ['UNLEASHED_VERSION'] = VERSION
@@ -1174,17 +1093,7 @@ class Unleashed:
             )
 
             self.pty_reader = PtyReader(self.pty_process)
-
-            # Choose input reader based on terminal environment
-            # Key fix for Issue #20: mintty sends Shift+Tab as \x1b[Z to stdin,
-            # which msvcrt cannot see. Use StdinReader for mintty.
-            if is_mintty():
-                self.input_reader = StdinReader()
-                self.logger.log_event("INPUT_READER", reader="StdinReader", reason="mintty detected")
-            else:
-                self.input_reader = InputReader()
-                self.logger.log_event("INPUT_READER", reader="InputReader", reason="native Windows console")
-
+            self.input_reader = InputReader()
             self.running = True
 
             # Main loop
@@ -1256,7 +1165,7 @@ class Unleashed:
         if self.logger:
             self.logger.log_event("END")
             self.logger.close()
-            print(f"\n[UNLEASHED] Logs saved to: {self.logger.log_dir}", file=sys.stderr)
+            print(f"\n[UNLEASHED-TEST] Logs saved to: {self.logger.log_dir}", file=sys.stderr)
 
         # Reset terminal state
         sys.stdout.write('\x1b[0m')  # Reset attributes
@@ -1285,23 +1194,31 @@ def setup_signal_handlers(unleashed_instance):
 # =============================================================================
 
 def main():
+    global DEBUG
+
     parser = argparse.ArgumentParser(
-        description="Unleashed - Auto-approval wrapper for Claude Code",
+        description="Unleashed Test - Auto-approval wrapper for Claude Code (Test Version)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment Variables:
   UNLEASHED_DELAY=N  Override countdown delay (default: 10 seconds)
 
 Examples:
-  python tools/unleashed.py              # Normal mode
-  python tools/unleashed.py --dry-run    # Test detection without injection
-  UNLEASHED_DELAY=5 python tools/unleashed.py  # 5-second countdown
+  python tools/unleashed-test.py              # Normal mode
+  python tools/unleashed-test.py --debug      # Debug mode with verbose logging
+  python tools/unleashed-test.py --dry-run    # Test detection without injection
+  UNLEASHED_DELAY=5 python tools/unleashed-test.py  # 5-second countdown
 
 Security Note:
   This tool auto-approves ALL permission prompts. Use at your own risk.
         """
     )
     # Note: --version is handled early (before imports) for faster response
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug output to stderr"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1319,21 +1236,11 @@ Security Note:
         default=None,
         help="Working directory for Claude (use when poetry changes cwd)"
     )
-    parser.add_argument(
-        "--version", "-v",
-        action="store_true",
-        help="Show version and exit"
-    )
 
     args = parser.parse_args()
 
-    # Handle --version flag
-    if args.version:
-        print(f"unleashed.py {VERSION}")
-        sys.exit(0)
-
-    # Set environment variable for /unleashed-version skill
-    os.environ['UNLEASHED_VERSION'] = VERSION
+    # Set global debug flag
+    DEBUG = args.debug
 
     # Determine delay
     delay = args.delay
@@ -1347,7 +1254,7 @@ Security Note:
     try:
         unleashed.run()
     except Exception as e:
-        print(f"[UNLEASHED] Fatal error: {e}", file=sys.stderr)
+        print(f"[UNLEASHED-TEST] Fatal error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

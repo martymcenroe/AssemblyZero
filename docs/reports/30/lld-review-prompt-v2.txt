@@ -1,0 +1,117 @@
+INSTRUCTIONS: Review ONLY the LLD document provided below. Do NOT search for or review any other files. Respond with JSON only.
+
+REVIEW THE FOLLOWING LLD DOCUMENT:
+
+---
+
+# LLD: Gemini Submission Gate (#30)
+
+**Issue:** https://github.com/mcwiz/AgentOS/issues/30
+**Author:** Claude Agent
+**Date:** 2026-01-16
+
+## 1. Problem Statement
+
+### Current State
+Agents currently can call the `gemini` CLI directly, which has several failure modes:
+1. Quota exhaustion - Direct CLI fails permanently when account quota is exceeded
+2. No credential rotation - Single credential means single point of failure
+3. Silent downgrades - Agents may substitute Flash models when Pro is exhausted
+4. No audit trail - Direct CLI calls leave no record of attempts or failures
+
+### Desired State
+All Gemini API calls MUST go through gemini-retry.py, which provides:
+1. Automatic credential rotation when quota exhausted
+2. Exponential backoff for capacity issues
+3. Model validation to prevent silent downgrades
+4. Logging of all attempts for audit purposes
+
+## 2. Design Overview
+
+### Gate Purpose
+The GEMINI SUBMISSION GATE enforces that agents NEVER call the gemini CLI directly. All Gemini API interactions must use the gemini-retry.py wrapper tool.
+
+### Gate Location
+COMPACTION-SAFE RULES section (lines 7-132 of CLAUDE.md)
+
+This placement is critical because:
+- Rules in this section survive context compaction
+- The gate is a hard constraint that must persist across all sessions
+- It complements existing gates (BASH COMMAND GATE, CODING TASK GATE)
+
+### Insertion Point
+After the "COMPACTION DETECTION" subsection (line 131-132), before the --- separator at line 133.
+
+## 3. Detailed Design
+
+### Gate Content to Add
+
+GEMINI SUBMISSION GATE (MANDATORY)
+
+NEVER call gemini CLI directly. ALWAYS use gemini-retry.py.
+
+Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
+- Rotates credentials when account quota exhausted
+- Applies exponential backoff for capacity issues
+- Validates model (prevents silent downgrades to Flash)
+- Logs all attempts for audit trail
+
+Required command pattern:
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+
+If all credentials exhausted (exit code 1):
+1. STOP - Do not bypass the review
+2. Report to user: "Gemini quota exhausted across all credentials"
+3. Wait for user decision
+
+BANNED patterns:
+- gemini --prompt "..." (direct CLI)
+- gemini < prompt.txt (direct CLI with stdin)
+- gemini --model X ... (any direct CLI invocation)
+
+### Enforcement Mechanism
+
+The gate is enforced through:
+1. Documentation - Clear prohibition in COMPACTION-SAFE section
+2. Pattern recognition - Explicit list of banned patterns
+3. Visible self-check - Agents must verify before any Gemini call
+4. Compaction safety - Gate survives context limits
+
+## 4. Integration with Existing Gates
+
+The GEMINI SUBMISSION GATE is complementary to the BASH COMMAND GATE:
+- BASH COMMAND GATE: Ensures safe command patterns (no &&, |, ;)
+- GEMINI SUBMISSION GATE: Ensures Gemini calls use the retry wrapper
+
+## 5. Files Modified
+
+CLAUDE.md - Add GEMINI SUBMISSION GATE section after COMPACTION DETECTION
+
+## 6. Risks and Mitigations
+
+Risk: Gate not visible after compaction | Impact: HIGH | Mitigation: Place in COMPACTION-SAFE section
+Risk: Agents ignore gate | Impact: MEDIUM | Mitigation: Clear BANNED patterns section
+Risk: Wrong command pattern | Impact: MEDIUM | Mitigation: Include working example
+
+## 7. Success Criteria
+
+1. Gate is in COMPACTION-SAFE section of CLAUDE.md
+2. Gate clearly prohibits direct gemini CLI usage
+3. Gate provides correct gemini-retry.py command pattern
+4. Gate specifies behavior when quota exhausted
+
+---
+
+END OF LLD DOCUMENT
+
+REQUIRED RESPONSE FORMAT (JSON only):
+{
+  "verdict": "[APPROVE]" or "[BLOCK]",
+  "summary": "One sentence overall assessment",
+  "strengths": ["strength 1", "strength 2"],
+  "concerns": ["concern 1", "concern 2"],
+  "blocking_issues": ["issue that must be fixed before implementation"] or [],
+  "suggestions": ["optional improvement 1"]
+}
+
+Use [BLOCK] only if there are critical issues that would cause implementation failure.

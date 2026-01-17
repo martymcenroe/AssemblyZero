@@ -17,12 +17,14 @@ Modes:
   --quick-check  Fast check for cleanup integration (exit code 0/1)
   --merge-up     LOCKED STEPS: clean all projects, then merge to master, then sync to Projects level
   --restore      Restore from backup
+  --repair       Fix invalid JSON by deleting broken project files (inheritance kicks in)
 
 Usage:
   poetry run python tools/agentos-permissions.py --audit --project Aletheia
   poetry run python tools/agentos-permissions.py --clean --project AgentOS --dry-run
   poetry run python tools/agentos-permissions.py --quick-check --project Aletheia
   poetry run python tools/agentos-permissions.py --merge-up --all-projects
+  poetry run python tools/agentos-permissions.py --repair --all-projects
 """
 import argparse
 import json
@@ -100,6 +102,152 @@ def load_settings(path: Path) -> Optional[dict]:
     except json.JSONDecodeError as e:
         print(f"ERROR: Invalid JSON in {path}: {e}")
         return None
+
+
+def check_json_valid(path: Path) -> tuple[bool, str]:
+    """
+    Check if a settings file contains valid JSON.
+
+    Returns (is_valid, error_message) tuple.
+    """
+    if not path.exists():
+        return True, ""  # Non-existent is fine (inheritance)
+    try:
+        json.loads(path.read_text(encoding='utf-8'))
+        return True, ""
+    except json.JSONDecodeError as e:
+        return False, str(e)
+
+
+def get_settings_level(path: Path) -> str:
+    """
+    Determine what level a settings file is at.
+
+    Returns: 'master', 'projects', or 'project'
+    """
+    master_path = get_master_settings_path()
+    projects_level_path = get_projects_level_settings_path()
+
+    if path == master_path:
+        return 'master'
+    elif path == projects_level_path:
+        return 'projects'
+    else:
+        return 'project'
+
+
+def repair_settings(dry_run: bool = True) -> dict:
+    """
+    Find and repair invalid JSON settings files.
+
+    Strategy:
+    - Project-level files: DELETE them (inheritance from parent kicks in)
+    - Projects-level file: DELETE it (inheritance from master kicks in)
+    - Master file: Try to restore from backup, or warn user
+
+    This is the correct approach because:
+    1. Claude Code permissions REPLACE, not inherit when present
+    2. Deleting a broken file lets the parent level take over
+    3. Claude will just recreate permissions as needed
+
+    Returns dict with repair statistics.
+    """
+    results = {
+        'checked': [],
+        'invalid': [],
+        'repaired': [],
+        'failed': [],
+        'dry_run': dry_run
+    }
+
+    # Collect all settings files to check
+    files_to_check = []
+
+    # Master
+    master_path = get_master_settings_path()
+    if master_path.exists():
+        files_to_check.append(('master', master_path))
+
+    # Projects level
+    projects_level_path = get_projects_level_settings_path()
+    if projects_level_path.exists():
+        files_to_check.append(('projects', projects_level_path))
+
+    # All project-level files
+    for project in find_all_projects():
+        project_path = get_project_settings_path(project)
+        if project_path.exists():
+            files_to_check.append((f'project:{project}', project_path))
+
+    print(f"\n{'='*60}")
+    print("Settings File Repair")
+    print(f"{'='*60}")
+    print(f"Checking {len(files_to_check)} settings files...\n")
+
+    for level, path in files_to_check:
+        results['checked'].append(str(path))
+        is_valid, error = check_json_valid(path)
+
+        if is_valid:
+            print(f"  OK: {level}")
+            continue
+
+        # Invalid JSON found
+        results['invalid'].append((str(path), error))
+        print(f"  INVALID: {level}")
+        print(f"    Error: {error[:80]}...")
+
+        # Determine repair strategy based on level
+        if level == 'master':
+            # Master is critical - try backup first
+            backup_path = path.with_suffix('.local.json.bak')
+            if backup_path.exists():
+                # Check if backup is valid
+                backup_valid, backup_error = check_json_valid(backup_path)
+                if backup_valid:
+                    if dry_run:
+                        print(f"    Would restore from backup: {backup_path}")
+                    else:
+                        shutil.copy(backup_path, path)
+                        print(f"    Restored from backup: {backup_path}")
+                        results['repaired'].append(str(path))
+                else:
+                    print(f"    Backup also invalid! Manual intervention required.")
+                    print(f"    File: {path}")
+                    results['failed'].append(str(path))
+            else:
+                print(f"    No backup available! Manual intervention required.")
+                print(f"    File: {path}")
+                results['failed'].append(str(path))
+        else:
+            # Projects-level or project-level: just delete it
+            # Parent level will be inherited
+            parent = "master" if level == 'projects' else "Projects-level or master"
+            if dry_run:
+                print(f"    Would DELETE (will inherit from {parent})")
+            else:
+                path.unlink()
+                print(f"    DELETED (now inherits from {parent})")
+                results['repaired'].append(str(path))
+
+    # Summary
+    print(f"\n{'='*60}")
+    print("Summary")
+    print(f"{'='*60}")
+    print(f"Checked: {len(results['checked'])} files")
+    print(f"Invalid: {len(results['invalid'])} files")
+
+    if dry_run:
+        print(f"Would repair: {len([p for l, p in results['invalid'] if get_settings_level(Path(p)) != 'master' or Path(p).with_suffix('.local.json.bak').exists()])} files")
+        print("\nRun without --dry-run to apply repairs.")
+    else:
+        print(f"Repaired: {len(results['repaired'])} files")
+        if results['failed']:
+            print(f"Failed (manual fix needed): {len(results['failed'])} files")
+            for path in results['failed']:
+                print(f"  - {path}")
+
+    return results
 
 
 def validate_json_content(content: str) -> tuple[bool, str]:
@@ -721,6 +869,8 @@ def main():
                            help="Collect unique reusable patterns from projects into master")
     mode_group.add_argument("--restore", action="store_true",
                            help="Restore from backup")
+    mode_group.add_argument("--repair", action="store_true",
+                           help="Fix invalid JSON by deleting broken files (inheritance kicks in)")
 
     parser.add_argument("--project", "-p",
                        help="Project name (e.g., Aletheia)")
@@ -791,6 +941,11 @@ def main():
             sys.exit(1)
         shutil.copy(backup_path, settings_path)
         print(f"Restored {settings_path} from backup")
+
+    elif args.repair:
+        result = repair_settings(dry_run=args.dry_run)
+        if result['failed']:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

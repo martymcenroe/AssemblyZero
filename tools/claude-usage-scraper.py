@@ -110,14 +110,16 @@ def parse_usage_data(raw_output: str) -> dict:
         result["weekly_all"]["percent_used"] = int(weekly_all_match.group(1))
         result["weekly_all"]["resets_at"] = weekly_all_match.group(2).strip()
 
-    # Weekly Sonnet only pattern
+    # Weekly Sonnet only pattern - captures percentage and optional reset time
     weekly_sonnet_match = re.search(
-        r'Current\s+week\s*\(Sonnet\s+only\)[^\d]*(\d+)%\s*used',
+        r'Current\s+week\s*\(Sonnet\s+only\)[^\d]*(\d+)%\s*used(?:.*?Resets?\s+([^\n\r│]+))?',
         text, re.IGNORECASE | re.DOTALL
     )
     if weekly_sonnet_match:
         result["weekly_sonnet"]["percent_used"] = int(weekly_sonnet_match.group(1))
-        # Sonnet may not have a reset time shown if 0%
+        # Sonnet reset time may not be shown if 0% - capture if present
+        if weekly_sonnet_match.group(2):
+            result["weekly_sonnet"]["resets_at"] = weekly_sonnet_match.group(2).strip()
 
     return result
 
@@ -234,30 +236,18 @@ def scrape_usage(timeout: int = 30) -> dict:
 
 
 def append_to_log(log_path: Path, data: dict):
-    """Append a single-line log entry."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """Append a NDJSON (newline-delimited JSON) log entry.
 
-    if data["status"] == "success":
-        session = data["session"]["percent_used"] or "?"
-        session_reset = data["session"]["resets_at"] or "?"
-        weekly = data["weekly_all"]["percent_used"] or "?"
-        weekly_reset = data["weekly_all"]["resets_at"] or "?"
-        sonnet = data["weekly_sonnet"]["percent_used"] or "?"
-        sonnet_reset = data["weekly_sonnet"]["resets_at"] or "?"
-
-        line = (
-            f"{timestamp} | "
-            f"session:{session}% resets:{session_reset} | "
-            f"weekly:{weekly}% resets:{weekly_reset} | "
-            f"sonnet:{sonnet}% resets:{sonnet_reset}"
-        )
-    else:
-        error = data.get("error", "unknown error")
-        line = f"{timestamp} | ERROR: {error}"
+    Each line is a complete JSON object for easy parsing by log aggregators
+    (Splunk, Datadog, etc.) and standard tools like jq.
+    """
+    # Ensure timestamp is present
+    if "timestamp" not in data:
+        data["timestamp"] = datetime.now(timezone.utc).isoformat()
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+        f.write(json.dumps(data) + "\n")
 
 
 def main():
@@ -274,7 +264,7 @@ Examples:
     parser.add_argument(
         "--log", "-l",
         default=None,
-        help="Path to append human-readable log entries (optional)"
+        help="Path to append NDJSON log entries (one JSON object per line)"
     )
     parser.add_argument(
         "--timeout", "-t",

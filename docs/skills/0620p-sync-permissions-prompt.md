@@ -13,6 +13,7 @@
 /sync-permissions --clean              # Clean (dry-run first, then confirm)
 /sync-permissions --audit PROJECT      # Audit specific project
 /sync-permissions --merge-up           # Merge patterns to master
+/sync-permissions --repair             # Fix invalid JSON (deletes broken files)
 ```
 
 ---
@@ -136,12 +137,32 @@ Backups created at *.local.json.bak
 
 ## Troubleshooting
 
-### "Settings Error" on Claude Startup
+### "Found 1 invalid settings file" (Claude Code /doctor)
 
-If you see a settings error when starting Claude:
-1. The settings file is corrupted
-2. Use `/sync-permissions --clean` to let Claude diagnose and fix
-3. Or use CLI directly: see [0620c-sync-permissions-cli.md](0620c-sync-permissions-cli.md)
+If you see this error on Claude startup:
+```
+Found 1 invalid settings file · /doctor for details
+```
+
+**Use --repair:**
+```
+/sync-permissions --repair
+```
+
+Claude will:
+1. Find the broken settings file(s)
+2. Delete project-level files (inheritance kicks in from parent)
+3. For master-level: restore from backup if available
+
+**Why this works:** Project-level settings files are expendable. Deleting them lets the parent level take over. Claude recreates permissions as you work.
+
+### "Invalid JSON" During --clean or --audit
+
+If --clean or --audit fails with a JSON error, run --repair first:
+```
+/sync-permissions --repair
+/sync-permissions --clean
+```
 
 ### Claude Can't Find Project
 

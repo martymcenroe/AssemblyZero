@@ -1,0 +1,169 @@
+You are a technical design reviewer. Review the following Low-Level Design (LLD) document and provide your assessment.
+
+## Review Criteria
+
+1. **Completeness**: Does the LLD cover all necessary aspects?
+2. **Clarity**: Is the design clear and unambiguous?
+3. **Correctness**: Are there any logical errors or inconsistencies?
+4. **Integration**: Does the design integrate well with existing systems?
+5. **Risk Assessment**: Are risks properly identified and mitigated?
+
+## Response Format
+
+Respond with a JSON object in this format:
+```json
+{
+  "verdict": "[APPROVE]" or "[BLOCK]",
+  "summary": "One sentence overall assessment",
+  "strengths": ["strength 1", "strength 2"],
+  "concerns": ["concern 1", "concern 2"],
+  "blocking_issues": ["issue that must be fixed before implementation"],
+  "suggestions": ["optional improvement 1"]
+}
+```
+
+Use [BLOCK] only if there are critical issues that would cause implementation failure.
+
+## LLD Document to Review
+
+# LLD: Gemini Submission Gate (#30)
+
+**Issue:** https://github.com/mcwiz/AgentOS/issues/30
+**Author:** Claude Agent
+**Date:** 2026-01-16
+**Status:** Draft - Pending Gemini Review
+
+## 1. Problem Statement
+
+### Current State
+Agents currently can call the `gemini` CLI directly, which has several failure modes:
+1. **Quota exhaustion** - Direct CLI fails permanently when account quota is exceeded
+2. **No credential rotation** - Single credential means single point of failure
+3. **Silent downgrades** - Agents may substitute Flash models when Pro is exhausted
+4. **No audit trail** - Direct CLI calls leave no record of attempts or failures
+
+### Desired State
+All Gemini API calls MUST go through `gemini-retry.py`, which provides:
+1. Automatic credential rotation when quota exhausted
+2. Exponential backoff for capacity issues
+3. Model validation to prevent silent downgrades
+4. Logging of all attempts for audit purposes
+
+## 2. Design Overview
+
+### Gate Purpose
+The GEMINI SUBMISSION GATE enforces that agents NEVER call the `gemini` CLI directly. All Gemini API interactions must use the `gemini-retry.py` wrapper tool.
+
+### Gate Location
+**COMPACTION-SAFE RULES section** (lines 7-132 of CLAUDE.md)
+
+This placement is critical because:
+- Rules in this section survive context compaction
+- The gate is a hard constraint that must persist across all sessions
+- It complements existing gates (BASH COMMAND GATE, CODING TASK GATE)
+
+### Insertion Point
+After the "COMPACTION DETECTION" subsection (line 131-132), before the `---` separator at line 133.
+
+## 3. Detailed Design
+
+### Gate Structure
+
+```markdown
+### GEMINI SUBMISSION GATE (MANDATORY)
+
+**NEVER call `gemini` CLI directly. ALWAYS use `gemini-retry.py`.**
+
+Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
+- Rotates credentials when account quota exhausted
+- Applies exponential backoff for capacity issues
+- Validates model (prevents silent downgrades to Flash)
+- Logs all attempts for audit trail
+
+**Required command pattern:**
+```bash
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+```
+
+**If all credentials exhausted (exit code 1):**
+1. STOP - Do not bypass the review
+2. Report to user: "Gemini quota exhausted across all credentials"
+3. Wait for user decision
+
+**BANNED patterns:**
+- `gemini --prompt "..."` (direct CLI)
+- `gemini < prompt.txt` (direct CLI with stdin)
+- `gemini --model X ...` (any direct CLI invocation)
+```
+
+### Enforcement Mechanism
+
+The gate is enforced through:
+1. **Documentation** - Clear prohibition in COMPACTION-SAFE section
+2. **Pattern recognition** - Explicit list of banned patterns
+3. **Visible self-check** - Agents must verify before any Gemini call
+4. **Compaction safety** - Gate survives context limits
+
+### Exit Conditions
+
+The gate blocks Gemini operations when:
+- All credentials are exhausted (exit code 1 from gemini-retry.py)
+- Model validation fails (wrong model returned)
+
+The gate passes when:
+- gemini-retry.py completes successfully with correct model
+
+## 4. Integration with Existing Gates
+
+### Relationship to BASH COMMAND GATE
+The GEMINI SUBMISSION GATE is complementary to the BASH COMMAND GATE:
+- BASH COMMAND GATE: Ensures safe command patterns (no &&, |, ;)
+- GEMINI SUBMISSION GATE: Ensures Gemini calls use the retry wrapper
+
+Agents should execute BOTH gates when making a Gemini API call:
+1. First, verify the command uses gemini-retry.py (GEMINI SUBMISSION GATE)
+2. Then, verify the command has no banned patterns (BASH COMMAND GATE)
+
+### Relationship to Gemini Review Protocol
+The existing "Gemini Review Protocol" section (lines 512-572) documents:
+- Which models to use
+- Quota exhaustion handling
+- What counts as "reviewed"
+
+The GEMINI SUBMISSION GATE adds:
+- **Enforcement** of using the retry tool
+- **Placement** in compaction-safe section
+- **Gate pattern** matching other workflow gates
+
+## 5. Files Modified
+
+| File | Change |
+|------|--------|
+| `CLAUDE.md` | Add GEMINI SUBMISSION GATE section after COMPACTION DETECTION |
+
+## 6. Testing Strategy
+
+### Manual Verification
+1. Read back CLAUDE.md after edit
+2. Verify gate is in COMPACTION-SAFE section (lines 7-~145)
+3. Verify banned patterns are clearly listed
+4. Verify required command pattern is correct
+
+### Integration Verification
+1. Ensure gemini-retry.py exists and is functional
+2. Verify the command pattern in the gate actually works
+
+## 7. Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Gate not visible after compaction | HIGH | Place in COMPACTION-SAFE section |
+| Agents ignore gate | MEDIUM | Clear BANNED patterns section |
+| Wrong command pattern | MEDIUM | Include working example |
+
+## 8. Success Criteria
+
+1. Gate is in COMPACTION-SAFE section of CLAUDE.md
+2. Gate clearly prohibits direct gemini CLI usage
+3. Gate provides correct gemini-retry.py command pattern
+4. Gate specifies behavior when quota exhausted

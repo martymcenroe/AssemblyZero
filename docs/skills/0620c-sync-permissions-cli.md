@@ -41,7 +41,7 @@ poetry run python tools/agentos-permissions.py --clean --all-projects
 
 ```
 usage: agentos-permissions.py [-h] (--audit | --clean | --quick-check |
-                              --merge-up | --restore) [--project PROJECT]
+                              --merge-up | --restore | --repair) [--project PROJECT]
                               [--all-projects] [--dry-run]
 
 options:
@@ -51,6 +51,7 @@ options:
   --quick-check         Fast check for cleanup integration
   --merge-up            Collect unique patterns from projects into master
   --restore             Restore from backup
+  --repair              Fix invalid JSON by deleting broken files (inheritance kicks in)
   --project, -p PROJECT Project name (e.g., Aletheia)
   --all-projects        Apply to all projects
   --dry-run, -n         Show what would be done without modifying files
@@ -127,6 +128,42 @@ Restores from backup created by --clean or --merge-up.
 ```bash
 poetry run python tools/agentos-permissions.py --restore --project Aletheia
 ```
+
+### --repair
+
+**Fixes invalid JSON settings files.** Use this when Claude Code shows:
+```
+Found 1 invalid settings file · /doctor for details
+```
+
+```bash
+# Dry-run first (see what would be fixed)
+poetry run python tools/agentos-permissions.py --repair --dry-run
+
+# Actually repair
+poetry run python tools/agentos-permissions.py --repair
+```
+
+**How it works:**
+
+The tool leverages Claude Code's permission inheritance hierarchy:
+```
+~/.claude/settings.local.json          ← Master (protected)
+~/Projects/.claude/settings.local.json ← Projects level (can delete)
+~/Projects/{Project}/.claude/...       ← Project level (can delete)
+```
+
+| Level | Repair Strategy |
+|-------|-----------------|
+| Project-level | DELETE file → inherits from Projects-level or master |
+| Projects-level | DELETE file → inherits from master |
+| Master | RESTORE from backup (if valid) or manual fix required |
+
+**Why delete instead of repair?**
+- JSON repair is fragile and error-prone
+- Deleting lets the parent level take over immediately
+- Claude will recreate permissions as you work
+- No data loss that matters (it's just accumulated junk anyway)
 
 ---
 
@@ -253,13 +290,34 @@ The slash command always:
 
 ## Troubleshooting
 
-### "Invalid JSON" Error
+### "Found 1 invalid settings file" (Claude Code /doctor)
 
-If you see a JSON parsing error:
-1. The settings file is corrupted
-2. Check for giant permissions (Gemini prompts saved as permissions)
-3. Manually inspect the file for multi-line strings or special characters
-4. Use the enhanced tool - it now catches these automatically
+This means a settings.local.json file has corrupted JSON. **Use --repair:**
+
+```bash
+# See which file is broken
+poetry run python tools/agentos-permissions.py --repair --dry-run
+
+# Fix it (deletes broken file, inheritance kicks in)
+poetry run python tools/agentos-permissions.py --repair
+```
+
+**Common causes:**
+- Claude saved a giant Gemini prompt as a permission
+- Multi-line strings or special characters in permissions
+- Truncated write during a crash
+
+**Why --repair works:** Project-level files are expendable. Deleting them lets the parent level (Projects or master) take over. Claude will recreate permissions as needed.
+
+### "Invalid JSON" Error (during --audit or --clean)
+
+If --audit or --clean fails with invalid JSON, use --repair first:
+
+```bash
+poetry run python tools/agentos-permissions.py --repair
+# Then retry your original command
+poetry run python tools/agentos-permissions.py --clean --project Aletheia
+```
 
 ### Restore from Backup
 
