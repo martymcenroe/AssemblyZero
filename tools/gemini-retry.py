@@ -236,13 +236,14 @@ class RetryLogger:
 # Gemini Invocation
 # =============================================================================
 
-def invoke_gemini(prompt: str, model: str) -> GeminiResult:
+def invoke_gemini(prompt: str, model: str, no_tools: bool = False) -> GeminiResult:
     """
     Invoke Gemini CLI with the given prompt.
 
     Args:
         prompt: The prompt to send
         model: The model to use
+        no_tools: If True, disable agentic tools (file search, code execution)
 
     Returns:
         GeminiResult with success/failure info
@@ -265,6 +266,10 @@ def invoke_gemini(prompt: str, model: str) -> GeminiResult:
         "--model", model,
         "--output-format", "json"
     ]
+
+    # Disable agentic tools if requested (for reviews)
+    if no_tools:
+        cmd.extend(["--sandbox", "false"])
 
     try:
         result = subprocess.run(
@@ -498,7 +503,7 @@ def try_credential_rotation(prompt: str, model: str, logger: RetryLogger) -> tup
 # Main Retry Loop
 # =============================================================================
 
-def retry_gemini(prompt: str, model: str, logger: RetryLogger) -> tuple[bool, str]:
+def retry_gemini(prompt: str, model: str, logger: RetryLogger, no_tools: bool = False) -> tuple[bool, str]:
     """
     Retry Gemini with exponential backoff.
 
@@ -506,17 +511,18 @@ def retry_gemini(prompt: str, model: str, logger: RetryLogger) -> tuple[bool, st
         prompt: The prompt to send
         model: The model to use
         logger: Logger for events
+        no_tools: If True, disable agentic tools (file search, code execution)
 
     Returns:
         (success, response_or_error)
     """
-    logger.log("START", model=model, max_retries=MAX_RETRIES)
+    logger.log("START", model=model, max_retries=MAX_RETRIES, no_tools=no_tools)
 
     for attempt in range(1, MAX_RETRIES + 1):
         logger.log("ATTEMPT", attempt=attempt, model=model)
         print(f"[GEMINI-RETRY] Attempt {attempt}/{MAX_RETRIES}...", file=sys.stderr)
 
-        result = invoke_gemini(prompt, model)
+        result = invoke_gemini(prompt, model, no_tools=no_tools)
 
         if result.success:
             # Validate model wasn't downgraded
@@ -643,6 +649,9 @@ Examples:
   # From file
   python gemini-retry.py --prompt-file review-prompt.txt
 
+  # For reviews: disable agentic tools (prevents file searching)
+  python gemini-retry.py --prompt-file review.txt --no-tools
+
   # With faster delays for testing
   GEMINI_RETRY_BASE_DELAY=5 python gemini-retry.py --prompt "Hello"
 """
@@ -664,6 +673,12 @@ Examples:
         help=f"Model to use (default: {DEFAULT_MODEL})"
     )
 
+    parser.add_argument(
+        "--no-tools",
+        action="store_true",
+        help="Disable Gemini's agentic tools (file search, code execution). Use for reviews."
+    )
+
     args = parser.parse_args()
 
     # Get prompt
@@ -681,7 +696,7 @@ Examples:
     logger = RetryLogger(LOG_DIR)
 
     try:
-        success, result = retry_gemini(prompt, args.model, logger)
+        success, result = retry_gemini(prompt, args.model, logger, no_tools=args.no_tools)
 
         if success:
             print(result)  # Response to stdout
