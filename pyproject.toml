@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "AgentOS configuration and tooling"
 authors = [{name = "Marty McEnroe"}]
 readme = "README.md"
+license = "MIT"
 requires-python = "^3.10"
 dependencies = [
     "pywinpty (>=3.0.2,<4.0.0)",
