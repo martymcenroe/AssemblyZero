@@ -42,7 +42,7 @@ grep -r "feature_x" src/  # If function exists, verify
 **Red Flags:**
 - LLD exists AND implementation code exists → Likely complete
 - Tests exist and pass → Likely complete
-- Reports exist in `docs/reports/{ID}/` → Definitely complete
+- Reports exist in `docs/reports/done/{ID}-*-report.md` → Definitely complete
 
 ### Step 3: Check for Deprecated Issues
 

@@ -25,11 +25,9 @@ gh issue list --repo {{GITHUB_REPO}} --state closed --limit 100 --json number,ti
 ```bash
 # For each closed issue, check if reports exist
 for issue in $(gh issue list --repo {{GITHUB_REPO}} --state closed --limit 50 --json number -q '.[].number'); do
-  if [ ! -d "docs/reports/$issue" ]; then
-    echo "MISSING: #$issue - No reports directory"
-  elif [ ! -f "docs/reports/$issue/implementation-report.md" ]; then
+  if [ ! -f "docs/reports/done/${issue}-implementation-report.md" ]; then
     echo "MISSING: #$issue - No implementation report"
-  elif [ ! -f "docs/reports/$issue/test-report.md" ]; then
+  elif [ ! -f "docs/reports/done/${issue}-test-report.md" ]; then
     echo "MISSING: #$issue - No test report"
   else
     echo "OK: #$issue"
@@ -80,8 +78,8 @@ gh issue view {ID} --repo {{GITHUB_REPO}} --json labels,title,body
 | #121 | Feature X | Both |
 
 ### Actions Taken
-- Created docs/reports/121/implementation-report.md
-- Created docs/reports/121/test-report.md
+- Created docs/reports/active/121-implementation-report.md
+- Created docs/reports/active/121-test-report.md
 ```
 
 ---

@@ -25,7 +25,7 @@ Verify that implemented code matches the LLD specification, or that deviations a
 LLD="docs/lld/done/1121-feature-name.md"
 IMPL="src/feature.py"
 TESTS="tests/test_feature.py"
-REPORT="docs/reports/121/implementation-report.md"
+REPORT="docs/reports/done/121-implementation-report.md"
 ```
 
 ### Step 2: Extract LLD Promises

@@ -19,19 +19,19 @@ Ensure every closed issue has proper implementation and test reports. Reports ar
 
 | Artifact | Required For | Location |
 |----------|--------------|----------|
-| Implementation Report | All closed issues with code changes | `docs/reports/{issue-id}/implementation-report.md` |
-| Test Report | All closed issues with code changes | `docs/reports/{issue-id}/test-report.md` |
-| LLD | Features and non-trivial bugs | `docs/reports/{issue-id}/lld-*.md` |
+| Implementation Report | All closed issues with code changes | `docs/reports/active/{issue-id}-implementation-report.md` → `docs/reports/done/` |
+| Test Report | All closed issues with code changes | `docs/reports/active/{issue-id}-test-report.md` → `docs/reports/done/` |
+| LLD | Features and non-trivial bugs | `docs/LLDs/active/{issue-id}-*.md` or `docs/LLDs/done/{issue-id}-*.md` |
 
 **Suggested implementation:**
 ```bash
 # Get closed issues
 gh issue list --state closed --json number,closedAt --jq '.[].number'
 
-# Check for report directory
+# Check for report files in done directory
 for issue in $issues; do
-  if [ ! -d "docs/reports/$issue" ]; then
-    echo "MISSING: docs/reports/$issue/"
+  if [ ! -f "docs/reports/done/${issue}-implementation-report.md" ]; then
+    echo "MISSING: docs/reports/done/${issue}-implementation-report.md"
   fi
 done
 ```

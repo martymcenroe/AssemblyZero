@@ -36,10 +36,9 @@ if [ -z "$issue_id" ]; then
     exit 0
 fi
 
-# Check if reports exist
-report_dir="docs/reports/$issue_id"
-impl_report="$report_dir/implementation-report.md"
-test_report="$report_dir/test-report.md"
+# Check if reports exist (active directory during development)
+impl_report="docs/reports/active/${issue_id}-implementation-report.md"
+test_report="docs/reports/active/${issue_id}-test-report.md"
 
 missing=""
 
@@ -61,8 +60,8 @@ if [ -n "$missing" ]; then
     echo -e "$missing" >&2
     echo "" >&2
     echo "Create reports first:" >&2
-    echo "  docs/reports/$issue_id/implementation-report.md" >&2
-    echo "  docs/reports/$issue_id/test-report.md" >&2
+    echo "  docs/reports/active/${issue_id}-implementation-report.md" >&2
+    echo "  docs/reports/active/${issue_id}-test-report.md" >&2
     echo "" >&2
     echo "See CLAUDE.md § 'PRE-COMMIT GATE' for requirements." >&2
     echo "" >&2
