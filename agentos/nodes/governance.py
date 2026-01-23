@@ -46,8 +46,13 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
         # Load system instruction
         system_instruction = _load_system_instruction()
 
-        # Get LLD content from state
-        lld_content = state.get("lld_content", "")
+        # Get LLD content - check for Designer Node flow first (Issue #56)
+        # If lld_draft_path exists, read from disk to capture human edits
+        lld_draft_path = state.get("lld_draft_path", "")
+        if lld_draft_path and Path(lld_draft_path).exists():
+            lld_content = Path(lld_draft_path).read_text(encoding="utf-8")
+        else:
+            lld_content = state.get("lld_content", "")
         issue_id = state.get("issue_id", 0)
 
         if not lld_content:

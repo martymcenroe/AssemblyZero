@@ -19,6 +19,8 @@ class AgentState(TypedDict):
         worktree_path: Path to the git worktree for this issue.
         lld_content: Full content of the Low-Level Design document.
         lld_status: Current approval status of the LLD.
+        lld_draft_path: Path to LLD draft file on disk (Designer Node output).
+        design_status: Designer Node outcome status.
         gemini_critique: Feedback from Gemini verification layer.
         iteration_count: Safety counter for loop prevention.
     """
@@ -33,6 +35,10 @@ class AgentState(TypedDict):
     # LLD governance
     lld_content: str
     lld_status: Literal["PENDING", "APPROVED", "BLOCKED"]
+
+    # Designer Node output (Issue #56)
+    lld_draft_path: str
+    design_status: Literal["PENDING", "DRAFTED", "FAILED"]
 
     # Gemini feedback
     gemini_critique: str

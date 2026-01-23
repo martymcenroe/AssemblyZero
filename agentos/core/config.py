@@ -52,3 +52,10 @@ DEFAULT_AUDIT_LOG_PATH = Path("logs/governance_history.jsonl")
 # =============================================================================
 
 LLD_REVIEW_PROMPT_PATH = Path("docs/skills/0702c-LLD-Review-Prompt.md")
+LLD_GENERATOR_PROMPT_PATH = Path("docs/skills/0705-lld-generator.md")
+
+# =============================================================================
+# Output Paths
+# =============================================================================
+
+LLD_DRAFTS_DIR = Path("docs/llds/drafts")
