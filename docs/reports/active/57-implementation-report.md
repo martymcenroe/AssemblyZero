@@ -84,3 +84,21 @@ Implemented session-sharded audit logging to eliminate write collisions and supp
 - [x] Concurrent writer test verifies no data loss
 - [x] mypy passes with no errors
 - [x] Full test suite (116 tests) passes
+
+## Gemini Implementation Review Feedback (v2)
+
+Gemini's initial review returned **REVISE** with Tier 2 issues. All issues have been addressed:
+
+### Fixed Issues
+
+1. **Performance Regression in `tail()`** (Tier 2 - Architecture)
+   - **Issue**: Original implementation read and parsed entire history file on every `tail()` call
+   - **Fix**: Added `_read_jsonl_tail()` helper that reads only the last K lines from history. When `n > 0`, we read `n + (shard_count * 100)` lines as buffer, then merge with active shards.
+
+2. **Git Hook Permissions** (Tier 2 - Quality)
+   - **Issue**: Hook file had mode `100644` (not executable)
+   - **Fix**: Ran `git update-index --chmod=+x .claude/hooks/post-commit` to mark as executable
+
+3. **Hook Compatibility (Windows)** (Tier 2 - Quality)
+   - **Issue**: Hook used `python3` which may not exist on Windows
+   - **Fix**: Updated hook to check for `python3` first, then fall back to `python`

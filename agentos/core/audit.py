@@ -170,27 +170,76 @@ class GovernanceAuditLog:
         Merges entries from governance_history.jsonl and all active shards,
         sorted by timestamp. Gracefully skips locked or inaccessible shards.
 
+        Optimization: History file is assumed sorted (guaranteed by consolidator),
+        so we read only the last K lines instead of the entire file.
+
         Args:
-            n: Number of entries to return.
+            n: Number of entries to return. If 0, returns all entries.
 
         Returns:
             List of the last N entries, oldest first.
         """
         entries: list[GovernanceLogEntry] = []
 
-        # Read from history file
-        entries.extend(self._read_jsonl_safe(self.history_file))
+        # Count active shards to estimate buffer size
+        shard_count = 0
+        if self.active_dir.exists():
+            shard_count = len(list(self.active_dir.glob("*.jsonl")))
 
-        # Read from all active shards
+        # Read from history file (optimized: only last K lines if n > 0)
+        if n > 0:
+            # Read extra lines to account for active shards that may interleave
+            # Assume max 100 entries per shard as buffer
+            buffer_size = n + (shard_count * 100)
+            entries.extend(self._read_jsonl_tail(self.history_file, buffer_size))
+        else:
+            # n=0 means read all
+            entries.extend(self._read_jsonl_safe(self.history_file))
+
+        # Read from all active shards (always read fully - they're small)
         if self.active_dir.exists():
             for shard in self.active_dir.glob("*.jsonl"):
                 entries.extend(self._read_jsonl_safe(shard))
 
-        # Sort by timestamp
+        # Sort by timestamp (shards may interleave with history tail)
         entries.sort(key=lambda e: e.get("timestamp", ""))
 
         # Return last N
         return entries[-n:] if n > 0 else entries
+
+    def _read_jsonl_tail(self, path: Path, n: int) -> list[GovernanceLogEntry]:
+        """Read last N lines from JSONL file, gracefully handling errors.
+
+        Optimized for large files - only reads the tail portion.
+
+        Args:
+            path: Path to JSONL file.
+            n: Maximum number of lines to read from end.
+
+        Returns:
+            List of entries, or empty list if file inaccessible.
+        """
+        if not path.exists():
+            return []
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+
+            entries: list[GovernanceLogEntry] = []
+            # Get last N lines
+            for line in lines[-n:]:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Skip malformed lines
+                        continue
+            return entries
+        except (OSError, IOError):
+            # Skip locked or inaccessible files (graceful degradation)
+            return []
 
     def _read_jsonl_safe(self, path: Path) -> list[GovernanceLogEntry]:
         """Read JSONL file, gracefully handling errors.

@@ -19,5 +19,16 @@ if [ ! -f "$CONSOLIDATE_SCRIPT" ]; then
     exit 0
 fi
 
+# Find Python executable (python3 on Unix, python on Windows)
+PYTHON_CMD=""
+if command -v python3 &>/dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &>/dev/null; then
+    PYTHON_CMD="python"
+else
+    # No Python found, exit silently
+    exit 0
+fi
+
 # Run consolidation (fail silently)
-python3 "$CONSOLIDATE_SCRIPT" 2>/dev/null || true
+"$PYTHON_CMD" "$CONSOLIDATE_SCRIPT" 2>/dev/null || true
