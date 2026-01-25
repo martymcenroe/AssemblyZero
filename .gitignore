@@ -13,7 +13,11 @@ tmpclaude-*
 # Gemini retry logs (generated at runtime)
 # Keep the directory structure but ignore log files
 logs/*.log
-logs/*.jsonl
+
+# Session shards (ephemeral, consolidated on commit)
+# Issue #57: Distributed Session-Sharded Logging
+logs/active/
+!logs/active/.gitkeep
 
 # Python cache
 __pycache__/

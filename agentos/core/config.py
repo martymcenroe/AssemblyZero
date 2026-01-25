@@ -42,10 +42,14 @@ BACKOFF_BASE_SECONDS = 2.0
 BACKOFF_MAX_SECONDS = 60.0
 
 # =============================================================================
-# Logging Paths
+# Logging Paths (Issue #57: Session-Sharded Logging)
 # =============================================================================
 
+# Permanent audit trail (consolidated from shards)
 DEFAULT_AUDIT_LOG_PATH = Path("logs/governance_history.jsonl")
+
+# Active session shards directory (gitignored, ephemeral)
+LOGS_ACTIVE_DIR = Path("logs/active")
 
 # =============================================================================
 # Prompt Paths

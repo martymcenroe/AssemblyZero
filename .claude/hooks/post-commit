@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Post-commit hook to consolidate governance audit log shards.
+# Issue #57: Distributed Session-Sharded Logging Architecture
+#
+# This hook merges all session shards from logs/active/ into
+# logs/governance_history.jsonl using atomic write pattern.
+#
+# The script fails silently (exit 0) to never block commits.
+
+# Get repository root
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$REPO_ROOT" ]; then
+    exit 0
+fi
+
+# Check if consolidation script exists
+CONSOLIDATE_SCRIPT="$REPO_ROOT/tools/consolidate_logs.py"
+if [ ! -f "$CONSOLIDATE_SCRIPT" ]; then
+    exit 0
+fi
+
+# Find Python executable (python3 on Unix, python on Windows)
+PYTHON_CMD=""
+if command -v python3 &>/dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &>/dev/null; then
+    PYTHON_CMD="python"
+else
+    # No Python found, exit silently
+    exit 0
+fi
+
+# Run consolidation (fail silently)
+"$PYTHON_CMD" "$CONSOLIDATE_SCRIPT" 2>/dev/null || true

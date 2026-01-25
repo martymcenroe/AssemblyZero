@@ -1,0 +1,4 @@
+# This directory holds active session shards for governance audit logging.
+# Each agent session writes to a unique shard: {timestamp}_{session_id}.jsonl
+# Shards are consolidated into governance_history.jsonl via post-commit hook.
+# Issue #57: Distributed Session-Sharded Logging Architecture

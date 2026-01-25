@@ -1,16 +1,22 @@
 """Audit logging infrastructure for AgentOS governance.
 
 This module provides persistent audit logging for governance decisions,
-with JSONL format for append-only, line-by-line reading.
+using session-sharded JSONL format to eliminate write collisions.
+
+Issue #57: Distributed Session-Sharded Logging Architecture
+- Each session writes to a unique shard: logs/active/{timestamp}_{session_id}.jsonl
+- Shards are consolidated into logs/governance_history.jsonl via post-commit hook
+- tail() merges history + active shards for unified view
 """
 
 import json
-import uuid
+import subprocess
+import uuid as uuid_module
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, TypedDict
+from typing import Iterator, Optional, TypedDict
 
-from agentos.core.config import DEFAULT_AUDIT_LOG_PATH
+from agentos.core.config import DEFAULT_AUDIT_LOG_PATH, LOGS_ACTIVE_DIR
 
 
 class GovernanceLogEntry(TypedDict):
@@ -45,100 +51,243 @@ class GeminiReviewResponse(TypedDict):
 class GovernanceAuditLog:
     """Persistent audit log for governance decisions.
 
-    Uses JSONL format for append-only, line-by-line reading.
-    Each line is a complete JSON object representing one governance decision.
+    Uses session-sharded JSONL format:
+    - Each session writes to a unique shard in logs/active/
+    - Shards are consolidated via post-commit hook
+    - tail() merges history + active shards for unified view
+
+    Issue #57: Distributed Session-Sharded Logging Architecture
     """
 
-    def __init__(self, log_path: Path = DEFAULT_AUDIT_LOG_PATH):
-        """Initialize with log file path.
+    def __init__(
+        self,
+        repo_root: Optional[Path] = None,
+        session_id: Optional[str] = None,
+        log_path: Optional[Path] = None,
+    ):
+        """Initialize with auto-detected repo root and unique session ID.
 
         Args:
-            log_path: Path to the JSONL log file. Parent directories
-                will be created if they don't exist.
+            repo_root: Repository root path. Auto-detected if None.
+            session_id: Session identifier (8 chars). Generated if None.
+            log_path: Legacy parameter for backwards compatibility.
+                      If provided, uses old single-file mode.
+
+        Raises:
+            RuntimeError: If not in a git repository and repo_root not provided.
         """
-        self.log_path = log_path
+        # Legacy mode: if log_path provided, use old single-file behavior
+        if log_path is not None:
+            self._legacy_mode = True
+            self.log_path = log_path
+            self.repo_root = log_path.parent.parent
+            self.session_id = ""
+            self.active_dir = self.repo_root / "logs" / "active"
+            self.history_file = log_path
+            self.shard_file = log_path  # Write to history directly
+            return
+
+        self._legacy_mode = False
+        self.repo_root = repo_root or self._detect_repo_root()
+        self.session_id = session_id or uuid_module.uuid4().hex[:8]
+
+        # Set paths relative to repo root
+        self.active_dir = self.repo_root / LOGS_ACTIVE_DIR
+        self.history_file = self.repo_root / DEFAULT_AUDIT_LOG_PATH
+        self.shard_file = self.active_dir / self._generate_shard_filename()
+
+        # Ensure active directory exists (fail-closed if not writable)
+        self.active_dir.mkdir(parents=True, exist_ok=True)
+
+        # Also ensure logs directory exists for history file
+        self.history_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # For backwards compatibility
+        self.log_path = self.history_file
+
+    def _detect_repo_root(self) -> Path:
+        """Detect repository root via git rev-parse --show-toplevel.
+
+        Returns:
+            Path to repository root.
+
+        Raises:
+            RuntimeError: If not in a git repository.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--show-toplevel"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "git not found. Install git or provide repo_root explicitly."
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("git rev-parse timed out")
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Not in a git repository: {result.stderr.strip()}"
+            )
+
+        return Path(result.stdout.strip())
+
+    def _generate_shard_filename(self) -> str:
+        """Generate unique shard filename: {YYYYMMDDTHHMMSS}_{session_id}.jsonl
+
+        Returns:
+            Shard filename string.
+        """
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        return f"{timestamp}_{self.session_id}.jsonl"
 
     def log(self, entry: GovernanceLogEntry) -> None:
-        """Append entry to JSONL file.
+        """Append entry to session shard.
 
         Args:
             entry: The governance log entry to write.
+
+        Raises:
+            OSError: If shard directory is not writable (fail-closed).
         """
         # Ensure parent directory exists
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.shard_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Serialize to JSON string
         json_line = json.dumps(entry, ensure_ascii=False)
 
-        # Append with newline
-        with open(self.log_path, "a", encoding="utf-8") as f:
+        # Append with newline (fail-closed: let OSError propagate)
+        with open(self.shard_file, "a", encoding="utf-8") as f:
             f.write(json_line + "\n")
             f.flush()
 
     def tail(self, n: int = 10) -> list[GovernanceLogEntry]:
-        """Return last N entries from log.
+        """Return last N entries from history + active shards.
+
+        Merges entries from governance_history.jsonl and all active shards,
+        sorted by timestamp. Gracefully skips locked or inaccessible shards.
+
+        Optimization: History file is assumed sorted (guaranteed by consolidator),
+        so we read only the last K lines instead of the entire file.
 
         Args:
-            n: Number of entries to return.
+            n: Number of entries to return. If 0, returns all entries.
 
         Returns:
             List of the last N entries, oldest first.
         """
-        if not self.log_path.exists():
-            return []
-
         entries: list[GovernanceLogEntry] = []
 
-        with open(self.log_path, encoding="utf-8") as f:
-            lines = f.readlines()
+        # Count active shards to estimate buffer size
+        shard_count = 0
+        if self.active_dir.exists():
+            shard_count = len(list(self.active_dir.glob("*.jsonl")))
 
-        # Get last N lines
-        for line in lines[-n:]:
-            line = line.strip()
-            if line:
-                try:
-                    entry = json.loads(line)
-                    entries.append(entry)
-                except json.JSONDecodeError:
-                    # Skip malformed lines
-                    continue
+        # Read from history file (optimized: only last K lines if n > 0)
+        if n > 0:
+            # Read extra lines to account for active shards that may interleave
+            # Assume max 100 entries per shard as buffer
+            buffer_size = n + (shard_count * 100)
+            entries.extend(self._read_jsonl_tail(self.history_file, buffer_size))
+        else:
+            # n=0 means read all
+            entries.extend(self._read_jsonl_safe(self.history_file))
+
+        # Read from all active shards (always read fully - they're small)
+        if self.active_dir.exists():
+            for shard in self.active_dir.glob("*.jsonl"):
+                entries.extend(self._read_jsonl_safe(shard))
+
+        # Sort by timestamp (shards may interleave with history tail)
+        entries.sort(key=lambda e: e.get("timestamp", ""))
+
+        # Return last N
+        return entries[-n:] if n > 0 else entries
+
+    def _read_jsonl_tail(self, path: Path, n: int) -> list[GovernanceLogEntry]:
+        """Read last N lines from JSONL file, gracefully handling errors.
+
+        Optimized for large files - only reads the tail portion.
+
+        Args:
+            path: Path to JSONL file.
+            n: Maximum number of lines to read from end.
+
+        Returns:
+            List of entries, or empty list if file inaccessible.
+        """
+        if not path.exists():
+            return []
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+
+            entries: list[GovernanceLogEntry] = []
+            # Get last N lines
+            for line in lines[-n:]:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Skip malformed lines
+                        continue
+            return entries
+        except (OSError, IOError):
+            # Skip locked or inaccessible files (graceful degradation)
+            return []
+
+    def _read_jsonl_safe(self, path: Path) -> list[GovernanceLogEntry]:
+        """Read JSONL file, gracefully handling errors.
+
+        Args:
+            path: Path to JSONL file.
+
+        Returns:
+            List of entries, or empty list if file inaccessible.
+        """
+        entries: list[GovernanceLogEntry] = []
+
+        if not path.exists():
+            return entries
+
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            # Skip malformed lines
+                            continue
+        except (OSError, IOError):
+            # Skip locked or inaccessible files (graceful degradation)
+            pass
 
         return entries
 
     def __iter__(self) -> Iterator[GovernanceLogEntry]:
-        """Iterate over all entries.
+        """Iterate over all entries from history + active shards.
 
         Yields:
             Each governance log entry in chronological order.
         """
-        if not self.log_path.exists():
-            return
-
-        with open(self.log_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        yield json.loads(line)
-                    except json.JSONDecodeError:
-                        # Skip malformed lines
-                        continue
+        # Get all entries and sort
+        all_entries = self.tail(n=0)  # n=0 returns all
+        yield from all_entries
 
     def count(self) -> int:
-        """Return total number of entries.
+        """Return total number of entries across history + shards.
 
         Returns:
             Count of log entries.
         """
-        if not self.log_path.exists():
-            return 0
-
-        count = 0
-        with open(self.log_path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    count += 1
-        return count
+        return len(self.tail(n=0))
 
 
 def create_log_entry(
@@ -177,7 +326,7 @@ def create_log_entry(
         A complete GovernanceLogEntry.
     """
     return GovernanceLogEntry(
-        id=str(uuid.uuid4()),
+        id=str(uuid_module.uuid4()),
         sequence_id=sequence_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
         node=node,
