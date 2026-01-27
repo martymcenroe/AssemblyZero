@@ -370,6 +370,156 @@ class TestGraphRouting:
         assert result == "N2_draft"
 
 
+class TestClaudeHeadless:
+    """Test Claude headless mode (claude -p) integration."""
+
+    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("subprocess.run")
+    def test_call_claude_headless_success(self, mock_run, mock_find):
+        """Test successful claude -p call."""
+        from agentos.workflows.issue.nodes.draft import call_claude_headless
+
+        mock_find.return_value = "/usr/bin/claude"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"result": "# Test Issue\\n\\nThis is a test."}',
+            stderr="",
+        )
+
+        result = call_claude_headless("Test prompt")
+        assert result == "# Test Issue\n\nThis is a test."
+        mock_run.assert_called_once()
+
+    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("subprocess.run")
+    def test_call_claude_headless_with_system_prompt(self, mock_run, mock_find):
+        """Test claude -p with system prompt."""
+        from agentos.workflows.issue.nodes.draft import call_claude_headless
+
+        mock_find.return_value = "/usr/bin/claude"
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"result": "Response"}',
+            stderr="",
+        )
+
+        call_claude_headless("User prompt", "System prompt")
+
+        # Verify --system-prompt was included (not --append-system-prompt)
+        call_args = mock_run.call_args[0][0]
+        assert "--system-prompt" in call_args
+        assert "System prompt" in call_args
+        # Verify project context is skipped
+        assert "--setting-sources" in call_args
+        assert "user" in call_args
+        # Verify tools are disabled
+        assert "--tools" in call_args
+
+    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("subprocess.run")
+    def test_call_claude_headless_failure(self, mock_run, mock_find):
+        """Test claude -p failure handling."""
+        from agentos.workflows.issue.nodes.draft import call_claude_headless
+
+        mock_find.return_value = "/usr/bin/claude"
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="Error: something went wrong",
+        )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            call_claude_headless("Test prompt")
+        assert "claude -p failed" in str(exc_info.value)
+
+    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("subprocess.run")
+    def test_call_claude_headless_timeout(self, mock_run, mock_find):
+        """Test claude -p timeout handling."""
+        import subprocess
+        from agentos.workflows.issue.nodes.draft import call_claude_headless
+
+        mock_find.return_value = "/usr/bin/claude"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=300)
+
+        with pytest.raises(RuntimeError) as exc_info:
+            call_claude_headless("Test prompt")
+        assert "timed out" in str(exc_info.value)
+
+    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    def test_call_claude_headless_not_found(self, mock_find):
+        """Test claude command not found."""
+        from agentos.workflows.issue.nodes.draft import call_claude_headless
+
+        mock_find.side_effect = RuntimeError("claude command not found")
+
+        with pytest.raises(RuntimeError) as exc_info:
+            call_claude_headless("Test prompt")
+        assert "not found" in str(exc_info.value)
+
+
+class TestDraftNode:
+    """Test N2 draft node."""
+
+    @patch("agentos.workflows.issue.nodes.draft.call_claude_headless")
+    @patch("agentos.workflows.issue.nodes.draft.load_issue_template")
+    def test_draft_success(self, mock_template, mock_claude, tmp_path):
+        """Test successful draft generation."""
+        from agentos.workflows.issue.nodes.draft import draft
+
+        # Setup mocks
+        mock_template.return_value = "# Template\n\n## Section"
+        mock_claude.return_value = "# Generated Issue\n\nContent here."
+
+        # Create audit dir
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
+
+        state: IssueWorkflowState = {
+            "audit_dir": str(audit_dir),
+            "brief_content": "My brief content",
+            "file_counter": 0,
+            "draft_count": 0,
+        }
+
+        result = draft(state)
+
+        assert result["error_message"] == ""
+        assert result["current_draft"] == "# Generated Issue\n\nContent here."
+        assert result["draft_count"] == 1
+        assert (audit_dir / "001-draft.md").exists()
+
+    @patch("agentos.workflows.issue.nodes.draft.call_claude_headless")
+    @patch("agentos.workflows.issue.nodes.draft.load_issue_template")
+    def test_draft_revision_mode(self, mock_template, mock_claude, tmp_path):
+        """Test draft revision with feedback."""
+        from agentos.workflows.issue.nodes.draft import draft
+
+        mock_template.return_value = "# Template"
+        mock_claude.return_value = "# Revised Issue"
+
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
+        (audit_dir / "001-brief.md").touch()
+
+        state: IssueWorkflowState = {
+            "audit_dir": str(audit_dir),
+            "brief_content": "Original brief",
+            "current_draft": "# Original Draft",
+            "user_feedback": "Please add more detail",
+            "file_counter": 1,
+            "draft_count": 1,
+        }
+
+        result = draft(state)
+
+        # Verify feedback was included in prompt
+        call_args = mock_claude.call_args[0][0]
+        assert "Please add more detail" in call_args
+        assert "Original Draft" in call_args
+        assert result["user_feedback"] == ""  # Cleared after use
+
+
 class TestGraphCompilation:
     """Test that the graph compiles without errors."""
 
