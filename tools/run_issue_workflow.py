@@ -14,12 +14,8 @@ Options:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
-
-# Disable LangSmith telemetry (no API key configured)
-os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
