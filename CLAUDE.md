@@ -130,69 +130,50 @@ git branch -D       # Force deletes branch
 
 If you hesitated, refresh.
 
-### GEMINI SUBMISSION GATE (MANDATORY)
+### GEMINI REVIEWS - ORCHESTRATOR ONLY (CRITICAL)
 
-**NEVER call `gemini` CLI directly. ALWAYS use `gemini-retry.py`.**
+**Claude does NOT submit to Gemini. The orchestrator (human) controls all Gemini submissions.**
 
-Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
-- Rotates credentials when account quota exhausted
-- Applies exponential backoff for capacity issues
-- Validates model (prevents silent downgrades to Flash)
-- Logs all attempts for audit trail
+This is the Inversion of Control principle: The workflow script (orchestrator) controls when reviews happen. Claude prepares materials and waits for the orchestrator to run reviews.
 
-**Required command pattern:**
-```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
-```
+**Claude's role:**
+- Prepare review materials (LLD, reports, diffs)
+- Save materials to appropriate locations
+- Wait for orchestrator to run review and provide results
 
-**If all credentials exhausted (exit code 1):**
-1. STOP - Do not bypass the review
-2. Report to user: "Gemini quota exhausted across all credentials"
-3. Wait for user decision
+**Orchestrator's role:**
+- Submit materials to Gemini
+- Manage credentials and quota
+- Provide review results back to Claude
 
-**BANNED patterns:**
-- `gemini --prompt "..."` (direct CLI)
-- `gemini < prompt.txt` (direct CLI with stdin)
-- `gemini --model X ...` (any direct CLI invocation)
+**BANNED for Claude:**
+- `gemini --prompt "..."` (any direct CLI)
+- `gemini-retry.py` (orchestrator tool, not Claude tool)
+- Any autonomous Gemini API calls
 
 ### LLD REVIEW GATE (BEFORE CODING)
 
-**Before writing ANY code for an issue, execute this gate:**
+**Before writing ANY code for an issue, this gate must pass:**
 
 ```
 LLD Review Gate Check:
 ├── Does an LLD exist for this issue?
-│   ├── YES → Submit to Gemini for review
+│   ├── YES → Proceed
 │   └── NO → Ask user: Create LLD or waive requirement?
 │
-├── Submit LLD to Gemini:
-│   └── Use gemini-retry.py with LLD review prompt
-│
-├── Parse Gemini response:
+├── Has orchestrator provided Gemini review results?
 │   ├── [APPROVE] → Gate PASSED, proceed to coding
-│   ├── [BLOCK] → Gate FAILED, fix issues before coding
-│   └── Quota exhausted → STOP, report to user
+│   ├── [BLOCK] → Gate FAILED, fix issues and wait for re-review
+│   └── Not yet reviewed → WAIT for orchestrator
 ```
 
-**State the gate explicitly:**
-> "Executing LLD REVIEW GATE: Submitting LLD to Gemini before coding."
+**Claude's responsibility:**
+1. Write the LLD to `docs/LLDs/active/{issue-id}-*.md`
+2. Commit the LLD
+3. **STOP and wait** for orchestrator to run Gemini review
+4. Resume only after orchestrator provides review results
 
-**LLD location:** `docs/LLDs/active/{issue-id}-*.md` (move to `docs/LLDs/done/` after merge)
-
-**Escape hatch:** For [HOTFIX] tagged issues, user can explicitly waive.
-
-**Prompt formatting (MANDATORY):**
-1. Include FULL LLD content in the prompt file (not just a reference)
-2. Start with: "REVIEW THE FOLLOWING LLD ONLY. DO NOT SEARCH FOR OTHER FILES."
-3. End with: "END OF LLD. Respond with JSON only."
-4. Read back prompt file before submission to verify content is correct
-
-**Post-review validation:**
-1. Gemini's response must reference the correct issue number
-2. Gemini's response must mention sections from YOUR submitted LLD
-3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
-
-**ACCOUNTABILITY:** If Gemini reviews the wrong document, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+**Escape hatch:** For [HOTFIX] tagged issues, orchestrator can explicitly waive.
 
 ### REPORT GENERATION GATE (AFTER CODING)
 
@@ -221,7 +202,7 @@ Move to `docs/reports/done/` after merge.
 
 ### IMPLEMENTATION REVIEW GATE (BEFORE PR)
 
-**Before creating ANY PR, execute this gate:**
+**Before creating ANY PR, this gate must pass:**
 
 ```
 Implementation Review Gate Check:
@@ -229,32 +210,20 @@ Implementation Review Gate Check:
 │   ├── YES → Proceed
 │   └── NO → Execute REPORT GENERATION GATE first
 │
-├── Submit to Gemini:
-│   └── Use gemini-retry.py with implementation-review prompt
-│
-├── Parse Gemini response:
+├── Has orchestrator provided Gemini review results?
 │   ├── [APPROVE] → Gate PASSED, create PR
-│   ├── [BLOCK] → Gate FAILED, fix issues before PR
-│   └── Quota exhausted → STOP, report to user, do NOT create PR
+│   ├── [BLOCK] → Gate FAILED, fix issues and wait for re-review
+│   └── Not yet reviewed → WAIT for orchestrator
 ```
 
-**State the gate explicitly:**
-> "Executing IMPLEMENTATION REVIEW GATE: Submitting to Gemini before PR."
+**Claude's responsibility:**
+1. Create implementation report: `docs/reports/active/{issue-id}-implementation-report.md`
+2. Create test report: `docs/reports/active/{issue-id}-test-report.md`
+3. Commit reports and all implementation code
+4. **STOP and wait** for orchestrator to run Gemini review
+5. Resume only after orchestrator provides review results
 
-**CRITICAL:** If Gemini returns [BLOCK], you MUST NOT create the PR.
-
-**Prompt formatting (MANDATORY):**
-1. Include FULL implementation report and test report in the prompt
-2. Include the git diff of changes
-3. Start with: "REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES."
-4. End with: "END OF IMPLEMENTATION. Respond with JSON only."
-
-**Post-review validation:**
-1. Gemini's response must reference the correct issue/PR
-2. Gemini's response must mention files from YOUR diff
-3. If Gemini reviewed wrong content: **THIS IS CLAUDE'S FAULT** - fix prompt, resubmit
-
-**ACCOUNTABILITY:** If Gemini reviews wrong code, Claude failed to provide clear input. Fix the prompt and resubmit. NEVER blame Gemini for Claude's prompt failures.
+**CRITICAL:** If orchestrator reports [BLOCK], Claude MUST NOT create the PR.
 
 ---
 
@@ -677,66 +646,29 @@ See: `AgentOS/docs/standards/0008-documentation-convention.md`
 
 ---
 
-## Gemini Review Protocol (MANDATORY)
+## Gemini Reviews - Orchestrator Protocol
 
-**When a task requires Gemini review (LLD, code, implementation), these rules are NON-NEGOTIABLE:**
+**The orchestrator (human) controls all Gemini submissions. Claude does NOT call Gemini.**
 
-### Required Model
+### Claude's Role in Reviews
 
-**ONLY these models are acceptable for reviews:**
-- `gemini-3-pro-preview` (primary)
-- `gemini-3-pro` (acceptable alternative)
+1. **Prepare materials** - Write LLDs, reports, gather diffs
+2. **Save to correct locations** - `docs/LLDs/active/`, `docs/reports/active/`
+3. **Commit and push** - Make materials available
+4. **STOP and wait** - Do not proceed past gates until orchestrator provides results
 
-**FORBIDDEN - DO NOT USE for reviews:**
-- `gemini-2.0-flash`, `gemini-2.5-flash`, `gemini-flash-*` (lower tier)
-- `gemini-2.5-lite`, `gemini-*-lite` (lowest tier)
-- Any model not explicitly `gemini-3-pro*`
+### What Claude Should NOT Do
 
-**If you use any other model, the review is INVALID and must be redone.**
+- Call `gemini` CLI directly
+- Call `gemini-retry.py`
+- Autonomously submit anything to Gemini
+- Bypass gates by assuming approval
 
-### Quota Exhaustion Protocol
+### When Orchestrator Provides Review Results
 
-**When you see ANY of these errors:**
-- `"You have exhausted your capacity on this model"`
-- `"TerminalQuotaError"`
-- `"QUOTA_EXHAUSTED"`
-- `gemini-retry.py` exceeds 5 attempts
-
-**You MUST:**
-1. **STOP** - Do not substitute a different model
-2. **Report to user** - State: "Gemini 3 Pro quota exhausted. Cannot proceed with review."
-3. **Wait** - The review cannot proceed until quota resets (~24h) or user intervenes
-4. **DO NOT rationalize** - "Flash review is better than nothing" is WRONG
-
-**Why this matters:**
-- Gemini 3 Pro has reasoning capabilities that Flash lacks
-- Reviews with lesser models miss critical issues
-- Claiming a Flash review is a "Gemini review" is dishonest
-
-### Running Gemini Reviews
-
-**Use the retry tool with explicit model:**
-```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt "..."
-```
-
-**For long prompts, use stdin (NOT -p flag):**
-```bash
-gemini --model gemini-3-pro-preview --output-format json < /path/to/prompt.txt
-```
-
-**Verify the model in response:**
-- Check `stats.models` in JSON output
-- If model is not `gemini-3-pro*`, the review is INVALID
-
-### What Counts as "Gemini Reviewed"
-
-A document is "Gemini reviewed" ONLY if:
-1. Review was performed by `gemini-3-pro-preview` or `gemini-3-pro`
-2. Model was verified in JSON response
-3. All three review types completed (LLD, Security, Implementation)
-
-**Partial reviews or reviews by other models DO NOT count.**
+If orchestrator says **[APPROVE]**: Proceed past the gate
+If orchestrator says **[BLOCK]**: Fix issues, wait for re-review
+If orchestrator says nothing: **WAIT** - do not assume approval
 
 ---
 
