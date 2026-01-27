@@ -122,7 +122,7 @@ def run_new_workflow(brief_file: str) -> int:
 
     # Use SQLite for persistence
     db_path = get_checkpoint_db_path()
-    with SqliteSaver.from_conn_string(f"sqlite:///{db_path}") as memory:
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
         app = workflow.compile(checkpointer=memory)
 
         # Initial state
@@ -218,7 +218,7 @@ def run_resume_workflow(brief_file: str) -> int:
 
     # Use SQLite for persistence
     db_path = get_checkpoint_db_path()
-    with SqliteSaver.from_conn_string(f"sqlite:///{db_path}") as memory:
+    with SqliteSaver.from_conn_string(str(db_path)) as memory:
         app = workflow.compile(checkpointer=memory)
 
         # Use brief filename as thread ID
