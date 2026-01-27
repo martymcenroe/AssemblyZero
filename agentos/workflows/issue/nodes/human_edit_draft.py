@@ -14,25 +14,37 @@ from agentos.workflows.issue.audit import next_file_number, save_audit_file
 from agentos.workflows.issue.state import HumanDecision, IssueWorkflowState
 
 
-def open_vscode_and_wait(file_path: str) -> bool:
+def open_vscode_and_wait(file_path: str) -> tuple[bool, str]:
     """Open VS Code with --wait flag and block until closed.
 
     Args:
         file_path: Path to file to open.
 
     Returns:
-        True if VS Code exited successfully, False otherwise.
+        Tuple of (success, error_message). error_message is empty string on success.
     """
     try:
+        print(f"Launching: code --wait {file_path}")
         result = subprocess.run(
             ["code", "--wait", file_path],
-            timeout=3600,  # 1 hour max
+            capture_output=True,
+            text=True,
+            timeout=86400,  # 24 hours - this is a human review gate
         )
-        return result.returncode == 0
+        if result.returncode != 0:
+            error = f"VS Code exited with code {result.returncode}"
+            if result.stderr:
+                error += f"\nStderr: {result.stderr}"
+            if result.stdout:
+                error += f"\nStdout: {result.stdout}"
+            return False, error
+        return True, ""
     except subprocess.TimeoutExpired:
-        return False
-    except Exception:
-        return False
+        return False, "VS Code did not close within 24 hours (timeout)"
+    except FileNotFoundError:
+        return False, "'code' command not found. Is VS Code installed and in PATH?"
+    except Exception as e:
+        return False, f"Unexpected error launching VS Code: {type(e).__name__}: {e}"
 
 
 def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
@@ -108,9 +120,14 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
     print(f">>> Opening: {draft_path}")
 
     # Open VS Code and wait
-    success = open_vscode_and_wait(draft_path)
+    success, error = open_vscode_and_wait(draft_path)
     if not success:
-        print("Warning: VS Code may not have closed cleanly.")
+        print(f"\nERROR: Failed to open VS Code")
+        print(f"  {error}")
+        print("\nYou can manually open the file:")
+        print(f"  code {draft_path}")
+        print("\nPress Enter when you've reviewed the draft...")
+        input()
 
     # Read potentially edited draft
     draft_content = Path(draft_path).read_text(encoding="utf-8")
