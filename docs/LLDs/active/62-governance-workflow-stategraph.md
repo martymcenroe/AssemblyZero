@@ -102,7 +102,7 @@ def create_sandbox(state: GovernanceState) -> GovernanceState:
 def check_vscode_available() -> bool:
     """Verify 'code' binary exists in PATH (VS Code CLI)."""
     # Note: If productized, expand to check_editor_available(cmd: str)
-    # supporting --editor flag for Sublime, vim, etc.
+    # supporting --editor flag for other editors.
     ...
 
 def check_gh_authenticated() -> bool:
