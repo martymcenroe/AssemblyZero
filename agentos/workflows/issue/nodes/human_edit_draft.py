@@ -29,6 +29,7 @@ def open_vscode_and_wait(file_path: str) -> tuple[bool, str]:
             ["code", "--wait", file_path],
             capture_output=True,
             text=True,
+            shell=True,  # Required on Windows to execute .CMD files
             timeout=86400,  # 24 hours - this is a human review gate
         )
         if result.returncode != 0:

@@ -33,6 +33,7 @@ def open_vscode_split_and_wait(file1: str, file2: str) -> tuple[bool, str]:
             ["code", "--wait", file1, file2],
             capture_output=True,
             text=True,
+            shell=True,  # Required on Windows to execute .CMD files
             timeout=86400,  # 24 hours - this is a human review gate
         )
         if result.returncode != 0:
