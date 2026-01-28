@@ -15,7 +15,8 @@ class HumanDecision(str, Enum):
 
     SEND = "S"  # Send to Gemini (N3 only)
     APPROVE = "A"  # Approve and file (N5 only)
-    REVISE = "R"  # Revise draft (N3 or N5)
+    REVISE = "R"  # Re-read verdict from disk, send to Claude (N5 only)
+    WRITE_FEEDBACK = "W"  # Re-read verdict + prompt for comments, send to Claude (N5 only)
     MANUAL = "M"  # Exit for manual handling
 
 
@@ -57,6 +58,7 @@ class IssueWorkflowState(TypedDict, total=False):
         current_draft: Latest draft content.
         current_verdict_path: Path to latest verdict file.
         current_verdict: Latest Gemini verdict content.
+        verdict_history: List of all Gemini verdicts (cumulative, sent to Claude).
         user_feedback: Feedback when user selects Revise.
 
         # Routing
@@ -87,6 +89,7 @@ class IssueWorkflowState(TypedDict, total=False):
     current_draft: str
     current_verdict_path: str
     current_verdict: str
+    verdict_history: list[str]
     user_feedback: str
 
     # Routing

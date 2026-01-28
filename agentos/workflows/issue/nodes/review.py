@@ -58,18 +58,20 @@ def review(state: IssueWorkflowState) -> dict[str, Any]:
     4. Call Gemini API via GeminiClient
     5. Save raw response to NNN-verdict.md
     6. Increment verdict_count
+    7. Append verdict to verdict_history
 
     Args:
         state: Current workflow state.
 
     Returns:
         dict with: current_verdict, current_verdict_path, file_counter,
-                   verdict_count
+                   verdict_count, verdict_history
     """
     audit_dir = Path(state.get("audit_dir", ""))
     current_draft = state.get("current_draft", "")
     file_counter = state.get("file_counter", 0)
     verdict_count = state.get("verdict_count", 0)
+    verdict_history = state.get("verdict_history", [])
 
     if not audit_dir or not audit_dir.exists():
         return {"error_message": "Audit directory not set or doesn't exist"}
@@ -97,12 +99,25 @@ def review(state: IssueWorkflowState) -> dict[str, Any]:
 """
 
     try:
+        import datetime
+        import time
+        import sys
+
+        # Progress indicator for Gemini call
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"\n[{timestamp}] Calling Gemini for review...", flush=True)
+        start_time = time.time()
+
         # Call Gemini API
         client = GeminiClient(model=GOVERNANCE_MODEL)
         result = client.invoke(
             system_instruction="You are reviewing a GitHub issue draft for quality and completeness.",
             content=content,
         )
+
+        elapsed = int(time.time() - start_time)
+        end_timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{end_timestamp}] Gemini response received ({elapsed}s)", flush=True)
 
         if not result.success:
             return {
@@ -126,12 +141,29 @@ def review(state: IssueWorkflowState) -> dict[str, Any]:
         audit_dir, file_counter, "verdict.md", verdict_content
     )
 
+    # Print verdict summary
+    print(f"\n{'=' * 60}")
+    print("Gemini Verdict")
+    print(f"{'=' * 60}")
+    # Print first 500 chars or full verdict if shorter
+    preview = verdict_content[:500] if len(verdict_content) > 500 else verdict_content
+    print(preview)
+    if len(verdict_content) > 500:
+        print(f"\n... ({len(verdict_content) - 500} more characters)")
+    print(f"\n{'=' * 60}")
+    print(f"Full verdict saved to: {verdict_path}")
+    print(f"{'=' * 60}\n")
+
     # Increment verdict count
     verdict_count += 1
+
+    # Append to verdict history (cumulative)
+    verdict_history = verdict_history + [verdict_content]
 
     return {
         "current_verdict": verdict_content,
         "current_verdict_path": str(verdict_path),
+        "verdict_history": verdict_history,
         "file_counter": file_counter,
         "verdict_count": verdict_count,
         "error_message": "",

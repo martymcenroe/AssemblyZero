@@ -161,6 +161,8 @@ def draft(state: IssueWorkflowState) -> dict[str, Any]:
     brief_content = state.get("brief_content", "")
     user_feedback = state.get("user_feedback", "")
     current_draft = state.get("current_draft", "")
+    current_verdict = state.get("current_verdict", "")
+    verdict_history = state.get("verdict_history", [])
     file_counter = state.get("file_counter", 0)
     draft_count = state.get("draft_count", 0)
 
@@ -178,44 +180,113 @@ def draft(state: IssueWorkflowState) -> dict[str, Any]:
 
     # Build prompt
     system_prompt = """You are a technical writer creating a GitHub issue.
-Use the template structure provided. Fill in all sections based on the brief.
-Include Mermaid diagrams where helpful. Be specific and actionable.
-Output ONLY the issue content in markdown format, ready to file."""
 
-    if user_feedback and current_draft:
-        # Revision mode: include feedback and current draft
-        user_content = f"""## User Feedback for Revision
+CRITICAL FORMATTING RULES:
+- Start DIRECTLY with the issue title (# heading)
+- Do NOT include any preamble, explanation, or meta-commentary
+- Do NOT write "I'll create..." or "Let me structure..." or similar narration
+- Output ONLY the raw markdown content that will be pasted into GitHub
+- First line MUST be the issue title starting with #
+
+Use the template structure provided. Fill in all sections based on the brief.
+Include Mermaid diagrams where helpful. Be specific and actionable."""
+
+    if current_draft and verdict_history:
+        # Revision mode: include ALL Gemini verdicts (cumulative) + current draft
+        revision_context = ""
+
+        # Include ALL verdicts from history
+        if verdict_history:
+            revision_context += "## ALL Gemini Review Feedback (CUMULATIVE - MUST COMPLY WITH EVERY ITEM)\n\n"
+            for i, verdict in enumerate(verdict_history, 1):
+                revision_context += f"### Gemini Review #{i}\n\n{verdict}\n\n"
+
+        # Add human feedback if provided
+        if user_feedback:
+            revision_context += f"""## Additional Human Feedback (from Orchestrator)
 {user_feedback}
 
-## Current Draft (to revise)
+"""
+
+        user_content = f"""IMPORTANT: Output ONLY the markdown issue content. Start with # title. No preamble.
+
+{revision_context}## Current Draft (to revise)
 {current_draft}
 
 ## Original Brief
 {brief_content}
 
-## Issue Template (follow this structure)
+## Issue Template (REQUIRED STRUCTURE - KEEP ALL SECTIONS)
 {template}
 
-Please revise the draft based on the feedback while maintaining the template structure."""
+CRITICAL REVISION INSTRUCTIONS:
+1. You MUST implement EVERY change requested by Gemini, including:
+   - Required changes (missing sections, formatting issues)
+   - Architecture suggestions
+   - Technical improvements
+   - ANY item mentioned in the feedback, no matter how small
+
+2. If ANY Gemini feedback conflicts or is unclear, you MUST:
+   - Stop and ask the orchestrator for clarification
+   - Do NOT guess or skip conflicting items
+   - Use this exact format: "ORCHESTRATOR CLARIFICATION NEEDED: [describe conflict]"
+
+3. Template compliance:
+   - ALL sections from template MUST be present
+   - PRESERVE sections that Gemini didn't flag
+   - ONLY modify sections Gemini specifically mentioned
+
+4. If you cannot fully comply with all feedback, STOP and ask orchestrator
+
+Revise the draft to address ALL feedback above while KEEPING all template sections intact.
+START YOUR RESPONSE WITH THE # HEADING. DO NOT WRITE "I'll revise" OR ANY PREAMBLE."""
     else:
         # Initial draft mode
-        user_content = f"""## Brief (user's ideation notes)
+        user_content = f"""IMPORTANT: Output ONLY the markdown issue content. Start with # title. No preamble.
+
+## Brief (user's ideation notes)
 {brief_content}
 
 ## Issue Template (follow this structure)
 {template}
 
-Create a complete GitHub issue following the template structure."""
+Create a complete GitHub issue following the template structure. START YOUR RESPONSE WITH THE # HEADING. DO NOT WRITE "I'll create" OR ANY PREAMBLE."""
 
     try:
+        import datetime
+        import time
+        import re
+
+        # Progress indicator for Claude call
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"\n[{timestamp}] Calling Claude to generate draft...", flush=True)
+        start_time = time.time()
+
         # Call Claude via headless mode (uses Max subscription)
         draft_content = call_claude_headless(user_content, system_prompt)
+
+        elapsed = int(time.time() - start_time)
+        end_timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{end_timestamp}] Draft received ({elapsed}s)", flush=True)
+
+        # Strip any preamble before the first # heading (failsafe)
+        match = re.search(r'^#\s+', draft_content, re.MULTILINE)
+        if match:
+            # Find position of first # heading
+            heading_pos = match.start()
+            if heading_pos > 0:
+                # There's text before the heading - strip it
+                stripped = draft_content[:heading_pos].strip()
+                if stripped:
+                    print(f"Warning: Stripped {len(stripped)} chars of preamble")
+                draft_content = draft_content[heading_pos:]
 
     except RuntimeError as e:
         return {"error_message": f"Claude error: {e}"}
 
     # Save draft to audit trail
     draft_path = save_audit_file(audit_dir, file_counter, "draft.md", draft_content)
+    print(f"Draft saved to: {draft_path}")
 
     # Increment draft count
     draft_count += 1

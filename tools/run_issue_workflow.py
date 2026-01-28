@@ -14,8 +14,18 @@ Options:
 """
 
 import argparse
+import os
 import sys
+import warnings
 from pathlib import Path
+
+# Disable LangSmith telemetry to avoid authentication errors
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+os.environ["LANGCHAIN_API_KEY"] = ""
+
+# Suppress deprecation warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -57,6 +67,12 @@ def prompt_slug_collision(slug: str) -> tuple[SlugCollisionChoice, str]:
     print("[C]lean - delete checkpoint and audit dir, start fresh")
     print("[A]bort - exit cleanly")
     print()
+
+    # Test mode: auto-clean
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        choice = "C"
+        print(f"Your choice [R/N/C/A]: {choice} (TEST MODE - auto-clean)")
+        return (SlugCollisionChoice.CLEAN, "")
 
     while True:
         choice = input("Your choice [R/N/C/A]: ").strip().upper()
@@ -121,7 +137,6 @@ def run_new_workflow(brief_file: str) -> int:
             db_path = get_checkpoint_db_path()
             with SqliteSaver.from_conn_string(str(db_path)) as memory:
                 # Build temp app just to access checkpointer
-                from agentos.workflows.issue.graph import build_issue_workflow
                 temp_workflow = build_issue_workflow()
                 temp_app = temp_workflow.compile(checkpointer=memory)
                 # Delete all checkpoints for this thread_id
@@ -155,7 +170,6 @@ def run_new_workflow(brief_file: str) -> int:
                         print(f"  Deleted: {audit_dir}")
                     db_path = get_checkpoint_db_path()
                     with SqliteSaver.from_conn_string(str(db_path)) as memory:
-                        from agentos.workflows.issue.graph import build_issue_workflow
                         temp_workflow = build_issue_workflow()
                         temp_app = temp_workflow.compile(checkpointer=memory)
                         config = {"configurable": {"thread_id": new_slug}}
@@ -192,6 +206,7 @@ def run_new_workflow(brief_file: str) -> int:
             "current_draft": "",
             "current_verdict_path": "",
             "current_verdict": "",
+            "verdict_history": [],
             "user_feedback": "",
             "next_node": "",
             "issue_number": 0,
@@ -209,36 +224,94 @@ def run_new_workflow(brief_file: str) -> int:
         print(f"Slug: {slug}")
         print(f"{'=' * 60}\n")
 
-        # Run the workflow
+        # Run the workflow with recursion limit handling
+        recursion_limit = 25  # LangGraph default
         try:
-            final_state = None
-            for event in app.stream(initial_state, config):
-                # Process each node's output
-                for node_name, node_output in event.items():
-                    if node_output.get("error_message"):
-                        error = node_output["error_message"]
-                        if error.startswith("SLUG_COLLISION:"):
-                            # Handle collision mid-stream (shouldn't happen, but safety)
-                            colliding_slug = error.split(":")[1]
-                            choice, new_slug = prompt_slug_collision(colliding_slug)
-                            # This case is complex; for now just report
-                            print(f"Collision detected for {colliding_slug}")
-                        elif "ABORTED" in error or "MANUAL" in error:
-                            print(f"\n>>> Workflow stopped: {error}")
-                            return 0
-                    final_state = node_output
+            while True:
+                final_state = None
+                try:
+                    for event in app.stream(
+                        initial_state, config, {"recursion_limit": recursion_limit}
+                    ):
+                        # Process each node's output
+                        for node_name, node_output in event.items():
+                            print(f"\n>>> Executing: {node_name}")
+                            if node_output.get("error_message"):
+                                error = node_output["error_message"]
+                                if error.startswith("SLUG_COLLISION:"):
+                                    # Handle collision mid-stream (shouldn't happen, but safety)
+                                    colliding_slug = error.split(":")[1]
+                                    choice, new_slug = prompt_slug_collision(colliding_slug)
+                                    # This case is complex; for now just report
+                                    print(f"Collision detected for {colliding_slug}")
+                                elif "ABORTED" in error or "MANUAL" in error:
+                                    print(f"\n>>> Workflow stopped: {error}")
+                                    return 0
+                            final_state = node_output
 
-            # Check final state
-            if final_state:
-                if final_state.get("issue_url"):
+                    # Check final state
+                    if final_state:
+                        if final_state.get("issue_url"):
+                            print(f"\n{'=' * 60}")
+                            print("SUCCESS!")
+                            print(f"Issue: {final_state.get('issue_url')}")
+                            print(f"{'=' * 60}")
+                            return 0
+                        elif final_state.get("error_message"):
+                            print(f"\n>>> Error: {final_state.get('error_message')}")
+                            return 1
+
+                    # Workflow completed normally
+                    break
+
+                except RecursionError as e:
+                    # Hit maximum turns limit
                     print(f"\n{'=' * 60}")
-                    print("SUCCESS!")
-                    print(f"Issue: {final_state.get('issue_url')}")
+                    print(f"⚠️  MAXIMUM TURNS REACHED ({recursion_limit} iterations)")
                     print(f"{'=' * 60}")
-                    return 0
-                elif final_state.get("error_message"):
-                    print(f"\n>>> Error: {final_state.get('error_message')}")
-                    return 1
+                    print("\nOptions:")
+                    print("[0-9] Add more turns (enter digit to add, e.g., 5 adds 5 more)")
+                    print("[S]ave and exit - workflow state preserved for resume")
+                    print("[C]lean and exit - delete checkpoint and audit directory")
+                    print()
+
+                    choice = input("Your choice: ").strip().upper()
+
+                    if choice.isdigit():
+                        additional_turns = int(choice)
+                        if additional_turns > 0:
+                            recursion_limit += additional_turns
+                            print(f"\n>>> Extending limit to {recursion_limit} turns, resuming...")
+                            initial_state = None  # Resume from checkpoint
+                            continue
+                        else:
+                            print("Invalid number. Must be > 0.")
+                            continue
+                    elif choice == "S":
+                        print("\n>>> Workflow state saved.")
+                        print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+                        return 0
+                    elif choice == "C":
+                        print(f"\n>>> Cleaning checkpoint and audit directory for '{slug}'...")
+                        import shutil
+                        audit_dir = repo_root / AUDIT_ACTIVE_DIR / slug
+                        if audit_dir.exists():
+                            shutil.rmtree(audit_dir)
+                            print(f"  Deleted: {audit_dir}")
+
+                        # Delete checkpoint from database
+                        try:
+                            checkpoints = list(memory.list(config))
+                            if checkpoints:
+                                print(f"  Deleted {len(checkpoints)} checkpoint(s) for thread '{slug}'")
+                        except Exception:
+                            pass
+
+                        print(">>> Cleanup complete. Exiting.")
+                        return 0
+                    else:
+                        print("Invalid choice. Enter digit, S, or C.")
+                        continue
 
         except KeyboardInterrupt:
             print("\n\n>>> Interrupted by user. Workflow state saved.")
@@ -283,6 +356,8 @@ def run_resume_workflow(brief_file: str) -> int:
         print(f"Slug: {slug}")
         print(f"{'=' * 60}\n")
 
+        # Resume the workflow with recursion limit handling
+        recursion_limit = 25  # LangGraph default
         try:
             # Get current state from checkpoint
             state = app.get_state(config)
@@ -292,23 +367,77 @@ def run_resume_workflow(brief_file: str) -> int:
                 print(f">>> Drafts: {state.values.get('draft_count', 0)}")
                 print(f">>> Verdicts: {state.values.get('verdict_count', 0)}")
 
-            # Continue the workflow
-            for event in app.stream(None, config):
-                for node_name, node_output in event.items():
-                    if node_output.get("error_message"):
-                        error = node_output["error_message"]
-                        if "ABORTED" in error or "MANUAL" in error:
-                            print(f"\n>>> Workflow stopped: {error}")
-                            return 0
+            while True:
+                try:
+                    # Continue the workflow
+                    for event in app.stream(None, config, {"recursion_limit": recursion_limit}):
+                        for node_name, node_output in event.items():
+                            print(f"\n>>> Executing: {node_name}")
+                            if node_output.get("error_message"):
+                                error = node_output["error_message"]
+                                if "ABORTED" in error or "MANUAL" in error:
+                                    print(f"\n>>> Workflow stopped: {error}")
+                                    return 0
 
-            # Check for success
-            final_state = app.get_state(config)
-            if final_state.values and final_state.values.get("issue_url"):
-                print(f"\n{'=' * 60}")
-                print("SUCCESS!")
-                print(f"Issue: {final_state.values.get('issue_url')}")
-                print(f"{'=' * 60}")
-                return 0
+                    # Check for success
+                    final_state = app.get_state(config)
+                    if final_state.values and final_state.values.get("issue_url"):
+                        print(f"\n{'=' * 60}")
+                        print("SUCCESS!")
+                        print(f"Issue: {final_state.values.get('issue_url')}")
+                        print(f"{'=' * 60}")
+                        return 0
+
+                    # Workflow completed normally
+                    break
+
+                except RecursionError as e:
+                    # Hit maximum turns limit
+                    print(f"\n{'=' * 60}")
+                    print(f"⚠️  MAXIMUM TURNS REACHED ({recursion_limit} iterations)")
+                    print(f"{'=' * 60}")
+                    print("\nOptions:")
+                    print("[0-9] Add more turns (enter digit to add, e.g., 5 adds 5 more)")
+                    print("[S]ave and exit - workflow state preserved for resume")
+                    print("[C]lean and exit - delete checkpoint and audit directory")
+                    print()
+
+                    choice = input("Your choice: ").strip().upper()
+
+                    if choice.isdigit():
+                        additional_turns = int(choice)
+                        if additional_turns > 0:
+                            recursion_limit += additional_turns
+                            print(f"\n>>> Extending limit to {recursion_limit} turns, resuming...")
+                            continue
+                        else:
+                            print("Invalid number. Must be > 0.")
+                            continue
+                    elif choice == "S":
+                        print("\n>>> Workflow state saved.")
+                        print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+                        return 0
+                    elif choice == "C":
+                        print(f"\n>>> Cleaning checkpoint and audit directory for '{slug}'...")
+                        import shutil
+                        audit_dir = repo_root / AUDIT_ACTIVE_DIR / slug
+                        if audit_dir.exists():
+                            shutil.rmtree(audit_dir)
+                            print(f"  Deleted: {audit_dir}")
+
+                        # Delete checkpoint from database
+                        try:
+                            checkpoints = list(memory.list(config))
+                            if checkpoints:
+                                print(f"  Deleted {len(checkpoints)} checkpoint(s) for thread '{slug}'")
+                        except Exception:
+                            pass
+
+                        print(">>> Cleanup complete. Exiting.")
+                        return 0
+                    else:
+                        print("Invalid choice. Enter digit, S, or C.")
+                        continue
 
         except KeyboardInterrupt:
             print("\n\n>>> Interrupted by user. Workflow state saved.")

@@ -1,8 +1,8 @@
 # 0904 - Issue Governance Workflow
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.0
-**Last Updated:** 2026-01-26
+**Version:** 2.0
+**Last Updated:** 2026-01-28
 
 ---
 
@@ -22,6 +22,115 @@ Create GitHub issues through a governed workflow that ensures human review at ev
 | GitHub CLI authenticated | `gh auth status` (should show logged in) |
 | Poetry environment | `poetry run python --version` |
 | Brief file exists | Your idea written in markdown |
+
+---
+
+## Architecture Overview
+
+### State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> N0_LoadBrief: 1. User runs --brief file.md
+    N0_LoadBrief --> N1_Sandbox: 2. Brief loaded into state
+    N1_Sandbox --> N2_Draft: 3. Worktree created, permissions stripped
+    N2_Draft --> N3_HumanEditDraft: 4. Claude generates from brief + template
+    N3_HumanEditDraft --> N4_Review: 5. User approves draft for review
+    N3_HumanEditDraft --> N2_Draft: 5a. User requests revision
+    N4_Review --> N5_AutoRoute: 6. Gemini reviews against 0701c
+    N5_AutoRoute --> N2_Draft: 7a. Verdict has feedback (auto-revise)
+    N5_AutoRoute --> N6_FileIssue: 7b. Verdict PASSED + no suggestions (auto-file)
+    N6_FileIssue --> [*]: 8. Python executes gh, issue number assigned
+```
+
+**Node Reference:**
+| Node | Name | Description |
+|------|------|-------------|
+| N0 | LoadBrief | Load user's ideation notes from `--brief <file>` |
+| N1 | Sandbox | Create worktree, strip agent permissions |
+| N2 | Draft | Claude generates structured issue from brief + template + ALL prior Gemini verdicts |
+| N3 | HumanEditDraft | User reviews/edits Claude output in VS Code |
+| N4 | Review | Gemini reviews human-approved draft against 0701c |
+| N5 | AutoRoute | Opens verdict in VSCode (non-blocking), auto-routes based on cleanliness |
+| N6 | FileIssue | Python executes `gh issue create`, issue number assigned here |
+
+### Sequence Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Python as run_workflow.py
+    participant Claude
+    participant Gemini
+    participant VSCode
+
+    User->>Python: 1. python run_workflow.py --brief my-notes.md
+
+    rect rgb(80, 80, 80)
+        Note over Python: N0: LOAD BRIEF
+        Python->>Python: 2. Load user's ideation notes
+        Python->>Python: 3. Store brief content in state
+    end
+
+    rect rgb(139, 69, 69)
+        Note over Python: N1: THE JAIL
+        Python->>Python: 4. Create worktree sandbox
+        Python->>Python: 5. Strip agent permissions (no gh)
+    end
+
+    rect rgb(69, 139, 69)
+        Note over Python,Claude: N2: THE DRAFT
+        Python->>Claude: 6. brief + template + ALL verdicts → generate structured issue
+        Note over Claude: MUST comply with EVERY Gemini item
+        Note over Claude: OR ask orchestrator for clarification
+        Claude-->>Python: 7. draft-issue.md
+    end
+
+    rect rgb(139, 139, 69)
+        Note over Python,User: N3: HUMAN EDIT DRAFT
+        Python->>VSCode: 8. code --wait draft-issue.md
+        Note over VSCode: SCRIPT PAUSES
+        User->>VSCode: 9. Review/edit Claude draft
+        User->>VSCode: 10. Close editor
+        VSCode-->>Python: 11. Editor closed
+        Python->>User: 12. [S]end to Gemini / [R]evise / [M]anual?
+        alt User selects Revise
+            User->>Python: R + feedback
+            Note over Python: Loop to N2
+        else User selects Send
+            User->>Python: S
+            Note over Python: Proceed to N4
+        end
+    end
+
+    rect rgb(69, 69, 139)
+        Note over Python,Gemini: N4: THE GATE
+        Python->>Python: 13. Load 0701c review prompt (HARD-CODED)
+        Python->>Gemini: 14. 0701c + draft-issue.md
+        Gemini-->>Python: 15. review-verdict.md (raw)
+        Python->>Python: 16. Append verdict to verdict_history
+    end
+
+    rect rgb(139, 100, 69)
+        Note over Python,User: N5: AUTO-ROUTE (NON-BLOCKING VSCODE)
+        Python->>Python: 17. Parse verdict: PASSED + no suggestions?
+        Python->>VSCode: 18. code draft.md verdict.md (non-blocking)
+        Note over VSCode: User can inspect, workflow continues
+        alt Verdict has feedback (suggestions/architecture)
+            Python->>Python: 19a. Auto-revise → N2
+            Note over Python: Claude gets ALL verdicts from history
+        else Verdict clean (PASSED + no suggestions)
+            Python->>Python: 19b. Auto-file → N6
+        end
+    end
+
+    rect rgb(100, 69, 139)
+        Note over Python: N6: FILE ISSUE
+        Python->>Python: 20. gh issue create
+        Note over Python: Python executes gh, NOT agent
+        Note over Python: Issue number assigned HERE
+    end
+```
 
 ---
 
@@ -62,6 +171,7 @@ The workflow automatically:
 If the slug already exists, you'll be prompted:
 - **[R]esume** - Continue existing workflow from checkpoint
 - **[N]ew name** - Enter a different slug
+- **[C]lean** - Delete checkpoint and audit dir, start fresh
 - **[A]bort** - Exit cleanly
 
 ### Step 4: N2 - Claude Drafts
@@ -73,14 +183,25 @@ Claude expands your brief into a full GitHub issue with:
 - Mermaid diagrams (if applicable)
 - Labels
 
+**Revision mode:** If Claude is revising based on Gemini feedback, it receives:
+- **ALL prior Gemini verdicts** (cumulative history)
+- The current draft
+- The original brief
+- The issue template
+
+**Claude MUST:**
+1. Implement EVERY change Gemini requested (including suggestions)
+2. OR explicitly ask orchestrator for clarification using: `"ORCHESTRATOR CLARIFICATION NEEDED: [describe conflict]"`
+
 **You don't interact here** - the draft is saved to the audit trail.
 
 ### Step 5: N3 - Human Gate (Post-Claude)
 
 VS Code opens with the draft. This is your chance to:
 1. **Review** Claude's expansion of your idea
-2. **Edit** anything - title, description, approach, labels
-3. **Save and close** VS Code when done
+2. **Check** if Claude asked for orchestrator clarification
+3. **Edit** anything - title, description, approach, labels
+4. **Save and close** VS Code when done
 
 **Prompt:** `Iteration {n} | Draft #{n}`
 
@@ -89,6 +210,8 @@ Choose:
 - **[R]evise** - Send back to Claude with feedback
 - **[M]anual** - File the issue yourself (exits workflow)
 
+**If Claude asked for clarification:** Provide feedback via [R]evise option.
+
 ### Step 6: N4 - Gemini Reviews
 
 Gemini (as adversarial reviewer) checks the draft for:
@@ -96,24 +219,33 @@ Gemini (as adversarial reviewer) checks the draft for:
 - Technical feasibility
 - Security considerations
 - Missing acceptance criteria
+- Architecture suggestions
 
-**You don't interact here** - the verdict is saved to the audit trail.
+**You don't interact here** - the verdict is saved to the audit trail and appended to cumulative verdict history.
 
-### Step 7: N5 - Human Gate (Post-Gemini)
+### Step 7: N5 - Auto-Route (Non-Blocking VSCode)
 
-VS Code opens with BOTH the draft and Gemini's verdict (split view).
+**This step is AUTOMATIC. No human gate unless Claude asked for clarification.**
 
-**Prompt:** `Iteration {n} | Draft #{n} | Verdict #{n}`
+The workflow:
+1. **Parses verdict** for cleanliness (PASSED + no suggestions/architecture)
+2. **Opens VSCode (non-blocking)** - you can inspect files, workflow continues
+3. **Auto-routes:**
+   - **Clean verdict** → Auto-files to GitHub (N6)
+   - **Verdict has feedback** → Auto-sends to Claude (N2) with ALL verdict history
 
-This is the critical sanitization gate:
-1. **Read** Gemini's feedback
-2. **Decide** if changes are needed
-3. **Edit** the draft if desired
+**Terminal output:**
+```
+✓ Verdict PASSED with no suggestions
+>>> Auto-filing issue to GitHub (N6)...
+```
 
-Choose:
-- **[A]pprove** - File the issue as-is
-- **[R]evise** - Send back to Claude with Gemini's feedback incorporated
-- **[M]anual** - File the issue yourself (exits workflow)
+OR
+
+```
+⚠ Verdict has feedback (suggestions/architecture)
+>>> Auto-sending to Claude for revision (N2)...
+```
 
 ### Step 8: N6 - Issue Filed
 
@@ -122,6 +254,31 @@ The workflow runs `gh issue create` with your approved draft.
 **Output:**
 - Issue URL printed to console
 - `filed.json` saved to audit trail with issue number and metadata
+- Audit directory moved to `docs/audit/done/{slug}/`
+
+---
+
+## Recursion Limit Handling
+
+If the workflow hits the maximum turns limit (default 25 iterations), you'll see:
+
+```
+============================================================
+⚠️  MAXIMUM TURNS REACHED (25 iterations)
+============================================================
+
+Options:
+[0-9] Add more turns (enter digit to add, e.g., 5 adds 5 more)
+[S]ave and exit - workflow state preserved for resume
+[C]lean and exit - delete checkpoint and audit directory
+
+Your choice:
+```
+
+**Recommendations:**
+- **If making progress:** Enter `5` or `10` to add more turns
+- **If stuck in loop:** Use `[S]` to save and debug, or `[C]` to clean and restart
+- **Typical cause:** Gemini and Claude disagreeing on structure vs. content
 
 ---
 
@@ -130,7 +287,7 @@ The workflow runs `gh issue create` with your approved draft.
 If VS Code crashes, terminal closes, or you need to continue later:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py --resume {slug}
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py --resume /path/to/your-brief.md
 ```
 
 Or just run with the same `--brief` and choose **[R]esume** when prompted about the existing slug.
@@ -145,12 +302,14 @@ All artifacts are saved to `docs/audit/active/{slug}/`:
 |------|-------------|
 | `001-brief.md` | Your original input |
 | `002-draft.md` | Claude's first draft |
-| `003-draft-edited.md` | Your edits at N3 |
-| `004-verdict.md` | Gemini's review |
-| `005-draft.md` | Revised draft (if looped) |
+| `003-verdict.md` | Gemini's first review |
+| `004-draft.md` | Claude's revision (if looped) |
+| `005-verdict.md` | Gemini's second review (if looped) |
 | `NNN-filed.json` | Final metadata with issue URL |
 
-After the issue is filed, move the folder to `docs/audit/done/`.
+**Verdict history:** Each verdict is appended to `state.verdict_history` and sent back to Claude on revision.
+
+After the issue is filed, the folder is automatically moved to `docs/audit/done/`.
 
 ---
 
@@ -159,7 +318,7 @@ After the issue is filed, move the folder to `docs/audit/done/`.
 | Check | Command | Expected |
 |-------|---------|----------|
 | Issue created | `gh issue view {number}` | Shows your issue |
-| Audit complete | `ls docs/audit/active/{slug}/` | Has `*-filed.json` |
+| Audit complete | `ls docs/audit/done/{slug}/` | Has `*-filed.json` |
 | Labels applied | `gh issue view {number} --json labels` | Labels from draft |
 
 ---
@@ -181,7 +340,7 @@ gh auth login
 
 ### "Slug collision" but I want to start fresh
 
-Delete the existing audit directory:
+Choose **[C]lean** when prompted, or delete the existing audit directory:
 ```bash
 rm -rf docs/audit/active/{slug}
 ```
@@ -190,15 +349,29 @@ Then re-run the workflow.
 
 ### "Gemini quota exhausted"
 
-The workflow will pause. Wait for quota reset (~24h) or use a different Gemini credential. The orchestrator manages credential rotation.
+The workflow will pause. Wait for quota reset (~24h) or the orchestrator will rotate credentials automatically.
+
+### "Workflow stuck in revision loop"
+
+**Symptoms:** Claude and Gemini keep disagreeing, hitting recursion limit.
+
+**Causes:**
+1. Gemini wants structural changes, Claude preserves correct structure
+2. Conflicting feedback between multiple verdicts
+
+**Solutions:**
+1. Review verdict history in audit trail - identify the conflict
+2. Use `[R]evise` at N3 to provide orchestrator guidance
+3. If truly stuck, use `[M]anual` to file manually
 
 ---
 
 ## Related Documents
 
-- [62-governance-workflow-stategraph.md](../LLDs/done/62-governance-workflow-stategraph.md) - Implementation LLD
-- [0701c-Issue-Review-Prompt.md](../skills/0701c-Issue-Review-Prompt.md) - Gemini's review prompt (if exists)
+- [Issue #62](https://github.com/martymcenroe/AgentOS/issues/62) - Governance Workflow StateGraph
+- [0701c-Issue-Review-Prompt.md](../skills/0701c-Issue-Review-Prompt.md) - Gemini's review prompt
 - [CLAUDE.md](../../CLAUDE.md) - Core rules including Gemini orchestrator protocol
+- [workflow-lessons-learned-1.md](../workflow-lessons-learned-1.md) - Testing lessons from initial implementation
 
 ---
 
@@ -207,3 +380,4 @@ The workflow will pause. Wait for quota reset (~24h) or use a different Gemini c
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-26 | Initial version |
+| 2.0 | 2026-01-28 | Auto-routing at N5, cumulative verdict history, recursion limit handling, stronger Claude instructions |
