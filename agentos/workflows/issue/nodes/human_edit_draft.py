@@ -23,15 +23,33 @@ def open_vscode_and_wait(file_path: str) -> tuple[bool, str]:
     Returns:
         Tuple of (success, error_message). error_message is empty string on success.
     """
+    import os
+    import datetime
+
+    # Test mode: skip VS Code launch
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] TEST MODE: Skipping VS Code launch for {file_path}")
+        return True, ""
+
     try:
-        print(f"Launching: code --wait {file_path}")
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] Launching VS Code: code --wait {file_path}")
+
+        # For markdown files, also open preview side-by-side
+        cmd = ["code", "--wait", file_path]
+        if file_path.endswith(".md"):
+            cmd.extend(["--command", "markdown.showPreviewToSide"])
+
         result = subprocess.run(
-            ["code", "--wait", file_path],
+            cmd,
             capture_output=True,
             text=True,
             shell=True,  # Required on Windows to execute .CMD files
             timeout=86400,  # 24 hours - this is a human review gate
         )
+        end_timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{end_timestamp}] VS Code closed (returncode: {result.returncode})")
         if result.returncode != 0:
             error = f"VS Code exited with code {result.returncode}"
             if result.stderr:
@@ -55,6 +73,8 @@ def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
         Tuple of (decision, feedback).
         Feedback is only populated if decision is REVISE.
     """
+    import os
+
     print("\n" + "=" * 60)
     print("Draft review complete.")
     print("=" * 60)
@@ -62,6 +82,12 @@ def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
     print("[R]evise - send back to Claude with feedback")
     print("[M]anual - exit for manual handling")
     print()
+
+    # Test mode: auto-respond
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        choice = "S"
+        print(f"Your choice [S/R/M]: {choice} (TEST MODE - auto-send)")
+        return (HumanDecision.SEND, "")
 
     while True:
         choice = input("Your choice [S/R/M]: ").strip().upper()
@@ -149,6 +175,7 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
         file_counter = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_counter, "feedback.txt", feedback)
 
+        print("\n>>> Sending feedback to Claude for revision (N2)...")
         return {
             "current_draft": draft_content,
             "iteration_count": iteration_count,
@@ -159,6 +186,7 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
         }
 
     # SEND - proceed to Gemini
+    print("\n>>> Proceeding to Gemini review (N4)...")
     return {
         "current_draft": draft_content,
         "iteration_count": iteration_count,

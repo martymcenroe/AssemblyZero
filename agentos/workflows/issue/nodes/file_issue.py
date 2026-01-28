@@ -201,6 +201,8 @@ def prompt_error_recovery() -> ErrorRecovery:
     Returns:
         User's choice.
     """
+    import os
+
     print("\n" + "=" * 60)
     print("GitHub rejected the issue creation.")
     print("=" * 60)
@@ -208,6 +210,12 @@ def prompt_error_recovery() -> ErrorRecovery:
     print("[E]dit - reopen VS Code and return to review")
     print("[A]bort - exit with error (files stay in active/)")
     print()
+
+    # Test mode: abort on error
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        choice = "A"
+        print(f"Your choice [R/E/A]: {choice} (TEST MODE - abort)")
+        return ErrorRecovery.ABORT
 
     while True:
         choice = input("Your choice [R/E/A]: ").strip().upper()
@@ -260,7 +268,10 @@ def file_issue(state: IssueWorkflowState) -> dict[str, Any]:
     labels = parse_labels_from_draft(current_draft)
     title = parse_title_from_draft(current_draft)
 
-    print(f"\n>>> Filing issue: {title}")
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"\n[{timestamp}] Filing issue to GitHub...")
+    print(f">>> Title: {title}")
     print(f">>> Labels: {', '.join(labels) if labels else 'none'}")
     print(f">>> Repo: {repo}")
 
