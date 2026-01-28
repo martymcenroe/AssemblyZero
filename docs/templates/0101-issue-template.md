@@ -8,6 +8,11 @@ Copy this template when creating a new feature issue via `gh issue create`.
 ## Template
 
 ```markdown
+## User Story
+As a {role/persona},
+I want {feature/capability},
+So that {benefit/outcome}.
+
 ## Objective
 {One sentence describing what this feature accomplishes for the user.}
 
@@ -91,9 +96,10 @@ Copy this template when creating a new feature issue via `gh issue create`.
 
 ## Tips for Good Issues
 
-1. **Objective:** One sentence. If you need more, scope is too big.
-2. **UX Flow:** Walk through what the user sees, step by step.
-3. **Scenarios:** Cover happy path AND at least one error/edge case.
-4. **Acceptance Criteria:** Must be testable. "Works correctly" is bad. "Button changes color to green" is good.
-5. **Out of Scope:** Explicitly state what you're NOT doing to prevent scope creep.
-6. **Dependencies:** Call out blockers so work can be sequenced.
+1. **User Story:** Follow the "As a {role}, I want {feature}, so that {benefit}" format. Identifies WHO benefits and WHY.
+2. **Objective:** One sentence. If you need more, scope is too big.
+3. **UX Flow:** Walk through what the user sees, step by step.
+4. **Scenarios:** Cover happy path AND at least one error/edge case.
+5. **Acceptance Criteria:** Must be testable. "Works correctly" is bad. "Button changes color to green" is good.
+6. **Out of Scope:** Explicitly state what you're NOT doing to prevent scope creep.
+7. **Dependencies:** Call out blockers so work can be sequenced.
