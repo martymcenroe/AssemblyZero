@@ -547,3 +547,218 @@ class TestGraphCompilation:
         ]
         for node in expected:
             assert node in nodes, f"Missing node: {node}"
+
+
+class TestWorkflowResume:
+    """Test workflow resume functionality (CLI tool)."""
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_continues_workflow(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume actually continues streaming events."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        # Mock repo setup
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            # Mock the workflow and compiled app
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            # Mock state showing a paused workflow
+            mock_state = MagicMock()
+            mock_state.values = {
+                "iteration_count": 3,
+                "draft_count": 2,
+                "verdict_count": 1,
+            }
+            mock_app.get_state.return_value = mock_state
+
+            # Mock streaming events - simulate workflow continuing
+            mock_app.stream.return_value = [
+                {"N4_review": {"error_message": ""}},
+                {"N5_human_edit_verdict": {"error_message": ""}},
+                {"N6_file": {"issue_url": "https://github.com/owner/repo/issues/123"}},
+            ]
+
+            # Run resume with brief file
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify success
+            assert result == 0
+            # Verify stream was called to continue workflow
+            mock_app.stream.assert_called_once()
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_handles_abort(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume handles ABORTED error correctly."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            mock_state = MagicMock()
+            mock_state.values = {"iteration_count": 2}
+            mock_app.get_state.return_value = mock_state
+
+            # Mock event with ABORTED error
+            mock_app.stream.return_value = [
+                {"N3_human_edit_draft": {"error_message": "ABORTED: User cancelled"}},
+            ]
+
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify returns 0 for user abort (not an error)
+            assert result == 0
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_handles_manual(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume handles MANUAL workflow stop correctly."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            mock_state = MagicMock()
+            mock_state.values = {"iteration_count": 2}
+            mock_app.get_state.return_value = mock_state
+
+            # Mock event with MANUAL error
+            mock_app.stream.return_value = [
+                {"N5_human_edit_verdict": {"error_message": "MANUAL: Needs manual filing"}},
+            ]
+
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify returns 0 for manual stop (not an error)
+            assert result == 0
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_handles_error(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume handles workflow errors correctly."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            mock_state = MagicMock()
+            mock_state.values = {"iteration_count": 2}
+            mock_app.get_state.return_value = mock_state
+
+            # Mock event with error in final state
+            mock_app.stream.return_value = [
+                {"N4_review": {"error_message": ""}},
+                {"N6_file": {"error_message": "Failed to create issue: API error"}},
+            ]
+
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify returns 1 for error
+            assert result == 1
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_streams_multiple_events(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume processes multiple events correctly."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            mock_state = MagicMock()
+            mock_state.values = {"iteration_count": 1}
+            mock_app.get_state.return_value = mock_state
+
+            # Mock multiple events being streamed
+            events_streamed = []
+
+            def mock_stream(state, config):
+                events = [
+                    {"N4_review": {"error_message": ""}},
+                    {"N5_human_edit_verdict": {"error_message": ""}},
+                    {"N2_draft": {"error_message": ""}},
+                    {"N4_review": {"error_message": ""}},
+                    {"N5_human_edit_verdict": {"error_message": ""}},
+                    {"N6_file": {"issue_url": "https://github.com/owner/repo/issues/456"}},
+                ]
+                for event in events:
+                    events_streamed.append(event)
+                    yield event
+
+            mock_app.stream = mock_stream
+
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify all events were processed
+            assert len(events_streamed) == 6
+            assert result == 0
+
+    @patch("tools.run_issue_workflow.get_repo_root")
+    @patch("tools.run_issue_workflow.slug_exists")
+    @patch("tools.run_issue_workflow.build_issue_workflow")
+    @patch("tools.run_issue_workflow.SqliteSaver")
+    def test_resume_empty_stream_completes(self, mock_saver, mock_build, mock_exists, mock_root):
+        """Test resume completes gracefully when no events to process."""
+        from tools.run_issue_workflow import run_resume_workflow
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_root.return_value = Path(tmpdir)
+            mock_exists.return_value = True
+
+            mock_workflow = MagicMock()
+            mock_app = MagicMock()
+            mock_workflow.compile.return_value = mock_app
+            mock_build.return_value = mock_workflow
+
+            mock_state = MagicMock()
+            mock_state.values = {"iteration_count": 5}
+            mock_app.get_state.return_value = mock_state
+
+            # Mock empty stream (workflow already complete)
+            mock_app.stream.return_value = iter([])
+
+            result = run_resume_workflow("test-brief.md")
+
+            # Verify returns 0 (no error)
+            assert result == 0

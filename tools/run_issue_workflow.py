@@ -381,6 +381,7 @@ def run_resume_workflow(brief_file: str) -> int:
                 print(f">>> Verdicts: {state.values.get('verdict_count', 0)}")
 
             while True:
+                final_state = None
                 try:
                     # Continue the workflow
                     for event in app.stream(None, config):
@@ -391,15 +392,19 @@ def run_resume_workflow(brief_file: str) -> int:
                                 if "ABORTED" in error or "MANUAL" in error:
                                     print(f"\n>>> Workflow stopped: {error}")
                                     return 0
+                            final_state = node_output
 
-                    # Check for success
-                    final_state = app.get_state(config)
-                    if final_state.values and final_state.values.get("issue_url"):
-                        print(f"\n{'=' * 60}")
-                        print("SUCCESS!")
-                        print(f"Issue: {final_state.values.get('issue_url')}")
-                        print(f"{'=' * 60}")
-                        return 0
+                    # Check final state
+                    if final_state:
+                        if final_state.get("issue_url"):
+                            print(f"\n{'=' * 60}")
+                            print("SUCCESS!")
+                            print(f"Issue: {final_state.get('issue_url')}")
+                            print(f"{'=' * 60}")
+                            return 0
+                        elif final_state.get("error_message"):
+                            print(f"\n>>> Error: {final_state.get('error_message')}")
+                            return 1
 
                     # Workflow completed normally
                     break
