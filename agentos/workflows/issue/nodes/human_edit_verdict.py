@@ -16,7 +16,11 @@ from agentos.workflows.issue.state import HumanDecision, IssueWorkflowState
 
 
 def is_verdict_clean(verdict_content: str) -> bool:
-    """Check if Gemini verdict is perfectly clean (PASSED + no suggestions).
+    """Check if Gemini verdict approves the issue.
+
+    The verdict uses markdown checkboxes to indicate the decision:
+    - [x] **APPROVED** - Issue is ready to file
+    - [x] **REVISE** - Issue needs changes
 
     Args:
         verdict_content: The verdict text to check.
@@ -24,15 +28,12 @@ def is_verdict_clean(verdict_content: str) -> bool:
     Returns:
         True if verdict is clean (auto-file), False if needs revision.
     """
-    # Must contain PASSED
-    if "PASSED" not in verdict_content:
+    # Check for explicit approval (checked APPROVED box)
+    if "[x] **APPROVED**" not in verdict_content:
         return False
 
-    # Must NOT contain suggestions or architecture sections
-    lowercase = verdict_content.lower()
-    if "suggestion" in lowercase:
-        return False
-    if "architecture" in lowercase:
+    # Check for NO revision request (checked REVISE box)
+    if "[x] **REVISE**" in verdict_content:
         return False
 
     return True
@@ -236,6 +237,8 @@ def human_edit_verdict(state: IssueWorkflowState) -> dict[str, Any]:
     if not verdict_path or not Path(verdict_path).exists():
         return {"error_message": "No verdict file to review"}
 
+    import os
+
     # Display iteration info
     print(f"\n>>> Iteration {iteration_count} | Draft #{draft_count} | Verdict #{verdict_count}")
 
@@ -246,11 +249,13 @@ def human_edit_verdict(state: IssueWorkflowState) -> dict[str, Any]:
     # Check if verdict is perfectly clean
     clean = is_verdict_clean(verdict_content)
 
-    # Open VS Code non-blocking for inspection
-    print(f">>> Opening verdict in VS Code (non-blocking):")
-    print(f"    {draft_path}")
-    print(f"    {verdict_path}")
-    open_vscode_non_blocking(draft_path, verdict_path)
+    # Auto mode: skip VS Code preview (will open done/ folder at end of workflow)
+    if os.environ.get("AGENTOS_AUTO_MODE") != "1":
+        # Interactive mode: open VS Code non-blocking for inspection
+        print(f">>> Opening verdict in VS Code (non-blocking):")
+        print(f"    {draft_path}")
+        print(f"    {verdict_path}")
+        open_vscode_non_blocking(draft_path, verdict_path)
 
     if clean:
         # Perfectly clean - auto-file

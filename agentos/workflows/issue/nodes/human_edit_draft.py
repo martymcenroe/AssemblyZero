@@ -14,6 +14,57 @@ from agentos.workflows.issue.audit import next_file_number, save_audit_file
 from agentos.workflows.issue.state import HumanDecision, IssueWorkflowState
 
 
+def open_vscode_non_blocking(file_path: str) -> tuple[bool, str]:
+    """Open VS Code without waiting (non-blocking).
+
+    Args:
+        file_path: Path to file to open.
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty string on success.
+    """
+    import os
+    import datetime
+
+    # Test mode: skip VS Code launch
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] TEST MODE: Skipping VS Code launch for {file_path}")
+        return True, ""
+
+    try:
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] Launching VS Code (non-blocking): code {file_path}")
+
+        # For markdown files, also open preview side-by-side
+        cmd = ["code", file_path]
+        if file_path.endswith(".md"):
+            cmd.extend(["--command", "markdown.showPreviewToSide"])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            shell=True,  # Required on Windows to execute .CMD files
+            timeout=10,  # Short timeout - just launching, not waiting
+        )
+        if result.returncode != 0:
+            error = f"VS Code exited with code {result.returncode}"
+            if result.stderr:
+                error += f"\nStderr: {result.stderr}"
+            if result.stdout:
+                error += f"\nStdout: {result.stdout}"
+            return False, error
+        return True, ""
+    except subprocess.TimeoutExpired:
+        # This shouldn't happen for non-blocking launch
+        return False, "VS Code launch timed out"
+    except FileNotFoundError:
+        return False, "'code' command not found. Is VS Code installed and in PATH?"
+    except Exception as e:
+        return False, f"Unexpected error launching VS Code: {type(e).__name__}: {e}"
+
+
 def open_vscode_and_wait(file_path: str) -> tuple[bool, str]:
     """Open VS Code with --wait flag and block until closed.
 
@@ -89,6 +140,12 @@ def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
         print(f"Your choice [G/R/S]: {choice} (TEST MODE - auto-send)")
         return (HumanDecision.SEND, "")
 
+    # Auto mode: auto-send to Gemini
+    if os.environ.get("AGENTOS_AUTO_MODE") == "1":
+        choice = "G"
+        print(f"Your choice [G/R/S]: {choice} (AUTO MODE - auto-send)")
+        return (HumanDecision.SEND, "")
+
     while True:
         choice = input("Your choice [G/R/S]: ").strip().upper()
         if choice == "G":
@@ -142,19 +199,25 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
     # Increment iteration count
     iteration_count += 1
 
+    import os
+
     # Display iteration info
     print(f"\n>>> Iteration {iteration_count} | Draft #{draft_count}")
     print(f">>> Opening: {draft_path}")
 
-    # Open VS Code and wait
-    success, error = open_vscode_and_wait(draft_path)
-    if not success:
-        print(f"\nERROR: Failed to open VS Code")
-        print(f"  {error}")
-        print("\nYou can manually open the file:")
-        print(f"  code {draft_path}")
-        print("\nPress Enter when you've reviewed the draft...")
-        input()
+    # Auto mode: skip VS Code (will open done/ folder at end of workflow)
+    if os.environ.get("AGENTOS_AUTO_MODE") == "1":
+        pass  # Don't open VS Code - user can't interact anyway
+    else:
+        # Interactive mode: open VS Code and wait for user to close
+        success, error = open_vscode_and_wait(draft_path)
+        if not success:
+            print(f"\nERROR: Failed to open VS Code")
+            print(f"  {error}")
+            print("\nYou can manually open the file:")
+            print(f"  code {draft_path}")
+            print("\nPress Enter when you've reviewed the draft...")
+            input()
 
     # Read potentially edited draft
     draft_content = Path(draft_path).read_text(encoding="utf-8")

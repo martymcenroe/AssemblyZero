@@ -6,6 +6,8 @@ Executes gh issue create - ONLY this node can file issues.
 The agent never has access to gh; only Python can execute it.
 """
 
+import datetime
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,6 +22,48 @@ from agentos.workflows.issue.audit import (
     save_filed_metadata,
 )
 from agentos.workflows.issue.state import ErrorRecovery, IssueWorkflowState
+
+
+def open_vscode_folder(folder_path: str) -> tuple[bool, str]:
+    """Open a folder in VS Code for review.
+
+    Args:
+        folder_path: Path to folder to open.
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty string on success.
+    """
+    # Test mode: skip VS Code launch
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] TEST MODE: Skipping VS Code launch for folder {folder_path}")
+        return True, ""
+
+    try:
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] Launching VS Code: code {folder_path}")
+
+        result = subprocess.run(
+            ["code", folder_path],
+            capture_output=True,
+            text=True,
+            shell=True,  # Required on Windows to execute .CMD files
+            timeout=10,  # Short timeout - just launching, not waiting
+        )
+        if result.returncode != 0:
+            error = f"VS Code exited with code {result.returncode}"
+            if result.stderr:
+                error += f"\nStderr: {result.stderr}"
+            if result.stdout:
+                error += f"\nStdout: {result.stdout}"
+            return False, error
+        return True, ""
+    except subprocess.TimeoutExpired:
+        return False, "VS Code launch timed out"
+    except FileNotFoundError:
+        return False, "'code' command not found. Is VS Code installed and in PATH?"
+    except Exception as e:
+        return False, f"Unexpected error launching VS Code: {type(e).__name__}: {e}"
 
 
 def get_repo_name() -> str:
@@ -269,7 +313,6 @@ def file_issue(state: IssueWorkflowState) -> dict[str, Any]:
     labels = parse_labels_from_draft(current_draft)
     title = parse_title_from_draft(current_draft)
 
-    import datetime
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     print(f"\n[{timestamp}] Filing issue to GitHub...")
     print(f">>> Title: {title}")
@@ -327,6 +370,13 @@ def file_issue(state: IssueWorkflowState) -> dict[str, Any]:
                 print(f">>> Committed audit trail for #{issue_number}")
             except subprocess.CalledProcessError as e:
                 print(f"Warning: Failed to commit audit trail: {e}")
+
+            # Auto mode: open done/ folder for review (since we skipped VS Code during workflow)
+            if os.environ.get("AGENTOS_AUTO_MODE") == "1":
+                print(f"\n>>> Opening audit trail for review...")
+                success, error = open_vscode_folder(str(done_dir))
+                if not success:
+                    print(f"Warning: Failed to open VS Code: {error}")
 
             return {
                 "issue_number": issue_number,
