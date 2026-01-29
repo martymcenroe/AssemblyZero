@@ -226,11 +226,17 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
     decision, feedback = prompt_user_decision_draft()
 
     if decision == HumanDecision.MANUAL:
-        # Raise KeyboardInterrupt to pause workflow WITHOUT completing this node.
-        # This ensures the checkpoint is saved BEFORE this node, so resume
-        # will re-run this node and show the prompt again.
-        print("\n>>> Pausing workflow for manual handling...")
-        raise KeyboardInterrupt("User chose manual handling")
+        # Return with next_node pointing back to N3 (this node).
+        # The workflow will route back to N3, where interrupt_before will pause.
+        # This ensures the checkpoint is saved with state.next = ("N3_human_edit_draft",)
+        # so resume will properly continue from this node.
+        print("\n>>> Saving workflow state for later...")
+        return {
+            "current_draft": draft_content,
+            "iteration_count": iteration_count,
+            "next_node": "N3_human_edit_draft",
+            "error_message": "",
+        }
 
     if decision == HumanDecision.REVISE:
         # Save feedback to audit trail

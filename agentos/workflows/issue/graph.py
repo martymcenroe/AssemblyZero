@@ -26,12 +26,13 @@ from agentos.workflows.issue.state import IssueWorkflowState
 
 def route_after_draft_edit(
     state: IssueWorkflowState,
-) -> Literal["N4_review", "N2_draft", "end"]:
+) -> Literal["N4_review", "N2_draft", "N3_human_edit_draft", "end"]:
     """Conditional routing after N3 (human edit draft).
 
     Routes based on state["next_node"]:
     - "N4_review" -> Proceed to Gemini review
     - "N2_draft" -> Loop back for revision
+    - "N3_human_edit_draft" -> Loop back to self (save and exit)
     - "MANUAL_EXIT" -> End workflow
 
     Args:
@@ -50,6 +51,10 @@ def route_after_draft_edit(
         return "N4_review"
     elif next_node == "N2_draft":
         return "N2_draft"
+    elif next_node == "N3_human_edit_draft":
+        # User chose "Save and exit" - loop back to N3
+        # The interrupt_before will pause the workflow before N3 runs again
+        return "N3_human_edit_draft"
     else:
         return "end"
 
@@ -187,13 +192,15 @@ def build_issue_workflow() -> StateGraph:
         },
     )
 
-    # N3 -> N4 or N2 (conditional based on user choice)
+    # N3 -> N4, N2, or N3 (conditional based on user choice)
+    # N3 loops back to itself for "save and exit" - interrupt_before will pause
     workflow.add_conditional_edges(
         "N3_human_edit_draft",
         route_after_draft_edit,
         {
             "N4_review": "N4_review",
             "N2_draft": "N2_draft",
+            "N3_human_edit_draft": "N3_human_edit_draft",
             "end": END,
         },
     )

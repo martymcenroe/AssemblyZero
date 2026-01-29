@@ -281,7 +281,12 @@ def run_new_workflow(brief_file: str, source_idea: str = "") -> int:
     # Use SQLite for persistence
     db_path = get_checkpoint_db_path()
     with SqliteSaver.from_conn_string(str(db_path)) as memory:
-        app = workflow.compile(checkpointer=memory)
+        # Use interrupt_before to properly handle pause/resume at human nodes
+        # This ensures checkpoints save state.next correctly for resumption
+        app = workflow.compile(
+            checkpointer=memory,
+            interrupt_before=["N3_human_edit_draft"],
+        )
 
         # Initial state
         initial_state: IssueWorkflowState = {
@@ -323,13 +328,17 @@ def run_new_workflow(brief_file: str, source_idea: str = "") -> int:
 
         # Run the workflow with recursion limit handling
         try:
+            stream_input = initial_state  # First iteration uses initial state
             while True:
                 final_state = None
+                n3_ran_this_iteration = False
                 try:
-                    for event in app.stream(initial_state, config):
+                    for event in app.stream(stream_input, config):
                         # Process each node's output
                         for node_name, node_output in event.items():
                             print(f"\n>>> Executing: {node_name}")
+                            if node_name == "N3_human_edit_draft":
+                                n3_ran_this_iteration = True
                             if node_output.get("error_message"):
                                 error = node_output["error_message"]
                                 if error.startswith("SLUG_COLLISION:"):
@@ -342,6 +351,19 @@ def run_new_workflow(brief_file: str, source_idea: str = "") -> int:
                                     print(f"\n>>> Workflow stopped: {error}")
                                     return 0
                             final_state = node_output
+
+                    # Check if we're paused at an interrupt point
+                    state = app.get_state(config)
+                    if state.next and "N3_human_edit_draft" in state.next:
+                        if n3_ran_this_iteration:
+                            # User chose [S]ave and exit - N3 ran and routed back to itself
+                            print("\n>>> Workflow state saved.")
+                            print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
+                            return 0
+                        else:
+                            # First time reaching N3 - auto-continue to run the human node
+                            stream_input = None  # Continue from checkpoint
+                            continue
 
                     # Check final state
                     if final_state:
@@ -446,7 +468,12 @@ def run_resume_workflow(brief_file: str) -> int:
     # Use SQLite for persistence
     db_path = get_checkpoint_db_path()
     with SqliteSaver.from_conn_string(str(db_path)) as memory:
-        app = workflow.compile(checkpointer=memory)
+        # Use interrupt_before to properly handle pause/resume at human nodes
+        # This ensures checkpoints save state.next correctly for resumption
+        app = workflow.compile(
+            checkpointer=memory,
+            interrupt_before=["N3_human_edit_draft"],
+        )
 
         # Use brief filename as thread ID
         # Start with default recursion limit
@@ -472,19 +499,38 @@ def run_resume_workflow(brief_file: str) -> int:
                 print(f">>> Drafts: {state.values.get('draft_count', 0)}")
                 print(f">>> Verdicts: {state.values.get('verdict_count', 0)}")
 
+            # Check if we're resuming at an interrupt point
+            if state.next:
+                print(f">>> Paused at: {', '.join(state.next)}")
+
             while True:
                 final_state = None
+                n3_ran_this_iteration = False
                 try:
                     # Continue the workflow
                     for event in app.stream(None, config):
                         for node_name, node_output in event.items():
                             print(f"\n>>> Executing: {node_name}")
+                            if node_name == "N3_human_edit_draft":
+                                n3_ran_this_iteration = True
                             if node_output.get("error_message"):
                                 error = node_output["error_message"]
                                 if "ABORTED" in error or "MANUAL" in error:
                                     print(f"\n>>> Workflow stopped: {error}")
                                     return 0
                             final_state = node_output
+
+                    # Check if we're paused at an interrupt point
+                    state = app.get_state(config)
+                    if state.next and "N3_human_edit_draft" in state.next:
+                        if n3_ran_this_iteration:
+                            # User chose [S]ave and exit - N3 ran and routed back to itself
+                            print("\n>>> Workflow state saved.")
+                            print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
+                            return 0
+                        else:
+                            # Paused at N3 but it didn't run - continue to run it
+                            continue
 
                     # Check final state
                     if final_state:
