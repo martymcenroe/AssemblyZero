@@ -39,8 +39,34 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 ### Scenario 5: Issue Has No Comments
 1. Tool processes issue #45 which has no comments
 2. Tool creates `001-issue.md` and `003-metadata.json`
-3. Tool skips `002-comments.md` (or creates empty placeholder)
+3. Tool creates `002-comments.md` containing only the text `No comments found.`
 4. Result: Graceful handling of issues without discussion
+
+### Scenario 6: Verbose Debugging Mode
+1. User runs `python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --verbose`
+2. Tool outputs detailed logging including API responses, slug transformations, and file write operations
+3. Result: User can debug issues with specific issue processing
+
+### Scenario 7: API Timeout During Batch Processing (Fail Open)
+1. Tool is processing issue #50 of 100
+2. `gh issue view` times out or returns an error
+3. Tool logs the error with issue number and error message to stderr
+4. Tool increments error counter and continues to issue #51
+5. Result: At completion, tool reports "Processed 99/100 issues. 1 error(s) logged."
+
+### Scenario 8: Fatal Error - Authentication Failure (Fail Fast)
+1. User runs tool without valid `gh` authentication
+2. Tool attempts first API call
+3. Tool receives authentication error
+4. Tool aborts immediately with non-zero exit code and error message
+5. Result: No partial processing, clear error for user to fix auth
+
+### Scenario 9: Rate Limit Handling
+1. Tool is processing a large repository with 200+ issues
+2. GitHub API returns `429 Too Many Requests` response
+3. Tool logs the rate limit error to stderr
+4. Tool continues to next issue (Fail Open behavior)
+5. Result: Summary shows rate-limited issues as failed; user can re-run with `--skip-existing`
 
 ## Requirements
 
@@ -50,20 +76,22 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 3. Accept `--dry-run` flag to preview without writing
 4. Accept `--skip-existing` flag to preserve existing audit directories
 5. Accept `--open-only` flag to process only open issues
-6. Provide clear progress output showing issues processed
+6. Accept `--verbose` flag for detailed debug output
+7. Provide clear progress output showing issues processed
 
 ### Slug Generation
 1. Implement slug algorithm matching `agentos/workflows/issue/audit.py`
 2. Lowercase the title
 3. Replace spaces and underscores with hyphens
-4. Remove special characters (keep alphanumeric and hyphens only)
-5. Collapse multiple consecutive hyphens to single hyphen
-6. Prepend issue number: `{number}-{slug}`
-7. Handle edge cases: empty titles, all-special-character titles
+4. Remove special characters (keep alphanumeric and hyphens only via regex `[^a-z0-9-]`)
+5. Collapse multiple consecutive hyphens to single hyphen (via regex `-+` → `-`)
+6. Strip leading/trailing hyphens
+7. Prepend issue number: `{number}-{slug}`
+8. Handle edge cases: empty titles become `{number}-untitled`, all-special-character titles become `{number}-untitled`
 
 ### File Generation
 1. Create `001-issue.md` with issue title as H1 and body as content
-2. Create `002-comments.md` with all comments, each prefixed by author and date
+2. Create `002-comments.md` with all comments, each prefixed by author and date; if no comments exist, file contains only `No comments found.`
 3. Create `003-metadata.json` with issue metadata (number, URL, state, labels, timestamps, linked PRs)
 4. Place files in `docs/audit/done/{slug}/` for closed issues
 5. Place files in `docs/audit/active/{slug}/` for open issues
@@ -74,9 +102,15 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 3. Handle pagination for repos with many issues
 4. Include linked PR detection from timeline events or issue body references
 
+### Error Handling Strategy
+1. **Fail Open (Log and Continue):** For individual issue processing errors (API timeouts, malformed data, rate limits `429`), log the error to stderr and continue processing remaining issues
+2. **Fail Fast:** For fatal errors (invalid repo, authentication failure, filesystem permission denied), abort immediately with non-zero exit code
+3. At completion, report summary: total issues, successful, skipped, and failed counts
+4. Exit with code 0 if all issues processed successfully, exit with code 1 if any issues failed
+
 ## Technical Approach
 - **CLI Parsing:** `argparse` for command-line interface
-- **GitHub API:** `subprocess` calls to `gh` CLI (avoids auth token management)
+- **GitHub API:** `subprocess` calls to `gh` CLI using list argument format (e.g., `subprocess.run(['gh', 'issue', 'list', '--repo', repo_name, '--json', 'number,title,state'], ...)`) — **never use `shell=True`** to prevent command injection
 - **Slug Generation:** Pure Python string manipulation (no external dependencies)
 - **File I/O:** `pathlib` for cross-platform path handling
 - **JSON Handling:** Standard library `json` module
@@ -87,9 +121,11 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 - Respects existing `gh` CLI authentication
 - No sensitive data stored—all content already public in GitHub issues
 - Local file writes restricted to `docs/audit/` directory tree
+- **All `subprocess` calls MUST use list argument format** (e.g., `['gh', 'issue', 'list', ...]`) and **MUST NOT use `shell=True`** to prevent shell injection attacks via malformed `--repo` arguments
 
 ## Files to Create/Modify
 - `tools/backfill_issue_audit.py` — Main CLI tool (new file)
+- `tools/fixtures/` — Static JSON fixtures for offline unit testing (new directory)
 - `docs/audit/done/` — Directory for closed issue audits (created by tool)
 - `docs/audit/active/` — Directory for open issue audits (created by tool)
 
@@ -102,6 +138,7 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 - **PR audit backfill** — separate tool for pull request audit trails
 - **Cross-repo linking** — detecting references between repos
 - **LLM summarization** — generating brief/summary from issue content
+- **GraphQL batching** — using `gh api graphql` for performance optimization on extremely large repos
 
 ## Acceptance Criteria
 - [ ] Running `--repo martymcenroe/AgentOS` creates audit directories for all issues
@@ -114,18 +151,24 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 - [ ] `--dry-run` prints actions without creating files
 - [ ] `--skip-existing` preserves directories that already exist
 - [ ] `--all-registered` processes multiple repos from registry
-- [ ] Tool handles issues with no comments gracefully
-- [ ] Tool handles issues with special characters in titles
+- [ ] `--verbose` outputs detailed debug information including API responses and file operations
+- [ ] Tool handles issues with no comments by creating `002-comments.md` containing `No comments found.`
+- [ ] Tool handles issues with special characters in titles using the slug algorithm: lowercase → replace spaces/underscores with hyphens → remove non-alphanumeric characters except hyphens → collapse consecutive hyphens → strip leading/trailing hyphens → prepend issue number
+- [ ] Tool logs errors for individual issue failures and continues processing (Fail Open)
+- [ ] Tool aborts immediately on fatal errors (invalid repo, auth failure) (Fail Fast)
+- [ ] Tool reports processing summary at completion (total, successful, skipped, failed)
+- [ ] All `subprocess` calls use list argument format without `shell=True`
 
 ## Definition of Done
 
 ### Implementation
 - [ ] Core feature implemented
-- [ ] Unit tests written and passing
+- [ ] Unit tests written and passing using static JSON fixtures (offline-capable)
 - [ ] Integration test with real GitHub repo
 
 ### Tools
 - [ ] `tools/backfill_issue_audit.py` created and executable
+- [ ] `tools/fixtures/` directory with mock `gh` CLI JSON responses for unit tests
 - [ ] Tool usage documented in script docstring
 
 ### Documentation
@@ -146,3 +189,10 @@ Create a Python CLI tool that backfills the `docs/audit/` directory structure fo
 - Test with issue titles containing emojis, quotes, slashes
 - Test `--dry-run` actually creates no files (check filesystem before/after)
 - Test `--skip-existing` by pre-creating one directory
+- **Offline Unit Tests:** Use static JSON fixtures in `tools/fixtures/` to test parsing logic without network access; mock `subprocess.run` to return fixture data
+- **Error Handling Tests:** Simulate API timeout by mocking subprocess to raise `TimeoutExpired`; verify tool logs error and continues
+- **Injection Tests:** Pass malicious `--repo` values (e.g., `foo; rm -rf /`) and verify no shell execution occurs
+- **Rate Limit Tests:** Mock `429` response from subprocess; verify Fail Open behavior logs and continues
+
+## Labels
+`enhancement`, `tooling`, `maintenance`, `audit`, `backfill`
