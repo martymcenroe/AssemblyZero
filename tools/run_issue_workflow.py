@@ -612,6 +612,12 @@ Examples:
         idea_path, from_ideas = result
         return run_new_workflow(idea_path, source_idea=idea_path if from_ideas else "")
     elif args.brief:
+        # Auto-detect if brief is from ideas/active/ and set source_idea
+        brief_path = Path(args.brief).resolve()
+        repo_root = get_repo_root()
+        ideas_active = repo_root / "ideas" / "active"
+        if brief_path.parent == ideas_active:
+            return run_new_workflow(args.brief, source_idea=str(brief_path))
         return run_new_workflow(args.brief)
     elif args.resume:
         return run_resume_workflow(args.resume)

@@ -27,6 +27,18 @@
 {{TEST_OUTPUT}}
 ```
 
+## Warnings Summary
+
+**Total Warnings:** X
+
+| Count | Type | Source | Message |
+|-------|------|--------|---------|
+| X | `WarningType` | package.module | "Warning message summary" |
+
+**Analysis:**
+- Which warnings are from dependencies vs project code
+- Whether any require action before merge
+
 ## Skipped Tests
 
 | Test | Reason |

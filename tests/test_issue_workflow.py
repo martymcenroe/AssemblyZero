@@ -938,3 +938,108 @@ class TestWorkflowResumeIntegration:
                 # State should still be accessible
                 state = app.get_state(config)
                 assert state.values.get("counter") == 111
+
+
+class TestBriefIdeaDetection:
+    """Test that --brief auto-detects ideas/active/ files for cleanup."""
+
+    def test_brief_from_ideas_active_sets_source_idea(self, tmp_path, monkeypatch):
+        """When --brief is from ideas/active/, source_idea should be set."""
+        # Create ideas/active/ structure
+        ideas_active = tmp_path / "ideas" / "active"
+        ideas_active.mkdir(parents=True)
+        idea_file = ideas_active / "test-idea.md"
+        idea_file.write_text("# Test Idea")
+
+        # Test the detection logic used in main()
+        brief_path = Path(str(idea_file)).resolve()
+        repo_root = tmp_path
+        ideas_active_dir = repo_root / "ideas" / "active"
+
+        # The condition checks if parent directory is ideas/active/
+        assert brief_path.parent == ideas_active_dir
+
+    def test_brief_from_elsewhere_no_source_idea(self, tmp_path, monkeypatch):
+        """When --brief is NOT from ideas/active/, source_idea should not be set."""
+        # Create file outside ideas/active/
+        other_dir = tmp_path / "other"
+        other_dir.mkdir()
+        brief_file = other_dir / "notes.md"
+        brief_file.write_text("# Notes")
+
+        # Test the detection logic
+        brief_path = Path(str(brief_file)).resolve()
+        repo_root = tmp_path
+        ideas_active_dir = repo_root / "ideas" / "active"
+
+        # The condition should NOT match
+        assert brief_path.parent != ideas_active_dir
+
+    def test_brief_from_ideas_done_no_source_idea(self, tmp_path, monkeypatch):
+        """When --brief is from ideas/done/, source_idea should not be set."""
+        # Create ideas/done/ structure (not active)
+        ideas_done = tmp_path / "ideas" / "done"
+        ideas_done.mkdir(parents=True)
+        done_file = ideas_done / "completed-idea.md"
+        done_file.write_text("# Completed Idea")
+
+        # Test the detection logic
+        brief_path = Path(str(done_file)).resolve()
+        repo_root = tmp_path
+        ideas_active_dir = repo_root / "ideas" / "active"
+
+        # The condition should NOT match
+        assert brief_path.parent != ideas_active_dir
+
+    @patch("tools.run_issue_workflow.run_new_workflow")
+    @patch("tools.run_issue_workflow.get_repo_root")
+    def test_main_sets_source_idea_for_ideas_active(
+        self, mock_root, mock_run_new, tmp_path, monkeypatch
+    ):
+        """Test main() actually passes source_idea when --brief is in ideas/active/."""
+        import sys
+
+        # Create ideas/active/ structure
+        ideas_active = tmp_path / "ideas" / "active"
+        ideas_active.mkdir(parents=True)
+        idea_file = ideas_active / "test-idea.md"
+        idea_file.write_text("# Test Idea")
+
+        mock_root.return_value = tmp_path
+        mock_run_new.return_value = 0
+
+        # Simulate --brief argument
+        from tools.run_issue_workflow import main
+
+        monkeypatch.setattr(sys, "argv", ["run_issue_workflow.py", "--brief", str(idea_file)])
+
+        main()
+
+        # Verify source_idea was passed
+        mock_run_new.assert_called_once_with(str(idea_file), source_idea=str(idea_file.resolve()))
+
+    @patch("tools.run_issue_workflow.run_new_workflow")
+    @patch("tools.run_issue_workflow.get_repo_root")
+    def test_main_no_source_idea_for_other_paths(
+        self, mock_root, mock_run_new, tmp_path, monkeypatch
+    ):
+        """Test main() does NOT pass source_idea when --brief is elsewhere."""
+        import sys
+
+        # Create file outside ideas/active/
+        other_dir = tmp_path / "docs"
+        other_dir.mkdir()
+        brief_file = other_dir / "notes.md"
+        brief_file.write_text("# Notes")
+
+        mock_root.return_value = tmp_path
+        mock_run_new.return_value = 0
+
+        from tools.run_issue_workflow import main
+
+        monkeypatch.setattr(sys, "argv", ["run_issue_workflow.py", "--brief", str(brief_file)])
+
+        main()
+
+        # Verify source_idea was NOT passed
+        mock_run_new.assert_called_once_with(str(brief_file))

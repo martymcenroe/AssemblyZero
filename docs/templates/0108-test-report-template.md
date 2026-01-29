@@ -92,6 +92,23 @@ poetry run pytest tests/test_{feature}.py -v
 | 020 | {Edge case} | `test_edge_case` | PASS |
 | 030 | {Error case} | `test_error_case` | PASS |
 
+### Warnings Summary (MANDATORY)
+
+**Total Warnings:** {X}
+
+| Count | Type | Source | Message |
+|-------|------|--------|---------|
+| {N} | `DeprecationWarning` | {package.module} | "{Summary of warning message}" |
+| {N} | `FutureWarning` | {package.module} | "{Summary of warning message}" |
+| {N} | `UserWarning` | {package.module} | "{Summary of warning message}" |
+
+**Analysis:**
+- {Which warnings are from dependencies (acceptable) vs project code (needs attention)}
+- {Whether any warnings indicate upcoming breaking changes that need tracking}
+- {Action items: None / Create issue for X / Upgrade dependency Y}
+
+> **Note:** Every warning must be accounted for. Unexplained warnings are not acceptable.
+
 ## 4. Manual Verification (Orchestrator)
 
 **Tester:** {Orchestrator name}
