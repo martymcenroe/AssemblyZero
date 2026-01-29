@@ -287,17 +287,17 @@ The workflow runs `gh issue create` with your approved draft.
 
 ---
 
-## Recursion Limit Handling
+## Turn Limit Handling
 
 If the workflow hits the maximum turns limit (default 25 iterations), you'll see:
 
 ```
 ============================================================
-⚠️  MAXIMUM TURNS REACHED (25 iterations)
+WARNING: MAXIMUM TURNS REACHED (25 iterations)
 ============================================================
 
 Options:
-[0-9] Add more turns (enter digit to add, e.g., 5 adds 5 more)
+[N] Add more turns (enter any number, e.g., 10 or 50)
 [S]ave and exit - workflow state preserved for resume
 [C]lean and exit - delete checkpoint and audit directory
 
@@ -305,7 +305,7 @@ Your choice:
 ```
 
 **Recommendations:**
-- **If making progress:** Enter `5` or `10` to add more turns
+- **If making progress:** Enter any number (e.g., `10`, `25`, `100`) to add more turns
 - **If stuck in loop:** Use `[S]` to save and debug, or `[C]` to clean and restart
 - **Typical cause:** Gemini and Claude disagreeing on structure vs. content
 
@@ -393,7 +393,7 @@ The workflow will pause. Wait for quota reset (~24h) or the orchestrator will ro
 
 ### "Workflow stuck in revision loop"
 
-**Symptoms:** Claude and Gemini keep disagreeing, hitting recursion limit.
+**Symptoms:** Claude and Gemini keep disagreeing, hitting turn limit.
 
 **Causes:**
 1. Gemini wants structural changes, Claude preserves correct structure
