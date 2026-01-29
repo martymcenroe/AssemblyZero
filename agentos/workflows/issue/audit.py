@@ -35,6 +35,10 @@ class FiledMetadata(TypedDict):
 AUDIT_ACTIVE_DIR = Path("docs/audit/active")
 AUDIT_DONE_DIR = Path("docs/audit/done")
 
+# Ideas directories (staging area for workflow)
+IDEAS_ACTIVE_DIR = Path("ideas/active")
+IDEAS_DONE_DIR = Path("ideas/done")
+
 
 def get_repo_root() -> Path:
     """Detect repository root via git rev-parse.
@@ -272,6 +276,141 @@ def ensure_audit_directories(repo_root: Path | None = None) -> None:
     root = repo_root or get_repo_root()
 
     for subdir in [AUDIT_ACTIVE_DIR, AUDIT_DONE_DIR]:
+        dir_path = root / subdir
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        gitkeep = dir_path / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.touch()
+
+
+# ---------------------------------------------------------------------------
+# Ideas folder utilities (staging area for workflow)
+# ---------------------------------------------------------------------------
+
+
+def is_idea_encrypted(idea_file: Path) -> bool:
+    """Check if a file is git-crypt encrypted.
+
+    Git-crypt encrypted files start with a specific binary header.
+
+    Args:
+        idea_file: Path to the idea file.
+
+    Returns:
+        True if file appears to be git-crypt encrypted.
+    """
+    try:
+        with open(idea_file, "rb") as f:
+            header = f.read(10)
+            # Git-crypt files start with \x00GITCRYPT
+            return header.startswith(b"\x00GITCRYPT")
+    except (OSError, IOError):
+        return False
+
+
+def list_ideas(repo_root: Path | None = None) -> list[Path]:
+    """List markdown files in ideas/active/, sorted alphabetically.
+
+    Skips git-crypt encrypted files and .gitkeep.
+
+    Args:
+        repo_root: Repository root path. Auto-detected if None.
+
+    Returns:
+        List of Path objects to idea files.
+    """
+    root = repo_root or get_repo_root()
+    ideas_dir = root / IDEAS_ACTIVE_DIR
+
+    if not ideas_dir.exists():
+        return []
+
+    ideas = []
+    for f in sorted(ideas_dir.iterdir()):
+        if f.is_file() and f.suffix == ".md" and f.name != ".gitkeep":
+            if not is_idea_encrypted(f):
+                ideas.append(f)
+
+    return ideas
+
+
+def count_encrypted_ideas(repo_root: Path | None = None) -> int:
+    """Count git-crypt encrypted files in ideas/active/.
+
+    Args:
+        repo_root: Repository root path. Auto-detected if None.
+
+    Returns:
+        Number of encrypted idea files.
+    """
+    root = repo_root or get_repo_root()
+    ideas_dir = root / IDEAS_ACTIVE_DIR
+
+    if not ideas_dir.exists():
+        return 0
+
+    count = 0
+    for f in ideas_dir.iterdir():
+        if f.is_file() and f.suffix == ".md" and f.name != ".gitkeep":
+            if is_idea_encrypted(f):
+                count += 1
+
+    return count
+
+
+def move_idea_to_done(
+    idea_file: Path | str,
+    issue_number: int,
+    repo_root: Path | None = None,
+) -> Path:
+    """Move idea file from active/ to done/{issue#}-{name}.md.
+
+    Args:
+        idea_file: Path to the idea file (can be relative or absolute).
+        issue_number: GitHub issue number.
+        repo_root: Repository root path. Auto-detected if None.
+
+    Returns:
+        New path in ideas/done/.
+
+    Raises:
+        FileNotFoundError: If idea file doesn't exist.
+    """
+    root = repo_root or get_repo_root()
+    idea_path = Path(idea_file)
+
+    # Make path absolute if relative
+    if not idea_path.is_absolute():
+        idea_path = root / idea_path
+
+    if not idea_path.exists():
+        raise FileNotFoundError(f"Idea file not found: {idea_path}")
+
+    # Create done directory if needed
+    done_dir = root / IDEAS_DONE_DIR
+    done_dir.mkdir(parents=True, exist_ok=True)
+
+    # New filename: {issue#}-{original-name}.md
+    new_name = f"{issue_number}-{idea_path.name}"
+    done_path = done_dir / new_name
+
+    # Move the file
+    shutil.move(str(idea_path), str(done_path))
+    return done_path
+
+
+def ensure_ideas_directories(repo_root: Path | None = None) -> None:
+    """Ensure ideas directory structure exists.
+
+    Creates ideas/active/ and ideas/done/ with .gitkeep files.
+
+    Args:
+        repo_root: Repository root path. Auto-detected if None.
+    """
+    root = repo_root or get_repo_root()
+
+    for subdir in [IDEAS_ACTIVE_DIR, IDEAS_DONE_DIR]:
         dir_path = root / subdir
         dir_path.mkdir(parents=True, exist_ok=True)
 

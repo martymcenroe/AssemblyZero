@@ -14,6 +14,7 @@ from typing import Any
 from agentos.workflows.issue.audit import (
     batch_commit,
     get_repo_root,
+    move_idea_to_done,
     move_to_done,
     next_file_number,
     save_filed_metadata,
@@ -308,6 +309,17 @@ def file_issue(state: IssueWorkflowState) -> dict[str, Any]:
             # Move to done/
             done_dir = move_to_done(audit_dir, issue_number, slug)
             print(f">>> Audit trail moved to: {done_dir}")
+
+            # Move source idea to done/ if workflow was started from --select
+            source_idea = state.get("source_idea", "")
+            if source_idea:
+                try:
+                    idea_done_path = move_idea_to_done(source_idea, issue_number)
+                    print(f">>> Idea moved to: {idea_done_path}")
+                except FileNotFoundError:
+                    print(f"Warning: Source idea not found: {source_idea}")
+                except Exception as e:
+                    print(f"Warning: Failed to move idea: {e}")
 
             # Batch commit
             try:

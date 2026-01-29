@@ -5,10 +5,12 @@ Issue #62: Governance Workflow StateGraph
 
 Usage:
     python tools/run_issue_workflow.py --brief <file.md>
+    python tools/run_issue_workflow.py --select
     poetry run python tools/run_issue_workflow.py --resume <file.md>
 
 Options:
     --brief <file>    Path to ideation notes (starts new workflow)
+    --select          Interactive idea picker from ideas/active/
     --resume <file>   Resume interrupted workflow by brief filename
     --help            Show this help message
 """
@@ -31,14 +33,90 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from agentos.workflows.issue.audit import (
     AUDIT_ACTIVE_DIR,
+    count_encrypted_ideas,
     ensure_audit_directories,
     generate_slug,
     get_repo_root,
+    list_ideas,
     slug_exists,
 )
 from agentos.workflows.issue.graph import build_issue_workflow
 from agentos.workflows.issue.nodes.load_brief import handle_slug_collision
 from agentos.workflows.issue.state import IssueWorkflowState, SlugCollisionChoice
+
+
+def extract_idea_title(idea_file: Path) -> str:
+    """Extract title from first H1 heading in idea file.
+
+    Args:
+        idea_file: Path to the idea file.
+
+    Returns:
+        Title string, or "Untitled" if not found.
+    """
+    try:
+        content = idea_file.read_text(encoding="utf-8")
+        import re
+        match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    except Exception:
+        pass
+    return "Untitled"
+
+
+def select_idea_interactive() -> tuple[str, bool] | None:
+    """Show interactive picker for ideas in ideas/active/.
+
+    Returns:
+        Tuple of (path_to_idea, from_ideas_folder) if selected, None if quit.
+        from_ideas_folder is True to indicate the workflow should track source_idea.
+    """
+    repo_root = get_repo_root()
+    ideas = list_ideas(repo_root)
+    encrypted_count = count_encrypted_ideas(repo_root)
+
+    if not ideas and encrypted_count == 0:
+        print("\nNo ideas found in ideas/active/")
+        print("Create a .md file there first, or use --brief to specify a file directly.")
+        return None
+
+    print(f"\n{'=' * 60}")
+    print("Select Idea from ideas/active/")
+    print(f"{'=' * 60}")
+
+    for i, idea in enumerate(ideas, 1):
+        title = extract_idea_title(idea)
+        print(f"  [{i}] {idea.name}")
+        print(f"      {title}")
+
+    if encrypted_count > 0:
+        print(f"\n  Note: {encrypted_count} encrypted idea(s) found.")
+        print("        Run 'git-crypt unlock' to access them.")
+
+    print(f"\n  [q] Quit")
+    print()
+
+    # Test mode: select first idea
+    if os.environ.get("AGENTOS_TEST_MODE") == "1" and ideas:
+        choice = "1"
+        print(f"Select idea [1-{len(ideas)}, q]: {choice} (TEST MODE - auto-select)")
+        return (str(ideas[0]), True)
+
+    while True:
+        choice = input(f"Select idea [1-{len(ideas)}, q]: ").strip().lower()
+
+        if choice == "q":
+            return None
+
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(ideas):
+                return (str(ideas[idx - 1]), True)
+            else:
+                print(f"Invalid number. Enter 1-{len(ideas)} or q.")
+        except ValueError:
+            print("Invalid input. Enter a number or q.")
 
 
 def get_checkpoint_db_path() -> Path:
@@ -102,11 +180,12 @@ def prompt_slug_collision(slug: str) -> tuple[SlugCollisionChoice, str]:
             print("Invalid choice. Please enter R, N, C, or A.")
 
 
-def run_new_workflow(brief_file: str) -> int:
+def run_new_workflow(brief_file: str, source_idea: str = "") -> int:
     """Run a new issue creation workflow.
 
     Args:
         brief_file: Path to the brief file.
+        source_idea: Path to original idea in ideas/active/ (for cleanup after filing).
 
     Returns:
         Exit code (0 for success, 1 for error).
@@ -207,6 +286,7 @@ def run_new_workflow(brief_file: str) -> int:
             "brief_file": brief_file,
             "brief_content": "",
             "slug": slug if slug_exists(slug, repo_root) else "",
+            "source_idea": source_idea,
             "audit_dir": "",
             "file_counter": 0,
             "iteration_count": 0,
@@ -490,6 +570,7 @@ def main() -> int:
         epilog="""
 Examples:
     python tools/run_issue_workflow.py --brief my-feature-notes.md
+    python tools/run_issue_workflow.py --select
     poetry run python tools/run_issue_workflow.py --resume my-feature-notes.md
         """,
     )
@@ -499,6 +580,11 @@ Examples:
         help="Path to ideation notes file (starts new workflow)",
     )
     parser.add_argument(
+        "--select",
+        action="store_true",
+        help="Interactive picker for ideas in ideas/active/",
+    )
+    parser.add_argument(
         "--resume",
         type=str,
         help="Resume interrupted workflow by brief filename",
@@ -506,7 +592,14 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.brief:
+    if args.select:
+        result = select_idea_interactive()
+        if result is None:
+            print("No idea selected. Exiting.")
+            return 0
+        idea_path, from_ideas = result
+        return run_new_workflow(idea_path, source_idea=idea_path if from_ideas else "")
+    elif args.brief:
         return run_new_workflow(args.brief)
     elif args.resume:
         return run_resume_workflow(args.resume)

@@ -45,6 +45,7 @@ class IssueWorkflowState(TypedDict, total=False):
         brief_file: Path to user's ideation notes file.
         brief_content: Loaded brief text content.
         slug: Derived from brief filename, used for audit directory.
+        source_idea: Path to original idea in ideas/active/ (for cleanup after filing).
 
         # Workflow tracking
         audit_dir: Path to docs/audit/active/{slug}/.
@@ -76,6 +77,7 @@ class IssueWorkflowState(TypedDict, total=False):
     brief_file: str
     brief_content: str
     slug: str
+    source_idea: str
 
     # Workflow tracking
     audit_dir: str
