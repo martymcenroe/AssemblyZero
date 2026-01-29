@@ -5,11 +5,40 @@ https://github.com/martymcenroe/AgentOS/issues/70
 
 ## Summary
 
-Investigation and testing confirmed that the resume workflow functionality **IS WORKING** after the fix in commit `58c5c34`. The user-reported issue may have been from before that fix, or from a specific edge case that could not be reproduced.
+Fixed the resume workflow functionality to properly save and restore state when user chooses to pause. Also improved UX by changing menu prompts from `[S]end/[R]evise/[M]anual` to `[G]emini/[R]evise/[S]ave and exit`.
 
 ## Changes Made
 
-### 1. Database Path Isolation (`tools/run_issue_workflow.py`)
+### 1. KeyboardInterrupt Fix for Save/Resume (`agentos/workflows/issue/nodes/human_edit_draft.py`)
+
+**The root cause:** When user chose `[M]anual` (now `[S]ave`), the node returned `error_message: "User chose manual handling"` which completed the node and routed to END. This meant the checkpoint was saved AFTER the node, so resume had nothing to do.
+
+**The fix:** Changed to raise `KeyboardInterrupt` instead of returning, so the checkpoint is saved BEFORE the node completes. Resume then re-runs the node and shows the prompt again.
+
+```python
+if decision == HumanDecision.MANUAL:
+    # Raise KeyboardInterrupt to pause workflow WITHOUT completing this node.
+    # This ensures the checkpoint is saved BEFORE this node, so resume
+    # will re-run this node and show the prompt again.
+    print("\n>>> Pausing workflow for manual handling...")
+    raise KeyboardInterrupt("User chose manual handling")
+```
+
+### 2. UX Improvements (`agentos/workflows/issue/nodes/human_edit_draft.py`)
+
+Changed menu options for clarity:
+- `[S]end to Gemini` → `[G]emini - send to Gemini for review`
+- `[R]evise` → `[R]evise - send back to Claude with feedback`
+- `[M]anual` → `[S]ave and exit - pause workflow for later`
+
+### 3. Resume Commands Include `poetry run` (`tools/run_issue_workflow.py`)
+
+All printed resume commands now include `poetry run` prefix for copy-paste convenience:
+```
+>>> Resume with: poetry run python tools/run_issue_workflow.py --resume <file>
+```
+
+### 4. Database Path Isolation (`tools/run_issue_workflow.py`)
 
 Added environment variable support for worktree-isolated testing:
 
@@ -106,7 +135,8 @@ Slug: test-resume-brief
 
 ## Files Changed
 
-- `tools/run_issue_workflow.py` - Added AGENTOS_WORKFLOW_DB support
+- `agentos/workflows/issue/nodes/human_edit_draft.py` - KeyboardInterrupt fix, UX improvements
+- `tools/run_issue_workflow.py` - AGENTOS_WORKFLOW_DB support, poetry run in resume commands
 - `tests/test_issue_workflow.py` - Added 4 integration tests
 
 ## Known Limitations
@@ -117,4 +147,6 @@ Slug: test-resume-brief
 
 - All 58 existing tests pass (1 pre-existing failure unrelated to this fix)
 - 4 new integration tests pass
-- Manual end-to-end testing confirms resume works for both CLI and collision prompt scenarios
+- Full end-to-end test with `AGENTOS_TEST_MODE=1` ran 25 iterations successfully
+- Manual testing confirms `[S]ave and exit` properly saves state for resume
+- Resume command with `poetry run` prefix works correctly

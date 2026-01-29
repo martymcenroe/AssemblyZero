@@ -78,20 +78,20 @@ def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
     print("\n" + "=" * 60)
     print("Draft review complete.")
     print("=" * 60)
-    print("\n[S]end to Gemini for review")
+    print("\n[G]emini - send to Gemini for review")
     print("[R]evise - send back to Claude with feedback")
-    print("[M]anual - exit for manual handling")
+    print("[S]ave and exit - pause workflow for later")
     print()
 
     # Test mode: auto-respond
     if os.environ.get("AGENTOS_TEST_MODE") == "1":
-        choice = "S"
-        print(f"Your choice [S/R/M]: {choice} (TEST MODE - auto-send)")
+        choice = "G"
+        print(f"Your choice [G/R/S]: {choice} (TEST MODE - auto-send)")
         return (HumanDecision.SEND, "")
 
     while True:
-        choice = input("Your choice [S/R/M]: ").strip().upper()
-        if choice == "S":
+        choice = input("Your choice [G/R/S]: ").strip().upper()
+        if choice == "G":
             return (HumanDecision.SEND, "")
         elif choice == "R":
             print("\nEnter feedback for Claude (end with empty line):")
@@ -103,10 +103,10 @@ def prompt_user_decision_draft() -> tuple[HumanDecision, str]:
                 lines.append(line)
             feedback = "\n".join(lines)
             return (HumanDecision.REVISE, feedback)
-        elif choice == "M":
+        elif choice == "S":
             return (HumanDecision.MANUAL, "")
         else:
-            print("Invalid choice. Please enter S, R, or M.")
+            print("Invalid choice. Please enter G, R, or S.")
 
 
 def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
@@ -163,12 +163,11 @@ def human_edit_draft(state: IssueWorkflowState) -> dict[str, Any]:
     decision, feedback = prompt_user_decision_draft()
 
     if decision == HumanDecision.MANUAL:
-        return {
-            "current_draft": draft_content,
-            "iteration_count": iteration_count,
-            "next_node": "MANUAL_EXIT",
-            "error_message": "User chose manual handling",
-        }
+        # Raise KeyboardInterrupt to pause workflow WITHOUT completing this node.
+        # This ensures the checkpoint is saved BEFORE this node, so resume
+        # will re-run this node and show the prompt again.
+        print("\n>>> Pausing workflow for manual handling...")
+        raise KeyboardInterrupt("User chose manual handling")
 
     if decision == HumanDecision.REVISE:
         # Save feedback to audit trail

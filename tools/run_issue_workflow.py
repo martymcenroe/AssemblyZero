@@ -5,7 +5,7 @@ Issue #62: Governance Workflow StateGraph
 
 Usage:
     python tools/run_issue_workflow.py --brief <file.md>
-    python tools/run_issue_workflow.py --resume <file.md>
+    poetry run python tools/run_issue_workflow.py --resume <file.md>
 
 Options:
     --brief <file>    Path to ideation notes (starts new workflow)
@@ -308,7 +308,7 @@ def run_new_workflow(brief_file: str) -> int:
                             continue
                     elif choice == "S":
                         print("\n>>> Workflow state saved.")
-                        print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+                        print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
                         return 0
                     elif choice == "C":
                         print(f"\n>>> Cleaning checkpoint and audit directory for '{slug}'...")
@@ -334,7 +334,7 @@ def run_new_workflow(brief_file: str) -> int:
 
         except KeyboardInterrupt:
             print("\n\n>>> Interrupted by user. Workflow state saved.")
-            print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+            print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
             return 0
 
     return 0
@@ -450,7 +450,7 @@ def run_resume_workflow(brief_file: str) -> int:
                             continue
                     elif choice == "S":
                         print("\n>>> Workflow state saved.")
-                        print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+                        print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
                         return 0
                     elif choice == "C":
                         print(f"\n>>> Cleaning checkpoint and audit directory for '{slug}'...")
@@ -476,7 +476,7 @@ def run_resume_workflow(brief_file: str) -> int:
 
         except KeyboardInterrupt:
             print("\n\n>>> Interrupted by user. Workflow state saved.")
-            print(f">>> Resume with: python tools/run_issue_workflow.py --resume {brief_file}")
+            print(f">>> Resume with: poetry run python tools/run_issue_workflow.py --resume {brief_file}")
             return 0
 
     return 0
@@ -490,7 +490,7 @@ def main() -> int:
         epilog="""
 Examples:
     python tools/run_issue_workflow.py --brief my-feature-notes.md
-    python tools/run_issue_workflow.py --resume my-feature-notes.md
+    poetry run python tools/run_issue_workflow.py --resume my-feature-notes.md
         """,
     )
     parser.add_argument(
