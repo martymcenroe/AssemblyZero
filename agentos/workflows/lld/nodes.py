@@ -12,9 +12,7 @@ Nodes:
 """
 
 import json
-import os
 import subprocess
-import sys
 from pathlib import Path
 
 from agentos.workflows.lld.audit import (
@@ -27,6 +25,9 @@ from agentos.workflows.lld.audit import (
     save_final_lld,
 )
 from agentos.workflows.lld.state import HumanDecision, LLDWorkflowState
+
+# Configuration constants
+GH_CLI_TIMEOUT_SECONDS = 30
 
 # Maximum iterations before forcing exit
 MAX_ITERATIONS = 5
@@ -124,7 +125,7 @@ def fetch_issue(state: LLDWorkflowState) -> dict:
             ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=GH_CLI_TIMEOUT_SECONDS,
         )
 
         if result.returncode != 0:

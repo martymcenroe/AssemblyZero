@@ -25,7 +25,7 @@
 
 ### Step 1: Automated Tests Written
 - **Test file:** `tests/test_lld_workflow.py`
-- **Scenarios covered:** 30 tests across 10 test classes
+- **Scenarios covered:** 41 tests across 15 test classes
 
 ### Step 2: Tests Fail on Revert
 
