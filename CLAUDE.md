@@ -567,6 +567,7 @@ git worktree list
 ```bash
 git worktree add ../ProjectName-{IssueID} -b {IssueID}-short-desc
 git -C ../ProjectName-{IssueID} push -u origin HEAD
+poetry install --directory ../ProjectName-{IssueID}  # Install dependencies
 ```
 
 ### POST-MERGE CLEANUP (MANDATORY)
@@ -608,6 +609,7 @@ Step 2: Create worktree FIRST
 ├── git worktree list                              # Verify current state
 ├── git worktree add ../ProjectName-{ID} -b {ID}-desc # Create worktree
 ├── git push -u origin HEAD                        # Push immediately
+├── poetry install --directory ../ProjectName-{ID} # Install dependencies
 └── ONLY THEN proceed to read docs and plan
 ```
 
