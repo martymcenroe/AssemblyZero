@@ -6,12 +6,14 @@ Issue #62: Governance Workflow StateGraph
 Usage:
     python tools/run_issue_workflow.py --brief <file.md>
     python tools/run_issue_workflow.py --select
+    python tools/run_issue_workflow.py --select --auto
     poetry run python tools/run_issue_workflow.py --resume <file.md>
 
 Options:
     --brief <file>    Path to ideation notes (starts new workflow)
     --select          Interactive idea picker from ideas/active/
     --resume <file>   Resume interrupted workflow by brief filename
+    --auto            Auto mode: skip VS Code, auto-send to Gemini, open done/ at end
     --help            Show this help message
 """
 
@@ -571,6 +573,7 @@ def main() -> int:
 Examples:
     python tools/run_issue_workflow.py --brief my-feature-notes.md
     python tools/run_issue_workflow.py --select
+    python tools/run_issue_workflow.py --select --auto
     poetry run python tools/run_issue_workflow.py --resume my-feature-notes.md
         """,
     )
@@ -589,8 +592,17 @@ Examples:
         type=str,
         help="Resume interrupted workflow by brief filename",
     )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto mode: skip VS Code, auto-send to Gemini, open done/ at end",
+    )
 
     args = parser.parse_args()
+
+    # Set auto mode environment variable if flag is used
+    if args.auto:
+        os.environ["AGENTOS_AUTO_MODE"] = "1"
 
     if args.select:
         result = select_idea_interactive()
