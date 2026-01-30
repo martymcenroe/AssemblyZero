@@ -210,8 +210,9 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         )
         audit_log.log(entry)
 
-        # Step 7: Print and block for human edit
-        _human_edit_pause(draft_path)
+        # Step 7: Print and block for human edit (unless auto mode)
+        auto_mode = state.get("auto_mode", False)
+        _human_edit_pause(draft_path, auto_mode=auto_mode)
 
         # Step 8: Return state updates
         # lld_content is empty - Governance will read from disk
@@ -403,16 +404,18 @@ def _write_draft(issue_id: int, content: str) -> Path:
     return output_path
 
 
-def _human_edit_pause(draft_path: Path) -> None:
+def _human_edit_pause(draft_path: Path, auto_mode: bool = False) -> None:
     """
     Print prompt and block until user presses Enter.
 
     Args:
         draft_path: Path to the draft file (shown in prompt).
+        auto_mode: If True, skip the blocking input() call.
 
     Output:
         Draft saved: docs/llds/drafts/56-LLD.md
         Edit the file, then press Enter to continue...
     """
     print(f"Draft saved: {draft_path}")
-    input("Edit the file, then press Enter to continue...")
+    if not auto_mode:
+        input("Edit the file, then press Enter to continue...")

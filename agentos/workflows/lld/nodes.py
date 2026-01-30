@@ -201,11 +201,12 @@ def design(state: LLDWorkflowState) -> dict:
     from agentos.nodes.designer import design_lld_node
 
     # Call existing designer node
-    # It expects: issue_id, iteration_count
+    # It expects: issue_id, iteration_count, auto_mode
     # It returns: design_status, lld_draft_path, lld_content, iteration_count
     designer_state = {
         "issue_id": state.get("issue_id", state.get("issue_number")),
         "iteration_count": state.get("iteration_count", 0),
+        "auto_mode": state.get("auto_mode", False),
     }
 
     result = design_lld_node(designer_state)
