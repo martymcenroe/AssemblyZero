@@ -169,16 +169,12 @@ def draft(state: IssueWorkflowState) -> dict[str, Any]:
     if not audit_dir or not audit_dir.exists():
         return {"error_message": "Audit directory not set or doesn't exist"}
 
-    # Get repo_root from state for cross-repo workflows
-    repo_root_str = state.get("repo_root", "")
-    repo_root = Path(repo_root_str) if repo_root_str else None
-
     # Increment file counter
     file_counter = next_file_number(audit_dir)
 
     try:
-        # Load template (use repo_root for cross-repo workflows)
-        template = load_issue_template(repo_root)
+        # Load template from AgentOS (NOT target repo - templates are part of AgentOS)
+        template = load_issue_template()
     except FileNotFoundError as e:
         return {"error_message": str(e)}
 

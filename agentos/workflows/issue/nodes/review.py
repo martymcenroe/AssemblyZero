@@ -79,16 +79,12 @@ def review(state: IssueWorkflowState) -> dict[str, Any]:
     if not current_draft:
         return {"error_message": "No draft content to review"}
 
-    # Get repo_root from state for cross-repo workflows
-    repo_root_str = state.get("repo_root", "")
-    repo_root = Path(repo_root_str) if repo_root_str else None
-
     # Increment file counter
     file_counter = next_file_number(audit_dir)
 
     try:
-        # Load review prompt (HARD-CODED path, but uses repo_root for cross-repo)
-        review_prompt = load_review_prompt(repo_root)
+        # Load review prompt from AgentOS (NOT target repo - prompts are part of AgentOS)
+        review_prompt = load_review_prompt()
     except FileNotFoundError as e:
         return {"error_message": str(e)}
 
