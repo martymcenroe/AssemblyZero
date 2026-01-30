@@ -80,6 +80,7 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=str(repo_root) if repo_root else None,  # Use target repo for gh commands
         )
 
         if result.returncode != 0:

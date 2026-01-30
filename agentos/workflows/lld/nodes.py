@@ -121,13 +121,18 @@ def fetch_issue(state: LLDWorkflowState) -> dict:
     if state.get("mock_mode"):
         return _mock_fetch_issue(state)
 
+    # Get repo_root from state for cross-repo workflows
+    repo_root_str = state.get("repo_root", "")
+    repo_root = repo_root_str if repo_root_str else None
+
     try:
-        # Fetch issue via gh CLI
+        # Fetch issue via gh CLI (use cwd for cross-repo workflows)
         result = subprocess.run(
             ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
             capture_output=True,
             text=True,
             timeout=GH_CLI_TIMEOUT_SECONDS,
+            cwd=repo_root,
         )
 
         if result.returncode != 0:
@@ -153,8 +158,9 @@ def fetch_issue(state: LLDWorkflowState) -> dict:
         print(f"    Loading {len(context_files)} context file(s)...")
         context_content = assemble_context(context_files)
 
-    # Create audit directory
-    audit_dir = create_lld_audit_dir(issue_number)
+    # Create audit directory (use repo_root for cross-repo workflows)
+    repo_root_path = Path(repo_root) if repo_root else None
+    audit_dir = create_lld_audit_dir(issue_number, repo_root_path)
     print(f"    Audit dir: {audit_dir}")
 
     # Save issue to audit trail
@@ -419,6 +425,10 @@ def finalize(state: LLDWorkflowState) -> dict:
     lld_content = state.get("lld_content", "")
     verdict_count = state.get("verdict_count", 1)
 
+    # Get repo_root from state for cross-repo workflows
+    repo_root_str = state.get("repo_root", "")
+    repo_root_path = Path(repo_root_str) if repo_root_str else None
+
     # Embed review evidence in LLD content before saving
     review_date = datetime.now().strftime("%Y-%m-%d")
     lld_content = embed_review_evidence(
@@ -429,11 +439,11 @@ def finalize(state: LLDWorkflowState) -> dict:
     )
     print(f"    Embedded review evidence (Gemini #{verdict_count}, {review_date})")
 
-    # Save final LLD
-    final_path = save_final_lld(issue_number, lld_content)
+    # Save final LLD (use repo_root for cross-repo workflows)
+    final_path = save_final_lld(issue_number, lld_content, repo_root_path)
     print(f"    Saved to: {final_path}")
 
-    # Update tracking cache
+    # Update tracking cache (use repo_root for cross-repo workflows)
     update_lld_status(
         issue_number=issue_number,
         lld_path=str(final_path),
@@ -443,6 +453,7 @@ def finalize(state: LLDWorkflowState) -> dict:
             "last_review_date": review_date,
             "review_count": verdict_count,
         },
+        repo_root=repo_root_path,
     )
     print(f"    Updated lld-status.json tracking")
 
@@ -479,8 +490,10 @@ def _mock_fetch_issue(state: LLDWorkflowState) -> dict:
     """Mock implementation of fetch_issue for testing."""
     issue_number = state.get("issue_number", 42)
 
-    # Create audit directory even in mock mode
-    audit_dir = create_lld_audit_dir(issue_number)
+    # Create audit directory even in mock mode (use repo_root for cross-repo)
+    repo_root_str = state.get("repo_root", "")
+    repo_root_path = Path(repo_root_str) if repo_root_str else None
+    audit_dir = create_lld_audit_dir(issue_number, repo_root_path)
 
     mock_title = f"Mock Issue #{issue_number}"
     mock_body = """## Requirements
