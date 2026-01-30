@@ -8,12 +8,12 @@
 
 ## Problem
 
-The canonical project structure (0009) does not include a `docs/ideas/` directory for briefs and proposals. During development of the RCA-PDF-extraction-pipeline project, we created:
+The canonical project structure (0009) does not include an `ideas/` directory for briefs and proposals. During development of the RCA-PDF-extraction-pipeline project, we created:
 
 ```
-docs/ideas/
-├── active/     # Actionable briefs (004-011)
-└── backlog/    # Future/speculative ideas (001-003)
+ideas/
+├── active/     # Actionable briefs
+└── backlog/    # Future/speculative ideas
 ```
 
 This pattern proved useful for:
@@ -30,43 +30,44 @@ Currently, the canonical structure only has `docs/lld/` which is tied to GitHub 
 
 ### 1. Update Canonical Structure (0009)
 
-Add to `docs/` structure:
+Add to **root level** structure (NOT in docs/):
 
 ```
-docs/
+project/
 ├── ideas/                      # Briefs, proposals, technical debt
 │   ├── active/                 # Actionable items
-│   │   └── (Nxxx-brief-name.md files)
+│   │   └── (brief-name.md files)
 │   └── backlog/                # Future/speculative items
-│       └── (Nxxx-brief-name.md files)
+│       └── (brief-name.md files)
 ```
 
-### 2. Define Numbering Scheme
+**Why root level, not docs/?**
+- Ideas are working documents, not formal documentation
+- They precede issues and may never become formal docs
+- Keeps docs/ cleaner for finalized documentation
 
-Add to the 5-digit numbering scheme:
+### 2. No Numbering for Briefs
 
-| Range | Category | Location |
-|-------|----------|----------|
-| `5xxxx` | Ideas, briefs, proposals | `docs/ideas/` |
+Briefs are **unnumbered**. They get numbered only after an issue is filed:
+- `ideas/active/header-normalization.md` (brief)
+- `docs/lld/active/10045-lld.md` (after issue #45 filed)
 
-Or alternatively, use project-specific numbering (ideas don't need cross-project uniqueness):
-- Sequential 3-digit: `001-brief-name.md`, `002-brief-name.md`
+This prevents:
+- Premature numbering that creates false sense of priority
+- Renumbering hassle when briefs are promoted to issues
+- Confusion between brief numbers and issue numbers
 
 ### 3. Update new-repo-setup.py
 
-Add to `DOCS_STRUCTURE` in `tools/new-repo-setup.py`:
+Add to `OTHER_STRUCTURE` in `tools/new-repo-setup.py`:
 
 ```python
-DOCS_STRUCTURE = [
+OTHER_STRUCTURE = [
     # ... existing ...
-    "docs/ideas/active",
-    "docs/ideas/backlog",
+    "ideas/active",
+    "ideas/backlog",
 ]
 ```
-
-### 4. Update agentos-generate.py
-
-If this script creates file inventory or structure docs, update to include ideas directory.
 
 ---
 
@@ -80,7 +81,7 @@ Create `docs/templates/0110-brief-template.md`:
 **Status:** [Draft | Active | Blocked | Done | Rejected]
 **Effort:** [Low | Medium | High] ([estimate])
 **Value:** [Low | Medium | High | Critical]
-**Blocked by:** [brief number if applicable]
+**Blocked by:** [brief name if applicable]
 
 ---
 
@@ -113,9 +114,9 @@ Create `docs/templates/0110-brief-template.md`:
 ## Migration
 
 For existing projects:
-1. Create `docs/ideas/active/` and `docs/ideas/backlog/`
+1. Create `ideas/active/` and `ideas/backlog/` at project root
 2. Move any informal briefs or TODO docs into appropriate subdirectory
-3. Renumber if needed
+3. Strip any numbers from filenames
 
 ---
 
@@ -123,9 +124,8 @@ For existing projects:
 
 | File | Change |
 |------|--------|
-| `docs/standards/0009-canonical-project-structure.md` | Add ideas/ to structure |
-| `tools/new-repo-setup.py` | Add ideas/active and ideas/backlog to DOCS_STRUCTURE |
-| `tools/agentos-generate.py` | Update if it creates structure |
+| `docs/standards/0009-canonical-project-structure.md` | Add ideas/ to root structure |
+| `tools/new-repo-setup.py` | Add ideas/active and ideas/backlog to OTHER_STRUCTURE |
 | `docs/templates/` | Add brief template |
 | `docs/0003-file-inventory.md` | Add ideas directory |
 
@@ -133,8 +133,8 @@ For existing projects:
 
 ## Acceptance Criteria
 
-- [ ] 0009 standard updated with ideas directory
+- [ ] 0009 standard updated with ideas directory at root
 - [ ] new-repo-setup.py creates ideas/active and ideas/backlog
-- [ ] Brief template created
+- [ ] Brief template created (unnumbered)
 - [ ] File inventory updated
 - [ ] Test by creating new project and verifying structure
