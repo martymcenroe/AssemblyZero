@@ -104,8 +104,9 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
     tracking = load_lld_tracking(repo_root)
     lld_statuses = tracking.get("issues", {})
 
-    # Prepare display list with status indicators
+    # Prepare display list - filter out approved issues entirely
     display_items = []
+    skipped_count = 0
     for issue in issues:
         issue_num = issue["number"]
         title = issue["title"]
@@ -114,9 +115,12 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
         status = lld_statuses.get(str(issue_num), {})
         lld_status = status.get("status", "new")
 
+        # Skip approved issues - they don't need LLDs created
         if lld_status == "approved":
-            indicator = "[SKIP - approved]"
-        elif lld_status == "draft":
+            skipped_count += 1
+            continue
+
+        if lld_status == "draft":
             indicator = "[DRAFT - has unreviewed LLD]"
         elif lld_status == "blocked":
             indicator = "[BLOCKED - needs revision]"
@@ -130,31 +134,32 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
             "indicator": indicator,
         })
 
+    if not display_items:
+        print("No issues need LLDs. All open issues already have approved LLDs.")
+        return None
+
     # Display
     print(f"\n{'=' * 60}")
     print("Select Issue for LLD Creation")
+    if skipped_count > 0:
+        print(f"({skipped_count} issues with approved LLDs hidden)")
     print(f"{'=' * 60}\n")
 
     for i, item in enumerate(display_items, 1):
-        if item["lld_status"] == "approved":
-            # Gray out approved issues
-            print(f"  [{i}] #{item['number']} {item['title'][:40]}")
-            print(f"       {item['indicator']}")
-        else:
-            print(f"  [{i}] #{item['number']} {item['title'][:40]}")
-            print(f"       {item['indicator']}")
+        print(f"  [{i}] #{item['number']} {item['title'][:40]}")
+        print(f"       {item['indicator']}")
 
     print(f"\n  [q] Quit")
     print()
 
-    # Test mode: select first non-approved issue
+    # Test mode: select first issue
     if os.environ.get("AGENTOS_TEST_MODE") == "1":
-        for i, item in enumerate(display_items, 1):
-            if item["lld_status"] != "approved":
-                choice = str(i)
-                print(f"Select issue [1-{len(display_items)}, q]: {choice} (TEST MODE - auto-select)")
-                return (item["number"], item["title"])
-        print("No non-approved issues available in test mode.")
+        if display_items:
+            choice = "1"
+            item = display_items[0]
+            print(f"Select issue [1-{len(display_items)}, q]: {choice} (TEST MODE - auto-select)")
+            return (item["number"], item["title"])
+        print("No issues available in test mode.")
         return None
 
     while True:
@@ -167,14 +172,6 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
             idx = int(choice)
             if 1 <= idx <= len(display_items):
                 item = display_items[idx - 1]
-
-                # Warn if selecting approved issue
-                if item["lld_status"] == "approved":
-                    print(f"\n>>> Issue #{item['number']} already has an approved LLD.")
-                    confirm = input("    Create new LLD anyway? [y/N]: ").strip().lower()
-                    if confirm != "y":
-                        continue
-
                 return (item["number"], item["title"])
             else:
                 print(f"Invalid number. Enter 1-{len(display_items)} or q.")
