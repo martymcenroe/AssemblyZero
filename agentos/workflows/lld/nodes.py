@@ -207,10 +207,13 @@ def design(state: LLDWorkflowState) -> dict:
     from agentos.nodes.designer import design_lld_node
 
     # Call existing designer node
-    # It expects: issue_id, iteration_count, auto_mode
-    # It returns: design_status, lld_draft_path, lld_content, iteration_count
+    # Pass issue content from state to avoid re-fetching (cross-repo support)
+    # Pass repo_root so draft is written to correct location
     designer_state = {
         "issue_id": state.get("issue_id", state.get("issue_number")),
+        "issue_title": state.get("issue_title", ""),
+        "issue_body": state.get("issue_body", ""),
+        "repo_root": state.get("repo_root", ""),
         "iteration_count": state.get("iteration_count", 0),
         "auto_mode": state.get("auto_mode", False),
     }

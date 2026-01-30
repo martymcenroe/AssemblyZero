@@ -5,6 +5,11 @@ pausing for human editing before Governance review.
 
 Issue: #56
 LLD: docs/LLDs/active/56-designer-node.md
+
+Cross-repo support (Issue #86):
+- Accepts issue_title, issue_body from state (skips re-fetch)
+- Accepts repo_root from state (writes to correct repo)
+- Returns actual lld_content (not empty)
 """
 
 import json
@@ -23,8 +28,8 @@ from agentos.core.gemini_client import GeminiClient
 from agentos.core.state import AgentState
 
 
-# GitHub repo for issue fetching
-GITHUB_REPO = "martymcenroe/AgentOS"
+# Default GitHub repo for issue fetching (only used if not provided in state)
+DEFAULT_GITHUB_REPO = "martymcenroe/AgentOS"
 
 
 def design_lld_node(state: AgentState) -> dict[str, Any]:
@@ -32,15 +37,20 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
     LangGraph node that drafts an LLD from a GitHub Issue.
 
     Process:
-    1. Fetch issue content from GitHub via `gh issue view`
+    1. Use issue content from state OR fetch from GitHub via `gh issue view`
     2. Load system instruction from 0705-lld-generator.md
     3. Invoke Gemini via GeminiClient (uses GOVERNANCE_MODEL)
-    4. Write draft to docs/llds/drafts/{issue_id}-LLD.md
+    4. Write draft to repo_root/docs/llds/drafts/{issue_id}-LLD.md
     5. Print plain text prompt and block on input()
-    6. Return state updates with draft path
+    6. Return state updates with draft path AND content
 
     Args:
-        state: The current AgentState containing issue_id.
+        state: The current AgentState containing:
+            - issue_id: GitHub issue number
+            - issue_title (optional): Pre-fetched issue title
+            - issue_body (optional): Pre-fetched issue body
+            - repo_root (optional): Target repository root path
+            - auto_mode (optional): Skip human edit pause
 
     Returns:
         dict with keys: design_status, lld_draft_path, lld_content, iteration_count
@@ -60,39 +70,52 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
     # Get issue_id from state
     issue_id = state.get("issue_id", 0)
 
+    # Get repo_root for cross-repo workflows
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else None
+
     # Track timing
     start_time = time.time()
 
     try:
-        # Step 1: Fetch issue from GitHub
-        try:
-            title, body = _fetch_github_issue(issue_id)
-        except ValueError as e:
-            # Issue not found or fetch failed
-            duration_ms = int((time.time() - start_time) * 1000)
-            entry = create_log_entry(
-                node="design_lld",
-                model=GOVERNANCE_MODEL,
-                model_verified="",
-                issue_id=issue_id,
-                verdict="FAILED",
-                critique=str(e),
-                tier_1_issues=["Issue fetch failed"],
-                raw_response="",
-                duration_ms=duration_ms,
-                credential_used="",
-                rotation_occurred=False,
-                attempts=0,
-                sequence_id=iteration_count,
-            )
-            audit_log.log(entry)
+        # Step 1: Get issue content from state OR fetch from GitHub
+        # Cross-repo workflows pass issue_title/issue_body in state
+        title = state.get("issue_title", "")
+        body = state.get("issue_body", "")
 
-            return {
-                "design_status": "FAILED",
-                "lld_draft_path": "",
-                "lld_content": "",
-                "iteration_count": iteration_count,
-            }
+        if title and body:
+            # Use pre-fetched content from state (cross-repo workflow)
+            print(f"    Using issue content from state: {title[:50]}...")
+        else:
+            # Fetch from GitHub (legacy single-repo workflow)
+            try:
+                title, body = _fetch_github_issue(issue_id, repo_root)
+            except ValueError as e:
+                # Issue not found or fetch failed
+                duration_ms = int((time.time() - start_time) * 1000)
+                entry = create_log_entry(
+                    node="design_lld",
+                    model=GOVERNANCE_MODEL,
+                    model_verified="",
+                    issue_id=issue_id,
+                    verdict="FAILED",
+                    critique=str(e),
+                    tier_1_issues=["Issue fetch failed"],
+                    raw_response="",
+                    duration_ms=duration_ms,
+                    credential_used="",
+                    rotation_occurred=False,
+                    attempts=0,
+                    sequence_id=iteration_count,
+                )
+                audit_log.log(entry)
+
+                return {
+                    "design_status": "FAILED",
+                    "lld_draft_path": "",
+                    "lld_content": "",
+                    "iteration_count": iteration_count,
+                }
 
         # Step 2: Load system instruction from 0705-lld-generator.md
         try:
@@ -161,10 +184,10 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
                 "iteration_count": iteration_count,
             }
 
-        # Step 5: Write draft to disk
+        # Step 5: Write draft to disk (use repo_root for cross-repo workflows)
         lld_content = result.response or ""
         try:
-            draft_path = _write_draft(issue_id, lld_content)
+            draft_path = _write_draft(issue_id, lld_content, repo_root)
         except OSError as e:
             duration_ms = int((time.time() - start_time) * 1000)
             entry = create_log_entry(
@@ -215,11 +238,11 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         _human_edit_pause(draft_path, auto_mode=auto_mode)
 
         # Step 8: Return state updates
-        # lld_content is empty - Governance will read from disk
+        # Return actual lld_content so audit trail and subsequent nodes have it
         return {
             "design_status": "DRAFTED",
             "lld_draft_path": str(draft_path),
-            "lld_content": "",  # Empty - governance will read from disk
+            "lld_content": lld_content,  # Return actual content for audit trail
             "iteration_count": iteration_count,
         }
 
@@ -278,12 +301,15 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         }
 
 
-def _fetch_github_issue(issue_id: int) -> tuple[str, str]:
+def _fetch_github_issue(issue_id: int, repo_root: Path | None = None) -> tuple[str, str]:
     """
     Fetch issue content from GitHub.
 
     Args:
         issue_id: The GitHub issue number.
+        repo_root: Optional path to run gh from (for cross-repo workflows).
+                   If provided, gh will infer repo from git remote.
+                   If not provided, uses DEFAULT_GITHUB_REPO.
 
     Returns:
         Tuple of (title, body).
@@ -295,17 +321,31 @@ def _fetch_github_issue(issue_id: int) -> tuple[str, str]:
     if not isinstance(issue_id, int) or issue_id <= 0:
         raise ValueError(f"Invalid issue ID: {issue_id}")
 
-    # Run gh issue view
-    cmd = [
-        "gh",
-        "issue",
-        "view",
-        str(issue_id),
-        "--repo",
-        GITHUB_REPO,
-        "--json",
-        "title,body",
-    ]
+    # Build gh command
+    # If repo_root provided, run gh in that directory (infers repo from git)
+    # Otherwise, use explicit --repo flag with default
+    if repo_root and repo_root.exists():
+        cmd = [
+            "gh",
+            "issue",
+            "view",
+            str(issue_id),
+            "--json",
+            "title,body",
+        ]
+        cwd = str(repo_root)
+    else:
+        cmd = [
+            "gh",
+            "issue",
+            "view",
+            str(issue_id),
+            "--repo",
+            DEFAULT_GITHUB_REPO,
+            "--json",
+            "title,body",
+        ]
+        cwd = None
 
     try:
         result = subprocess.run(
@@ -313,6 +353,7 @@ def _fetch_github_issue(issue_id: int) -> tuple[str, str]:
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=cwd,
         )
     except subprocess.TimeoutExpired:
         raise ValueError(f"Timeout fetching issue #{issue_id}")
@@ -370,13 +411,16 @@ def _load_generator_instruction() -> str:
     return prompt_path.read_text(encoding="utf-8")
 
 
-def _write_draft(issue_id: int, content: str) -> Path:
+def _write_draft(issue_id: int, content: str, repo_root: Path | None = None) -> Path:
     """
     Write LLD draft to disk.
 
     Args:
         issue_id: The GitHub issue number.
         content: The generated LLD content.
+        repo_root: Optional target repository root (for cross-repo workflows).
+                   If provided, writes to repo_root/docs/llds/drafts/.
+                   If not provided, uses relative LLD_DRAFTS_DIR.
 
     Returns:
         Path to the written file.
@@ -386,11 +430,15 @@ def _write_draft(issue_id: int, content: str) -> Path:
 
     Creates docs/llds/drafts/ directory if it doesn't exist.
     """
-    # Determine output path
-    # Try relative path first, fall back to project root
-    if LLD_DRAFTS_DIR.exists() or LLD_DRAFTS_DIR.parent.exists():
+    # Determine output path based on repo_root
+    if repo_root and repo_root.exists():
+        # Cross-repo workflow: write to target repo
+        output_dir = repo_root / "docs" / "llds" / "drafts"
+    elif LLD_DRAFTS_DIR.exists() or LLD_DRAFTS_DIR.parent.exists():
+        # Relative path exists
         output_dir = LLD_DRAFTS_DIR
     else:
+        # Fall back to AgentOS project root
         project_root = Path(__file__).parent.parent.parent
         output_dir = project_root / LLD_DRAFTS_DIR
 
