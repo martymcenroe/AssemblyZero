@@ -155,7 +155,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         user_feedback = state.get("user_feedback", "")
         previous_draft = state.get("lld_content", "")
 
-        content = f"## Issue Title\n{title}\n\n## Issue Body\n{body}"
+        content = f"## Issue Number\n#{issue_id}\n\n## Issue Title\n{title}\n\n## Issue Body\n{body}"
 
         if user_feedback and previous_draft:
             # Revision mode: include previous draft and feedback
