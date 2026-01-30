@@ -356,19 +356,24 @@ def run_workflow(
                                     if additional > 0:
                                         new_max = current_max + additional
                                         print(f"\n>>> Extending limit to {new_max} iterations, resuming...")
-                                        # Update state with new max and resume
-                                        input_state = None  # Resume from checkpoint
-                                        # Update max_iterations in the saved state
+                                        # Update state with new max and reset to continue
                                         saved_state = app.get_state(config)
                                         if saved_state.values:
+                                            # Reset error and next_node to continue from human edit
                                             app.update_state(
                                                 config,
-                                                {"max_iterations": new_max, "error_message": ""},
+                                                {
+                                                    "max_iterations": new_max,
+                                                    "error_message": "",
+                                                    "next_node": "N2_human_edit",
+                                                },
                                             )
                                         current_max = new_max
                                         # Also update recursion_limit
                                         recursion_limit = new_max * 10
                                         config["recursion_limit"] = recursion_limit
+                                        # Resume from updated checkpoint
+                                        input_state = None
                                         restart_stream = True
                                         break  # Break inner loop
                                     else:
