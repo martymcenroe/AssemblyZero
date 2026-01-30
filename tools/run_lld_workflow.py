@@ -223,7 +223,7 @@ def run_workflow(
     auto_mode: bool = False,
     mock_mode: bool = False,
     resume: bool = False,
-    max_iterations: int = 5,
+    max_iterations: int = 20,
     repo_root: Path | None = None,
 ) -> int:
     """Run the LLD governance workflow.
@@ -264,6 +264,7 @@ def run_workflow(
         print(f"Context files: {len(context_files)}")
 
     print(f"Checkpoint DB: {db_path}")
+    print(f"Max iterations: {max_iterations} (recursion_limit: {max_iterations * 10})")
     print(f"{'=' * 60}\n")
 
     # Initial state
