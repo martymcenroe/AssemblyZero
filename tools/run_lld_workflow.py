@@ -46,6 +46,7 @@ import json
 import subprocess
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.errors import GraphRecursionError
 
 from agentos.workflows.lld.audit import (
     check_lld_status,
@@ -281,7 +282,12 @@ def run_workflow(
     # Run with checkpointer
     with SqliteSaver.from_conn_string(str(db_path)) as memory:
         app = workflow.compile(checkpointer=memory)
-        config = {"configurable": {"thread_id": thread_id}}
+        # Set recursion_limit high enough for max_iterations (each iteration = multiple nodes)
+        recursion_limit = max_iterations * 10
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": recursion_limit,
+        }
 
         if resume:
             # Check if checkpoint exists
@@ -344,8 +350,7 @@ def run_workflow(
                                         print(f"\n>>> Extending limit to {new_max} iterations, resuming...")
                                         # Update state with new max and resume
                                         input_state = None  # Resume from checkpoint
-                                        # We need to update max_iterations in the saved state
-                                        # Get current state and update it
+                                        # Update max_iterations in the saved state
                                         saved_state = app.get_state(config)
                                         if saved_state.values:
                                             app.update_state(
@@ -353,6 +358,9 @@ def run_workflow(
                                                 {"max_iterations": new_max, "error_message": ""},
                                             )
                                         current_max = new_max
+                                        # Also update recursion_limit
+                                        recursion_limit = new_max * 10
+                                        config["recursion_limit"] = recursion_limit
                                         break  # Break inner loop to restart stream
                                     else:
                                         print("Invalid number. Must be > 0.")
@@ -376,6 +384,16 @@ def run_workflow(
             except KeyboardInterrupt:
                 print("\n\n[INTERRUPTED] Workflow interrupted. Use --resume to continue.")
                 return 130  # Standard exit code for SIGINT
+
+            except GraphRecursionError:
+                # LangGraph recursion limit hit - this shouldn't happen with our settings
+                # but handle it gracefully
+                print(f"\n{'=' * 60}")
+                print(f"WARNING: Graph recursion limit reached ({recursion_limit})")
+                print(f"{'=' * 60}")
+                print("\nThis usually means an infinite loop in the workflow graph.")
+                print("Use --resume to continue after investigating.")
+                return 1
 
     # Check final outcome
     if final_state:
