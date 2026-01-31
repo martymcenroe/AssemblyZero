@@ -32,6 +32,7 @@ FORBIDDEN_MODELS = [
 
 CREDENTIALS_FILE = Path.home() / ".agentos" / "gemini-credentials.json"
 ROTATION_STATE_FILE = Path.home() / ".agentos" / "gemini-rotation-state.json"
+GEMINI_API_LOG_FILE = Path.home() / ".agentos" / "gemini-api.jsonl"
 
 # =============================================================================
 # Retry Configuration

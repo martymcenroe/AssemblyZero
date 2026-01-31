@@ -27,6 +27,7 @@ from agentos.core.config import (
     BACKOFF_MAX_SECONDS,
     CREDENTIALS_FILE,
     FORBIDDEN_MODELS,
+    GEMINI_API_LOG_FILE,
     GOVERNANCE_MODEL,
     MAX_RETRIES_PER_CREDENTIAL,
     ROTATION_STATE_FILE,
@@ -115,6 +116,117 @@ class GeminiCallResult:
     attempts: int  # Total attempts made
     duration_ms: int  # Total time including retries
     model_verified: str  # Actual model used (for audit)
+
+
+# =============================================================================
+# Gemini API Logging (Quota & Rotation Visibility)
+# =============================================================================
+
+
+def log_gemini_event(
+    event_type: str,
+    credential_name: str = "",
+    model: str = "",
+    reset_time: str = "",
+    error_message: str = "",
+    details: dict = None,
+) -> None:
+    """Log a Gemini API event to the dedicated log file.
+
+    This log provides visibility into:
+    - Quota exhaustion (429) - when to add more API keys
+    - Capacity exhaustion (529) - temporary overload
+    - Credential rotation - which credentials are being used
+    - OAuth reset times - when quotas will refresh
+
+    Args:
+        event_type: One of: quota_exhausted, capacity_exhausted, credential_rotated,
+                    oauth_exhausted, all_exhausted, api_success, api_error
+        credential_name: Name of the credential involved
+        model: Model being used
+        reset_time: ISO timestamp when quota will reset (for exhaustion events)
+        error_message: Error details if applicable
+        details: Additional context dict
+    """
+    log_entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event_type,
+        "credential": credential_name,
+        "model": model,
+    }
+
+    if reset_time:
+        log_entry["reset_time"] = reset_time
+    if error_message:
+        log_entry["error"] = error_message
+    if details:
+        log_entry["details"] = details
+
+    # Ensure log directory exists
+    GEMINI_API_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Append to log file
+    with open(GEMINI_API_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+
+def get_credential_status() -> dict:
+    """Get current status of all credentials for visibility.
+
+    Returns:
+        Dict with credential status summary:
+        {
+            "total": 4,
+            "available": 3,
+            "exhausted": ["oauth-primary"],
+            "exhausted_details": {"oauth-primary": "2026-02-01T20:49:18+00:00"},
+            "last_success": "api-key-1"
+        }
+    """
+    try:
+        if not CREDENTIALS_FILE.exists():
+            return {"error": "No credentials file found"}
+
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            cred_data = json.load(f)
+
+        credentials = cred_data.get("credentials", [])
+        enabled = [c for c in credentials if c.get("enabled", True)]
+
+        state = {}
+        if ROTATION_STATE_FILE.exists():
+            with open(ROTATION_STATE_FILE, encoding="utf-8") as f:
+                state = json.load(f)
+
+        exhausted = state.get("exhausted", {})
+        now = datetime.now(timezone.utc)
+
+        # Filter to actually exhausted (not yet reset)
+        still_exhausted = {}
+        for name, reset_str in exhausted.items():
+            try:
+                reset_time = datetime.fromisoformat(reset_str)
+                if reset_time > now:
+                    still_exhausted[name] = reset_str
+            except (ValueError, TypeError):
+                pass
+
+        available_names = [
+            c.get("name") for c in enabled
+            if c.get("name") not in still_exhausted
+        ]
+
+        return {
+            "total": len(enabled),
+            "available": len(available_names),
+            "available_names": available_names,
+            "exhausted": list(still_exhausted.keys()),
+            "exhausted_details": still_exhausted,
+            "last_success": state.get("last_success"),
+            "last_success_time": state.get("last_success_time"),
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # =============================================================================
@@ -287,6 +399,16 @@ class GeminiClient:
 
         if not available:
             exhausted_names = [c.name for c in credentials if c.name in state.exhausted]
+            # Log: All credentials exhausted
+            log_gemini_event(
+                event_type="all_exhausted",
+                model=self.model,
+                error_message=f"All credentials exhausted: {', '.join(exhausted_names)}",
+                details={
+                    "exhausted_credentials": exhausted_names,
+                    "reset_times": {k: v for k, v in state.exhausted.items()},
+                },
+            )
             return GeminiCallResult(
                 success=False,
                 response=None,
@@ -305,6 +427,17 @@ class GeminiClient:
 
         for cred in available:
             rotation_occurred = cred.name != initial_credential.name
+            if rotation_occurred:
+                # Log credential rotation
+                log_gemini_event(
+                    event_type="credential_rotated",
+                    credential_name=cred.name,
+                    model=self.model,
+                    details={
+                        "previous_credential": initial_credential.name,
+                        "reason": "previous credential failed",
+                    },
+                )
             attempt = 0
 
             while attempt < MAX_RETRIES_PER_CREDENTIAL:
@@ -390,28 +523,67 @@ class GeminiClient:
                     if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
                         # 529: Backoff and retry same credential
                         delay = self._backoff_delay(attempt)
+                        log_gemini_event(
+                            event_type="capacity_exhausted",
+                            credential_name=cred.name,
+                            model=self.model,
+                            error_message=f"529 capacity exhausted, backing off {delay:.1f}s (attempt {attempt})",
+                            details={"backoff_seconds": delay, "attempt": attempt},
+                        )
                         time.sleep(delay)
                         continue
 
                     elif error_type == GeminiErrorType.QUOTA_EXHAUSTED:
                         # 429: Mark exhausted and rotate
                         reset_hours = self._parse_reset_time(error_str) or 24
+                        reset_time = (datetime.now(timezone.utc) + timedelta(hours=reset_hours)).isoformat()
                         self._mark_exhausted(cred, state, reset_hours)
+                        log_gemini_event(
+                            event_type="quota_exhausted",
+                            credential_name=cred.name,
+                            model=self.model,
+                            reset_time=reset_time,
+                            error_message=f"429 quota exhausted, will reset in {reset_hours}h",
+                            details={"reset_hours": reset_hours, "cred_type": cred.cred_type},
+                        )
                         errors.append(f"{cred.name}: Quota exhausted")
                         break  # Move to next credential
 
                     elif error_type == GeminiErrorType.AUTH_ERROR:
                         # Auth error: Skip credential
+                        log_gemini_event(
+                            event_type="auth_error",
+                            credential_name=cred.name,
+                            model=self.model,
+                            error_message=error_str[:200],
+                        )
                         errors.append(f"{cred.name}: Authentication failed")
                         break  # Move to next credential
 
                     else:
                         # Unknown error: Log and try next credential
+                        log_gemini_event(
+                            event_type="api_error",
+                            credential_name=cred.name,
+                            model=self.model,
+                            error_message=error_str[:200],
+                        )
                         errors.append(f"{cred.name}: {error_str[:100]}")
                         break  # Move to next credential
 
         # All credentials failed
         duration_ms = int((time.time() - start_time) * 1000)
+        log_gemini_event(
+            event_type="all_credentials_failed",
+            model=self.model,
+            error_message=f"Tried {len(available)} credentials, all failed",
+            details={
+                "credentials_tried": [c.name for c in available],
+                "errors": errors,
+                "total_attempts": total_attempts,
+                "duration_ms": duration_ms,
+            },
+        )
         return GeminiCallResult(
             success=False,
             response=None,
