@@ -291,6 +291,8 @@ def run_workflow(
         print("Mode: MOCK (using fixtures)")
     elif auto_mode:
         print("Mode: AUTO (unattended)")
+        # Set environment variable for nodes to detect auto mode
+        os.environ["AGENTOS_AUTO_MODE"] = "1"
     else:
         print("Mode: INTERACTIVE")
 

@@ -36,6 +36,47 @@ GH_CLI_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_ITERATIONS = 20
 
 
+def open_vscode_folder(folder_path: str) -> tuple[bool, str]:
+    """Open a folder in VS Code for review.
+
+    Args:
+        folder_path: Path to the folder to open.
+
+    Returns:
+        Tuple of (success, error_message).
+    """
+    import os
+    from datetime import datetime
+
+    # Test mode: skip VS Code launch
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] TEST MODE: Skipping VS Code launch for folder {folder_path}")
+        return True, ""
+
+    try:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] Launching VS Code: code {folder_path}")
+        result = subprocess.run(
+            ["code", folder_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            error = f"VS Code exited with code {result.returncode}"
+            if result.stderr:
+                error += f": {result.stderr.strip()}"
+            return False, error
+        return True, ""
+    except subprocess.TimeoutExpired:
+        return False, "VS Code launch timed out"
+    except FileNotFoundError:
+        return False, "'code' command not found. Is VS Code installed and in PATH?"
+    except Exception as e:
+        return False, f"Unexpected error launching VS Code: {type(e).__name__}: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Shared audit helpers (used by both production and mock implementations)
 # ---------------------------------------------------------------------------
@@ -745,6 +786,14 @@ def finalize(state: LLDWorkflowState) -> dict:
             "iteration_count": state.get("iteration_count", 0),
         },
     )
+
+    # Auto mode: open audit trail folder for review (since we skipped VS Code during workflow)
+    import os
+    if os.environ.get("AGENTOS_AUTO_MODE") == "1" and audit_dir.exists():
+        print(f"\n>>> Opening audit trail for review...")
+        success, error = open_vscode_folder(str(audit_dir))
+        if not success:
+            print(f"Warning: Failed to open VS Code: {error}")
 
     return {
         "final_lld_path": str(final_path),
