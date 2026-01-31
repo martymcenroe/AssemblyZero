@@ -1,8 +1,8 @@
 # 0906 - LLD Governance Workflow
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.1
-**Last Updated:** 2026-01-29
+**Version:** 1.2
+**Last Updated:** 2026-01-31
 
 ---
 
@@ -135,7 +135,7 @@ VS Code opens with the draft LLD. Review and edit:
 3. Add missing details or context
 4. Save and close VS Code
 
-**Prompt:** `Iteration {n}/5`
+**Prompt:** `Iteration {n}/20`
 
 Choose:
 - **[S]end** - Submit to Gemini review
@@ -153,7 +153,7 @@ Gemini (as Senior Software Architect) evaluates the LLD against:
 - **APPROVED** - Proceed to finalize
 - **BLOCKED** - Returns to human edit with critique
 
-**Maximum 5 iterations** before forced exit with guidance.
+**Maximum 20 iterations** (configurable via `--max-iterations`) before forced exit with guidance.
 
 ### Step 6: N4 - Finalize
 
@@ -193,6 +193,14 @@ Continue interrupted workflow:
 poetry run python tools/run_lld_workflow.py --issue 42 --resume
 ```
 
+### Custom Iteration Limit
+
+Override the default 20-iteration limit:
+
+```bash
+poetry run python tools/run_lld_workflow.py --issue 42 --max-iterations 50
+```
+
 ### Audit Mode
 
 Rebuild LLD status cache from all LLD files:
@@ -230,7 +238,7 @@ Saved to: docs/lld/lld-status.json
 
 ## Audit Trail
 
-All artifacts are saved to `docs/audit/active/{issue_number}-lld/`:
+All artifacts are saved to `docs/lineage/active/{issue_number}-lld/`:
 
 | File | Description |
 |------|-------------|
@@ -278,7 +286,7 @@ The workflow maintains `docs/lld/lld-status.json`:
 | LLD created | `ls docs/lld/active/LLD-{N}.md` | File exists |
 | Evidence embedded | `grep "Final Status" docs/lld/active/LLD-{N}.md` | Shows APPROVED |
 | Cache updated | `cat docs/lld/lld-status.json` | Issue entry present |
-| Audit complete | `ls docs/audit/active/{N}-lld/` | Has `*-approved.json` |
+| Audit complete | `ls docs/lineage/active/{N}-lld/` | Has `*-approved.json` |
 
 ---
 
@@ -335,3 +343,4 @@ All `--context` paths must be within the repository root. Use relative paths:
 |---------|------|---------|
 | 1.0 | 2026-01-29 | Initial version with --select, --audit, and status tracking |
 | 1.1 | 2026-01-29 | Add `--repo` flag for cross-repo workflow usage |
+| 1.2 | 2026-01-31 | Update max iterations to 20, fix audit path to docs/lineage/ |
