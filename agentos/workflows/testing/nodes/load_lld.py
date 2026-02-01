@@ -309,7 +309,7 @@ def extract_coverage_target(lld_content: str) -> int:
         if match:
             return int(match.group(1))
 
-    return 90  # Default
+    return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
 
 
 def load_lld(state: TestingWorkflowState) -> dict[str, Any]:

@@ -193,11 +193,11 @@ Users need valid credentials.
         assert result == 85
 
     def test_extract_coverage_target_default(self):
-        """extract_coverage_target defaults to 90."""
+        """extract_coverage_target defaults to 95 (ADR 0207)."""
         lld = "No coverage mentioned."
         result = extract_coverage_target(lld)
 
-        assert result == 90
+        assert result == 95
 
     def test_parse_test_scenarios_headings(self):
         """parse_test_scenarios extracts from headings."""

@@ -1,7 +1,7 @@
 """N1: Review Test Plan node for TDD Testing Workflow.
 
 Submits the test plan to Gemini for coverage analysis:
-- Checks 95% requirement coverage
+- Checks 100% requirement coverage (ADR 0207)
 - Ensures no human delegation (real tests required)
 - Validates test types match LLD content
 """
@@ -54,7 +54,7 @@ Your goal is to ensure the test plan provides adequate coverage and uses real, e
 ## Review Criteria
 
 ### 1. Coverage Analysis (CRITICAL)
-- [ ] At least 95% of requirements have corresponding tests
+- [ ] 100% of requirements have corresponding tests (ADR 0207)
 - [ ] Each requirement maps to at least one test scenario
 - [ ] Edge cases are covered (empty inputs, error conditions, boundaries)
 

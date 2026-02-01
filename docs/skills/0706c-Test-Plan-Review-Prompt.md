@@ -13,7 +13,7 @@ If any pre-flight check fails, immediately return BLOCKED with the specific issu
 
 ## Review Criteria
 
-### 1. Coverage Analysis (CRITICAL - 95% threshold)
+### 1. Coverage Analysis (CRITICAL - 100% threshold per ADR 0207)
 
 Calculate coverage by mapping test scenarios to requirements:
 
