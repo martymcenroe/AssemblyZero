@@ -1,0 +1,241 @@
+# Test Type Knowledge Base
+# RAG-ready corpus for test type detection and guidance
+# Each entry becomes an embeddable document when RAG is implemented
+
+test_types:
+  unit:
+    name: "Unit Tests"
+    description: "Test individual functions/classes in isolation"
+    tools:
+      - pytest
+    coverage_target: 80
+    detection_patterns:
+      - function
+      - class
+      - method
+      - utility
+      - helper
+      - parse
+      - validate
+      - transform
+    mock_guidance: "Mock external dependencies (APIs, DB, filesystem)"
+    required_for:
+      - "Any code changes"
+      - "Business logic"
+      - "Data transformations"
+    example_structure: |
+      def test_function_returns_expected_value():
+          result = my_function(input)
+          assert result == expected
+
+  integration:
+    name: "Integration Tests"
+    description: "Test component interactions and data flow between modules"
+    tools:
+      - pytest
+      - docker-compose
+    coverage_target: 60
+    detection_patterns:
+      - database
+      - api
+      - workflow
+      - service
+      - integration
+      - external
+      - http
+      - request
+    mock_guidance: "Use test doubles for external services, real DB where possible"
+    required_for:
+      - "API endpoints"
+      - "Database operations"
+      - "Service interactions"
+    example_structure: |
+      @pytest.fixture
+      def db_session():
+          # Setup test database
+          yield session
+          # Cleanup
+
+      def test_api_creates_record(db_session, client):
+          response = client.post("/api/items", json={...})
+          assert response.status_code == 201
+          assert db_session.query(Item).count() == 1
+
+  e2e:
+    name: "End-to-End Tests"
+    description: "Test complete user flows from start to finish"
+    tools:
+      - pytest
+      - playwright
+    coverage_target: 40
+    detection_patterns:
+      - user flow
+      - end-to-end
+      - e2e
+      - complete flow
+      - user journey
+      - scenario
+    mock_guidance: "Minimal mocking - test against real (sandboxed) systems"
+    required_for:
+      - "Critical user paths"
+      - "Cross-system workflows"
+    example_structure: |
+      def test_user_can_complete_checkout():
+          # Login
+          # Add items to cart
+          # Complete checkout
+          # Verify order confirmation
+
+  browser:
+    name: "Browser/UI Tests"
+    description: "Test web UI interactions and visual elements"
+    tools:
+      - playwright
+      - selenium
+    coverage_target: 50
+    detection_patterns:
+      - html
+      - frontend
+      - ui
+      - web
+      - browser
+      - button
+      - form
+      - input
+      - click
+      - page
+    mock_guidance: "Real browser required, mock backend APIs for isolation"
+    required_for:
+      - "Web interface changes"
+      - "Form validation"
+      - "User interactions"
+    example_structure: |
+      async def test_login_form(page):
+          await page.goto("/login")
+          await page.fill("input[name='email']", "test@example.com")
+          await page.fill("input[name='password']", "password")
+          await page.click("button[type='submit']")
+          await expect(page).to_have_url("/dashboard")
+
+  terminal:
+    name: "Terminal/CLI Tests"
+    description: "Test command-line interfaces and terminal interactions"
+    tools:
+      - pytest
+      - pexpect
+      - click.testing
+    coverage_target: 70
+    detection_patterns:
+      - cli
+      - argparse
+      - input()
+      - command line
+      - terminal
+      - stdin
+      - stdout
+      - argument
+      - flag
+    mock_guidance: "Use CliRunner or capture stdout/stderr"
+    required_for:
+      - "CLI tools"
+      - "Interactive prompts"
+    example_structure: |
+      def test_cli_version_flag(runner):
+          result = runner.invoke(cli, ["--version"])
+          assert result.exit_code == 0
+          assert "1.0.0" in result.output
+
+  mobile:
+    name: "Mobile App Tests"
+    description: "Test mobile application interfaces"
+    tools:
+      - appium
+      - detox
+    coverage_target: 50
+    detection_patterns:
+      - android
+      - ios
+      - react-native
+      - mobile
+      - app
+      - device
+    mock_guidance: "Use emulators/simulators, mock backend services"
+    required_for:
+      - "Mobile app changes"
+
+  performance:
+    name: "Performance Tests"
+    description: "Test speed, latency, and resource usage"
+    tools:
+      - locust
+      - pytest-benchmark
+    coverage_target: 30
+    detection_patterns:
+      - latency
+      - throughput
+      - load
+      - performance
+      - benchmark
+      - speed
+      - concurrent
+      - scale
+    mock_guidance: "Test against representative data volumes"
+    required_for:
+      - "Performance-critical code"
+      - "High-traffic endpoints"
+    example_structure: |
+      def test_api_latency(benchmark):
+          result = benchmark(api_call)
+          assert benchmark.stats.mean < 0.1  # 100ms
+
+  security:
+    name: "Security Tests"
+    description: "Test security controls and vulnerability prevention"
+    tools:
+      - bandit
+      - safety
+      - pytest
+    coverage_target: 100  # All security paths must be tested
+    detection_patterns:
+      - auth
+      - password
+      - token
+      - credential
+      - security
+      - permission
+      - access
+      - secret
+      - encrypt
+    mock_guidance: "Never use real credentials, test edge cases thoroughly"
+    required_for:
+      - "Authentication changes"
+      - "Authorization logic"
+      - "Input handling"
+    example_structure: |
+      def test_unauthorized_access_returns_401(client):
+          response = client.get("/api/admin", headers={})
+          assert response.status_code == 401
+
+      def test_sql_injection_prevented(client):
+          response = client.get("/api/users?id=1; DROP TABLE users;")
+          assert response.status_code == 400
+
+# Detection rules for automatic test type inference
+detection_rules:
+  - pattern: "database|sql|query|orm"
+    implies: ["unit", "integration"]
+
+  - pattern: "api|endpoint|rest|graphql"
+    implies: ["unit", "integration"]
+
+  - pattern: "browser|page|dom|html"
+    implies: ["browser"]
+
+  - pattern: "cli|argparse|command"
+    implies: ["terminal"]
+
+  - pattern: "auth|login|password|token"
+    implies: ["unit", "security"]
+
+  - pattern: "performance|latency|load"
+    implies: ["performance"]

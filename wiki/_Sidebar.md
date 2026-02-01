@@ -14,10 +14,17 @@
 
 ### Architecture
 
+- [Governance Pipeline](Governance-Pipeline)
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration)
 - [Gemini Verification](Gemini-Verification)
 - [Governance Gates](Governance-Gates)
 - [LangGraph Evolution](LangGraph-Evolution)
+
+---
+
+### Workflows
+
+- [TDD Testing Workflow](TDD-Testing-Workflow)
 
 ---
 
@@ -37,3 +44,4 @@
 
 - [Audits Catalog](Audits-Catalog)
 - [Tools Reference](Tools-Reference)
+- [The Scout External Intelligence Gathering Workflow](The-Scout-External-Intelligence-Gathering-Workflow)
