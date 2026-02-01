@@ -8,6 +8,7 @@ LLD: docs/lld/active/LLD-086-lld-governance-workflow.md
 Usage:
     python tools/run_lld_workflow.py --issue 42
     python tools/run_lld_workflow.py --select
+    python tools/run_lld_workflow.py --all
     python tools/run_lld_workflow.py --audit
     python tools/run_lld_workflow.py --issue 42 --auto
     python tools/run_lld_workflow.py --issue 42 --mock
@@ -17,7 +18,8 @@ Usage:
 
 Options:
     --issue <number>      GitHub issue number
-    --select              Interactive picker for open GitHub issues
+    --select              Interactive picker for open GitHub issues (use 'a' for all)
+    --all                 Process ALL issues that need LLDs (sequentially)
     --audit               Rebuild lld-status.json from all LLD files
     --context <path>      Additional context files (can specify multiple)
     --auto                Auto mode: skip VS Code, auto-send to Gemini
@@ -92,57 +94,41 @@ def count_audit_files(audit_dir: Path) -> tuple[int, int]:
     return draft_count, verdict_count
 
 
-def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] | None:
-    """Interactive picker for open GitHub issues.
-
-    Flow:
-    1. Fetch open issues via gh CLI
-    2. Load lld-status.json for cached statuses
-    3. Filter out issues with status="approved"
-    4. Display with status indicators
-    5. Return (issue_number, title) or None
+def get_issues_needing_llds(repo_root: Path | None = None) -> list[dict]:
+    """Get all open issues that don't have approved LLDs.
 
     Args:
         repo_root: Repository root path. Auto-detected if None.
 
     Returns:
-        Tuple of (issue_number, title) if selected, None if quit.
+        List of issue dicts with number, title, lld_status, indicator.
     """
-    print("\nFetching open GitHub issues...")
-
     try:
         result = subprocess.run(
             ["gh", "issue", "list", "--state", "open", "--json", "number,title", "--limit", "50"],
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=str(repo_root) if repo_root else None,  # Use target repo for gh commands
+            cwd=str(repo_root) if repo_root else None,
         )
 
         if result.returncode != 0:
-            print(f"Error fetching issues: {result.stderr.strip()}")
-            return None
+            return []
 
         issues = json.loads(result.stdout)
 
-    except subprocess.TimeoutExpired:
-        print("Timeout fetching issues from GitHub")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse issues: {e}")
-        return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return []
 
     if not issues:
-        print("No open issues found.")
-        return None
+        return []
 
     # Load LLD tracking cache
     tracking = load_lld_tracking(repo_root)
     lld_statuses = tracking.get("issues", {})
 
-    # Prepare display list - filter out approved issues entirely
+    # Filter and annotate issues
     display_items = []
-    skipped_count = 0
     for issue in issues:
         issue_num = issue["number"]
         title = issue["title"]
@@ -151,9 +137,8 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
         status = lld_statuses.get(str(issue_num), {})
         lld_status = status.get("status", "new")
 
-        # Skip approved issues - they don't need LLDs created
+        # Skip approved issues
         if lld_status == "approved":
-            skipped_count += 1
             continue
 
         if lld_status == "draft":
@@ -170,9 +155,39 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
             "indicator": indicator,
         })
 
+    return display_items
+
+
+def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] | list[dict] | None:
+    """Interactive picker for open GitHub issues.
+
+    Flow:
+    1. Fetch open issues via gh CLI
+    2. Load lld-status.json for cached statuses
+    3. Filter out issues with status="approved"
+    4. Display with status indicators
+    5. Return (issue_number, title), list of all issues for 'a', or None if quit
+
+    Args:
+        repo_root: Repository root path. Auto-detected if None.
+
+    Returns:
+        Tuple of (issue_number, title) if single issue selected,
+        list of all issue dicts if 'a' (all) selected,
+        None if quit.
+    """
+    print("\nFetching open GitHub issues...")
+
+    display_items = get_issues_needing_llds(repo_root)
+
     if not display_items:
         print("No issues need LLDs. All open issues already have approved LLDs.")
         return None
+
+    # Count approved issues for display
+    tracking = load_lld_tracking(repo_root)
+    lld_statuses = tracking.get("issues", {})
+    skipped_count = sum(1 for s in lld_statuses.values() if s.get("status") == "approved")
 
     # Display
     print(f"\n{'=' * 60}")
@@ -185,7 +200,8 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
         print(f"  [{i}] #{item['number']} {item['title'][:40]}")
         print(f"       {item['indicator']}")
 
-    print(f"\n  [q] Quit")
+    print(f"\n  [a] Process ALL {len(display_items)} issues sequentially")
+    print(f"  [q] Quit")
     print()
 
     # Test mode: select first issue
@@ -193,16 +209,19 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
         if display_items:
             choice = "1"
             item = display_items[0]
-            print(f"Select issue [1-{len(display_items)}, q]: {choice} (TEST MODE - auto-select)")
+            print(f"Select issue [1-{len(display_items)}, a, q]: {choice} (TEST MODE - auto-select)")
             return (item["number"], item["title"])
         print("No issues available in test mode.")
         return None
 
     while True:
-        choice = input(f"Select issue [1-{len(display_items)}, q]: ").strip().lower()
+        choice = input(f"Select issue [1-{len(display_items)}, a, q]: ").strip().lower()
 
         if choice == "q":
             return None
+
+        if choice == "a":
+            return display_items  # Return list for --all processing
 
         try:
             idx = int(choice)
@@ -210,9 +229,87 @@ def select_issue_interactive(repo_root: Path | None = None) -> tuple[int, str] |
                 item = display_items[idx - 1]
                 return (item["number"], item["title"])
             else:
-                print(f"Invalid number. Enter 1-{len(display_items)} or q.")
+                print(f"Invalid number. Enter 1-{len(display_items)}, a, or q.")
         except ValueError:
-            print("Invalid input. Enter a number or q.")
+            print("Invalid input. Enter a number, a, or q.")
+
+
+def run_all_llds(
+    issues: list[dict],
+    context_files: list[str] | None = None,
+    auto_mode: bool = False,
+    mock_mode: bool = False,
+    max_iterations: int = 20,
+    repo_root: Path | None = None,
+) -> int:
+    """Run LLD workflow for all provided issues sequentially.
+
+    Args:
+        issues: List of issue dicts with 'number' and 'title' keys.
+        context_files: Optional list of context file paths.
+        auto_mode: If True, skip VS Code and auto-send to review.
+        mock_mode: If True, use fixtures instead of real APIs.
+        max_iterations: Maximum review iterations per issue.
+        repo_root: Target repository root path.
+
+    Returns:
+        Exit code (0 for success, non-zero for partial/full failure).
+    """
+    total = len(issues)
+    succeeded = 0
+    failed = 0
+    paused = 0
+
+    print(f"\n{'=' * 60}")
+    print(f"BATCH LLD WORKFLOW - {total} issues to process")
+    print(f"{'=' * 60}\n")
+
+    for i, issue in enumerate(issues, 1):
+        issue_number = issue["number"]
+        title = issue.get("title", "")[:40]
+
+        print(f"\n{'=' * 60}")
+        print(f"[{i}/{total}] Issue #{issue_number}: {title}")
+        print(f"{'=' * 60}")
+
+        exit_code = run_workflow(
+            issue_number=issue_number,
+            context_files=context_files,
+            auto_mode=auto_mode,
+            mock_mode=mock_mode,
+            resume=False,
+            max_iterations=max_iterations,
+            repo_root=repo_root,
+        )
+
+        if exit_code == 0:
+            succeeded += 1
+        elif exit_code == 75:  # EX_TEMPFAIL - credential exhaustion
+            paused += 1
+            print(f"\n>>> Stopping batch: credential pool exhausted")
+            print(f">>> Completed: {succeeded}/{total}, Paused at: #{issue_number}")
+            break
+        else:
+            failed += 1
+
+    # Summary
+    print(f"\n{'=' * 60}")
+    print("BATCH COMPLETE")
+    print(f"{'=' * 60}")
+    print(f"  Total:     {total}")
+    print(f"  Succeeded: {succeeded}")
+    print(f"  Failed:    {failed}")
+    if paused > 0:
+        remaining = total - succeeded - failed - paused
+        print(f"  Paused:    {paused} (credential exhaustion)")
+        print(f"  Remaining: {remaining}")
+    print(f"{'=' * 60}\n")
+
+    if failed > 0:
+        return 1
+    if paused > 0:
+        return 75
+    return 0
 
 
 def run_audit(repo_root: Path | None = None) -> int:
@@ -591,6 +688,11 @@ Examples:
         help="Interactive picker for open GitHub issues",
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process ALL issues that need LLDs (sequentially)",
+    )
+    parser.add_argument(
         "--audit",
         action="store_true",
         help="Rebuild lld-status.json from all LLD files",
@@ -642,12 +744,39 @@ Examples:
     if args.audit:
         return run_audit(repo_root)
 
+    # Handle --all (process all issues needing LLDs)
+    if args.all:
+        issues = get_issues_needing_llds(repo_root)
+        if not issues:
+            print("No issues need LLDs. All open issues already have approved LLDs.")
+            return 0
+
+        return run_all_llds(
+            issues=issues,
+            context_files=args.context,
+            auto_mode=args.auto,
+            mock_mode=args.mock,
+            max_iterations=args.max_iterations,
+            repo_root=repo_root,
+        )
+
     # Handle --select
     if args.select:
         result = select_issue_interactive(repo_root)
         if result is None:
             print("No issue selected. Exiting.")
             return 0
+
+        # Check if user selected 'a' for all
+        if isinstance(result, list):
+            return run_all_llds(
+                issues=result,
+                context_files=args.context,
+                auto_mode=args.auto,
+                mock_mode=args.mock,
+                max_iterations=args.max_iterations,
+                repo_root=repo_root,
+            )
 
         issue_number, title = result
 
@@ -679,9 +808,9 @@ Examples:
             repo_root=repo_root,
         )
 
-    # Require --issue if not --select or --audit
+    # Require --issue if not --select, --all, or --audit
     if not args.issue:
-        parser.error("one of the arguments --issue --select --audit is required")
+        parser.error("one of the arguments --issue --select --all --audit is required")
 
     return run_workflow(
         issue_number=args.issue,

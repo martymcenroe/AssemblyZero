@@ -6,13 +6,15 @@ Issue #62: Governance Workflow StateGraph
 Usage:
     python tools/run_issue_workflow.py --brief <file.md>
     python tools/run_issue_workflow.py --select
+    python tools/run_issue_workflow.py --all
     python tools/run_issue_workflow.py --select --auto
     poetry run python tools/run_issue_workflow.py --resume <file.md>
     poetry run python tools/run_issue_workflow.py --repo /path/to/repo --select
 
 Options:
     --brief <file>    Path to ideation notes (starts new workflow)
-    --select          Interactive idea picker from ideas/active/
+    --select          Interactive idea picker from ideas/active/ (use 'a' for all)
+    --all             Process ALL ideas in ideas/active/ (sequentially)
     --resume <file>   Resume interrupted workflow by brief filename
     --auto            Auto mode: skip VS Code, auto-send to Gemini, open done/ at end
     --repo <path>     Target repository root (default: auto-detect via git)
@@ -70,15 +72,16 @@ def extract_idea_title(idea_file: Path) -> str:
     return "Untitled"
 
 
-def select_idea_interactive(repo_root: Path | None = None) -> tuple[str, bool] | None:
+def select_idea_interactive(repo_root: Path | None = None) -> tuple[str, bool] | list[Path] | None:
     """Show interactive picker for ideas in ideas/active/.
 
     Args:
         repo_root: Repository root path. Auto-detected if None.
 
     Returns:
-        Tuple of (path_to_idea, from_ideas_folder) if selected, None if quit.
-        from_ideas_folder is True to indicate the workflow should track source_idea.
+        Tuple of (path_to_idea, from_ideas_folder) if single selection,
+        list of all idea Paths if 'a' (all) selected,
+        None if quit.
     """
     root = repo_root or get_repo_root()
     ideas = list_ideas(root)
@@ -102,29 +105,34 @@ def select_idea_interactive(repo_root: Path | None = None) -> tuple[str, bool] |
         print(f"\n  Note: {encrypted_count} encrypted idea(s) found.")
         print("        Run 'git-crypt unlock' to access them.")
 
-    print(f"\n  [q] Quit")
+    if ideas:
+        print(f"\n  [a] Process ALL {len(ideas)} ideas sequentially")
+    print(f"  [q] Quit")
     print()
 
     # Test mode: select first idea
     if os.environ.get("AGENTOS_TEST_MODE") == "1" and ideas:
         choice = "1"
-        print(f"Select idea [1-{len(ideas)}, q]: {choice} (TEST MODE - auto-select)")
+        print(f"Select idea [1-{len(ideas)}, a, q]: {choice} (TEST MODE - auto-select)")
         return (str(ideas[0]), True)
 
     while True:
-        choice = input(f"Select idea [1-{len(ideas)}, q]: ").strip().lower()
+        choice = input(f"Select idea [1-{len(ideas)}, a, q]: ").strip().lower()
 
         if choice == "q":
             return None
+
+        if choice == "a":
+            return ideas  # Return list for --all processing
 
         try:
             idx = int(choice)
             if 1 <= idx <= len(ideas):
                 return (str(ideas[idx - 1]), True)
             else:
-                print(f"Invalid number. Enter 1-{len(ideas)} or q.")
+                print(f"Invalid number. Enter 1-{len(ideas)}, a, or q.")
         except ValueError:
-            print("Invalid input. Enter a number or q.")
+            print("Invalid input. Enter a number, a, or q.")
 
 
 def get_checkpoint_db_path() -> Path:
@@ -612,6 +620,72 @@ def run_resume_workflow(brief_file: str, repo_root: Path | None = None) -> int:
     return 0
 
 
+def run_all_issues(
+    ideas: list[Path],
+    repo_root: Path | None = None,
+) -> int:
+    """Run issue workflow for all provided ideas sequentially.
+
+    Args:
+        ideas: List of paths to idea files.
+        repo_root: Repository root path.
+
+    Returns:
+        Exit code (0 for success, non-zero for partial/full failure).
+    """
+    total = len(ideas)
+    succeeded = 0
+    failed = 0
+    paused = 0
+
+    print(f"\n{'=' * 60}")
+    print(f"BATCH ISSUE WORKFLOW - {total} ideas to process")
+    print(f"{'=' * 60}\n")
+
+    for i, idea_path in enumerate(ideas, 1):
+        title = extract_idea_title(idea_path)
+
+        print(f"\n{'=' * 60}")
+        print(f"[{i}/{total}] {idea_path.name}")
+        print(f"         {title}")
+        print(f"{'=' * 60}")
+
+        exit_code = run_new_workflow(
+            brief_file=str(idea_path),
+            source_idea=str(idea_path),
+            repo_root=repo_root,
+        )
+
+        if exit_code == 0:
+            succeeded += 1
+        elif exit_code == 75:  # EX_TEMPFAIL - credential exhaustion
+            paused += 1
+            print(f"\n>>> Stopping batch: credential pool exhausted")
+            print(f">>> Completed: {succeeded}/{total}, Paused at: {idea_path.name}")
+            break
+        else:
+            failed += 1
+
+    # Summary
+    print(f"\n{'=' * 60}")
+    print("BATCH COMPLETE")
+    print(f"{'=' * 60}")
+    print(f"  Total:     {total}")
+    print(f"  Succeeded: {succeeded}")
+    print(f"  Failed:    {failed}")
+    if paused > 0:
+        remaining = total - succeeded - failed - paused
+        print(f"  Paused:    {paused} (credential exhaustion)")
+        print(f"  Remaining: {remaining}")
+    print(f"{'=' * 60}\n")
+
+    if failed > 0:
+        return 1
+    if paused > 0:
+        return 75
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -634,7 +708,12 @@ Examples:
     parser.add_argument(
         "--select",
         action="store_true",
-        help="Interactive picker for ideas in ideas/active/",
+        help="Interactive picker for ideas in ideas/active/ (use 'a' for all)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process ALL ideas in ideas/active/ (sequentially)",
     )
     parser.add_argument(
         "--resume",
@@ -666,11 +745,32 @@ Examples:
     if args.auto:
         os.environ["AGENTOS_AUTO_MODE"] = "1"
 
+    # Handle --all (process all ideas)
+    if args.all:
+        root = repo_root or get_repo_root()
+        ideas = list_ideas(root)
+        if not ideas:
+            print("No ideas found in ideas/active/")
+            return 0
+
+        return run_all_issues(
+            ideas=ideas,
+            repo_root=repo_root,
+        )
+
     if args.select:
         result = select_idea_interactive(repo_root)
         if result is None:
             print("No idea selected. Exiting.")
             return 0
+
+        # Check if user selected 'a' for all
+        if isinstance(result, list):
+            return run_all_issues(
+                ideas=result,
+                repo_root=repo_root,
+            )
+
         idea_path, from_ideas = result
         return run_new_workflow(
             idea_path,
