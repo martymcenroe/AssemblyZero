@@ -2535,3 +2535,142 @@ AGENTOS_TEST_MODE=1 poetry run python tools/run_lld_workflow.py --issue 999 --mo
 ---
 
 **End of Session 5 Report**
+
+---
+
+# Session 6: Batch Mode (`--all`) E2E Testing
+
+**Date:** 2026-01-31
+**Context:** Testing new `--all` option for issue workflow batch processing
+**Duration:** ~2 hours
+**Outcome:** 7/7 briefs → GitHub issues, 2 bugs found and fixed
+
+---
+
+## Executive Summary
+
+Implemented and tested `--all` option for batch processing of briefs/issues. Found two critical bugs related to auto mode handling that caused crashes when running unattended.
+
+## What Was Tested
+
+- **Repo:** RCA-PDF-extraction-pipeline
+- **Briefs:** 7 files in `ideas/active/`
+- **Mode:** `--all --auto` (unattended batch)
+- **Cross-repo:** Running from AgentOS-101 worktree targeting RCA-PDF
+
+## Bugs Found
+
+### Bug 1: EOFError on Max Iterations
+
+**Location:** `tools/run_issue_workflow.py:400`
+
+**Problem:** When hitting recursion limit (25 iterations), code tried to prompt user with `input()`. In auto mode with no stdin, this crashed with `EOFError`.
+
+**Fix:** Added `AGENTOS_AUTO_MODE` check alongside existing `AGENTOS_TEST_MODE`:
+```python
+if os.environ.get("AGENTOS_TEST_MODE") == "1" or os.environ.get("AGENTOS_AUTO_MODE") == "1":
+    choice = "S"  # Auto-save and continue
+```
+
+### Bug 2: EOFError on Slug Collision
+
+**Location:** `tools/run_issue_workflow.py:182`
+
+**Problem:** When an in-progress workflow exists (slug collision), code prompted for Resume/New/Clean/Abort. In auto mode, this crashed.
+
+**Fix:** Added `AGENTOS_AUTO_MODE` check to auto-resume:
+```python
+if os.environ.get("AGENTOS_AUTO_MODE") == "1":
+    choice = "R"  # Auto-resume existing workflow
+```
+
+## Context Compaction Issue
+
+**Critical Discovery:** After context compaction, I lost track of which directory I was working in. I was supposed to be in `AgentOS-101` worktree but switched to `AgentOS` main branch without realizing it.
+
+**Evidence:**
+- 13 commits went to main instead of the worktree
+- User had to audit and ask "aren't we in the worktree?"
+
+**Impact:** Had to merge main into 101 branch and stash/unstash uncommitted work.
+
+**Lesson:** After compaction, verify working directory immediately:
+```bash
+pwd
+git branch --show-current
+```
+
+## Test Results
+
+| Run | Status | Issue |
+|-----|--------|-------|
+| 1st | ❌ Failed | EOFError on max iterations (ingestion-alberta hit 25 cycles) |
+| 2nd | ❌ Failed | EOFError on slug collision (existing workflow in active/) |
+| 3rd | ✅ Success | All 7 briefs → issues #20-#26 |
+
+### Issues Created
+
+| # | Brief | Iterations |
+|---|-------|------------|
+| #20 | automated-data-validation.md | 3 |
+| #21 | ingestion-alberta.md | 2 |
+| #22 | ingestion-australia.md | 2 |
+| #23 | ingestion-core.md | 2 |
+| #24 | ingestion-norway.md | 2 |
+| #25 | ingestion-texas.md | 2 |
+| #26 | ingestion-uk.md | 2 |
+
+## Observations
+
+### 1. Governance Working Correctly
+
+`ingestion-alberta` initially failed (first run) because the brief had placeholder "Spike #YY" dependencies. Gemini correctly rejected it 6 times until it hit max iterations.
+
+On the second run (fresh start), Claude generated a cleaner draft without placeholders and it passed in 2 iterations.
+
+**Takeaway:** Briefs with incomplete dependencies will be rejected. This is correct governance behavior.
+
+### 2. Auto-Created Labels
+
+The workflow auto-created GitHub labels when filing issues:
+- `ingestion`
+- `region:canada`
+- `norway`
+- `external-data`
+
+### 3. Cross-Repo Artifacts Correct
+
+All artifacts landed in RCA-PDF repo:
+- Issues: github.com/martymcenroe/RCA-PDF-extraction-pipeline/issues
+- Lineage: RCA-PDF/docs/lineage/done/
+- Ideas moved: RCA-PDF/ideas/done/
+
+## Files Modified This Session
+
+| File | Change |
+|------|--------|
+| `tools/run_issue_workflow.py` | Fixed auto mode prompts (2 locations) |
+| `tools/run_lld_workflow.py` | Added `--all` option and batch handler |
+
+## Parallel Execution Brief Filed
+
+Filed `ideas/active/parallel-workflow-execution.md` documenting why parallel `--all` is not trivial:
+- SQLite single-writer limitation
+- Credential pool contention
+- Console output collision
+
+Sequential execution works; parallel requires database isolation.
+
+---
+
+## Key Takeaways
+
+1. **Auto mode must handle ALL prompts** - Any `input()` call crashes in batch mode
+2. **Context compaction loses working directory** - Must verify after compaction
+3. **Governance catches incomplete briefs** - Placeholders will be rejected
+4. **Cross-repo execution works** - Artifacts land in correct repo
+5. **Most issues approve in 2 iterations** - First gets feedback, second passes
+
+---
+
+**End of Session 6 Report**
