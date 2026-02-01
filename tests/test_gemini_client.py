@@ -77,12 +77,22 @@ class TestGeminiClientModelValidation:
         )
         assert client.model == "gemini-3-pro-preview"
 
-    def test_non_pro_model_rejected(self):
-        """Test that non-Pro models are rejected."""
+    def test_non_gemini_model_rejected(self):
+        """Test that non-Gemini models are rejected."""
         with pytest.raises(ValueError) as exc_info:
-            GeminiClient(model="gemini-nano")
+            GeminiClient(model="gpt-4")
 
-        assert "not a Pro-tier model" in str(exc_info.value)
+        assert "not a valid Gemini model" in str(exc_info.value)
+
+    def test_flash_preview_model_accepted(self, temp_credentials_file, temp_state_file):
+        """Test that 3-flash-preview model is accepted."""
+        # Should not raise
+        client = GeminiClient(
+            model="gemini-3-flash-preview",
+            credentials_file=temp_credentials_file,
+            state_file=temp_state_file,
+        )
+        assert client.model == "gemini-3-flash-preview"
 
 
 class TestCredentialLoading:

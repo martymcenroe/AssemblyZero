@@ -277,17 +277,17 @@ class GeminiClient:
             state_file: Path to rotation state JSON file.
 
         Raises:
-            ValueError: If model is in FORBIDDEN_MODELS list or not Pro-tier.
+            ValueError: If model is in FORBIDDEN_MODELS list or not a valid Gemini model.
         """
         if model in FORBIDDEN_MODELS:
             raise ValueError(
                 f"Model '{model}' is explicitly forbidden for governance. "
-                f"Required: gemini-3-pro-preview or gemini-3-pro"
+                f"Allowed: gemini-3-pro-preview, gemini-3-pro, gemini-3-flash-preview"
             )
-        if not model.startswith("gemini-") or "pro" not in model.lower():
+        if not model.startswith("gemini-"):
             raise ValueError(
-                f"Model '{model}' is not a Pro-tier model. "
-                f"Governance requires: gemini-3-pro-preview or gemini-3-pro"
+                f"Model '{model}' is not a valid Gemini model. "
+                f"Expected format: gemini-*"
             )
 
         self.model = model

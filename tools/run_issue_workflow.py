@@ -178,6 +178,12 @@ def prompt_slug_collision(slug: str) -> tuple[SlugCollisionChoice, str]:
         print(f"Your choice [R/N/C/A]: {choice} (TEST MODE - auto-clean)")
         return (SlugCollisionChoice.CLEAN, "")
 
+    # Auto mode: auto-resume existing workflow
+    if os.environ.get("AGENTOS_AUTO_MODE") == "1":
+        choice = "R"
+        print(f"Your choice [R/N/C/A]: {choice} (AUTO MODE - auto-resume)")
+        return (SlugCollisionChoice.RESUME, "")
+
     while True:
         choice = input("Your choice [R/N/C/A]: ").strip().upper()
         if choice == "R":
@@ -391,11 +397,11 @@ def run_new_workflow(
                     print("[C]lean and exit - delete checkpoint and audit directory")
                     print()
 
-                    # Test mode: auto-save and exit
+                    # Auto/Test mode: auto-save and exit
                     import os
-                    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+                    if os.environ.get("AGENTOS_TEST_MODE") == "1" or os.environ.get("AGENTOS_AUTO_MODE") == "1":
                         choice = "S"
-                        print(f"Your choice: {choice} (TEST MODE - auto-save on recursion limit)")
+                        print(f"Your choice: {choice} (AUTO MODE - auto-save on recursion limit)")
                     else:
                         choice = input("Your choice: ").strip().upper()
 
@@ -553,11 +559,11 @@ def run_resume_workflow(brief_file: str, repo_root: Path | None = None) -> int:
                     print("[C]lean and exit - delete checkpoint and audit directory")
                     print()
 
-                    # Test mode: auto-save and exit
+                    # Auto/Test mode: auto-save and exit
                     import os
-                    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+                    if os.environ.get("AGENTOS_TEST_MODE") == "1" or os.environ.get("AGENTOS_AUTO_MODE") == "1":
                         choice = "S"
-                        print(f"Your choice: {choice} (TEST MODE - auto-save on recursion limit)")
+                        print(f"Your choice: {choice} (AUTO MODE - auto-save on recursion limit)")
                     else:
                         choice = input("Your choice: ").strip().upper()
 
