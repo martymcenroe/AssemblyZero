@@ -2,6 +2,7 @@
 
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
+Issue #93: N8 Documentation Node
 
 Nodes:
 - N0: load_lld - Load LLD and extract test plan
@@ -12,8 +13,10 @@ Nodes:
 - N5: verify_green_phase - Verify all tests pass
 - N6: e2e_validation - Run E2E tests in sandbox
 - N7: finalize - Generate reports and complete
+- N8: document - Auto-generate documentation artifacts
 """
 
+from agentos.workflows.testing.nodes.document import document
 from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
 from agentos.workflows.testing.nodes.finalize import finalize
 from agentos.workflows.testing.nodes.implement_code import implement_code
@@ -34,4 +37,5 @@ __all__ = [
     "verify_green_phase",
     "e2e_validation",
     "finalize",
+    "document",
 ]

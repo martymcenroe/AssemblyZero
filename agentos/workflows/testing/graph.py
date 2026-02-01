@@ -2,9 +2,10 @@
 
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
+Issue #93: N8 Documentation Node
 
 Defines the compiled graph with:
-- N0-N7 nodes
+- N0-N8 nodes
 - Conditional edges for routing
 - Checkpoint support via SqliteSaver
 
@@ -28,13 +29,13 @@ Graph structure:
            v                |                  v                    v
           N4               N4                  N6                  N7
 
-    N6_e2e_validation -> N7_finalize -> END
-           |                  |
-           v                  v
-       skip_e2e           complete
-           |
-           v
-          N7
+    N6_e2e_validation -> N7_finalize -> N8_document -> END
+           |                  |               |
+           v                  v               v
+       skip_e2e           complete       skip_docs
+           |                                  |
+           v                                  v
+          N7                                 END
 """
 
 from typing import Literal
@@ -42,6 +43,7 @@ from typing import Literal
 from langgraph.graph import END, StateGraph
 
 from agentos.workflows.testing.nodes import (
+    document,
     e2e_validation,
     finalize,
     implement_code,
@@ -218,6 +220,28 @@ def route_after_e2e(
     return "N7_finalize"
 
 
+def route_after_finalize(
+    state: TestingWorkflowState,
+) -> Literal["N8_document", "end"]:
+    """Route after N7 (finalize).
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name or END.
+    """
+    error = state.get("error_message", "")
+    if error:
+        return "end"
+
+    # Skip documentation if flag is set
+    if state.get("skip_docs"):
+        return "end"
+
+    return "N8_document"
+
+
 def build_testing_workflow() -> StateGraph:
     """Build the TDD testing workflow StateGraph.
 
@@ -236,6 +260,7 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N5_verify_green", verify_green_phase)
     workflow.add_node("N6_e2e_validation", e2e_validation)
     workflow.add_node("N7_finalize", finalize)
+    workflow.add_node("N8_document", document)
 
     # Set entry point
     workflow.set_entry_point("N0_load_lld")
@@ -312,7 +337,17 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N7 -> END
-    workflow.add_edge("N7_finalize", END)
+    # N7 -> N8 (with skip_docs check)
+    workflow.add_conditional_edges(
+        "N7_finalize",
+        route_after_finalize,
+        {
+            "N8_document": "N8_document",
+            "end": END,
+        },
+    )
+
+    # N8 -> END
+    workflow.add_edge("N8_document", END)
 
     return workflow

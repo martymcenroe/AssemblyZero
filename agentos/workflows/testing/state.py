@@ -2,9 +2,11 @@
 
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
+Issue #93: N8 Documentation Node
 
-This TypedDict travels through nodes N0-N7, tracking the testing workflow
-from LLD loading through test generation, implementation, and E2E validation.
+This TypedDict travels through nodes N0-N8, tracking the testing workflow
+from LLD loading through test generation, implementation, E2E validation,
+and documentation generation.
 """
 
 from enum import Enum
@@ -89,6 +91,17 @@ class TestingWorkflowState(TypedDict, total=False):
         sandbox_repo: Path to sandbox repository for E2E tests.
         e2e_max_issues: Maximum issues to create in E2E (safety limit).
         e2e_max_prs: Maximum PRs to create in E2E (safety limit).
+
+        # Documentation outputs (N8)
+        doc_wiki_path: Path to generated wiki page.
+        doc_runbook_path: Path to generated runbook.
+        doc_lessons_path: Path to lessons learned file.
+        doc_readme_updated: Whether README was updated.
+        doc_cp_paths: Paths to c/p documentation files.
+
+        # Documentation control
+        skip_docs: CLI flag to skip documentation generation.
+        doc_scope: Documentation scope ("full", "minimal", "auto", "none").
     """
 
     # Input
@@ -113,6 +126,7 @@ class TestingWorkflowState(TypedDict, total=False):
     # Test artifacts
     test_files: list[str]
     implementation_files: list[str]
+    coverage_module: str  # Module path for coverage measurement (e.g., "agentos.workflows.scout")
     red_phase_output: str
     green_phase_output: str
     coverage_achieved: float
@@ -126,6 +140,7 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Routing
     next_node: str
+    implementation_exists: bool
 
     # Output
     test_report_path: str
@@ -145,3 +160,14 @@ class TestingWorkflowState(TypedDict, total=False):
     sandbox_repo: str
     e2e_max_issues: int
     e2e_max_prs: int
+
+    # Documentation outputs (N8)
+    doc_wiki_path: str
+    doc_runbook_path: str
+    doc_lessons_path: str
+    doc_readme_updated: bool
+    doc_cp_paths: list[str]
+
+    # Documentation control
+    skip_docs: bool
+    doc_scope: Literal["full", "minimal", "auto", "none"]
