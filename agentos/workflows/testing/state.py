@@ -41,6 +41,8 @@ class TestingWorkflowState(TypedDict, total=False):
         issue_number: GitHub issue number (links to LLD).
         lld_path: Path to the approved LLD file.
         repo_root: Target repository root path (for cross-repo workflows).
+        worktree_path: Path to git worktree (if created for this workflow).
+        original_repo_root: Original repository root before worktree switch.
 
         # LLD content (populated by N0)
         lld_content: Full LLD content.
@@ -108,6 +110,10 @@ class TestingWorkflowState(TypedDict, total=False):
     issue_number: int
     lld_path: str
     repo_root: str
+
+    # Worktree isolation (for multi-branch safety)
+    worktree_path: str  # Path to worktree if created
+    original_repo_root: str  # Original repo root (for reference)
 
     # LLD content
     lld_content: str

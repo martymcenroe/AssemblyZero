@@ -35,11 +35,105 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+def get_current_branch(repo_path: Path) -> str:
+    """Get the current git branch name."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=str(repo_path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return ""
+
+
+def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
+    """Find an existing worktree for this issue."""
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=str(repo_path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    # Parse worktree list for issue-specific worktree
+    worktree_path = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = Path(line.split(" ", 1)[1])
+            # Check if this worktree is for our issue
+            if f"-{issue_number}" in path.name:
+                worktree_path = path
+                break
+
+    return worktree_path
+
+
+def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
+    """Create a git worktree for the issue.
+
+    Args:
+        repo_path: Path to the main repository.
+        issue_number: Issue number.
+
+    Returns:
+        Tuple of (worktree_path, error_message).
+    """
+    # Derive project name from repo path
+    project_name = repo_path.name
+
+    # Worktree path: ../ProjectName-IssueNumber
+    worktree_path = repo_path.parent / f"{project_name}-{issue_number}"
+
+    # Branch name: issue-number-implementation
+    branch_name = f"{issue_number}-implementation"
+
+    # Check if worktree already exists
+    if worktree_path.exists():
+        return worktree_path, ""
+
+    # Create worktree
+    result = subprocess.run(
+        ["git", "worktree", "add", str(worktree_path), "-b", branch_name],
+        cwd=str(repo_path),
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        # Maybe branch already exists - try without -b
+        result = subprocess.run(
+            ["git", "worktree", "add", str(worktree_path), branch_name],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return worktree_path, f"Failed to create worktree: {result.stderr.strip()}"
+
+    # Push branch to remote
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", branch_name],
+        cwd=str(worktree_path),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # Non-fatal - might be offline or remote doesn't accept
+        print(f"    [WARN] Could not push branch to remote: {result.stderr.strip()}")
+
+    return worktree_path, ""
 
 
 def main():
@@ -114,6 +208,11 @@ def main():
         action="store_true",
         help="Resume from checkpoint",
     )
+    parser.add_argument(
+        "--no-worktree",
+        action="store_true",
+        help="Skip worktree creation (use current directory)",
+    )
 
     args = parser.parse_args()
 
@@ -145,10 +244,48 @@ def main():
             print(f"Error: {e}")
             sys.exit(1)
 
+    # Track original repo for worktree cleanup later
+    original_repo_root = repo_root
+    worktree_path = None
+
+    # Handle worktree creation/detection
+    if not args.no_worktree:
+        current_branch = get_current_branch(repo_root)
+
+        # Check if we're on main/master (need worktree)
+        if current_branch in ("main", "master"):
+            # Check for existing worktree first
+            existing = find_existing_worktree(repo_root, args.issue)
+
+            if existing and existing.exists():
+                print(f"Found existing worktree: {existing}")
+                repo_root = existing
+                worktree_path = existing
+            else:
+                print(f"Creating worktree for issue #{args.issue}...")
+                worktree_path, error = create_worktree(repo_root, args.issue)
+                if error:
+                    print(f"Error: {error}")
+                    sys.exit(1)
+                print(f"Created worktree: {worktree_path}")
+                repo_root = worktree_path
+        elif f"-{args.issue}" in current_branch or f"{args.issue}-" in current_branch:
+            # Already on issue branch - likely in a worktree
+            print(f"Already on issue branch: {current_branch}")
+        else:
+            # On some other branch - warn user
+            print(f"WARNING: On branch '{current_branch}', not main.")
+            print("         Use --no-worktree to skip worktree creation.")
+            print("         Or switch to main first: git checkout main")
+            sys.exit(1)
+
+    print()
     print(f"AgentOS TDD Testing Workflow")
     print(f"============================")
     print(f"Issue: #{args.issue}")
     print(f"Repository: {repo_root}")
+    if worktree_path:
+        print(f"Worktree: {worktree_path}")
     print(f"Mode: {'auto' if args.auto else 'interactive'}")
     if args.skip_e2e:
         print(f"E2E: skipped")
@@ -166,6 +303,11 @@ def main():
         "scaffold_only": args.scaffold_only,
         "max_iterations": args.max_iterations,
     }
+
+    # Track worktree for later reference (cleanup, PR creation)
+    if worktree_path:
+        initial_state["worktree_path"] = str(worktree_path)
+        initial_state["original_repo_root"] = str(original_repo_root)
 
     if args.lld:
         initial_state["lld_path"] = args.lld
@@ -236,6 +378,16 @@ def main():
                     return 1
                 else:
                     print("Status: SUCCESS")
+
+                    # Show next steps for worktree workflow
+                    if worktree_path:
+                        print()
+                        print("Next steps:")
+                        print(f"  1. cd {worktree_path}")
+                        print("  2. Review changes: git diff")
+                        print("  3. Commit: git add . && git commit -m 'feat: implement issue #{}'".format(args.issue))
+                        print("  4. Create PR: gh pr create")
+
                     return 0
 
     except KeyboardInterrupt:
