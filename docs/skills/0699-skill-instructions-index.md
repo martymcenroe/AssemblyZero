@@ -37,6 +37,7 @@ This document indexes all skill documentation in the `06xx` namespace.
 | `/code-review` | [0625c](0625c-code-review-cli.md) | [0625p](0625p-code-review-prompt.md) | Active |
 | `/commit-push-pr` | [0626c](0626c-commit-push-pr-cli.md) | [0626p](0626p-commit-push-pr-prompt.md) | Active |
 | `/test-gaps` | [0627c](0627c-test-gaps-cli.md) | [0627p](0627p-test-gaps-prompt.md) | Active |
+| `/quote` | - | User-level (`~/.claude/commands/quote.md`) | Active |
 
 ---
 

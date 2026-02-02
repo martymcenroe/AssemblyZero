@@ -11,7 +11,7 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | Category | Description | Examples |
 |----------|-------------|----------|
 | **Audit Runbooks** | How to invoke audits (ultrathink, model selection) | 0901 |
-| **Skill Runbooks** | How to use /cleanup, /onboard, /audit, etc. | (TBD) |
+| **Skill Runbooks** | How to use /cleanup, /onboard, /audit, etc. | 0913 |
 | **Agent Runbooks** | How to invoke custom agents | (TBD) |
 | **Prompt Runbooks** | Standard prompts for common tasks | (TBD) |
 
@@ -31,6 +31,7 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | 0910 | [Verdict Analyzer](0910-verdict-analyzer---template-improvement-from-gemini-verdicts.md) | Manual | Weekly/ad-hoc | - |
 | 0911 | [Dependabot PR Audit](0911-dependabot-pr-audit.md) | Manual | On Dependabot PRs | Sonnet |
 | 0912 | [GitHub Projects](0912-github-projects.md) | Reference | - | - |
+| 0913 | [Skill Command Reference](0913-skill-command-reference.md) | Reference | - | - |
 
 ## Model Selection Guide
 

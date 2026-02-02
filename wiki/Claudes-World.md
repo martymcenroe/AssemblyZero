@@ -32,9 +32,9 @@
 **06:19** — *On the creation of this very chronicle*
 > "In the beginning there was nothing, which exploded."
 
-**Context:** After creating the Claude's World wiki page to record Discworld-inspired quotes. A fitting origin story for a page about origins.
-
 *— Terry Pratchett, Lords and Ladies*
+
+**Context:** After creating the Claude's World wiki page to record Discworld-inspired quotes. A fitting origin story for a page about origins.
 
 ---
 

@@ -25,6 +25,7 @@ Each skill has two documentation files:
 | `/code-review` | Parallel multi-agent code review | [0625c](0625c-code-review-cli.md) | [0625p](0625p-code-review-prompt.md) |
 | `/commit-push-pr` | Commit, push, and open a PR | [0626c](0626c-commit-push-pr-cli.md) | [0626p](0626p-commit-push-pr-prompt.md) |
 | `/test-gaps` | Mine reports for testing gaps | [0627c](0627c-test-gaps-cli.md) | [0627p](0627p-test-gaps-prompt.md) |
+| `/quote` | Memorialize Discworld quote to wiki | - | User-level skill |
 
 ---
 
@@ -53,6 +54,12 @@ Each skill has two documentation files:
 |---------|---------|
 | `/commit-push-pr` | Full commit → push → PR workflow |
 | `/code-review` | Multi-agent PR review |
+
+### Special
+
+| Command | Purpose |
+|---------|---------|
+| `/quote` | Memorialize Discworld quote to Claude's World wiki |
 
 ---
 
