@@ -1,0 +1,20 @@
+[
+  {
+    "full_name": "fixture/repo1",
+    "html_url": "https://github.com/fixture/repo1",
+    "stargazers_count": 500,
+    "description": "Fixture repository 1"
+  },
+  {
+    "full_name": "fixture/repo2",
+    "html_url": "https://github.com/fixture/repo2",
+    "stargazers_count": 400,
+    "description": "Fixture repository 2"
+  },
+  {
+    "full_name": "fixture/repo3",
+    "html_url": "https://github.com/fixture/repo3",
+    "stargazers_count": 300,
+    "description": "Fixture repository 3"
+  }
+]
