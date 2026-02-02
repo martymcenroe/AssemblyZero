@@ -1,0 +1,35 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\mcwiz\Projects\AgentOS-106
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
+collecting ... collected 11 items
+
+tests/test_issue_106.py::test_010 PASSED                                 [  9%]
+tests/test_issue_106.py::test_020 PASSED                                 [ 18%]
+tests/test_issue_106.py::test_030 PASSED                                 [ 27%]
+tests/test_issue_106.py::test_040 PASSED                                 [ 36%]
+tests/test_issue_106.py::test_050 PASSED                                 [ 45%]
+tests/test_issue_106.py::test_060 PASSED                                 [ 54%]
+tests/test_issue_106.py::test_070 PASSED                                 [ 63%]
+tests/test_issue_106.py::test_080 PASSED                                 [ 72%]
+tests/test_issue_106.py::test_090 PASSED                                 [ 81%]
+tests/test_issue_106.py::test_100 PASSED                                 [ 90%]
+tests/test_issue_106.py::test_110 PASSED                                 [100%]
+
+---------- coverage: platform win32, python 3.14.0-final-0 -----------
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+agentos\workflows\parallel\__init__.py                     5      0   100%
+agentos\workflows\parallel\coordinator.py                105      8    92%   136, 164, 179-189
+agentos\workflows\parallel\credential_coordinator.py      55      5    91%   88-89, 108, 116-117
+agentos\workflows\parallel\input_sanitizer.py             18      8    56%   32-35, 47-51
+agentos\workflows\parallel\output_prefixer.py             34      7    79%   33, 56-58, 65, 69-70
+------------------------------------------------------------------------------------
+TOTAL                                                    217     28    87%
+
+FAIL Required test coverage of 95% not reached. Total coverage: 87.10%
+
+======================= 11 passed in 182.98s (0:03:02) ========================
+

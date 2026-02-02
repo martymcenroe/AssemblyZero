@@ -1,0 +1,42 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\mcwiz\Projects\AgentOS-106
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
+collecting ... collected 18 items
+
+tests/test_issue_106.py::test_010 PASSED                                 [  5%]
+tests/test_issue_106.py::test_020 PASSED                                 [ 11%]
+tests/test_issue_106.py::test_030 PASSED                                 [ 16%]
+tests/test_issue_106.py::test_040 PASSED                                 [ 22%]
+tests/test_issue_106.py::test_050 PASSED                                 [ 27%]
+tests/test_issue_106.py::test_060 PASSED                                 [ 33%]
+tests/test_issue_106.py::test_070 PASSED                                 [ 38%]
+tests/test_issue_106.py::test_080 PASSED                                 [ 44%]
+tests/test_issue_106.py::test_090 PASSED                                 [ 50%]
+tests/test_issue_106.py::test_100 PASSED                                 [ 55%]
+tests/test_issue_106.py::test_110 PASSED                                 [ 61%]
+tests/test_issue_106.py::test_120_credential_timeout PASSED              [ 66%]
+tests/test_issue_106.py::test_130_credential_rate_limit_release PASSED   [ 72%]
+tests/test_issue_106.py::test_140_sanitize_path_separators PASSED        [ 77%]
+tests/test_issue_106.py::test_150_sanitize_invalid_characters PASSED     [ 83%]
+tests/test_issue_106.py::test_160_output_prefixer_empty_lines PASSED     [ 88%]
+tests/test_issue_106.py::test_170_output_prefixer_flush_buffer PASSED    [ 94%]
+tests/test_issue_106.py::test_180_coordinator_credential_acquisition_failure PASSED [100%]
+
+---------- coverage: platform win32, python 3.14.0-final-0 -----------
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+agentos\workflows\parallel\__init__.py                     5      0   100%
+agentos\workflows\parallel\coordinator.py                 85      1    99%   106
+agentos\workflows\parallel\credential_coordinator.py      34      2    94%   44, 48
+agentos\workflows\parallel\input_sanitizer.py             13      1    92%   39
+agentos\workflows\parallel\output_prefixer.py             19      0   100%
+------------------------------------------------------------------------------------
+TOTAL                                                    156      4    97%
+
+Required test coverage of 95% reached. Total coverage: 97.44%
+
+============================= 18 passed in 2.88s ==============================
+
