@@ -25,7 +25,7 @@ Manage and test Gemini API credentials for the rotation system. Supports multipl
 Run the test script to verify all credentials (including disabled ones):
 
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-test-credentials.py
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-test-credentials.py
 ```
 
 **Expected output:**
@@ -124,8 +124,8 @@ The `gemini-rotate.py` tool automatically:
 
 **Usage:**
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --prompt "Hello"
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --prompt "Hello"
+poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
 ```
 
 ## Monitoring Credential Health
