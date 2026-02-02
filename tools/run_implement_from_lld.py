@@ -99,9 +99,17 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
     # Branch name: issue-number-implementation
     branch_name = f"{issue_number}-implementation"
 
-    # Check if worktree already exists
+    # Check if worktree already exists AND is valid
     if worktree_path.exists():
-        return worktree_path, ""
+        # Verify it's actually a git worktree (has .git file)
+        git_marker = worktree_path / ".git"
+        if git_marker.exists():
+            return worktree_path, ""
+        else:
+            # Directory exists but isn't a valid worktree - remove it
+            import shutil
+            shutil.rmtree(worktree_path)
+            # Continue to create proper worktree below
 
     # Create worktree
     result = subprocess.run(
