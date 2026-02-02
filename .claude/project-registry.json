@@ -33,6 +33,16 @@
       "lastSync": "2026-01-13T00:00:00Z",
       "lastHarvest": null,
       "status": "active"
+    },
+    {
+      "name": "RCA-PDF-extraction-pipeline",
+      "path": "C:\\Users\\mcwiz\\Projects\\RCA-PDF-extraction-pipeline",
+      "pathUnix": "/c/Users/mcwiz/Projects/RCA-PDF-extraction-pipeline",
+      "github": "martymcenroe/RCA-PDF-extraction-pipeline",
+      "description": "PDF extraction pipeline for Routine Core Analysis reports + G-FIAT forensic image analysis",
+      "lastSync": "2026-02-01T00:00:00Z",
+      "lastHarvest": null,
+      "status": "active"
     }
   ],
 
