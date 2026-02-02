@@ -211,7 +211,8 @@ class ClaudeCLIProvider(LLMProvider):
             "-p",
             "--output-format", "json",
             "--setting-sources", "user",  # Skip project CLAUDE.md context
-            "--tools", "",  # Disable all tools - just need text generation
+            "--tools", "",  # Disable built-in tools
+            "--strict-mcp-config",  # Disable MCP tools (issue #157)
             "--model", self._model_id,  # Use full model ID (e.g., claude-opus-4-5-20251101)
         ]
 
