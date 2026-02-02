@@ -271,6 +271,15 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("mock_mode"):
         return _mock_review_test_plan(state)
 
+    # Check for auto mode - skip Gemini review and auto-approve
+    if state.get("auto_mode"):
+        print("    [AUTO] Skipping Gemini review - auto mode enabled")
+        return {
+            "test_plan_status": "APPROVED",
+            "test_plan_verdict": "[AUTO] Review skipped - auto mode enabled",
+            "file_counter": state.get("file_counter", 0),
+        }
+
     # Get repo root
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()

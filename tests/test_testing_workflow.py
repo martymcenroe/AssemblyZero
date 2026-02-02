@@ -605,6 +605,42 @@ class TestNodeFunctions:
         assert result.get("test_plan_status") == "BLOCKED"
         assert "REQ-2" in result.get("gemini_feedback", "")
 
+    def test_review_test_plan_auto_mode_skips_review(self, tmp_path):
+        """review_test_plan auto-approves in auto mode without calling Gemini."""
+        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+
+        # Create lineage directory
+        lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
+        lineage_dir.mkdir(parents=True)
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "auto_mode": True,  # Auto mode - should skip review
+            "audit_dir": str(lineage_dir),
+            "file_counter": 1,
+            "iteration_count": 0,
+            "test_scenarios": [
+                {
+                    "name": "test_example",
+                    "description": "Test",
+                    "requirement_ref": "REQ-1",
+                    "test_type": "unit",
+                    "mock_needed": False,
+                    "assertions": [],
+                }
+            ],
+            "requirements": ["REQ-1: Example"],
+            "detected_test_types": ["unit"],
+            "coverage_target": 90,
+        }
+
+        result = review_test_plan(state)
+
+        # Auto mode should always APPROVE without calling Gemini
+        assert result.get("test_plan_status") == "APPROVED"
+        assert "AUTO" in result.get("test_plan_verdict", "")
+
     def test_scaffold_tests_creates_files(self, tmp_path):
         """scaffold_tests creates test files."""
         from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
