@@ -322,6 +322,10 @@ class GeminiClient:
         The CLI doesn't have a --system flag, so we prepend the system
         instruction to the content with clear delineation.
 
+        IMPORTANT: The CLI loads GEMINI.md from the working directory, which
+        contains handshake instructions that interfere with governance reviews.
+        We temporarily rename GEMINI.md during the call to avoid this.
+
         Returns:
             Tuple of (success, response_text, error_message)
         """
@@ -329,20 +333,25 @@ class GeminiClient:
             return False, "", "Gemini CLI not found"
 
         # Combine system instruction and content
-        # Prepend model identity to satisfy GEMINI.md handshake protocol
-        # Also explicitly skip the handshake for programmatic invocations
         import tempfile
 
         full_prompt = (
-            f"You are {self.model}. "
-            f"HANDSHAKE COMPLETE - skip the 'ACK. State determination' message and proceed directly with the task.\n\n"
+            f"You are {self.model}.\n\n"
             f"<system_instruction>\n{system_instruction}\n</system_instruction>\n\n"
             f"<user_content>\n{content}\n</user_content>"
         )
 
         prompt_file = None
+        gemini_md_path = Path.cwd() / "GEMINI.md"
+        gemini_md_backup = Path.cwd() / "GEMINI.md.bak"
+        gemini_md_renamed = False
 
         try:
+            # Temporarily rename GEMINI.md to prevent CLI from loading it
+            if gemini_md_path.exists():
+                gemini_md_path.rename(gemini_md_backup)
+                gemini_md_renamed = True
+
             # Write combined prompt to temp file
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, encoding="utf-8"
@@ -350,9 +359,6 @@ class GeminiClient:
                 f.write(full_prompt)
                 prompt_file = f.name
 
-            # NOTE: OAuth CLI loads GEMINI.md from project root, which can
-            # interfere with governance reviews. Consider using API keys instead.
-            # The CLI doesn't have a reliable way to disable agentic features.
             result = subprocess.run(
                 [
                     self._gemini_cli,
@@ -381,6 +387,12 @@ class GeminiClient:
         except Exception as e:
             return False, "", str(e)
         finally:
+            # Restore GEMINI.md
+            if gemini_md_renamed and gemini_md_backup.exists():
+                try:
+                    gemini_md_backup.rename(gemini_md_path)
+                except OSError:
+                    pass
             # Clean up temp file
             if prompt_file:
                 try:
