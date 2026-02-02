@@ -378,6 +378,12 @@ def main():
                 print("WORKFLOW COMPLETE")
                 print("=" * 60)
 
+                # Debug: Show key final state values
+                print(f"DEBUG: Final state error_message: '{values.get('error_message', '')}'")
+                print(f"DEBUG: Final state next_node: '{values.get('next_node', '')}'")
+                print(f"DEBUG: Final state iteration_count: {values.get('iteration_count', 0)}")
+                print(f"DEBUG: Final state coverage_achieved: {values.get('coverage_achieved', 0)}")
+
                 if values.get("test_report_path"):
                     print(f"Test Report: {values['test_report_path']}")
 

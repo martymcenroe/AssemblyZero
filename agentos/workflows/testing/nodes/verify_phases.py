@@ -236,14 +236,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     impl_files = state.get("implementation_files", [])
     coverage_module = None
 
+    # Debug: Show what implementation files were received
+    print(f"    DEBUG: implementation_files = {impl_files}")
+
     if impl_files:
         # Find first non-test implementation file for coverage
         for impl_path in impl_files:
+            print(f"    DEBUG: Checking impl_path = {impl_path}")
             # Skip test files (in tests/ directory)
             path_parts = Path(impl_path).parts
+            print(f"    DEBUG: path_parts = {path_parts}")
             if any(part.lower() in ("tests", "test") for part in path_parts):
+                print(f"    DEBUG: Skipping (test path)")
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
+            print(f"    DEBUG: rel_path = {rel_path}")
             # Use the specific file for coverage (e.g., agentos/workflows/testing/nodes/finalize.py)
             # pytest-cov can measure coverage for a specific file path
             coverage_module = str(rel_path)
@@ -282,18 +289,22 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     coverage_achieved = parsed.get("coverage", 0)
 
     # Check for failures
+    print(f"    DEBUG: failed_count={failed_count}, error_count={error_count}, iteration_count={iteration_count}")
     if failed_count > 0 or error_count > 0:
         # Check if we've exhausted iterations
         max_iterations = state.get("max_iterations", 10)
+        print(f"    DEBUG: max_iterations={max_iterations}, check={iteration_count + 1} >= {max_iterations}")
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {failed_count} failures")
+            error_msg = f"Green phase failed after {max_iterations} iterations: {failed_count} tests still failing"
+            print(f"    DEBUG: Returning error_message='{error_msg}'")
             return {
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "file_counter": file_num,
                 "iteration_count": iteration_count + 1,
                 "next_node": "end",
-                "error_message": f"Green phase failed after {max_iterations} iterations: {failed_count} tests still failing",
+                "error_message": error_msg,
             }
 
         print(f"    [ITERATE] {failed_count} failures, {error_count} errors - needs revision")
@@ -361,6 +372,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         }
 
     # Success: all tests pass and coverage meets target
+    print(f"    DEBUG: SUCCESS PATH - failed_count={failed_count}, coverage_achieved={coverage_achieved}, coverage_target={coverage_target}")
     print(f"    Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
 
     log_workflow_execution(
