@@ -1,7 +1,7 @@
 # 0910 - Verdict Analyzer
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.1
+**Version:** 1.2
 **Last Updated:** 2026-02-01
 
 ---
@@ -98,32 +98,40 @@ poetry run python tools/verdict-analyzer.py scan --force
 poetry run python tools/verdict-analyzer.py stats
 ```
 
-Example output:
+Example output (from 2026-02-01 run):
 ```
-Pattern Statistics
-==================
+Total Verdicts: 164
+Total Blocking Issues: 80
 
-Tier 1 (Blocking):
-  - Missing input validation: 12 occurrences
-  - No error handling: 8 occurrences
-  - Security: hardcoded credentials: 5 occurrences
+Decisions:
+  APPROVED: 36
+  BLOCKED: 128
 
-Tier 2 (High Priority):
-  - Test coverage insufficient: 15 occurrences
-  - Missing mock mode: 9 occurrences
+By Tier:
+  Tier 1: 33
+  Tier 2: 47
+
+By Category:
+  architecture: 23
+  quality: 23
+  security: 10
+  safety: 9
+  legal: 8
+  cost: 6
+  observability: 1
 ```
 
 ### 3. Get template recommendations
 
 ```bash
 # Preview recommendations for LLD template
-poetry run python tools/verdict-analyzer.py recommend docs/templates/lld-template.md
+poetry run python tools/verdict-analyzer.py recommend docs/templates/0102-feature-lld-template.md
 
 # Apply recommendations (dry-run first)
-poetry run python tools/verdict-analyzer.py recommend docs/templates/lld-template.md --apply
+poetry run python tools/verdict-analyzer.py recommend docs/templates/0102-feature-lld-template.md --apply
 
 # Actually apply (no dry-run)
-poetry run python tools/verdict-analyzer.py recommend docs/templates/lld-template.md --apply --no-dry-run
+poetry run python tools/verdict-analyzer.py recommend docs/templates/0102-feature-lld-template.md --apply --no-dry-run
 ```
 
 ---
@@ -179,11 +187,11 @@ poetry run python tools/verdict-analyzer.py stats
 
 # 3. Generate recommendations for LLD template
 poetry run python tools/verdict-analyzer.py recommend \
-  docs/templates/lld-template.md --min-count 5
+  docs/templates/0102-feature-lld-template.md --min-count 5
 
 # 4. Review and apply (if appropriate)
 poetry run python tools/verdict-analyzer.py recommend \
-  docs/templates/lld-template.md --apply --no-dry-run
+  docs/templates/0102-feature-lld-template.md --apply --no-dry-run
 ```
 
 ### After Major Governance Changes
@@ -207,9 +215,11 @@ The SQLite database (`.agentos/verdicts.db`) contains:
 
 | Table | Purpose |
 |-------|---------|
-| `verdicts` | Parsed verdict records with metadata |
-| `blocking_issues` | Individual blocking issues extracted |
-| `pattern_stats` | Aggregated pattern counts |
+| `verdicts` | Parsed verdict records (filepath, decision, content_hash, parser_version) |
+| `blocking_issues` | Individual issues with tier, category, description |
+| `schema_version` | Database migration tracking |
+
+**Incremental Updates:** The scanner uses content hashes to skip unchanged files. Only new or modified verdicts are re-parsed. Use `--force` to override.
 
 ---
 
@@ -267,5 +277,6 @@ poetry run python tools/verdict-analyzer.py scan --force
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2 | 2026-02-01 | Updated examples with real output, fixed template paths |
 | 1.1 | 2026-02-01 | Enhanced with CLI examples, workflows, troubleshooting |
 | 1.0 | 2026-02-01 | Initial version (auto-generated) |

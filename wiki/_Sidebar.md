@@ -19,6 +19,7 @@
 - [Gemini Verification](Gemini-Verification)
 - [Governance Gates](Governance-Gates)
 - [LangGraph Evolution](LangGraph-Evolution)
+- [How the AgentOS Learns](How-the-AgentOS-Learns)
 
 ---
 
@@ -45,3 +46,4 @@
 - [Audits Catalog](Audits-Catalog)
 - [Tools Reference](Tools-Reference)
 - [The Scout External Intelligence Gathering Workflow](The-Scout-External-Intelligence-Gathering-Workflow)
+- [Verdict Analyzer   Template Improvement from Gemini Verdicts](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
