@@ -166,6 +166,29 @@ Not automated. After workflow completes, you may manually refactor while keeping
 | Test report | `docs/reports/active/{issue}-test-report.md` |
 | Audit trail | `docs/lineage/active/{issue}-impl/` |
 
+### N8 Auto-Generated Documentation
+
+The N8 documentation node automatically generates docs for the implemented feature:
+
+| Doc Type | Generated When | Location |
+|----------|----------------|----------|
+| **Runbook** | CLI tool or workflow | `docs/runbooks/09XX-{feature}.md` |
+| **c/p docs** | CLI tool | `docs/skills/{num}c-*.md`, `{num}p-*.md` |
+| **Wiki page** | Major feature | `wiki/{feature}.md` |
+| **Lessons learned** | Always | `docs/lineage/active/{issue}-impl/lessons.md` |
+| **README update** | Breaking change | `README.md` |
+
+Detection logic:
+- **Runbook**: LLD mentions "workflow", "langgraph", or files in `tools/`
+- **c/p docs**: Files in `tools/` or "cli" in filename
+- **Wiki**: LLD mentions "new feature", "workflow", or "architecture"
+
+So when you run this workflow for a CLI tool like Verdict Analyzer, N8 will auto-create:
+1. A runbook for using the tool
+2. CLI doc (copy-paste commands)
+3. Prompt doc (natural language examples)
+4. Lessons learned
+
 ---
 
 ## Common Workflows
