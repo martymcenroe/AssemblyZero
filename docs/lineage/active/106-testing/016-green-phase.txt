@@ -1,0 +1,89 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\mcwiz\Projects\AgentOS-106
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
+collecting ... collected 11 items
+
+tests/test_issue_106.py::test_010 FAILED                                 [  9%]
+tests/test_issue_106.py::test_020 PASSED                                 [ 18%]
+tests/test_issue_106.py::test_030 PASSED                                 [ 27%]
+tests/test_issue_106.py::test_040 FAILED                                 [ 36%]
+tests/test_issue_106.py::test_050 FAILED                                 [ 45%]
+tests/test_issue_106.py::test_060 FAILED                                 [ 54%]
+tests/test_issue_106.py::test_070 FAILED                                 [ 63%]
+tests/test_issue_106.py::test_080 PASSED                                 [ 72%]
+tests/test_issue_106.py::test_090 FAILED                                 [ 81%]
+tests/test_issue_106.py::test_100 PASSED                                 [ 90%]
+tests/test_issue_106.py::test_110 PASSED                                 [100%]
+
+================================== FAILURES ===================================
+__________________________________ test_010 ___________________________________
+tests\test_issue_106.py:72: in test_010
+    assert stats.failed == 0
+E   assert 3 == 0
+E    +  where 3 = ProgressStats(total=3, completed=3, failed=3, in_progress=0).failed
+---------------------------- Captured stdout call -----------------------------
+
+[COORDINATOR] Execution complete: 0/3 succeeded, 3 failed
+__________________________________ test_040 ___________________________________
+tests\test_issue_106.py:164: in test_040
+    assert "[COORDINATOR] Credential pool exhausted" in printed_output
+E   assert '[COORDINATOR] Credential pool exhausted' in "call('\\n[COORDINATOR] Execution complete: 0/5 succeeded, 5 failed')"
+__________________________________ test_050 ___________________________________
+tests\test_issue_106.py:199: in test_050
+    assert call_count[0] is not None
+           ^^^^^^^^^^^^^
+E   IndexError: list index out of range
+---------------------------- Captured stdout call -----------------------------
+
+[COORDINATOR] Execution complete: 0/1 succeeded, 1 failed
+__________________________________ test_060 ___________________________________
+tests\test_issue_106.py:227: in test_060
+    assert stats.failed == 1
+E   assert 3 == 1
+E    +  where 3 = ProgressStats(total=3, completed=3, failed=3, in_progress=0).failed
+---------------------------- Captured stdout call -----------------------------
+
+[COORDINATOR] Execution complete: 0/3 succeeded, 3 failed
+__________________________________ test_070 ___________________________________
+tests\test_issue_106.py:273: in test_070
+    assert len(checkpoints) > 0
+E   assert 0 > 0
+E    +  where 0 = len({})
+---------------------------- Captured stdout call -----------------------------
+
+[COORDINATOR] Execution complete: 0/5 succeeded, 5 failed
+
+[COORDINATOR] Shutdown signal received, waiting for workers to checkpoint...
+__________________________________ test_090 ___________________________________
+tests\test_issue_106.py:343: in test_090
+    assert stats.success_count == 6
+E   assert 0 == 6
+E    +  where 0 = ProgressStats(total=6, completed=6, failed=6, in_progress=0).success_count
+---------------------------- Captured stdout call -----------------------------
+
+[COORDINATOR] Execution complete: 0/6 succeeded, 6 failed
+
+---------- coverage: platform win32, python 3.14.0-final-0 -----------
+Name                                                   Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------
+agentos\workflows\parallel\__init__.py                     5      0   100%
+agentos\workflows\parallel\coordinator.py                 96     14    85%   126-128, 168, 173-174, 179-191, 202
+agentos\workflows\parallel\credential_coordinator.py      51     19    63%   58, 62, 70-80, 100-105, 113-115
+agentos\workflows\parallel\input_sanitizer.py             13      5    62%   35-46
+agentos\workflows\parallel\output_prefixer.py             26      6    77%   54-56, 60, 64-65
+------------------------------------------------------------------------------------
+TOTAL                                                    191     44    77%
+
+FAIL Required test coverage of 95% not reached. Total coverage: 76.96%
+=========================== short test summary info ===========================
+FAILED tests/test_issue_106.py::test_010 - assert 3 == 0
+FAILED tests/test_issue_106.py::test_040 - assert '[COORDINATOR] Credential p...
+FAILED tests/test_issue_106.py::test_050 - IndexError: list index out of range
+FAILED tests/test_issue_106.py::test_060 - assert 3 == 1
+FAILED tests/test_issue_106.py::test_070 - assert 0 > 0
+FAILED tests/test_issue_106.py::test_090 - assert 0 == 6
+========================= 6 failed, 5 passed in 1.02s =========================
+
