@@ -20,7 +20,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from agentos.core.config import (
     BACKOFF_BASE_SECONDS,
@@ -516,17 +517,17 @@ class GeminiClient:
                             # Raise exception to trigger error handling
                             raise RuntimeError(error_msg)
                     else:
-                        # API key: use SDK
-                        genai.configure(api_key=cred.key)
+                        # API key: use new google.genai SDK
+                        client = genai.Client(api_key=cred.key)
 
-                        # Create model instance
-                        model = genai.GenerativeModel(
-                            model_name=self.model,
-                            system_instruction=system_instruction,
+                        # Make the API call with system instruction in config
+                        response = client.models.generate_content(
+                            model=self.model,
+                            contents=content,
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                            ),
                         )
-
-                        # Make the API call
-                        response = model.generate_content(content)
 
                         # Check for successful response
                         if response.text:
