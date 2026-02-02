@@ -43,6 +43,14 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     mock_mode = state.get("config_mock_mode", False)
     audit_dir = Path(state.get("audit_dir", ""))
 
+    draft_count = state.get("draft_count", 0) + 1
+    is_revision = bool(state.get("current_draft") and state.get("verdict_history"))
+
+    if is_revision:
+        print(f"\n[N1] Generating revision (draft #{draft_count})...")
+    else:
+        print(f"\n[N1] Generating initial draft...")
+
     # Use mock provider in mock mode, otherwise use configured drafter
     if mock_mode:
         drafter_spec = "mock:draft"
@@ -97,21 +105,28 @@ Use the template structure provided. Include all sections. Be specific about:
 - Error handling approach"""
 
     # Call drafter
+    print(f"    Drafter: {drafter_spec}")
+
     result = drafter.invoke(system_prompt=system_prompt, content=prompt)
 
     if not result.success:
+        print(f"    ERROR: {result.error_message}")
         return {"error_message": f"Drafter failed: {result.error_message}"}
 
     draft_content = result.response or ""
 
     # Save to audit trail
-    draft_count = state.get("draft_count", 0) + 1
     iteration_count = state.get("iteration_count", 0) + 1
     file_num = next_file_number(audit_dir)
     if audit_dir.exists():
         draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
     else:
         draft_path = None
+
+    draft_lines = len(draft_content.splitlines()) if draft_content else 0
+    print(f"    Generated {draft_lines} lines")
+    if draft_path:
+        print(f"    Saved: {draft_path.name}")
 
     return {
         "current_draft": draft_content,
