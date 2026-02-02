@@ -48,3 +48,9 @@
 - [Tools Reference](Tools-Reference)
 - [The Scout External Intelligence Gathering Workflow](The-Scout-External-Intelligence-Gathering-Workflow)
 - [Verdict Analyzer   Template Improvement from Gemini Verdicts](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
+
+---
+
+### Chronicles
+
+- [Claude's World](Claudes-World)
