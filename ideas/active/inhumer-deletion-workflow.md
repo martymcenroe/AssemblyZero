@@ -73,7 +73,7 @@ class InhumerState(TypedDict):
     collateral_damage: List[str]      # Files that will be modified/deleted
 
     # Execution
-    inhumation_status: str            # PENDING, AUTHORIZED, EXECUTED, ROLLED_BACK
+    inhumation_status: str            # PENDING, AUTHORIZED, STAGED, COMMITTED, ROLLED_BACK
     authorization_received: bool
 
     # Verification
@@ -82,7 +82,7 @@ class InhumerState(TypedDict):
 
     # Audit Trail
     git_operations: List[str]         # Commands executed
-    rollback_point: str               # Commit SHA before inhumation
+    commit_sha: Optional[str]         # SHA of inhumation commit (only after success)
 ```
 
 ### State Graph (`agentos/workflows/inhumer/graph.py`)
@@ -194,22 +194,21 @@ def execution(state: InhumerState) -> dict:
     """
     Perform the inhumation. Clean. Professional. Complete.
 
-    1. Record rollback point
-    2. Remove target file
-    3. Remove test files
-    4. Clean references from witness files
+    IMPORTANT: Stage changes but DO NOT COMMIT yet.
+    Commit only happens in N3 after tests pass.
+    This allows safe rollback via `git restore` if tests fail.
+
+    1. Remove target file (staged)
+    2. Remove test files (staged)
+    3. Clean references from witness files (staged)
     """
     operations = []
 
-    # Record escape route
-    rollback_point = get_current_commit_sha()
-    operations.append(f"Rollback point: {rollback_point}")
-
-    # Remove the target
+    # Remove the target (stages deletion)
     git_rm(state["target_path"])
     operations.append(f"git rm {state['target_path']}")
 
-    # Remove the bodyguards
+    # Remove the bodyguards (stages deletions)
     for test in state["related_tests"]:
         git_rm(test)
         operations.append(f"git rm {test}")
@@ -217,12 +216,12 @@ def execution(state: InhumerState) -> dict:
     # Clean the scene (remove imports from witnesses)
     for witness in state["referencing_files"]:
         remove_import(witness, state["target_path"])
+        git_add(witness)  # Stage the cleaned file
         operations.append(f"Cleaned reference in {witness}")
 
     return {
         "git_operations": operations,
-        "rollback_point": rollback_point,
-        "inhumation_status": "EXECUTED",
+        "inhumation_status": "STAGED",  # Not committed yet!
     }
 ```
 
@@ -234,6 +233,9 @@ def getaway(state: InhumerState) -> dict:
     Verify clean escape. Run tests to ensure no witnesses remain.
 
     A true professional leaves no trace.
+
+    IMPORTANT: Only COMMIT if tests pass. Changes are staged but
+    not committed until we verify success. This is the safe pattern.
     """
     result = subprocess.run(
         ["poetry", "run", "pytest", "-x", "-q"],
@@ -242,12 +244,21 @@ def getaway(state: InhumerState) -> dict:
     )
 
     if result.returncode == 0:
+        # Tests pass - NOW we commit
+        commit_result = subprocess.run(
+            ["git", "commit", "-m", f"chore: inhume {state['target_path']}"],
+            capture_output=True,
+            text=True,
+        )
+        commit_sha = get_current_commit_sha()
+
         print("\n✓ Inhumation complete. The system is stable.")
         print("  No witnesses. No evidence. Professional.")
         return {
             "test_exit_code": 0,
             "test_output": result.stdout,
-            "inhumation_status": "COMPLETE",
+            "commit_sha": commit_sha,
+            "inhumation_status": "COMMITTED",
         }
     else:
         print("\n✗ Witnesses detected! Build is broken.")
@@ -267,13 +278,18 @@ def rollback(state: InhumerState) -> dict:
     Abort mission. Restore previous state.
 
     Even the best professionals sometimes need to retreat.
-    """
-    subprocess.run(
-        ["git", "reset", "--hard", state["rollback_point"]],
-        check=True,
-    )
 
-    print(f"\n⟲ Rolled back to {state['rollback_point']}")
+    NOTE: We use git restore, not git reset --hard.
+    The Inhumer stages but doesn't commit until tests pass,
+    so rollback is simply unstaging and restoring files.
+    """
+    # Unstage all changes
+    subprocess.run(["git", "restore", "--staged", "."], check=True)
+
+    # Restore deleted files
+    subprocess.run(["git", "restore", "."], check=True)
+
+    print("\n⟲ Inhumation aborted. All targets restored.")
     print("  The target survives... for now.")
 
     return {"inhumation_status": "ROLLED_BACK"}
