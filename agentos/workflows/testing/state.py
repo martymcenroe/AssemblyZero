@@ -122,6 +122,7 @@ class TestingWorkflowState(TypedDict, total=False):
     detected_test_types: list[str]
     coverage_target: int
     requirements: list[str]
+    files_to_modify: list[dict]  # Files from LLD Section 2.1
 
     # Workflow tracking
     audit_dir: str

@@ -251,9 +251,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
             print(f"    DEBUG: rel_path = {rel_path}")
-            # Use the specific file for coverage (e.g., agentos/workflows/testing/nodes/finalize.py)
-            # pytest-cov can measure coverage for a specific file path
-            coverage_module = str(rel_path)
+            # Convert file path to module format for pytest-cov
+            # e.g., agentos/workflows/testing/nodes/finalize.py -> agentos.workflows.testing.nodes.finalize
+            rel_path_str = str(rel_path)
+            if rel_path_str.endswith(".py"):
+                rel_path_str = rel_path_str[:-3]  # Remove .py extension
+            coverage_module = rel_path_str.replace("/", ".").replace("\\", ".")
+            print(f"    DEBUG: coverage_module (after conversion) = {coverage_module}")
             break
 
     # Default to agentos if no implementation files
