@@ -90,7 +90,7 @@ Audits exist because:
 |----------|-------|----------|-------|
 | Core Audits (0801-0817) | 17 | 3 | Security, privacy, AI governance, permissions |
 | Extended Audits (0832-0840) | 9 | 1 | Cost, structure, hygiene, references |
-| Documentation Health (0841-0846) | 6 | 4 | Docs-code alignment (STUBS) |
+| Documentation Health (0841-0847) | 7 | 4 | Docs-code alignment, completeness |
 | Meta (0899) | 1 | 0 | Audit system governance |
 | **Total** | **33** | **8** | |
 
@@ -140,14 +140,15 @@ Audits exist because:
 | 0844 | File Inventory Drift | **Yes** |
 | 0845 | Terminology Consistency | **Yes** |
 | 0846 | Architecture Drift (code vs docs) | **Yes** |
+| 0847 | Implementation Completeness (stubs, fake tests) | No |
 
 ---
 
 ## 4. Audit Categories
 
-### 4.0 Documentation Health Audits (0841-0846 STUBS)
+### 4.0 Documentation Health Audits (0841-0847)
 
-Audits ensuring documentation stays aligned with code and complete. **These are stub files pending implementation.**
+Audits ensuring documentation stays aligned with code and complete.
 
 | Number | Name | Frequency | Auto-Fix |
 |--------|------|-----------|----------|
@@ -157,6 +158,7 @@ Audits ensuring documentation stays aligned with code and complete. **These are 
 | 0844 | File Inventory Drift | Weekly | **Yes** |
 | 0845 | Terminology Consistency | On rename | **Yes** |
 | 0846 | Architecture Drift | Monthly | **Yes** |
+| 0847 | Implementation Completeness | On new repo / Monthly | No |
 | 0817 | AgentOS Self-Audit | Monthly | **Yes** |
 
 ### 4.1 Core Development Audits
@@ -423,6 +425,7 @@ Standard format for all audits:
 - [0844 - File Inventory Drift](0844-audit-file-inventory.md) ✨📝
 - [0845 - Terminology Consistency](0845-audit-terminology.md) ✨📝
 - [0846 - Architecture Drift](0846-audit-architecture-drift.md) ✨📝
+- [0847 - Implementation Completeness](0847-audit-implementation-completeness.md) 🔨
 
 **Meta (0899)**
 - [0899 - Meta-Audit](0899-meta-audit.md)
@@ -430,6 +433,7 @@ Standard format for all audits:
 ✨ = Auto-fix capability
 🔒 = Ultimate tier (only runs with `--ultimate` flag)
 📝 = Stub file (implementation pending)
+🔨 = Anti-laziness audit (forces thorough work)
 
 ### 10.2 By Topic
 
