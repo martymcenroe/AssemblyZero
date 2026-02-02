@@ -343,6 +343,59 @@ def extract_coverage_target(lld_content: str) -> int:
     return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
 
 
+def extract_files_to_modify(lld_content: str) -> list[dict]:
+    """Extract files to modify from LLD Section 2.1.
+
+    Parses the "Files Changed" table to extract file paths and change types.
+
+    Args:
+        lld_content: Full LLD markdown content.
+
+    Returns:
+        List of dicts with 'path', 'change_type', and 'description'.
+    """
+    files = []
+
+    # Find Section 2.1 Files Changed table
+    # Pattern: | File | Change Type | Description |
+    # Rows: | `path/to/file.py` | Modify | Description text |
+    table_pattern = re.compile(
+        r"###?\s*2\.1[^\n]*Files Changed[^\n]*\n"  # Section header
+        r"[^\n]*\n"  # Table header row
+        r"[^\n]*-+[^\n]*\n"  # Separator row (---)
+        r"((?:\|[^\n]+\n)+)",  # Table rows
+        re.IGNORECASE,
+    )
+
+    match = table_pattern.search(lld_content)
+    if not match:
+        return files
+
+    table_rows = match.group(1)
+
+    # Parse each row: | `path` | ChangeType | Description |
+    row_pattern = re.compile(
+        r"\|\s*`?([^`|]+)`?\s*\|\s*(\w+)\s*\|\s*([^|]*)\|"
+    )
+
+    for row_match in row_pattern.finditer(table_rows):
+        path = row_match.group(1).strip()
+        change_type = row_match.group(2).strip()
+        description = row_match.group(3).strip()
+
+        # Skip header-like rows
+        if path.lower() in ("file", "path", "filename"):
+            continue
+
+        files.append({
+            "path": path,
+            "change_type": change_type,
+            "description": description,
+        })
+
+    return files
+
+
 def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """N0: Load LLD and extract test plan.
 
@@ -420,6 +473,10 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     coverage_target = extract_coverage_target(lld_content)
     print(f"    Coverage target: {coverage_target}%")
 
+    # Extract files to modify from Section 2.1
+    files_to_modify = extract_files_to_modify(lld_content)
+    print(f"    Found {len(files_to_modify)} files to modify")
+
     # Create audit directory
     audit_dir = create_testing_audit_dir(issue_number, repo_root)
     print(f"    Audit dir: {audit_dir}")
@@ -460,6 +517,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
         "detected_test_types": detected_types,
         "coverage_target": coverage_target,
         "requirements": requirements,
+        "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
         "iteration_count": 0,

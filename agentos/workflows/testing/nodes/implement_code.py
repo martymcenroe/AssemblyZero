@@ -60,6 +60,9 @@ def build_implementation_prompt(state: TestingWorkflowState) -> str:
     test_scenarios = state.get("test_scenarios", [])
     iteration_count = state.get("iteration_count", 0)
     green_phase_output = state.get("green_phase_output", "")
+    files_to_modify = state.get("files_to_modify", [])
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else None
 
     prompt = f"""# Implementation Request
 
@@ -97,6 +100,31 @@ The tests have been scaffolded and need implementation code to pass.
 ```
 
 """
+
+    # Include source files that need to be modified (from LLD Section 2.1)
+    if files_to_modify and repo_root:
+        prompt += "### Source Files to Modify\n\n"
+        prompt += "These are the existing files you need to modify:\n\n"
+        for file_info in files_to_modify:
+            file_path = repo_root / file_info["path"]
+            change_type = file_info.get("change_type", "Modify")
+            if change_type.lower() == "modify" and file_path.exists():
+                try:
+                    source_content = file_path.read_text(encoding="utf-8")
+                    prompt += f"""#### {file_info['path']} ({change_type})
+
+{file_info.get('description', '')}
+
+```python
+{source_content}
+```
+
+"""
+                except Exception:
+                    prompt += f"#### {file_info['path']} - (could not read file)\n\n"
+            elif change_type.lower() == "add":
+                prompt += f"#### {file_info['path']} (NEW FILE)\n\n"
+                prompt += f"{file_info.get('description', '')}\n\n"
 
     # Include previous failure output if iteration > 0
     if iteration_count > 0 and green_phase_output:
