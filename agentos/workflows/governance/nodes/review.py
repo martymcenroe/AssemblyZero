@@ -106,13 +106,30 @@ Be specific about what needs to change for BLOCKED verdicts."""
     verdict_history.append(verdict_content)
 
     # Determine LLD status from verdict
+    # Look for the checked verdict checkbox: [x] **APPROVED** or [X] **APPROVED**
+    # The review prompt outputs checkboxes like:
+    # [ ] **APPROVED** - Ready for implementation
+    # [x] **REVISE** - Fix issues first
+    import re
     verdict_upper = verdict_content.upper()
-    if "APPROVED" in verdict_upper:
+
+    # Check for checked APPROVED checkbox
+    if re.search(r"\[X\]\s*\**APPROVED\**", verdict_upper):
         lld_status = "APPROVED"
-    elif "BLOCKED" in verdict_upper:
+    # Check for checked REVISE checkbox (maps to BLOCKED for workflow purposes)
+    elif re.search(r"\[X\]\s*\**REVISE\**", verdict_upper):
+        lld_status = "BLOCKED"
+    # Check for checked DISCUSS checkbox (maps to BLOCKED, needs human)
+    elif re.search(r"\[X\]\s*\**DISCUSS\**", verdict_upper):
+        lld_status = "BLOCKED"
+    # Fallback: Look for explicit keywords (legacy/simple responses)
+    elif "VERDICT: APPROVED" in verdict_upper or "**APPROVED**" in verdict_upper.split("[X]")[0] if "[X]" in verdict_upper else False:
+        lld_status = "APPROVED"
+    elif "VERDICT: BLOCKED" in verdict_upper or "VERDICT: REVISE" in verdict_upper:
         lld_status = "BLOCKED"
     else:
-        lld_status = "PENDING"
+        # Default to BLOCKED if we can't determine status (safe choice)
+        lld_status = "BLOCKED"
 
     return {
         "current_verdict": verdict_content,
