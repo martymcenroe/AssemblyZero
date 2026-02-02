@@ -4,8 +4,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.0.0 |
-| **Last Updated** | 2026-01-22 |
+| **Version** | 2.1.0 |
+| **Last Updated** | 2026-02-02 |
 | **Role** | Senior Software Architect & AI Governance Lead |
 | **Purpose** | LLD gatekeeper review before implementation begins |
 | **Standard** | [0010-prompt-schema.md](../standards/0010-prompt-schema.md) |
@@ -115,8 +115,12 @@ These issues require fixes but don't block implementation. Be thorough.
 | Check | Question |
 |-------|----------|
 | **Section 10 Test Scenarios (CRITICAL)** | Does Section 10 contain a structured table of test scenarios with columns for: ID/Name, Scenario/Description, Type (unit/integration/e2e), and Expected behavior? LLDs without parseable test scenarios BLOCK the TDD workflow. |
+| **Requirement Coverage (CRITICAL - 95% threshold)** | Map each test scenario to requirements. Coverage = (Requirements with tests / Total requirements). **BLOCK if coverage < 95%.** List any uncovered requirements. |
+| **Test Assertions (CRITICAL)** | Does every test scenario have explicit assertions or expected outcomes? **BLOCK if any test is vague** (e.g., "verify it works", "check behavior", "test the feature"). Each test must specify WHAT is checked and WHAT the expected result is. |
+| **No Human Delegation (CRITICAL)** | Do any tests delegate to human verification? **BLOCK if any test says:** "manual verification", "visual check", "observe behavior", "ask user", "human review", or requires judgment to determine pass/fail. ALL tests must be fully automated. |
 | **Test Strategy (CRITICAL)** | Is the test strategy defined? Does it rely on automated assertions, NOT manual "vibes" verification? |
 | **Willison Protocol** | Will tests fail if the implementation is reverted? (Tests must prove the feature works, not just that it doesn't crash.) |
+| **Edge Cases** | Are edge cases covered: empty inputs, invalid inputs, boundary conditions, error conditions? (Warning if missing, not blocking.) |
 | **Test Data Hygiene** | Are test fixtures defined? No real PII or slurs in test data? |
 | **Scope Boundaries** | Is the scope bounded to prevent creep? |
 
@@ -271,5 +275,6 @@ The LLD proposes a batch file cleanup utility but contains critical Safety block
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-02-02 | 2.1.0 | Added 0706c test plan checks: 95% coverage, explicit assertions, no human delegation, edge cases (#126). Unified LLD review with test plan review. |
 | 2026-01-22 | 2.0.0 | Refactored to Golden Schema (Standard 0010). Added Pre-Flight Gate, Cost/Safety tiers, Observability section. |
 | 2026-01-XX | 1.0.0 | Initial version. |
