@@ -134,8 +134,8 @@ def route_after_review(
     Routes to:
     - N4_human_gate_verdict: Gate enabled
     - N5_finalize: Gate disabled and approved
-    - N1_generate_draft: Gate disabled and blocked
-    - END: Error in review
+    - N1_generate_draft: Gate disabled and blocked (if iterations remain)
+    - END: Error in review or max iterations reached
 
     Args:
         state: Current workflow state.
@@ -154,6 +154,12 @@ def route_after_review(
         if lld_status == "APPROVED":
             return "N5_finalize"
         else:
+            # Check max iterations before looping back
+            iteration_count = state.get("iteration_count", 0)
+            max_iterations = state.get("max_iterations", 20)
+            if iteration_count >= max_iterations:
+                # Max iterations reached - finalize with current status
+                return "N5_finalize"
             return "N1_generate_draft"
 
 

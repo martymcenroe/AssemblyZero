@@ -356,7 +356,15 @@ def main() -> int:
         print("Starting workflow...")
         print()
 
-        final_state = compiled.invoke(state)
+        # Calculate recursion limit: each iteration needs ~3 nodes (draft, review, route)
+        # Plus startup nodes. Add buffer for safety.
+        max_iters = state.get("max_iterations", 20)
+        recursion_limit = (max_iters * 4) + 10
+
+        final_state = compiled.invoke(
+            state,
+            config={"recursion_limit": recursion_limit}
+        )
 
         print_result(final_state)
 

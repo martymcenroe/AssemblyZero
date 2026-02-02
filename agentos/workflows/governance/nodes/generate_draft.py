@@ -106,6 +106,7 @@ Use the template structure provided. Include all sections. Be specific about:
 
     # Save to audit trail
     draft_count = state.get("draft_count", 0) + 1
+    iteration_count = state.get("iteration_count", 0) + 1
     file_num = next_file_number(audit_dir)
     if audit_dir.exists():
         draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
@@ -116,6 +117,7 @@ Use the template structure provided. Include all sections. Be specific about:
         "current_draft": draft_content,
         "current_draft_path": str(draft_path) if draft_path else "",
         "draft_count": draft_count,
+        "iteration_count": iteration_count,
         "file_counter": file_num,
         "user_feedback": "",  # Clear feedback after use
         "error_message": "",
