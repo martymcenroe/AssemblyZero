@@ -48,7 +48,7 @@
 **07:20** — *On refusing to normalize technical debt*
 > "The Ankh-Morpork way is to let the sewage pile up until it becomes solid enough to build on. We are not doing that."
 
-**Context:** When faced with a choice between adapting the Dependabot runbook to tolerate "known failures" (Option B) versus fixing all test failures first for a clean baseline (Option A), the user chose Option A. As they wisely noted: "Nice place to visit, wouldn't want to live there."
+**Context:** When faced with a choice between adapting the Dependabot runbook to tolerate "known failures" (Option B) versus fixing all test failures first for a clean baseline (Option A), [The Great God Om](The-Great-God-Om) chose Option A. As Om wisely noted: "Nice place to visit, wouldn't want to live there."
 
 ---
 
