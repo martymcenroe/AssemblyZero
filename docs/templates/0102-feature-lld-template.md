@@ -277,4 +277,5 @@ poetry run pytest tests/test_{module}.py -v -m live
 |--------|------|---------|-----------|
 | {Reviewer} #{N} | {date} | {verdict} | {one-line summary} |
 
-**Final Status:** {APPROVED / PENDING / BLOCKED}
+**Final Status:** PENDING
+<!-- Note: This field is auto-updated to APPROVED by the workflow when finalized -->

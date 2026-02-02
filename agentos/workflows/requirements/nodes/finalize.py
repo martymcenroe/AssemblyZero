@@ -7,6 +7,7 @@ Handles finalization for both workflow types:
 - LLD workflow: Save LLD to docs/lld/active/ and update tracking
 """
 
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,10 +134,21 @@ def _finalize_lld(state: RequirementsWorkflowState) -> dict[str, Any]:
     if not issue_number:
         return {"error_message": "No issue number for LLD finalization"}
 
+    # Update Final Status in LLD content to match actual verdict
+    # The drafter writes "PENDING" during drafting, but we know the final status now
+    final_draft = current_draft
+    if lld_status == "APPROVED":
+        # Replace any PENDING status with APPROVED
+        final_draft = re.sub(
+            r"\*\*Final Status:\*\*\s*PENDING[^\n]*",
+            "**Final Status:** APPROVED",
+            final_draft,
+        )
+
     # Save LLD to target_repo/docs/lld/active/
     lld_path = save_final_lld(
         issue_number=issue_number,
-        lld_content=current_draft,
+        lld_content=final_draft,
         target_repo=target_repo,
     )
 
@@ -162,7 +174,7 @@ def _finalize_lld(state: RequirementsWorkflowState) -> dict[str, Any]:
             f"Path: {lld_path}\n"
             f"Status: {lld_status}\n"
             f"Reviews: {verdict_count}\n\n"
-            f"---\n\n{current_draft}"
+            f"---\n\n{final_draft}"
         )
         save_audit_file(audit_dir, file_num, "final.md", final_content)
 
