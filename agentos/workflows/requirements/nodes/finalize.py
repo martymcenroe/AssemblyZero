@@ -1,6 +1,6 @@
 """Finalize node for requirements workflow.
 
-Updates GitHub issue with final draft and closes workflow.
+Updates GitHub issue with final draft, commits artifacts to git, and closes workflow.
 """
 
 import subprocess
@@ -11,6 +11,7 @@ from agentos.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
 )
+from ..git_operations import commit_and_push, GitOperationError
 
 # Constants
 GH_TIMEOUT_SECONDS = 30
@@ -18,10 +19,10 @@ GH_TIMEOUT_SECONDS = 30
 
 def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
     """Finalize issue by updating with final draft.
-    
+
     Args:
         state: Workflow state containing issue_number, current_draft, etc.
-        
+
     Returns:
         Updated state with finalization status
     """
@@ -29,7 +30,7 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
     target_repo = state.get("target_repo", ".")
     audit_dir = Path(state.get("audit_dir", "."))
     current_draft = state.get("current_draft", "")
-    
+
     if not current_draft:
         error_msg = "No draft to finalize"
         state["error_message"] = error_msg
@@ -37,7 +38,7 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
             file_num = next_file_number(audit_dir)
             save_audit_file(audit_dir, file_num, "error", error_msg)
         return state
-    
+
     try:
         # Update issue comment with final draft using UTF-8 encoding
         result = subprocess.run(
@@ -49,7 +50,7 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
             timeout=GH_TIMEOUT_SECONDS,
             check=False,
         )
-        
+
         if result.returncode != 0:
             error_msg = f"Failed to post comment to issue #{issue_number}: {result.stderr}"
             state["error_message"] = error_msg
@@ -57,17 +58,17 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
                 file_num = next_file_number(audit_dir)
                 save_audit_file(audit_dir, file_num, "error", error_msg)
             return state
-        
+
         state["error_message"] = ""
         state["finalized"] = True
-        
+
         # Save finalization status to audit
         if audit_dir.exists():
             file_num = next_file_number(audit_dir)
             audit_content = f"# Finalized Issue #{issue_number}\n\n"
             audit_content += f"**Comment URL:** {result.stdout.strip()}\n"
             save_audit_file(audit_dir, file_num, "finalize", audit_content)
-        
+
     except subprocess.TimeoutExpired:
         error_msg = f"Timeout posting comment to issue #{issue_number}"
         state["error_message"] = error_msg
@@ -80,17 +81,62 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
         if audit_dir.exists():
             file_num = next_file_number(audit_dir)
             save_audit_file(audit_dir, file_num, "error", error_msg)
-    
+
+    return state
+
+
+def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Commit and push created files to git.
+
+    Args:
+        state: Current workflow state with created_files list
+
+    Returns:
+        Updated state with commit_sha if successful
+    """
+    created_files = state.get("created_files", [])
+    if not created_files:
+        return state
+
+    workflow_type = state.get("workflow_type", "lld")
+    target_repo = state.get("target_repo", ".")
+    issue_number = state.get("issue_number")
+    slug = state.get("slug")
+
+    try:
+        commit_sha = commit_and_push(
+            created_files=created_files,
+            workflow_type=workflow_type,
+            target_repo=target_repo,
+            issue_number=issue_number,
+            slug=slug,
+        )
+
+        if commit_sha:
+            state["commit_sha"] = commit_sha
+
+    except GitOperationError as e:
+        # Log error but don't fail the workflow - files are already saved
+        state["commit_error"] = str(e)
+
     return state
 
 
 def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     """Public interface for finalize node.
-    
+
+    Finalizes the issue (if applicable) and commits artifacts to git.
+
     Args:
         state: Workflow state
-        
+
     Returns:
         Updated state with finalization status
     """
-    return _finalize_issue(state)
+    # First, finalize the issue (existing behavior)
+    state = _finalize_issue(state)
+
+    # Then, commit and push artifacts to git (new behavior for #162)
+    state = _commit_and_push_files(state)
+
+    return state
