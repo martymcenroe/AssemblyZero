@@ -1,4 +1,32 @@
-# GitHub Project Stage Automation
+# Visibility Workflow: The Patrician (GitHub Project Stage Automation)
+
+**Status:** Brief
+**Priority:** High (enables project-wide visibility)
+**Created:** 2026-02-02
+**Persona:** Lord Vetinari (The Patrician of Ankh-Morpork)
+**Inspiration:** Terry Pratchett's Discworld - City Watch series, *Going Postal*, *Making Money*
+
+---
+
+## Philosophy
+
+> *"Down there are people who will follow any dragon, worship any god, ignore any iniquity. All out of a condition called 'not wanting to be noticed.'"*
+
+Lord Havelock Vetinari doesn't control everything directly; he *organizes* it so the pieces work together. In his office, he maintains a wall map with little markers showing where everyone is. He sees patterns others miss. He moves pieces before problems arise.
+
+**The Patrician's Core Principle:** "Don't tell me what stage you're in. I'll *observe* what stage you're in."
+
+---
+
+## The Wall Map
+
+```
+┌──────────┐    ┌─────────┐    ┌─────────────┐    ┌──────┐
+│ Backlog  │ -> │  Ready  │ -> │ In Progress │ -> │ Done │
+└──────────┘    └─────────┘    └─────────────┘    └──────┘
+```
+
+---
 
 ## Problem
 
@@ -260,9 +288,66 @@ Or query dynamically via `gh` CLI (slower but always current).
 3. Should worktree creation hook be mandatory or opt-in?
 4. GitHub Action vs local hook for PR merge - which is preferred?
 
+## Output Example (The Morning Report)
+
+```
+======================================================================
+            THE PATRICIAN'S MORNING REPORT
+              'Information is power.'
+======================================================================
+
+Surveyed: 5 projects
+Work items: 47
+
+THE WALL MAP:
+────────────────────────────────────────
+  Backlog      │ ████████████ (12)
+  Ready        │ █████ (5)
+  In Progress  │ ████████ (8)
+  Review       │ ███ (3)
+  Done         │ ███████████████████ (19)
+
+MOVEMENTS:
+────────────────────────────────────────
+  #104  │ Backlog      → Ready
+  #107  │ In Progress  → Done
+  #93   │ Review       → Done
+
+  Total updates: 3
+
+MATTERS REQUIRING ATTENTION:
+────────────────────────────────────────
+  ⚠ #88: Stale in In Progress (no activity 21 days)
+  ⚠ #92: Has PR but no LLD
+
+======================================================================
+              'Don't let me detain you.'
+======================================================================
+```
+
+---
+
+## The Patrician's Rules
+
+1. **Never trust self-reported status.** Observe the actual state.
+2. **Flag anomalies, don't hide them.** Stale work is dangerous work.
+3. **Move quietly.** Update the board; don't make a production of it.
+4. **Information is power.** The report is the product.
+
+---
+
 ## References
 
+- [Workflow Personas](../wiki/Workflow-Personas.md) - Lord Vetinari entry
 - GitHub Projects v2 API: https://docs.github.com/en/issues/planning-and-tracking-with-projects
 - `gh project` CLI: https://cli.github.com/manual/gh_project
 - AgentOS issue workflow: `tools/run_issue_workflow.py`
 - AgentOS LLD workflow: `tools/run_lld_workflow.py`
+- *Going Postal* by Terry Pratchett (Vetinari's management style)
+- *Night Watch* by Terry Pratchett (The wall map)
+
+---
+
+*"Taxation, gentlemen, is very much like dairy farming. The task is to extract the maximum amount of milk with the minimum amount of moo."*
+
+**The Patrician sees all. The Patrician knows all. Don't let him detain you.**
