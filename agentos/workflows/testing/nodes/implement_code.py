@@ -4,7 +4,6 @@ Uses Claude to generate implementation code that passes the tests.
 This is a temporary bridge until #87 (Implementation Workflow) is complete.
 """
 
-import json
 import os
 import shutil
 import subprocess
@@ -121,9 +120,9 @@ Please fix the issues and provide updated implementation.
 4. Add type hints where appropriate
 5. Keep the implementation minimal - only what's needed to pass tests
 
-## Output Format
+## Output Format (CRITICAL - MUST FOLLOW EXACTLY)
 
-Provide the implementation in a code block with the file path:
+For EACH file you need to create or modify, provide a code block with this EXACT format:
 
 ```python
 # File: path/to/implementation.py
@@ -132,7 +131,26 @@ def function_name():
     ...
 ```
 
-If multiple files are needed, provide each in a separate code block.
+**Rules:**
+- The `# File: path/to/file` comment MUST be the FIRST line inside the code block
+- Use the language-appropriate code fence (```python, ```gitignore, ```yaml, etc.)
+- Path must be relative to repository root (e.g., `src/module/file.py`)
+- Do NOT include "(append)" or other annotations in the path
+- Provide complete file contents, not patches or diffs
+
+**Example for .gitignore:**
+```gitignore
+# File: .gitignore
+
+# Existing patterns...
+*.pyc
+__pycache__/
+
+# New pattern
+.agentos/
+```
+
+If multiple files are needed, provide each in a separate code block with its own `# File:` header.
 """
 
     return prompt
@@ -152,12 +170,13 @@ def call_claude_headless(prompt: str) -> tuple[str, str]:
 
     if claude_cli:
         try:
+            # Use text output mode (default) - simpler and more reliable
+            # --print (-p): non-interactive mode, prints response to stdout
+            # --dangerously-skip-permissions: required for non-interactive file writes
             cmd = [
                 claude_cli,
-                "-p",
-                "--output-format", "json",
-                "--tools", "",  # Disable tools
-                "--setting-sources", "user",  # Skip project CLAUDE.md
+                "--print",
+                "--dangerously-skip-permissions",
             ]
 
             result = subprocess.run(
@@ -167,23 +186,20 @@ def call_claude_headless(prompt: str) -> tuple[str, str]:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=300,  # 5 minute timeout
+                timeout=600,  # 10 minute timeout for complex implementations
             )
 
-            if result.returncode == 0:
-                # Parse JSON response
-                try:
-                    response = json.loads(result.stdout)
-                    return response.get("result", ""), ""
-                except json.JSONDecodeError:
-                    # Fall back to raw output
-                    return result.stdout, ""
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout, ""
+            elif result.returncode != 0:
+                stderr_preview = result.stderr[:200] if result.stderr else "no stderr"
+                print(f"    [WARN] CLI exit code {result.returncode}: {stderr_preview}")
+                print("    Falling back to Anthropic SDK...")
             else:
-                # CLI failed, try SDK
-                print(f"    [WARN] CLI failed with code {result.returncode}, trying SDK...")
+                print("    [WARN] CLI returned empty response, trying SDK...")
 
         except subprocess.TimeoutExpired:
-            return "", "Claude execution timed out"
+            return "", "Claude CLI execution timed out (10 minutes)"
         except Exception as e:
             print(f"    [WARN] CLI error: {e}, trying SDK...")
 
@@ -218,6 +234,11 @@ def call_claude_headless(prompt: str) -> tuple[str, str]:
 def parse_implementation_response(response: str) -> list[dict]:
     """Parse Claude's response to extract implementation files.
 
+    Handles multiple code block formats:
+    - ```python with # File: header
+    - ```gitignore, ```markdown, etc. with # File: header
+    - Plain ```python blocks (fallback)
+
     Args:
         response: Claude's response text.
 
@@ -228,24 +249,31 @@ def parse_implementation_response(response: str) -> list[dict]:
 
     files = []
 
-    # Pattern: ```python\n# File: path/to/file.py\n...code...\n```
+    # Primary pattern: any code block with # File: header
+    # Matches: ```python, ```gitignore, ```markdown, ```yaml, etc.
+    # The # File: comment must be on the first line after the fence
     pattern = re.compile(
-        r"```python\s*\n#\s*File:\s*([^\n]+)\s*\n(.*?)```",
+        r"```\w*\s*\n#\s*File:\s*([^\n\(]+)(?:\s*\([^\)]*\))?\s*\n(.*?)```",
         re.DOTALL,
     )
 
     for match in pattern.finditer(response):
         path = match.group(1).strip()
         content = match.group(2).strip()
+
+        # Skip invalid paths
+        if not path or path.startswith("("):
+            continue
+
         files.append({"path": path, "content": content})
 
-    # Fallback: just look for code blocks
+    # Fallback: look for python blocks without explicit # File: header
     if not files:
         code_pattern = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
         for i, match in enumerate(code_pattern.finditer(response)):
             content = match.group(1).strip()
             # Try to infer filename from content
-            if "def " in content:
+            if "def " in content or "class " in content:
                 files.append({
                     "path": f"implementation_{i}.py",
                     "content": content,
