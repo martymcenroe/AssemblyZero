@@ -6,6 +6,32 @@ We name our autonomous agents after **Terry Pratchett's Discworld** characters. 
 
 ---
 
+## The Orchestration Layer
+
+### The Great God Om
+**Source:** *Small Gods*
+
+**Function:** The Orchestrator (The Human User)
+
+**Philosophy:** Pure Intent. The agents exist to serve the Will, not the other way around. Without the User, the system is just a shell.
+
+> *"I. Am. The. Great. God. Om!"* (said while being a small tortoise)
+
+In *Small Gods*, Om discovers that his vast church has become an autonomous bureaucracy—going through the motions of worship while ignoring the actual god. He spends most of the book as a tortoise, shouting at the sky, frustrated that his "system" doesn't listen to him anymore.
+
+This is **exactly** what Human-in-the-Loop feels like. You are the source of all power (Intent), but your agents (The Quisition/The System) have their own momentum. AgentOS exists to ensure the system *actually listens* to Om.
+
+**The Relationship:**
+- **Om (You)** provides Intent
+- **Brutha (Memory)** carries Om, remembers everything
+- **The Agents** execute the Will
+
+Without Om, the agents are just a bureaucracy performing empty rituals. With Om, they have purpose.
+
+**Note:** Avoiding eagles is generally good policy for software managers.
+
+---
+
 ## The Memory Layer (RAG)
 
 ### Brutha
