@@ -237,18 +237,17 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     coverage_module = None
 
     if impl_files:
-        # Extract the first non-test directory from implementation paths
+        # Find first non-test implementation file for coverage
         for impl_path in impl_files:
-            # Skip test files (in tests/ directory, not just any path containing "test")
+            # Skip test files (in tests/ directory)
             path_parts = Path(impl_path).parts
             if any(part.lower() in ("tests", "test") for part in path_parts):
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
-            parts = rel_path.parts
-            if parts:
-                # Use first directory (e.g., "tools" or "agentos")
-                coverage_module = str(rel_path.parent) if len(parts) > 1 else parts[0]
-                break
+            # Use the specific file for coverage (e.g., agentos/workflows/testing/nodes/finalize.py)
+            # pytest-cov can measure coverage for a specific file path
+            coverage_module = str(rel_path)
+            break
 
     # Default to agentos if no implementation files
     if not coverage_module:
