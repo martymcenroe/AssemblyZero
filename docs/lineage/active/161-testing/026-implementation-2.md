@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/audit.py
+
+```python
 """Audit utilities for requirements workflow.
 
 Provides functions for creating audit directories and saving audit files.
@@ -57,13 +60,13 @@ def save_audit_file(
     content: str,
 ) -> Path:
     """Save audit file with sequential numbering.
-
+    
     Args:
         audit_dir: Audit directory path
         file_num: File number
         file_type: Type of file (e.g., 'issue', 'error', 'finalize')
         content: File content
-
+        
     Returns:
         Path to saved file
     """
@@ -71,43 +74,4 @@ def save_audit_file(
     file_path = audit_dir / filename
     file_path.write_text(content, encoding="utf-8")
     return file_path
-
-
-def load_template(template_path: Path, agentos_root: Path) -> str:
-    """Load template file from agentos_root.
-
-    Args:
-        template_path: Relative path to template file
-        agentos_root: Root directory of AgentOS
-
-    Returns:
-        Template content as string
-
-    Raises:
-        FileNotFoundError: If template file doesn't exist
-    """
-    full_path = agentos_root / template_path
-    if not full_path.exists():
-        raise FileNotFoundError(f"Template not found: {full_path}")
-
-    return full_path.read_text(encoding="utf-8")
-
-
-def load_review_prompt(prompt_path: Path, agentos_root: Path) -> str:
-    """Load review prompt file from agentos_root.
-
-    Args:
-        prompt_path: Relative path to review prompt file
-        agentos_root: Root directory of AgentOS
-
-    Returns:
-        Review prompt content as string
-
-    Raises:
-        FileNotFoundError: If review prompt file doesn't exist
-    """
-    full_path = agentos_root / prompt_path
-    if not full_path.exists():
-        raise FileNotFoundError(f"Review prompt not found: {full_path}")
-
-    return full_path.read_text(encoding="utf-8")
+```

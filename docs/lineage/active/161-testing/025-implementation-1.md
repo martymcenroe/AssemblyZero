@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/nodes/finalize.py
+
+```python
 """Finalize node for requirements workflow.
 
 Updates GitHub issue with final draft and closes workflow.
@@ -94,3 +97,4 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
         Updated state with finalization status
     """
     return _finalize_issue(state)
+```
