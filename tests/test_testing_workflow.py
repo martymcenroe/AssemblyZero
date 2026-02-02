@@ -605,41 +605,39 @@ class TestNodeFunctions:
         assert result.get("test_plan_status") == "BLOCKED"
         assert "REQ-2" in result.get("gemini_feedback", "")
 
-    def test_review_test_plan_auto_mode_skips_review(self, tmp_path):
-        """review_test_plan auto-approves in auto mode without calling Gemini."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
-
-        # Create lineage directory
-        lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
-        lineage_dir.mkdir(parents=True)
+    def test_route_after_review_auto_mode_continues_on_blocked(self, tmp_path):
+        """route_after_review continues to scaffold in auto mode even when BLOCKED."""
+        from agentos.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "issue_number": 42,
             "repo_root": str(tmp_path),
-            "auto_mode": True,  # Auto mode - should skip review
-            "audit_dir": str(lineage_dir),
-            "file_counter": 1,
-            "iteration_count": 0,
-            "test_scenarios": [
-                {
-                    "name": "test_example",
-                    "description": "Test",
-                    "requirement_ref": "REQ-1",
-                    "test_type": "unit",
-                    "mock_needed": False,
-                    "assertions": [],
-                }
-            ],
-            "requirements": ["REQ-1: Example"],
-            "detected_test_types": ["unit"],
-            "coverage_target": 90,
+            "auto_mode": True,  # Auto mode - should continue despite BLOCKED
+            "test_plan_status": "BLOCKED",
+            "error_message": "",
         }
 
-        result = review_test_plan(state)
+        result = route_after_review(state)
 
-        # Auto mode should always APPROVE without calling Gemini
-        assert result.get("test_plan_status") == "APPROVED"
-        assert "AUTO" in result.get("test_plan_verdict", "")
+        # Auto mode should continue to scaffold even when BLOCKED
+        assert result == "N2_scaffold_tests"
+
+    def test_route_after_review_stops_on_blocked_without_auto(self, tmp_path):
+        """route_after_review stops at end when BLOCKED without auto mode."""
+        from agentos.workflows.testing.graph import route_after_review
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "auto_mode": False,  # Not auto mode - should stop
+            "test_plan_status": "BLOCKED",
+            "error_message": "",
+        }
+
+        result = route_after_review(state)
+
+        # Without auto mode, BLOCKED should end the workflow
+        assert result == "end"
 
     def test_scaffold_tests_creates_files(self, tmp_path):
         """scaffold_tests creates test files."""
