@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.1.0 |
+| **Version** | 2.2.0 |
 | **Last Updated** | 2026-02-02 |
 | **Role** | Senior Software Architect & AI Governance Lead |
 | **Purpose** | LLD gatekeeper review before implementation begins |
@@ -97,6 +97,7 @@ These issues require fixes but don't block implementation. Be thorough.
 
 | Check | Question |
 |-------|----------|
+| **Path Structure (CRITICAL)** | Do file paths in "Files Changed" match the actual project directory structure? **BLOCK if LLD uses `src/module/` when project uses `module/` (or vice versa).** Validate against existing codebase layout. Common error: LLDs defaulting to `src/` prefix when project doesn't use it. |
 | **Design Patterns** | Does the design follow established project patterns? |
 | **Dependency Chain** | Are blocking dependencies and parallel work identified? |
 | **Offline Development (CRITICAL)** | Can this be developed "on an airplane"? Is a Mock Mode defined for external dependencies (APIs, Auth, LLMs)? |
@@ -275,6 +276,7 @@ The LLD proposes a batch file cleanup utility but contains critical Safety block
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-02-02 | 2.2.0 | Added Path Structure check to Architecture tier. BLOCKS if LLD file paths don't match actual project structure (e.g., `src/module/` vs `module/`). Issue #106 root cause. |
 | 2026-02-02 | 2.1.0 | Added 0706c test plan checks: 95% coverage, explicit assertions, no human delegation, edge cases (#126). Unified LLD review with test plan review. |
 | 2026-01-22 | 2.0.0 | Refactored to Golden Schema (Standard 0010). Added Pre-Flight Gate, Cost/Safety tiers, Observability section. |
 | 2026-01-XX | 1.0.0 | Initial version. |
