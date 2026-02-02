@@ -232,12 +232,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Running pytest with coverage target: {coverage_target}%")
 
     # Determine coverage module from implementation files
+    # Filter out test files - we want to measure coverage of implementation, not tests
     impl_files = state.get("implementation_files", [])
     coverage_module = None
 
     if impl_files:
-        # Extract the first directory from implementation paths
+        # Extract the first non-test directory from implementation paths
         for impl_path in impl_files:
+            # Skip test files
+            if "test" in impl_path.lower():
+                continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
             parts = rel_path.parts
             if parts:
