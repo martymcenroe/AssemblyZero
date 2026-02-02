@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/nodes/load_input.py
+
+```python
 """Load input node for requirements workflow.
 
 Fetches GitHub issue details and prepares them for processing.
@@ -96,3 +99,4 @@ def load_input(state: Dict[str, Any]) -> Dict[str, Any]:
         Updated state with issue details
     """
     return _load_issue(state)
+```

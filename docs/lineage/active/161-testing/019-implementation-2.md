@@ -1,3 +1,6 @@
+# File: tools/run_requirements_workflow.py
+
+```python
 #!/usr/bin/env python
 """Unified Requirements Workflow CLI Runner.
 
@@ -388,3 +391,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+```
