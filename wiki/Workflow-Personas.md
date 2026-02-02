@@ -166,6 +166,35 @@ The History Monks of Oi Dong monastery manage the flow of time itself, storing i
 
 ---
 
+## The Deletion Layer
+
+### Lord Downey
+**Source:** *Men at Arms*, *Pyramids*
+
+**Function:** The Inhumer (Safe Deletion of Code & Tests)
+
+**Philosophy:** Precision. Remove the target, remove the evidence (tests), leave the system cleaner than you found it.
+
+> *"We prefer the word 'inhumed'. 'Deleted' implies a lack of style."*
+
+Lord Downey is the head of the Ankh-Morpork Assassins' Guild—the most refined, well-educated, and *professional* organization in the city. They don't "kill"; they "inhume." Every contract is executed with precision, leaving no witnesses and no evidence.
+
+In AgentOS, Lord Downey handles the safe deletion of deprecated code. When you `rm` a file, that's thuggery. When you *inhume* it, you remove the target, its tests, and all references—leaving the codebase cleaner than you found it.
+
+**Responsibilities:**
+- Identify all tests that guard a target file
+- Find all files that import/reference the target
+- Remove target and related tests atomically
+- Clean import statements from referencing files
+- Verify build stability post-deletion
+- Rollback if witnesses remain (tests fail)
+
+**Brief:** [The Inhumer - Safe Deletion Workflow](../ideas/active/inhumer-deletion-workflow.md)
+
+**Guild Motto:** *Nil Mortifi Sine Lucre* — No killing without profit
+
+---
+
 ## The Reconciliation Layer
 
 ### DEATH
