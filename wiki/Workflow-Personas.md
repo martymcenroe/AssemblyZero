@@ -166,6 +166,34 @@ The History Monks of Oi Dong monastery manage the flow of time itself, storing i
 
 ---
 
+## The Reconciliation Layer
+
+### DEATH
+**Source:** The entire Discworld series
+
+**Function:** Documentation Reconciliation (Post-Implementation Cleanup)
+
+**Philosophy:** INEVITABLE. THOROUGH. PATIENT.
+
+> *"THERE IS NO JUSTICE. THERE IS JUST ME."*
+
+DEATH is the anthropomorphic personification who comes for everyone eventually. He rides a pale horse named Binky, has a granddaughter named Susan, and SPEAKS ENTIRELY IN CAPITAL LETTERS. He is not cruel—he is simply inevitable.
+
+In AgentOS, DEATH arrives after implementation is complete. He reconciles documentation, ties up loose ends, and ensures nothing is forgotten. He is patient. He can wait.
+
+**Responsibilities:**
+- Post-implementation documentation updates
+- Architecture diagram reconciliation
+- ADR creation and review
+- Wiki synchronization
+- File inventory updates
+
+**Issue:** [#114 - DEATH](../issues/114)
+
+> *"What can the harvest hope for, if not for the care of the Reaper Man?"*
+
+---
+
 ## Design Principles
 
 ### Why Discworld?
@@ -193,12 +221,12 @@ When adding a new workflow, choose a Discworld character that:
 
 | Character | Potential Role | Notes |
 |-----------|---------------|-------|
-| **DEATH** | Error Handler / Graceful Shutdown | "THERE'S NO JUSTICE. THERE'S JUST ME." |
 | **Moist von Lipwig** | PR/Release Manager | The con man who makes things work |
 | **The Patrician** | Orchestrator / Scheduler | Sees everything, controls everything |
 | **Igor** | Migration / Transformation | "We have alwayth done it thith way" |
 | **The Auditors** | Compliance Checker | Hate individuality, love rules |
 | **Rincewind** | Chaos Handler / Fallback | Survives everything by running away |
+| **Susan Sto Helit** | Exception Handler | DEATH's granddaughter, deals with what shouldn't exist |
 
 ---
 
