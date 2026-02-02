@@ -1,10 +1,10 @@
 # 0101 - Template: GitHub Issue (Feature)
 
 <!-- Template Metadata
-Last Updated: 2026-02-01
+Last Updated: 2026-02-02
 Updated By: Verdict Analyzer (tools/verdict-analyzer.py)
-Update Reason: Added Risk Checklist based on 67 blocking issues from 46 issue reviews
-Top blockers: architecture (20), quality (19), legal (8), security (8), cost (6), safety (6)
+Update Reason: Added AC guidance, Open Questions section, dependency validation based on 230 blocking issues from 227 verdicts
+Top blockers: quality (60), architecture (52), legal (23), security (19), safety (12), cost (10)
 -->
 
 ## Usage
@@ -57,23 +57,43 @@ So that {benefit/outcome}.
 - [ ] **Architecture:** Does this change system structure? {Note if yes}
 - [ ] **Cost:** Does this add API calls, storage, or compute? {Note if yes}
 - [ ] **Legal/PII:** Does this handle personal data or have compliance implications? {Note if yes}
+- [ ] **Legal/External Data:** Does this fetch from external sources? {Confirm ToS/robots.txt compliance}
 - [ ] **Safety:** Can this cause data loss or system instability? {Note if yes}
 
 ## Security Considerations
-{If applicable: explain why the approach is safe, what permissions are needed, data handling}
+<!-- Address if applicable: path validation, input sanitization, permissions, data handling -->
+- **Path Validation:** {How are user-provided paths validated? Symlink handling?}
+- **Input Sanitization:** {How is untrusted input handled?}
+- **Permissions:** {What access levels are required?}
+- N/A (no security-relevant operations)
 
 ## Files to Create/Modify
 - `path/to/file.js` — {What changes}
 - `path/to/new-file.py` — {Purpose of new file}
 
 ## Dependencies
+<!-- Use actual issue numbers. #TBD is NOT allowed - create the dependency issue first or mark as "None". -->
 - Issue #{N} must be completed first (if applicable)
+- None (if no dependencies)
 
 ## Out of Scope (Future)
 - {Feature X} — deferred to future issue
 - {Enhancement Y} — nice-to-have, not MVP
 
+## Open Questions
+<!-- BLOCKING: All questions MUST be resolved before filing. If any remain open, the issue is NOT ready. -->
+- None (all questions resolved)
+<!-- Example format for resolved questions:
+- [x] Should we use SQLite or PostgreSQL? → Resolved: SQLite for MVP, PostgreSQL deferred to future issue
+-->
+
 ## Acceptance Criteria
+<!-- REQUIRED: Each criterion MUST be binary (pass/fail). Avoid:
+  - "works correctly" → specify exact behavior
+  - "handles gracefully" → specify exact output/error message
+  - ">80% accuracy" → requires ground truth dataset; use fixture_metadata.json
+  - "renders correctly" → specify exact visual elements or screenshot comparison
+-->
 - [ ] {Testable criterion 1}
 - [ ] {Testable criterion 2}
 - [ ] {Testable criterion 3}
@@ -115,7 +135,9 @@ So that {benefit/outcome}.
 2. **Objective:** One sentence. If you need more, scope is too big.
 3. **UX Flow:** Walk through what the user sees, step by step.
 4. **Scenarios:** Cover happy path AND at least one error/edge case.
-5. **Acceptance Criteria:** Must be testable. "Works correctly" is bad. "Button changes color to green" is good.
-6. **Out of Scope:** Explicitly state what you're NOT doing to prevent scope creep.
-7. **Dependencies:** Call out blockers so work can be sequenced.
-8. **Risk Checklist:** Quick flags for governance. If any box is checked, the LLD must address it in detail.
+5. **Acceptance Criteria:** Must be binary (pass/fail). Bad: "Works correctly", "handles gracefully", ">80% accuracy". Good: "Returns exit code 0", "Outputs JSON with 'status' field", "Bounding box overlaps ground truth by >50% per fixture_metadata.json".
+6. **Open Questions:** Resolve ALL questions before filing. #TBD in Dependencies = not ready.
+7. **Out of Scope:** Explicitly state what you're NOT doing to prevent scope creep.
+8. **Dependencies:** Use actual issue numbers. Create dependency issues first if needed.
+9. **Risk Checklist:** Quick flags for governance. If any box is checked, the LLD must address it in detail.
+10. **Security:** Always address path validation and input sanitization for file/CLI operations.
