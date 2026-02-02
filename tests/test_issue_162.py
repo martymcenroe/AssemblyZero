@@ -312,13 +312,18 @@ def test_090(tmp_path):
     # This will actually commit and push (to local bare remote)
     try:
         updated_state = _commit_and_push_files(state)
-        commit_succeeded = "commit_error" not in updated_state
+        commit_error = updated_state.get("commit_error", "")
+        if commit_error:
+            print(f"Commit error: {commit_error}")
+        # Success = no error message (empty string is OK, means no error)
+        commit_succeeded = not commit_error
     except Exception as e:
         print(f"Exception: {e}")
         commit_succeeded = False
+        updated_state = {"commit_error": str(e)}
 
     # TDD: Assert
-    assert commit_succeeded
+    assert commit_succeeded, f"Commit failed. State: {updated_state.get('commit_error', 'no error in state')}"
 
     # Verify commit exists
     log_result = subprocess.run(
