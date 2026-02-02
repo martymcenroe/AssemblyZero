@@ -326,6 +326,8 @@ class GeminiClient:
         contains handshake instructions that interfere with governance reviews.
         We temporarily rename GEMINI.md during the call to avoid this.
 
+        We also use --sandbox mode to disable agentic features.
+
         Returns:
             Tuple of (success, response_text, error_message)
         """
@@ -333,15 +335,12 @@ class GeminiClient:
             return False, "", "Gemini CLI not found"
 
         # Combine system instruction and content
-        import tempfile
-
         full_prompt = (
             f"You are {self.model}.\n\n"
             f"<system_instruction>\n{system_instruction}\n</system_instruction>\n\n"
             f"<user_content>\n{content}\n</user_content>"
         )
 
-        prompt_file = None
         gemini_md_path = Path.cwd() / "GEMINI.md"
         gemini_md_backup = Path.cwd() / "GEMINI.md.bak"
         gemini_md_renamed = False
@@ -352,23 +351,19 @@ class GeminiClient:
                 gemini_md_path.rename(gemini_md_backup)
                 gemini_md_renamed = True
 
-            # Write combined prompt to temp file
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(full_prompt)
-                prompt_file = f.name
-
+            # Use stdin to pass the prompt to avoid agentic file reading
             result = subprocess.run(
                 [
                     self._gemini_cli,
                     "--prompt",
-                    f"@{prompt_file}",
+                    "-",  # Read from stdin
                     "--model",
                     self.model,
                     "--output-format",
                     "text",
+                    "--sandbox",  # Disable agentic features
                 ],
+                input=full_prompt,
                 capture_output=True,
                 text=True,
                 timeout=120,  # 2 minute timeout
@@ -391,12 +386,6 @@ class GeminiClient:
             if gemini_md_renamed and gemini_md_backup.exists():
                 try:
                     gemini_md_backup.rename(gemini_md_path)
-                except OSError:
-                    pass
-            # Clean up temp file
-            if prompt_file:
-                try:
-                    os.unlink(prompt_file)
                 except OSError:
                     pass
 
