@@ -1,10 +1,10 @@
 # 1{IssueID} - Feature: {Title}
 
 <!-- Template Metadata
-Last Updated: 2026-02-01
-Updated By: Verdict Analyzer (tools/verdict-analyzer.py)
-Update Reason: Added sections based on 80 blocking issues from 164 governance verdicts
-Categories addressed: architecture (23), safety (9), legal (8), cost (6)
+Last Updated: 2026-02-02
+Updated By: Issue #117 fix
+Update Reason: Moved Verification & Testing to Section 10 (was Section 11) to match 0702c review prompt and testing workflow expectations
+Previous: Added sections based on 80 blocking issues from 164 governance verdicts (2026-02-01)
 -->
 
 ## 1. Context & Goal
@@ -254,19 +254,13 @@ sequenceDiagram
 - [ ] External API usage compliant with provider ToS
 - [ ] Data retention policy documented
 
-## 10. Risks & Mitigations
-
-| Risk | Impact | Likelihood | Mitigation |
-|------|--------|------------|------------|
-| {Risk description} | High/Med/Low | High/Med/Low | {How addressed} |
-
-## 11. Verification & Testing
+## 10. Verification & Testing
 
 *Ref: [0005-testing-strategy-and-protocols.md](0005-testing-strategy-and-protocols.md)*
 
 **Testing Philosophy:** Strive for 100% automated test coverage. Manual tests are a last resort for scenarios that genuinely cannot be automated (e.g., visual inspection, hardware interaction). Every scenario marked "Manual" requires justification.
 
-### 11.1 Test Scenarios
+### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
@@ -281,7 +275,7 @@ sequenceDiagram
 - `Auto-Live` - Automated but hits real external services (may be slow/flaky)
 - `Manual` - Requires human execution (MUST include justification why automation is impossible)
 
-### 11.2 Test Commands
+### 10.2 Test Commands
 
 ```bash
 # Run all automated tests
@@ -294,7 +288,7 @@ poetry run pytest tests/test_{module}.py -v -m "not live"
 poetry run pytest tests/test_{module}.py -v -m live
 ```
 
-### 11.3 Manual Tests (Only If Unavoidable)
+### 10.3 Manual Tests (Only If Unavoidable)
 
 **If no manual tests required:** Write "N/A - All scenarios automated."
 
@@ -305,6 +299,12 @@ poetry run pytest tests/test_{module}.py -v -m live
 | {ID} | {scenario} | {e.g., requires visual inspection of PDF} | {steps} |
 
 *Full test results recorded in Implementation Report (0103) or Test Report (0113).*
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| {Risk description} | High/Med/Low | High/Med/Low | {How addressed} |
 
 ## 12. Definition of Done
 

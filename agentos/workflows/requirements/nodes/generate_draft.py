@@ -147,14 +147,17 @@ def _build_prompt(
         input_content = state.get("brief_content", "")
         input_label = "Brief (user's ideation notes)"
     else:
+        issue_number = state.get("issue_number", 0)
         issue_title = state.get("issue_title", "")
         issue_body = state.get("issue_body", "")
         context_content = state.get("context_content", "")
 
-        input_content = f"# {issue_title}\n\n{issue_body}"
+        # CRITICAL: Explicitly include issue number to prevent LLM confusion
+        input_content = f"# Issue #{issue_number}: {issue_title}\n\n{issue_body}"
         if context_content:
             input_content += f"\n\n## Context\n\n{context_content}"
-        input_label = "GitHub Issue"
+        input_content += f"\n\n**CRITICAL: This LLD is for GitHub Issue #{issue_number}. Use this exact issue number in all references.**"
+        input_label = f"GitHub Issue #{issue_number}"
 
     # Check if this is a revision
     if current_draft and verdict_history:
