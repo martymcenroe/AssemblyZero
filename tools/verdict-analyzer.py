@@ -48,34 +48,48 @@ def configure_logging(verbosity: int) -> None:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     """Scan repositories and populate database."""
+    from tools.verdict_analyzer.scanner import load_registry, discover_verdicts
+
     db_path = Path(args.db)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     db = VerdictDatabase(db_path)
-    
+
     try:
-        registry_path = None
-        if args.registry:
-            registry_path = Path(args.registry)
-        elif not args.repos:
-            registry_path = find_registry()
-        
-        repos = [Path(r) for r in args.repos] if args.repos else None
-        
+        # Determine repos to scan
+        if args.repos:
+            repos = [Path(r) for r in args.repos]
+        else:
+            # Find registry
+            if args.registry:
+                registry_path = Path(args.registry)
+            else:
+                registry_path = find_registry(Path.cwd())
+
+            if registry_path is None:
+                print("No project-registry.json found. Scanning current directory.")
+                repos = [Path.cwd()]
+            else:
+                print(f"Using registry: {registry_path}")
+                repos = load_registry(registry_path)
+
         count = 0
-        for repo_path, verdict_path in scan_repos(registry_path, repos):
-            try:
-                content = verdict_path.read_text(encoding="utf-8")
-                content_hash = compute_content_hash(content)
-                
-                if args.force or db.needs_update(str(verdict_path), content_hash):
-                    logger.info(f"Parsing: {verdict_path}")
-                    record = parse_verdict(verdict_path, content)
-                    db.upsert_verdict(record)
-                    count += 1
-                else:
-                    logger.debug(f"Skipping (unchanged): {verdict_path}")
-            except Exception as e:
-                logger.error(f"Error parsing {verdict_path}: {e}")
-        
+        for repo in repos:
+            print(f"Scanning: {repo}")
+            for verdict_path in discover_verdicts(repo):
+                try:
+                    content = verdict_path.read_text(encoding="utf-8")
+                    content_hash = compute_content_hash(content)
+
+                    if args.force or db.needs_update(str(verdict_path), content_hash):
+                        logger.info(f"Parsing: {verdict_path}")
+                        record = parse_verdict(verdict_path)
+                        db.upsert_verdict(record)
+                        count += 1
+                    else:
+                        logger.debug(f"Skipping (unchanged): {verdict_path}")
+                except Exception as e:
+                    logger.error(f"Error parsing {verdict_path}: {e}")
+
         print(f"Processed {count} verdict(s)")
         return 0
     finally:
@@ -88,7 +102,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     db = VerdictDatabase(db_path)
     
     try:
-        stats = db.get_pattern_stats()
+        stats = db.get_stats()
         print(format_stats(stats))
         return 0
     finally:
@@ -109,7 +123,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
         
         content = template_path.read_text(encoding="utf-8")
         sections = parse_template_sections(content)
-        stats = db.get_pattern_stats()
+        stats = db.get_stats()
         
         recommendations = generate_recommendations(
             stats,
@@ -125,7 +139,7 @@ def cmd_recommend(args: argparse.Namespace) -> int:
         
         for i, rec in enumerate(recommendations, 1):
             print(f"{i}. [{rec.rec_type}] {rec.section}")
-            print(f"   Reason: {rec.reason}")
+            print(f"   Pattern count: {rec.pattern_count}")
             print(f"   Content: {rec.content}")
             print()
         

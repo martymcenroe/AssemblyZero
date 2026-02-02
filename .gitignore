@@ -29,3 +29,7 @@ harvest-*.xlsx
 
 # Blog drafts (not ready for public)
 docs/blog/
+
+# Verdict analyzer database (generated locally)
+.agentos/verdicts.db
+verdicts.db

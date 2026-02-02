@@ -62,15 +62,19 @@ def load_registry(registry_path: Path) -> list[Path]:
 
 
 def validate_verdict_path(verdict_path: Path, base_dir: Path) -> bool:
-    """Validate verdict path is within base directory.
+    """Validate verdict path is within base directory and is a verdict file.
 
     Args:
         verdict_path: Path to validate.
         base_dir: Base directory path must be within.
 
     Returns:
-        True if path is valid, False otherwise.
+        True if path is valid verdict file, False otherwise.
     """
+    # Must be a verdict file (contains "verdict" in filename)
+    if "verdict" not in verdict_path.name.lower():
+        return False
+
     try:
         verdict_path.resolve().relative_to(base_dir.resolve())
         return True
@@ -89,6 +93,8 @@ def discover_verdicts(repo_path: Path) -> Iterator[Path]:
     """
     # Look in common verdict locations
     verdict_dirs = [
+        repo_path / "docs" / "lineage" / "active",  # AgentOS governance workflow
+        repo_path / "docs" / "lineage",  # Broader lineage search
         repo_path / "docs" / "verdicts",
         repo_path / "verdicts",
         repo_path / ".verdicts",
