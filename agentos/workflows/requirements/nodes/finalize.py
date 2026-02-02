@@ -47,10 +47,22 @@ def finalize(state: RequirementsWorkflowState) -> dict[str, Any]:
     """
     workflow_type = state.get("workflow_type", "lld")
 
+    print(f"\n[N5] Finalizing ({workflow_type} workflow)...")
+
     if workflow_type == "issue":
-        return _finalize_issue(state)
+        result = _finalize_issue(state)
     else:
-        return _finalize_lld(state)
+        result = _finalize_lld(state)
+
+    # Print summary
+    if result.get("error_message"):
+        print(f"    ERROR: {result['error_message']}")
+    elif workflow_type == "issue":
+        print(f"    Filed issue: {result.get('issue_url', 'unknown')}")
+    else:
+        print(f"    Saved LLD: {result.get('final_lld_path', 'unknown')}")
+
+    return result
 
 
 def _finalize_issue(state: RequirementsWorkflowState) -> dict[str, Any]:

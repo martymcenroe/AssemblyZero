@@ -42,6 +42,9 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     current_draft = state.get("current_draft", "")
     verdict_history = list(state.get("verdict_history", []))
 
+    verdict_count = state.get("verdict_count", 0) + 1
+    print(f"\n[N3] Reviewing draft (review #{verdict_count})...")
+
     # Use mock provider in mock mode, otherwise use configured reviewer
     if mock_mode:
         reviewer_spec = "mock:review"
@@ -85,15 +88,16 @@ Be specific about what needs to change for BLOCKED verdicts."""
 {review_prompt}"""
 
     # Call reviewer
+    print(f"    Reviewer: {reviewer_spec}")
     result = reviewer.invoke(system_prompt=system_prompt, content=review_content)
 
     if not result.success:
+        print(f"    ERROR: {result.error_message}")
         return {"error_message": f"Reviewer failed: {result.error_message}"}
 
     verdict_content = result.response or ""
 
     # Save to audit trail
-    verdict_count = state.get("verdict_count", 0) + 1
     file_num = next_file_number(audit_dir)
     if audit_dir.exists():
         verdict_path = save_audit_file(
@@ -130,6 +134,11 @@ Be specific about what needs to change for BLOCKED verdicts."""
     else:
         # Default to BLOCKED if we can't determine status (safe choice)
         lld_status = "BLOCKED"
+
+    verdict_lines = len(verdict_content.splitlines()) if verdict_content else 0
+    print(f"    Verdict: {lld_status} ({verdict_lines} lines)")
+    if verdict_path:
+        print(f"    Saved: {verdict_path.name}")
 
     return {
         "current_verdict": verdict_content,

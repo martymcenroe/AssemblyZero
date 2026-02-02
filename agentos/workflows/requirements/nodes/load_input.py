@@ -57,10 +57,27 @@ def load_input(state: RequirementsWorkflowState) -> dict[str, Any]:
     """
     workflow_type = state.get("workflow_type", "lld")
 
+    print(f"\n[N0] Loading input ({workflow_type} workflow)...")
+
     if workflow_type == "issue":
-        return _load_brief(state)
+        result = _load_brief(state)
     else:
-        return _load_issue(state)
+        result = _load_issue(state)
+
+    # Print summary
+    if result.get("error_message"):
+        print(f"    ERROR: {result['error_message']}")
+    elif workflow_type == "issue":
+        print(f"    Loaded brief: {state.get('brief_file', 'unknown')}")
+    else:
+        issue_num = state.get("issue_number", 0)
+        title = result.get("issue_title", "")[:50]
+        print(f"    Issue #{issue_num}: {title}")
+
+    if result.get("audit_dir"):
+        print(f"    Audit dir: {result['audit_dir']}")
+
+    return result
 
 
 def _load_brief(state: RequirementsWorkflowState) -> dict[str, Any]:
