@@ -32,6 +32,44 @@ Without Om, the agents are just a bureaucracy performing empty rituals. With Om,
 
 ---
 
+## The Visibility Layer
+
+### Lord Vetinari (The Patrician)
+**Source:** The entire City Watch series, *Going Postal*, *Making Money*
+
+**Function:** Work Organization & Project Management (GitHub Projects, Stage Tracking)
+
+**Philosophy:** Information is power. Know where every piece is on the board.
+
+> *"Down there are people who will follow any dragon, worship any god, ignore any iniquity. All out of a conditions called 'not wanting to be noticed.'"*
+
+Lord Havelock Vetinari is the Patrician of Ankh-Morpork—the tyrant who makes the trains run on time. In his office, he maintains a wall map of the city with little markers showing where everyone is and what they're doing. He doesn't control everything directly; he *organizes* it so the pieces work together. He sees patterns others miss and moves pieces before problems arise.
+
+In AgentOS, The Patrician manages work visibility across all projects. He maintains the board, tracks what stage each piece of work is in, and ensures nothing falls through the cracks. He doesn't do the work—he ensures you can *see* the work.
+
+**Responsibilities:**
+- GitHub Projects board management
+- Stage transitions (Backlog → Ready → In Progress → Done)
+- Cross-project visibility and reporting
+- Work-in-progress tracking
+- "Who is doing what" status queries
+- Automated stage updates when workflows complete
+
+**The Wall Map:**
+```
+┌──────────┐    ┌─────────┐    ┌─────────────┐    ┌──────┐
+│ Backlog  │ -> │  Ready  │ -> │ In Progress │ -> │ Done │
+└──────────┘    └─────────┘    └─────────────┘    └──────┘
+```
+
+**Runbook:** [0912 - GitHub Projects](../docs/runbooks/0912-github-projects.md)
+
+**Brief:** [GitHub Project Stage Automation](../ideas/active/github-project-stage-automation.md)
+
+> *"Taxation, gentlemen, is very much like dairy farming. The task is to extract the maximum amount of milk with the minimum amount of moo."*
+
+---
+
 ## The Memory Layer (RAG)
 
 ### Brutha
@@ -277,7 +315,6 @@ When adding a new workflow, choose a Discworld character that:
 | Character | Potential Role | Notes |
 |-----------|---------------|-------|
 | **Moist von Lipwig** | PR/Release Manager | The con man who makes things work |
-| **The Patrician** | Orchestrator / Scheduler | Sees everything, controls everything |
 | **Igor** | Migration / Transformation | "We have alwayth done it thith way" |
 | **The Auditors** | Compliance Checker | Hate individuality, love rules |
 | **Rincewind** | Chaos Handler / Fallback | Survives everything by running away |
