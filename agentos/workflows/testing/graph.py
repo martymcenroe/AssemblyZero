@@ -86,13 +86,18 @@ def route_after_review(
     """
     error = state.get("error_message", "")
     test_plan_status = state.get("test_plan_status", "")
+    auto_mode = state.get("auto_mode", False)
 
-    if error:
+    if error and not auto_mode:
         return "end"
 
     # BLOCKED means test plan needs revision - this requires returning
     # to the LLD workflow (outside scope of this workflow)
+    # In auto_mode, continue anyway (skip human gate)
     if test_plan_status == "BLOCKED":
+        if auto_mode:
+            print("    [AUTO] Continuing despite BLOCKED verdict - auto mode enabled")
+            return "N2_scaffold_tests"
         return "end"
 
     return "N2_scaffold_tests"
