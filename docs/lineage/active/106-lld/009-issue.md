@@ -1,4 +1,4 @@
-# Parallel Workflow Execution for LLD and Issue Processing
+# Issue #106: Parallel Workflow Execution for LLD and Issue Processing
 
 ## User Story
 As a developer using AgentOS workflows,
@@ -114,28 +114,28 @@ Enable concurrent execution of LLD and Issue workflows with the `--all` flag, so
 - **Path Traversal Prevention:** All user-derived inputs used in file paths are sanitized to alphanumeric characters only
 
 ## Files to Create/Modify
-- `src/agentos/workflows/parallel_coordinator.py` — New coordinator managing worker pool and progress
-- `src/agentos/workflows/credential_coordinator.py` — Thread-safe credential reservation system with rate-limit tracking
-- `src/agentos/workflows/output_prefixer.py` — Stdout/stderr wrapper with prefix injection
-- `src/agentos/workflows/lld_workflow.py` — Add `--parallel` and `--dry-run` flags, integrate with coordinator
-- `src/agentos/workflows/issue_workflow.py` — Add `--parallel` and `--dry-run` flags, integrate with coordinator
-- `src/agentos/workflows/checkpoint_manager.py` — Support dynamic database path via env var
-- `src/agentos/workflows/input_sanitizer.py` — Input validation utilities for path-safe identifiers
-- `tests/test_parallel_coordinator.py` — Unit tests for coordinator logic
-- `tests/test_credential_coordinator.py` — Unit tests for credential reservation and rate-limit handling
-- `tests/fixtures/mock_llm_provider.py` — Mock LLM responses for offline testing
+- `src/agentos/workflows/parallel_coordinator.py` â€” New coordinator managing worker pool and progress
+- `src/agentos/workflows/credential_coordinator.py` â€” Thread-safe credential reservation system with rate-limit tracking
+- `src/agentos/workflows/output_prefixer.py` â€” Stdout/stderr wrapper with prefix injection
+- `src/agentos/workflows/lld_workflow.py` â€” Add `--parallel` and `--dry-run` flags, integrate with coordinator
+- `src/agentos/workflows/issue_workflow.py` â€” Add `--parallel` and `--dry-run` flags, integrate with coordinator
+- `src/agentos/workflows/checkpoint_manager.py` â€” Support dynamic database path via env var
+- `src/agentos/workflows/input_sanitizer.py` â€” Input validation utilities for path-safe identifiers
+- `tests/test_parallel_coordinator.py` â€” Unit tests for coordinator logic
+- `tests/test_credential_coordinator.py` â€” Unit tests for credential reservation and rate-limit handling
+- `tests/fixtures/mock_llm_provider.py` â€” Mock LLM responses for offline testing
 
 ## Dependencies
-- None — builds on existing `--all` implementation and credential pool
+- None â€” builds on existing `--all` implementation and credential pool
 
 ## Out of Scope (Future)
-- **PostgreSQL/Redis backend** — SQLite with isolation is sufficient for MVP
-- **Rich/curses split-pane display** — Prefixed output is sufficient for MVP
-- **Distributed execution across machines** — Single-machine parallelism only
-- **Auto-scaling parallelism based on system resources** — Fixed N for MVP
-- **Web UI for monitoring parallel runs** — CLI only for MVP
-- **TPM-aware scheduling** — MVP tracks rate limits reactively; proactive TPM tracking deferred
-- **`--force` flag for checkpoint overwrite** — Edge case for corrupted locks, deferred
+- **PostgreSQL/Redis backend** â€” SQLite with isolation is sufficient for MVP
+- **Rich/curses split-pane display** â€” Prefixed output is sufficient for MVP
+- **Distributed execution across machines** â€” Single-machine parallelism only
+- **Auto-scaling parallelism based on system resources** â€” Fixed N for MVP
+- **Web UI for monitoring parallel runs** â€” CLI only for MVP
+- **TPM-aware scheduling** â€” MVP tracks rate limits reactively; proactive TPM tracking deferred
+- **`--force` flag for checkpoint overwrite** â€” Edge case for corrupted locks, deferred
 
 ## Acceptance Criteria
 - [ ] `lld-workflow --all --parallel 3` processes 3 LLDs concurrently
@@ -214,4 +214,4 @@ Enable concurrent execution of LLD and Issue workflows with the `--all` flag, so
 `core-workflow`, `performance`
 
 ## T-Shirt Size
-**L** — Complexity of subprocess state management, credential coordination with rate-limit tracking, and graceful shutdown handling
+**L** â€” Complexity of subprocess state management, credential coordination with rate-limit tracking, and graceful shutdown handling
