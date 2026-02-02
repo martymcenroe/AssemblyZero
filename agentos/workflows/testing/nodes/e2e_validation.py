@@ -200,9 +200,40 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"    [WARN] Sandbox cleanup failed: {error}")
 
     # Analyze results
-    if result["returncode"] != 0:
-        # Check if no E2E tests were found (not a failure)
-        if "no tests ran" in output.lower() or "0 items" in output.lower():
+    # Pytest return codes:
+    #   0: All tests passed
+    #   1: Tests collected and run but some failed
+    #   2: Test execution interrupted
+    #   3: Internal error
+    #   4: Command line usage error
+    #   5: No tests were collected
+    returncode = result["returncode"]
+
+    if returncode == 5:
+        # No tests collected - tests don't have @pytest.mark.e2e markers
+        # This is NOT a failure, just means no E2E tests to run
+        print("    No E2E tests collected (missing @pytest.mark.e2e markers)")
+        print("    Proceeding to finalize - add markers to enable E2E validation")
+        return {
+            "e2e_output": output,
+            "file_counter": file_num,
+            "next_node": "N7_finalize",
+            "error_message": "",
+        }
+
+    if returncode in (3, 4, -1):
+        # Internal error, usage error, or timeout - don't loop, just fail
+        print(f"    E2E validation error (code {returncode}) - not retrying")
+        return {
+            "e2e_output": output,
+            "file_counter": file_num,
+            "error_message": f"E2E validation error: pytest returned {returncode}",
+        }
+
+    if returncode != 0:
+        # Fallback string check for edge cases (older pytest versions, etc.)
+        output_lower = output.lower()
+        if "no tests ran" in output_lower or "collected 0 items" in output_lower:
             print("    No E2E tests found - proceeding to finalize")
             return {
                 "e2e_output": output,

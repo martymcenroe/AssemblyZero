@@ -1064,5 +1064,105 @@ poetry run python tools/run_tool.py --issue 42
         assert result is False  # No update needed
 
 
+class TestE2EValidationReturnCodes:
+    """Tests for E2E validation return code handling (Issue #134)."""
+
+    def test_e2e_validation_return_code_5_proceeds_to_finalize(self, tmp_path):
+        """Return code 5 (no tests collected) should proceed to finalize, not loop."""
+        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+
+        # Create audit directory
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "mock_mode": False,
+            "skip_e2e": False,
+            "audit_dir": str(audit_dir),
+            "file_counter": 1,
+            "iteration_count": 0,
+            "test_files": [],  # No test files = pytest returns code 5
+            "max_iterations": 10,
+        }
+
+        # Mock subprocess.run to return code 5 (no tests collected)
+        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 5
+            mock_run.return_value.stdout = "collected 0 items\n\nno tests ran in 0.01s"
+            mock_run.return_value.stderr = ""
+
+            result = e2e_validation(state)
+
+        # Should proceed to finalize, NOT loop back to implement
+        assert result.get("next_node") == "N7_finalize"
+        assert result.get("error_message") == ""
+
+    def test_e2e_validation_return_code_1_loops_back(self, tmp_path):
+        """Return code 1 (tests failed) should loop back to implementation."""
+        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+
+        # Create audit directory
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "mock_mode": False,
+            "skip_e2e": False,
+            "audit_dir": str(audit_dir),
+            "file_counter": 1,
+            "iteration_count": 0,
+            "test_files": ["tests/test_example.py"],
+            "max_iterations": 10,
+        }
+
+        # Mock subprocess.run to return code 1 (tests failed)
+        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stdout = "1 failed, 0 passed"
+            mock_run.return_value.stderr = ""
+
+            result = e2e_validation(state)
+
+        # Should loop back to implementation
+        assert result.get("next_node") == "N4_implement_code"
+        assert result.get("iteration_count") == 1
+
+    def test_e2e_validation_return_code_3_does_not_loop(self, tmp_path):
+        """Return code 3 (internal error) should fail without looping."""
+        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+
+        # Create audit directory
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "mock_mode": False,
+            "skip_e2e": False,
+            "audit_dir": str(audit_dir),
+            "file_counter": 1,
+            "iteration_count": 0,
+            "test_files": ["tests/test_example.py"],
+            "max_iterations": 10,
+        }
+
+        # Mock subprocess.run to return code 3 (internal error)
+        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 3
+            mock_run.return_value.stdout = ""
+            mock_run.return_value.stderr = "INTERNAL ERROR"
+
+            result = e2e_validation(state)
+
+        # Should NOT loop back - internal errors shouldn't retry
+        assert result.get("next_node") is None  # No next node = error state
+        assert "error" in result.get("error_message", "").lower()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
