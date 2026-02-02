@@ -1,6 +1,6 @@
-"""Configuration constants for AgentOS governance.
+"""Configuration constants for AgentOS LLD review.
 
-This module defines constants that control governance behavior,
+This module defines constants that control LLD review behavior,
 including model hierarchy and credential paths.
 """
 
@@ -8,14 +8,14 @@ import os
 from pathlib import Path
 
 # =============================================================================
-# Model Hierarchy (NEVER downgrade for governance)
+# Model Hierarchy (NEVER downgrade for reviews)
 # =============================================================================
 
-# Primary governance model - highest reasoning tier available
-GOVERNANCE_MODEL = os.environ.get("GOVERNANCE_MODEL", "gemini-3-pro-preview")
+# Primary review model - highest reasoning tier available
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3-pro-preview")
 
 # Acceptable fallback models (Pro-tier only)
-GOVERNANCE_MODEL_FALLBACKS = ["gemini-3-pro"]
+REVIEWER_MODEL_FALLBACKS = ["gemini-3-pro"]
 
 # Forbidden models - fail closed rather than use these
 FORBIDDEN_MODELS = [
@@ -47,7 +47,7 @@ BACKOFF_MAX_SECONDS = 60.0
 # =============================================================================
 
 # Permanent audit trail (consolidated from shards)
-DEFAULT_AUDIT_LOG_PATH = Path("logs/governance_history.jsonl")
+DEFAULT_AUDIT_LOG_PATH = Path("logs/review_history.jsonl")
 
 # Active session shards directory (gitignored, ephemeral)
 LOGS_ACTIVE_DIR = Path("logs/active")

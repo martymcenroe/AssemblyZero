@@ -1,6 +1,6 @@
-"""Governance nodes for AgentOS LangGraph workflows.
+"""LLD Reviewer node for AgentOS LangGraph workflows.
 
-This module contains the governance node that gates LLDs through
+This module contains the LLD reviewer node that gates LLDs through
 Gemini 3 Pro review, enforcing model hierarchy and credential rotation.
 """
 
@@ -9,8 +9,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agentos.core.audit import GovernanceAuditLog, create_log_entry
-from agentos.core.config import GOVERNANCE_MODEL, LLD_REVIEW_PROMPT_PATH
+from agentos.core.audit import ReviewAuditLog, create_log_entry
+from agentos.core.config import REVIEWER_MODEL, LLD_REVIEW_PROMPT_PATH
 from agentos.core.gemini_client import (
     CredentialPoolExhaustedException,
     GeminiClient,
@@ -41,7 +41,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
     - Any unexpected error
     """
     # Initialize audit log
-    audit_log = GovernanceAuditLog()
+    audit_log = ReviewAuditLog()
 
     # Increment iteration count
     iteration_count = state.get("iteration_count", 0) + 1
@@ -63,7 +63,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
             # No LLD content - fail closed
             entry = create_log_entry(
                 node="review_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified="",
                 issue_id=issue_id,
                 verdict="BLOCK",
@@ -85,7 +85,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
             }
 
         # Initialize Gemini client with strict model enforcement
-        client = GeminiClient(model=GOVERNANCE_MODEL)
+        client = GeminiClient(model=REVIEWER_MODEL)
 
         # Invoke Gemini with rotation logic
         result = client.invoke(
@@ -109,7 +109,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
             # Log to audit trail
             entry = create_log_entry(
                 node="review_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified=result.model_verified,
                 issue_id=issue_id,
                 verdict=verdict,
@@ -144,7 +144,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
 
             entry = create_log_entry(
                 node="review_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified="",
                 issue_id=issue_id,
                 verdict="BLOCK",
@@ -169,7 +169,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
         # Missing prompt file or credentials
         entry = create_log_entry(
             node="review_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified="",
             issue_id=state.get("issue_id", 0),
             verdict="BLOCK",
@@ -194,7 +194,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
         # Model validation error
         entry = create_log_entry(
             node="review_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified="",
             issue_id=state.get("issue_id", 0),
             verdict="BLOCK",
@@ -219,7 +219,7 @@ def review_lld_node(state: AgentState) -> dict[str, Any]:
         # Unexpected error - fail closed
         entry = create_log_entry(
             node="review_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified="",
             issue_id=state.get("issue_id", 0),
             verdict="BLOCK",

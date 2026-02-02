@@ -218,10 +218,10 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Call Gemini for review
     try:
-        from agentos.core.config import GOVERNANCE_MODEL
+        from agentos.core.config import REVIEWER_MODEL
         from agentos.core.gemini_client import GeminiClient
 
-        client = GeminiClient(model=GOVERNANCE_MODEL)
+        client = GeminiClient(model=REVIEWER_MODEL)
         result = client.invoke(
             system_instruction="You are a senior QA engineer reviewing a test plan for coverage and quality.",
             content=full_prompt,

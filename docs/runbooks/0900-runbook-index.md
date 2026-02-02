@@ -25,7 +25,7 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | 0904 | [Issue Governance Workflow](0904-issue-governance-workflow.md) | Manual | Per issue | Claude + Gemini |
 | 0905 | [Gemini Credentials](0905-gemini-credentials.md) | Manual | On credential issues | - |
 | 0906 | [LLD Governance Workflow](0906-lld-governance-workflow.md) | Manual | Per LLD | Claude + Gemini |
-| 0907 | [Unified Governance Workflow](0907-unified-governance-workflow.md) | Manual | Per issue/LLD | Pluggable |
+| 0907 | [Unified Requirements Workflow](0907-unified-requirements-workflow.md) | Manual | Per issue/LLD | Pluggable |
 | 0908 | [The Scout](0908-the-scout-external-intelligence-gathering-workflow.md) | Manual | Research | Sonnet |
 | 0909 | [TDD Implementation Workflow](0909-tdd-implementation-workflow.md) | Manual | Per approved LLD | Claude + Gemini |
 | 0910 | [Verdict Analyzer](0910-verdict-analyzer---template-improvement-from-gemini-verdicts.md) | Manual | Weekly/ad-hoc | - |

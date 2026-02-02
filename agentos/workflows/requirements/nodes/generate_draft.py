@@ -1,6 +1,6 @@
-"""N1: Generate draft node for Governance Workflow.
+"""N1: Generate draft node for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Uses the configured drafter LLM to generate a draft based on:
 - Issue workflow: brief content + template
@@ -13,15 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from agentos.core.llm_provider import get_provider
-from agentos.workflows.governance.audit import (
+from agentos.workflows.requirements.audit import (
     load_template,
     next_file_number,
     save_audit_file,
 )
-from agentos.workflows.governance.state import GovernanceWorkflowState
+from agentos.workflows.requirements.state import RequirementsWorkflowState
 
 
-def generate_draft(state: GovernanceWorkflowState) -> dict[str, Any]:
+def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N1: Generate draft using configured drafter.
 
     Steps:
@@ -125,7 +125,7 @@ Use the template structure provided. Include all sections. Be specific about:
 
 
 def _build_prompt(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
     template: str,
     workflow_type: str,
 ) -> str:

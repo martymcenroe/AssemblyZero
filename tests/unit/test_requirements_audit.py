@@ -1,6 +1,6 @@
-"""Unit tests for Governance Audit Trail.
+"""Unit tests for Requirements Audit Trail.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for:
 - Unified audit directory creation
@@ -22,7 +22,7 @@ class TestCreateAuditDir:
 
     def test_creates_issue_audit_dir(self, tmp_path):
         """Test creating audit directory for issue workflow."""
-        from agentos.workflows.governance.audit import create_audit_dir
+        from agentos.workflows.requirements.audit import create_audit_dir
 
         audit_dir = create_audit_dir(
             workflow_type="issue",
@@ -37,7 +37,7 @@ class TestCreateAuditDir:
 
     def test_creates_lld_audit_dir(self, tmp_path):
         """Test creating audit directory for LLD workflow."""
-        from agentos.workflows.governance.audit import create_audit_dir
+        from agentos.workflows.requirements.audit import create_audit_dir
 
         audit_dir = create_audit_dir(
             workflow_type="lld",
@@ -51,7 +51,7 @@ class TestCreateAuditDir:
 
     def test_creates_parent_dirs(self, tmp_path):
         """Test that parent directories are created."""
-        from agentos.workflows.governance.audit import create_audit_dir
+        from agentos.workflows.requirements.audit import create_audit_dir
 
         audit_dir = create_audit_dir(
             workflow_type="lld",
@@ -68,14 +68,14 @@ class TestNextFileNumber:
 
     def test_returns_1_for_empty_dir(self, tmp_path):
         """Test returns 1 for empty directory."""
-        from agentos.workflows.governance.audit import next_file_number
+        from agentos.workflows.requirements.audit import next_file_number
 
         num = next_file_number(tmp_path)
         assert num == 1
 
     def test_returns_next_after_existing_files(self, tmp_path):
         """Test returns max + 1 after existing numbered files."""
-        from agentos.workflows.governance.audit import next_file_number
+        from agentos.workflows.requirements.audit import next_file_number
 
         # Create some numbered files
         (tmp_path / "001-issue.md").write_text("content")
@@ -87,7 +87,7 @@ class TestNextFileNumber:
 
     def test_handles_non_sequential_numbers(self, tmp_path):
         """Test handles gaps in numbering."""
-        from agentos.workflows.governance.audit import next_file_number
+        from agentos.workflows.requirements.audit import next_file_number
 
         (tmp_path / "001-issue.md").write_text("content")
         (tmp_path / "005-draft.md").write_text("content")
@@ -97,7 +97,7 @@ class TestNextFileNumber:
 
     def test_ignores_non_numbered_files(self, tmp_path):
         """Test ignores files without NNN- prefix."""
-        from agentos.workflows.governance.audit import next_file_number
+        from agentos.workflows.requirements.audit import next_file_number
 
         (tmp_path / "001-draft.md").write_text("content")
         (tmp_path / "readme.md").write_text("content")
@@ -112,7 +112,7 @@ class TestSaveAuditFile:
 
     def test_saves_with_correct_numbering(self, tmp_path):
         """Test saves file with NNN- prefix."""
-        from agentos.workflows.governance.audit import save_audit_file
+        from agentos.workflows.requirements.audit import save_audit_file
 
         path = save_audit_file(
             audit_dir=tmp_path,
@@ -126,7 +126,7 @@ class TestSaveAuditFile:
 
     def test_saves_in_correct_directory(self, tmp_path):
         """Test saves in specified directory."""
-        from agentos.workflows.governance.audit import save_audit_file
+        from agentos.workflows.requirements.audit import save_audit_file
 
         path = save_audit_file(
             audit_dir=tmp_path,
@@ -143,7 +143,7 @@ class TestGetAuditDirPath:
 
     def test_issue_workflow_path(self, tmp_path):
         """Test path construction for issue workflow."""
-        from agentos.workflows.governance.audit import get_audit_dir_path
+        from agentos.workflows.requirements.audit import get_audit_dir_path
 
         path = get_audit_dir_path(
             workflow_type="issue",
@@ -157,7 +157,7 @@ class TestGetAuditDirPath:
 
     def test_lld_workflow_path(self, tmp_path):
         """Test path construction for LLD workflow."""
-        from agentos.workflows.governance.audit import get_audit_dir_path
+        from agentos.workflows.requirements.audit import get_audit_dir_path
 
         path = get_audit_dir_path(
             workflow_type="lld",
@@ -174,7 +174,7 @@ class TestResolveRoots:
 
     def test_explicit_agentos_root(self, tmp_path):
         """Test with explicit AgentOS root."""
-        from agentos.workflows.governance.audit import resolve_roots
+        from agentos.workflows.requirements.audit import resolve_roots
 
         agentos_root, target_repo = resolve_roots(
             agentos_root=str(tmp_path / "agentos"),
@@ -186,7 +186,7 @@ class TestResolveRoots:
 
     def test_paths_are_resolved(self, tmp_path):
         """Test that paths are resolved to absolute paths."""
-        from agentos.workflows.governance.audit import resolve_roots
+        from agentos.workflows.requirements.audit import resolve_roots
 
         agentos_root, target_repo = resolve_roots(
             agentos_root=str(tmp_path / "agentos"),
@@ -202,7 +202,7 @@ class TestLoadTemplateFromAgentOS:
 
     def test_loads_from_agentos_root(self, tmp_path):
         """Test template is loaded from agentos_root, not target_repo."""
-        from agentos.workflows.governance.audit import load_template
+        from agentos.workflows.requirements.audit import load_template
 
         # Set up agentos_root with template
         agentos_root = tmp_path / "agentos"
@@ -225,7 +225,7 @@ class TestLoadTemplateFromAgentOS:
 
     def test_raises_on_missing_template(self, tmp_path):
         """Test raises FileNotFoundError when template missing."""
-        from agentos.workflows.governance.audit import load_template
+        from agentos.workflows.requirements.audit import load_template
 
         with pytest.raises(FileNotFoundError):
             load_template(
@@ -239,7 +239,7 @@ class TestSaveOutputToTargetRepo:
 
     def test_lld_saved_to_target_repo(self, tmp_path):
         """Test LLD is saved to target_repo/docs/lld/active/."""
-        from agentos.workflows.governance.audit import save_final_lld
+        from agentos.workflows.requirements.audit import save_final_lld
 
         target_repo = tmp_path / "my-project"
         target_repo.mkdir()
@@ -262,7 +262,7 @@ class TestSaveOutputToTargetRepo:
 
     def test_lld_not_saved_to_agentos_root(self, tmp_path):
         """Test LLD is NOT saved to AgentOS root."""
-        from agentos.workflows.governance.audit import save_final_lld
+        from agentos.workflows.requirements.audit import save_final_lld
 
         target_repo = tmp_path / "my-project"
         target_repo.mkdir()
@@ -286,7 +286,7 @@ class TestAssembleContext:
 
     def test_assembles_multiple_files(self, tmp_path):
         """Test assembling context from multiple files."""
-        from agentos.workflows.governance.audit import assemble_context
+        from agentos.workflows.requirements.audit import assemble_context
 
         # Create context files
         (tmp_path / "file1.py").write_text("def hello(): pass")
@@ -305,7 +305,7 @@ class TestAssembleContext:
 
     def test_skips_missing_files(self, tmp_path):
         """Test skips files that don't exist."""
-        from agentos.workflows.governance.audit import assemble_context
+        from agentos.workflows.requirements.audit import assemble_context
 
         (tmp_path / "exists.py").write_text("content")
 
@@ -321,7 +321,7 @@ class TestAssembleContext:
 
     def test_validates_paths_within_repo(self, tmp_path):
         """Test rejects paths outside target_repo."""
-        from agentos.workflows.governance.audit import assemble_context
+        from agentos.workflows.requirements.audit import assemble_context
 
         context = assemble_context(
             context_files=["/etc/passwd"],
@@ -337,7 +337,7 @@ class TestUpdateLLDStatus:
 
     def test_updates_status_file(self, tmp_path):
         """Test updates lld-status.json."""
-        from agentos.workflows.governance.audit import update_lld_status, load_lld_tracking
+        from agentos.workflows.requirements.audit import update_lld_status, load_lld_tracking
 
         update_lld_status(
             issue_number=42,
@@ -356,7 +356,7 @@ class TestUpdateLLDStatus:
 
     def test_creates_status_file_if_missing(self, tmp_path):
         """Test creates lld-status.json if it doesn't exist."""
-        from agentos.workflows.governance.audit import update_lld_status
+        from agentos.workflows.requirements.audit import update_lld_status
 
         status_file = tmp_path / "docs" / "lld" / "lld-status.json"
         assert not status_file.exists()

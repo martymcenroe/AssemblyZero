@@ -1,6 +1,6 @@
-"""Parameterized StateGraph for Governance Workflow.
+"""Parameterized StateGraph for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Creates a LangGraph StateGraph that connects:
 - N0: load_input (brief or issue loading)
@@ -27,7 +27,7 @@ from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 
-from agentos.workflows.governance.nodes import (
+from agentos.workflows.requirements.nodes import (
     finalize,
     generate_draft,
     human_gate_draft,
@@ -35,7 +35,7 @@ from agentos.workflows.governance.nodes import (
     load_input,
     review,
 )
-from agentos.workflows.governance.state import GovernanceWorkflowState
+from agentos.workflows.requirements.state import RequirementsWorkflowState
 
 
 # =============================================================================
@@ -56,7 +56,7 @@ N5_FINALIZE = "N5_finalize"
 
 
 def route_after_load_input(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["N1_generate_draft", "END"]:
     """Route after load_input node.
 
@@ -76,7 +76,7 @@ def route_after_load_input(
 
 
 def route_after_generate_draft(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["N2_human_gate_draft", "N3_review", "END"]:
     """Route after generate_draft node.
 
@@ -101,7 +101,7 @@ def route_after_generate_draft(
 
 
 def route_from_human_gate_draft(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["N3_review", "N1_generate_draft", "END"]:
     """Route from human_gate_draft node.
 
@@ -127,7 +127,7 @@ def route_from_human_gate_draft(
 
 
 def route_after_review(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["N4_human_gate_verdict", "N5_finalize", "N1_generate_draft", "END"]:
     """Route after review node.
 
@@ -164,7 +164,7 @@ def route_after_review(
 
 
 def route_from_human_gate_verdict(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["N5_finalize", "N1_generate_draft", "END"]:
     """Route from human_gate_verdict node.
 
@@ -190,7 +190,7 @@ def route_from_human_gate_verdict(
 
 
 def route_after_finalize(
-    state: GovernanceWorkflowState,
+    state: RequirementsWorkflowState,
 ) -> Literal["END"]:
     """Route after finalize node.
 
@@ -210,8 +210,8 @@ def route_after_finalize(
 # =============================================================================
 
 
-def create_governance_graph() -> StateGraph:
-    """Create the governance workflow graph.
+def create_requirements_graph() -> StateGraph:
+    """Create the requirements workflow graph.
 
     Graph structure:
         START -> N0 -> N1 -> N2 -> N3 -> N4 -> N5 -> END
@@ -223,7 +223,7 @@ def create_governance_graph() -> StateGraph:
         Uncompiled StateGraph.
     """
     # Create graph with state schema
-    graph = StateGraph(GovernanceWorkflowState)
+    graph = StateGraph(RequirementsWorkflowState)
 
     # Add nodes
     graph.add_node(N0_LOAD_INPUT, load_input)

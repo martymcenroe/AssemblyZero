@@ -221,7 +221,7 @@ class TestDesignLldNode:
                     mock_load.return_value = "System instruction"
 
                     with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                        with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                             mock_log = MagicMock()
                             mock_log_class.return_value = mock_log
 
@@ -244,7 +244,7 @@ class TestDesignLldNode:
                 stderr="Could not resolve to an Issue with the number of 99999",
             )
 
-            with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+            with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                 mock_log = MagicMock()
                 mock_log_class.return_value = mock_log
 
@@ -276,7 +276,7 @@ class TestDesignLldNode:
                         "Model 'gemini-2.5-flash' is explicitly forbidden"
                     )
 
-                    with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                    with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                         mock_log = MagicMock()
                         mock_log_class.return_value = mock_log
 
@@ -319,7 +319,7 @@ class TestDesignLldNode:
                 with patch("agentos.nodes.designer._load_generator_instruction") as mock_load:
                     mock_load.return_value = "System instruction"
 
-                    with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                    with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                         mock_log = MagicMock()
                         mock_log_class.return_value = mock_log
 
@@ -344,7 +344,7 @@ class TestDesignLldNode:
             with patch("agentos.nodes.designer._load_generator_instruction") as mock_load:
                 mock_load.side_effect = FileNotFoundError("Generator prompt not found")
 
-                with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 
@@ -388,7 +388,7 @@ class TestDesignLldNode:
                     mock_load.return_value = "System instruction"
 
                     with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                        with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                             mock_log = MagicMock()
                             mock_log_class.return_value = mock_log
 
@@ -437,12 +437,12 @@ class TestDesignLldNode:
                     mock_load.return_value = "System instruction"
 
                     with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.GovernanceAuditLog") as mock_log_class:
+                        with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
                             mock_log = MagicMock()
                             mock_log_class.return_value = mock_log
 
                             with patch("builtins.input", return_value=""):
-                                with patch("agentos.nodes.designer.GOVERNANCE_MODEL", "gemini-3-pro-preview"):
+                                with patch("agentos.nodes.designer.REVIEWER_MODEL", "gemini-3-pro-preview"):
                                     design_lld_node(mock_state)
 
         logged_entry = mock_log.log.call_args[0][0]
@@ -493,7 +493,7 @@ class TestGovernanceReadsFromDisk:
             with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
                 mock_load.return_value = "System instruction"
 
-                with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.governance.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 

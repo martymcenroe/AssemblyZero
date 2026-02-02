@@ -1,6 +1,6 @@
-"""Unit tests for Governance Workflow Nodes.
+"""Unit tests for Requirements Workflow Nodes.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for:
 - load_input (brief or issue loading)
@@ -21,8 +21,8 @@ class TestLoadInputNode:
 
     def test_loads_brief_for_issue_workflow(self, tmp_path):
         """Test loading brief content for issue workflow."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Create brief file
         brief_file = tmp_path / "ideas" / "active" / "my-feature.md"
@@ -45,8 +45,8 @@ class TestLoadInputNode:
     @patch("subprocess.run")
     def test_loads_issue_for_lld_workflow(self, mock_run, tmp_path):
         """Test loading issue content for LLD workflow."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Mock gh CLI response
         mock_run.return_value = Mock(
@@ -69,8 +69,8 @@ class TestLoadInputNode:
 
     def test_creates_audit_dir(self, tmp_path):
         """Test that audit directory is created."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         brief_file = tmp_path / "brief.md"
         brief_file.write_text("# Brief")
@@ -90,8 +90,8 @@ class TestLoadInputNode:
 
     def test_returns_error_for_missing_brief(self, tmp_path):
         """Test error when brief file doesn't exist."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="issue",
@@ -108,11 +108,11 @@ class TestLoadInputNode:
 class TestGenerateDraftNode:
     """Tests for generate_draft node."""
 
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
     def test_generates_draft_with_drafter(self, mock_get_provider, tmp_path):
         """Test draft generation using configured drafter."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Setup mock provider
         mock_provider = Mock()
@@ -144,11 +144,11 @@ class TestGenerateDraftNode:
         assert "Generated Draft" in result.get("current_draft", "")
         mock_provider.invoke.assert_called_once()
 
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
     def test_handles_drafter_failure(self, mock_get_provider, tmp_path):
         """Test handling of drafter failure."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Setup mock provider to fail
         mock_provider = Mock()
@@ -179,11 +179,11 @@ class TestGenerateDraftNode:
         assert result.get("error_message", "") != ""
         assert "rate limit" in result.get("error_message", "").lower()
 
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
     def test_increments_draft_count(self, mock_get_provider, tmp_path):
         """Test that draft_count is incremented."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -218,8 +218,8 @@ class TestHumanGateNode:
 
     def test_draft_gate_routes_to_review(self, tmp_path):
         """Test draft gate routes to review when user chooses Send."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -236,8 +236,8 @@ class TestHumanGateNode:
 
     def test_draft_gate_routes_to_revise(self, tmp_path):
         """Test draft gate routes to revise when critique exists."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -255,8 +255,8 @@ class TestHumanGateNode:
 
     def test_verdict_gate_routes_to_finalize_on_approve(self, tmp_path):
         """Test verdict gate routes to finalize when approved."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_verdict
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -274,8 +274,8 @@ class TestHumanGateNode:
 
     def test_increments_iteration_count(self, tmp_path):
         """Test that iteration_count is incremented."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -293,8 +293,8 @@ class TestHumanGateNode:
 
     def test_skips_gate_when_disabled(self, tmp_path):
         """Test gate is skipped when disabled in config."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -314,11 +314,11 @@ class TestHumanGateNode:
 class TestReviewNode:
     """Tests for review node."""
 
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_reviews_draft_with_reviewer(self, mock_get_provider, tmp_path):
         """Test review using configured reviewer."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Setup mock provider
         mock_provider = Mock()
@@ -350,11 +350,11 @@ class TestReviewNode:
         assert "APPROVED" in result.get("current_verdict", "")
         mock_provider.invoke.assert_called_once()
 
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_increments_verdict_count(self, mock_get_provider, tmp_path):
         """Test that verdict_count is incremented."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -383,11 +383,11 @@ class TestReviewNode:
 
         assert result.get("verdict_count") == 2
 
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_appends_to_verdict_history(self, mock_get_provider, tmp_path):
         """Test that verdict is appended to history."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -423,8 +423,8 @@ class TestLoadInputNodeAdditional:
 
     def test_returns_error_for_missing_brief_file_field(self, tmp_path):
         """Test error when brief_file field is empty."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="issue",
@@ -440,8 +440,8 @@ class TestLoadInputNodeAdditional:
 
     def test_mock_mode_for_lld(self, tmp_path):
         """Test mock mode for LLD workflow."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -459,8 +459,8 @@ class TestLoadInputNodeAdditional:
     @patch("subprocess.run")
     def test_lld_with_context_files(self, mock_run, tmp_path):
         """Test LLD workflow with context files."""
-        from agentos.workflows.governance.nodes.load_input import load_input
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_run.return_value = Mock(
             returncode=0,
@@ -488,11 +488,11 @@ class TestLoadInputNodeAdditional:
 class TestGenerateDraftNodeAdditional:
     """Additional tests for generate_draft node coverage."""
 
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
     def test_generates_lld_draft(self, mock_get_provider, tmp_path):
         """Test draft generation for LLD workflow."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -524,8 +524,8 @@ class TestGenerateDraftNodeAdditional:
 
     def test_returns_error_for_missing_template(self, tmp_path):
         """Test error when template file is missing."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="issue",
@@ -540,11 +540,11 @@ class TestGenerateDraftNodeAdditional:
         assert result.get("error_message", "") != ""
         assert "template" in result.get("error_message", "").lower()
 
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
     def test_revision_mode_with_history(self, mock_get_provider, tmp_path):
         """Test revision mode with verdict history."""
-        from agentos.workflows.governance.nodes.generate_draft import generate_draft
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -583,8 +583,8 @@ class TestHumanGateNodeAdditional:
 
     def test_verdict_gate_routes_to_revise_on_block(self, tmp_path):
         """Test verdict gate routes to revise when blocked."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_verdict
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -602,8 +602,8 @@ class TestHumanGateNodeAdditional:
 
     def test_verdict_gate_disabled_routes_based_on_status(self, tmp_path):
         """Test verdict gate when disabled routes based on lld_status."""
-        from agentos.workflows.governance.nodes.human_gate import human_gate_verdict
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -622,11 +622,11 @@ class TestHumanGateNodeAdditional:
 class TestReviewNodeAdditional:
     """Additional tests for review node coverage."""
 
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_reviews_issue_workflow(self, mock_get_provider, tmp_path):
         """Test review for issue workflow."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -655,11 +655,11 @@ class TestReviewNodeAdditional:
         assert result.get("error_message", "") == ""
         assert result.get("lld_status") == "APPROVED"
 
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_review_handles_blocked_status(self, mock_get_provider, tmp_path):
         """Test review correctly sets BLOCKED status."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
@@ -689,8 +689,8 @@ class TestReviewNodeAdditional:
 
     def test_review_returns_error_for_missing_prompt(self, tmp_path):
         """Test review returns error when prompt file is missing."""
-        from agentos.workflows.governance.nodes.review import review
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -712,8 +712,8 @@ class TestFinalizeNode:
     @patch("subprocess.run")
     def test_files_github_issue(self, mock_run, tmp_path):
         """Test filing GitHub issue for issue workflow."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Mock gh CLI response
         mock_run.return_value = Mock(
@@ -739,8 +739,8 @@ class TestFinalizeNode:
 
     def test_saves_lld_to_target_repo(self, tmp_path):
         """Test saving LLD for LLD workflow."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -765,9 +765,9 @@ class TestFinalizeNode:
 
     def test_updates_lld_status_tracking(self, tmp_path):
         """Test that LLD status tracking is updated."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
-        from agentos.workflows.governance.audit import load_lld_tracking
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+        from agentos.workflows.requirements.audit import load_lld_tracking
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
@@ -798,8 +798,8 @@ class TestFinalizeNodeAdditional:
     @patch("subprocess.run")
     def test_handles_gh_cli_failure(self, mock_run, tmp_path):
         """Test handling of gh CLI failure."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
 
         mock_run.return_value = Mock(
             returncode=1,
@@ -822,8 +822,8 @@ class TestFinalizeNodeAdditional:
 
     def test_returns_error_for_missing_issue_number(self, tmp_path):
         """Test error when issue_number is missing for LLD."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
@@ -840,8 +840,8 @@ class TestFinalizeNodeAdditional:
 
     def test_returns_error_for_empty_title(self, tmp_path):
         """Test error when issue title cannot be parsed."""
-        from agentos.workflows.governance.nodes.finalize import finalize
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="issue",

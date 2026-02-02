@@ -9,7 +9,7 @@ The 0701c path is hard-coded and cannot be changed by the agent.
 from pathlib import Path
 from typing import Any
 
-from agentos.core.config import GOVERNANCE_MODEL
+from agentos.core.config import REVIEWER_MODEL
 from agentos.core.gemini_client import GeminiClient
 from agentos.workflows.issue.audit import (
     get_repo_root,
@@ -125,7 +125,7 @@ def review(state: IssueWorkflowState) -> dict[str, Any]:
         start_time = time.time()
 
         # Call Gemini API
-        client = GeminiClient(model=GOVERNANCE_MODEL)
+        client = GeminiClient(model=REVIEWER_MODEL)
         result = client.invoke(
             system_instruction="You are reviewing a GitHub issue draft for quality and completeness.",
             content=content,

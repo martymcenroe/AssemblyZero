@@ -1,6 +1,6 @@
-"""N0: Load input node for Governance Workflow.
+"""N0: Load input node for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Handles loading input for both workflow types:
 - Issue workflow: Load brief file content
@@ -15,14 +15,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agentos.workflows.governance.audit import (
+from agentos.workflows.requirements.audit import (
     assemble_context,
     create_audit_dir,
     generate_slug,
     next_file_number,
     save_audit_file,
 )
-from agentos.workflows.governance.state import GovernanceWorkflowState
+from agentos.workflows.requirements.state import RequirementsWorkflowState
 
 
 # Timeout for gh CLI commands
@@ -34,7 +34,7 @@ GH_BACKOFF_BASE_SECONDS = 1.0
 GH_BACKOFF_MAX_SECONDS = 10.0
 
 
-def load_input(state: GovernanceWorkflowState) -> dict[str, Any]:
+def load_input(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N0: Load input based on workflow type.
 
     For issue workflow:
@@ -63,7 +63,7 @@ def load_input(state: GovernanceWorkflowState) -> dict[str, Any]:
         return _load_issue(state)
 
 
-def _load_brief(state: GovernanceWorkflowState) -> dict[str, Any]:
+def _load_brief(state: RequirementsWorkflowState) -> dict[str, Any]:
     """Load brief file for issue workflow.
 
     Args:
@@ -114,7 +114,7 @@ def _load_brief(state: GovernanceWorkflowState) -> dict[str, Any]:
     }
 
 
-def _load_issue(state: GovernanceWorkflowState) -> dict[str, Any]:
+def _load_issue(state: RequirementsWorkflowState) -> dict[str, Any]:
     """Load GitHub issue for LLD workflow.
 
     Args:
@@ -219,7 +219,7 @@ def _load_issue(state: GovernanceWorkflowState) -> dict[str, Any]:
     }
 
 
-def _mock_load_issue(state: GovernanceWorkflowState) -> dict[str, Any]:
+def _mock_load_issue(state: RequirementsWorkflowState) -> dict[str, Any]:
     """Mock implementation for testing."""
     issue_number = state.get("issue_number", 42)
     target_repo = Path(state.get("target_repo", ""))

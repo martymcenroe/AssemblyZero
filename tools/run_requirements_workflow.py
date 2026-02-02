@@ -1,27 +1,27 @@
 #!/usr/bin/env python
-"""Unified Governance Workflow CLI Runner.
+"""Unified Requirements Workflow CLI Runner.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Usage:
     # Issue workflow (from brief)
-    python tools/run_governance_workflow.py --type issue --brief ideas/active/my-feature.md
+    python tools/run_requirements_workflow.py --type issue --brief ideas/active/my-feature.md
 
     # LLD workflow (from GitHub issue)
-    python tools/run_governance_workflow.py --type lld --issue 42
+    python tools/run_requirements_workflow.py --type lld --issue 42
 
     # With custom LLM providers
-    python tools/run_governance_workflow.py --type lld --issue 42 \
+    python tools/run_requirements_workflow.py --type lld --issue 42 \
         --drafter gemini:2.5-flash --reviewer claude:sonnet
 
     # With specific gates
-    python tools/run_governance_workflow.py --type lld --issue 42 --gates draft
+    python tools/run_requirements_workflow.py --type lld --issue 42 --gates draft
 
     # Fully automated (no human gates)
-    python tools/run_governance_workflow.py --type lld --issue 42 --gates none
+    python tools/run_requirements_workflow.py --type lld --issue 42 --gates none
 
     # Mock mode for testing
-    python tools/run_governance_workflow.py --type lld --issue 42 --mock
+    python tools/run_requirements_workflow.py --type lld --issue 42 --mock
 """
 
 import argparse
@@ -34,9 +34,9 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agentos.workflows.governance.config import GateConfig
-from agentos.workflows.governance.graph import create_governance_graph
-from agentos.workflows.governance.state import create_initial_state, GovernanceWorkflowState
+from agentos.workflows.requirements.config import GateConfig
+from agentos.workflows.requirements.graph import create_requirements_graph
+from agentos.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -49,22 +49,22 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         Parsed arguments namespace.
     """
     parser = argparse.ArgumentParser(
-        description="Unified Governance Workflow for Issue and LLD creation.",
+        description="Unified Requirements Workflow for Issue and LLD creation.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Issue workflow (from brief)
-  python tools/run_governance_workflow.py --type issue --brief ideas/active/my-feature.md
+  python tools/run_requirements_workflow.py --type issue --brief ideas/active/my-feature.md
 
   # LLD workflow (from GitHub issue)
-  python tools/run_governance_workflow.py --type lld --issue 42
+  python tools/run_requirements_workflow.py --type lld --issue 42
 
   # Custom LLM providers
-  python tools/run_governance_workflow.py --type lld --issue 42 \\
+  python tools/run_requirements_workflow.py --type lld --issue 42 \\
       --drafter gemini:2.5-flash --reviewer claude:sonnet
 
   # Fully automated
-  python tools/run_governance_workflow.py --type lld --issue 42 --gates none
+  python tools/run_requirements_workflow.py --type lld --issue 42 --gates none
         """,
     )
 
@@ -201,7 +201,7 @@ def build_initial_state(
     args: argparse.Namespace,
     agentos_root: Path,
     target_repo: Path,
-) -> GovernanceWorkflowState:
+) -> RequirementsWorkflowState:
     """Build initial workflow state from CLI arguments.
 
     Args:
@@ -210,7 +210,7 @@ def build_initial_state(
         target_repo: Path to target repository.
 
     Returns:
-        Initialized GovernanceWorkflowState.
+        Initialized RequirementsWorkflowState.
     """
     # Parse gate configuration
     gate_config = GateConfig.from_string(args.gates)
@@ -254,7 +254,7 @@ def print_header(args: argparse.Namespace) -> None:
         args: Parsed CLI arguments.
     """
     print("=" * 60)
-    print("Unified Governance Workflow")
+    print("Unified Requirements Workflow")
     print("=" * 60)
     print(f"Type:     {args.type}")
     if args.type == "issue":
@@ -350,7 +350,7 @@ def main() -> int:
 
     # Create and run graph
     try:
-        graph = create_governance_graph()
+        graph = create_requirements_graph()
         compiled = graph.compile()
 
         print("Starting workflow...")

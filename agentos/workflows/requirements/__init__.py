@@ -1,6 +1,6 @@
-"""Unified Governance Workflow package.
+"""Unified Requirements Workflow package.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 This package provides a unified workflow for both:
 - Issue creation (from briefs/ideation notes)
@@ -8,21 +8,21 @@ This package provides a unified workflow for both:
 
 Key components:
 - config: WorkflowConfig dataclass and presets
-- state: GovernanceWorkflowState TypedDict
+- state: RequirementsWorkflowState TypedDict
 - audit: Unified audit trail utilities
 - graph: Parameterized StateGraph
 - nodes/: Individual node implementations
 """
 
-from agentos.workflows.governance.config import (
+from agentos.workflows.requirements.config import (
     GateConfig,
     WorkflowConfig,
     create_issue_config,
     create_lld_config,
 )
-from agentos.workflows.governance.graph import create_governance_graph
-from agentos.workflows.governance.state import (
-    GovernanceWorkflowState,
+from agentos.workflows.requirements.graph import create_requirements_graph
+from agentos.workflows.requirements.state import (
+    RequirementsWorkflowState,
     HumanDecision,
     WorkflowType,
     create_initial_state,
@@ -31,11 +31,11 @@ from agentos.workflows.governance.state import (
 __all__ = [
     "WorkflowConfig",
     "GateConfig",
-    "GovernanceWorkflowState",
+    "RequirementsWorkflowState",
     "HumanDecision",
     "WorkflowType",
     "create_issue_config",
     "create_lld_config",
-    "create_governance_graph",
+    "create_requirements_graph",
     "create_initial_state",
 ]

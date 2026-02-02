@@ -1,6 +1,6 @@
-"""N5: Finalize node for Governance Workflow.
+"""N5: Finalize node for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Handles finalization for both workflow types:
 - Issue workflow: File GitHub issue using gh CLI
@@ -12,20 +12,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agentos.workflows.governance.audit import (
+from agentos.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
     save_final_lld,
     update_lld_status,
 )
-from agentos.workflows.governance.state import GovernanceWorkflowState
+from agentos.workflows.requirements.state import RequirementsWorkflowState
 
 
 # Timeout for gh CLI commands
 GH_CLI_TIMEOUT_SECONDS = 60
 
 
-def finalize(state: GovernanceWorkflowState) -> dict[str, Any]:
+def finalize(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N5: Finalize workflow based on type.
 
     For issue workflow:
@@ -52,7 +52,7 @@ def finalize(state: GovernanceWorkflowState) -> dict[str, Any]:
         return _finalize_lld(state)
 
 
-def _finalize_issue(state: GovernanceWorkflowState) -> dict[str, Any]:
+def _finalize_issue(state: RequirementsWorkflowState) -> dict[str, Any]:
     """Finalize issue workflow by filing GitHub issue.
 
     Args:
@@ -113,7 +113,7 @@ def _finalize_issue(state: GovernanceWorkflowState) -> dict[str, Any]:
     }
 
 
-def _finalize_lld(state: GovernanceWorkflowState) -> dict[str, Any]:
+def _finalize_lld(state: RequirementsWorkflowState) -> dict[str, Any]:
     """Finalize LLD workflow by saving LLD and updating tracking.
 
     Args:

@@ -1,6 +1,6 @@
-"""Unified audit trail utilities for Governance Workflow.
+"""Unified audit trail utilities for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Provides functions for:
 - Unified audit directory creation (issue and LLD workflows)

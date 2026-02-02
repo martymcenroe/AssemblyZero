@@ -31,8 +31,8 @@ from unittest.mock import patch
 import pytest
 
 from agentos.core.audit import (
-    GovernanceAuditLog,
-    GovernanceLogEntry,
+    ReviewAuditLog,
+    ReviewLogEntry,
     create_log_entry,
 )
 
@@ -56,8 +56,8 @@ def temp_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def sample_entry() -> GovernanceLogEntry:
-    """Create a sample governance log entry."""
+def sample_entry() -> ReviewLogEntry:
+    """Create a sample review log entry."""
     return create_log_entry(
         node="review_lld",
         model="gemini-3-pro-preview",
@@ -80,7 +80,7 @@ class TestShardFilenameFormat:
 
     def test_filename_matches_pattern(self, temp_repo: Path) -> None:
         """Filename should match {YYYYMMDDTHHMMSS}_{8chars}.jsonl."""
-        log = GovernanceAuditLog(repo_root=temp_repo, session_id="a1b2c3d4")
+        log = ReviewAuditLog(repo_root=temp_repo, session_id="a1b2c3d4")
 
         pattern = r"^\d{8}T\d{6}_[a-f0-9]{8}\.jsonl$"
         assert re.match(pattern, log.shard_file.name) is not None
@@ -88,7 +88,7 @@ class TestShardFilenameFormat:
     def test_filename_contains_session_id(self, temp_repo: Path) -> None:
         """Filename should contain the session ID."""
         session_id = "deadbeef"
-        log = GovernanceAuditLog(repo_root=temp_repo, session_id=session_id)
+        log = ReviewAuditLog(repo_root=temp_repo, session_id=session_id)
 
         assert session_id in log.shard_file.name
 
@@ -101,14 +101,14 @@ class TestSessionIdUniqueness:
         session_ids = set()
 
         for _ in range(100):
-            log = GovernanceAuditLog(repo_root=temp_repo)
+            log = ReviewAuditLog(repo_root=temp_repo)
             session_ids.add(log.session_id)
 
         assert len(session_ids) == 100
 
     def test_session_id_length(self, temp_repo: Path) -> None:
         """Session ID should be 8 characters."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
         assert len(log.session_id) == 8
 
 
@@ -118,7 +118,7 @@ class TestRepoRootDetection:
     def test_030_detect_repo_root_success(self, temp_repo: Path) -> None:
         """Should detect repo root in a git repository."""
         # Change to temp repo and verify detection works
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
         assert log.repo_root == temp_repo
 
     def test_030_auto_detection_in_git_repo(self, temp_repo: Path) -> None:
@@ -128,7 +128,7 @@ class TestRepoRootDetection:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = str(temp_repo)
 
-            log = GovernanceAuditLog()
+            log = ReviewAuditLog()
             assert log.repo_root == temp_repo
 
     def test_040_detect_repo_root_failure(self, tmp_path: Path) -> None:
@@ -143,17 +143,17 @@ class TestRepoRootDetection:
             mock_run.return_value.stderr = "fatal: not a git repository"
 
             with pytest.raises(RuntimeError, match="Not in a git repository"):
-                GovernanceAuditLog()
+                ReviewAuditLog()
 
 
 class TestLogToShard:
     """Test 050: Log to shard."""
 
     def test_entry_written_to_shard(
-        self, temp_repo: Path, sample_entry: GovernanceLogEntry
+        self, temp_repo: Path, sample_entry: ReviewLogEntry
     ) -> None:
         """Entry should be written to shard file as valid JSON."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
         log.log(sample_entry)
 
         assert log.shard_file.exists()
@@ -167,10 +167,10 @@ class TestLogToShard:
         assert entry["verdict"] == "APPROVED"
 
     def test_multiple_entries_append(
-        self, temp_repo: Path, sample_entry: GovernanceLogEntry
+        self, temp_repo: Path, sample_entry: ReviewLogEntry
     ) -> None:
         """Multiple entries should be appended to same shard."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         # Log multiple entries
         for i in range(3):
@@ -215,7 +215,7 @@ class TestFailClosed:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = str(readonly_dir)
 
-            log = GovernanceAuditLog(repo_root=readonly_dir)
+            log = ReviewAuditLog(repo_root=readonly_dir)
 
             # Make directory read-only
             if os.name != "nt":  # Skip on Windows (permissions work differently)
@@ -275,7 +275,7 @@ class TestTailMerges:
                 f.write(json.dumps(entry) + "\n")
 
         # Create shard with more entries
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
         for i in range(2):
             entry = create_log_entry(
                 node=f"shard_{i}",
@@ -300,7 +300,7 @@ class TestTailMerges:
 
     def test_sorted_by_timestamp(self, temp_repo: Path) -> None:
         """Entries should be sorted by timestamp."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         # Log entries with deliberate pauses for timestamp ordering
         for i in range(3):
@@ -331,7 +331,7 @@ class TestTailSkipsLocked:
 
     def test_graceful_degradation_on_unreadable(self, temp_repo: Path) -> None:
         """Should return partial results when some shards are unreadable."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         # Log an entry to create the shard
         entry = create_log_entry(
@@ -371,7 +371,7 @@ class TestConsolidation:
         sys.path.insert(0, str(temp_repo / "tools"))
 
         # Create shards
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
         for i in range(3):
             entry = create_log_entry(
                 node=f"node_{i}",
@@ -411,7 +411,7 @@ class TestConsolidation:
 
     def test_100_deletes_shards_after_success(self, temp_repo: Path) -> None:
         """Shards should be deleted only after successful consolidation."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         entry = create_log_entry(
             node="test",
@@ -446,7 +446,7 @@ class TestConsolidation:
     def test_110_idempotent(self, temp_repo: Path) -> None:
         """Running consolidation twice with no new shards should be no-op."""
         # First, create and consolidate some entries
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         entry = create_log_entry(
             node="test",
@@ -499,7 +499,7 @@ class TestConcurrentWriters:
 
         def writer_thread(thread_id: int) -> None:
             try:
-                log = GovernanceAuditLog(repo_root=temp_repo)
+                log = ReviewAuditLog(repo_root=temp_repo)
                 results.append(log.shard_file)
 
                 for i in range(entries_per_thread):
@@ -556,7 +556,7 @@ class TestWindowsPathHandling:
 
     def test_pathlib_used_throughout(self, temp_repo: Path) -> None:
         """All paths should be pathlib.Path objects."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         assert isinstance(log.repo_root, Path)
         assert isinstance(log.active_dir, Path)
@@ -567,7 +567,7 @@ class TestWindowsPathHandling:
         self, temp_repo: Path
     ) -> None:
         """Shard filename should not contain invalid characters."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         filename = log.shard_file.name
 
@@ -585,7 +585,7 @@ class TestLegacyMode:
         log_path = tmp_path / "logs" / "test.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        log = GovernanceAuditLog(log_path=log_path)
+        log = ReviewAuditLog(log_path=log_path)
 
         entry = create_log_entry(
             node="test",
@@ -617,7 +617,7 @@ class TestIteratorAndCount:
 
     def test_iterator_returns_all_entries(self, temp_repo: Path) -> None:
         """Iterator should yield all entries in chronological order."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         for i in range(5):
             entry = create_log_entry(
@@ -642,7 +642,7 @@ class TestIteratorAndCount:
 
     def test_count_returns_total_entries(self, temp_repo: Path) -> None:
         """Count should return total number of entries."""
-        log = GovernanceAuditLog(repo_root=temp_repo)
+        log = ReviewAuditLog(repo_root=temp_repo)
 
         for i in range(3):
             entry = create_log_entry(

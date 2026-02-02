@@ -1,6 +1,6 @@
-"""Workflow configuration for Unified Governance Workflow.
+"""Workflow configuration for Unified Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Provides:
 - WorkflowConfig dataclass for workflow parameterization

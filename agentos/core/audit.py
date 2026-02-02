@@ -1,11 +1,11 @@
-"""Audit logging infrastructure for AgentOS governance.
+"""Audit logging infrastructure for AgentOS reviews.
 
-This module provides persistent audit logging for governance decisions,
+This module provides persistent audit logging for LLD review decisions,
 using session-sharded JSONL format to eliminate write collisions.
 
 Issue #57: Distributed Session-Sharded Logging Architecture
 - Each session writes to a unique shard: logs/active/{timestamp}_{session_id}.jsonl
-- Shards are consolidated into logs/governance_history.jsonl via post-commit hook
+- Shards are consolidated into logs/review_history.jsonl via post-commit hook
 - tail() merges history + active shards for unified view
 """
 
@@ -19,8 +19,8 @@ from typing import Iterator, Optional, TypedDict
 from agentos.core.config import DEFAULT_AUDIT_LOG_PATH, LOGS_ACTIVE_DIR
 
 
-class GovernanceLogEntry(TypedDict):
-    """Single entry in the governance audit log."""
+class ReviewLogEntry(TypedDict):
+    """Single entry in the review audit log."""
 
     id: str  # UUID as string
     sequence_id: int  # From state.iteration_count
@@ -48,8 +48,8 @@ class GeminiReviewResponse(TypedDict):
     tier_1_issues: list[str]  # Blocking issues (empty if approved)
 
 
-class GovernanceAuditLog:
-    """Persistent audit log for governance decisions.
+class ReviewAuditLog:
+    """Persistent audit log for review decisions.
 
     Uses session-sharded JSONL format:
     - Each session writes to a unique shard in logs/active/
@@ -144,11 +144,11 @@ class GovernanceAuditLog:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
         return f"{timestamp}_{self.session_id}.jsonl"
 
-    def log(self, entry: GovernanceLogEntry) -> None:
+    def log(self, entry: ReviewLogEntry) -> None:
         """Append entry to session shard.
 
         Args:
-            entry: The governance log entry to write.
+            entry: The review log entry to write.
 
         Raises:
             OSError: If shard directory is not writable (fail-closed).
@@ -164,10 +164,10 @@ class GovernanceAuditLog:
             f.write(json_line + "\n")
             f.flush()
 
-    def tail(self, n: int = 10) -> list[GovernanceLogEntry]:
+    def tail(self, n: int = 10) -> list[ReviewLogEntry]:
         """Return last N entries from history + active shards.
 
-        Merges entries from governance_history.jsonl and all active shards,
+        Merges entries from review_history.jsonl and all active shards,
         sorted by timestamp. Gracefully skips locked or inaccessible shards.
 
         Optimization: History file is assumed sorted (guaranteed by consolidator),
@@ -179,7 +179,7 @@ class GovernanceAuditLog:
         Returns:
             List of the last N entries, oldest first.
         """
-        entries: list[GovernanceLogEntry] = []
+        entries: list[ReviewLogEntry] = []
 
         # Count active shards to estimate buffer size
         shard_count = 0
@@ -207,7 +207,7 @@ class GovernanceAuditLog:
         # Return last N
         return entries[-n:] if n > 0 else entries
 
-    def _read_jsonl_tail(self, path: Path, n: int) -> list[GovernanceLogEntry]:
+    def _read_jsonl_tail(self, path: Path, n: int) -> list[ReviewLogEntry]:
         """Read last N lines from JSONL file, gracefully handling errors.
 
         Optimized for large files - only reads the tail portion.
@@ -226,7 +226,7 @@ class GovernanceAuditLog:
             with open(path, encoding="utf-8") as f:
                 lines = f.readlines()
 
-            entries: list[GovernanceLogEntry] = []
+            entries: list[ReviewLogEntry] = []
             # Get last N lines
             for line in lines[-n:]:
                 line = line.strip()
@@ -241,7 +241,7 @@ class GovernanceAuditLog:
             # Skip locked or inaccessible files (graceful degradation)
             return []
 
-    def _read_jsonl_safe(self, path: Path) -> list[GovernanceLogEntry]:
+    def _read_jsonl_safe(self, path: Path) -> list[ReviewLogEntry]:
         """Read JSONL file, gracefully handling errors.
 
         Args:
@@ -250,7 +250,7 @@ class GovernanceAuditLog:
         Returns:
             List of entries, or empty list if file inaccessible.
         """
-        entries: list[GovernanceLogEntry] = []
+        entries: list[ReviewLogEntry] = []
 
         if not path.exists():
             return entries
@@ -271,11 +271,11 @@ class GovernanceAuditLog:
 
         return entries
 
-    def __iter__(self) -> Iterator[GovernanceLogEntry]:
+    def __iter__(self) -> Iterator[ReviewLogEntry]:
         """Iterate over all entries from history + active shards.
 
         Yields:
-            Each governance log entry in chronological order.
+            Each review log entry in chronological order.
         """
         # Get all entries and sort
         all_entries = self.tail(n=0)  # n=0 returns all
@@ -304,8 +304,8 @@ def create_log_entry(
     rotation_occurred: bool,
     attempts: int,
     sequence_id: int = 0,
-) -> GovernanceLogEntry:
-    """Factory function to create a governance log entry.
+) -> ReviewLogEntry:
+    """Factory function to create a review log entry.
 
     Args:
         node: Node name (e.g., "review_lld").
@@ -323,9 +323,9 @@ def create_log_entry(
         sequence_id: Sequence number from state.
 
     Returns:
-        A complete GovernanceLogEntry.
+        A complete ReviewLogEntry for the review decision.
     """
-    return GovernanceLogEntry(
+    return ReviewLogEntry(
         id=str(uuid_module.uuid4()),
         sequence_id=sequence_id,
         timestamp=datetime.now(timezone.utc).isoformat(),

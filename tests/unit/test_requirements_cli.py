@@ -1,6 +1,6 @@
-"""Unit tests for Governance Workflow CLI Runner.
+"""Unit tests for Requirements Workflow CLI Runner.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for the CLI interface and argument parsing.
 """
@@ -16,7 +16,7 @@ class TestArgumentParsing:
 
     def test_parse_issue_workflow_args(self):
         """Test parsing issue workflow arguments."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "issue",
@@ -28,7 +28,7 @@ class TestArgumentParsing:
 
     def test_parse_lld_workflow_args(self):
         """Test parsing LLD workflow arguments."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -40,7 +40,7 @@ class TestArgumentParsing:
 
     def test_parse_drafter_reviewer(self):
         """Test parsing drafter and reviewer specifications."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -54,7 +54,7 @@ class TestArgumentParsing:
 
     def test_parse_gates_both(self):
         """Test parsing gates with both enabled."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -66,7 +66,7 @@ class TestArgumentParsing:
 
     def test_parse_gates_draft_only(self):
         """Test parsing gates with draft only."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -78,7 +78,7 @@ class TestArgumentParsing:
 
     def test_parse_gates_none(self):
         """Test parsing gates with none."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -90,7 +90,7 @@ class TestArgumentParsing:
 
     def test_parse_mock_mode(self):
         """Test parsing mock mode flag."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -102,7 +102,7 @@ class TestArgumentParsing:
 
     def test_parse_repo(self):
         """Test parsing target repo path."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -114,7 +114,7 @@ class TestArgumentParsing:
 
     def test_parse_context_files(self):
         """Test parsing context files."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -127,7 +127,7 @@ class TestArgumentParsing:
 
     def test_parse_max_iterations(self):
         """Test parsing max iterations."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -139,7 +139,7 @@ class TestArgumentParsing:
 
     def test_default_values(self):
         """Test default argument values."""
-        from tools.run_governance_workflow import parse_args
+        from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
@@ -158,7 +158,7 @@ class TestResolveRoots:
 
     def test_resolve_roots_with_explicit_repo(self, tmp_path):
         """Test resolving roots with explicit repo path."""
-        from tools.run_governance_workflow import resolve_roots
+        from tools.run_requirements_workflow import resolve_roots
 
         # Create mock args
         args = Mock()
@@ -172,7 +172,7 @@ class TestResolveRoots:
     @patch("subprocess.run")
     def test_resolve_roots_with_git_detection(self, mock_run, tmp_path):
         """Test resolving roots with git detection."""
-        from tools.run_governance_workflow import resolve_roots
+        from tools.run_requirements_workflow import resolve_roots
 
         mock_run.return_value = Mock(
             returncode=0,
@@ -193,7 +193,7 @@ class TestBuildInitialState:
 
     def test_build_issue_state(self, tmp_path):
         """Test building state for issue workflow."""
-        from tools.run_governance_workflow import build_initial_state
+        from tools.run_requirements_workflow import build_initial_state
 
         args = Mock()
         args.type = "issue"
@@ -219,7 +219,7 @@ class TestBuildInitialState:
 
     def test_build_lld_state(self, tmp_path):
         """Test building state for LLD workflow."""
-        from tools.run_governance_workflow import build_initial_state
+        from tools.run_requirements_workflow import build_initial_state
 
         args = Mock()
         args.type = "lld"
@@ -249,11 +249,11 @@ class TestBuildInitialState:
 class TestMainFunction:
     """Tests for main function."""
 
-    @patch("tools.run_governance_workflow.resolve_roots")
-    @patch("tools.run_governance_workflow.create_governance_graph")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    @patch("tools.run_requirements_workflow.create_governance_graph")
     def test_main_creates_and_runs_graph(self, mock_graph, mock_roots, tmp_path):
         """Test that main creates and runs the graph."""
-        from tools.run_governance_workflow import main
+        from tools.run_requirements_workflow import main
 
         mock_roots.return_value = (tmp_path, tmp_path)
 

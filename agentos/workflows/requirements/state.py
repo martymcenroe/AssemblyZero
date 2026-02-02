@@ -1,6 +1,6 @@
-"""Unified state definition for Governance Workflow.
+"""Unified state definition for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 This TypedDict merges IssueWorkflowState and LLDWorkflowState to support
 both workflow types through a single graph. Fields are organized by:
@@ -18,7 +18,7 @@ from typing import Literal, TypedDict
 
 
 class WorkflowType(str, Enum):
-    """Type of governance workflow."""
+    """Type of requirements workflow."""
 
     ISSUE = "issue"
     LLD = "lld"
@@ -55,8 +55,8 @@ class SlugCollisionChoice(str, Enum):
     ABORT = "A"
 
 
-class GovernanceWorkflowState(TypedDict, total=False):
-    """Unified state for both Issue and LLD governance workflows.
+class RequirementsWorkflowState(TypedDict, total=False):
+    """Unified state for both Issue and LLD requirements workflows.
 
     CRITICAL PATH RULES (from LLD #101):
     - agentos_root: ALWAYS set, NEVER empty. Where templates live.
@@ -191,8 +191,8 @@ def create_initial_state(
     # LLD-specific
     issue_number: int = 0,
     context_files: list[str] | None = None,
-) -> GovernanceWorkflowState:
-    """Create initial state for governance workflow.
+) -> RequirementsWorkflowState:
+    """Create initial state for requirements workflow.
 
     Args:
         workflow_type: Either "issue" or "lld".
@@ -211,7 +211,7 @@ def create_initial_state(
         context_files: Context file paths (LLD workflow).
 
     Returns:
-        Initialized GovernanceWorkflowState.
+        Initialized RequirementsWorkflowState.
 
     Raises:
         ValueError: If agentos_root or target_repo is empty.
@@ -222,7 +222,7 @@ def create_initial_state(
     if not target_repo or not target_repo.strip():
         raise ValueError("target_repo must be set and non-empty")
 
-    state: GovernanceWorkflowState = {
+    state: RequirementsWorkflowState = {
         # Configuration
         "workflow_type": workflow_type,
         "agentos_root": agentos_root,
@@ -281,7 +281,7 @@ def create_initial_state(
     return state
 
 
-def validate_state(state: GovernanceWorkflowState) -> list[str]:
+def validate_state(state: RequirementsWorkflowState) -> list[str]:
     """Validate workflow state and return list of errors.
 
     Args:

@@ -1,4 +1,4 @@
-# 0907 - Unified Governance Workflow
+# 0907 - Unified Requirements Workflow
 
 **Category:** Runbook / Operational Procedure
 **Version:** 1.0
@@ -73,20 +73,20 @@ stateDiagram-v2
 
 ```bash
 # Interactive picker from ideas/active/
-poetry run python tools/run_governance_workflow.py --type issue --select
+poetry run python tools/run_requirements_workflow.py --type issue --select
 
 # Direct path to brief
-poetry run python tools/run_governance_workflow.py --type issue --brief ideas/active/my-feature.md
+poetry run python tools/run_requirements_workflow.py --type issue --brief ideas/active/my-feature.md
 ```
 
 ### LLD Workflow (GitHub Issue → LLD)
 
 ```bash
 # Interactive picker from open issues
-poetry run python tools/run_governance_workflow.py --type lld --select
+poetry run python tools/run_requirements_workflow.py --type lld --select
 
 # Direct issue number
-poetry run python tools/run_governance_workflow.py --type lld --issue 42
+poetry run python tools/run_requirements_workflow.py --type lld --issue 42
 ```
 
 ### Cross-Repo Usage
@@ -94,7 +94,7 @@ poetry run python tools/run_governance_workflow.py --type lld --issue 42
 ```bash
 # Run from AgentOS against a different repository
 poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_governance_workflow.py \
+  /c/Users/mcwiz/Projects/AgentOS/tools/run_requirements_workflow.py \
   --type lld --repo /c/Users/mcwiz/Projects/OtherProject --issue 42
 ```
 
@@ -163,7 +163,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
 ### 1. Standard Issue Creation
 
 ```bash
-poetry run python tools/run_governance_workflow.py \
+poetry run python tools/run_requirements_workflow.py \
   --type issue \
   --brief ideas/active/my-feature.md
 ```
@@ -178,7 +178,7 @@ Flow:
 ### 2. Fully Automated LLD Creation
 
 ```bash
-poetry run python tools/run_governance_workflow.py \
+poetry run python tools/run_requirements_workflow.py \
   --type lld \
   --issue 42 \
   --gates none
@@ -194,7 +194,7 @@ Flow:
 
 ```bash
 # Use Gemini for drafting, Claude for reviewing
-poetry run python tools/run_governance_workflow.py \
+poetry run python tools/run_requirements_workflow.py \
   --type lld \
   --issue 42 \
   --drafter gemini:2.5-flash \
@@ -204,7 +204,7 @@ poetry run python tools/run_governance_workflow.py \
 ### 4. LLD with Context Files
 
 ```bash
-poetry run python tools/run_governance_workflow.py \
+poetry run python tools/run_requirements_workflow.py \
   --type lld \
   --issue 42 \
   --context src/auth/login.py \
@@ -214,7 +214,7 @@ poetry run python tools/run_governance_workflow.py \
 ### 5. Testing with Mock Mode
 
 ```bash
-poetry run python tools/run_governance_workflow.py \
+poetry run python tools/run_requirements_workflow.py \
   --type lld \
   --issue 42 \
   --mock
@@ -341,7 +341,7 @@ Another workflow is running. Either:
 
 ## Related Documents
 
-- [Issue #101](https://github.com/martymcenroe/AgentOS/issues/101) - Unified Governance Workflow
+- [Issue #101](https://github.com/martymcenroe/AgentOS/issues/101) - Unified Requirements Workflow
 - [LLD-101](../lld/active/LLD-101.md) - Design document
 - [0904-issue-governance-workflow](0904-issue-governance-workflow.md) - Legacy issue workflow
 - [0906-lld-governance-workflow](0906-lld-governance-workflow.md) - Legacy LLD workflow

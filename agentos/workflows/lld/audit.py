@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
-from agentos.core.config import GOVERNANCE_MODEL
+from agentos.core.config import REVIEWER_MODEL
 
 # Module logger for GUARD messages
 logger = logging.getLogger(__name__)
@@ -735,11 +735,11 @@ def embed_review_evidence(
         r"(\*\s*\*\*Status:\*\*)\s*\w+(?:\s*\([^)]*\))?",
         re.IGNORECASE,
     )
-    new_status = f"\\1 {verdict.capitalize()} ({GOVERNANCE_MODEL}, {review_date})"
+    new_status = f"\\1 {verdict.capitalize()} ({REVIEWER_MODEL}, {review_date})"
     lld_content = status_pattern.sub(new_status, lld_content, count=1)
 
     # Update or create Review Summary table in Appendix
-    review_entry = f"| {review_count} | {review_date} | {verdict} | `{GOVERNANCE_MODEL}` |"
+    review_entry = f"| {review_count} | {review_date} | {verdict} | `{REVIEWER_MODEL}` |"
 
     # Check if Review Summary table exists
     if "### Review Summary" in lld_content:

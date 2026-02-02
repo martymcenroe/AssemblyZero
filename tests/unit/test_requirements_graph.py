@@ -1,6 +1,6 @@
-"""Unit tests for Governance Workflow Graph.
+"""Unit tests for Requirements Workflow Graph.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for the parameterized StateGraph that connects all nodes.
 """
@@ -10,21 +10,21 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 
-class TestGovernanceGraph:
-    """Tests for governance workflow graph."""
+class TestRequirementsGraph:
+    """Tests for requirements workflow graph."""
 
     def test_graph_creation(self):
         """Test that graph can be created."""
-        from agentos.workflows.governance.graph import create_governance_graph
+        from agentos.workflows.requirements.graph import create_requirements_graph
 
-        graph = create_governance_graph()
+        graph = create_requirements_graph()
         assert graph is not None
 
     def test_graph_has_all_nodes(self):
         """Test that graph has all expected nodes."""
-        from agentos.workflows.governance.graph import create_governance_graph
+        from agentos.workflows.requirements.graph import create_requirements_graph
 
-        graph = create_governance_graph()
+        graph = create_requirements_graph()
         compiled = graph.compile()
 
         # LangGraph compiled graphs have a 'nodes' attribute in their graph structure
@@ -33,9 +33,9 @@ class TestGovernanceGraph:
 
     def test_graph_compiles(self):
         """Test that graph compiles without errors."""
-        from agentos.workflows.governance.graph import create_governance_graph
+        from agentos.workflows.requirements.graph import create_requirements_graph
 
-        graph = create_governance_graph()
+        graph = create_requirements_graph()
         compiled = graph.compile()
         assert compiled is not None
 
@@ -45,7 +45,7 @@ class TestGraphRouting:
 
     def test_route_from_load_input_to_generate_draft(self):
         """Test routing from load_input to generate_draft on success."""
-        from agentos.workflows.governance.graph import route_after_load_input
+        from agentos.workflows.requirements.graph import route_after_load_input
 
         state = {"error_message": ""}
         result = route_after_load_input(state)
@@ -53,7 +53,7 @@ class TestGraphRouting:
 
     def test_route_from_load_input_to_end_on_error(self):
         """Test routing from load_input to END on error."""
-        from agentos.workflows.governance.graph import route_after_load_input
+        from agentos.workflows.requirements.graph import route_after_load_input
 
         state = {"error_message": "File not found"}
         result = route_after_load_input(state)
@@ -61,7 +61,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_with_gate(self):
         """Test routing from generate_draft to human gate when enabled."""
-        from agentos.workflows.governance.graph import route_after_generate_draft
+        from agentos.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "", "config_gates_draft": True}
         result = route_after_generate_draft(state)
@@ -69,7 +69,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_without_gate(self):
         """Test routing from generate_draft to review when gate disabled."""
-        from agentos.workflows.governance.graph import route_after_generate_draft
+        from agentos.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "", "config_gates_draft": False}
         result = route_after_generate_draft(state)
@@ -77,7 +77,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_on_error(self):
         """Test routing from generate_draft to END on error."""
-        from agentos.workflows.governance.graph import route_after_generate_draft
+        from agentos.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "API error", "config_gates_draft": True}
         result = route_after_generate_draft(state)
@@ -85,7 +85,7 @@ class TestGraphRouting:
 
     def test_route_from_human_gate_draft(self):
         """Test routing from human gate draft based on next_node."""
-        from agentos.workflows.governance.graph import route_from_human_gate_draft
+        from agentos.workflows.requirements.graph import route_from_human_gate_draft
 
         # Route to review
         state = {"next_node": "N3_review"}
@@ -101,7 +101,7 @@ class TestGraphRouting:
 
     def test_route_from_review_with_gate(self):
         """Test routing from review to human gate when enabled."""
-        from agentos.workflows.governance.graph import route_after_review
+        from agentos.workflows.requirements.graph import route_after_review
 
         state = {"error_message": "", "config_gates_verdict": True}
         result = route_after_review(state)
@@ -109,7 +109,7 @@ class TestGraphRouting:
 
     def test_route_from_review_without_gate(self):
         """Test routing from review based on verdict when gate disabled."""
-        from agentos.workflows.governance.graph import route_after_review
+        from agentos.workflows.requirements.graph import route_after_review
 
         # Approved - go to finalize
         state = {"error_message": "", "config_gates_verdict": False, "lld_status": "APPROVED"}
@@ -123,7 +123,7 @@ class TestGraphRouting:
 
     def test_route_from_human_gate_verdict(self):
         """Test routing from human gate verdict based on next_node."""
-        from agentos.workflows.governance.graph import route_from_human_gate_verdict
+        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
 
         # Route to finalize
         state = {"next_node": "N5_finalize"}
@@ -137,15 +137,15 @@ class TestGraphRouting:
 class TestGraphExecution:
     """Tests for full graph execution paths."""
 
-    @patch("agentos.workflows.governance.nodes.load_input.load_input")
-    @patch("agentos.workflows.governance.nodes.generate_draft.get_provider")
-    @patch("agentos.workflows.governance.nodes.review.get_provider")
+    @patch("agentos.workflows.requirements.nodes.load_input.load_input")
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
     def test_full_issue_workflow_mock(
         self, mock_review_provider, mock_draft_provider, mock_load, tmp_path
     ):
         """Test full issue workflow with mocks."""
-        from agentos.workflows.governance.graph import create_governance_graph
-        from agentos.workflows.governance.state import create_initial_state
+        from agentos.workflows.requirements.graph import create_requirements_graph
+        from agentos.workflows.requirements.state import create_initial_state
 
         # Setup mocks
         mock_load.return_value = {
@@ -196,7 +196,7 @@ class TestGraphExecution:
         )
         state["audit_dir"] = str(audit_dir)
 
-        graph = create_governance_graph()
+        graph = create_requirements_graph()
         compiled = graph.compile()
 
         # Run the graph (without finalize since we'd need gh CLI)
@@ -209,7 +209,7 @@ class TestNodeNames:
 
     def test_node_names_defined(self):
         """Test that node name constants are defined."""
-        from agentos.workflows.governance.graph import (
+        from agentos.workflows.requirements.graph import (
             N0_LOAD_INPUT,
             N1_GENERATE_DRAFT,
             N2_HUMAN_GATE_DRAFT,

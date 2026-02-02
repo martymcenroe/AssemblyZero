@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from agentos.core.config import GOVERNANCE_MODEL
+from agentos.core.config import REVIEWER_MODEL
 from agentos.workflows.issue.audit import (
     batch_commit,
     get_repo_root,
@@ -41,7 +41,7 @@ def add_approval_footer(content: str, verdict_count: int) -> str:
 
 ---
 
-<sub>**Gemini Review:** APPROVED | **Model:** `{GOVERNANCE_MODEL}` | **Date:** {review_date} | **Reviews:** {verdict_count}</sub>
+<sub>**Gemini Review:** APPROVED | **Model:** `{REVIEWER_MODEL}` | **Date:** {review_date} | **Reviews:** {verdict_count}</sub>
 """
     return content + footer
 

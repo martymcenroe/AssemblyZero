@@ -1,6 +1,6 @@
 """Custom Gemini client with credential rotation and model enforcement.
 
-This module encapsulates ALL Gemini API interaction for governance,
+This module encapsulates ALL Gemini API interaction for LLD reviews,
 ensuring:
 1. Model hierarchy enforcement - Never downgrades from Pro
 2. Credential rotation - Automatic failover on quota exhaustion
@@ -28,7 +28,7 @@ from agentos.core.config import (
     CREDENTIALS_FILE,
     FORBIDDEN_MODELS,
     GEMINI_API_LOG_FILE,
-    GOVERNANCE_MODEL,
+    REVIEWER_MODEL,
     MAX_RETRIES_PER_CREDENTIAL,
     ROTATION_STATE_FILE,
 )
@@ -264,7 +264,7 @@ class GeminiClient:
 
     def __init__(
         self,
-        model: str = GOVERNANCE_MODEL,
+        model: str = REVIEWER_MODEL,
         credentials_file: Path = CREDENTIALS_FILE,
         state_file: Path = ROTATION_STATE_FILE,
     ):

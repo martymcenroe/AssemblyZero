@@ -1,9 +1,9 @@
-"""Unit tests for Governance Workflow State.
+"""Unit tests for Requirements Workflow State.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for:
-- GovernanceWorkflowState TypedDict
+- RequirementsWorkflowState TypedDict
 - HumanDecision enum
 - WorkflowType enum
 - create_initial_state factory
@@ -12,8 +12,8 @@ Tests for:
 
 import pytest
 
-from agentos.workflows.governance.state import (
-    GovernanceWorkflowState,
+from agentos.workflows.requirements.state import (
+    RequirementsWorkflowState,
     HumanDecision,
     WorkflowType,
     SlugCollisionChoice,
@@ -262,7 +262,7 @@ class TestValidateState:
 
     def test_missing_agentos_root(self):
         """Test validation catches missing agentos_root."""
-        state: GovernanceWorkflowState = {
+        state: RequirementsWorkflowState = {
             "workflow_type": "lld",
             "agentos_root": "",
             "target_repo": "/repo",
@@ -274,7 +274,7 @@ class TestValidateState:
 
     def test_missing_target_repo(self):
         """Test validation catches missing target_repo."""
-        state: GovernanceWorkflowState = {
+        state: RequirementsWorkflowState = {
             "workflow_type": "lld",
             "agentos_root": "/agentos",
             "target_repo": "",
@@ -286,7 +286,7 @@ class TestValidateState:
 
     def test_invalid_workflow_type(self):
         """Test validation catches invalid workflow_type."""
-        state: GovernanceWorkflowState = {
+        state: RequirementsWorkflowState = {
             "workflow_type": "invalid",  # type: ignore
             "agentos_root": "/agentos",
             "target_repo": "/repo",
@@ -297,7 +297,7 @@ class TestValidateState:
 
     def test_issue_missing_brief_file(self):
         """Test validation catches missing brief_file for issue workflow."""
-        state: GovernanceWorkflowState = {
+        state: RequirementsWorkflowState = {
             "workflow_type": "issue",
             "agentos_root": "/agentos",
             "target_repo": "/repo",
@@ -309,7 +309,7 @@ class TestValidateState:
 
     def test_lld_missing_issue_number(self):
         """Test validation catches missing issue_number for LLD workflow."""
-        state: GovernanceWorkflowState = {
+        state: RequirementsWorkflowState = {
             "workflow_type": "lld",
             "agentos_root": "/agentos",
             "target_repo": "/repo",
@@ -320,7 +320,7 @@ class TestValidateState:
         assert any("issue_number" in e for e in errors)
 
 
-class TestGovernanceWorkflowStateTypedDict:
+class TestRequirementsWorkflowStateTypedDict:
     """Tests to verify TypedDict behavior."""
 
     def test_state_is_dict(self):

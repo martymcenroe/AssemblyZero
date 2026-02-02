@@ -1,4 +1,4 @@
-"""Tests for the governance audit log.
+"""Tests for the review audit log.
 
 Test Scenarios from LLD:
 - 040: Audit entry written - All 14 required fields present
@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from agentos.core.audit import (
-    GovernanceAuditLog,
-    GovernanceLogEntry,
+    ReviewAuditLog,
+    ReviewLogEntry,
     create_log_entry,
 )
 
@@ -26,12 +26,12 @@ def temp_log_path():
         yield Path(tmpdir) / "test_governance.jsonl"
 
 
-class TestGovernanceAuditLog:
-    """Tests for GovernanceAuditLog class."""
+class TestReviewAuditLog:
+    """Tests for ReviewAuditLog class."""
 
     def test_040_audit_entry_has_all_required_fields(self, temp_log_path: Path):
         """Test that audit entries contain all 14 required fields."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         entry = create_log_entry(
             node="review_lld",
@@ -90,7 +90,7 @@ class TestGovernanceAuditLog:
 
     def test_050_audit_tail_reads_correctly(self, temp_log_path: Path):
         """Test that tail returns correct number of entries in order."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         # Write 5 entries
         for i in range(5):
@@ -122,14 +122,14 @@ class TestGovernanceAuditLog:
 
     def test_tail_empty_log(self, temp_log_path: Path):
         """Test tail on non-existent log returns empty list."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         entries = audit_log.tail(10)
         assert entries == []
 
     def test_iterator(self, temp_log_path: Path):
         """Test iterating over all entries."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         # Write 3 entries
         for i in range(3):
@@ -156,7 +156,7 @@ class TestGovernanceAuditLog:
 
     def test_count(self, temp_log_path: Path):
         """Test entry counting."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         assert audit_log.count() == 0
 
@@ -183,7 +183,7 @@ class TestGovernanceAuditLog:
 
     def test_140_credential_logged(self, temp_log_path: Path):
         """Test that credential_used field is properly logged."""
-        audit_log = GovernanceAuditLog(log_path=temp_log_path)
+        audit_log = ReviewAuditLog(log_path=temp_log_path)
 
         entry = create_log_entry(
             node="review_lld",

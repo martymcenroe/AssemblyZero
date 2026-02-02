@@ -1,6 +1,6 @@
-"""Unit tests for Governance Workflow Configuration.
+"""Unit tests for Requirements Workflow Configuration.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Tests for:
 - GateConfig dataclass and from_string factory
@@ -12,7 +12,7 @@ Tests for:
 import pytest
 from pathlib import Path
 
-from agentos.workflows.governance.config import (
+from agentos.workflows.requirements.config import (
     GateConfig,
     WorkflowConfig,
     create_issue_config,

@@ -1,7 +1,7 @@
 """Designer node for AgentOS LangGraph workflows.
 
 This module contains the Designer Node that drafts LLDs from GitHub Issues,
-pausing for human editing before Governance review.
+pausing for human editing before LLD review.
 
 Issue: #56
 LLD: docs/LLDs/active/56-designer-node.md
@@ -18,9 +18,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agentos.core.audit import GovernanceAuditLog, create_log_entry
+from agentos.core.audit import ReviewAuditLog, create_log_entry
 from agentos.core.config import (
-    GOVERNANCE_MODEL,
+    REVIEWER_MODEL,
     LLD_DRAFTS_DIR,
     LLD_GENERATOR_PROMPT_PATH,
 )
@@ -39,7 +39,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
     Process:
     1. Use issue content from state OR fetch from GitHub via `gh issue view`
     2. Load system instruction from 0705-lld-generator.md
-    3. Invoke Gemini via GeminiClient (uses GOVERNANCE_MODEL)
+    3. Invoke Gemini via GeminiClient (uses REVIEWER_MODEL)
     4. Write draft to repo_root/docs/llds/drafts/{issue_id}-LLD.md
     5. Print plain text prompt and block on input()
     6. Return state updates with draft path AND content
@@ -62,7 +62,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
     - File write fails
     """
     # Initialize audit log
-    audit_log = GovernanceAuditLog()
+    audit_log = ReviewAuditLog()
 
     # Increment iteration count
     iteration_count = state.get("iteration_count", 0) + 1
@@ -95,7 +95,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
                 duration_ms = int((time.time() - start_time) * 1000)
                 entry = create_log_entry(
                     node="design_lld",
-                    model=GOVERNANCE_MODEL,
+                    model=REVIEWER_MODEL,
                     model_verified="",
                     issue_id=issue_id,
                     verdict="FAILED",
@@ -125,7 +125,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
             duration_ms = int((time.time() - start_time) * 1000)
             entry = create_log_entry(
                 node="design_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified="",
                 issue_id=issue_id,
                 verdict="FAILED",
@@ -148,9 +148,9 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
                 "error_message": str(e),
             }
 
-        # Step 3: Initialize GeminiClient with GOVERNANCE_MODEL
+        # Step 3: Initialize GeminiClient with REVIEWER_MODEL
         # NUCLEAR WINTER: This will raise ValueError if model is forbidden
-        client = GeminiClient(model=GOVERNANCE_MODEL)
+        client = GeminiClient(model=REVIEWER_MODEL)
 
         # Step 4: Build prompt and invoke Gemini
         # Include feedback and previous draft if this is a revision
@@ -190,7 +190,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
             duration_ms = int((time.time() - start_time) * 1000)
             entry = create_log_entry(
                 node="design_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified=result.model_verified,
                 issue_id=issue_id,
                 verdict="FAILED",
@@ -221,7 +221,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
             duration_ms = int((time.time() - start_time) * 1000)
             entry = create_log_entry(
                 node="design_lld",
-                model=GOVERNANCE_MODEL,
+                model=REVIEWER_MODEL,
                 model_verified=result.model_verified,
                 issue_id=issue_id,
                 verdict="FAILED",
@@ -248,7 +248,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         duration_ms = int((time.time() - start_time) * 1000)
         entry = create_log_entry(
             node="design_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified=result.model_verified,
             issue_id=issue_id,
             verdict="DRAFTED",
@@ -281,7 +281,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         duration_ms = int((time.time() - start_time) * 1000)
         entry = create_log_entry(
             node="design_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified="",
             issue_id=issue_id,
             verdict="FAILED",
@@ -309,7 +309,7 @@ def design_lld_node(state: AgentState) -> dict[str, Any]:
         duration_ms = int((time.time() - start_time) * 1000)
         entry = create_log_entry(
             node="design_lld",
-            model=GOVERNANCE_MODEL,
+            model=REVIEWER_MODEL,
             model_verified="",
             issue_id=issue_id,
             verdict="FAILED",

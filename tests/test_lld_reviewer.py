@@ -1,4 +1,4 @@
-"""Tests for the governance node.
+"""Tests for the LLD reviewer node.
 
 Test Scenarios from LLD:
 - 010: Valid LLD approved
@@ -14,9 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.core.audit import GovernanceAuditLog
+from agentos.core.audit import ReviewAuditLog
 from agentos.core.gemini_client import GeminiCallResult, GeminiErrorType
-from agentos.nodes.governance import (
+from agentos.nodes.lld_reviewer import (
     _load_system_instruction,
     _parse_gemini_response,
     review_lld_node,
@@ -156,15 +156,15 @@ No blocking issues.
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.governance.GeminiClient") as mock_client_class:
+        with patch("agentos.nodes.lld_reviewer.GeminiClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.invoke.return_value = mock_result
             mock_client_class.return_value = mock_client
 
-            with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+            with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
                 mock_load.return_value = "System instruction"
 
-                with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 
@@ -204,15 +204,15 @@ Critical issues found.
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.governance.GeminiClient") as mock_client_class:
+        with patch("agentos.nodes.lld_reviewer.GeminiClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.invoke.return_value = mock_result
             mock_client_class.return_value = mock_client
 
-            with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+            with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
                 mock_load.return_value = "System instruction"
 
-                with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 
@@ -232,7 +232,7 @@ Critical issues found.
             "iteration_count": 0,
         }
 
-        with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+        with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
             mock_log = MagicMock()
             mock_log_class.return_value = mock_log
 
@@ -256,15 +256,15 @@ Critical issues found.
             model_verified="",
         )
 
-        with patch("agentos.nodes.governance.GeminiClient") as mock_client_class:
+        with patch("agentos.nodes.lld_reviewer.GeminiClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.invoke.return_value = mock_result
             mock_client_class.return_value = mock_client
 
-            with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+            with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
                 mock_load.return_value = "System instruction"
 
-                with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 
@@ -275,10 +275,10 @@ Critical issues found.
 
     def test_080_missing_prompt_file_returns_block(self, mock_state):
         """Test that missing prompt file returns BLOCK."""
-        with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+        with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
             mock_load.side_effect = FileNotFoundError("Prompt file not found")
 
-            with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+            with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                 mock_log = MagicMock()
                 mock_log_class.return_value = mock_log
 
@@ -291,10 +291,10 @@ Critical issues found.
         """Test that iteration count is incremented."""
         mock_state["iteration_count"] = 5
 
-        with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+        with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
             mock_load.side_effect = FileNotFoundError("Test")
 
-            with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+            with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                 mock_log = MagicMock()
                 mock_log_class.return_value = mock_log
 
@@ -318,15 +318,15 @@ Critical issues found.
             model_verified="gemini-2.0-flash",  # Wrong model!
         )
 
-        with patch("agentos.nodes.governance.GeminiClient") as mock_client_class:
+        with patch("agentos.nodes.lld_reviewer.GeminiClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.invoke.return_value = mock_result
             mock_client_class.return_value = mock_client
 
-            with patch("agentos.nodes.governance._load_system_instruction") as mock_load:
+            with patch("agentos.nodes.lld_reviewer._load_system_instruction") as mock_load:
                 mock_load.return_value = "System instruction"
 
-                with patch("agentos.nodes.governance.GovernanceAuditLog") as mock_log_class:
+                with patch("agentos.nodes.lld_reviewer.ReviewAuditLog") as mock_log_class:
                     mock_log = MagicMock()
                     mock_log_class.return_value = mock_log
 

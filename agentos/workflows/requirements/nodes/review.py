@@ -1,6 +1,6 @@
-"""N3: Review node for Governance Workflow.
+"""N3: Review node for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Uses the configured reviewer LLM to review the current draft.
 Saves verdict to audit trail and updates verdict history.
@@ -10,15 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from agentos.core.llm_provider import get_provider
-from agentos.workflows.governance.audit import (
+from agentos.workflows.requirements.audit import (
     load_review_prompt,
     next_file_number,
     save_audit_file,
 )
-from agentos.workflows.governance.state import GovernanceWorkflowState
+from agentos.workflows.requirements.state import RequirementsWorkflowState
 
 
-def review(state: GovernanceWorkflowState) -> dict[str, Any]:
+def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N3: Review draft using configured reviewer.
 
     Steps:

@@ -1,14 +1,14 @@
 """Core components for AgentOS state management and infrastructure."""
 
 from agentos.core.audit import (
-    GovernanceAuditLog,
-    GovernanceLogEntry,
+    ReviewAuditLog,
+    ReviewLogEntry,
     GeminiReviewResponse,
     create_log_entry,
 )
 from agentos.core.config import (
-    GOVERNANCE_MODEL,
-    GOVERNANCE_MODEL_FALLBACKS,
+    REVIEWER_MODEL,
+    REVIEWER_MODEL_FALLBACKS,
     FORBIDDEN_MODELS,
     CREDENTIALS_FILE,
     ROTATION_STATE_FILE,
@@ -31,8 +31,8 @@ __all__ = [
     # State
     "AgentState",
     # Config
-    "GOVERNANCE_MODEL",
-    "GOVERNANCE_MODEL_FALLBACKS",
+    "REVIEWER_MODEL",
+    "REVIEWER_MODEL_FALLBACKS",
     "FORBIDDEN_MODELS",
     "CREDENTIALS_FILE",
     "ROTATION_STATE_FILE",
@@ -48,8 +48,8 @@ __all__ = [
     "Credential",
     "RotationState",
     # Audit
-    "GovernanceAuditLog",
-    "GovernanceLogEntry",
+    "ReviewAuditLog",
+    "ReviewLogEntry",
     "GeminiReviewResponse",
     "create_log_entry",
 ]

@@ -1,6 +1,6 @@
-"""N2/N4: Human gate nodes for Governance Workflow.
+"""N2/N4: Human gate nodes for Requirements Workflow.
 
-Issue #101: Unified Governance Workflow
+Issue #101: Unified Requirements Workflow
 
 Provides human checkpoints:
 - human_gate_draft: After draft generation (S/R/M choices)
@@ -12,10 +12,10 @@ When gates are disabled or auto_mode is enabled, gates are skipped.
 from pathlib import Path
 from typing import Any
 
-from agentos.workflows.governance.state import GovernanceWorkflowState, HumanDecision
+from agentos.workflows.requirements.state import RequirementsWorkflowState, HumanDecision
 
 
-def human_gate_draft(state: GovernanceWorkflowState) -> dict[str, Any]:
+def human_gate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N2: Human checkpoint after draft generation.
 
     Routes to:
@@ -68,7 +68,7 @@ def human_gate_draft(state: GovernanceWorkflowState) -> dict[str, Any]:
     }
 
 
-def human_gate_verdict(state: GovernanceWorkflowState) -> dict[str, Any]:
+def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
     """N4: Human checkpoint after Gemini review.
 
     Routes to:
