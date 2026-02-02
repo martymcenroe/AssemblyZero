@@ -1,5 +1,12 @@
 # 0101 - Template: GitHub Issue (Feature)
 
+<!-- Template Metadata
+Last Updated: 2026-02-01
+Updated By: Verdict Analyzer (tools/verdict-analyzer.py)
+Update Reason: Added Risk Checklist based on 67 blocking issues from 46 issue reviews
+Top blockers: architecture (20), quality (19), legal (8), security (8), cost (6), safety (6)
+-->
+
 ## Usage
 Copy this template when creating a new feature issue via `gh issue create`.
 
@@ -43,6 +50,14 @@ So that {benefit/outcome}.
 ## Technical Approach
 - **{Component 1}:** {Brief description of how}
 - **{Component 2}:** {Brief description of how}
+
+## Risk Checklist
+*Quick assessment - details go in LLD. Check all that apply and add brief notes.*
+
+- [ ] **Architecture:** Does this change system structure? {Note if yes}
+- [ ] **Cost:** Does this add API calls, storage, or compute? {Note if yes}
+- [ ] **Legal/PII:** Does this handle personal data or have compliance implications? {Note if yes}
+- [ ] **Safety:** Can this cause data loss or system instability? {Note if yes}
 
 ## Security Considerations
 {If applicable: explain why the approach is safe, what permissions are needed, data handling}
@@ -103,3 +118,4 @@ So that {benefit/outcome}.
 5. **Acceptance Criteria:** Must be testable. "Works correctly" is bad. "Button changes color to green" is good.
 6. **Out of Scope:** Explicitly state what you're NOT doing to prevent scope creep.
 7. **Dependencies:** Call out blockers so work can be sequenced.
+8. **Risk Checklist:** Quick flags for governance. If any box is checked, the LLD must address it in detail.

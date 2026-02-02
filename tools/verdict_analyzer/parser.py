@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Define PARSER_VERSION locally to avoid circular import
 # Bump version when parser logic changes to trigger re-parsing
-PARSER_VERSION = "1.3.0"
+PARSER_VERSION = "1.4.0"
 
 
 @dataclass
@@ -51,12 +51,20 @@ def parse_verdict(filepath: Path) -> VerdictRecord:
     content_hash = compute_content_hash(content)
 
     # Determine verdict type (LLD vs Issue)
-    # LLD format: "# 105 - Feature: ..." or has "## 1. Context & Goal"
-    # Issue format: "# Issue #42 - ..." or has "## User Story"
-    verdict_type = "lld"
-    if re.search(r"^#\s*Issue\s*#\d+", content, re.MULTILINE | re.IGNORECASE):
+    # Detection methods (in priority order):
+    # 1. Header: "# Issue Review:" vs "# Governance Verdict:" / "# LLD Review:"
+    # 2. Path: contains "-lld" → LLD, otherwise → issue
+    verdict_type = "lld"  # default
+
+    # Check header first (most reliable)
+    if re.search(r"^#\s*Issue\s+Review:", content, re.MULTILINE | re.IGNORECASE):
         verdict_type = "issue"
-    elif "## User Story" in content or "## Acceptance Criteria" in content:
+    elif re.search(r"^#\s*(Governance\s+Verdict|LLD\s+Review):", content, re.MULTILINE | re.IGNORECASE):
+        verdict_type = "lld"
+    # Fallback to path-based detection
+    elif "-lld" in str(filepath).lower():
+        verdict_type = "lld"
+    elif "-issue" in str(filepath).lower() or "test-" in str(filepath).lower():
         verdict_type = "issue"
 
     # Extract decision from multiple possible formats:
