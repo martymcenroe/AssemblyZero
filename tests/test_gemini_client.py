@@ -33,9 +33,9 @@ def temp_credentials_file():
             json.dumps(
                 {
                     "credentials": [
-                        {"name": "key-1", "key": "test-key-1", "enabled": True},
-                        {"name": "key-2", "key": "test-key-2", "enabled": True},
-                        {"name": "key-3", "key": "test-key-3", "enabled": True},
+                        {"name": "key-1", "key": "test-key-1", "enabled": True, "type": "api_key"},
+                        {"name": "key-2", "key": "test-key-2", "enabled": True, "type": "api_key"},
+                        {"name": "key-3", "key": "test-key-3", "enabled": True, "type": "api_key"},
                     ]
                 }
             )
@@ -200,23 +200,19 @@ class TestRotationLogic:
 
         call_sequence = []
 
-        def mock_generate(*args, **kwargs):
-            # Track which credential was used (via configure call)
-            raise Exception("TerminalQuotaError: exhausted")
+        def mock_client_init(api_key):
+            """Capture API key and return mock client."""
+            call_sequence.append(api_key)
+            mock_client = MagicMock()
+            mock_client.models.generate_content.side_effect = Exception(
+                "TerminalQuotaError: exhausted"
+            )
+            return mock_client
 
-        with patch("google.generativeai.configure") as mock_configure:
-            with patch("google.generativeai.GenerativeModel") as mock_model_class:
-                mock_instance = MagicMock()
-                mock_instance.generate_content.side_effect = mock_generate
-                mock_model_class.return_value = mock_instance
+        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+            mock_client_class.side_effect = mock_client_init
 
-                # Capture API key used in each configure call
-                def capture_config(api_key):
-                    call_sequence.append(api_key)
-
-                mock_configure.side_effect = capture_config
-
-                result = client.invoke("system", "content")
+            result = client.invoke("system", "content")
 
         # Should have tried all 3 credentials
         assert len(call_sequence) == 3
@@ -247,14 +243,17 @@ class TestRotationLogic:
             mock_response.text = "Success"
             return mock_response
 
-        with patch("google.generativeai.configure"):
-            with patch("google.generativeai.GenerativeModel") as mock_model_class:
-                mock_instance = MagicMock()
-                mock_instance.generate_content.side_effect = mock_generate
-                mock_model_class.return_value = mock_instance
+        def mock_client_init(api_key):
+            """Return mock client with generate_content that tracks attempts."""
+            mock_client = MagicMock()
+            mock_client.models.generate_content.side_effect = mock_generate
+            return mock_client
 
-                with patch("time.sleep"):  # Skip actual delay
-                    result = client.invoke("system", "content")
+        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+            mock_client_class.side_effect = mock_client_init
+
+            with patch("time.sleep"):  # Skip actual delay
+                result = client.invoke("system", "content")
 
         # Should have retried 3 times on same credential
         assert attempts[0] == 3
@@ -269,19 +268,22 @@ class TestRotationLogic:
             state_file=temp_state_file,
         )
 
-        def mock_generate(*args, **kwargs):
-            raise Exception("TerminalQuotaError: exhausted")
+        def mock_client_init(api_key):
+            """Return mock client that always raises quota error."""
+            mock_client = MagicMock()
+            mock_client.models.generate_content.side_effect = Exception(
+                "TerminalQuotaError: exhausted"
+            )
+            return mock_client
 
-        with patch("google.generativeai.configure"):
-            with patch("google.generativeai.GenerativeModel") as mock_model_class:
-                mock_instance = MagicMock()
-                mock_instance.generate_content.side_effect = mock_generate
-                mock_model_class.return_value = mock_instance
+        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+            mock_client_class.side_effect = mock_client_init
 
-                result = client.invoke("system", "content")
+            result = client.invoke("system", "content")
 
         assert result.success is False
-        assert result.error_type == GeminiErrorType.UNKNOWN
+        # When all credentials fail due to quota exhaustion, error type is QUOTA_EXHAUSTED
+        assert result.error_type == GeminiErrorType.QUOTA_EXHAUSTED
         assert "All credentials failed" in result.error_message
 
 
