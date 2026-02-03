@@ -576,6 +576,7 @@ poetry install --directory ../ProjectName-{IssueID}  # Install dependencies
 
 ```
 Post-Merge Cleanup:
+├── Archive lineage: python tools/archive_worktree_lineage.py --worktree ../ProjectName-{ID} --issue {ID}
 ├── Remove worktree: git worktree remove ../ProjectName-{ID}
 ├── Delete local branch: git branch -d {ID}-desc
 ├── Delete remote branch: git push origin --delete {ID}-desc
@@ -583,6 +584,12 @@ Post-Merge Cleanup:
 ├── Pull merged changes: git pull
 └── Verify: git branch -a (should show only main)
 ```
+
+**Archive step details:**
+- Copies `docs/lineage/active/{issue}-*/` to main repo's `docs/lineage/archived/`
+- Cleans ephemeral files (`.coverage`, `__pycache__`, `.pytest_cache`)
+- Commits archived lineage to main repo
+- Skip with `--no-commit` if you want to review first
 
 **This is NON-NEGOTIABLE.** Stale branches and orphaned worktrees:
 - Confuse future agents about active work
