@@ -155,8 +155,16 @@ def _generate_test_function(
     requirement_ref = scenario.get("requirement_ref", "")
     assertions = scenario.get("assertions", [])
     mock_needed = scenario.get("mock_needed", False)
+    test_type = scenario.get("test_type", "unit").lower()
 
     lines = []
+
+    # Add pytest markers for non-unit test types
+    # This enables e2e_validation.py to filter with '-m e2e or integration'
+    if test_type == "e2e":
+        lines.append("@pytest.mark.e2e")
+    elif test_type == "integration":
+        lines.append("@pytest.mark.integration")
 
     # Function signature
     if fixture:

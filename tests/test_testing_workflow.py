@@ -3447,15 +3447,10 @@ class TestScaffoldEdgeCases:
         assert "def test_api" in content
         assert "Integration" in content or "integration" in content.lower()
 
-    @pytest.mark.xfail(reason="Issue #178: scaffold_tests doesn't add pytest markers")
     def test_generate_test_file_content_adds_e2e_marker(self):
-        """generate_test_file_content should add @pytest.mark.e2e for e2e tests.
+        """generate_test_file_content adds @pytest.mark.e2e for e2e tests.
 
-        Issue #178: Currently _generate_test_function() doesn't add markers,
-        but e2e_validation.py filters for '-m e2e or integration', causing
-        'no tests collected' failures.
-
-        This test documents the CORRECT behavior and will pass once #178 is fixed.
+        This enables e2e_validation.py to filter tests with '-m e2e or integration'.
         """
         from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
@@ -3480,15 +3475,10 @@ class TestScaffoldEdgeCases:
             "can filter for them with '-m e2e or integration'"
         )
 
-    @pytest.mark.xfail(reason="Issue #178: scaffold_tests doesn't add pytest markers")
     def test_generate_test_file_content_adds_integration_marker(self):
-        """generate_test_file_content should add @pytest.mark.integration for integration tests.
+        """generate_test_file_content adds @pytest.mark.integration for integration tests.
 
-        Issue #178: Currently _generate_test_function() doesn't add markers,
-        but e2e_validation.py filters for '-m e2e or integration', causing
-        'no tests collected' failures.
-
-        This test documents the CORRECT behavior and will pass once #178 is fixed.
+        This enables e2e_validation.py to filter tests with '-m e2e or integration'.
         """
         from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
