@@ -504,6 +504,98 @@ def generate_slug(brief_file: str) -> str:
 
 
 # =============================================================================
+# Lineage Versioning (Standard 0012)
+# =============================================================================
+
+
+class ExistingLLDInfo(TypedDict):
+    """Information about existing LLD and lineage for an issue."""
+
+    lld_exists: bool
+    lineage_exists: bool
+    lld_path: Path | None
+    lineage_path: Path | None
+
+
+def check_existing_lld(issue_number: int, target_repo: Path) -> ExistingLLDInfo:
+    """Check if LLD and/or lineage already exist for an issue.
+
+    Per Standard 0012, before regenerating an LLD we must check for:
+    - Existing LLD file: docs/lld/active/LLD-{issue}.md
+    - Existing lineage directory: docs/lineage/active/{issue}-lld/
+
+    Args:
+        issue_number: GitHub issue number.
+        target_repo: Target repository root.
+
+    Returns:
+        ExistingLLDInfo dict with existence flags and paths.
+    """
+    lld_path = target_repo / LLD_ACTIVE_DIR / f"LLD-{issue_number:03d}.md"
+    lineage_path = target_repo / AUDIT_ACTIVE_DIR / f"{issue_number}-lld"
+
+    return {
+        "lld_exists": lld_path.exists(),
+        "lineage_exists": lineage_path.exists(),
+        "lld_path": lld_path if lld_path.exists() else None,
+        "lineage_path": lineage_path if lineage_path.exists() else None,
+    }
+
+
+def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
+    """Shift existing lineage directories to preserve history.
+
+    Per Standard 0012, when regenerating an LLD:
+    1. Delete existing LLD file
+    2. Shift lineage: {issue}-lld-n1 -> {issue}-lld-n2 (if n1 exists)
+    3. Rename current: {issue}-lld -> {issue}-lld-n1
+
+    Args:
+        issue_number: GitHub issue number.
+        target_repo: Target repository root.
+
+    Returns:
+        List of operations performed (for logging).
+    """
+    operations: list[str] = []
+    active_dir = target_repo / AUDIT_ACTIVE_DIR
+
+    # Paths
+    lld_path = target_repo / LLD_ACTIVE_DIR / f"LLD-{issue_number:03d}.md"
+    lineage_current = active_dir / f"{issue_number}-lld"
+    lineage_n1 = active_dir / f"{issue_number}-lld-n1"
+    lineage_n2 = active_dir / f"{issue_number}-lld-n2"
+
+    # Step 1: Delete existing LLD file
+    if lld_path.exists():
+        lld_path.unlink()
+        operations.append(f"Deleted: {lld_path.relative_to(target_repo)}")
+
+    # Step 2: Shift n1 -> n2 (if n1 exists)
+    if lineage_n1.exists():
+        if lineage_n2.exists():
+            # n2 already exists - remove it first (oldest version discarded)
+            import shutil
+            shutil.rmtree(lineage_n2)
+            operations.append(f"Removed: {lineage_n2.relative_to(target_repo)} (oldest)")
+        lineage_n1.rename(lineage_n2)
+        operations.append(
+            f"Shifted: {lineage_n1.relative_to(target_repo)} -> "
+            f"{lineage_n2.relative_to(target_repo)}"
+        )
+
+    # Step 3: Shift current -> n1 (if current exists)
+    if lineage_current.exists():
+        lineage_current.rename(lineage_n1)
+        operations.append(
+            f"Shifted: {lineage_current.relative_to(target_repo)} -> "
+            f"{lineage_n1.relative_to(target_repo)}"
+        )
+
+    return operations
+
+
+# =============================================================================
 # Review Evidence Embedding
 # =============================================================================
 

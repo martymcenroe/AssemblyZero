@@ -784,3 +784,183 @@ class TestGenerateSlug:
         slug = generate_slug("-my-feature-.md")
 
         assert slug == "my-feature"
+
+
+# =============================================================================
+# Lineage Versioning Tests (Standard 0012)
+# =============================================================================
+
+
+class TestCheckExistingLLD:
+    """Tests for check_existing_lld function."""
+
+    def test_returns_false_when_nothing_exists(self, tmp_path):
+        """Test returns all false when no LLD or lineage exists."""
+        from agentos.workflows.requirements.audit import check_existing_lld
+
+        result = check_existing_lld(42, tmp_path)
+
+        assert result["lld_exists"] is False
+        assert result["lineage_exists"] is False
+        assert result["lld_path"] is None
+        assert result["lineage_path"] is None
+
+    def test_detects_existing_lld_file(self, tmp_path):
+        """Test detects existing LLD file."""
+        from agentos.workflows.requirements.audit import check_existing_lld, LLD_ACTIVE_DIR
+
+        # Create LLD file
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# LLD Content")
+
+        result = check_existing_lld(42, tmp_path)
+
+        assert result["lld_exists"] is True
+        assert result["lld_path"] == lld_file
+        assert result["lineage_exists"] is False
+
+    def test_detects_existing_lineage_dir(self, tmp_path):
+        """Test detects existing lineage directory."""
+        from agentos.workflows.requirements.audit import check_existing_lld, AUDIT_ACTIVE_DIR
+
+        # Create lineage directory
+        lineage_dir = tmp_path / AUDIT_ACTIVE_DIR / "42-lld"
+        lineage_dir.mkdir(parents=True)
+        (lineage_dir / "001-issue.md").write_text("content")
+
+        result = check_existing_lld(42, tmp_path)
+
+        assert result["lineage_exists"] is True
+        assert result["lineage_path"] == lineage_dir
+        assert result["lld_exists"] is False
+
+    def test_detects_both_lld_and_lineage(self, tmp_path):
+        """Test detects both LLD file and lineage directory."""
+        from agentos.workflows.requirements.audit import (
+            check_existing_lld,
+            LLD_ACTIVE_DIR,
+            AUDIT_ACTIVE_DIR,
+        )
+
+        # Create both
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# LLD Content")
+
+        lineage_dir = tmp_path / AUDIT_ACTIVE_DIR / "42-lld"
+        lineage_dir.mkdir(parents=True)
+
+        result = check_existing_lld(42, tmp_path)
+
+        assert result["lld_exists"] is True
+        assert result["lineage_exists"] is True
+
+
+class TestShiftLineageVersions:
+    """Tests for shift_lineage_versions function."""
+
+    def test_deletes_existing_lld_file(self, tmp_path):
+        """Test deletes existing LLD file."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions, LLD_ACTIVE_DIR
+
+        # Create LLD file
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# Old LLD Content")
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        assert not lld_file.exists()
+        assert any("Deleted" in op for op in operations)
+
+    def test_shifts_current_to_n1(self, tmp_path):
+        """Test shifts current lineage to n1."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions, AUDIT_ACTIVE_DIR
+
+        # Create current lineage
+        active_dir = tmp_path / AUDIT_ACTIVE_DIR
+        lineage_current = active_dir / "42-lld"
+        lineage_current.mkdir(parents=True)
+        (lineage_current / "001-issue.md").write_text("content")
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        assert not lineage_current.exists()
+        lineage_n1 = active_dir / "42-lld-n1"
+        assert lineage_n1.exists()
+        assert (lineage_n1 / "001-issue.md").exists()
+        assert any("Shifted" in op and "n1" in op for op in operations)
+
+    def test_shifts_n1_to_n2_before_current_to_n1(self, tmp_path):
+        """Test shifts n1 to n2 before shifting current to n1."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions, AUDIT_ACTIVE_DIR
+
+        # Create current and n1 lineage
+        active_dir = tmp_path / AUDIT_ACTIVE_DIR
+        lineage_current = active_dir / "42-lld"
+        lineage_current.mkdir(parents=True)
+        (lineage_current / "001-issue.md").write_text("current content")
+
+        lineage_n1 = active_dir / "42-lld-n1"
+        lineage_n1.mkdir(parents=True)
+        (lineage_n1 / "001-issue.md").write_text("n1 content")
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        # n1 should now be n2
+        lineage_n2 = active_dir / "42-lld-n2"
+        assert lineage_n2.exists()
+        assert (lineage_n2 / "001-issue.md").read_text() == "n1 content"
+
+        # current should now be n1
+        new_n1 = active_dir / "42-lld-n1"
+        assert new_n1.exists()
+        assert (new_n1 / "001-issue.md").read_text() == "current content"
+
+    def test_removes_existing_n2_when_shifting(self, tmp_path):
+        """Test removes existing n2 when shifting n1 to n2."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions, AUDIT_ACTIVE_DIR
+
+        # Create current, n1, and n2 lineage
+        active_dir = tmp_path / AUDIT_ACTIVE_DIR
+        for suffix in ["", "-n1", "-n2"]:
+            d = active_dir / f"42-lld{suffix}"
+            d.mkdir(parents=True)
+            (d / "001-issue.md").write_text(f"{suffix or 'current'} content")
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        # Should have removed old n2
+        assert any("Removed" in op and "oldest" in op for op in operations)
+
+        # n2 should now have n1's content
+        lineage_n2 = active_dir / "42-lld-n2"
+        assert (lineage_n2 / "001-issue.md").read_text() == "-n1 content"
+
+    def test_handles_nothing_existing(self, tmp_path):
+        """Test handles case where nothing exists."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        assert operations == []
+
+    def test_handles_only_lld_file(self, tmp_path):
+        """Test handles case where only LLD file exists."""
+        from agentos.workflows.requirements.audit import shift_lineage_versions, LLD_ACTIVE_DIR
+
+        # Create only LLD file (no lineage)
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# LLD Content")
+
+        operations = shift_lineage_versions(42, tmp_path)
+
+        assert not lld_file.exists()
+        assert len(operations) == 1
+        assert "Deleted" in operations[0]

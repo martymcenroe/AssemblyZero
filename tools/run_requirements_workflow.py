@@ -45,7 +45,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agentos.workflows.requirements.audit import (
     AUDIT_ACTIVE_DIR,
     IDEAS_ACTIVE_DIR,
+    check_existing_lld,
     generate_slug,
+    shift_lineage_versions,
 )
 from agentos.workflows.requirements.config import GateConfig
 from agentos.workflows.requirements.graph import create_requirements_graph
@@ -385,6 +387,11 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Show what would happen without making changes",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip confirmation when regenerating existing LLD (shifts lineage to n-1)",
     )
 
     # Paths
@@ -785,6 +792,88 @@ def run_resume_workflow(
     return run_single_workflow(args, agentos_root, target_repo)
 
 
+def check_and_shift_existing_lld(
+    issue_number: int,
+    target_repo: Path,
+    force: bool = False,
+) -> bool:
+    """Check for existing LLD/lineage and handle regeneration.
+
+    Per Standard 0012, before regenerating an LLD we must:
+    1. Check for existing LLD file and lineage directory
+    2. Warn the user and require YES confirmation (unless --force)
+    3. Shift lineage versions to preserve history
+
+    Args:
+        issue_number: GitHub issue number.
+        target_repo: Target repository path.
+        force: If True, skip confirmation prompt.
+
+    Returns:
+        True if we should proceed with generation, False to abort.
+    """
+    existing = check_existing_lld(issue_number, target_repo)
+
+    # Nothing exists - proceed with fresh generation
+    if not existing["lld_exists"] and not existing["lineage_exists"]:
+        return True
+
+    # Something exists - warn user
+    print()
+    print("=" * 60)
+    print(f"WARNING: LLD already exists for issue #{issue_number}")
+    print("=" * 60)
+
+    if existing["lld_exists"]:
+        lld_rel = existing["lld_path"].relative_to(target_repo)
+        print(f"  LLD file:  {lld_rel}")
+    if existing["lineage_exists"]:
+        lineage_rel = existing["lineage_path"].relative_to(target_repo)
+        print(f"  Lineage:   {lineage_rel}/")
+
+    print()
+    print("Regenerating will:")
+    if existing["lld_exists"]:
+        print("  - Delete the existing LLD file")
+    if existing["lineage_exists"]:
+        print("  - Move existing lineage to {issue}-lld-n1")
+    print()
+
+    # Force mode - proceed without confirmation
+    if force:
+        print("--force specified, proceeding with regeneration...")
+        print()
+        operations = shift_lineage_versions(issue_number, target_repo)
+        for op in operations:
+            print(f"  {op}")
+        print()
+        return True
+
+    # Interactive confirmation required
+    # Test mode: auto-confirm
+    if os.environ.get("AGENTOS_TEST_MODE") == "1":
+        print("Type YES to proceed, or anything else to abort: YES (TEST MODE)")
+        operations = shift_lineage_versions(issue_number, target_repo)
+        for op in operations:
+            print(f"  {op}")
+        print()
+        return True
+
+    response = input("Type YES to proceed, or anything else to abort: ").strip()
+    print()
+
+    if response != "YES":
+        print("Aborted by user.")
+        return False
+
+    # User confirmed - perform the shift
+    operations = shift_lineage_versions(issue_number, target_repo)
+    for op in operations:
+        print(f"  {op}")
+    print()
+    return True
+
+
 def print_header(args: argparse.Namespace) -> None:
     """Print workflow header.
 
@@ -899,6 +988,11 @@ def main() -> int:
                 print("Selection cancelled.")
                 return 0
             args.issue = selected
+
+    # Pre-generation check for LLD workflow (Standard 0012)
+    if args.type == "lld" and args.issue:
+        if not check_and_shift_existing_lld(args.issue, target_repo, args.force):
+            return 0  # User aborted
 
     # Run single workflow
     return run_single_workflow(args, agentos_root, target_repo)
