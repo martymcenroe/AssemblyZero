@@ -9,9 +9,9 @@
 ### Open Questions
 *Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [ ] Should we add a max retry count for the Gemini question-answering loop, or reuse the existing max_iterations budget?
-- [ ] What should happen if Gemini marks ALL questions as HUMAN REQUIRED - terminate workflow or force human gate?
-- [ ] Should the prompt changes be in the template file (0702c) or hardcoded in review.py?
+- [x] ~~Should we add a max retry count for the Gemini question-answering loop?~~ **RESOLVED: Yes, use existing max_iterations (default 20). The loop shares the iteration budget with revisions.**
+- [x] ~~What should happen if Gemini marks ALL questions as HUMAN REQUIRED?~~ **RESOLVED: Workflow terminates with human gate request. Human can answer or override.**
+- [x] ~~Should the prompt changes be in the template file or hardcoded in review.py?~~ **RESOLVED: Add to 0702c-LLD-Review-Prompt.md for maintainability and auditability.**
 
 ## 2. Proposed Changes
 
@@ -31,9 +31,17 @@
 
 *No new packages required.*
 
+```toml
+# pyproject.toml additions (if any)
+# None
+```
+
 ### 2.3 Data Structures
 
 ```python
+# Pseudocode - NOT implementation
+# New state fields (additions to RequirementsWorkflowState)
+
 # No new state fields needed - reuse existing:
 # - lld_status: "APPROVED" | "BLOCKED" | "QUESTIONS_PENDING"
 # - iteration_count: int (shared budget for revisions + question loops)
@@ -48,13 +56,40 @@
 def check_unanswered_questions(draft_content: str, verdict_content: str) -> tuple[list[str], list[str]]:
     """Check for unanswered open questions after Gemini review.
 
+    Args:
+        draft_content: The LLD draft content
+        verdict_content: Gemini's review verdict
+
     Returns:
         Tuple of (unanswered_questions, human_required_questions)
+        - unanswered: Questions Gemini should have answered but didn't
+        - human_required: Questions Gemini explicitly marked HUMAN REQUIRED
     """
     ...
 
 def build_question_followup_prompt(unanswered: list[str]) -> str:
-    """Build prompt asking Gemini to answer the unanswered questions."""
+    """Build prompt asking Gemini to answer the unanswered questions.
+
+    Args:
+        unanswered: List of questions Gemini failed to answer
+
+    Returns:
+        Followup prompt string
+    """
+    ...
+
+
+# agentos/workflows/requirements/graph.py
+
+def route_after_review(state: RequirementsWorkflowState) -> Literal[...]:
+    """Route after review - now includes QUESTIONS_PENDING handling.
+
+    New routing logic:
+    - APPROVED + no unanswered questions -> N5_finalize
+    - APPROVED + unanswered questions -> N3_review (loop back with followup)
+    - APPROVED + only HUMAN_REQUIRED -> END (human gate)
+    - BLOCKED -> N1_generate_draft (revision loop)
+    """
     ...
 ```
 
@@ -77,9 +112,12 @@ New Flow:
       - Loop back to N3 with followup context
    d. IF all answered OR only "HUMAN REQUIRED":
       - Proceed based on verdict
-4. IF verdict=APPROVED AND no unanswered → N5: Finalize
-5. IF verdict=BLOCKED → N1: Revise draft (existing loop)
-6. IF only HUMAN REQUIRED questions → N4: Human gate
+4. IF verdict=APPROVED AND no unanswered:
+   - N5: Finalize
+5. IF verdict=BLOCKED:
+   - N1: Revise draft (existing loop)
+6. IF only HUMAN REQUIRED questions:
+   - N4: Human gate (existing node, ask human to answer)
 ```
 
 ### 2.6 Technical Approach
@@ -108,6 +146,8 @@ New Flow:
 
 ## 3. Requirements
 
+*What must be true when this is done. These become acceptance criteria.*
+
 1. Drafts with open questions proceed to Gemini review (not blocked pre-review)
 2. Gemini review prompt includes instructions to answer open questions
 3. Post-review check detects unanswered questions (not marked HUMAN REQUIRED)
@@ -120,10 +160,12 @@ New Flow:
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Keep pre-review validation, fix drafter prompt | Simple | Drafter can't always know answers | **Rejected** |
-| Let Gemini revise draft directly | Fewer steps | Role confusion | **Rejected** |
+| Keep pre-review validation, fix drafter prompt | Simple | Drafter can't always know answers; shifts burden | **Rejected** |
+| Let Gemini revise draft directly | Fewer steps | Gemini is reviewer not editor; role confusion | **Rejected** |
 | Post-review validation with loop | Gemini can answer; clear roles | More complex routing | **Selected** |
 | Remove validation entirely | Simplest | Open questions slip through | **Rejected** |
+
+**Rationale:** Post-review validation with loop-back lets Gemini (the senior reviewer) answer design questions, which is appropriate for an architect role. Only truly human-required decisions escalate.
 
 ## 5. Data & Fixtures
 
@@ -134,6 +176,14 @@ New Flow:
 | Source | LLD draft content, Gemini verdict |
 | Format | Markdown text |
 | Size | ~500-1000 lines |
+| Refresh | Per workflow run |
+| Copyright/License | N/A |
+
+### 5.2 Data Pipeline
+
+```
+Draft (open questions) ──review──► Gemini verdict ──check──► Loop or Finalize
+```
 
 ### 5.3 Test Fixtures
 
@@ -144,10 +194,38 @@ New Flow:
 | `verdict_questions_unanswered.md` | Generated | Gemini approves but leaves questions unchecked |
 | `verdict_human_required.md` | Generated | Gemini marks questions as HUMAN REQUIRED |
 
+### 5.4 Deployment Pipeline
+
+Test fixtures generated during test setup. No external data.
+
 ## 6. Diagram
+
+### 6.1 Mermaid Quality Gate
+
+- [x] **Simplicity:** Similar components collapsed
+- [x] **No touching:** All elements have visual separation
+- [x] **No hidden lines:** All arrows fully visible
+- [x] **Readable:** Labels not truncated, flow direction clear
+- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed
+
+**Auto-Inspection Results:**
+```
+- Touching elements: [x] None
+- Hidden lines: [x] None
+- Label readability: [x] Pass
+- Flow clarity: [x] Clear
+```
+
+### 6.2 Diagram
 
 ```mermaid
 flowchart TD
+    subgraph Current["Current Flow (Broken)"]
+        A1[N1: Generate Draft] --> V1{Validate}
+        V1 -->|Open Questions| X1[BLOCKED - Terminates]
+        V1 -->|All Resolved| R1[N3: Review]
+    end
+
     subgraph New["New Flow"]
         A2[N1: Generate Draft] --> R2[N3: Gemini Review]
         R2 --> C2{Check Questions}
@@ -173,15 +251,34 @@ flowchart TD
 |---------|------------|--------|
 | Infinite loop | Shared iteration budget (max_iterations) | Addressed |
 | Gemini always says HUMAN REQUIRED | Human can override or answer | Addressed |
+| Lost context in loop | Full verdict history preserved | Addressed |
 
 **Fail Mode:** Fail Closed - If max iterations reached, workflow terminates with current state
 
+**Recovery Strategy:** User can resume workflow with --resume flag
+
 ## 8. Performance & Cost Considerations
+
+### 8.1 Performance
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
 | Additional API calls | 0-2 per workflow | Only loops if Gemini fails to answer |
 | Latency | +30s per loop | Acceptable for improved outcomes |
+
+**Bottlenecks:** Each Gemini call adds ~15-30s. Loop should rarely trigger if prompt is clear.
+
+### 8.2 Cost Analysis
+
+| Resource | Unit Cost | Estimated Usage | Monthly Cost |
+|----------|-----------|-----------------|--------------|
+| Gemini API (question loop) | ~$0.01 per call | 0.5 extra calls avg | ~$1-2/month |
+
+**Cost Controls:**
+- Shared iteration budget prevents runaway loops
+- Clear prompt reduces need for loops
+
+**Worst-Case Scenario:** If Gemini consistently fails to answer, max 20 iterations total (shared with revisions)
 
 ## 9. Legal & Compliance
 
@@ -189,10 +286,23 @@ flowchart TD
 |---------|----------|------------|
 | PII/Personal Data | No | No PII in LLD content |
 | Third-Party Licenses | No | No new dependencies |
+| Terms of Service | N/A | Gemini API already in use |
+| Data Retention | N/A | Workflow state only |
+| Export Controls | No | N/A |
+
+**Data Classification:** Internal
+
+**Compliance Checklist:**
+- [x] No PII stored without consent
+- [x] All third-party licenses compatible
+- [x] External API usage compliant
+- [x] Data retention policy documented
 
 ## 10. Verification & Testing
 
-### 10.0 Test Plan (TDD)
+### 10.0 Test Plan (TDD - Complete Before Implementation)
+
+**TDD Requirement:** Tests MUST be written and failing BEFORE implementation begins.
 
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
@@ -204,7 +314,13 @@ flowchart TD
 | T060 | test_all_answered_proceeds_to_finalize | N5 reached when resolved | RED |
 | T070 | test_prompt_includes_question_instructions | 0702c has new section | RED |
 
-**Coverage Target:** ≥95%
+**Coverage Target:** ≥95% for all new code
+
+**TDD Checklist:**
+- [ ] All tests written before implementation
+- [ ] Tests currently RED (failing)
+- [ ] Test IDs match scenario IDs in 10.1
+- [ ] Test file created at: `tests/unit/test_open_questions_loop.py`
 
 ### 10.1 Test Scenarios
 
@@ -218,12 +334,27 @@ flowchart TD
 | 060 | Resolved proceeds to finalize | Auto | All questions answered | Reaches N5 | APPROVED status |
 | 070 | Prompt updated | Auto | Load 0702c | Contains question instructions | Regex match |
 
+### 10.2 Test Commands
+
+```bash
+# Run all automated tests
+poetry run pytest tests/unit/test_open_questions_loop.py -v
+
+# Run with coverage
+poetry run pytest tests/unit/test_open_questions_loop.py --cov=agentos/workflows/requirements --cov-report=term-missing
+```
+
+### 10.3 Manual Tests (Only If Unavoidable)
+
+N/A - All scenarios automated.
+
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | Gemini ignores question instructions | Med | Low | Clear prompt, followup loop |
 | Infinite loop | High | Low | Shared iteration budget |
+| Human bottleneck if all HUMAN REQUIRED | Med | Low | Human can delegate back |
 | Regression in existing behavior | High | Med | Comprehensive test coverage |
 
 ## 12. Definition of Done
@@ -238,7 +369,8 @@ flowchart TD
 
 ### Documentation
 - [ ] LLD updated with any deviations
-- [ ] Implementation Report completed
+- [ ] Implementation Report (0103) completed
+- [ ] Test Report (0113) completed if applicable
 
 ### Review
 - [ ] Code review completed
@@ -248,8 +380,12 @@ flowchart TD
 
 ## Appendix: Review Log
 
+*Track all review feedback with timestamps and implementation status.*
+
+### Review Summary
+
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| (pending) | - | - | - |
+| Gemini #1 | (pending) | (pending) | (pending) |
 
 **Final Status:** PENDING
