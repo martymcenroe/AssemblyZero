@@ -424,6 +424,14 @@ def build_initial_state(
 
     # Build state based on workflow type
     if args.type == "issue":
+        # Detect if brief is in ideas/active/ for cleanup after success
+        source_idea = ""
+        if args.brief:
+            brief_path = Path(args.brief).resolve()
+            ideas_active = (target_repo / "ideas" / "active").resolve()
+            if brief_path.parent == ideas_active:
+                source_idea = str(brief_path)
+
         return create_initial_state(
             workflow_type="issue",
             agentos_root=str(agentos_root),
@@ -436,6 +444,7 @@ def build_initial_state(
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
             brief_file=args.brief or "",
+            source_idea=source_idea,
         )
     else:  # lld
         return create_initial_state(
