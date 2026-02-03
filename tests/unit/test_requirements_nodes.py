@@ -1755,6 +1755,139 @@ class TestLineageProvenance:
         assert "This is the body" in content
 
 
+class TestIdeasCleanup:
+    """Tests for ideas file cleanup after issue creation.
+
+    Issue #219: Ideas file not moved to done/ after issue creation.
+    """
+
+    def test_source_idea_set_when_brief_in_ideas_active(self, tmp_path):
+        """--brief pointing to ideas/active/ should set source_idea."""
+        from tools.run_requirements_workflow import build_initial_state
+        import argparse
+
+        ideas_active = tmp_path / "ideas" / "active"
+        ideas_active.mkdir(parents=True)
+        brief = ideas_active / "my-feature.md"
+        brief.write_text("# My Feature")
+
+        # Create minimal args namespace
+        args = argparse.Namespace(
+            type="issue",
+            brief=str(brief),
+            drafter="mock:draft",
+            reviewer="mock:review",
+            gates="none",
+            mock=True,
+            max_iterations=5,
+            context=None,
+            issue=None,
+        )
+
+        state = build_initial_state(args, tmp_path, tmp_path)
+
+        assert state.get("source_idea") == str(brief)
+
+    def test_source_idea_empty_when_brief_elsewhere(self, tmp_path):
+        """--brief pointing outside ideas/active/ should not set source_idea."""
+        from tools.run_requirements_workflow import build_initial_state
+        import argparse
+
+        other_dir = tmp_path / "docs" / "briefs"
+        other_dir.mkdir(parents=True)
+        brief = other_dir / "feature.md"
+        brief.write_text("# Feature")
+
+        args = argparse.Namespace(
+            type="issue",
+            brief=str(brief),
+            drafter="mock:draft",
+            reviewer="mock:review",
+            gates="none",
+            mock=True,
+            max_iterations=5,
+            context=None,
+            issue=None,
+        )
+
+        state = build_initial_state(args, tmp_path, tmp_path)
+
+        assert state.get("source_idea") == ""
+
+    @patch("subprocess.run")
+    def test_idea_moved_to_done_on_success(self, mock_run, tmp_path):
+        """After successful issue creation, idea moves to ideas/done/."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        ideas_active = tmp_path / "ideas" / "active"
+        ideas_done = tmp_path / "ideas" / "done"
+        ideas_active.mkdir(parents=True)
+
+        brief = ideas_active / "my-feature.md"
+        brief.write_text("# My Feature\n\nDescription here.")
+
+        # Mock successful gh issue create
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout="https://github.com/user/repo/issues/42",
+        )
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file=str(brief),
+            source_idea=str(brief),  # Set because brief is in ideas/active/
+        )
+        state["current_draft"] = "# My Feature\n\nDescription here."
+        state["slug"] = "my-feature"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        finalize(state)
+
+        # Source file should be moved to ideas/done/42-my-feature.md
+        assert not brief.exists(), "Original file should be moved"
+        assert ideas_done.exists(), "ideas/done/ should be created"
+        moved_file = ideas_done / "42-my-feature.md"
+        assert moved_file.exists(), f"File should be at {moved_file}"
+
+    @patch("subprocess.run")
+    def test_idea_not_moved_on_error(self, mock_run, tmp_path):
+        """On workflow error, idea stays in ideas/active/."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        ideas_active = tmp_path / "ideas" / "active"
+        ideas_active.mkdir(parents=True)
+
+        brief = ideas_active / "my-feature.md"
+        brief.write_text("# My Feature")
+
+        # Mock failed gh issue create
+        mock_run.return_value = Mock(
+            returncode=1,
+            stdout="",
+            stderr="Rate limit exceeded",
+        )
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file=str(brief),
+            source_idea=str(brief),
+        )
+        state["current_draft"] = "# My Feature\n\nDescription"
+        state["audit_dir"] = str(tmp_path / "audit")
+
+        finalize(state)
+
+        # Source file should still be in ideas/active/
+        assert brief.exists(), "File should stay in ideas/active/ on error"
+
+
 class TestHumanGateInteractiveMode:
     """Tests for human_gate interactive mode paths."""
 

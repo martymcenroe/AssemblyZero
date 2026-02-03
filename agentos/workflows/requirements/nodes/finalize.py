@@ -4,12 +4,11 @@ Updates GitHub issue with final draft, commits artifacts to git, and closes work
 For LLD workflows, saves LLD file with embedded review evidence.
 """
 
+import shutil
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-
-from datetime import timezone
 
 from agentos.workflows.requirements.audit import (
     embed_review_evidence,
@@ -240,6 +239,43 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _cleanup_source_idea(state: Dict[str, Any]) -> None:
+    """Move source idea to ideas/done/ after successful issue creation.
+
+    Issue #219: Ideas file not moved to done/ after issue creation.
+
+    Args:
+        state: Workflow state with source_idea, filed_issue_number, error_message.
+    """
+    source_idea = state.get("source_idea", "")
+    if not source_idea:
+        return
+
+    source_path = Path(source_idea)
+    if not source_path.exists():
+        return
+
+    # Only cleanup on success (no error and issue was filed)
+    if state.get("error_message"):
+        return
+
+    # Get issue number from filed_issue_number
+    issue_number = state.get("filed_issue_number", 0)
+    if not issue_number:
+        return
+
+    # Ensure ideas/done/ exists
+    done_dir = source_path.parent.parent / "done"
+    done_dir.mkdir(exist_ok=True)
+
+    # Move with issue number prefix
+    new_name = f"{issue_number}-{source_path.name}"
+    dest_path = done_dir / new_name
+
+    shutil.move(str(source_path), str(dest_path))
+    print(f"  Moved idea to: {dest_path}")
+
+
 def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     """Public interface for finalize node.
 
@@ -259,9 +295,15 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
         state = _save_lld_file(state)
     else:
         # For issue workflow: post comment to GitHub issue
-        state = _finalize_issue(state)
+        # _finalize_issue returns only updates, merge them into state
+        updates = _finalize_issue(state)
+        state.update(updates)
 
     # Then, commit and push artifacts to git
     state = _commit_and_push_files(state)
+
+    # Cleanup source idea after successful issue creation
+    if workflow_type == "issue" and not state.get("error_message"):
+        _cleanup_source_idea(state)
 
     return state
