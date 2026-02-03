@@ -312,6 +312,10 @@ def test_100(temp_git_repo: Path):
         os.chdir(original_cwd)
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).parent.parent / ".gitignore").exists(),
+    reason="Source .gitignore not accessible from test location"
+)
 def test_110(temp_git_repo: Path):
     """
     .gitignore contains .agentos/ pattern | Auto | Check `.gitignore`
@@ -319,12 +323,8 @@ def test_110(temp_git_repo: Path):
     assert pattern present
     """
     source_gitignore = Path(__file__).parent.parent / ".gitignore"
-    
-    if source_gitignore.exists():
-        content = source_gitignore.read_text()
-        assert ".agentos/" in content or ".agentos/issue_workflow.db" in content
-    else:
-        pytest.skip("Source .gitignore not accessible from test location")
+    content = source_gitignore.read_text()
+    assert ".agentos/" in content or ".agentos/issue_workflow.db" in content
 
 
 def test_120(tmp_path: Path, clean_env: None):

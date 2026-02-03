@@ -11,4 +11,7 @@ if str(tools_dir.parent) not in sys.path:
 
 def pytest_configure(config):
     """Configure pytest."""
-    pass
+    config.addinivalue_line(
+        "markers",
+        "integration: marks tests as integration tests (deselect with '-m \"not integration\"')"
+    )
