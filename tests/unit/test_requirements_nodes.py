@@ -964,6 +964,148 @@ class TestFinalizeNodeAdditional:
         assert "push failed" in result.get("commit_error", "")
 
 
+class TestFinalizeLineageFiles:
+    """Tests for lineage files being included in created_files.
+
+    Issue #241: requirements workflow does not commit lineage files.
+    """
+
+    def test_finalize_includes_lineage_files_in_created_files(self, tmp_path):
+        """Finalize should add all lineage files to created_files for commit."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        # Create audit directory with lineage files
+        audit_dir = target_repo / "docs" / "lineage" / "active" / "42-lld"
+        audit_dir.mkdir(parents=True)
+        (audit_dir / "001-issue.md").write_text("# Issue content")
+        (audit_dir / "002-draft.md").write_text("# Draft content")
+        (audit_dir / "003-verdict.md").write_text("# Verdict content")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path / "agentos"),
+            target_repo=str(target_repo),
+            issue_number=42,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Add Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(audit_dir)
+
+        result = finalize(state)
+
+        # Should have no error
+        assert result.get("error_message", "") == ""
+
+        # created_files should contain lineage files, not just LLD
+        created_files = result.get("created_files", [])
+        assert len(created_files) > 1, "Should have more than just the LLD file"
+
+        # Should contain at least the lineage files
+        lineage_files = [f for f in created_files if "lineage" in f]
+        assert len(lineage_files) >= 3, f"Expected lineage files, got: {created_files}"
+
+    def test_finalize_commits_entire_audit_directory(self, tmp_path):
+        """All files in audit_dir should be staged for commit."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        # Create audit directory with multiple files
+        audit_dir = target_repo / "docs" / "lineage" / "active" / "99-lld"
+        audit_dir.mkdir(parents=True)
+        expected_files = [
+            "001-issue.md",
+            "002-draft.md",
+            "003-verdict.md",
+            "004-draft.md",
+            "005-verdict.md",
+        ]
+        for filename in expected_files:
+            (audit_dir / filename).write_text(f"# {filename}")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path / "agentos"),
+            target_repo=str(target_repo),
+            issue_number=99,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(audit_dir)
+
+        result = finalize(state)
+
+        created_files = result.get("created_files", [])
+
+        # Verify each lineage file is in created_files
+        for expected in expected_files:
+            found = any(expected in f for f in created_files)
+            assert found, f"Expected {expected} in created_files, got: {created_files}"
+
+    def test_finalize_handles_empty_audit_dir(self, tmp_path):
+        """Should handle case where audit_dir exists but is empty."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        # Create empty audit directory
+        audit_dir = target_repo / "docs" / "lineage" / "active" / "50-lld"
+        audit_dir.mkdir(parents=True)
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path / "agentos"),
+            target_repo=str(target_repo),
+            issue_number=50,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(audit_dir)
+
+        result = finalize(state)
+
+        # Should succeed even with empty audit_dir
+        assert result.get("error_message", "") == ""
+        # Should at least have the LLD file
+        created_files = result.get("created_files", [])
+        assert len(created_files) >= 1
+
+    def test_finalize_handles_nonexistent_audit_dir(self, tmp_path):
+        """Should handle case where audit_dir doesn't exist."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path / "agentos"),
+            target_repo=str(target_repo),
+            issue_number=77,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(target_repo / "nonexistent" / "77-lld")
+
+        result = finalize(state)
+
+        # Should succeed (LLD gets saved even without lineage)
+        assert result.get("error_message", "") == ""
+
+
 class TestLoadInputRetryLogic:
     """Tests for load_input retry and error handling."""
 

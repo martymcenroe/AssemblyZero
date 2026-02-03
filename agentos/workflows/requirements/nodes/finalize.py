@@ -265,6 +265,13 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     # Add to created_files for commit
     created_files = list(state.get("created_files", []))
     created_files.append(str(lld_path))
+
+    # Add ALL lineage files to created_files (Issue #241)
+    if audit_dir.exists():
+        for lineage_file in audit_dir.glob("*"):
+            if lineage_file.is_file():
+                created_files.append(str(lineage_file))
+
     state["created_files"] = created_files
     state["final_lld_path"] = str(lld_path)
 
