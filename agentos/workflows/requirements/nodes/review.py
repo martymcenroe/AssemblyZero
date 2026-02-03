@@ -127,7 +127,7 @@ Be specific about what needs to change for BLOCKED verdicts."""
     elif re.search(r"\[X\]\s*\**DISCUSS\**", verdict_upper):
         lld_status = "BLOCKED"
     # Fallback: Look for explicit keywords (legacy/simple responses)
-    elif "VERDICT: APPROVED" in verdict_upper or "**APPROVED**" in verdict_upper.split("[X]")[0] if "[X]" in verdict_upper else False:
+    elif "VERDICT: APPROVED" in verdict_upper:
         lld_status = "APPROVED"
     elif "VERDICT: BLOCKED" in verdict_upper or "VERDICT: REVISE" in verdict_upper:
         lld_status = "BLOCKED"
