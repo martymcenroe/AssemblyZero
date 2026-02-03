@@ -5300,5 +5300,150 @@ class TestFinalizeCoverageMore:
             assert conflict_file.exists()
 
 
+class TestValidateCommitMessage:
+    """Tests for validate_commit_message node (Issue #190).
+
+    TDD: These tests define the expected behavior for commit message validation.
+    The node should block commits that don't include 'fixes #N' or equivalent.
+    """
+
+    def test_valid_message_with_fixes(self):
+        """Commit message with 'fixes #N' should pass validation."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "feat: add new feature\n\nFixes #42",
+        }
+
+        result = validate_commit_message(state)
+
+        assert result.get("error_message", "") == ""
+        assert "BLOCKED" not in result.get("error_message", "")
+
+    def test_valid_message_with_closes(self):
+        """Commit message with 'closes #N' should pass validation."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 99,
+            "commit_message": "fix: resolve bug\n\nCloses #99",
+        }
+
+        result = validate_commit_message(state)
+
+        assert result.get("error_message", "") == ""
+
+    def test_valid_message_with_resolves(self):
+        """Commit message with 'resolves #N' should pass validation."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 123,
+            "commit_message": "chore: cleanup\n\nResolves #123",
+        }
+
+        result = validate_commit_message(state)
+
+        assert result.get("error_message", "") == ""
+
+    def test_valid_message_case_insensitive(self):
+        """Validation should be case-insensitive."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "feat: add feature\n\nFIXES #42",
+        }
+
+        result = validate_commit_message(state)
+
+        assert result.get("error_message", "") == ""
+
+    def test_invalid_message_missing_keyword(self):
+        """Commit message without fixes/closes/resolves should be BLOCKED."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "feat: add new feature\n\nThis is a great change.",
+        }
+
+        result = validate_commit_message(state)
+
+        assert "BLOCKED" in result.get("error_message", "")
+        assert "#42" in result.get("error_message", "")
+
+    def test_invalid_message_wrong_issue_number(self):
+        """Commit message with wrong issue number should be BLOCKED."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "feat: add feature\n\nFixes #99",  # Wrong number
+        }
+
+        result = validate_commit_message(state)
+
+        assert "BLOCKED" in result.get("error_message", "")
+        assert "#42" in result.get("error_message", "")
+
+    def test_invalid_message_empty(self):
+        """Empty commit message should be BLOCKED."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "",
+        }
+
+        result = validate_commit_message(state)
+
+        assert "BLOCKED" in result.get("error_message", "")
+
+    def test_invalid_message_no_commit_message_key(self):
+        """Missing commit_message key should be BLOCKED."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+        }
+
+        result = validate_commit_message(state)
+
+        assert "BLOCKED" in result.get("error_message", "")
+
+    def test_valid_message_inline_format(self):
+        """Commit message with inline 'fixes #N' should pass."""
+        from agentos.workflows.testing.nodes.validate_commit_message import (
+            validate_commit_message,
+        )
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "commit_message": "feat: add new feature (fixes #42)",
+        }
+
+        result = validate_commit_message(state)
+
+        assert result.get("error_message", "") == ""
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

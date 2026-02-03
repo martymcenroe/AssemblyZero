@@ -23,6 +23,9 @@ from agentos.workflows.testing.nodes.implement_code import implement_code
 from agentos.workflows.testing.nodes.load_lld import load_lld
 from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
 from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+from agentos.workflows.testing.nodes.validate_commit_message import (
+    validate_commit_message,
+)
 from agentos.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
     verify_red_phase,
@@ -38,4 +41,5 @@ __all__ = [
     "e2e_validation",
     "finalize",
     "document",
+    "validate_commit_message",
 ]
