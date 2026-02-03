@@ -38,7 +38,7 @@ def human_gate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
 
     # If gate is disabled, skip to review
     if not gates_draft:
-        print("    Gate disabled → proceeding to review")
+        print("    Gate disabled -> proceeding to review")
         return {
             "next_node": "N3_review",
             "iteration_count": iteration_count,
@@ -49,7 +49,7 @@ def human_gate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     if auto_mode:
         # If there's a blocking verdict, auto-revise
         if current_verdict and "BLOCKED" in current_verdict.upper():
-            print("    [AUTO] BLOCKED verdict → revising draft")
+            print("    [AUTO] BLOCKED verdict -> revising draft")
             return {
                 "next_node": "N1_generate_draft",
                 "iteration_count": iteration_count,
@@ -99,7 +99,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
     # If gate is disabled, auto-route based on verdict
     if not gates_verdict:
         if lld_status == "APPROVED" or "APPROVED" in current_verdict.upper():
-            print("    Gate disabled, APPROVED → finalizing")
+            print("    Gate disabled, APPROVED -> finalizing")
             return {
                 "next_node": "N5_finalize",
                 "iteration_count": iteration_count,
@@ -107,7 +107,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
             }
         else:
             # Auto-revise if blocked
-            print("    Gate disabled, BLOCKED → revising")
+            print("    Gate disabled, BLOCKED -> revising")
             return {
                 "next_node": "N1_generate_draft",
                 "iteration_count": iteration_count,
@@ -117,7 +117,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
     # Auto mode: route based on lld_status
     if auto_mode:
         if lld_status == "APPROVED" or "APPROVED" in current_verdict.upper():
-            print("    [AUTO] APPROVED → finalizing")
+            print("    [AUTO] APPROVED -> finalizing")
             return {
                 "next_node": "N5_finalize",
                 "iteration_count": iteration_count,
@@ -125,7 +125,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
             }
         else:
             # Auto-revise if blocked
-            print("    [AUTO] BLOCKED → revising draft")
+            print("    [AUTO] BLOCKED -> revising draft")
             return {
                 "next_node": "N1_generate_draft",
                 "iteration_count": iteration_count,
@@ -134,7 +134,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
 
     # Interactive mode: default to finalize if approved
     if lld_status == "APPROVED":
-        print("    APPROVED → finalizing")
+        print("    APPROVED -> finalizing")
         return {
             "next_node": "N5_finalize",
             "iteration_count": iteration_count,
@@ -142,7 +142,7 @@ def human_gate_verdict(state: RequirementsWorkflowState) -> dict[str, Any]:
         }
 
     # Default to revise for blocked verdicts
-    print("    BLOCKED → revising draft")
+    print("    BLOCKED -> revising draft")
     return {
         "next_node": "N1_generate_draft",
         "iteration_count": iteration_count,
