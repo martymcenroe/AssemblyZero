@@ -1588,6 +1588,173 @@ class TestLoadInputEmptyResponseExhaustsRetries:
         assert "empty" in result.get("error_message", "").lower()
 
 
+class TestLineageProvenance:
+    """Tests for repo provenance in lineage files (Issue #169)."""
+
+    @patch("subprocess.run")
+    def test_issue_file_has_yaml_frontmatter(self, mock_run, tmp_path):
+        """001-issue.md should include YAML frontmatter with repo info."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # Mock gh CLI response
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"title": "Test Issue", "body": "Issue body content"}',
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=37,
+        )
+
+        result = load_input(state)
+
+        # Read the saved issue file
+        audit_dir = Path(result.get("audit_dir", ""))
+        issue_file = audit_dir / "001-issue.md"
+        assert issue_file.exists(), f"Issue file not found at {issue_file}"
+
+        content = issue_file.read_text()
+        assert content.startswith("---"), "File should start with YAML frontmatter"
+        assert "repo:" in content, "Frontmatter should include repo field"
+        assert "issue:" in content, "Frontmatter should include issue field"
+        assert "url:" in content, "Frontmatter should include url field"
+        assert "fetched:" in content, "Frontmatter should include fetched timestamp"
+
+    @patch("subprocess.run")
+    def test_frontmatter_contains_correct_issue_number(self, mock_run, tmp_path):
+        """Frontmatter issue field matches the issue number from state."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"title": "Test", "body": "Body"}',
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        audit_dir = Path(result.get("audit_dir", ""))
+        content = (audit_dir / "001-issue.md").read_text()
+        assert "issue: 42" in content, "Frontmatter should contain correct issue number"
+
+    @patch("subprocess.run")
+    def test_frontmatter_url_is_valid_github_url(self, mock_run, tmp_path):
+        """URL field should be full GitHub issue URL."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # Mock both gh issue view and git remote get-url
+        def mock_subprocess(cmd, **kwargs):
+            if "issue" in cmd:
+                return Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}')
+            elif "remote" in cmd:
+                return Mock(returncode=0, stdout="https://github.com/owner/repo-name.git\n")
+            return Mock(returncode=1, stdout="", stderr="")
+
+        mock_run.side_effect = mock_subprocess
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=37,
+        )
+
+        result = load_input(state)
+
+        audit_dir = Path(result.get("audit_dir", ""))
+        content = (audit_dir / "001-issue.md").read_text()
+        assert "url: https://github.com/" in content, "URL should be full GitHub URL"
+        assert "/issues/37" in content, "URL should contain issue number"
+
+    def test_mock_mode_also_has_frontmatter(self, tmp_path):
+        """Mock mode should also include frontmatter."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=99,
+            mock_mode=True,
+        )
+
+        result = load_input(state)
+
+        audit_dir = Path(result.get("audit_dir", ""))
+        content = (audit_dir / "001-issue.md").read_text()
+        assert content.startswith("---"), "Mock mode should also have frontmatter"
+        assert "issue: 99" in content, "Mock mode should have correct issue number"
+
+    @patch("subprocess.run")
+    def test_frontmatter_fetched_is_iso_timestamp(self, mock_run, tmp_path):
+        """Fetched field should be ISO 8601 timestamp."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+        import re
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"title": "Test", "body": "Body"}',
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        audit_dir = Path(result.get("audit_dir", ""))
+        content = (audit_dir / "001-issue.md").read_text()
+
+        # ISO 8601 pattern: YYYY-MM-DDTHH:MM:SS
+        iso_pattern = r"fetched: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+        assert re.search(iso_pattern, content), "Fetched should be ISO 8601 format"
+
+    @patch("subprocess.run")
+    def test_issue_content_preserved_after_frontmatter(self, mock_run, tmp_path):
+        """Original issue content should follow the frontmatter."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='{"title": "My Test Issue", "body": "This is the body"}',
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        audit_dir = Path(result.get("audit_dir", ""))
+        content = (audit_dir / "001-issue.md").read_text()
+
+        # Content should have frontmatter then issue content
+        assert "---" in content
+        assert "# Issue #42: My Test Issue" in content
+        assert "This is the body" in content
+
+
 class TestHumanGateInteractiveMode:
     """Tests for human_gate interactive mode paths."""
 

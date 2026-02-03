@@ -1,14 +1,17 @@
 """N0: Load input node for Requirements Workflow.
 
 Issue #101: Unified Requirements Workflow
+Issue #169: Add repo provenance to lineage issue files
 
 Handles loading input for both workflow types:
 - Issue workflow: Load brief file content
 - LLD workflow: Fetch GitHub issue via gh CLI
 
 Creates audit directory and saves initial input to audit trail.
+Issue files now include YAML frontmatter with repo provenance.
 """
 
+import datetime
 import json
 import subprocess
 import time
@@ -202,13 +205,18 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
         target_repo=target_repo,
     )
 
-    # Save issue to audit trail
+    # Save issue to audit trail with provenance frontmatter (Issue #169)
     issue_content = f"# Issue #{issue_number}: {issue_title}\n\n{issue_body}"
     if context_content:
         issue_content += f"\n\n---\n\n# Context Files\n\n{context_content}"
 
+    # Add YAML frontmatter with repo provenance
+    repo_name = _get_repo_name(str(target_repo))
+    frontmatter = _create_issue_frontmatter(repo_name, issue_number)
+    issue_content_with_frontmatter = frontmatter + issue_content
+
     file_num = next_file_number(audit_dir)
-    save_audit_file(audit_dir, file_num, "issue.md", issue_content)
+    save_audit_file(audit_dir, file_num, "issue.md", issue_content_with_frontmatter)
 
     return {
         "issue_title": issue_title,
@@ -250,11 +258,15 @@ This is a mock issue for testing.
         target_repo=target_repo,
     )
 
-    # Save to audit
+    # Save to audit with provenance frontmatter (Issue #169)
+    repo_name = _get_repo_name(str(target_repo))
+    frontmatter = _create_issue_frontmatter(repo_name, issue_number)
+    issue_content = f"# Issue #{issue_number}: {mock_title}\n\n{mock_body}"
+
     file_num = next_file_number(audit_dir)
     save_audit_file(
         audit_dir, file_num, "issue.md",
-        f"# Issue #{issue_number}: {mock_title}\n\n{mock_body}"
+        frontmatter + issue_content
     )
 
     return {
@@ -265,3 +277,52 @@ This is a mock issue for testing.
         "file_counter": file_num,
         "error_message": "",
     }
+
+
+def _get_repo_name(target_repo: str) -> str:
+    """Extract owner/repo from git remote.
+
+    Args:
+        target_repo: Path to the target repository.
+
+    Returns:
+        Repository name in format 'owner/repo', or 'unknown/unknown' on failure.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", target_repo, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        if result.returncode == 0:
+            url = result.stdout.strip()
+            # Parse: https://github.com/owner/repo.git or git@github.com:owner/repo.git
+            if "github.com" in url:
+                parts = url.rstrip(".git").split("github.com")[-1]
+                return parts.lstrip("/").lstrip(":")
+    except Exception:
+        pass
+    return "unknown/unknown"
+
+
+def _create_issue_frontmatter(repo_name: str, issue_number: int) -> str:
+    """Create YAML frontmatter with repo provenance.
+
+    Args:
+        repo_name: Repository name in format 'owner/repo'.
+        issue_number: The GitHub issue number.
+
+    Returns:
+        YAML frontmatter string including trailing newlines.
+    """
+    timestamp = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+    return f"""---
+repo: {repo_name}
+issue: {issue_number}
+url: https://github.com/{repo_name}/issues/{issue_number}
+fetched: {timestamp}Z
+---
+
+"""
