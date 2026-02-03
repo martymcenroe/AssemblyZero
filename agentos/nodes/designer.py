@@ -4,7 +4,7 @@ This module contains the Designer Node that drafts LLDs from GitHub Issues,
 pausing for human editing before LLD review.
 
 Issue: #56
-LLD: docs/LLDs/active/56-designer-node.md
+LLD: docs/lld/active/56-designer-node.md
 
 Cross-repo support (Issue #86):
 - Accepts issue_title, issue_body from state (skips re-fetch)

@@ -4872,7 +4872,7 @@ class TestFinalizeCoverageGaps:
         from agentos.workflows.testing.nodes.finalize import _archive_workflow_artifacts
 
         # Create active directory with files
-        active_dir = tmp_path / "docs" / "LLDs" / "active"
+        active_dir = tmp_path / "docs" / "lld" / "active"
         active_dir.mkdir(parents=True)
         lld_file = active_dir / "42-feature.md"
         lld_file.write_text("# LLD")
@@ -5289,9 +5289,9 @@ class TestFinalizeCoverageMore:
         from agentos.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Create active and done directories
-        active_dir = tmp_path / "docs" / "LLDs" / "active"
+        active_dir = tmp_path / "docs" / "lld" / "active"
         active_dir.mkdir(parents=True)
-        done_dir = tmp_path / "docs" / "LLDs" / "done"
+        done_dir = tmp_path / "docs" / "lld" / "done"
         done_dir.mkdir(parents=True)
 
         # Create a file in active

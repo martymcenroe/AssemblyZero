@@ -24,8 +24,8 @@ from agentos.workflows.testing.state import TestingWorkflowState
 @pytest.fixture
 def temp_repo(tmp_path):
     """Create a temporary repository structure with active/ and done/ directories."""
-    active_dir = tmp_path / "docs" / "LLDs" / "active"
-    done_dir = tmp_path / "docs" / "LLDs" / "done"
+    active_dir = tmp_path / "docs" / "lld" / "active"
+    done_dir = tmp_path / "docs" / "lld" / "done"
     reports_active = tmp_path / "docs" / "reports" / "active"
     reports_done = tmp_path / "docs" / "reports" / "done"
     
@@ -42,7 +42,7 @@ def sample_metadata() -> TestReportMetadata:
     """Sample TestReportMetadata for testing."""
     return {
         "issue_number": 141,
-        "lld_path": "docs/LLDs/active/141-fix.md",
+        "lld_path": "docs/lld/active/141-fix.md",
         "completed_at": "2025-01-15T10:30:00",
         "test_files": ["tests/test_foo.py", "tests/test_bar.py"],
         "implementation_files": ["agentos/foo.py", "agentos/bar.py"],
@@ -87,7 +87,7 @@ def test_100(caplog):
     contains error message
     """
     # TDD: Arrange
-    test_file = Path("/fake/docs/LLDs/active/141-test.md")
+    test_file = Path("/fake/docs/lld/active/141-test.md")
     
     with caplog.at_level(logging.ERROR):
         with patch.object(Path, "exists", return_value=True):
@@ -180,7 +180,7 @@ def test_010(temp_repo, caplog):
     not in active/, log contains success message
     """
     # TDD: Arrange
-    active_lld = temp_repo / "docs" / "LLDs" / "active" / "141-test.md"
+    active_lld = temp_repo / "docs" / "lld" / "active" / "141-test.md"
     active_lld.write_text("# LLD Content")
     
     with caplog.at_level(logging.INFO):
@@ -189,7 +189,7 @@ def test_010(temp_repo, caplog):
 
     # TDD: Assert
     assert result is not None
-    done_lld = temp_repo / "docs" / "LLDs" / "done" / "141-test.md"
+    done_lld = temp_repo / "docs" / "lld" / "done" / "141-test.md"
     assert done_lld.exists()
     assert not active_lld.exists()
     assert "Archived 141-test.md" in caplog.text
@@ -235,7 +235,7 @@ def test_030(caplog):
     Warning logged, None returned | No exception, log contains warning
     """
     # TDD: Arrange
-    non_existent = Path("/fake/path/docs/LLDs/active/999-missing.md")
+    non_existent = Path("/fake/path/docs/lld/active/999-missing.md")
     
     with caplog.at_level(logging.WARNING):
         # TDD: Act
@@ -273,8 +273,8 @@ def test_050(temp_repo):
     """
     # TDD: Arrange
     # Create active/ but remove done/
-    active_lld = temp_repo / "docs" / "LLDs" / "active" / "141-test.md"
-    done_dir = temp_repo / "docs" / "LLDs" / "done"
+    active_lld = temp_repo / "docs" / "lld" / "active" / "141-test.md"
+    done_dir = temp_repo / "docs" / "lld" / "done"
     active_lld.write_text("# LLD Content")
     
     # Remove done directory to test creation
@@ -288,7 +288,7 @@ def test_050(temp_repo):
     # TDD: Assert
     assert result is not None
     assert done_dir.exists()  # Directory was created
-    done_lld = temp_repo / "docs" / "LLDs" / "done" / "141-test.md"
+    done_lld = temp_repo / "docs" / "lld" / "done" / "141-test.md"
     assert done_lld.exists()
     assert not active_lld.exists()
 
@@ -300,8 +300,8 @@ def test_060(temp_repo):
     preserved
     """
     # TDD: Arrange
-    active_lld = temp_repo / "docs" / "LLDs" / "active" / "141-test.md"
-    done_lld = temp_repo / "docs" / "LLDs" / "done" / "141-test.md"
+    active_lld = temp_repo / "docs" / "lld" / "active" / "141-test.md"
+    done_lld = temp_repo / "docs" / "lld" / "done" / "141-test.md"
     
     active_lld.write_text("# New LLD Content")
     done_lld.write_text("# Old LLD Content")
@@ -355,7 +355,7 @@ def test_090(temp_repo):
     Files remain in active/, log indicates skip
     """
     # TDD: Arrange
-    active_lld = temp_repo / "docs" / "LLDs" / "active" / "141-test.md"
+    active_lld = temp_repo / "docs" / "lld" / "active" / "141-test.md"
     active_lld.write_text("# LLD Content")
 
     state: TestingWorkflowState = {
@@ -419,7 +419,7 @@ def test_150(temp_repo):
     printed | archived_files populated, LLD moved to done/
     """
     # TDD: Arrange
-    active_lld = temp_repo / "docs" / "LLDs" / "active" / "141-test.md"
+    active_lld = temp_repo / "docs" / "lld" / "active" / "141-test.md"
     active_lld.write_text("# LLD Content")
     audit_dir = temp_repo / "docs" / "lineage" / "active" / "141-testing"
     audit_dir.mkdir(parents=True)
@@ -449,6 +449,6 @@ def test_150(temp_repo):
     # TDD: Assert
     assert "archived_files" in result
     assert len(result["archived_files"]) == 1
-    done_lld = temp_repo / "docs" / "LLDs" / "done" / "141-test.md"
+    done_lld = temp_repo / "docs" / "lld" / "done" / "141-test.md"
     assert done_lld.exists()
     assert not active_lld.exists()
