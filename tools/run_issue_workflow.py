@@ -692,8 +692,11 @@ def run_all_issues(
     return 0
 
 
-def main() -> int:
-    """Main entry point."""
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Create and return the argument parser for the CLI.
+
+    Separated from main() to enable testing.
+    """
     parser = argparse.ArgumentParser(
         description="Issue creation workflow with governance gates.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -701,7 +704,7 @@ def main() -> int:
 Examples:
     python tools/run_issue_workflow.py --brief my-feature-notes.md
     python tools/run_issue_workflow.py --select
-    python tools/run_issue_workflow.py --select --auto
+    python tools/run_issue_workflow.py --select --gates none
     poetry run python tools/run_issue_workflow.py --resume my-feature-notes.md
     poetry run python tools/run_issue_workflow.py --repo /path/to/repo --select
         """,
@@ -727,9 +730,15 @@ Examples:
         help="Resume interrupted workflow by brief filename",
     )
     parser.add_argument(
+        "--gates",
+        choices=["none", "draft", "verdict", "all"],
+        default=None,
+        help="Which gates to enable: none, draft, verdict, all (default: all)",
+    )
+    parser.add_argument(
         "--auto",
         action="store_true",
-        help="Auto mode: skip VS Code, auto-send to Gemini, open done/ at end",
+        help="DEPRECATED: Use --gates none instead",
     )
     parser.add_argument(
         "--repo",
@@ -737,7 +746,48 @@ Examples:
         help="Target repository root (default: auto-detect via git)",
     )
 
+    return parser
+
+
+def apply_gates_config(args: argparse.Namespace) -> None:
+    """Apply gates configuration to args, handling deprecation.
+
+    Args:
+        args: Parsed arguments namespace. Modified in place.
+    """
+    # Handle deprecated --auto flag
+    if args.auto:
+        if args.gates is not None:
+            # Both flags specified - warn and prefer --gates
+            print(
+                "WARNING: --auto is deprecated and conflicts with --gates. "
+                "Ignoring --auto, using --gates.",
+                file=sys.stderr,
+            )
+        else:
+            # Only --auto specified - map to --gates none
+            print(
+                "WARNING: --auto is deprecated. Use --gates none instead.",
+                file=sys.stderr,
+            )
+            args.gates = "none"
+
+    # Apply default if --gates not specified
+    if args.gates is None:
+        args.gates = "all"
+
+    # Set environment variable based on gates
+    if args.gates == "none":
+        os.environ["AGENTOS_AUTO_MODE"] = "1"
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = create_argument_parser()
     args = parser.parse_args()
+
+    # Apply gates configuration (handles deprecation, sets env vars)
+    apply_gates_config(args)
 
     # Resolve and validate repo root if provided
     repo_root = None
@@ -746,10 +796,6 @@ Examples:
         if not (repo_root / ".git").exists():
             print(f"Error: {repo_root} is not a git repository")
             return 1
-
-    # Set auto mode environment variable if flag is used
-    if args.auto:
-        os.environ["AGENTOS_AUTO_MODE"] = "1"
 
     # Handle --all (process all ideas)
     if args.all:

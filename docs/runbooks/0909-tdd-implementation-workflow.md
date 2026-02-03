@@ -83,10 +83,10 @@ stateDiagram-v2
 poetry run python tools/run_implement_from_lld.py --issue 104
 ```
 
-### Fully Automated
+### Fully Automated (No Human Gates)
 
 ```bash
-poetry run python tools/run_implement_from_lld.py --issue 104 --auto
+poetry run python tools/run_implement_from_lld.py --issue 104 --gates none
 ```
 
 ### Fast Mode (Skip E2E)
@@ -115,12 +115,14 @@ poetry run python tools/run_implement_from_lld.py --issue 104 --scaffold-only
 
 | Argument | Description |
 |----------|-------------|
-| `--auto` | Skip human gates (fully automated) |
+| `--gates LEVEL` | Which gates to enable: `none`, `draft`, `verdict`, `all` (default: `all`) |
 | `--mock` | Use fixtures instead of real APIs |
 | `--skip-e2e` | Skip E2E validation phase |
 | `--scaffold-only` | Stop after scaffolding tests (red phase) |
 | `--green-only` | Only run green phase verification |
 | `--resume` | Resume from checkpoint |
+
+**Note:** `--auto` is deprecated. Use `--gates none` instead.
 
 ### Configuration
 
