@@ -25,6 +25,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -37,6 +38,164 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from agentos.workflows.requirements.config import GateConfig
 from agentos.workflows.requirements.graph import create_requirements_graph
 from agentos.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
+
+
+# =============================================================================
+# Interactive Selection Functions
+# =============================================================================
+
+
+def extract_brief_title(brief_path: Path) -> str:
+    """Extract title from brief file (first # heading).
+
+    Args:
+        brief_path: Path to brief file.
+
+    Returns:
+        Title string or "(no title)" if not found.
+    """
+    try:
+        content = brief_path.read_text(encoding="utf-8", errors="replace")
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("# "):
+                return line[2:].strip()
+    except (OSError, UnicodeDecodeError):
+        pass
+    return "(no title)"
+
+
+def select_brief_file(target_repo: Path) -> str | None:
+    """Interactively select a brief file from ideas/active/.
+
+    Args:
+        target_repo: Path to target repository.
+
+    Returns:
+        Selected brief file path (relative to repo), or None if cancelled.
+    """
+    ideas_dir = target_repo / "ideas" / "active"
+
+    if not ideas_dir.exists():
+        print(f"ERROR: ideas/active/ directory not found at {ideas_dir}")
+        return None
+
+    # Find markdown files
+    briefs = sorted(ideas_dir.glob("*.md"))
+
+    if not briefs:
+        print("ERROR: No brief files (*.md) found in ideas/active/")
+        return None
+
+    # Display menu
+    print(f"\n{'=' * 60}")
+    print("Select Brief File from ideas/active/")
+    print(f"{'=' * 60}")
+
+    for i, brief in enumerate(briefs, 1):
+        title = extract_brief_title(brief)
+        print(f"  [{i}] {brief.name}")
+        print(f"      {title}")
+
+    print(f"\n  [q] Quit")
+    print()
+
+    # Test mode: auto-select first
+    if os.environ.get("AGENTOS_TEST_MODE") == "1" and briefs:
+        choice = "1"
+        print(f"Select brief [1-{len(briefs)}, q]: {choice} (TEST MODE)")
+        return str(briefs[0].relative_to(target_repo))
+
+    while True:
+        choice = input(f"Select brief [1-{len(briefs)}, q]: ").strip().lower()
+
+        if choice == "q":
+            return None
+
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(briefs):
+                return str(briefs[idx - 1].relative_to(target_repo))
+            else:
+                print(f"Invalid number. Enter 1-{len(briefs)} or q.")
+        except ValueError:
+            print("Invalid input. Enter a number or q.")
+
+
+def select_github_issue(target_repo: Path) -> int | None:
+    """Interactively select an open GitHub issue.
+
+    Args:
+        target_repo: Path to target repository (for gh CLI context).
+
+    Returns:
+        Selected issue number, or None if cancelled.
+    """
+    print("\nFetching open issues from GitHub...")
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "list", "--state", "open", "--json", "number,title,labels"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            cwd=str(target_repo),
+        )
+
+        if result.returncode != 0:
+            print(f"ERROR: Failed to fetch issues: {result.stderr.strip()}")
+            return None
+
+        issues = json.loads(result.stdout)
+
+    except subprocess.TimeoutExpired:
+        print("ERROR: Timeout fetching issues from GitHub")
+        return None
+    except FileNotFoundError:
+        print("ERROR: gh CLI not found. Install GitHub CLI: https://cli.github.com/")
+        return None
+    except json.JSONDecodeError:
+        print("ERROR: Failed to parse GitHub response")
+        return None
+
+    if not issues:
+        print("No open issues found.")
+        return None
+
+    # Display menu
+    print(f"\n{'=' * 60}")
+    print("Select GitHub Issue")
+    print(f"{'=' * 60}")
+
+    for i, issue in enumerate(issues, 1):
+        labels = ", ".join(label["name"] for label in issue.get("labels", []))
+        label_str = f" [{labels}]" if labels else ""
+        print(f"  [{i}] #{issue['number']}: {issue['title']}{label_str}")
+
+    print(f"\n  [q] Quit")
+    print()
+
+    # Test mode: auto-select first
+    if os.environ.get("AGENTOS_TEST_MODE") == "1" and issues:
+        choice = "1"
+        print(f"Select issue [1-{len(issues)}, q]: {choice} (TEST MODE)")
+        return issues[0]["number"]
+
+    while True:
+        choice = input(f"Select issue [1-{len(issues)}, q]: ").strip().lower()
+
+        if choice == "q":
+            return None
+
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(issues):
+                return issues[idx - 1]["number"]
+            else:
+                print(f"Invalid number. Enter 1-{len(issues)} or q.")
+        except ValueError:
+            print("Invalid input. Enter a number or q.")
 
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
@@ -73,7 +232,7 @@ Examples:
         "--type",
         choices=["issue", "lld"],
         required=True,
-        help="Workflow type: 'issue' for brief→GitHub issue, 'lld' for issue→LLD",
+        help="Workflow type: 'issue' for brief->GitHub issue, 'lld' for issue->LLD",
     )
 
     # Input (mutually exclusive based on type)
@@ -324,8 +483,23 @@ def main() -> int:
         print("ERROR: --issue or --select required for LLD workflow")
         return 1
 
-    # Resolve paths
+    # Resolve paths (needed for --select)
     agentos_root, target_repo = resolve_roots(args)
+
+    # Handle --select: interactive selection
+    if args.select:
+        if args.type == "issue":
+            selected = select_brief_file(target_repo)
+            if selected is None:
+                print("Selection cancelled.")
+                return 0
+            args.brief = selected
+        else:  # lld
+            selected = select_github_issue(target_repo)
+            if selected is None:
+                print("Selection cancelled.")
+                return 0
+            args.issue = selected
 
     if args.debug:
         print(f"DEBUG: agentos_root = {agentos_root}")

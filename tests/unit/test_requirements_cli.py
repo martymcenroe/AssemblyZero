@@ -6,6 +6,7 @@ Tests for the CLI interface and argument parsing.
 """
 
 import pytest
+import json
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
@@ -276,3 +277,281 @@ class TestMainFunction:
         # Verify graph was created and invoked
         mock_graph.assert_called_once()
         mock_compiled.invoke.assert_called_once()
+
+
+class TestSelectFlag:
+    """Tests for --select flag parsing."""
+
+    def test_parse_select_flag(self):
+        """Test parsing --select flag."""
+        from tools.run_requirements_workflow import parse_args
+
+        args = parse_args([
+            "--type", "issue",
+            "--select",
+        ])
+
+        assert args.select is True
+
+    def test_select_with_issue_workflow(self):
+        """Test --select is valid for issue workflow."""
+        from tools.run_requirements_workflow import parse_args
+
+        args = parse_args([
+            "--type", "issue",
+            "--select",
+        ])
+
+        assert args.type == "issue"
+        assert args.select is True
+        assert args.brief is None
+
+    def test_select_with_lld_workflow(self):
+        """Test --select is valid for lld workflow."""
+        from tools.run_requirements_workflow import parse_args
+
+        args = parse_args([
+            "--type", "lld",
+            "--select",
+        ])
+
+        assert args.type == "lld"
+        assert args.select is True
+        assert args.issue is None
+
+
+class TestExtractBriefTitle:
+    """Tests for extract_brief_title function."""
+
+    def test_extracts_h1_title(self, tmp_path):
+        """Test extracting title from H1 heading."""
+        from tools.run_requirements_workflow import extract_brief_title
+
+        brief = tmp_path / "feature.md"
+        brief.write_text("# My Feature Title\n\nDescription here.")
+
+        title = extract_brief_title(brief)
+
+        assert title == "My Feature Title"
+
+    def test_returns_no_title_for_empty_file(self, tmp_path):
+        """Test returns placeholder for empty file."""
+        from tools.run_requirements_workflow import extract_brief_title
+
+        brief = tmp_path / "empty.md"
+        brief.write_text("")
+
+        title = extract_brief_title(brief)
+
+        assert title == "(no title)"
+
+    def test_returns_no_title_when_no_heading(self, tmp_path):
+        """Test returns placeholder when no H1 heading."""
+        from tools.run_requirements_workflow import extract_brief_title
+
+        brief = tmp_path / "no-heading.md"
+        brief.write_text("Just some text without a heading.")
+
+        title = extract_brief_title(brief)
+
+        assert title == "(no title)"
+
+    def test_handles_missing_file(self, tmp_path):
+        """Test handles missing file gracefully."""
+        from tools.run_requirements_workflow import extract_brief_title
+
+        missing = tmp_path / "nonexistent.md"
+
+        title = extract_brief_title(missing)
+
+        assert title == "(no title)"
+
+
+class TestSelectBriefFile:
+    """Tests for select_brief_file function."""
+
+    def test_returns_none_when_no_ideas_dir(self, tmp_path):
+        """Test returns None when ideas/active/ doesn't exist."""
+        from tools.run_requirements_workflow import select_brief_file
+
+        result = select_brief_file(tmp_path)
+
+        assert result is None
+
+    def test_returns_none_when_no_briefs(self, tmp_path):
+        """Test returns None when no brief files found."""
+        from tools.run_requirements_workflow import select_brief_file
+
+        ideas_dir = tmp_path / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+
+        result = select_brief_file(tmp_path)
+
+        assert result is None
+
+    @patch.dict("os.environ", {"AGENTOS_TEST_MODE": "1"})
+    def test_auto_selects_first_in_test_mode(self, tmp_path):
+        """Test auto-selects first brief in test mode."""
+        from tools.run_requirements_workflow import select_brief_file
+
+        ideas_dir = tmp_path / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        (ideas_dir / "feature-a.md").write_text("# Feature A")
+        (ideas_dir / "feature-b.md").write_text("# Feature B")
+
+        result = select_brief_file(tmp_path)
+
+        assert result == "ideas/active/feature-a.md" or result == "ideas\\active\\feature-a.md"
+
+    @patch("builtins.input", return_value="q")
+    def test_returns_none_when_user_quits(self, mock_input, tmp_path):
+        """Test returns None when user quits."""
+        from tools.run_requirements_workflow import select_brief_file
+
+        ideas_dir = tmp_path / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        (ideas_dir / "feature.md").write_text("# Feature")
+
+        result = select_brief_file(tmp_path)
+
+        assert result is None
+
+    @patch("builtins.input", return_value="1")
+    def test_selects_valid_number(self, mock_input, tmp_path):
+        """Test selects brief when valid number entered."""
+        from tools.run_requirements_workflow import select_brief_file
+
+        ideas_dir = tmp_path / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        (ideas_dir / "feature.md").write_text("# Feature")
+
+        result = select_brief_file(tmp_path)
+
+        assert "feature.md" in result
+
+
+class TestSelectGitHubIssue:
+    """Tests for select_github_issue function."""
+
+    @patch("subprocess.run")
+    def test_returns_none_on_gh_failure(self, mock_run, tmp_path):
+        """Test returns None when gh CLI fails."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=1,
+            stdout="",
+            stderr="gh: not logged in",
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_returns_none_on_timeout(self, mock_run, tmp_path):
+        """Test returns None on gh CLI timeout."""
+        import subprocess
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
+
+        result = select_github_issue(tmp_path)
+
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_returns_none_when_gh_not_found(self, mock_run, tmp_path):
+        """Test returns None when gh CLI not installed."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.side_effect = FileNotFoundError("gh not found")
+
+        result = select_github_issue(tmp_path)
+
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_returns_none_when_no_issues(self, mock_run, tmp_path):
+        """Test returns None when no open issues."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout="[]",
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result is None
+
+    @patch("subprocess.run")
+    @patch.dict("os.environ", {"AGENTOS_TEST_MODE": "1"})
+    def test_auto_selects_first_in_test_mode(self, mock_run, tmp_path):
+        """Test auto-selects first issue in test mode."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps([
+                {"number": 42, "title": "First Issue", "labels": []},
+                {"number": 43, "title": "Second Issue", "labels": []},
+            ]),
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result == 42
+
+    @patch("subprocess.run")
+    @patch("builtins.input", return_value="q")
+    def test_returns_none_when_user_quits(self, mock_input, mock_run, tmp_path):
+        """Test returns None when user quits."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps([
+                {"number": 42, "title": "Test Issue", "labels": []},
+            ]),
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result is None
+
+    @patch("subprocess.run")
+    @patch("builtins.input", return_value="1")
+    def test_selects_valid_number(self, mock_input, mock_run, tmp_path):
+        """Test selects issue when valid number entered."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps([
+                {"number": 42, "title": "First Issue", "labels": []},
+                {"number": 43, "title": "Second Issue", "labels": []},
+            ]),
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result == 42
+
+    @patch("subprocess.run")
+    @patch("builtins.input", return_value="2")
+    def test_selects_second_issue(self, mock_input, mock_run, tmp_path):
+        """Test selects second issue when 2 entered."""
+        from tools.run_requirements_workflow import select_github_issue
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps([
+                {"number": 42, "title": "First Issue", "labels": []},
+                {"number": 99, "title": "Second Issue", "labels": []},
+            ]),
+        )
+
+        result = select_github_issue(tmp_path)
+
+        assert result == 99
