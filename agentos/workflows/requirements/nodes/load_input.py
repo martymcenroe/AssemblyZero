@@ -55,7 +55,7 @@ def _load_issue(state: Dict[str, Any]) -> Dict[str, Any]:
             state["error_message"] = error_msg
             # Save error to audit
             file_num = next_file_number(audit_dir)
-            save_audit_file(audit_dir, file_num, "error", error_msg)
+            save_audit_file(audit_dir, file_num, "error.md", error_msg)
             return state
         
         # Parse JSON response
@@ -69,23 +69,23 @@ def _load_issue(state: Dict[str, Any]) -> Dict[str, Any]:
         audit_content = f"# Issue #{issue_number}\n\n"
         audit_content += f"**Title:** {state['issue_title']}\n\n"
         audit_content += f"**Body:**\n{state['issue_body']}\n"
-        save_audit_file(audit_dir, file_num, "issue", audit_content)
+        save_audit_file(audit_dir, file_num, "issue.md", audit_content)
         
     except subprocess.TimeoutExpired:
         error_msg = f"Timeout fetching issue #{issue_number}"
         state["error_message"] = error_msg
         file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "error", error_msg)
+        save_audit_file(audit_dir, file_num, "error.md", error_msg)
     except json.JSONDecodeError as e:
         error_msg = f"Failed to parse issue JSON: {e}"
         state["error_message"] = error_msg
         file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "error", error_msg)
+        save_audit_file(audit_dir, file_num, "error.md", error_msg)
     except Exception as e:
         error_msg = f"Unexpected error loading issue: {e}"
         state["error_message"] = error_msg
         file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "error", error_msg)
+        save_audit_file(audit_dir, file_num, "error.md", error_msg)
     
     return state
 
