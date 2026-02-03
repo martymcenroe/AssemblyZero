@@ -14,7 +14,7 @@ Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
 
 Usage:
-    # Full TDD workflow
+    # Full TDD workflow (all gates enabled)
     python tools/run_implement_from_lld.py --issue 42
 
     # Fast mode (skip E2E)
@@ -23,8 +23,11 @@ Usage:
     # Just scaffold tests
     python tools/run_implement_from_lld.py --issue 42 --scaffold-only
 
-    # Auto mode (no human gates)
-    python tools/run_implement_from_lld.py --issue 42 --auto
+    # Fully automated (no human gates)
+    python tools/run_implement_from_lld.py --issue 42 --gates none
+
+    # Only draft gate (skip verdict)
+    python tools/run_implement_from_lld.py --issue 42 --gates draft
 
     # With sandbox repo for E2E
     python tools/run_implement_from_lld.py --issue 42 --sandbox-repo mcwiz/agentos-e2e-sandbox
@@ -144,7 +147,11 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
     return worktree_path, ""
 
 
-def main():
+def create_argument_parser() -> argparse.ArgumentParser:
+    """Create and return the argument parser for the CLI.
+
+    Separated from main() to enable testing.
+    """
     parser = argparse.ArgumentParser(
         description="Run TDD Testing Workflow on an issue with an approved LLD",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -171,9 +178,15 @@ def main():
         help="Path to LLD file (default: auto-detect from issue number)",
     )
     parser.add_argument(
+        "--gates",
+        choices=["none", "draft", "verdict", "all"],
+        default=None,
+        help="Which gates to enable: none, draft, verdict, all (default: all)",
+    )
+    parser.add_argument(
         "--auto",
         action="store_true",
-        help="Auto mode - skip human gates",
+        help="DEPRECATED: Use --gates none instead",
     )
     parser.add_argument(
         "--mock",
@@ -217,7 +230,61 @@ def main():
         help="Skip worktree creation (use current directory)",
     )
 
+    return parser
+
+
+def apply_gates_config(args: argparse.Namespace) -> None:
+    """Apply gates configuration to args, handling deprecation.
+
+    Args:
+        args: Parsed arguments namespace. Modified in place.
+    """
+    # Handle deprecated --auto flag
+    if args.auto:
+        if args.gates is not None:
+            # Both flags specified - warn and prefer --gates
+            print(
+                "WARNING: --auto is deprecated and conflicts with --gates. "
+                "Ignoring --auto, using --gates.",
+                file=sys.stderr,
+            )
+        else:
+            # Only --auto specified - map to --gates none
+            print(
+                "WARNING: --auto is deprecated. Use --gates none instead.",
+                file=sys.stderr,
+            )
+            args.gates = "none"
+
+    # Apply default if --gates not specified
+    if args.gates is None:
+        args.gates = "all"
+
+    # Set individual gate flags based on --gates value
+    if args.gates == "none":
+        args.gates_draft = False
+        args.gates_verdict = False
+        args.auto_mode = True
+    elif args.gates == "draft":
+        args.gates_draft = True
+        args.gates_verdict = False
+        args.auto_mode = False
+    elif args.gates == "verdict":
+        args.gates_draft = False
+        args.gates_verdict = True
+        args.auto_mode = False
+    else:  # "all"
+        args.gates_draft = True
+        args.gates_verdict = True
+        args.auto_mode = False
+
+
+def main():
+    parser = create_argument_parser()
     args = parser.parse_args()
+
+    # Apply gates configuration
+    apply_gates_config(args)
 
     # Validate issue number
     if args.issue <= 0:
@@ -225,7 +292,7 @@ def main():
         sys.exit(1)
 
     # Set environment variables for mode flags
-    if args.auto:
+    if args.auto_mode:
         os.environ["AGENTOS_AUTO_MODE"] = "1"
 
     # Import after setting up path
@@ -289,7 +356,7 @@ def main():
     print(f"Repository: {repo_root}")
     if worktree_path:
         print(f"Worktree: {worktree_path}")
-    print(f"Mode: {'auto' if args.auto else 'interactive'}")
+    print(f"Mode: {'auto' if args.auto_mode else 'interactive'}")
     if args.skip_e2e:
         print(f"E2E: skipped")
     if args.scaffold_only:
@@ -300,7 +367,7 @@ def main():
     initial_state: TestingWorkflowState = {
         "issue_number": args.issue,
         "repo_root": str(repo_root),
-        "auto_mode": args.auto,
+        "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,
         "scaffold_only": args.scaffold_only,
