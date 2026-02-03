@@ -50,6 +50,7 @@
 - [Verdict Analyzer   Template Improvement from Gemini Verdicts](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
 
 ---
+- [Fix Implementation Workflow Should Archive LLD and Reports to done  on Completion](Fix-Implementation-Workflow-Should-Archive-LLD-and-Reports-to-done--on-Completion)
 
 ### Chronicles
 
