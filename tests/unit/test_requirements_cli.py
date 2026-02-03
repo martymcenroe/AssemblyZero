@@ -182,6 +182,7 @@ class TestResolveRoots:
 
         args = Mock()
         args.repo = None
+        args.brief = None  # No brief provided, fall back to CWD
 
         agentos_root, target_repo = resolve_roots(args)
 
@@ -706,3 +707,150 @@ class TestAllArgumentsUsed:
         state = build_initial_state(args, tmp_path, tmp_path)
 
         assert state["config_reviewer"] == "claude:sonnet"
+
+
+class TestRepoAutoDetection:
+    """Tests for automatic target repo detection from brief file path.
+
+    Issue #115: Auto-detect target repo from brief file path.
+
+    TDD: These tests are written FIRST to define the expected behavior.
+    """
+
+    def test_explicit_repo_takes_precedence(self, tmp_path):
+        """--repo flag should override all auto-detection."""
+        from tools.run_requirements_workflow import resolve_roots
+
+        # Create two repos
+        repo_a = tmp_path / "repo_a"
+        repo_b = tmp_path / "repo_b"
+        repo_a.mkdir()
+        repo_b.mkdir()
+
+        # Initialize repo_b as git repo
+        import subprocess
+        subprocess.run(["git", "init"], cwd=str(repo_b), capture_output=True)
+
+        # Create brief in repo_b
+        ideas_dir = repo_b / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        brief = ideas_dir / "feature.md"
+        brief.write_text("# Feature")
+
+        # Create args with --repo pointing to repo_a and --brief in repo_b
+        args = Mock()
+        args.repo = str(repo_a)
+        args.brief = str(brief)
+
+        _, target_repo = resolve_roots(args)
+
+        # Explicit --repo should take precedence
+        assert target_repo == repo_a.resolve()
+
+    def test_detect_repo_from_brief_path(self, tmp_path):
+        """Brief in another repo should set target_repo to that repo."""
+        from tools.run_requirements_workflow import resolve_roots
+
+        # Create a git repo
+        repo = tmp_path / "other_repo"
+        repo.mkdir()
+
+        import subprocess
+        subprocess.run(["git", "init"], cwd=str(repo), capture_output=True)
+
+        # Create brief in that repo
+        ideas_dir = repo / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        brief = ideas_dir / "feature.md"
+        brief.write_text("# Feature")
+
+        # Create args with --brief but no --repo
+        args = Mock()
+        args.repo = None
+        args.brief = str(brief)
+
+        _, target_repo = resolve_roots(args)
+
+        # Should detect repo from brief path
+        assert target_repo == repo.resolve()
+
+    def test_fallback_to_cwd_when_brief_not_in_repo(self, tmp_path, monkeypatch):
+        """Brief outside any git repo falls back to CWD detection."""
+        from tools.run_requirements_workflow import resolve_roots
+
+        # Create a non-git directory with a brief
+        non_git_dir = tmp_path / "not_a_repo"
+        non_git_dir.mkdir()
+        brief = non_git_dir / "brief.md"
+        brief.write_text("# Feature")
+
+        # Create a git repo to be CWD
+        cwd_repo = tmp_path / "cwd_repo"
+        cwd_repo.mkdir()
+
+        import subprocess
+        subprocess.run(["git", "init"], cwd=str(cwd_repo), capture_output=True)
+
+        # Change to the CWD repo
+        monkeypatch.chdir(cwd_repo)
+
+        # Create args with --brief in non-git dir
+        args = Mock()
+        args.repo = None
+        args.brief = str(brief)
+
+        _, target_repo = resolve_roots(args)
+
+        # Should fall back to CWD repo
+        assert target_repo == cwd_repo.resolve()
+
+    def test_fallback_to_cwd_when_no_brief(self, tmp_path, monkeypatch):
+        """No --brief and no --repo uses CWD."""
+        from tools.run_requirements_workflow import resolve_roots
+
+        # Create a git repo to be CWD
+        cwd_repo = tmp_path / "cwd_repo"
+        cwd_repo.mkdir()
+
+        import subprocess
+        subprocess.run(["git", "init"], cwd=str(cwd_repo), capture_output=True)
+
+        # Change to the CWD repo
+        monkeypatch.chdir(cwd_repo)
+
+        # Create args with no --brief and no --repo
+        args = Mock()
+        args.repo = None
+        args.brief = None
+
+        _, target_repo = resolve_roots(args)
+
+        # Should use CWD repo
+        assert target_repo == cwd_repo.resolve()
+
+    def test_detect_repo_handles_nested_brief_path(self, tmp_path):
+        """Brief deeply nested in repo should still detect repo root."""
+        from tools.run_requirements_workflow import resolve_roots
+
+        # Create a git repo with deeply nested structure
+        repo = tmp_path / "deep_repo"
+        repo.mkdir()
+
+        import subprocess
+        subprocess.run(["git", "init"], cwd=str(repo), capture_output=True)
+
+        # Create deeply nested brief
+        nested_dir = repo / "ideas" / "active" / "subfolder" / "deep"
+        nested_dir.mkdir(parents=True)
+        brief = nested_dir / "feature.md"
+        brief.write_text("# Feature")
+
+        # Create args
+        args = Mock()
+        args.repo = None
+        args.brief = str(brief)
+
+        _, target_repo = resolve_roots(args)
+
+        # Should still find repo root
+        assert target_repo == repo.resolve()

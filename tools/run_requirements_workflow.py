@@ -309,11 +309,67 @@ Examples:
     return parser.parse_args(args)
 
 
+def _detect_repo_from_path(file_path: Path) -> Path | None:
+    """Walk up from file_path to find git repo root.
+
+    Args:
+        file_path: Path to a file or directory.
+
+    Returns:
+        Path to git repo root, or None if not in a git repo.
+    """
+    # Start from file's directory
+    search_dir = file_path.parent if file_path.is_file() else file_path
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(search_dir), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip()).resolve()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    return None
+
+
+def _detect_repo_from_cwd() -> Path:
+    """Detect git repo from current working directory.
+
+    Returns:
+        Path to git repo root, or CWD if not in a git repo.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return Path(result.stdout.strip()).resolve()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+
+    return Path.cwd().resolve()
+
+
 def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     """Resolve agentos_root and target_repo paths.
 
     agentos_root: Where AgentOS is installed (for templates/prompts).
     target_repo: Where the work happens (outputs, context, gh CLI).
+
+    Priority for target_repo:
+    1. --repo flag (explicit override)
+    2. Git repo containing the --brief file
+    3. Git repo of current working directory
+    4. Current working directory (fallback)
 
     Args:
         args: Parsed CLI arguments.
@@ -329,25 +385,21 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
         # Default to parent of tools/ directory
         agentos_root = Path(__file__).parent.parent.resolve()
 
-    # target_repo: from --repo or auto-detect from git
+    # target_repo: explicit --repo takes precedence
     if args.repo:
         target_repo = Path(args.repo).resolve()
+    elif args.brief:
+        # Try to detect repo from brief file path
+        brief_path = Path(args.brief).resolve()
+        detected = _detect_repo_from_path(brief_path)
+        if detected:
+            target_repo = detected
+        else:
+            # Brief not in a git repo, fall back to CWD
+            target_repo = _detect_repo_from_cwd()
     else:
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=10,
-            )
-            if result.returncode == 0:
-                target_repo = Path(result.stdout.strip()).resolve()
-            else:
-                # Fall back to current directory
-                target_repo = Path.cwd().resolve()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            target_repo = Path.cwd().resolve()
+        # Fall back to CWD detection
+        target_repo = _detect_repo_from_cwd()
 
     return agentos_root, target_repo
 
