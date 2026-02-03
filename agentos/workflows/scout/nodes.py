@@ -48,13 +48,18 @@ def load_fixture(filename: str) -> Any:
 
     Returns:
         Parsed fixture data.
+
+    Raises:
+        FileNotFoundError: If the fixture file does not exist.
     """
     fixture_dir = Path(__file__).parent.parent.parent.parent / "tests" / "fixtures" / "scout"
     fixture_path = fixture_dir / filename
 
     if not fixture_path.exists():
-        # Return empty data if fixture doesn't exist
-        return []
+        raise FileNotFoundError(
+            f"Fixture '{filename}' not found at {fixture_path}. "
+            f"Mock/offline mode requires fixture files to exist."
+        )
 
     with open(fixture_path, encoding="utf-8") as f:
         return json.load(f)
