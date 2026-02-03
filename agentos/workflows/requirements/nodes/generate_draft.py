@@ -9,6 +9,7 @@ Uses the configured drafter LLM to generate a draft based on:
 Supports revision mode with cumulative verdict history.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,20 @@ Use the template structure provided. Include all sections. Be specific about:
     if draft_path:
         print(f"    Saved: {draft_path.name}")
 
+    # Gate 1: Validate draft structure before review (Issue #235)
+    validation_error = validate_draft_structure(draft_content)
+    if validation_error:
+        print(f"    VALIDATION: {validation_error}")
+        return {
+            "current_draft": draft_content,
+            "current_draft_path": str(draft_path) if draft_path else "",
+            "draft_count": draft_count,
+            "iteration_count": iteration_count,
+            "file_counter": file_num,
+            "user_feedback": "",
+            "error_message": validation_error,
+        }
+
     return {
         "current_draft": draft_content,
         "current_draft_path": str(draft_path) if draft_path else "",
@@ -221,3 +236,26 @@ Create a complete document following the template structure.
 START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
 
     return prompt
+
+
+def validate_draft_structure(content: str) -> str | None:
+    """Check for unresolved open questions in draft.
+
+    Issue #235: Mechanical validation gate to catch structural issues
+    before Gemini review.
+
+    Args:
+        content: Draft content to validate.
+
+    Returns:
+        Error message if validation fails, None if passes.
+    """
+    if not content:
+        return None
+
+    # Find unchecked checkbox items (- [ ])
+    unchecked = re.findall(r"^- \[ \]", content, re.MULTILINE)
+    if unchecked:
+        return f"BLOCKED: {len(unchecked)} unresolved open questions - resolve before review"
+
+    return None

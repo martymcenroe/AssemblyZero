@@ -4,6 +4,7 @@ Updates GitHub issue with final draft, commits artifacts to git, and closes work
 For LLD workflows, saves LLD file with embedded review evidence.
 """
 
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -156,6 +157,34 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def validate_lld_final(content: str) -> list[str]:
+    """Final structural checks before LLD finalization.
+
+    Issue #235: Mechanical validation gate to catch structural issues
+    before saving the final LLD.
+
+    Args:
+        content: LLD content to validate.
+
+    Returns:
+        List of error messages. Empty list if validation passes.
+    """
+    errors = []
+
+    if not content:
+        return errors
+
+    # Check for unresolved open questions (unchecked checkboxes)
+    if re.search(r"^- \[ \]", content, re.MULTILINE):
+        errors.append("Unresolved open questions remain")
+
+    # Check for unresolved TODO in table cells
+    if re.search(r"\|\s*TODO\s*\|", content):
+        errors.append("Unresolved TODO in table cell")
+
+    return errors
+
+
 def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     """Save LLD file with embedded review evidence.
 
@@ -185,6 +214,14 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
         return state
 
     if not current_draft:
+        return state
+
+    # Gate 2: Validate LLD structure before finalization (Issue #235)
+    validation_errors = validate_lld_final(current_draft)
+    if validation_errors:
+        error_msg = "BLOCKED: " + "; ".join(validation_errors)
+        print(f"    VALIDATION: {error_msg}")
+        state["error_message"] = error_msg
         return state
 
     # Embed review evidence with ACTUAL verdict (not hardcoded APPROVED!)
