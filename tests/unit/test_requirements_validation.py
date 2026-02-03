@@ -69,17 +69,74 @@ Just some implementation details.
         result = validate_draft_structure("")
         assert result is None
 
-    def test_unchecked_in_any_section(self):
-        """Test that unchecked items anywhere are caught."""
+    def test_validation_ignores_definition_of_done_checkboxes(self):
+        """DoD checkboxes should not block validation.
+
+        Issue #245: Definition of Done checkboxes are supposed to be unchecked
+        until implementation is complete.
+        """
         content = """# LLD-123
 
-## Tasks
+## 1. Context
 
-- [ ] Task not done
+### Open Questions
+
+- [x] Resolved question
+
+## 12. Definition of Done
+
+- [ ] All tests written before implementation
+- [ ] Implementation complete
+- [ ] Documentation updated
+"""
+        result = validate_draft_structure(content)
+        assert result is None  # Should pass - no unchecked in Open Questions
+
+    def test_validation_catches_unchecked_open_questions(self):
+        """Unchecked Open Questions should block.
+
+        Issue #245: Only Open Questions section should be checked.
+        """
+        content = """# LLD-123
+
+## 1. Context
+
+### Open Questions
+
+- [ ] Unresolved question
+
+## 12. Definition of Done
+
+- [ ] All tests written
 """
         result = validate_draft_structure(content)
         assert result is not None
-        assert "1 unresolved" in result
+        assert "1 unresolved" in result  # Should block - 1 unchecked Open Question
+
+    def test_validation_only_checks_open_questions_section(self):
+        """Only the Open Questions section matters.
+
+        Issue #245: Random checkboxes in other sections should be ignored.
+        """
+        content = """# LLD-123
+
+## 1. Context
+
+### Open Questions
+
+- [x] All resolved
+
+## 5. Implementation Tasks
+
+- [ ] Random checkbox here
+- [ ] Another task checkbox
+
+## 12. Definition of Done
+
+- [ ] Tests written
+"""
+        result = validate_draft_structure(content)
+        assert result is None  # Pass - Open Questions are all checked
 
 
 class TestValidateLldFinal:
@@ -118,10 +175,14 @@ class TestValidateLldFinal:
         assert "TODO" in errors[0]
 
     def test_catches_multiple_issues(self):
-        """Test catching both unchecked and TODO."""
+        """Test catching both unchecked open question and TODO."""
         content = """# LLD-123
 
+## Open Questions
+
 - [ ] Unresolved
+
+## Implementation
 
 | Status |
 | TODO   |
@@ -169,3 +230,48 @@ TODO: This is a note in prose, not a table cell.
 """
         errors = validate_lld_final(content)
         assert len(errors) == 0
+
+    def test_final_ignores_definition_of_done_checkboxes(self):
+        """DoD checkboxes should not block final validation.
+
+        Issue #245: Definition of Done checkboxes are supposed to be unchecked
+        until implementation is complete.
+        """
+        content = """# LLD-123
+
+## 1. Context
+
+### Open Questions
+
+- [x] Resolved question
+
+## 12. Definition of Done
+
+- [ ] All tests written
+- [ ] Implementation complete
+"""
+        errors = validate_lld_final(content)
+        # Should pass - only TODO in tables and unchecked Open Questions matter
+        open_question_errors = [e for e in errors if "open questions" in e.lower()]
+        assert len(open_question_errors) == 0
+
+    def test_final_catches_unchecked_open_questions(self):
+        """Unchecked Open Questions should block final validation.
+
+        Issue #245: Only Open Questions section should be checked.
+        """
+        content = """# LLD-123
+
+## 1. Context
+
+### Open Questions
+
+- [ ] Unresolved question
+
+## 12. Definition of Done
+
+- [ ] All tests written
+"""
+        errors = validate_lld_final(content)
+        assert len(errors) == 1
+        assert "open questions" in errors[0].lower()

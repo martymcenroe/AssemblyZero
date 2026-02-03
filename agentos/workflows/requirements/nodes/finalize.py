@@ -163,6 +163,9 @@ def validate_lld_final(content: str) -> list[str]:
     Issue #235: Mechanical validation gate to catch structural issues
     before saving the final LLD.
 
+    Issue #245: Only checks the 'Open Questions' section for unchecked items,
+    ignoring Definition of Done and other sections.
+
     Args:
         content: LLD content to validate.
 
@@ -174,9 +177,16 @@ def validate_lld_final(content: str) -> list[str]:
     if not content:
         return errors
 
-    # Check for unresolved open questions (unchecked checkboxes)
-    if re.search(r"^- \[ \]", content, re.MULTILINE):
-        errors.append("Unresolved open questions remain")
+    # Check for unresolved open questions ONLY in the Open Questions section
+    # Pattern: from "### Open Questions" or "## Open Questions"
+    # until the next "##" header or end of document
+    pattern = r"(?:^##?#?\s*Open Questions\s*\n)(.*?)(?=^##|\Z)"
+    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+
+    if match:
+        open_questions_section = match.group(1)
+        if re.search(r"^- \[ \]", open_questions_section, re.MULTILINE):
+            errors.append("Unresolved open questions remain")
 
     # Check for unresolved TODO in table cells
     if re.search(r"\|\s*TODO\s*\|", content):

@@ -244,6 +244,9 @@ def validate_draft_structure(content: str) -> str | None:
     Issue #235: Mechanical validation gate to catch structural issues
     before Gemini review.
 
+    Issue #245: Only checks the 'Open Questions' section, ignoring Definition
+    of Done and other sections that legitimately have unchecked checkboxes.
+
     Args:
         content: Draft content to validate.
 
@@ -253,8 +256,20 @@ def validate_draft_structure(content: str) -> str | None:
     if not content:
         return None
 
-    # Find unchecked checkbox items (- [ ])
-    unchecked = re.findall(r"^- \[ \]", content, re.MULTILINE)
+    # Extract only the Open Questions section
+    # Pattern: from "### Open Questions" or "## Open Questions"
+    # until the next "##" header or end of document
+    pattern = r"(?:^##?#?\s*Open Questions\s*\n)(.*?)(?=^##|\Z)"
+    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+
+    if not match:
+        # No Open Questions section found - that's fine
+        return None
+
+    open_questions_section = match.group(1)
+
+    # Count unchecked boxes only in this section
+    unchecked = re.findall(r"^- \[ \]", open_questions_section, re.MULTILINE)
     if unchecked:
         return f"BLOCKED: {len(unchecked)} unresolved open questions - resolve before review"
 
