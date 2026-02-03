@@ -2,6 +2,7 @@
 """Unified Requirements Workflow CLI Runner.
 
 Issue #101: Unified Requirements Workflow
+Issue #230: Port --all and --resume flags
 
 Usage:
     # Issue workflow (from brief)
@@ -9,6 +10,12 @@ Usage:
 
     # LLD workflow (from GitHub issue)
     python tools/run_requirements_workflow.py --type lld --issue 42
+
+    # Process ALL briefs in ideas/active/
+    python tools/run_requirements_workflow.py --type issue --all
+
+    # Resume interrupted workflow
+    python tools/run_requirements_workflow.py --type issue --resume my-feature.md
 
     # With custom LLM providers
     python tools/run_requirements_workflow.py --type lld --issue 42 \
@@ -35,9 +42,91 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from agentos.workflows.requirements.audit import (
+    AUDIT_ACTIVE_DIR,
+    IDEAS_ACTIVE_DIR,
+    generate_slug,
+)
 from agentos.workflows.requirements.config import GateConfig
 from agentos.workflows.requirements.graph import create_requirements_graph
 from agentos.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
+
+
+# =============================================================================
+# Checkpoint Database (SQLite)
+# =============================================================================
+
+
+def get_checkpoint_db_path() -> Path:
+    """Get path to SQLite checkpoint database.
+
+    Supports AGENTOS_WORKFLOW_DB environment variable for worktree isolation.
+
+    Returns:
+        Path to checkpoint database.
+    """
+    if db_path_env := os.environ.get("AGENTOS_WORKFLOW_DB"):
+        db_path = Path(db_path_env)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return db_path
+
+    db_dir = Path.home() / ".agentos"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return db_dir / "requirements_workflow.db"
+
+
+def checkpoint_exists(slug: str) -> bool:
+    """Check if checkpoint exists for a slug.
+
+    Args:
+        slug: Workflow slug to check.
+
+    Returns:
+        True if checkpoint exists.
+    """
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        db_path = get_checkpoint_db_path()
+        with SqliteSaver.from_conn_string(str(db_path)) as memory:
+            config = {"configurable": {"thread_id": slug}}
+            checkpoints = list(memory.list(config))
+            return len(checkpoints) > 0
+    except Exception:
+        return False
+
+
+def audit_dir_exists(slug: str, target_repo: Path) -> bool:
+    """Check if audit directory exists for a slug.
+
+    Args:
+        slug: Workflow slug to check.
+        target_repo: Target repository path.
+
+    Returns:
+        True if audit directory exists.
+    """
+    audit_dir = target_repo / AUDIT_ACTIVE_DIR / slug
+    return audit_dir.exists()
+
+
+def list_briefs(target_repo: Path) -> list[Path]:
+    """List all brief files in ideas/active/.
+
+    Args:
+        target_repo: Target repository path.
+
+    Returns:
+        List of paths to brief files.
+    """
+    ideas_dir = target_repo / IDEAS_ACTIVE_DIR
+
+    if not ideas_dir.exists():
+        return []
+
+    # Find all .md files, sorted alphabetically
+    briefs = sorted(ideas_dir.glob("*.md"))
+    return briefs
 
 
 # =============================================================================
@@ -249,6 +338,17 @@ Examples:
         "--select",
         action="store_true",
         help="Interactively select input file/issue",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process ALL briefs in ideas/active/ sequentially (issue workflow only)",
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        metavar="FILE",
+        help="Resume interrupted workflow by brief filename (issue workflow only)",
     )
 
     # LLM configuration
@@ -463,6 +563,228 @@ def build_initial_state(
         )
 
 
+def run_single_workflow(
+    args: argparse.Namespace,
+    agentos_root: Path,
+    target_repo: Path,
+) -> int:
+    """Run a single workflow instance.
+
+    Args:
+        args: Parsed CLI arguments.
+        agentos_root: Path to AgentOS installation.
+        target_repo: Path to target repository.
+
+    Returns:
+        Exit code (0 for success, non-zero for error).
+    """
+    # Print header
+    print_header(args)
+
+    # Build initial state
+    state = build_initial_state(args, agentos_root, target_repo)
+
+    if args.debug:
+        print(f"DEBUG: Initial state keys: {list(state.keys())}")
+
+    # Handle dry-run mode
+    if args.dry_run:
+        print("DRY RUN: Would execute workflow with the above configuration")
+        print(f"  Workflow type: {state['workflow_type']}")
+        print(f"  Audit dir would be created at: {target_repo}/docs/lineage/active/...")
+        if state["workflow_type"] == "lld":
+            print(f"  LLD would be saved to: {target_repo}/docs/lld/active/LLD-{args.issue:03d}.md")
+        return 0
+
+    # Create and run graph
+    try:
+        graph = create_requirements_graph()
+        compiled = graph.compile()
+
+        print("Starting workflow...")
+        print()
+
+        # Calculate recursion limit
+        max_iters = state.get("max_iterations", 20)
+        recursion_limit = (max_iters * 4) + 10
+
+        final_state = compiled.invoke(
+            state,
+            config={"recursion_limit": recursion_limit}
+        )
+
+        print_result(final_state)
+
+        if final_state.get("error_message"):
+            return 1
+
+        return 0
+
+    except KeyboardInterrupt:
+        print("\n\nWorkflow interrupted by user.")
+        return 130
+
+    except Exception as e:
+        print(f"\nERROR: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+def run_all_briefs(
+    args: argparse.Namespace,
+    agentos_root: Path,
+    target_repo: Path,
+) -> int:
+    """Process all briefs in ideas/active/ sequentially.
+
+    Args:
+        args: Parsed CLI arguments.
+        agentos_root: Path to AgentOS installation.
+        target_repo: Path to target repository.
+
+    Returns:
+        Exit code (0 for success, non-zero for partial/full failure).
+    """
+    briefs = list_briefs(target_repo)
+
+    if not briefs:
+        print("No briefs found in ideas/active/")
+        return 0
+
+    total = len(briefs)
+    processed = 0
+    skipped = 0
+    failed = 0
+
+    print()
+    print("=" * 60)
+    print(f"BATCH PROCESSING - {total} briefs found")
+    print("=" * 60)
+    print()
+
+    for i, brief_path in enumerate(briefs, 1):
+        slug = generate_slug(str(brief_path))
+        title = extract_brief_title(brief_path)
+
+        print(f"\n[{i}/{total}] {brief_path.name}")
+        print(f"        Slug: {slug}")
+        print(f"        Title: {title}")
+
+        # Check if already processed (audit dir exists)
+        if audit_dir_exists(slug, target_repo):
+            print("        Status: SKIPPED (audit directory exists)")
+            skipped += 1
+            continue
+
+        # Update args with this brief
+        args.brief = str(brief_path.relative_to(target_repo))
+
+        print("        Status: PROCESSING...")
+        exit_code = run_single_workflow(args, agentos_root, target_repo)
+
+        if exit_code == 0:
+            processed += 1
+            print(f"        Result: SUCCESS")
+        else:
+            failed += 1
+            print(f"        Result: FAILED (exit code {exit_code})")
+
+    # Print summary
+    print()
+    print("=" * 60)
+    print("BATCH COMPLETE")
+    print("=" * 60)
+    print(f"  Total:     {total}")
+    print(f"  Processed: {processed}")
+    print(f"  Skipped:   {skipped}")
+    print(f"  Failed:    {failed}")
+    print("=" * 60)
+
+    if failed > 0:
+        return 1
+    return 0
+
+
+def run_resume_workflow(
+    args: argparse.Namespace,
+    agentos_root: Path,
+    target_repo: Path,
+) -> int:
+    """Resume an interrupted workflow.
+
+    Args:
+        args: Parsed CLI arguments (args.resume contains the brief filename).
+        agentos_root: Path to AgentOS installation.
+        target_repo: Path to target repository.
+
+    Returns:
+        Exit code (0 for success, non-zero for error).
+    """
+    brief_file = args.resume
+    slug = generate_slug(brief_file)
+
+    print()
+    print("=" * 60)
+    print("RESUME WORKFLOW")
+    print("=" * 60)
+    print(f"Brief: {brief_file}")
+    print(f"Slug:  {slug}")
+    print("=" * 60)
+
+    # Check if audit directory exists
+    has_audit = audit_dir_exists(slug, target_repo)
+    has_checkpoint = checkpoint_exists(slug)
+
+    if not has_audit and not has_checkpoint:
+        print()
+        print("WARNING: No checkpoint or audit directory found for this brief.")
+        print("         Starting fresh workflow instead.")
+        print()
+
+        # Resolve the brief path
+        brief_path = Path(brief_file)
+        if not brief_path.is_absolute():
+            # Try ideas/active/ first
+            ideas_path = target_repo / IDEAS_ACTIVE_DIR / brief_file
+            if ideas_path.exists():
+                brief_path = ideas_path
+            else:
+                brief_path = target_repo / brief_file
+
+        if not brief_path.exists():
+            print(f"ERROR: Brief file not found: {brief_file}")
+            return 1
+
+        args.brief = str(brief_path.relative_to(target_repo))
+        return run_single_workflow(args, agentos_root, target_repo)
+
+    # Resume: set brief and run
+    print()
+    if has_checkpoint:
+        print(f"Found checkpoint for '{slug}', resuming...")
+    else:
+        print(f"Found audit directory for '{slug}', resuming...")
+    print()
+
+    # Resolve the brief path
+    brief_path = Path(brief_file)
+    if not brief_path.is_absolute():
+        ideas_path = target_repo / IDEAS_ACTIVE_DIR / brief_file
+        if ideas_path.exists():
+            brief_path = ideas_path
+        else:
+            brief_path = target_repo / brief_file
+
+    if not brief_path.exists():
+        print(f"ERROR: Brief file not found: {brief_file}")
+        return 1
+
+    args.brief = str(brief_path.relative_to(target_repo))
+    return run_single_workflow(args, agentos_root, target_repo)
+
+
 def print_header(args: argparse.Namespace) -> None:
     """Print workflow header.
 
@@ -530,17 +852,38 @@ def main() -> int:
     """
     args = parse_args()
 
+    # Validate --all and --resume are only for issue workflow
+    if args.all and args.type != "issue":
+        print("ERROR: --all is only supported for issue workflow")
+        return 1
+
+    if args.resume and args.type != "issue":
+        print("ERROR: --resume is only supported for issue workflow")
+        return 1
+
     # Validate arguments
-    if args.type == "issue" and not args.brief and not args.select:
-        print("ERROR: --brief or --select required for issue workflow")
+    if args.type == "issue" and not args.brief and not args.select and not args.all and not args.resume:
+        print("ERROR: --brief, --select, --all, or --resume required for issue workflow")
         return 1
 
     if args.type == "lld" and not args.issue and not args.select:
         print("ERROR: --issue or --select required for LLD workflow")
         return 1
 
-    # Resolve paths (needed for --select)
+    # Resolve paths (needed for --select, --all, --resume)
     agentos_root, target_repo = resolve_roots(args)
+
+    if args.debug:
+        print(f"DEBUG: agentos_root = {agentos_root}")
+        print(f"DEBUG: target_repo = {target_repo}")
+
+    # Handle --all: process all briefs
+    if args.all:
+        return run_all_briefs(args, agentos_root, target_repo)
+
+    # Handle --resume: resume interrupted workflow
+    if args.resume:
+        return run_resume_workflow(args, agentos_root, target_repo)
 
     # Handle --select: interactive selection
     if args.select:
@@ -557,63 +900,8 @@ def main() -> int:
                 return 0
             args.issue = selected
 
-    if args.debug:
-        print(f"DEBUG: agentos_root = {agentos_root}")
-        print(f"DEBUG: target_repo = {target_repo}")
-
-    # Print header
-    print_header(args)
-
-    # Build initial state
-    state = build_initial_state(args, agentos_root, target_repo)
-
-    if args.debug:
-        print(f"DEBUG: Initial state keys: {list(state.keys())}")
-
-    # Handle dry-run mode
-    if args.dry_run:
-        print("DRY RUN: Would execute workflow with the above configuration")
-        print(f"  Workflow type: {state['workflow_type']}")
-        print(f"  Audit dir would be created at: {target_repo}/docs/lineage/active/...")
-        if state["workflow_type"] == "lld":
-            print(f"  LLD would be saved to: {target_repo}/docs/lld/active/LLD-{args.issue:03d}.md")
-        return 0
-
-    # Create and run graph
-    try:
-        graph = create_requirements_graph()
-        compiled = graph.compile()
-
-        print("Starting workflow...")
-        print()
-
-        # Calculate recursion limit: each iteration needs ~3 nodes (draft, review, route)
-        # Plus startup nodes. Add buffer for safety.
-        max_iters = state.get("max_iterations", 20)
-        recursion_limit = (max_iters * 4) + 10
-
-        final_state = compiled.invoke(
-            state,
-            config={"recursion_limit": recursion_limit}
-        )
-
-        print_result(final_state)
-
-        if final_state.get("error_message"):
-            return 1
-
-        return 0
-
-    except KeyboardInterrupt:
-        print("\n\nWorkflow interrupted by user.")
-        return 130
-
-    except Exception as e:
-        print(f"\nERROR: {e}")
-        if args.debug:
-            import traceback
-            traceback.print_exc()
-        return 1
+    # Run single workflow
+    return run_single_workflow(args, agentos_root, target_repo)
 
 
 if __name__ == "__main__":

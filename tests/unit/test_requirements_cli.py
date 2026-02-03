@@ -558,33 +558,68 @@ class TestSelectGitHubIssue:
         assert result == 99
 
 
-class TestUnusedArgumentsRemoved:
-    """Tests to verify that previously unused arguments have been removed.
+class TestAllAndResumeFlags:
+    """Tests for --all and --resume flags.
 
-    Issue #156: These arguments were defined but never used.
-    The fix removes them entirely from the argparse definition.
+    Issue #230: Port --all and --resume flags from issue workflow.
     """
 
-    def test_resume_not_in_parser(self):
-        """Verify --resume argument has been removed from requirements CLI.
+    def test_all_flag_in_parser(self):
+        """Verify --all argument is defined in parser."""
+        from tools.run_requirements_workflow import parse_args
 
-        This argument was defined but never used in the code.
-        It should be removed from the parser.
-        """
-        from pathlib import Path
-        import re
+        args = parse_args([
+            "--type", "issue",
+            "--all",
+        ])
 
-        cli_file = Path(__file__).parent.parent.parent / "tools" / "run_requirements_workflow.py"
-        content = cli_file.read_text(encoding="utf-8")
+        assert args.all is True
 
-        # Should NOT find --resume in argument definitions
-        resume_pattern = r'parser\.add_argument\([^)]*"--resume"'
-        matches = re.findall(resume_pattern, content)
+    def test_resume_flag_in_parser(self):
+        """Verify --resume argument is defined in parser."""
+        from tools.run_requirements_workflow import parse_args
 
-        assert len(matches) == 0, (
-            f"--resume argument should be removed from parser. "
-            f"Found {len(matches)} occurrences."
-        )
+        args = parse_args([
+            "--type", "issue",
+            "--resume", "my-brief.md",
+        ])
+
+        assert args.resume == "my-brief.md"
+
+    def test_all_only_for_issue_workflow(self, capsys):
+        """Verify --all is only allowed for issue workflow."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        # Mock sys.argv
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--all"]
+
+        try:
+            exit_code = main()
+        finally:
+            sys.argv = original_argv
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "only supported for issue workflow" in captured.out
+
+    def test_resume_only_for_issue_workflow(self, capsys):
+        """Verify --resume is only allowed for issue workflow."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--resume", "test.md"]
+
+        try:
+            exit_code = main()
+        finally:
+            sys.argv = original_argv
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "only supported for issue workflow" in captured.out
 
 
 class TestAllArgumentsUsed:
