@@ -295,7 +295,7 @@ def print_result(final_state: dict[str, Any]) -> None:
         else:
             print("Issue was not filed (manual mode or error)")
     else:
-        lld_path = final_state.get("final_lld_path", "")
+        lld_path = final_state.get("lld_path", "")
         if lld_path:
             print(f"LLD Path: {lld_path}")
             print(f"Status:   {final_state.get('lld_status', 'UNKNOWN')}")
