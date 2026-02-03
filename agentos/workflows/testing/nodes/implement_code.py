@@ -5,8 +5,10 @@ This is a temporary bridge until #87 (Implementation Workflow) is complete.
 """
 
 import os
+import random
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,44 @@ def _find_claude_cli() -> str | None:
             return str(path)
 
     return None
+
+
+# Retry configuration for rate limits
+_RETRY_MAX_ATTEMPTS = 5
+_RETRY_BASE_DELAY = 1.0  # seconds
+_RETRY_MAX_DELAY = 60.0  # seconds
+_RETRY_JITTER_FACTOR = 0.2  # ±20%
+
+
+def _is_rate_limit_error(stderr: str) -> bool:
+    """Check if the error is a rate limit (429).
+
+    Args:
+        stderr: The stderr output from subprocess.
+
+    Returns:
+        True if this appears to be a rate limit error.
+    """
+    stderr_lower = stderr.lower()
+    return (
+        "429" in stderr_lower
+        or "rate limit" in stderr_lower
+        or "too many requests" in stderr_lower
+    )
+
+
+def _calculate_retry_backoff(attempt: int) -> float:
+    """Calculate exponential backoff with jitter.
+
+    Args:
+        attempt: The current attempt number (0-indexed).
+
+    Returns:
+        The delay in seconds before the next retry.
+    """
+    delay = min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY)
+    jitter = delay * _RETRY_JITTER_FACTOR * (2 * random.random() - 1)
+    return delay + jitter
 
 
 def build_implementation_prompt(state: TestingWorkflowState) -> str:
@@ -236,24 +276,46 @@ DO NOT:
                 "--system-prompt", system_prompt,
             ]
 
-            result = subprocess.run(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=600,  # 10 minute timeout for complex implementations
-            )
+            # Retry loop for rate limits
+            last_rate_limit_error = None
+            for attempt in range(_RETRY_MAX_ATTEMPTS):
+                result = subprocess.run(
+                    cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=600,  # 10 minute timeout for complex implementations
+                )
 
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout, ""
-            elif result.returncode != 0:
-                stderr_preview = result.stderr[:200] if result.stderr else "no stderr"
-                print(f"    [WARN] CLI exit code {result.returncode}: {stderr_preview}")
-                print("    Falling back to Anthropic SDK...")
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout, ""
+                elif result.returncode != 0:
+                    # Check if rate limited - retry with backoff
+                    if _is_rate_limit_error(result.stderr or ""):
+                        delay = _calculate_retry_backoff(attempt)
+                        print(
+                            f"    [WARN] Rate limited, retrying in {delay:.1f}s "
+                            f"(attempt {attempt + 1}/{_RETRY_MAX_ATTEMPTS})"
+                        )
+                        time.sleep(delay)
+                        last_rate_limit_error = result.stderr
+                        continue
+
+                    # Non-rate-limit error - don't retry
+                    stderr_preview = result.stderr[:200] if result.stderr else "no stderr"
+                    print(f"    [WARN] CLI exit code {result.returncode}: {stderr_preview}")
+                    print("    Falling back to Anthropic SDK...")
+                    break
+                else:
+                    print("    [WARN] CLI returned empty response, trying SDK...")
+                    break
             else:
-                print("    [WARN] CLI returned empty response, trying SDK...")
+                # Exhausted retries due to rate limiting
+                print(f"    [WARN] Rate limited after {_RETRY_MAX_ATTEMPTS} retries, trying SDK...")
+                if last_rate_limit_error:
+                    print(f"    Last error: {last_rate_limit_error[:100]}")
 
         except subprocess.TimeoutExpired:
             return "", "Claude CLI execution timed out (10 minutes)"
