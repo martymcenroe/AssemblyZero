@@ -1,0 +1,35 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AgentOS-177
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 12 items
+
+tests/test_issue_177.py::test_010 PASSED                                 [  8%]
+tests/test_issue_177.py::test_020 PASSED                                 [ 16%]
+tests/test_issue_177.py::test_030 PASSED                                 [ 25%]
+tests/test_issue_177.py::test_040 PASSED                                 [ 33%]
+tests/test_issue_177.py::test_050 PASSED                                 [ 41%]
+tests/test_issue_177.py::test_060 PASSED                                 [ 50%]
+tests/test_issue_177.py::test_070 PASSED                                 [ 58%]
+tests/test_issue_177.py::test_080 PASSED                                 [ 66%]
+tests/test_issue_177.py::test_110 PASSED                                 [ 75%]
+tests/test_issue_177.py::test_120 PASSED                                 [ 83%]
+tests/test_issue_177.py::test_090 PASSED                                 [ 91%]
+tests/test_issue_177.py::test_100 PASSED                                 [100%]
+ERROR: Coverage failure: total of 90 is less than fail-under=95
+
+
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------
+agentos\utils\lld_verification.py      98     10    90%   135, 138-142, 176, 270, 284, 312, 320-321
+-----------------------------------------------------------------
+TOTAL                                  98     10    90%
+FAIL Required test coverage of 95% not reached. Total coverage: 89.80%
+============================= 12 passed in 0.07s ==============================
+

@@ -1,0 +1,74 @@
+# File: agentos/core/__init__.py
+
+```python
+"""Core components for AgentOS state management and infrastructure."""
+
+from agentos.core.audit import (
+    ReviewAuditLog,
+    ReviewLogEntry,
+    GeminiReviewResponse,
+    create_log_entry,
+)
+from agentos.core.config import (
+    REVIEWER_MODEL,
+    REVIEWER_MODEL_FALLBACKS,
+    FORBIDDEN_MODELS,
+    CREDENTIALS_FILE,
+    ROTATION_STATE_FILE,
+    MAX_RETRIES_PER_CREDENTIAL,
+    BACKOFF_BASE_SECONDS,
+    BACKOFF_MAX_SECONDS,
+    DEFAULT_AUDIT_LOG_PATH,
+    LLD_REVIEW_PROMPT_PATH,
+)
+from agentos.core.gemini_client import (
+    GeminiClient,
+    GeminiCallResult,
+    GeminiErrorType,
+    Credential,
+    RotationState,
+)
+from agentos.core.lld_verification import (
+    LLDVerificationResult,
+    LLDVerificationError,
+    verify_lld_approval,
+    verify_lld_path_security,
+    verify_lld_file,
+    run_verification_gate,
+)
+from agentos.core.state import AgentState
+
+__all__ = [
+    # State
+    "AgentState",
+    # Config
+    "REVIEWER_MODEL",
+    "REVIEWER_MODEL_FALLBACKS",
+    "FORBIDDEN_MODELS",
+    "CREDENTIALS_FILE",
+    "ROTATION_STATE_FILE",
+    "MAX_RETRIES_PER_CREDENTIAL",
+    "BACKOFF_BASE_SECONDS",
+    "BACKOFF_MAX_SECONDS",
+    "DEFAULT_AUDIT_LOG_PATH",
+    "LLD_REVIEW_PROMPT_PATH",
+    # Gemini Client
+    "GeminiClient",
+    "GeminiCallResult",
+    "GeminiErrorType",
+    "Credential",
+    "RotationState",
+    # Audit
+    "ReviewAuditLog",
+    "ReviewLogEntry",
+    "GeminiReviewResponse",
+    "create_log_entry",
+    # LLD Verification (Issue #177)
+    "LLDVerificationResult",
+    "LLDVerificationError",
+    "verify_lld_approval",
+    "verify_lld_path_security",
+    "verify_lld_file",
+    "run_verification_gate",
+]
+```
