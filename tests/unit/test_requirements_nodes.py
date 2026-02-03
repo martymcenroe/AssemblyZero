@@ -1591,8 +1591,9 @@ class TestLoadInputEmptyResponseExhaustsRetries:
 class TestHumanGateInteractiveMode:
     """Tests for human_gate interactive mode paths."""
 
-    def test_draft_gate_interactive_defaults_to_review(self, tmp_path):
-        """Test draft gate in interactive mode defaults to review."""
+    @patch("builtins.input", return_value="S")
+    def test_draft_gate_interactive_defaults_to_review(self, mock_input, tmp_path):
+        """Test draft gate in interactive mode routes to review when user chooses S."""
         from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
         from agentos.workflows.requirements.state import create_initial_state
 
@@ -1609,6 +1610,7 @@ class TestHumanGateInteractiveMode:
 
         result = human_gate_draft(state)
 
+        assert mock_input.called, "Interactive mode should prompt for input"
         assert result.get("next_node") == "N3_review"
 
     def test_verdict_gate_disabled_approved_routes_to_finalize(self, tmp_path):
@@ -1630,8 +1632,9 @@ class TestHumanGateInteractiveMode:
 
         assert result.get("next_node") == "N5_finalize"
 
-    def test_verdict_gate_interactive_approved_routes_to_finalize(self, tmp_path):
-        """Test verdict gate in interactive mode routes to finalize on APPROVED."""
+    @patch("builtins.input", return_value="A")
+    def test_verdict_gate_interactive_approved_routes_to_finalize(self, mock_input, tmp_path):
+        """Test verdict gate in interactive mode routes to finalize when user chooses A."""
         from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
         from agentos.workflows.requirements.state import create_initial_state
 
@@ -1648,10 +1651,12 @@ class TestHumanGateInteractiveMode:
 
         result = human_gate_verdict(state)
 
+        assert mock_input.called, "Interactive mode should prompt for input"
         assert result.get("next_node") == "N5_finalize"
 
-    def test_verdict_gate_interactive_blocked_routes_to_revise(self, tmp_path):
-        """Test verdict gate in interactive mode routes to revise on BLOCKED."""
+    @patch("builtins.input", return_value="R")
+    def test_verdict_gate_interactive_blocked_routes_to_revise(self, mock_input, tmp_path):
+        """Test verdict gate in interactive mode routes to revise when user chooses R."""
         from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
         from agentos.workflows.requirements.state import create_initial_state
 
@@ -1668,4 +1673,5 @@ class TestHumanGateInteractiveMode:
 
         result = human_gate_verdict(state)
 
+        assert mock_input.called, "Interactive mode should prompt for input"
         assert result.get("next_node") == "N1_generate_draft"
