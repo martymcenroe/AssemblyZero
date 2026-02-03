@@ -224,3 +224,95 @@ class TestNodeNames:
         assert N3_REVIEW == "N3_review"
         assert N4_HUMAN_GATE_VERDICT == "N4_human_gate_verdict"
         assert N5_FINALIZE == "N5_finalize"
+
+
+class TestGraphRoutingExtended:
+    """Extended tests for graph routing logic."""
+
+    def test_route_from_review_to_end_on_error(self):
+        """Test routing from review to END on error."""
+        from agentos.workflows.requirements.graph import route_after_review
+
+        state = {"error_message": "Review failed", "config_gates_verdict": True}
+        result = route_after_review(state)
+        assert result == "END"
+
+    def test_route_from_review_to_finalize_on_max_iterations(self):
+        """Test routing from review to finalize when max iterations reached."""
+        from agentos.workflows.requirements.graph import route_after_review
+
+        state = {
+            "error_message": "",
+            "config_gates_verdict": False,
+            "lld_status": "BLOCKED",
+            "iteration_count": 20,
+            "max_iterations": 20,
+        }
+        result = route_after_review(state)
+        assert result == "N5_finalize"
+
+    def test_route_from_review_to_draft_when_under_max_iterations(self):
+        """Test routing from review to draft when under max iterations."""
+        from agentos.workflows.requirements.graph import route_after_review
+
+        state = {
+            "error_message": "",
+            "config_gates_verdict": False,
+            "lld_status": "BLOCKED",
+            "iteration_count": 5,
+            "max_iterations": 20,
+        }
+        result = route_after_review(state)
+        assert result == "N1_generate_draft"
+
+    def test_route_from_human_gate_verdict_to_end(self):
+        """Test routing from human gate verdict to END for unknown next_node."""
+        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
+
+        state = {"next_node": "unknown_node"}
+        result = route_from_human_gate_verdict(state)
+        assert result == "END"
+
+    def test_route_from_human_gate_verdict_empty_next_node(self):
+        """Test routing from human gate verdict to END when next_node is empty."""
+        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
+
+        state = {"next_node": ""}
+        result = route_from_human_gate_verdict(state)
+        assert result == "END"
+
+    def test_route_after_finalize(self):
+        """Test routing after finalize always returns END."""
+        from agentos.workflows.requirements.graph import route_after_finalize
+
+        # Should always return END regardless of state
+        state = {"error_message": "", "lld_status": "APPROVED"}
+        result = route_after_finalize(state)
+        assert result == "END"
+
+        state = {"error_message": "Some error"}
+        result = route_after_finalize(state)
+        assert result == "END"
+
+    def test_route_from_human_gate_draft_unknown_next_node(self):
+        """Test routing from human gate draft to END for unknown next_node."""
+        from agentos.workflows.requirements.graph import route_from_human_gate_draft
+
+        state = {"next_node": "unknown"}
+        result = route_from_human_gate_draft(state)
+        assert result == "END"
+
+    def test_route_from_review_uses_default_max_iterations(self):
+        """Test routing from review uses default max_iterations of 20."""
+        from agentos.workflows.requirements.graph import route_after_review
+
+        # No max_iterations set, should use default of 20
+        state = {
+            "error_message": "",
+            "config_gates_verdict": False,
+            "lld_status": "BLOCKED",
+            "iteration_count": 19,
+            # max_iterations not set - should default to 20
+        }
+        result = route_after_review(state)
+        assert result == "N1_generate_draft"  # Under default max of 20

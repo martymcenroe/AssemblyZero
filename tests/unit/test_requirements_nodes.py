@@ -855,3 +855,817 @@ class TestFinalizeNodeAdditional:
         result = finalize(state)
 
         assert result.get("error_message", "") != ""
+
+    @patch("subprocess.run")
+    def test_handles_gh_timeout(self, mock_run, tmp_path):
+        """Test handling of gh CLI timeout."""
+        import subprocess
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["current_draft"] = "# Title\n\nBody"
+        state["audit_dir"] = str(tmp_path / "audit")
+
+        result = finalize(state)
+
+        assert "timeout" in result.get("error_message", "").lower()
+
+    @patch("subprocess.run")
+    def test_handles_gh_not_found(self, mock_run, tmp_path):
+        """Test handling when gh CLI is not installed."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.side_effect = FileNotFoundError("gh not found")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["current_draft"] = "# Title\n\nBody"
+        state["audit_dir"] = str(tmp_path / "audit")
+
+        result = finalize(state)
+
+        assert "gh" in result.get("error_message", "").lower()
+
+    def test_returns_state_unchanged_for_non_lld_workflow(self, tmp_path):
+        """Test _save_lld_file returns state unchanged for non-LLD workflow."""
+        from agentos.workflows.requirements.nodes.finalize import _save_lld_file
+
+        state = {
+            "workflow_type": "issue",
+            "current_draft": "# Draft",
+        }
+
+        result = _save_lld_file(state)
+
+        assert result == state
+
+    def test_returns_state_unchanged_for_empty_draft(self, tmp_path):
+        """Test _save_lld_file returns state unchanged when draft is empty."""
+        from agentos.workflows.requirements.nodes.finalize import _save_lld_file
+
+        state = {
+            "workflow_type": "lld",
+            "issue_number": 42,
+            "current_draft": "",
+            "target_repo": str(tmp_path),
+        }
+
+        result = _save_lld_file(state)
+
+        assert result.get("final_lld_path") is None
+
+    @patch("agentos.workflows.requirements.nodes.finalize.commit_and_push")
+    def test_commit_and_push_success(self, mock_commit, tmp_path):
+        """Test _commit_and_push_files sets commit_sha on success."""
+        from agentos.workflows.requirements.nodes.finalize import _commit_and_push_files
+
+        mock_commit.return_value = "abc123"
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "lld",
+            "target_repo": str(tmp_path),
+            "issue_number": 42,
+        }
+
+        result = _commit_and_push_files(state)
+
+        assert result.get("commit_sha") == "abc123"
+
+    @patch("agentos.workflows.requirements.nodes.finalize.commit_and_push")
+    def test_commit_and_push_error_logged(self, mock_commit, tmp_path):
+        """Test _commit_and_push_files logs error but doesn't fail."""
+        from agentos.workflows.requirements.nodes.finalize import _commit_and_push_files
+        from agentos.workflows.requirements.git_operations import GitOperationError
+
+        mock_commit.side_effect = GitOperationError("push failed")
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "lld",
+            "target_repo": str(tmp_path),
+        }
+
+        result = _commit_and_push_files(state)
+
+        assert "push failed" in result.get("commit_error", "")
+
+
+class TestLoadInputRetryLogic:
+    """Tests for load_input retry and error handling."""
+
+    @patch("subprocess.run")
+    def test_returns_error_for_missing_issue_number(self, mock_run, tmp_path):
+        """Test error when issue_number is 0 or missing."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=0,
+        )
+
+        result = load_input(state)
+
+        assert "issue" in result.get("error_message", "").lower()
+
+    @patch("subprocess.run")
+    def test_handles_gh_nonzero_return(self, mock_run, tmp_path):
+        """Test handling of gh CLI non-zero return code."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.return_value = Mock(
+            returncode=1,
+            stdout="",
+            stderr="Issue not found",
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=9999,
+        )
+
+        result = load_input(state)
+
+        assert "not found" in result.get("error_message", "").lower()
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    def test_handles_empty_response_with_retry(self, mock_sleep, mock_run, tmp_path):
+        """Test retry logic for empty gh CLI response."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # First two calls return empty, third succeeds
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout=""),
+            Mock(returncode=0, stdout=""),
+            Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+        ]
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        assert result.get("issue_title") == "Test"
+        assert mock_sleep.call_count == 2
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    def test_handles_timeout_with_retry(self, mock_sleep, mock_run, tmp_path):
+        """Test retry logic for gh CLI timeout."""
+        import subprocess
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # First call times out, second succeeds
+        mock_run.side_effect = [
+            subprocess.TimeoutExpired("gh", 30),
+            Mock(returncode=0, stdout='{"title": "Test", "body": "Body"}'),
+        ]
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        assert result.get("issue_title") == "Test"
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    def test_exhausted_retries_return_error(self, mock_sleep, mock_run, tmp_path):
+        """Test error returned when all retries exhausted."""
+        import subprocess
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        assert "timeout" in result.get("error_message", "").lower()
+
+    @patch("subprocess.run")
+    def test_handles_json_decode_error(self, mock_run, tmp_path):
+        """Test handling of invalid JSON response."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout="not valid json",
+        )
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        assert "parse" in result.get("error_message", "").lower() or "json" in result.get("error_message", "").lower()
+
+    def test_relative_brief_path_resolution(self, tmp_path):
+        """Test that relative brief paths are resolved relative to target_repo."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # Create brief file in subdirectory
+        ideas_dir = tmp_path / "ideas"
+        ideas_dir.mkdir()
+        brief_file = ideas_dir / "feature.md"
+        brief_file.write_text("# Feature Brief")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="ideas/feature.md",  # Relative path
+        )
+
+        result = load_input(state)
+
+        assert result.get("error_message", "") == ""
+        assert "Feature Brief" in result.get("brief_content", "")
+
+    def test_read_brief_oserror(self, tmp_path):
+        """Test handling of OSError when reading brief file."""
+        from agentos.workflows.requirements.nodes.load_input import _load_brief
+
+        # Create a directory with the same name as the brief file
+        brief_path = tmp_path / "brief.md"
+        brief_path.mkdir()  # This is a directory, not a file
+
+        state = {
+            "brief_file": str(brief_path),
+            "target_repo": str(tmp_path),
+        }
+
+        result = _load_brief(state)
+
+        assert "read" in result.get("error_message", "").lower() or "failed" in result.get("error_message", "").lower()
+
+
+class TestReviewNodeCoverage:
+    """Additional tests for review node to increase coverage."""
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_mock_mode_uses_mock_provider(self, mock_get_provider, tmp_path):
+        """Test that mock mode uses mock:review provider."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="APPROVED",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+            mock_mode=True,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        review(state)
+
+        mock_get_provider.assert_called_with("mock:review")
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_handles_invalid_reviewer(self, mock_get_provider, tmp_path):
+        """Test handling of invalid reviewer configuration."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_get_provider.side_effect = ValueError("Unknown provider: invalid")
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["config_reviewer"] = "invalid:provider"
+
+        result = review(state)
+
+        assert "invalid" in result.get("error_message", "").lower()
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_handles_reviewer_failure(self, mock_get_provider, tmp_path):
+        """Test handling of reviewer invocation failure."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=False,
+            response=None,
+            error_message="API error",
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert "api error" in result.get("error_message", "").lower()
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_verdict_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
+        """Test verdict_path is None when audit_dir doesn't exist."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="APPROVED",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "nonexistent" / "audit")
+
+        result = review(state)
+
+        assert result.get("current_verdict_path", "") == ""
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_discuss_checkbox_maps_to_blocked(self, mock_get_provider, tmp_path):
+        """Test [x] DISCUSS checkbox maps to BLOCKED status."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="[x] **DISCUSS** - Need clarification on requirements",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert result.get("lld_status") == "BLOCKED"
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_revise_checkbox_maps_to_blocked(self, mock_get_provider, tmp_path):
+        """Test [x] REVISE checkbox maps to BLOCKED status."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="[X] **REVISE** - Missing error handling section",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert result.get("lld_status") == "BLOCKED"
+
+    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    def test_unknown_verdict_defaults_to_blocked(self, mock_get_provider, tmp_path):
+        """Test unknown verdict format defaults to BLOCKED."""
+        from agentos.workflows.requirements.nodes.review import review
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="Some random response without clear verdict markers",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert result.get("lld_status") == "BLOCKED"
+
+
+class TestGenerateDraftNodeCoverage:
+    """Additional tests for generate_draft node coverage."""
+
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    def test_mock_mode_uses_mock_provider(self, mock_get_provider, tmp_path):
+        """Test that mock mode uses mock:draft provider."""
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="# Draft",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        template_dir = tmp_path / "docs" / "templates"
+        template_dir.mkdir(parents=True)
+        (template_dir / "0101-issue-template.md").write_text("# Template")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+            mock_mode=True,
+        )
+        state["brief_content"] = "# Brief"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        generate_draft(state)
+
+        mock_get_provider.assert_called_with("mock:draft")
+
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    def test_handles_invalid_drafter(self, mock_get_provider, tmp_path):
+        """Test handling of invalid drafter configuration."""
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_get_provider.side_effect = ValueError("Unknown provider")
+
+        template_dir = tmp_path / "docs" / "templates"
+        template_dir.mkdir(parents=True)
+        (template_dir / "0101-issue-template.md").write_text("# Template")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["brief_content"] = "# Brief"
+        state["config_drafter"] = "invalid:provider"
+
+        result = generate_draft(state)
+
+        assert "invalid" in result.get("error_message", "").lower()
+
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    def test_draft_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
+        """Test draft_path is None when audit_dir doesn't exist."""
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="# Draft",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        template_dir = tmp_path / "docs" / "templates"
+        template_dir.mkdir(parents=True)
+        (template_dir / "0101-issue-template.md").write_text("# Template")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["brief_content"] = "# Brief"
+        state["audit_dir"] = str(tmp_path / "nonexistent" / "audit")
+
+        result = generate_draft(state)
+
+        assert result.get("current_draft_path", "") == ""
+
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    def test_lld_with_context_content(self, mock_get_provider, tmp_path):
+        """Test LLD draft generation includes context content."""
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="# LLD Draft",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        template_dir = tmp_path / "docs" / "templates"
+        template_dir.mkdir(parents=True)
+        (template_dir / "0102-feature-lld-template.md").write_text("# Template")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["issue_title"] = "Test Feature"
+        state["issue_body"] = "## Requirements"
+        state["context_content"] = "## Existing Code\n\ndef foo(): pass"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        generate_draft(state)
+
+        # Verify context is included in prompt
+        call_args = mock_provider.invoke.call_args
+        content_arg = call_args.kwargs.get("content", "") or call_args[1].get("content", "")
+        assert "Context" in content_arg or "Existing Code" in content_arg
+
+    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
+    def test_revision_with_user_feedback(self, mock_get_provider, tmp_path):
+        """Test revision mode includes user feedback."""
+        from agentos.workflows.requirements.nodes.generate_draft import generate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            response="# Revised Draft",
+            error_message=None,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        template_dir = tmp_path / "docs" / "templates"
+        template_dir.mkdir(parents=True)
+        (template_dir / "0101-issue-template.md").write_text("# Template")
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["brief_content"] = "# Brief"
+        state["current_draft"] = "# Old Draft"
+        state["verdict_history"] = ["BLOCKED: Missing tests"]
+        state["user_feedback"] = "Please add error handling section"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        generate_draft(state)
+
+        # Verify user feedback is included in prompt
+        call_args = mock_provider.invoke.call_args
+        content_arg = call_args.kwargs.get("content", "") or call_args[1].get("content", "")
+        assert "error handling" in content_arg.lower()
+
+
+class TestFinalizeIssueNumberParsing:
+    """Tests for issue number parsing in finalize."""
+
+    @patch("subprocess.run")
+    def test_handles_invalid_issue_number_in_url(self, mock_run, tmp_path):
+        """Test handles URL with invalid issue number gracefully."""
+        from agentos.workflows.requirements.nodes.finalize import finalize
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # URL with non-numeric issue number
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout="https://github.com/user/repo/issues/not-a-number",
+        )
+
+        state = create_initial_state(
+            workflow_type="issue",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            brief_file="brief.md",
+        )
+        state["current_draft"] = "# Title\n\nBody"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = finalize(state)
+
+        # Should succeed but filed_issue_number stays 0
+        assert result.get("error_message", "") == ""
+        assert result.get("filed_issue_number") == 0
+
+
+class TestLoadInputEmptyResponseExhaustsRetries:
+    """Tests for empty response exhausting retries."""
+
+    @patch("subprocess.run")
+    @patch("time.sleep")
+    def test_empty_response_exhausts_retries(self, mock_sleep, mock_run, tmp_path):
+        """Test error returned when all retries return empty response."""
+        from agentos.workflows.requirements.nodes.load_input import load_input
+        from agentos.workflows.requirements.state import create_initial_state
+
+        # All calls return empty response
+        mock_run.return_value = Mock(returncode=0, stdout="")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+
+        result = load_input(state)
+
+        assert "empty" in result.get("error_message", "").lower()
+
+
+class TestHumanGateInteractiveMode:
+    """Tests for human_gate interactive mode paths."""
+
+    def test_draft_gate_interactive_defaults_to_review(self, tmp_path):
+        """Test draft gate in interactive mode defaults to review."""
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+            auto_mode=False,  # Interactive mode
+            gates_draft=True,
+        )
+        state["current_draft"] = "# Draft"
+        # No verdict set
+
+        result = human_gate_draft(state)
+
+        assert result.get("next_node") == "N3_review"
+
+    def test_verdict_gate_disabled_approved_routes_to_finalize(self, tmp_path):
+        """Test verdict gate when disabled routes to finalize on APPROVED."""
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+            gates_verdict=False,
+        )
+        state["lld_status"] = "APPROVED"
+        state["current_verdict"] = "APPROVED: All good"
+
+        result = human_gate_verdict(state)
+
+        assert result.get("next_node") == "N5_finalize"
+
+    def test_verdict_gate_interactive_approved_routes_to_finalize(self, tmp_path):
+        """Test verdict gate in interactive mode routes to finalize on APPROVED."""
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+            auto_mode=False,  # Interactive mode
+            gates_verdict=True,
+        )
+        state["lld_status"] = "APPROVED"
+        state["current_verdict"] = ""  # No verdict text
+
+        result = human_gate_verdict(state)
+
+        assert result.get("next_node") == "N5_finalize"
+
+    def test_verdict_gate_interactive_blocked_routes_to_revise(self, tmp_path):
+        """Test verdict gate in interactive mode routes to revise on BLOCKED."""
+        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from agentos.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            agentos_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+            auto_mode=False,  # Interactive mode
+            gates_verdict=True,
+        )
+        state["lld_status"] = "BLOCKED"
+        state["current_verdict"] = "BLOCKED: Missing sections"
+
+        result = human_gate_verdict(state)
+
+        assert result.get("next_node") == "N1_generate_draft"
