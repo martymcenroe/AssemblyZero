@@ -248,7 +248,7 @@ class TestTailMerges:
 
     def test_merges_history_and_shards(self, temp_repo: Path) -> None:
         """Tail should merge entries from history file and active shards."""
-        history_file = temp_repo / "logs" / "governance_history.jsonl"
+        history_file = temp_repo / "logs" / "review_history.jsonl"
 
         # Create history entries
         history_entries = []
