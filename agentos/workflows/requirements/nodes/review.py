@@ -101,7 +101,7 @@ Be specific about what needs to change for BLOCKED verdicts."""
     file_num = next_file_number(audit_dir)
     if audit_dir.exists():
         verdict_path = save_audit_file(
-            audit_dir, file_num, "verdict.md", verdict_content
+            audit_dir, file_num, "verdict", verdict_content
         )
     else:
         verdict_path = None

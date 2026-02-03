@@ -119,7 +119,7 @@ Use the template structure provided. Include all sections. Be specific about:
     iteration_count = state.get("iteration_count", 0) + 1
     file_num = next_file_number(audit_dir)
     if audit_dir.exists():
-        draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
+        draft_path = save_audit_file(audit_dir, file_num, "draft", draft_content)
     else:
         draft_path = None
 

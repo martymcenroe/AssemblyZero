@@ -178,7 +178,7 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     # Save to audit trail
     if audit_dir.exists():
         file_num = next_file_number(audit_dir)
-        save_audit_file(audit_dir, file_num, "final.md", lld_content)
+        save_audit_file(audit_dir, file_num, "final", lld_content)
 
     return state
 

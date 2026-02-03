@@ -10,17 +10,34 @@ from typing import Any
 from agentos.core.config import REVIEWER_MODEL
 
 
-def create_audit_dir(repo_path: Path, workflow_type: str) -> Path:
+def create_audit_dir(
+    target_repo: Path,
+    workflow_type: str,
+    slug: str = "",
+    issue_number: int | None = None,
+) -> Path:
     """Create audit directory for workflow execution.
-    
+
+    Creates lineage directory at docs/lineage/active/{dir_name}/
+    - Issue workflow: dir_name = slug (e.g., "my-feature")
+    - LLD workflow: dir_name = "{issue_number}-lld" (e.g., "42-lld")
+
     Args:
-        repo_path: Repository root path
-        workflow_type: Type of workflow (e.g., 'lld', 'test')
-        
+        target_repo: Repository root path
+        workflow_type: Type of workflow ("issue" or "lld")
+        slug: Slug name for issue workflow
+        issue_number: Issue number for LLD workflow
+
     Returns:
         Path to audit directory
     """
-    audit_dir = repo_path / ".agentos" / "audit" / workflow_type
+    # Build directory name based on workflow type
+    if workflow_type == "issue":
+        dir_name = slug if slug else "issue"
+    else:  # lld
+        dir_name = f"{issue_number}-lld" if issue_number else "lld"
+
+    audit_dir = target_repo / "docs" / "lineage" / "active" / dir_name
     audit_dir.mkdir(parents=True, exist_ok=True)
     return audit_dir
 

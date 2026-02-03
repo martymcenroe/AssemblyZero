@@ -30,8 +30,12 @@ def _load_issue(state: Dict[str, Any]) -> Dict[str, Any]:
     issue_number = state.get("issue_number")
     target_repo = state.get("target_repo", ".")
     
-    # Create audit directory
-    audit_dir = create_audit_dir(Path(target_repo), state.get("workflow_type", "lld"))
+    # Create audit directory with issue number for unique path
+    audit_dir = create_audit_dir(
+        target_repo=Path(target_repo),
+        workflow_type=state.get("workflow_type", "lld"),
+        issue_number=issue_number,
+    )
     state["audit_dir"] = str(audit_dir)
     
     try:
