@@ -525,11 +525,32 @@ class TestGraphCompilation:
     """Test that the graph compiles without errors."""
 
     def test_build_graph(self):
-        """Test graph builds successfully."""
+        """Test graph builds successfully with correct structure."""
         from agentos.workflows.issue.graph import build_issue_workflow
 
         workflow = build_issue_workflow()
         assert workflow is not None
+
+        # Verify graph has expected nodes (N0-N6)
+        compiled = workflow.compile()
+        graph_nodes = list(compiled.get_graph().nodes.keys())
+        expected_nodes = [
+            "N0_load_brief",
+            "N1_sandbox",
+            "N2_draft",
+            "N3_human_edit_draft",
+            "N4_review",
+            "N5_human_edit_verdict",
+            "N6_file",
+        ]
+        for node in expected_nodes:
+            assert node in graph_nodes, f"Missing node: {node}"
+
+        # Verify entry point
+        graph_obj = compiled.get_graph()
+        start_edges = [e for e in graph_obj.edges if e[0] == "__start__"]
+        assert len(start_edges) > 0, "No entry point found"
+        assert start_edges[0][1] == "N0_load_brief", "Entry point should be N0_load_brief"
 
     def test_graph_has_all_nodes(self):
         """Test all expected nodes exist."""

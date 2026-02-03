@@ -506,8 +506,19 @@ Requirement: REQ-1
                 if node_name != "__end__":
                     final_state = output
 
-        # Verify workflow completed
+        # Verify workflow completed with expected state keys
         assert final_state is not None
+
+        # Verify no error occurred (final node output should not have error)
+        assert final_state.get("error_message", "") == "", (
+            f"Workflow error: {final_state.get('error_message')}"
+        )
+
+        # Verify workflow reached documentation node (N8) and produced outputs
+        # The final_state is from the last node (N8 document), which sets doc_* fields
+        assert "doc_lessons_path" in final_state or "doc_scope" in final_state, (
+            "Workflow should reach N8 (document) and produce documentation outputs"
+        )
 
 
 class TestNodeFunctions:

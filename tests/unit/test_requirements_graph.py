@@ -14,11 +14,25 @@ class TestRequirementsGraph:
     """Tests for requirements workflow graph."""
 
     def test_graph_creation(self):
-        """Test that graph can be created."""
+        """Test that graph can be created with expected nodes."""
         from agentos.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         assert graph is not None
+
+        # Verify graph has expected nodes
+        compiled = graph.compile()
+        graph_nodes = list(compiled.get_graph().nodes.keys())
+        expected_nodes = [
+            "N0_load_input",
+            "N1_generate_draft",
+            "N2_human_gate_draft",
+            "N3_review",
+            "N4_human_gate_verdict",
+            "N5_finalize",
+        ]
+        for node in expected_nodes:
+            assert node in graph_nodes, f"Missing node: {node}"
 
     def test_graph_has_all_nodes(self):
         """Test that graph has all expected nodes."""
@@ -26,18 +40,50 @@ class TestRequirementsGraph:
 
         graph = create_requirements_graph()
         compiled = graph.compile()
-
-        # LangGraph compiled graphs have a 'nodes' attribute in their graph structure
-        # We verify by checking the graph can be compiled without error
         assert compiled is not None
 
+        # Verify all expected nodes are present
+        graph_nodes = list(compiled.get_graph().nodes.keys())
+        expected_nodes = [
+            "N0_load_input",
+            "N1_generate_draft",
+            "N2_human_gate_draft",
+            "N3_review",
+            "N4_human_gate_verdict",
+            "N5_finalize",
+        ]
+        for node in expected_nodes:
+            assert node in graph_nodes, f"Missing node: {node}"
+
+        # Verify entry point is correct (should start at N0_load_input)
+        graph_obj = compiled.get_graph()
+        # Entry point is indicated by edge from __start__ to first node
+        start_edges = [
+            edge for edge in graph_obj.edges
+            if edge[0] == "__start__"
+        ]
+        assert len(start_edges) > 0, "No entry point found"
+        assert start_edges[0][1] == "N0_load_input", "Entry point should be N0_load_input"
+
     def test_graph_compiles(self):
-        """Test that graph compiles without errors."""
+        """Test that graph compiles and can be invoked."""
         from agentos.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         compiled = graph.compile()
         assert compiled is not None
+
+        # Verify compiled graph has required methods for invocation
+        assert hasattr(compiled, "invoke"), "Compiled graph should have invoke method"
+        assert hasattr(compiled, "stream"), "Compiled graph should have stream method"
+        assert hasattr(compiled, "get_graph"), "Compiled graph should have get_graph method"
+
+        # Verify graph structure is accessible
+        graph_obj = compiled.get_graph()
+        assert graph_obj is not None
+        assert hasattr(graph_obj, "nodes"), "Graph should have nodes"
+        assert hasattr(graph_obj, "edges"), "Graph should have edges"
+        assert len(graph_obj.nodes) >= 6, "Graph should have at least 6 nodes"
 
 
 class TestGraphRouting:
@@ -198,10 +244,29 @@ class TestGraphExecution:
 
         graph = create_requirements_graph()
         compiled = graph.compile()
-
-        # Run the graph (without finalize since we'd need gh CLI)
-        # Just verify it doesn't raise
         assert compiled is not None
+
+        # Verify compiled graph structure before running
+        graph_obj = compiled.get_graph()
+        graph_nodes = list(graph_obj.nodes.keys())
+
+        # Verify all expected nodes are present
+        expected_nodes = [
+            "N0_load_input",
+            "N1_generate_draft",
+            "N2_human_gate_draft",
+            "N3_review",
+            "N4_human_gate_verdict",
+            "N5_finalize",
+        ]
+        for node in expected_nodes:
+            assert node in graph_nodes, f"Missing node: {node}"
+
+        # Verify routing edges exist (key workflow paths)
+        edges = list(graph_obj.edges)
+        # Check that entry point exists
+        start_edges = [e for e in edges if e[0] == "__start__"]
+        assert len(start_edges) > 0, "No entry point edge found"
 
 
 class TestNodeNames:
