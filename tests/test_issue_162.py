@@ -58,8 +58,8 @@ def test_010(tmp_path):
         assert mock_run.call_args_list[0][0][0] == ["git", "add", "docs/lld/active/LLD-162.md"]
         assert mock_run.call_args_list[1][0][0] == ["git", "add", "docs/lld/lld-status.json"]
         
-        # Verify git commit (includes "Closes #N" footer to auto-close GitHub issue)
-        assert mock_run.call_args_list[2][0][0] == ["git", "commit", "-m", "docs: add LLD-162 via requirements workflow\n\nCloses #162"]
+        # Verify git commit (includes "Ref #N" footer - NOT "Closes" since LLD is design only)
+        assert mock_run.call_args_list[2][0][0] == ["git", "commit", "-m", "docs: add LLD-162 via requirements workflow\n\nRef #162"]
         
         # Verify git push
         assert mock_run.call_args_list[3][0][0] == ["git", "push"]
@@ -121,7 +121,7 @@ def test_030(tmp_path):
 def test_040():
     """
     Commit message format - LLD | Auto | workflow_type="lld", issue=162 |
-    Formatted message | Message includes title and "Closes #N" footer
+    Formatted message | Message includes title and "Ref #N" footer (NOT Closes)
     """
     # TDD: Arrange
     # (no setup needed)
@@ -129,8 +129,8 @@ def test_040():
     # TDD: Act
     message = format_commit_message("lld", issue_number=162)
 
-    # TDD: Assert - message includes "Closes #N" to auto-close GitHub issue
-    assert message == "docs: add LLD-162 via requirements workflow\n\nCloses #162"
+    # TDD: Assert - message includes "Ref #N" (NOT "Closes" - LLD is design only)
+    assert message == "docs: add LLD-162 via requirements workflow\n\nRef #162"
 
 
 def test_050():
@@ -341,3 +341,22 @@ def test_090(tmp_path):
         text=True,
     )
     assert "docs/lld/active/LLD-162.md" in ls_result.stdout
+
+
+# Issue #238 - Ref instead of Closes
+# -----------------------------------
+
+def test_format_commit_message_lld_uses_ref_not_closes():
+    """LLD commits should reference issues, not close them."""
+    message = format_commit_message("lld", issue_number=173)
+
+    assert "Ref #173" in message, "Should use 'Ref' to reference issue"
+    assert "Closes #173" not in message, "Should NOT close issue - LLD is design only"
+    assert "closes #173" not in message.lower(), "Case-insensitive check"
+
+
+def test_format_commit_message_issue_uses_ref_not_closes():
+    """Issue brief commits should reference issues, not close them."""
+    message = format_commit_message("issue", issue_number=99, slug="my-feature")
+
+    assert "Closes #" not in message, "Issue workflow should not close issues"

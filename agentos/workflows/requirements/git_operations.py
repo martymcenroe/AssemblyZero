@@ -25,7 +25,7 @@ def format_commit_message(workflow_type: str, issue_number: Optional[int] = None
         Formatted commit message
     """
     if workflow_type == "lld":
-        return f"docs: add LLD-{issue_number} via requirements workflow\n\nCloses #{issue_number}"
+        return f"docs: add LLD-{issue_number} via requirements workflow\n\nRef #{issue_number}"
     else:  # issue
         return f"docs: add lineage for {slug} via requirements workflow"
 
