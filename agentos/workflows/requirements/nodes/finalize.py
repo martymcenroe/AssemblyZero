@@ -173,7 +173,7 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     created_files = list(state.get("created_files", []))
     created_files.append(str(lld_path))
     state["created_files"] = created_files
-    state["lld_path"] = str(lld_path)
+    state["final_lld_path"] = str(lld_path)
 
     # Save to audit trail
     if audit_dir.exists():
