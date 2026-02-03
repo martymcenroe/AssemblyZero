@@ -889,3 +889,257 @@ class TestRepoAutoDetection:
 
         # Should still find repo root
         assert target_repo == repo.resolve()
+
+
+# =============================================================================
+# Lineage Versioning CLI Tests (Issue #237, Standard 0012)
+# =============================================================================
+
+
+class TestForceFlag:
+    """Tests for --force flag in CLI.
+
+    Issue #237: Automate lineage n-1 versioning on LLD regeneration.
+    """
+
+    def test_force_flag_in_parser(self):
+        """Verify --force argument is defined in parser."""
+        from tools.run_requirements_workflow import parse_args
+
+        args = parse_args([
+            "--type", "lld",
+            "--issue", "42",
+            "--force",
+        ])
+
+        assert args.force is True
+
+    def test_force_flag_default_false(self):
+        """Verify --force defaults to False."""
+        from tools.run_requirements_workflow import parse_args
+
+        args = parse_args([
+            "--type", "lld",
+            "--issue", "42",
+        ])
+
+        assert args.force is False
+
+
+class TestCheckAndShiftExistingLLD:
+    """Tests for check_and_shift_existing_lld function.
+
+    Issue #237: Automate lineage n-1 versioning on LLD regeneration.
+    """
+
+    def test_returns_true_when_nothing_exists(self, tmp_path):
+        """Test returns True when no LLD or lineage exists."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=False)
+
+        assert result is True
+
+    def test_returns_true_with_force_flag(self, tmp_path):
+        """Test returns True with --force even when LLD exists."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+
+        # Create existing LLD
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# Existing LLD")
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=True)
+
+        assert result is True
+        # LLD should be deleted
+        assert not lld_file.exists()
+
+    @patch.dict("os.environ", {"AGENTOS_TEST_MODE": "1"})
+    def test_auto_confirms_in_test_mode(self, tmp_path):
+        """Test auto-confirms YES in test mode."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR, AUDIT_ACTIVE_DIR
+
+        # Create existing LLD and lineage
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        (lld_dir / "LLD-042.md").write_text("# Existing LLD")
+
+        lineage_dir = tmp_path / AUDIT_ACTIVE_DIR / "42-lld"
+        lineage_dir.mkdir(parents=True)
+        (lineage_dir / "001-issue.md").write_text("content")
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=False)
+
+        assert result is True
+        # LLD should be deleted, lineage shifted
+        assert not (lld_dir / "LLD-042.md").exists()
+        assert not (tmp_path / AUDIT_ACTIVE_DIR / "42-lld").exists()
+        assert (tmp_path / AUDIT_ACTIVE_DIR / "42-lld-n1").exists()
+
+    @patch("builtins.input", return_value="YES")
+    def test_proceeds_on_yes_confirmation(self, mock_input, tmp_path):
+        """Test proceeds when user types YES."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+
+        # Create existing LLD
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        (lld_dir / "LLD-042.md").write_text("# Existing LLD")
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=False)
+
+        assert result is True
+        mock_input.assert_called_once()
+
+    @patch("builtins.input", return_value="no")
+    def test_aborts_on_non_yes_response(self, mock_input, tmp_path):
+        """Test aborts when user doesn't type YES."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+
+        # Create existing LLD
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# Existing LLD")
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=False)
+
+        assert result is False
+        # LLD should NOT be deleted
+        assert lld_file.exists()
+
+    @patch("builtins.input", return_value="y")
+    def test_aborts_on_lowercase_yes(self, mock_input, tmp_path):
+        """Test aborts when user types lowercase 'yes' instead of 'YES'."""
+        from tools.run_requirements_workflow import check_and_shift_existing_lld
+        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+
+        # Create existing LLD
+        lld_dir = tmp_path / LLD_ACTIVE_DIR
+        lld_dir.mkdir(parents=True)
+        lld_file = lld_dir / "LLD-042.md"
+        lld_file.write_text("# Existing LLD")
+
+        result = check_and_shift_existing_lld(42, tmp_path, force=False)
+
+        # Exact match required - lowercase 'y' should abort
+        assert result is False
+        assert lld_file.exists()
+
+
+class TestMainWithPreGenerationCheck:
+    """Tests for main() integration with pre-generation check.
+
+    Issue #237: Automate lineage n-1 versioning on LLD regeneration.
+    """
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_calls_pregeneration_check_for_lld(
+        self, mock_roots, mock_run, mock_check, tmp_path
+    ):
+        """Test main() calls pre-generation check for LLD workflow."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        mock_roots.return_value = (tmp_path, tmp_path)
+        mock_check.return_value = True
+        mock_run.return_value = 0
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--mock"]
+
+        try:
+            main()
+        finally:
+            sys.argv = original_argv
+
+        # Pre-generation check should be called
+        mock_check.assert_called_once_with(42, tmp_path, False)
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_passes_force_to_check(
+        self, mock_roots, mock_run, mock_check, tmp_path
+    ):
+        """Test main() passes --force flag to pre-generation check."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        mock_roots.return_value = (tmp_path, tmp_path)
+        mock_check.return_value = True
+        mock_run.return_value = 0
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--issue", "42", "--force", "--mock"]
+
+        try:
+            main()
+        finally:
+            sys.argv = original_argv
+
+        # Pre-generation check should be called with force=True
+        mock_check.assert_called_once_with(42, tmp_path, True)
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_aborts_when_check_returns_false(
+        self, mock_roots, mock_run, mock_check, tmp_path
+    ):
+        """Test main() returns 0 when check returns False (user abort)."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        mock_roots.return_value = (tmp_path, tmp_path)
+        mock_check.return_value = False  # User aborted
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "lld", "--issue", "42"]
+
+        try:
+            result = main()
+        finally:
+            sys.argv = original_argv
+
+        assert result == 0
+        # run_single_workflow should NOT be called
+        mock_run.assert_not_called()
+
+    @patch("tools.run_requirements_workflow.check_and_shift_existing_lld")
+    @patch("tools.run_requirements_workflow.run_single_workflow")
+    @patch("tools.run_requirements_workflow.resolve_roots")
+    def test_main_skips_check_for_issue_workflow(
+        self, mock_roots, mock_run, mock_check, tmp_path
+    ):
+        """Test main() does NOT call pre-generation check for issue workflow."""
+        from tools.run_requirements_workflow import main
+        import sys
+
+        mock_roots.return_value = (tmp_path, tmp_path)
+        mock_run.return_value = 0
+
+        # Create brief file
+        ideas_dir = tmp_path / "ideas" / "active"
+        ideas_dir.mkdir(parents=True)
+        brief = ideas_dir / "test.md"
+        brief.write_text("# Test")
+
+        original_argv = sys.argv
+        sys.argv = ["prog", "--type", "issue", "--brief", str(brief), "--mock"]
+
+        try:
+            main()
+        finally:
+            sys.argv = original_argv
+
+        # Pre-generation check should NOT be called for issue workflow
+        mock_check.assert_not_called()
