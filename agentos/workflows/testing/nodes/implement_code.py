@@ -404,17 +404,25 @@ def parse_implementation_response(response: str) -> list[dict]:
 def write_implementation_files(
     files: list[dict],
     repo_root: Path,
+    test_files: list[str] | None = None,
 ) -> list[str]:
     """Write implementation files to disk.
 
     Args:
         files: List of file dicts with 'path' and 'content'.
         repo_root: Repository root path.
+        test_files: List of test file paths to protect from overwrite.
 
     Returns:
         List of written file paths.
     """
     written = []
+
+    # Build set of protected test file paths
+    protected_paths = set()
+    if test_files:
+        for tf in test_files:
+            protected_paths.add(str(Path(tf).resolve()))
 
     for file_info in files:
         path = file_info["path"]
@@ -424,6 +432,18 @@ def write_implementation_files(
         file_path = Path(path)
         if not file_path.is_absolute():
             file_path = repo_root / path
+
+        # SAFETY: Never overwrite test files
+        resolved_path = str(file_path.resolve())
+        if resolved_path in protected_paths:
+            print(f"    [WARN] Skipping write to protected test file: {path}")
+            continue
+
+        # SAFETY: Never write to tests/ directory during implementation
+        path_str = str(file_path)
+        if "/tests/" in path_str or "\\tests\\" in path_str or path_str.startswith("tests"):
+            print(f"    [WARN] Skipping write to tests/ directory: {path}")
+            continue
 
         # Ensure parent directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -510,8 +530,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    Extracted {len(files)} implementation file(s)")
 
-    # Write files
-    written_paths = write_implementation_files(files, repo_root)
+    # Write files (protect test files from accidental overwrite)
+    test_files = state.get("test_files", [])
+    written_paths = write_implementation_files(files, repo_root, test_files)
     print(f"    Written: {', '.join(written_paths)}")
 
     # Save implementation to audit trail

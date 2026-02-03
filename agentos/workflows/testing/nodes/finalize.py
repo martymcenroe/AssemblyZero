@@ -4,8 +4,10 @@ Generates test report and archives the audit trail:
 - Creates docs/reports/active/{issue}-test-report.md
 - Saves metadata to audit trail
 - Logs workflow completion
+- Archives LLD and reports to done/ directories on success
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,102 @@ from agentos.workflows.testing.audit import (
     save_test_report_metadata,
 )
 from agentos.workflows.testing.state import TestingWorkflowState
+
+logger = logging.getLogger(__name__)
+
+
+def archive_file_to_done(active_path: Path) -> Path | None:
+    """
+    Move a file from active/ to done/ directory.
+    
+    Args:
+        active_path: Path to file in active/ directory
+        
+    Returns:
+        The new path if successful, None if skipped or failed
+    """
+    try:
+        # Verify the file exists
+        if not active_path.exists():
+            logger.warning(f"File not found for archival: {active_path}")
+            return None
+        
+        # Verify it's in an active/ directory
+        if "active" not in str(active_path):
+            logger.info(f"File not in active/ directory, skipping archival: {active_path}")
+            return None
+        
+        # Construct the done/ path
+        done_path = Path(str(active_path).replace("/active/", "/done/").replace("\\active\\", "\\done\\"))
+        
+        # Create done/ directory if it doesn't exist
+        done_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Handle name conflicts by appending timestamp
+        if done_path.exists():
+            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            stem = done_path.stem
+            suffix = done_path.suffix
+            done_path = done_path.parent / f"{stem}-{timestamp}{suffix}"
+        
+        # Move the file
+        active_path.rename(done_path)
+        logger.info(f"Archived {active_path.name} to {done_path}")
+        
+        return done_path
+        
+    except OSError as e:
+        logger.error(f"Failed to archive {active_path}: {e}")
+        return None
+
+
+def _archive_workflow_artifacts(state: TestingWorkflowState) -> dict[str, list[str]]:
+    """
+    Archive LLD and report files from active/ to done/ directories.
+    
+    Args:
+        state: Current workflow state
+        
+    Returns:
+        Dict with 'archived' and 'skipped' lists of file paths
+    """
+    archived = []
+    skipped = []
+    
+    # Check if workflow was successful
+    workflow_success = state.get("workflow_success", True)
+    if not workflow_success:
+        logger.info("Workflow not successful, skipping artifact archival")
+        lld_path = state.get("lld_path", "")
+        if lld_path:
+            skipped.append(lld_path)
+        # Collect report paths from individual state fields
+        for report_key in ["test_report_path", "implementation_report_path"]:
+            report_path = state.get(report_key, "")
+            if report_path:
+                skipped.append(report_path)
+        return {"archived": archived, "skipped": skipped}
+
+    # Archive LLD if present
+    lld_path = state.get("lld_path", "")
+    if lld_path:
+        result = archive_file_to_done(Path(lld_path))
+        if result:
+            archived.append(str(result))
+        else:
+            skipped.append(lld_path)
+
+    # Archive reports if present (using individual state fields)
+    for report_key in ["test_report_path", "implementation_report_path"]:
+        report_path = state.get(report_key, "")
+        if report_path:
+            result = archive_file_to_done(Path(report_path))
+            if result:
+                archived.append(str(result))
+            else:
+                skipped.append(report_path)
+    
+    return {"archived": archived, "skipped": skipped}
 
 
 def finalize(state: TestingWorkflowState) -> dict[str, Any]:
@@ -100,6 +198,15 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
         summary = _generate_summary(metadata)
         save_audit_file(audit_dir, file_num, "summary.md", summary)
 
+    # Archive workflow artifacts (LLD and reports)
+    archival_result = _archive_workflow_artifacts(state)
+    archived_files = archival_result["archived"]
+    
+    if archived_files:
+        print(f"\n    Archived artifacts:")
+        for file_path in archived_files:
+            print(f"      - {file_path}")
+
     # Log workflow completion
     log_workflow_execution(
         target_repo=repo_root,
@@ -112,6 +219,7 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
             "coverage": coverage_achieved,
             "iterations": iteration_count,
             "report_path": str(report_path),
+            "archived_files": archived_files,
         },
     )
 
@@ -120,6 +228,7 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         "test_report_path": str(report_path),
+        "archived_files": archived_files,
         "error_message": "",
     }
 
