@@ -398,7 +398,7 @@ class TestConsolidation:
         assert count == 1  # One shard created by this session
 
         # Verify history file exists and contains entries
-        history_file = temp_repo / "logs" / "governance_history.jsonl"
+        history_file = temp_repo / "logs" / "review_history.jsonl"
         assert history_file.exists()
 
         with open(history_file, encoding="utf-8") as f:
@@ -470,7 +470,7 @@ class TestConsolidation:
         assert first_count == 1
 
         # Get history file content after first consolidation
-        history_file = temp_repo / "logs" / "governance_history.jsonl"
+        history_file = temp_repo / "logs" / "review_history.jsonl"
         with open(history_file, encoding="utf-8") as f:
             first_content = f.read()
 

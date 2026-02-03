@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Consolidate session shards into governance history.
+"""Consolidate session shards into review history.
 
 This script is invoked by the post-commit git hook to merge all active
-session shards into the permanent governance_history.jsonl file.
+session shards into the permanent review_history.jsonl file.
 
 Uses atomic write pattern: temp file + os.replace() for crash safety.
 
@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from agentos.core.config import DEFAULT_AUDIT_LOG_PATH
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -86,7 +88,7 @@ def consolidate(repo_root: Path) -> int:
         OSError: If atomic write fails.
     """
     active_dir = repo_root / "logs" / "active"
-    history_file = repo_root / "logs" / "governance_history.jsonl"
+    history_file = repo_root / DEFAULT_AUDIT_LOG_PATH
 
     # Find all shards (exclude .gitkeep)
     if not active_dir.exists():
