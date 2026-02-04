@@ -1,0 +1,3 @@
+# Governance Verdict: BLOCK
+
+The LLD proposes a robust State Machine architecture using `langgraph` to enforce Test-Driven Development (TDD). The inclusion of a "Mock Mode" for offline development and explicit security validators for paths/secrets is commendable. However, there is a critical Safety gap regarding the handling of the git worktree state which could lead to accidental data loss during the "Rollback" phase.

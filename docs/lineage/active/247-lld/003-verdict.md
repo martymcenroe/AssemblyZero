@@ -1,4 +1,4 @@
-# LLD Review: 1247-Two-tier Commit Validation with Hourly Orphan Issue Detection
+# LLD Review: 1247 - Feature: Two-tier commit validation with hourly orphan issue detection
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
@@ -7,38 +7,35 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The LLD proposes a solid dual-layer approach to issue tracking hygiene, combining immediate developer feedback (git hook) with asynchronous safety nets (orphan detector). The logic for distinguishing implementation PRs is sound. However, the **Requirement Coverage Analysis** indicates significant gaps in the test plan, specifically regarding output formatting and infrastructure setup verification. These must be addressed before approval.
+The LLD proposes a solid dual-layer validation strategy. The separation of concerns (blocking shell script vs. non-blocking Python detector) is architecturally sound. However, the Testing Strategy (Section 10) falls slightly short on Requirement Coverage, specifically missing integration tests for the negative cases (Requirement 6) and infrastructure validation (Requirement 3).
 
 ## Open Questions Resolved
-- [x] ~~Should the orphan detection report go to Slack, GitHub Issues, or both?~~ **RESOLVED: Output to Stdout and GitHub Actions Job Summary (Markdown). Avoid Slack integration to minimize secrets management complexity.**
-- [x] ~~What is the threshold for "implementation PR" - just file extensions or also minimum lines changed?~~ **RESOLVED: Use file extensions + PR title/branch conventions (as defined in 2.5). Do not use line counts, as small bug fixes are valid implementations.**
-- [x] ~~Should we create auto-fix functionality that closes orphan issues automatically or just report them?~~ **RESOLVED: Report only. Auto-closing introduces risk of false positives; human review is required.**
+- [x] ~~Should the orphan detector also check for issues referenced only with `Ref #N` that have been open for extended periods (e.g., 30+ days)?~~ **RESOLVED: No. Keep the scope strictly limited to "Orphaned Implementations" (code merged, issue open). Stale issue management is a separate concern/feature.**
+- [x] ~~What notification mechanism is preferred for orphan reports: GitHub Issues, Slack, or email?~~ **RESOLVED: Stdout (for logs) + creation of a summary GitHub Issue if orphans are found. Avoid adding Slack/Email secrets for this MVP.**
+- [x] ~~Should the hourly job run on a schedule or only on PR merge events?~~ **RESOLVED: Hourly schedule as proposed. This handles batch processing efficiently and avoids API rate limit bursts from rapid-fire PR merges.**
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| 1 | Pre-commit hook rejects commits without issue reference | T030 (Scenario 050, 060) | ✓ Covered |
-| 2 | Pre-commit hook accepts valid commits with supported formats | T010, T020 (Scenario 010, 020, 030, 040) | ✓ Covered |
-| 3 | Pre-commit hook provides clear error message | T030 (Scenario 050 implicit) | ✓ Covered |
-| 4 | Orphan detector identifies open issues with merged impl PRs | T040 (Scenario 070) | ✓ Covered |
-| 5 | Orphan detector distinguishes impl PRs from docs/LLD PRs | T050, T060 (Scenario 080, 100-130) | ✓ Covered |
-| 6 | Orphan detector runs hourly via GitHub Actions | - | **GAP** |
-| 7 | Orphan detector outputs machine-readable (JSON) and human-readable (MD) | - | **GAP** |
-| 8 | Setup script installs git hook correctly on dev machines | - | **GAP** |
+| 1 | Pre-commit hook rejects commits without any issue reference pattern | T050 | ✓ Covered |
+| 2 | Pre-commit hook accepts commits with `Ref`, `fixes`, `closes`, or `resolves` | T010, T020, T030, T040, T060 | ✓ Covered |
+| 3 | Orphan detector runs hourly via GitHub Actions | - | **GAP** |
+| 4 | Detector correctly identifies implementation PRs vs. LLD/docs PRs | T070, T080 | ✓ Covered |
+| 5 | Detector generates actionable report listing orphan issues | T110 | ✓ Covered |
+| 6 | System does not generate false positives for legitimate `Ref #N` usage on LLD commits | T080 (Partial) | **GAP** |
 
-**Coverage Calculation:** 5 requirements covered / 8 total = **62.5%**
+**Coverage Calculation:** 4 requirements covered / 6 total = **66%**
 
-**Verdict:** **BLOCK** (Threshold < 95%)
+**Verdict:** BLOCK
 
-**Missing Test Scenarios:**
-1.  **For Req 6:** A test verifying the workflow file (`.github/workflows/orphan-detection.yml`) exists and contains the correct cron schedule `0 * * * *`.
-2.  **For Req 7:** Unit tests for `generate_report` verifying it produces valid JSON structure and Markdown syntax matching the schema defined in 2.3.
-3.  **For Req 8:** A shell or integration test verifying `tools/setup_hooks.sh` correctly copies the file to `.git/hooks/commit-msg` and sets executable permissions.
+### Missing Test Scenarios
+1.  **Requirement 3:** Need a test (e.g., `T130`) that parses `.github/workflows/orphan-detection.yml` to verify the `cron` schedule is present and valid.
+2.  **Requirement 6:** `T080` only tests the `is_implementation_pr` helper. You need an integration test (e.g., `T140`) where `detect_orphan_issues` is called with a mocked LLD PR (ref only) and asserts that the returned orphan list is **empty**. The current plan tests the helper, but not the decision logic in the main loop.
 
 ## Tier 1: BLOCKING Issues
-No blocking issues found in Cost, Safety, Security, or Legal categories. LLD is blocked primarily on Requirement Coverage.
+No blocking issues found. LLD is approved for implementation pending Tier 2 fixes.
 
 ### Cost
 - [ ] No issues found.
@@ -61,12 +58,12 @@ No blocking issues found in Cost, Safety, Security, or Legal categories. LLD is 
 - [ ] No issues found.
 
 ### Quality
-- [ ] **Requirement Coverage Failure:** The Test Plan (Section 10) misses tests for report generation formatting, workflow scheduling configuration, and the installation script. These are core requirements listed in Section 3. Add scenarios to Section 10.1 to cover these (e.g., `T140: Generate JSON report`, `T150: Setup script installs hook`).
+- [ ] **Requirement Coverage:** 66% (Threshold 95%). The test plan is missing verification for the workflow schedule and a full integration test for the false-positive suppression logic.
+- [ ] **Test Data Hygiene:** Ensure the "Mock PR objects" in Section 5.3 explicitly include examples of "LLD-only" PRs (only .md files) to support the missing T140.
 
 ## Tier 3: SUGGESTIONS
-- **Setup Script Safety:** Consider checking if a hook already exists in `setup_hooks.sh` before overwriting it, or prompt the user.
-- **Pagination:** Ensure `tools/orphan_issue_detector.py` handles GitHub API pagination correctly when fetching "all open issues" (Logic Flow 2.5), as noted in 2.6.
-- **Breaking Changes:** Consider adding logic to the commit hook to validate `BREAKING CHANGE:` footer format if that is part of the project's convention.
+- **Performance:** The pseudocode logic (Loop open issues -> Search all merged PRs) is O(N*M). For larger repos, consider inverting this: Fetch merged PRs in lookback period once, extract their issue refs, and then check those specific issues.
+- **Maintainability:** In `is_implementation_pr`, verify that the list of "implementation extensions" is configurable or comprehensive (e.g., include `.sh`, `.yml`, `.toml` as implementation changes?).
 
 ## Questions for Orchestrator
 1. None.

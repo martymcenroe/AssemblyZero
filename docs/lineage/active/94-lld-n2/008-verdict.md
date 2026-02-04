@@ -1,0 +1,3 @@
+# Governance Verdict: BLOCK
+
+The LLD proposes a robust state-machine approach to repository hygiene using LangGraph, with a commendable focus on safety regarding destructive operations (Worktree pruning). However, the initialization logic creates a significant safety risk regarding the scan scope (`repo_root`), and resource boundaries are not defined for the findings collection. These must be addressed before implementation.

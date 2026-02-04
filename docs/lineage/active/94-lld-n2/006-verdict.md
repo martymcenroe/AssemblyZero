@@ -1,0 +1,3 @@
+# Governance Verdict: BLOCK
+
+The LLD provides a solid foundation for automated repository hygiene using LangGraph. The "Safety First" approach with `safe_walk` is commendable. However, there is a critical Safety issue regarding the granularity of the `auto_fix` flag, which combines low-risk text changes with high-risk destructive operations (directory deletion). Implementation cannot proceed until this safety mechanism is refined.

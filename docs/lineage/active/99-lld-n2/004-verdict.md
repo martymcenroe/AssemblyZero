@@ -1,0 +1,3 @@
+# Governance Verdict: BLOCK
+
+The proposal to move to a configuration-driven project structure is architecturally sound and improves maintainability. However, the LLD is **REJECTED** due to a Tier 1 Safety gap: the security mitigations promised in Section 7 (path traversal protection) are missing from the actual implementation logic in Section 2.5. This disconnect poses a risk if developed strictly as designed.
