@@ -23,6 +23,23 @@ from ..git_operations import commit_and_push, GitOperationError
 GH_TIMEOUT_SECONDS = 30
 
 
+def cleanup_todo_placeholders(content: str) -> str:
+    """Clean up TODO placeholders in table cells.
+
+    Issue #273: Claude sometimes puts TODO in table Status columns.
+    Replace with "Open" to pass validation while preserving intent.
+
+    Args:
+        content: LLD content with potential TODO placeholders.
+
+    Returns:
+        Content with | TODO | replaced by | Open |.
+    """
+    # Replace | TODO | with | Open | (case-insensitive)
+    cleaned = re.sub(r"\|\s*TODO\s*\|", "| Open |", content, flags=re.IGNORECASE)
+    return cleaned
+
+
 def _parse_issue_content(draft: str) -> tuple:
     """Parse issue title and body from markdown draft.
 
@@ -239,6 +256,9 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     # If so, skip the open questions check (but still check for TODOs)
     open_questions_status = state.get("open_questions_status", "")
     open_questions_resolved = open_questions_status == "RESOLVED"
+
+    # Issue #273: Clean up TODO placeholders in table cells before validation
+    current_draft = cleanup_todo_placeholders(current_draft)
 
     # Gate 2: Validate LLD structure before finalization (Issue #235)
     validation_errors = validate_lld_final(current_draft, open_questions_resolved)

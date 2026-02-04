@@ -792,6 +792,62 @@ class TestFinalizeNode:
         assert tracking["issues"]["99"]["status"] == "approved"
 
 
+class TestCleanupTodoPlaceholders:
+    """Tests for cleanup_todo_placeholders function (Issue #273)."""
+
+    def test_replaces_todo_in_table_cells(self):
+        """Test that | TODO | is replaced with | Open |."""
+        from agentos.workflows.requirements.nodes.finalize import cleanup_todo_placeholders
+
+        content = """| Risk | Mitigation | Status |
+|------|------------|--------|
+| CVE-2026-0994 | Upgrade to patched version | TODO |
+| Regression | Full test suite validates | TODO |"""
+
+        result = cleanup_todo_placeholders(content)
+
+        assert "| TODO |" not in result
+        assert "| Open |" in result
+        assert result.count("| Open |") == 2
+
+    def test_case_insensitive(self):
+        """Test that todo, Todo, TODO all get replaced."""
+        from agentos.workflows.requirements.nodes.finalize import cleanup_todo_placeholders
+
+        content = "| todo | and | Todo | and | TODO |"
+        result = cleanup_todo_placeholders(content)
+
+        assert "| Open |" in result
+        assert result.count("| Open |") == 3
+
+    def test_preserves_todo_outside_tables(self):
+        """Test that TODO outside table cells is preserved."""
+        from agentos.workflows.requirements.nodes.finalize import cleanup_todo_placeholders
+
+        content = """## TODO List
+- TODO: implement feature
+| Status |
+| TODO |"""
+
+        result = cleanup_todo_placeholders(content)
+
+        # Table cell TODO replaced
+        assert "| Open |" in result
+        # Non-table TODOs preserved
+        assert "## TODO List" in result
+        assert "- TODO: implement feature" in result
+
+    def test_handles_whitespace_variations(self):
+        """Test that | TODO | with various whitespace is handled."""
+        from agentos.workflows.requirements.nodes.finalize import cleanup_todo_placeholders
+
+        content = "|TODO| and |  TODO  | and | TODO|"
+        result = cleanup_todo_placeholders(content)
+
+        assert "TODO" not in result
+        assert result.count("| Open |") == 3
+
+
 class TestFinalizeNodeAdditional:
     """Additional tests for finalize node coverage."""
 
