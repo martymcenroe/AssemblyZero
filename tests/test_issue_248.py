@@ -28,6 +28,7 @@ from agentos.workflows.requirements.nodes.review import (
 )
 from agentos.workflows.requirements.graph import (
     route_after_generate_draft,
+    route_after_validate_mechanical,
     route_after_review,
 )
 
@@ -195,18 +196,30 @@ def test_t010(draft_with_open_questions, mock_state_base):
 
     Issue #248: Pre-review validation gate was removed. Drafts with open
     questions should now proceed to review where Gemini can answer them.
+
+    Issue #277: LLD workflows now go through mechanical validation (N1.5) first,
+    then to review. This test verifies the full path.
     """
     # TDD: Arrange
     state = mock_state_base.copy()
     state["current_draft"] = draft_with_open_questions
 
     # TDD: Act
-    # With gates disabled, route_after_generate_draft should go to N3_review
-    result = route_after_generate_draft(state)
+    # Issue #277: LLD workflows go through mechanical validation first
+    result_after_draft = route_after_generate_draft(state)
+
+    # Simulate mechanical validation passing (no BLOCKED status)
+    state["lld_status"] = "PENDING"  # Not BLOCKED
+    result_after_validation = route_after_validate_mechanical(state)
 
     # TDD: Assert
-    # Draft with open questions should NOT be blocked - goes to review
-    assert result == "N3_review"
+    # Step 1: After draft, LLD workflows go to mechanical validation
+    assert result_after_draft == "N1_5_validate_mechanical", \
+        "LLD workflows should go to mechanical validation after draft (Issue #277)"
+
+    # Step 2: After validation passes (no BLOCKED), proceed to review
+    assert result_after_validation == "N3_review", \
+        "After validation passes with gates disabled, should proceed to review"
 
 
 def test_t020(draft_with_open_questions, verdict_with_resolved_questions):
@@ -342,6 +355,8 @@ def test_010(draft_with_open_questions, mock_state_base):
     """
     Draft with open questions proceeds | Auto | Draft with 3 unchecked
     questions | Reaches N3_review | No BLOCKED status pre-review
+
+    Issue #277: LLD workflows now go through mechanical validation (N1.5) first.
     """
     # TDD: Arrange
     state = mock_state_base.copy()
@@ -351,12 +366,20 @@ def test_010(draft_with_open_questions, mock_state_base):
     # Verify draft has open questions
     has_questions = _draft_has_open_questions(draft_with_open_questions)
 
-    # Route should go to review, not be blocked
-    route = route_after_generate_draft(state)
+    # Issue #277: LLD workflows go through mechanical validation first
+    route_after_draft = route_after_generate_draft(state)
+
+    # Simulate mechanical validation passing
+    state["lld_status"] = "PENDING"  # Not BLOCKED
+    route_after_validation = route_after_validate_mechanical(state)
 
     # TDD: Assert
     assert has_questions, "Draft should have unchecked open questions"
-    assert route == "N3_review", "Should proceed to review despite open questions"
+    # Issue #277: LLD workflows go to N1.5 first, then N3 when validation passes
+    assert route_after_draft == "N1_5_validate_mechanical", \
+        "LLD workflows go to mechanical validation after draft"
+    assert route_after_validation == "N3_review", \
+        "Should proceed to review despite open questions (after validation passes)"
 
 
 def test_020(draft_with_open_questions, verdict_with_resolved_questions):
