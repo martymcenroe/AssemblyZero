@@ -144,6 +144,7 @@ Use the template structure provided. Include all sections. Be specific about:
         "iteration_count": iteration_count,
         "file_counter": file_num,
         "user_feedback": "",  # Clear feedback after use
+        "validation_errors": [],  # Clear validation errors after use (Issue #294)
         "error_message": "",
     }
 
@@ -166,6 +167,7 @@ def _build_prompt(
     current_draft = state.get("current_draft", "")
     verdict_history = state.get("verdict_history", [])
     user_feedback = state.get("user_feedback", "")
+    validation_errors = state.get("validation_errors", [])  # Issue #294
 
     if workflow_type == "issue":
         input_content = state.get("brief_content", "")
@@ -183,10 +185,26 @@ def _build_prompt(
         input_content += f"\n\n**CRITICAL: This LLD is for GitHub Issue #{issue_number}. Use this exact issue number in all references.**"
         input_label = f"GitHub Issue #{issue_number}"
 
-    # Check if this is a revision
-    if current_draft and verdict_history:
+    # Check if this is a revision (Gemini feedback, user feedback, OR validation errors)
+    # Issue #294: Include validation_errors to break infinite loop
+    is_revision = current_draft and (verdict_history or validation_errors or user_feedback)
+
+    if is_revision:
         # Revision mode
         revision_context = ""
+
+        # Issue #294: Include mechanical validation errors FIRST (highest priority)
+        if validation_errors:
+            revision_context += "## MECHANICAL VALIDATION ERRORS (MUST FIX FIRST)\n\n"
+            revision_context += "The following errors were found by automated validation. "
+            revision_context += "These MUST be fixed before the LLD can proceed:\n\n"
+            for error in validation_errors:
+                revision_context += f"- **ERROR:** {error}\n"
+            revision_context += "\n"
+            revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
+            revision_context += "- 'Modify' files MUST exist in the repository\n"
+            revision_context += "- 'Add' files must have existing parent directories\n"
+            revision_context += "- Use actual file names from the codebase, not generic names\n\n"
 
         if verdict_history:
             revision_context += "## ALL Gemini Review Feedback (CUMULATIVE)\n\n"
@@ -208,10 +226,11 @@ def _build_prompt(
 {template}
 
 CRITICAL REVISION INSTRUCTIONS:
-1. Implement EVERY change requested by Gemini feedback
-2. PRESERVE sections that Gemini didn't flag
-3. ONLY modify sections Gemini specifically mentioned
-4. Keep ALL template sections intact
+1. Fix ALL mechanical validation errors FIRST (invalid file paths, missing sections)
+2. Implement EVERY change requested by Gemini feedback
+3. PRESERVE sections that weren't flagged
+4. ONLY modify sections that need changes
+5. Keep ALL template sections intact
 
 Revise the draft to address ALL feedback above.
 START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
