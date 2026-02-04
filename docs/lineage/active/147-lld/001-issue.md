@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 147
+url: https://github.com/martymcenroe/AgentOS/issues/147
+fetched: 2026-02-04T01:37:27.668474Z
+---
+
 # Issue #147: feat: Implementation Completeness Gate (anti-stub detection)
 
 # Implementation Completeness Gate - Anti-Laziness System
@@ -24,9 +31,9 @@ If BLOCKED, loops back to N4_implement_code with feedback.
 ## Architecture
 
 ```
-Current:  N4_implement_code â†’ N5_verify_green
-Proposed: N4_implement_code â†’ N4b_completeness_gate â†’ N5_verify_green
-                                      â†“ (BLOCK)
+Current:  N4_implement_code → N5_verify_green
+Proposed: N4_implement_code → N4b_completeness_gate → N5_verify_green
+                                      ↓ (BLOCK)
                               N4_implement_code (loop)
 ```
 
