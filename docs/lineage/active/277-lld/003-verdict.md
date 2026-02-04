@@ -1,71 +1,72 @@
-# LLD Review: 1277-Mechanical LLD Validation Node
+# LLD Review: 1277-Feature: Mechanical LLD Validation Node
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 
-## Pre-Flight Gate: PASSED
-All required elements are present.
+## Pre-Flight Gate
+PASSED
 
 ## Review Summary
-The LLD proposes a necessary quality gate to catch structural and filesystem inconsistencies before costly human or LLM review. The architecture is sound (deterministic, local, fast). However, there is a **Tier 1 Safety** issue regarding "Silent Failure" where malformed LLD headers could result in the validator skipping checks entirely and passing the document erroneously. This must be addressed before approval.
+The LLD is well-structured and proposes a high-value mechanism to enforce quality gates programmatically before consuming expensive LLM or human review cycles. The architectural pattern (functional node) fits the existing graph perfectly. The Test Plan is robust and covers the core logic thoroughly. The design correctly identifies the need for deterministic checks over fuzzy LLM validation for file system facts.
 
 ## Open Questions Resolved
-- [x] ~~Should risk mitigation tracing be blocking or warning?~~ **RESOLVED: WARNING initially, promote to blocking after validation** (As proposed).
-- [x] ~~Should we validate pseudocode syntax minimally (balanced braces, etc.)?~~ **RESOLVED: NO.** Pseudocode is inherently unstructured. enforcing syntax checks here adds complexity and false positives. Rely on the subsequent Human/Gemini reviews for logic correctness.
-- [x] ~~What's the threshold for "matching" keywords to function names?~~ **RESOLVED: EXACT TOKEN MATCH.** Extract significant terms (ignoring stopwords like "the", "to", "use") and require at least one case-insensitive substring match in the function name to avoid ambiguity.
+- [x] ~~Should risk mitigation tracing be a warning or hard block initially?~~ **RESOLVED: Warning.** Keyword matching is heuristic and will likely generate false positives. Hard blocking on "fuzzy" logic frustrates users. Monitor the "warning" efficacy for a few sprints before considering promotion to a block.
+- [x] ~~Should we validate import paths in pseudocode sections as well?~~ **RESOLVED: No.** Pseudocode is illustrative and often intentionally simplified or abstract. Validating it adds complexity for low value. Focus strictly on the "Source of Truth" tables (Files Changed, Definitions).
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| 1 | Mechanical validation executes before Gemini review | T130, T140 (Workflow integration) | ✓ Covered |
-| 2 | Invalid paths (Modify/Delete on non-existent files) block | T030, T040 | ✓ Covered |
-| 3 | Placeholder prefixes (src/, lib/, app/) without matching directory block | T070, T080 | ✓ Covered |
-| 4 | DoD / Files Changed mismatches block | T090, T100 | ✓ Covered |
-| 5 | Risk mitigations without traced implementation generate warnings | T110, T120 | ✓ Covered |
-| 6 | LLD-272's specific errors (paths, mitigations) would be caught | T040, T120 | ✓ Covered |
-| 7 | Template documentation updated | N/A (Doc task) | ✓ Covered (Plan) |
-| 8 | Gemini review prompt clarifies role | N/A (Doc task) | ✓ Covered (Plan) |
+| 1 | Mechanical validation runs automatically before Gemini review | T130, T140 (Logic integration) | ✓ Covered |
+| 2 | Invalid paths (Modify/Delete file doesn't exist) produce BLOCKED status | T030, T040 | ✓ Covered |
+| 3 | Placeholder prefixes without matching directory produce BLOCKED status | T070, T080 | ✓ Covered |
+| 4 | Definition of Done / Files Changed mismatches produce BLOCKED status | T090, T100 | ✓ Covered |
+| 5 | Risk mitigation without implementation produces WARNING (non-blocking) | T110, T120 | ✓ Covered |
+| 6 | LLD-272's specific errors would be caught by this gate | T140 | ✓ Covered |
+| 7 | Template updated with new sections 2.1.1 and 12.1 | N/A (Static Asset Change) | - |
+| 8 | Gemini review prompt updated to clarify role division | N/A (Static Asset Change) | - |
 
-**Coverage Calculation:** 8 requirements covered / 8 total = **100%**
+**Coverage Calculation:** 6 functional requirements covered / 6 testable functional requirements = **100%**
+*(Requirements 7 & 8 are documentation/template updates which do not require runtime unit tests)*
 
 **Verdict:** PASS
 
 ## Tier 1: BLOCKING Issues
+No blocking issues found. LLD is approved for implementation.
 
 ### Cost
-- [ ] No issues found.
+- [ ] No issues. Local regex processing is computationally negligible.
 
 ### Safety
-- [ ] **Fail-Safe Strategy (Silent Failure on Missing Sections):** The current logic in Section 2.5 (Steps 3 & 4) implies that if Section 2.1 is missing or the regex fails to find the table, the parsed list is empty, and the validation loop (`FOR each file...`) simply doesn't run. This results in a PASS for a structurally broken LLD.
-    *   **Recommendation:** Explicitly validate that mandatory LLD sections (Headers `### 2.1`, `### 11`, `### 12`) exist. If a mandatory section is missing, the validator must **BLOCK** with a specific error (e.g., "Critical: Section 2.1 missing"). Add a test scenario for "Missing Mandatory Section".
+- [ ] No issues. Read-only checks on filesystem.
 
 ### Security
-- [ ] No issues found.
+- [ ] No issues.
 
 ### Legal
-- [ ] No issues found.
+- [ ] No issues.
 
 ## Tier 2: HIGH PRIORITY Issues
+No high-priority issues found.
 
 ### Architecture
-- [ ] No issues found.
+- [ ] No issues. Functional node pattern is appropriate.
 
 ### Observability
-- [ ] No issues found.
+- [ ] No issues. Warnings are logged to state.
 
 ### Quality
-- [ ] No issues found.
+- [ ] **Requirement Coverage:** PASS (100% of testable logic).
 
 ## Tier 3: SUGGESTIONS
-- **Regex Robustness:** In Section 2.4/2.5, ensure the regex for parsing tables handles variations in markdown table formatting (e.g., alignment colons `| :--- |`, varying whitespace) to minimize parsing errors.
-- **Fail Mode Clarity:** Section 7.2 mentions "fail-open only on parse errors". Given the goal is a strict quality gate, "Fail Closed" (blocking) on parse errors is generally safer. If we can't parse the LLD, we shouldn't trust it.
+- **Regex Robustness:** In `parse_files_changed_table`, ensure the regex handles GitHub Markdown table edge cases, such as extra whitespace in cells or escaped pipes `\|` within descriptions, to prevent parser crashes.
+- **Warning Visibility:** Ensure `validation_warnings` are prominently displayed in the final output (or PR comment) so the user actually sees the "Risk Mitigation" gaps, otherwise the warning status provides no value.
 
 ## Questions for Orchestrator
 1. None.
 
 ## Verdict
-[ ] **APPROVED** - Ready for implementation
-[x] **REVISE** - Fix Tier 1/2 issues first
+[x] **APPROVED** - Ready for implementation
+[ ] **REVISE** - Fix Tier 1/2 issues first
 [ ] **DISCUSS** - Needs Orchestrator decision

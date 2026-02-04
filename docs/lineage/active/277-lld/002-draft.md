@@ -2,21 +2,21 @@
 
 <!-- Template Metadata
 Last Updated: 2025-01-XX
-Updated By: Issue #277 implementation
-Update Reason: New feature - mechanical validation gate before Gemini review
+Updated By: Issue #277
+Update Reason: Initial LLD creation for mechanical validation gate
 -->
 
 ## 1. Context & Goal
 * **Issue:** #277
-* **Objective:** Add a mechanical validation node to the LLD workflow that catches path errors, section inconsistencies, and untraced mitigations before Gemini review
+* **Objective:** Add a mechanical validation node to the LangGraph requirements workflow that catches path/consistency errors before Gemini review
 * **Status:** Draft
-* **Related Issues:** #272 (LLD that exposed the need for this)
+* **Related Issues:** #272 (LLD that passed review with errors)
 
 ### Open Questions
+*Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [x] Should risk mitigation tracing be blocking or warning? **Decision: WARNING initially, promote to blocking after validation**
-- [ ] Should we validate pseudocode syntax minimally (balanced braces, etc.)?
-- [ ] What's the threshold for "matching" keywords to function names?
+- [ ] Should risk mitigation tracing be a warning or hard block initially?
+- [ ] Should we validate import paths in pseudocode sections as well?
 
 ## 2. Proposed Changes
 
@@ -26,52 +26,52 @@ Update Reason: New feature - mechanical validation gate before Gemini review
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/nodes/validate_mechanical.py` | Add | New node implementing mechanical validation checks |
-| `agentos/workflows/requirements/graph.py` | Modify | Insert validate_mechanical node before review node |
+| `agentos/workflows/requirements/nodes/validate_mechanical.py` | Add | New mechanical validation node |
+| `agentos/workflows/requirements/graph.py` | Modify | Insert validation node before review |
 | `agentos/workflows/requirements/state.py` | Modify | Add validation_errors field to state |
-| `docs/templates/0102-feature-lld-template.md` | Modify | Add sections 2.1.1 and 12.1 for validation documentation |
-| `docs/templates/0702c-gemini-lld-review-prompt.md` | Modify | Update instructions to clarify Gemini's role |
+| `docs/templates/0102-feature-lld-template.md` | Modify | Add sections 2.1.1 and 12.1 |
+| `docs/templates/0702c-gemini-review-prompt.md` | Modify | Update Gemini instructions |
 | `tests/unit/test_validate_mechanical.py` | Add | Unit tests for validation node |
-| `tests/fixtures/lld_samples/` | Add | Test fixtures with valid/invalid LLD content |
+
+### 2.1.1 Path Validation (Mechanical - Auto-Checked)
+
+Before Gemini review, paths are verified programmatically:
+- All "Modify" files must exist in repository
+- All "Add" files must have existing parent directories  
+- All "Delete" files must exist in repository
+- No placeholder prefixes (`src/`, `lib/`, `app/`) unless directory exists
+
+If validation fails, the LLD is BLOCKED before reaching Gemini.
 
 ### 2.2 Dependencies
 
-*No new packages required. Uses stdlib only.*
+*No new packages required. Uses standard library pathlib and re modules.*
 
 ```toml
-# No pyproject.toml additions needed
-# Uses: pathlib, re, dataclasses (all stdlib)
+# pyproject.toml additions (if any)
+# None - uses existing dependencies
 ```
 
 ### 2.3 Data Structures
 
 ```python
 # Pseudocode - NOT implementation
-from dataclasses import dataclass
-from enum import Enum
+class FileEntry(TypedDict):
+    path: str           # File path from table
+    change_type: str    # Add | Modify | Delete
+    description: str    # Brief description from table
 
-class ValidationSeverity(Enum):
-    ERROR = "error"      # Blocks workflow
-    WARNING = "warning"  # Logged but does not block
+class ValidationResult(TypedDict):
+    errors: list[str]          # Hard blockers
+    warnings: list[str]        # Non-blocking issues
+    files_validated: int       # Count of files checked
+    cross_refs_validated: int  # Count of cross-references checked
 
-@dataclass
-class ValidationError:
-    severity: ValidationSeverity
-    section: str         # e.g., "2.1", "11", "12"
-    message: str
-    file_path: str | None = None  # If related to a specific file
-
-@dataclass  
-class ValidationResult:
-    passed: bool
-    errors: list[ValidationError]
-    warnings: list[ValidationError]
-
-# State extension
+# Addition to RequirementsWorkflowState
 class RequirementsWorkflowState(TypedDict):
     # ... existing fields ...
-    validation_errors: list[str]  # Human-readable error messages
-    validation_warnings: list[str]  # Human-readable warning messages
+    validation_errors: list[str]  # NEW: Mechanical validation errors
+    validation_warnings: list[str]  # NEW: Mechanical validation warnings
 ```
 
 ### 2.4 Function Signatures
@@ -81,80 +81,89 @@ class RequirementsWorkflowState(TypedDict):
 
 def validate_lld_mechanical(state: RequirementsWorkflowState) -> RequirementsWorkflowState:
     """
-    Mechanical validation of LLD content. No LLM judgment.
-    Fails hard on errors, warns on suspicious patterns.
+    Mechanical validation node - no LLM judgment. Fail hard on errors.
+    
+    Runs before Gemini review to catch:
+    - Invalid file paths
+    - Placeholder prefixes
+    - Section cross-reference mismatches
+    - Risk mitigations without implementation
     """
     ...
 
-def parse_files_changed_table(lld_content: str) -> list[dict]:
+def parse_files_changed_table(lld_content: str) -> list[FileEntry]:
     """
-    Extract file entries from Section 2.1 table.
-    Returns list of {path, change_type, description}.
-    """
-    ...
-
-def validate_file_paths(
-    files: list[dict], 
-    repo_root: Path
-) -> list[ValidationError]:
-    """
-    Check that Modify/Delete files exist, Add files have valid parents.
+    Parse Section 2.1 Files Changed table from LLD markdown.
+    
+    Returns list of FileEntry dicts with path, change_type, description.
+    Raises ValueError if table format is invalid.
     """
     ...
 
-def detect_placeholder_prefixes(
-    files: list[dict], 
-    repo_root: Path
-) -> list[ValidationError]:
+def validate_file_paths(files: list[FileEntry], repo_root: Path) -> list[str]:
     """
-    Flag paths using src/, lib/, app/ when those directories don't exist.
-    """
-    ...
-
-def extract_files_from_section(
-    lld_content: str, 
-    section_header: str
-) -> set[str]:
-    """
-    Extract file paths mentioned in a specific section (e.g., DoD).
+    Validate file paths against filesystem.
+    
+    Returns list of error messages for:
+    - Modify/Delete files that don't exist
+    - Add files with non-existent parent directories
     """
     ...
 
-def cross_reference_sections(
-    lld_content: str,
-    files_changed: list[dict]
-) -> list[ValidationError]:
+def detect_placeholder_prefixes(files: list[FileEntry], repo_root: Path) -> list[str]:
     """
-    Verify files in Definition of Done appear in Files Changed.
+    Detect generic placeholder prefixes that don't match repo structure.
+    
+    Returns list of error messages for paths using src/, lib/, app/
+    when those directories don't exist.
+    """
+    ...
+
+def extract_files_from_section(lld_content: str, section_header: str) -> set[str]:
+    """
+    Extract file paths mentioned in a specific section.
+    
+    Looks for patterns like `path/to/file.py` in backticks or table cells.
+    """
+    ...
+
+def validate_cross_references(lld_content: str) -> list[str]:
+    """
+    Validate that files in Definition of Done appear in Files Changed.
+    
+    Returns list of error messages for files mentioned in DoD but not in 2.1.
     """
     ...
 
 def extract_mitigations_from_risks(lld_content: str) -> list[str]:
     """
-    Parse Section 11 Risks table to extract mitigation text.
+    Extract mitigation text from Section 11 Risks & Mitigations table.
     """
     ...
 
 def extract_function_names(lld_content: str) -> list[str]:
     """
-    Parse Section 2.4 to extract function/method names.
+    Extract function names from Section 2.4 Function Signatures.
     """
     ...
 
 def trace_mitigations_to_functions(
-    mitigations: list[str],
+    mitigations: list[str], 
     functions: list[str]
-) -> list[ValidationError]:
+) -> list[str]:
     """
-    Check that each mitigation has at least one related function.
-    Returns warnings (not errors) for untraced mitigations.
+    Check that each risk mitigation has a corresponding function.
+    
+    Uses keyword extraction and fuzzy matching.
+    Returns list of warning messages (non-blocking).
     """
     ...
 
 def extract_keywords(text: str) -> list[str]:
     """
     Extract significant keywords from mitigation text.
-    Filters stopwords, returns lowercase tokens.
+    
+    Filters stopwords, normalizes to lowercase.
     """
     ...
 ```
@@ -162,100 +171,108 @@ def extract_keywords(text: str) -> list[str]:
 ### 2.5 Logic Flow (Pseudocode)
 
 ```
-1. Receive state with current_draft LLD content
-2. Extract repo_root from state
+1. Receive state with current_draft and repo_root
+2. Initialize errors = [], warnings = []
 
-3. PARSE Section 2.1 Files Changed table
-   - Use regex to find markdown table after "### 2.1"
-   - Extract rows into structured data
+3. PARSE FILES CHANGED TABLE
+   - Extract all rows from Section 2.1
+   - IF parsing fails THEN
+     - Add error: "Failed to parse Section 2.1 Files Changed table"
+     - GOTO step 9
 
-4. VALIDATE file paths
-   FOR each file in parsed table:
-     IF change_type is "Modify" or "Delete":
-       IF file does not exist at repo_root/path:
-         ADD ERROR "file marked {type} but does not exist"
-     ELIF change_type is "Add":
-       IF parent directory does not exist:
-         ADD ERROR "parent directory does not exist"
+4. VALIDATE FILE PATHS
+   FOR each file in parsed_files:
+     IF change_type == "Modify" OR change_type == "Delete":
+       IF NOT (repo_root / path).exists():
+         Add error: "'{path}' marked {change_type} but does not exist"
+     ELIF change_type == "Add":
+       IF NOT (repo_root / path).parent.exists():
+         Add error: "Parent directory for '{path}' does not exist"
 
-5. DETECT placeholder prefixes
-   FOR each file in parsed table:
-     prefix = first path segment (e.g., "src" from "src/foo.py")
-     IF prefix in ["src", "lib", "app"]:
-       IF repo_root/prefix does not exist:
-         ADD ERROR "uses {prefix}/ but directory doesn't exist"
+5. DETECT PLACEHOLDER PREFIXES
+   FOR each file in parsed_files:
+     prefix = first segment of path (src/, lib/, app/, etc.)
+     IF prefix in KNOWN_PLACEHOLDERS:
+       IF NOT (repo_root / prefix).exists():
+         Add error: "'{path}' uses '{prefix}/' but that directory doesn't exist"
 
-6. CROSS-REFERENCE sections
-   - Extract file paths mentioned in Section 12 (Definition of Done)
-   - Compare against Section 2.1 file list
-   - IF any files in DoD not in Files Changed:
-     ADD ERROR "Section 12 references files not in Section 2.1"
+6. VALIDATE CROSS-REFERENCES
+   - Extract files from Definition of Done (Section 12)
+   - Extract files from Files Changed (Section 2.1)
+   - missing = dod_files - fc_files
+   - IF missing:
+     Add error: "Section 12 references files not in Section 2.1: {missing}"
 
-7. TRACE risk mitigations (WARNING only)
-   - Extract mitigations from Section 11 table
+7. TRACE RISK MITIGATIONS (warnings only)
+   - Extract mitigations from Section 11
    - Extract function names from Section 2.4
    FOR each mitigation:
      keywords = extract_keywords(mitigation)
-     IF no function name contains any keyword:
-       ADD WARNING "mitigation '{text}' has no matching function"
+     IF NOT any keyword matches any function name:
+       Add warning: "Section 11 claims '{mitigation}' but no matching function"
 
-8. AGGREGATE results
-   IF any ERRORS:
-     state["validation_errors"] = [e.message for e in errors]
+8. COMPILE RESULTS
+   state["validation_errors"] = errors
+   state["validation_warnings"] = warnings
+
+9. DETERMINE OUTCOME
+   IF errors:
      state["lld_status"] = "BLOCKED"
-     state["error"] = format_error_message(errors)
+     state["error"] = format_error_message(errors, warnings)
    ELSE:
-     state["validation_warnings"] = [w.message for w in warnings]
-     # Proceed to next node
+     state["lld_status"] = "VALIDATED"
+     IF warnings:
+       Log warnings for informational purposes
 
-9. RETURN state
+10. Return state
 ```
 
 ### 2.6 Technical Approach
 
-* **Module:** `agentos/workflows/requirements/nodes/validate_mechanical.py`
-* **Pattern:** Pure function with deterministic output; no LLM calls
-* **Key Decisions:**
-  - Use regex for table parsing (markdown is predictable enough)
-  - Fail fast on first category of errors (collect all within category)
-  - Warnings do not block workflow progression
-  - No external dependencies - stdlib only for reliability
+* **Module:** `agentos/workflows/requirements/nodes/`
+* **Pattern:** Functional node pattern (pure function transforming state)
+* **Key Decisions:** 
+  - Regex-based parsing (no LLM) for deterministic results
+  - Hard fail on path errors, soft warn on mitigation tracing
+  - Validation runs synchronously before graph continues
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Parsing approach | Full markdown parser (mistune), Regex, Custom parser | Regex | LLD tables are predictable; avoid new dependency |
-| Error handling | Fail on first error, Collect all errors, Collect per-category | Collect all errors | Better UX - fix everything at once |
-| Warning vs Error split | All blocking, All warnings, Categorized | Categorized | Path errors are critical; mitigation tracing is advisory |
-| Node placement | Before human gate, After human gate, Before Gemini | Before human gate | Catch errors before any review (human or LLM) |
+| Parsing method | LLM parsing, Regex parsing, AST parsing | Regex parsing | Deterministic, zero tokens, fast |
+| Error handling | Collect all errors, Fail on first | Collect all errors | Better UX - shows all problems at once |
+| Mitigation tracing | Hard block, Soft warning, Skip | Soft warning | Keyword matching is heuristic, may have false positives |
+| Node placement | Before human gate, After human gate, Parallel with review | Before human gate | Catch errors before wasting human attention |
 
 **Architectural Constraints:**
-- Must integrate with existing LangGraph workflow pattern
-- Cannot introduce latency > 1 second (no network calls)
-- Must work offline (no external validation services)
+- Must integrate with existing LangGraph workflow structure
+- Cannot introduce LLM calls (that defeats the purpose)
+- Must not break existing workflow if validation passes
 
 ## 3. Requirements
 
-1. Mechanical validation executes before Gemini review in the workflow graph
-2. Invalid paths (Modify/Delete on non-existent files) block with clear error message
-3. Placeholder prefixes (src/, lib/, app/) without matching directory block workflow
-4. Definition of Done / Files Changed mismatches block workflow
-5. Risk mitigations without traced implementation generate warnings (non-blocking)
-6. LLD-272's specific errors (wrong paths, missing graph runner, unimplemented token tracking) would be caught
-7. Template documentation updated to explain mechanical validation
-8. Gemini review prompt clarifies its role excludes path validation
+*What must be true when this is done. These become acceptance criteria.*
+
+1. Mechanical validation runs automatically before Gemini review in the workflow
+2. Invalid paths (Modify/Delete file doesn't exist) produce BLOCKED status with clear error
+3. Placeholder prefixes without matching directory produce BLOCKED status
+4. Definition of Done / Files Changed mismatches produce BLOCKED status
+5. Risk mitigation without implementation produces WARNING (non-blocking)
+6. LLD-272's specific errors would be caught by this gate
+7. Template updated with new sections 2.1.1 and 12.1
+8. Gemini review prompt updated to clarify role division
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Add checks to Gemini prompt | No code changes, uses existing review | LLMs unreliable for filesystem checks, costs tokens | **Rejected** |
-| Pre-commit hook | Catches errors at commit time | Too late in workflow, doesn't integrate with state | **Rejected** |
-| Dedicated validation node | Deterministic, fast, integrates with workflow | Requires new code, another node to maintain | **Selected** |
-| Schema validation (JSON Schema) | Formal specification, reusable | LLD is markdown not JSON, overkill | **Rejected** |
+| Add checks to Gemini prompt | No code changes, immediate | LLMs unreliable for filesystem checks | **Rejected** |
+| Pre-commit hook | Runs locally, fast feedback | Doesn't integrate with workflow state | **Rejected** |
+| LangGraph node (chosen) | Deterministic, integrated, trackable | Requires code changes | **Selected** |
+| Separate CLI tool | Reusable outside workflow | Duplicates workflow logic, harder to maintain | **Rejected** |
 
-**Rationale:** Dedicated node is the only option that provides deterministic validation integrated with the LangGraph workflow state. Pre-commit hooks run too late, and LLM-based checks are fundamentally unreliable for filesystem assertions.
+**Rationale:** LangGraph node integrates seamlessly with existing workflow, maintains state properly, and can be tested in isolation. The deterministic nature guarantees consistent results.
 
 ## 5. Data & Fixtures
 
@@ -264,74 +281,87 @@ def extract_keywords(text: str) -> list[str]:
 | Attribute | Value |
 |-----------|-------|
 | Source | LLD markdown content from workflow state |
-| Format | Markdown with specific section structure |
-| Size | ~5-20KB per LLD document |
-| Refresh | Real-time (per workflow execution) |
-| Copyright/License | N/A (internal documents) |
+| Format | Markdown with structured tables |
+| Size | ~5-20KB per LLD |
+| Refresh | Per workflow invocation |
+| Copyright/License | N/A - internal documents |
 
 ### 5.2 Data Pipeline
 
 ```
-state["current_draft"] ──parse──► Structured file list ──validate──► ValidationResult ──format──► state update
+Workflow State (current_draft) ──regex parse──► Extracted Structures ──validate──► Errors/Warnings ──update──► Workflow State
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| `valid_lld.md` | Generated | Complete LLD with valid paths matching test repo structure |
-| `invalid_paths_lld.md` | Generated | LLD with Modify on non-existent file |
-| `placeholder_prefix_lld.md` | Generated | LLD using `src/` when no `src/` exists |
-| `dod_mismatch_lld.md` | Generated | DoD mentions file not in Section 2.1 |
-| `untraced_mitigation_lld.md` | Generated | Risk mitigation with no matching function |
-| `mock_repo/` | Generated | Minimal directory structure for path validation |
+| Valid LLD markdown | Handcrafted | Based on actual LLD-272 structure |
+| LLD with bad paths | Handcrafted | src/nodes/... style errors |
+| LLD with DoD mismatch | Handcrafted | Files in DoD not in 2.1 |
+| LLD with orphan mitigations | Handcrafted | Risk mitigations with no functions |
+| Mock repo structure | tempfile/pytest fixtures | Simulates actual directory layout |
 
 ### 5.4 Deployment Pipeline
 
-Tests run against fixture files in `tests/fixtures/lld_samples/`. No external data deployment required.
+Validation runs in-process as part of the LangGraph workflow. No separate deployment needed.
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-- [x] **Simplicity:** Collapsed validation checks into single node
-- [x] **No touching:** All elements have visual separation
-- [x] **No hidden lines:** All arrows fully visible
-- [x] **Readable:** Labels clear, flow direction obvious
-- [ ] **Auto-inspected:** Pending agent render
+Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.live) or GitHub preview:
+
+- [x] **Simplicity:** Similar components collapsed (per 0006 §8.1)
+- [x] **No touching:** All elements have visual separation (per 0006 §8.2)
+- [x] **No hidden lines:** All arrows fully visible (per 0006 §8.3)
+- [x] **Readable:** Labels not truncated, flow direction clear
+- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed (per 0006 §8.5)
 
 **Auto-Inspection Results:**
 ```
-- Touching elements: [ ] None / [ ] Found: ___
-- Hidden lines: [ ] None / [ ] Found: ___
-- Label readability: [ ] Pass / [ ] Issue: ___
-- Flow clarity: [ ] Clear / [ ] Issue: ___
+- Touching elements: [x] None / [ ] Found: ___
+- Hidden lines: [x] None / [ ] Found: ___
+- Label readability: [x] Pass / [ ] Issue: ___
+- Flow clarity: [x] Clear / [ ] Issue: ___
 ```
 
 ### 6.2 Diagram
 
 ```mermaid
 flowchart TD
-    subgraph Workflow["Requirements Workflow"]
-        A[generate_draft] --> B[validate_lld_mechanical]
-        B -->|PASS| C[human_gate]
-        B -->|BLOCKED| E[error_handler]
-        C --> D[gemini_review]
-        D --> F[finalize]
-        E --> G[Return to Draft]
-        G --> A
+    subgraph Requirements Workflow
+        GD[generate_draft]
+        VM[validate_lld_mechanical]
+        HG[human_gate]
+        GR[gemini_review]
+        FIN[finalize]
     end
 
-    subgraph Validation["Mechanical Validation Checks"]
-        V1[Parse Section 2.1]
-        V2[Validate File Paths]
-        V3[Detect Placeholders]
-        V4[Cross-reference DoD]
-        V5[Trace Mitigations]
-        V1 --> V2 --> V3 --> V4 --> V5
+    GD --> VM
+    VM -->|VALIDATED| HG
+    VM -->|BLOCKED| ERR[Error State]
+    HG -->|APPROVED| GR
+    HG -->|REJECTED| GD
+    GR --> FIN
+
+    subgraph Mechanical Checks
+        direction TB
+        C1[Parse 2.1 Table]
+        C2[Validate Paths]
+        C3[Check Placeholders]
+        C4[Cross-ref DoD]
+        C5[Trace Mitigations]
     end
 
-    B -.-> Validation
+    VM -.-> C1
+    C1 --> C2
+    C2 --> C3
+    C3 --> C4
+    C4 --> C5
+
+    style VM fill:#f9f,stroke:#333,stroke-width:2px
+    style ERR fill:#f66,stroke:#333
 ```
 
 ## 7. Security & Safety Considerations
@@ -340,21 +370,21 @@ flowchart TD
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Path traversal in file checks | Validate paths are within repo_root | Addressed |
-| Regex denial of service | Use non-backtracking patterns, set timeout | Addressed |
-| Arbitrary code in LLD content | Only parse structure, never execute | Addressed |
+| Path traversal in file checks | Resolve paths relative to repo_root only | Addressed |
+| Regex ReDoS | Use simple, bounded regex patterns | Addressed |
+| Arbitrary file read | Only checks existence, never reads content | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| False positives blocking valid LLDs | Conservative regex matching, clear error messages | Addressed |
-| Silent failures masking errors | Explicit error logging, fail-open only on parse errors | Addressed |
-| Infinite loop in parsing | Bounded iteration, timeout guards | Addressed |
+| False positives blocking valid LLDs | Extensive test coverage, clear error messages | Addressed |
+| Silent failures | All parsing errors surfaced as validation errors | Addressed |
+| Workflow breakage | Graceful degradation if parsing fails | Addressed |
 
-**Fail Mode:** Fail Closed - If validation cannot complete, block the workflow rather than allow unvalidated LLD through.
+**Fail Mode:** Fail Closed - If validation cannot complete (e.g., unparseable table), the LLD is BLOCKED with explanation.
 
-**Recovery Strategy:** Clear error message with specific section/line references. User can fix LLD and re-run workflow.
+**Recovery Strategy:** User can fix the LLD and resubmit. No persistent state affected.
 
 ## 8. Performance & Cost Considerations
 
@@ -362,64 +392,65 @@ flowchart TD
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Latency | < 500ms | Regex parsing, no I/O except stat() |
-| Memory | < 50MB | String operations, no large data structures |
-| API Calls | 0 | Fully local execution |
+| Latency | < 100ms | Pure Python, no I/O except stat() |
+| Memory | < 10MB | String processing only |
+| API Calls | 0 | No external calls |
 
-**Bottlenecks:** Large LLD files with many paths could slow stat() checks. Mitigated by early exit on first error category.
+**Bottlenecks:** None expected. File existence checks are syscalls, not I/O.
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| Compute | N/A | Sub-second per run | $0 |
-| LLM calls saved | ~$0.01 per Gemini review | ~10 blocked LLDs/month | -$0.10 (savings) |
+| Compute | Negligible | < 100ms per run | $0 |
+| Gemini tokens saved | ~$0.001 per avoided review | Unknown | Positive ROI |
 
 **Cost Controls:**
-- [x] No external API calls
-- [x] No cloud resources required
-- [x] Saves Gemini tokens by blocking invalid LLDs early
+- [x] Zero external API calls
+- [x] Runs in existing workflow infrastructure
 
-**Worst-Case Scenario:** If every LLD fails validation, users spend time fixing. This is preferable to LLDs failing later in implementation.
+**Worst-Case Scenario:** A pathological LLD with 1000 files would still validate in <1s.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Only processes internal document structure |
-| Third-Party Licenses | No | Uses Python stdlib only |
-| Terms of Service | N/A | No external services |
-| Data Retention | N/A | No data stored |
-| Export Controls | No | No restricted algorithms |
+| PII/Personal Data | No | Validates structure, not content |
+| Third-Party Licenses | No | Standard library only |
+| Terms of Service | N/A | Internal tooling |
+| Data Retention | N/A | No data persisted |
+| Export Controls | N/A | No restricted algorithms |
 
 **Data Classification:** Internal
 
 **Compliance Checklist:**
-- [x] No PII processed
-- [x] No third-party dependencies
-- [x] No external API usage
-- [x] No data retention
+- [x] No PII stored without consent
+- [x] All third-party licenses compatible with project license
+- [x] External API usage compliant with provider ToS
+- [x] Data retention policy documented
 
 ## 10. Verification & Testing
 
 ### 10.0 Test Plan (TDD - Complete Before Implementation)
 
+**TDD Requirement:** Tests MUST be written and failing BEFORE implementation begins.
+
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
-| T010 | Parse valid files table | Returns list of file dicts | RED |
-| T020 | Parse malformed table | Returns empty list with warning | RED |
-| T030 | Validate existing Modify file | No error | RED |
-| T040 | Validate non-existent Modify file | Returns ERROR | RED |
-| T050 | Validate Add file with valid parent | No error | RED |
-| T060 | Validate Add file with invalid parent | Returns ERROR | RED |
-| T070 | Detect src/ placeholder | Returns ERROR when src/ missing | RED |
+| T010 | Parse valid files changed table | Returns list of FileEntry | RED |
+| T020 | Parse malformed table | Raises ValueError | RED |
+| T030 | Validate existing modify path | No error | RED |
+| T040 | Validate non-existent modify path | Error message | RED |
+| T050 | Validate add with existing parent | No error | RED |
+| T060 | Validate add with missing parent | Error message | RED |
+| T070 | Detect src/ placeholder | Error when src/ doesn't exist | RED |
 | T080 | Allow src/ when exists | No error when src/ exists | RED |
-| T090 | DoD cross-reference match | No error | RED |
-| T100 | DoD cross-reference mismatch | Returns ERROR | RED |
+| T090 | Cross-ref DoD matches 2.1 | No error | RED |
+| T100 | Cross-ref DoD has extra file | Error message | RED |
 | T110 | Mitigation with matching function | No warning | RED |
-| T120 | Mitigation without matching function | Returns WARNING | RED |
-| T130 | Full validation pass | state["lld_status"] unchanged | RED |
-| T140 | Full validation fail | state["lld_status"] = "BLOCKED" | RED |
+| T120 | Mitigation without function | Warning message | RED |
+| T130 | Full validation pass | State has VALIDATED status | RED |
+| T140 | Full validation fail | State has BLOCKED status | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -433,35 +464,35 @@ flowchart TD
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Parse well-formed table | Auto | Valid markdown table | List of 3 file dicts | Correct path, type, description |
-| 020 | Parse missing table | Auto | LLD without 2.1 table | Empty list | No crash, logs warning |
-| 030 | Modify existing file | Auto | Path to existing file | No errors | errors list empty |
-| 040 | Modify non-existent file | Auto | Path to missing file | 1 error | Error mentions file path |
-| 050 | Add to existing dir | Auto | Path with valid parent | No errors | errors list empty |
-| 060 | Add to missing dir | Auto | Path with invalid parent | 1 error | Error mentions parent |
-| 070 | src/ placeholder detected | Auto | "src/foo.py", no src/ dir | 1 error | Error mentions placeholder |
-| 080 | src/ exists, allowed | Auto | "src/foo.py", src/ exists | No errors | errors list empty |
-| 090 | DoD matches 2.1 | Auto | Matching file lists | No errors | errors list empty |
-| 100 | DoD has extra file | Auto | DoD mentions unlisted file | 1 error | Error names mismatched file |
-| 110 | Mitigation traced | Auto | "Rate limit" + rate_limit() | No warnings | warnings list empty |
-| 120 | Mitigation untraced | Auto | "Token count" + no match | 1 warning | Warning is non-blocking |
-| 130 | All checks pass | Auto | Valid complete LLD | state unchanged | No BLOCKED status |
-| 140 | Path check fails | Auto | Invalid Modify path | state BLOCKED | Error in state |
+| 010 | Parse valid table | Auto | LLD with proper 2.1 table | list[FileEntry] | Correct file count and fields |
+| 020 | Parse malformed table | Auto | LLD with broken markdown | ValueError | Clear error message |
+| 030 | Modify file exists | Auto | FileEntry + real file | No error | errors list empty |
+| 040 | Modify file missing | Auto | FileEntry + missing file | Error string | Contains path and "does not exist" |
+| 050 | Add with valid parent | Auto | FileEntry + existing parent | No error | errors list empty |
+| 060 | Add with missing parent | Auto | FileEntry + missing parent | Error string | Contains "Parent directory" |
+| 070 | Placeholder detected | Auto | path "src/foo.py", no src/ | Error string | Contains "doesn't exist" |
+| 080 | Placeholder allowed | Auto | path "src/foo.py", src/ exists | No error | errors list empty |
+| 090 | DoD matches 2.1 | Auto | Consistent LLD | No error | errors list empty |
+| 100 | DoD has orphan | Auto | DoD mentions file not in 2.1 | Error string | Contains file name |
+| 110 | Mitigation traced | Auto | "token tracking" + track_tokens() | No warning | warnings list empty |
+| 120 | Mitigation orphaned | Auto | "token tracking" + no function | Warning string | Contains mitigation text |
+| 130 | E2E validation pass | Auto | Valid LLD + mock repo | VALIDATED status | No errors |
+| 140 | E2E validation fail | Auto | LLD-272-style errors | BLOCKED status | All errors present |
 
 ### 10.2 Test Commands
 
 ```bash
-# Run all mechanical validation tests
+# Run all automated tests
 poetry run pytest tests/unit/test_validate_mechanical.py -v
 
 # Run with coverage
 poetry run pytest tests/unit/test_validate_mechanical.py -v --cov=agentos/workflows/requirements/nodes/validate_mechanical
 
 # Run specific test
-poetry run pytest tests/unit/test_validate_mechanical.py::test_validate_nonexistent_modify -v
+poetry run pytest tests/unit/test_validate_mechanical.py::test_parse_valid_table -v
 ```
 
-### 10.3 Manual Tests
+### 10.3 Manual Tests (Only If Unavoidable)
 
 N/A - All scenarios automated.
 
@@ -469,34 +500,34 @@ N/A - All scenarios automated.
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Regex fails on edge-case markdown | Med | Low | Extensive test fixtures, fallback to empty parse |
-| False positives block valid LLDs | High | Med | Conservative matching, clear error messages |
-| Performance degrades on large repos | Low | Low | Path checks use stat() not full traversal |
-| Users bypass validation | Med | Low | Integrate into workflow graph, not optional |
-| Keyword extraction too aggressive | Med | Med | Stopword filtering, minimum match threshold |
+| Regex doesn't handle all table formats | Med | Med | Test against diverse real LLDs, iterate patterns |
+| False positives frustrate users | High | Low | Clear error messages, easy override path |
+| Template changes break parsing | Med | Low | Template has version comment, parser checks version |
+| Keyword matching misses valid mitigations | Low | Med | Make mitigation tracing a warning, not error |
 
 ## 12. Definition of Done
 
+### 12.1 Traceability (Mechanical - Auto-Checked)
+
+- Every file mentioned in this section must appear in Section 2.1
+- Every risk mitigation in Section 11 must have corresponding function in Section 2.4
+
 ### Code
-- [ ] `agentos/workflows/requirements/nodes/validate_mechanical.py` implemented
-- [ ] `agentos/workflows/requirements/graph.py` updated with new node
-- [ ] `agentos/workflows/requirements/state.py` updated with new fields
-- [ ] Code comments reference this LLD (#277)
+- [ ] Implementation complete and linted
+- [ ] Code comments reference this LLD
 
 ### Tests
-- [ ] All 14 test scenarios pass
-- [ ] Test coverage ≥95% for new module
-- [ ] Tests include LLD-272 regression case
+- [ ] All test scenarios pass
+- [ ] Test coverage meets 95% threshold
 
 ### Documentation
-- [ ] `docs/templates/0102-feature-lld-template.md` updated with 2.1.1, 12.1
-- [ ] `docs/templates/0702c-gemini-lld-review-prompt.md` updated
-- [ ] LLD updated with any implementation deviations
+- [ ] LLD updated with any deviations
 - [ ] Implementation Report (0103) completed
+- [ ] Test Report (0113) completed if applicable
 
 ### Review
 - [ ] Code review completed
-- [ ] User approval before closing issue #277
+- [ ] User approval before closing issue
 
 ---
 
