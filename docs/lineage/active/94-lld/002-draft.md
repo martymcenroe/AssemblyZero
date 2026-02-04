@@ -3,354 +3,460 @@
 <!-- Template Metadata
 Last Updated: 2025-01-XX
 Updated By: Initial LLD creation
-Update Reason: Initial Low-Level Design for Issue #94
+Update Reason: New feature design for automated repository maintenance
 -->
 
 ## 1. Context & Goal
 * **Issue:** #94
-* **Objective:** Create an automated repository maintenance workflow using LangGraph that fixes mechanical issues (broken links, stale worktrees) and reports unfixable structural problems via GitHub issues.
+* **Objective:** Create an automated LangGraph-based maintenance workflow that monitors and fixes repository hygiene issues (broken links, stale worktrees, cross-project drift, stale TODOs), replacing manual audit checklists with automated enforcement.
 * **Status:** Draft
 * **Related Issues:** N/A
 
 ### Open Questions
 
 - [ ] Should worktree staleness threshold (14 days) be configurable via CLI or config file?
-- [ ] What is the exact location/interface of the existing `agentos-harvest.py` script?
-- [ ] Should the harvest probe fail gracefully if `agentos-harvest.py` doesn't exist yet?
-- [ ] What's the preferred commit message format for auto-fixes (Conventional Commits style)?
+- [ ] For the harvest probe, should we create a new issue or integrate with existing AgentOS issue tracking?
+- [ ] What is the exact format expected from `agentos-harvest.py` for the harvest probe integration?
+- [ ] Should `--create-pr` require a specific branch naming convention?
 
 ## 2. Proposed Changes
 
-*This section is the **source of truth** for implementation. Describes exactly what will be built.*
+*This section is the **source of truth** for implementation. Describe exactly what will be built.*
 
 ### 2.1 Files Changed
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/run_janitor_workflow.py` | Add | CLI entry point for the Janitor workflow |
-| `agentos/workflows/janitor/__init__.py` | Add | Package initialization, exports main run function |
-| `agentos/workflows/janitor/graph.py` | Add | LangGraph state graph definition with 3 nodes |
-| `agentos/workflows/janitor/state.py` | Add | JanitorState TypedDict and related types |
+| `tools/run_janitor_workflow.py` | Add | CLI entry point with argparse interface |
+| `agentos/workflows/janitor/__init__.py` | Add | Package initialization, exports graph and state |
+| `agentos/workflows/janitor/graph.py` | Add | LangGraph state graph with Sweeper → Fixer → Reporter nodes |
+| `agentos/workflows/janitor/state.py` | Add | JanitorState TypedDict and ProbeResult dataclass |
 | `agentos/workflows/janitor/probes/__init__.py` | Add | Probe registry and base interface |
-| `agentos/workflows/janitor/probes/base.py` | Add | ProbeInterface abstract base class |
-| `agentos/workflows/janitor/probes/links.py` | Add | Broken markdown link detection |
-| `agentos/workflows/janitor/probes/worktrees.py` | Add | Stale/detached git worktree detection |
-| `agentos/workflows/janitor/probes/harvest.py` | Add | Cross-project drift via agentos-harvest.py |
-| `agentos/workflows/janitor/probes/todo.py` | Add | Stale TODO comment scanner |
-| `agentos/workflows/janitor/fixers.py` | Add | Auto-fix implementations for fixable issues |
-| `agentos/workflows/janitor/reporter.py` | Add | ReporterInterface and implementations |
-| `tests/workflows/janitor/test_probes.py` | Add | Unit tests for all probes |
-| `tests/workflows/janitor/test_graph.py` | Add | Integration tests for workflow graph |
-| `tests/workflows/janitor/test_fixers.py` | Add | Unit tests for fixer implementations |
-| `tests/workflows/janitor/test_reporter.py` | Add | Unit tests for reporter implementations |
-| `docs/audits/083x/README.md` | Modify | Archive notice pointing to Janitor |
-| `docs/0003-file-inventory.md` | Modify | Add new files to inventory |
+| `agentos/workflows/janitor/probes/base.py` | Add | BaseProbe abstract class definition |
+| `agentos/workflows/janitor/probes/links.py` | Add | Broken markdown link detection probe |
+| `agentos/workflows/janitor/probes/worktrees.py` | Add | Stale git worktree detection probe |
+| `agentos/workflows/janitor/probes/harvest.py` | Add | Cross-project drift detection via agentos-harvest.py |
+| `agentos/workflows/janitor/probes/todo.py` | Add | Stale TODO comment scanner (30+ days) |
+| `agentos/workflows/janitor/fixers.py` | Add | Auto-fix implementations for links and worktrees |
+| `agentos/workflows/janitor/reporter.py` | Add | ReporterInterface, GitHubReporter, LocalFileReporter |
+| `docs/audits/083x/0834-*.md` | Modify | Archive with pointer to Janitor workflow |
+| `docs/audits/083x/0838-*.md` | Modify | Archive with pointer to Janitor workflow |
+| `docs/audits/083x/0840-*.md` | Modify | Archive with pointer to Janitor workflow |
+| `docs/0003-file-inventory.md` | Modify | Add new Janitor workflow files |
+| `tests/unit/test_janitor_probes.py` | Add | Unit tests for all probe implementations |
+| `tests/unit/test_janitor_fixers.py` | Add | Unit tests for fixer implementations |
+| `tests/unit/test_janitor_reporter.py` | Add | Unit tests for reporter implementations |
+| `tests/integration/test_janitor_workflow.py` | Add | Integration tests for full workflow |
 
 ### 2.2 Dependencies
 
 ```toml
-# pyproject.toml additions (if not already present)
-langgraph = "^0.2.0"
+# pyproject.toml additions
+langgraph = "^0.2.0"  # State graph orchestration
 ```
 
-*Note: `gh` CLI must be installed and authenticated for GitHubReporter. No new Python packages beyond LangGraph.*
+*Note: `gh` CLI is a runtime dependency (not Python package) - must be installed and authenticated.*
 
 ### 2.3 Data Structures
 
 ```python
-# agentos/workflows/janitor/state.py
+# Pseudocode - NOT implementation
 
 from typing import TypedDict, Literal
+from dataclasses import dataclass
 from enum import Enum
 
-class Severity(str, Enum):
+class Severity(Enum):
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
 
-class Finding(TypedDict):
-    """A single issue detected by a probe."""
+@dataclass
+class Finding:
     probe_name: str           # Which probe found this
-    category: str             # e.g., "broken_link", "stale_worktree"
+    file_path: str            # Affected file
+    line_number: int | None   # Line if applicable
     description: str          # Human-readable description
-    file_path: str | None     # Affected file, if applicable
-    line_number: int | None   # Line number, if applicable
     fixable: bool             # Can be auto-fixed
-    severity: Severity        # info, warning, critical
-    fix_data: dict | None     # Data needed by fixer (e.g., old_link, new_link)
+    severity: Severity        # info/warning/critical
+    fix_data: dict | None     # Data needed for auto-fix (e.g., old_link, new_link)
 
-class ProbeResult(TypedDict):
-    """Result from a single probe execution."""
-    probe_name: str           # Name of the probe
-    status: Literal["success", "error"]  # Did probe run without crashing
-    findings: list[Finding]   # Issues found (empty if clean)
-    error_message: str | None # Error details if status == "error"
-    duration_ms: int          # Execution time
+@dataclass
+class ProbeResult:
+    probe_name: str
+    status: Literal["success", "error"]
+    findings: list[Finding]
+    error_message: str | None  # If status == "error"
+    duration_ms: int
 
-class FixAction(TypedDict):
-    """Record of a fix that was applied."""
-    finding: Finding          # The original finding
-    action_taken: str         # Description of fix applied
-    commit_sha: str | None    # Commit created, if any
+@dataclass
+class FixResult:
+    finding: Finding
+    success: bool
+    commit_sha: str | None
+    error_message: str | None
 
 class JanitorState(TypedDict):
-    """Main workflow state passed between nodes."""
-    # Configuration
-    scope: list[str]          # Which probes to run
-    auto_fix: bool            # Whether to apply fixes
-    dry_run: bool             # Preview mode
-    silent: bool              # Suppress output
-    create_pr: bool           # Create PR instead of direct commit
-    reporter_type: str        # "github" or "local"
+    # Input configuration
+    scope: list[str]           # Probes to run: ["links", "worktrees", "harvest", "todo"]
+    auto_fix: bool             # Enable automatic fixing
+    dry_run: bool              # Preview mode, no changes
+    silent: bool               # Suppress output
+    create_pr: bool            # Create PR instead of direct commit
+    reporter_type: str         # "github" or "local"
     
-    # Sweeper outputs
+    # Sweeper output
     probe_results: list[ProbeResult]
     all_findings: list[Finding]
     
-    # Fixer outputs
+    # Fixer output
+    fix_results: list[FixResult]
     fixable_findings: list[Finding]
     unfixable_findings: list[Finding]
-    fix_actions: list[FixAction]
     
-    # Reporter outputs
-    issue_url: str | None     # Created/updated GitHub issue URL
-    report_path: str | None   # Local report path (for LocalFileReporter)
+    # Reporter output
+    issue_url: str | None      # GitHub issue URL if created/updated
+    report_path: str | None    # Local report path if using LocalFileReporter
     
     # Workflow metadata
-    exit_code: int            # 0 = clean, 1 = unfixable issues remain
-    errors: list[str]         # Any errors during execution
+    start_time: str
+    end_time: str | None
+    exit_code: int             # 0 = clean, 1 = unfixable issues remain
 ```
 
 ### 2.4 Function Signatures
 
 ```python
-# agentos/workflows/janitor/probes/base.py
-
-from abc import ABC, abstractmethod
-from agentos.workflows.janitor.state import ProbeResult
-
-class ProbeInterface(ABC):
-    """Abstract base class for all probes."""
-    
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Unique probe identifier used in --scope."""
-        ...
-    
-    @abstractmethod
-    def run(self, repo_root: Path) -> ProbeResult:
-        """Execute the probe and return findings."""
-        ...
-
-
-# agentos/workflows/janitor/probes/__init__.py
-
-def get_probe_registry() -> dict[str, type[ProbeInterface]]:
-    """Return mapping of probe names to probe classes."""
-    ...
-
-def run_probes_parallel(
-    probe_names: list[str],
-    repo_root: Path,
-    max_workers: int = 4
-) -> list[ProbeResult]:
-    """Run specified probes in parallel, isolating failures."""
-    ...
-
-
-# agentos/workflows/janitor/fixers.py
-
-def apply_fixes(
-    findings: list[Finding],
-    repo_root: Path,
-    dry_run: bool = False,
-    create_pr: bool = False
-) -> list[FixAction]:
-    """Apply fixes for all fixable findings. Returns actions taken."""
-    ...
-
-def fix_broken_link(finding: Finding, repo_root: Path, dry_run: bool) -> FixAction:
-    """Fix a single broken markdown link."""
-    ...
-
-def fix_stale_worktree(finding: Finding, repo_root: Path, dry_run: bool) -> FixAction:
-    """Prune a stale git worktree."""
-    ...
-
-def generate_commit_message(category: str, count: int) -> str:
-    """Generate deterministic commit message from template."""
-    ...
-
-
-# agentos/workflows/janitor/reporter.py
-
-from abc import ABC, abstractmethod
-
-class ReporterInterface(ABC):
-    """Abstract base for issue reporters."""
-    
-    @abstractmethod
-    def report(
-        self,
-        findings: list[Finding],
-        fix_actions: list[FixAction]
-    ) -> str | None:
-        """Create/update report. Returns issue URL or file path."""
-        ...
-    
-    @abstractmethod
-    def find_existing_report(self) -> str | None:
-        """Check for existing Janitor Report. Returns issue number or path."""
-        ...
-
-class GitHubReporter(ReporterInterface):
-    """Reports issues via GitHub Issues using gh CLI."""
-    ...
-
-class LocalFileReporter(ReporterInterface):
-    """Writes reports to local files for testing."""
-    ...
-
-
-# agentos/workflows/janitor/graph.py
-
-from langgraph.graph import StateGraph
-from agentos.workflows.janitor.state import JanitorState
-
-def create_janitor_graph() -> StateGraph:
-    """Create the LangGraph workflow with Sweeper → Fixer → Reporter nodes."""
-    ...
-
-def sweeper_node(state: JanitorState) -> JanitorState:
-    """N0: Run all configured probes and collect findings."""
-    ...
-
-def fixer_node(state: JanitorState) -> JanitorState:
-    """N1: Apply fixes to fixable findings."""
-    ...
-
-def reporter_node(state: JanitorState) -> JanitorState:
-    """N2: Report unfixable findings via configured reporter."""
-    ...
-
-
+# === Entry Point ===
 # tools/run_janitor_workflow.py
 
 def main() -> int:
-    """CLI entry point. Returns exit code."""
+    """CLI entry point. Returns exit code (0=clean, 1=issues remain)."""
     ...
 
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     ...
+
+# === Graph Definition ===
+# agentos/workflows/janitor/graph.py
+
+def create_janitor_graph() -> StateGraph:
+    """Create and return the LangGraph state graph."""
+    ...
+
+def sweeper_node(state: JanitorState) -> JanitorState:
+    """N0: Run all probes in parallel, collect findings."""
+    ...
+
+def fixer_node(state: JanitorState) -> JanitorState:
+    """N1: Apply auto-fixes to fixable findings."""
+    ...
+
+def reporter_node(state: JanitorState) -> JanitorState:
+    """N2: Report unfixable findings to GitHub or local file."""
+    ...
+
+def should_fix(state: JanitorState) -> Literal["fix", "report"]:
+    """Conditional edge: skip fixer if no fixable findings or dry_run."""
+    ...
+
+def should_report(state: JanitorState) -> Literal["report", "end"]:
+    """Conditional edge: skip reporter if no unfixable findings."""
+    ...
+
+# === Probe Base & Registry ===
+# agentos/workflows/janitor/probes/base.py
+
+class BaseProbe(ABC):
+    """Abstract base class for all probes."""
+    
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Unique probe identifier."""
+        ...
+    
+    @abstractmethod
+    def run(self, repo_root: Path) -> ProbeResult:
+        """Execute probe and return results."""
+        ...
+
+# agentos/workflows/janitor/probes/__init__.py
+
+def get_probe_registry() -> dict[str, type[BaseProbe]]:
+    """Return mapping of probe names to probe classes."""
+    ...
+
+def run_probes_parallel(
+    probe_names: list[str], 
+    repo_root: Path
+) -> list[ProbeResult]:
+    """Run specified probes in parallel, isolating failures."""
+    ...
+
+# === Individual Probes ===
+# agentos/workflows/janitor/probes/links.py
+
+class LinksProbe(BaseProbe):
+    """Detect broken internal markdown links."""
+    
+    def run(self, repo_root: Path) -> ProbeResult:
+        ...
+    
+    def _scan_markdown_files(self, repo_root: Path) -> list[Path]:
+        ...
+    
+    def _extract_links(self, file_path: Path) -> list[tuple[str, int]]:
+        """Extract (link_target, line_number) tuples."""
+        ...
+    
+    def _check_link(self, source: Path, target: str, repo_root: Path) -> bool:
+        """Return True if link resolves correctly."""
+        ...
+
+# agentos/workflows/janitor/probes/worktrees.py
+
+class WorktreesProbe(BaseProbe):
+    """Detect stale/detached git worktrees."""
+    
+    STALE_DAYS_THRESHOLD: int = 14
+    
+    def run(self, repo_root: Path) -> ProbeResult:
+        ...
+    
+    def _list_worktrees(self) -> list[dict]:
+        """Parse `git worktree list --porcelain` output."""
+        ...
+    
+    def _is_stale(self, worktree: dict) -> bool:
+        """Check if worktree is stale (no commits in 14+ days, branch merged/deleted)."""
+        ...
+
+# agentos/workflows/janitor/probes/harvest.py
+
+class HarvestProbe(BaseProbe):
+    """Detect cross-project drift via agentos-harvest.py."""
+    
+    def run(self, repo_root: Path) -> ProbeResult:
+        ...
+    
+    def _run_harvest_script(self, repo_root: Path) -> dict:
+        """Execute agentos-harvest.py and parse JSON output."""
+        ...
+
+# agentos/workflows/janitor/probes/todo.py
+
+class TodoProbe(BaseProbe):
+    """Scan for TODO comments older than 30 days."""
+    
+    STALE_DAYS_THRESHOLD: int = 30
+    
+    def run(self, repo_root: Path) -> ProbeResult:
+        ...
+    
+    def _find_todos(self, repo_root: Path) -> list[dict]:
+        """Find all TODO/FIXME/HACK comments with git blame dates."""
+        ...
+    
+    def _get_blame_date(self, file_path: Path, line_number: int) -> datetime:
+        """Get the last modification date for a specific line."""
+        ...
+
+# === Fixers ===
+# agentos/workflows/janitor/fixers.py
+
+class Fixer:
+    """Applies fixes to findings."""
+    
+    def __init__(self, repo_root: Path, dry_run: bool, create_pr: bool):
+        ...
+    
+    def fix_all(self, findings: list[Finding]) -> list[FixResult]:
+        """Apply fixes to all fixable findings, grouped by type."""
+        ...
+    
+    def fix_broken_link(self, finding: Finding) -> FixResult:
+        """Fix a single broken link."""
+        ...
+    
+    def fix_stale_worktree(self, finding: Finding) -> FixResult:
+        """Prune a stale worktree."""
+        ...
+    
+    def _create_commit(self, message: str, files: list[Path]) -> str:
+        """Create atomic commit, return SHA."""
+        ...
+    
+    def _generate_commit_message(self, fix_type: str, count: int) -> str:
+        """Generate deterministic commit message from template."""
+        ...
+
+COMMIT_TEMPLATES: dict[str, str] = {
+    "links": "fix(docs): update {count} broken markdown link(s)\n\nAuto-fixed by Janitor workflow",
+    "worktrees": "chore: prune {count} stale worktree(s)\n\nAuto-fixed by Janitor workflow",
+}
+
+# === Reporters ===
+# agentos/workflows/janitor/reporter.py
+
+class ReporterInterface(ABC):
+    """Abstract base for issue reporting."""
+    
+    @abstractmethod
+    def report(self, findings: list[Finding]) -> str | None:
+        """Report findings. Returns issue URL or file path."""
+        ...
+    
+    @abstractmethod
+    def find_existing_report(self) -> str | None:
+        """Find existing Janitor Report. Returns issue number or file path."""
+        ...
+
+class GitHubReporter(ReporterInterface):
+    """Reports findings as GitHub issues using `gh` CLI."""
+    
+    ISSUE_TITLE: str = "🧹 Janitor Report: Repository Hygiene Findings"
+    
+    def report(self, findings: list[Finding]) -> str | None:
+        ...
+    
+    def find_existing_report(self) -> str | None:
+        """Search for existing open issue with Janitor Report title."""
+        ...
+    
+    def _create_issue(self, body: str) -> str:
+        """Create new GitHub issue, return URL."""
+        ...
+    
+    def _update_issue(self, issue_number: str, body: str) -> str:
+        """Update existing issue, return URL."""
+        ...
+    
+    def _format_issue_body(self, findings: list[Finding]) -> str:
+        """Format findings into categorized markdown."""
+        ...
+    
+    def _check_gh_auth(self) -> bool:
+        """Verify gh CLI is authenticated (interactive or GITHUB_TOKEN)."""
+        ...
+
+class LocalFileReporter(ReporterInterface):
+    """Reports findings to local files (for testing)."""
+    
+    OUTPUT_DIR: str = "./janitor-reports"
+    
+    def report(self, findings: list[Finding]) -> str | None:
+        ...
+    
+    def find_existing_report(self) -> str | None:
+        ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
 ```
-CLI Entry (tools/run_janitor_workflow.py):
-1. Parse CLI arguments (--scope, --auto-fix, --dry-run, --silent, --create-pr, --reporter)
-2. Validate scope values against probe registry
-3. Initialize JanitorState with configuration
-4. Create and compile LangGraph workflow
-5. Execute workflow with initial state
-6. IF --silent AND exit_code == 0 THEN output nothing
-7. ELSE print summary
-8. Return exit_code
+MAIN WORKFLOW:
+1. Parse CLI arguments
+2. Initialize JanitorState with config
+3. Build LangGraph: Sweeper → Fixer → Reporter
+4. Execute graph
+5. Return exit_code from final state
 
-N0_Sweeper Node:
-1. Get list of probes to run from state.scope
-2. FOR EACH probe IN probes (parallel):
+SWEEPER NODE (N0):
+1. Get probe registry
+2. Filter probes by scope argument
+3. FOR EACH probe IN parallel:
    TRY:
      - result = probe.run(repo_root)
      - Append result to probe_results
-   CATCH Exception:
-     - Create error ProbeResult (status="error")
-     - Continue to next probe (isolation)
-3. Flatten all findings from probe_results into all_findings
-4. Return updated state
+   EXCEPT Exception as e:
+     - Log error, append error ProbeResult
+     - Continue (isolated failure)
+4. Flatten all findings from probe_results
+5. Return updated state
 
-N1_Fixer Node:
-1. Partition all_findings into fixable_findings and unfixable_findings
-2. IF NOT state.auto_fix THEN skip fixing, return state
-3. FOR EACH finding IN fixable_findings:
-   - Look up appropriate fixer function by category
-   - IF state.dry_run THEN
-     - Log what would be fixed
-     - Create FixAction with commit_sha=None
-   - ELSE
-     - Apply fix
-     - Create atomic commit (or stage for PR)
-     - Create FixAction with commit_sha
-4. IF state.create_pr AND NOT dry_run AND fixes_applied:
-   - Create PR with all fix commits
-5. Return updated state with fix_actions
+FIXER NODE (N1):
+1. IF dry_run THEN
+   - Log what would be fixed
+   - Skip actual fixes
+   - Return state unchanged
+2. Separate findings into fixable/unfixable
+3. Group fixable findings by type (links, worktrees)
+4. FOR EACH group:
+   - Apply fixes
+   - Create atomic commit with template message
+   - IF create_pr THEN create PR instead
+5. Return state with fix_results
 
-N2_Reporter Node:
-1. IF unfixable_findings is empty AND errors is empty:
-   - Set exit_code = 0
-   - Return state (nothing to report)
-2. Initialize reporter based on state.reporter_type
-3. existing = reporter.find_existing_report()
-4. IF existing:
-   - Update existing report with new findings
+REPORTER NODE (N2):
+1. IF no unfixable_findings THEN return (nothing to report)
+2. Get reporter based on reporter_type
+3. Search for existing Janitor Report
+4. IF existing report found:
+   - Update existing issue/file
 5. ELSE:
-   - Create new report
-6. Set issue_url or report_path from reporter
-7. Set exit_code = 1 (unfixable issues remain)
-8. Return updated state
+   - Create new issue/file
+6. Set exit_code = 1 (unfixable issues remain)
+7. Return state with issue_url or report_path
+
+CONDITIONAL ROUTING:
+- should_fix: IF auto_fix AND fixable_findings exist AND NOT dry_run → "fix" ELSE → "report"
+- should_report: IF unfixable_findings exist → "report" ELSE → "end"
 ```
 
 ### 2.6 Technical Approach
 
 * **Module:** `agentos/workflows/janitor/`
-* **Pattern:** State Graph (LangGraph), Strategy Pattern (probes, reporters)
+* **Pattern:** State Machine (LangGraph), Strategy Pattern (Reporters), Template Method (Probes)
 * **Key Decisions:**
-  - LangGraph for state management and conditional routing, NOT for LLM orchestration
-  - Probe isolation via try/catch ensures one failing probe doesn't crash the workflow
-  - Parallel probe execution for performance
-  - Reporter abstraction enables testing without GitHub API
-  - Deterministic commit messages from templates (no LLM)
-  - Atomic commits per fix category for easy reversion
+  - LangGraph for state management and conditional routing (not LLM orchestration)
+  - Parallel probe execution with isolated failure handling
+  - Deterministic commit messages via templates (no LLM)
+  - Reporter abstraction enables testing without GitHub API calls
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Workflow Framework | Custom state machine, LangGraph, Prefect | LangGraph | Already in stack, good state management, overkill concerns addressed by keeping it deterministic |
-| Probe Execution | Sequential, Parallel | Parallel with isolation | Performance + fault tolerance; one crashing probe shouldn't block others |
-| Commit Strategy | Single commit, Per-file, Per-category | Per-category | Balance between atomicity (easy revert) and noise (not 50 commits) |
-| Reporter Pattern | Direct GitHub calls, Abstract interface | Abstract interface | Enables `LocalFileReporter` for testing without mocking |
-| Commit Messages | LLM-generated, Templates | Templates | Deterministic, no external API cost, predictable for testing |
+| Workflow orchestration | Plain Python, Prefect, LangGraph | LangGraph | Native state management, conditional routing, matches existing patterns |
+| Probe execution | Sequential, Parallel | Parallel with isolation | Faster execution, probe crashes don't block others |
+| Commit message generation | LLM-generated, Templates | Templates | Deterministic, no external API calls, faster |
+| Issue reporting | Direct API, gh CLI | gh CLI | Leverages existing auth, simpler implementation |
+| Testing strategy | Mock GitHub API, Local reporter | Local reporter abstraction | Clean separation, no API mocking complexity |
 
 **Architectural Constraints:**
+- Must not introduce LLM dependencies (purely deterministic workflow)
+- Must work in headless CI environments with `GITHUB_TOKEN`
+- Must be reversible (all changes via git commits)
 - Must integrate with existing `agentos-harvest.py` script
-- Must use `gh` CLI for GitHub operations (no direct API calls)
-- Must work in both interactive and CI environments
-- No LLM usage - purely deterministic workflow
 
 ## 3. Requirements
 
-1. **Probe System:** Four built-in probes (links, worktrees, harvest, todo) that return structured JSON and run in parallel with failure isolation
-2. **Fixer System:** Auto-fix capability for links and worktrees with atomic commits and dry-run support
-3. **Reporter System:** GitHub issue creation/update with deduplication, plus LocalFileReporter for testing
-4. **CLI Interface:** Full CLI with --scope, --auto-fix, --dry-run, --silent, --create-pr, --reporter flags
-5. **CI Compatibility:** Silent mode with GITHUB_TOKEN authentication for automated runs
-6. **Exit Codes:** 0 when clean/all fixed, 1 when unfixable issues remain
-7. **Reversibility:** All fixes create git commits that can be reverted
+*What must be true when this is done. These become acceptance criteria.*
+
+1. Running `python tools/run_janitor_workflow.py` executes all probes and reports findings
+2. `--dry-run` flag shows pending fixes without modifying any files
+3. Broken markdown links are automatically fixed when `--auto-fix true`
+4. Stale worktrees (14+ days inactive, branch merged/deleted) are automatically pruned
+5. Unfixable issues create or update a single "Janitor Report" GitHub issue
+6. Existing Janitor Report issue is updated (not duplicated) on subsequent runs
+7. `--silent` mode produces no stdout on success, exits cleanly
+8. Exit code 0 when all issues fixed, exit code 1 when unfixable issues remain
+9. `--reporter local` writes reports to local files without GitHub API calls
+10. CI execution with `GITHUB_TOKEN` environment variable authenticates successfully
+11. Probe crashes are isolated and do not block other probes from running
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Shell script | Simple, no dependencies | Hard to test, no parallelism, poor state management | **Rejected** |
-| Prefect workflow | Production-grade, good monitoring | Heavy dependency, overkill for local tooling | **Rejected** |
-| LangGraph workflow | Good state management, already in stack, conditional routing | May seem like overkill for deterministic flow | **Selected** |
-| Direct GitHub API | More control | Requires auth management, more code | **Rejected** |
-| `gh` CLI wrapper | Simple, auth handled, consistent with other tools | Subprocess calls | **Selected** |
+| LangGraph workflow | State management, conditional routing, parallel execution | Learning curve, dependency | **Selected** |
+| Plain Python script | Simple, no dependencies | Manual state management, no parallelism | Rejected |
+| Prefect/Airflow | Mature, scheduling built-in | Heavy dependency, overkill for scope | Rejected |
+| GitHub Actions only | Native CI integration | Limited local execution, no interactive mode | Rejected |
 
-**Rationale:** LangGraph provides clean state management and parallel execution without requiring an LLM. The `gh` CLI handles authentication complexity and provides a stable interface to GitHub.
+**Rationale:** LangGraph provides the right balance of state management capabilities without requiring external services. It matches existing patterns in the codebase and supports the parallel execution model needed for probes.
 
 ## 5. Data & Fixtures
 
@@ -358,44 +464,49 @@ N2_Reporter Node:
 
 | Attribute | Value |
 |-----------|-------|
-| Source | Local repository filesystem, git metadata |
-| Format | File system traversal, git commands, markdown parsing |
-| Size | Varies by repository (typically <10k files scanned) |
-| Refresh | On-demand (CLI invocation) or scheduled (cron) |
-| Copyright/License | N/A - repository-internal scanning only |
+| Source | Local repository files, git history |
+| Format | Markdown files, git porcelain output, JSON (harvest) |
+| Size | Variable (depends on repo size) |
+| Refresh | On-demand per workflow run |
+| Copyright/License | N/A - operates on user's own repository |
 
 ### 5.2 Data Pipeline
 
 ```
-Repository ──scan──► Probes ──findings──► Fixer ──commits──► Git
-                                              │
-                                              └──unfixable──► Reporter ──issue──► GitHub
+Repository Files ──scan──► Probes ──findings──► Fixer ──commits──► Git
+                                      │
+                                      └──unfixable──► Reporter ──issue──► GitHub/Local
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| Test repository with broken links | Generated in test setup | Created via `tempfile`, cleaned up after |
-| Stale worktree simulation | Generated via git commands | Tests use isolated temp git repos |
-| TODO fixtures | Hardcoded markdown files | Various ages for threshold testing |
-| Mock ProbeResult JSON | Hardcoded | Tests probe result handling |
+| Test markdown with broken links | Generated | Created in test setup |
+| Test git worktree (stale) | Generated | Created in test setup, cleaned in teardown |
+| Mock harvest output | Hardcoded | JSON fixture matching expected format |
+| Source files with old TODOs | Generated | Files with blamed TODO comments |
 
 ### 5.4 Deployment Pipeline
 
-Local development → CI tests with LocalFileReporter → Production runs with GitHubReporter
+- **Development:** Run locally with `--reporter local`
+- **Testing:** Automated tests use `LocalFileReporter`, no external calls
+- **CI:** GitHub Actions with `GITHUB_TOKEN`, `--silent` mode
+- **Production:** Cron job or Task Scheduler, full `gh` CLI auth
 
-**External Data:** The `agentos-harvest.py` script may need to exist separately. If not present, harvest probe should return an error result gracefully.
+**External utilities:** Depends on existing `agentos-harvest.py` for harvest probe. No new utility needed.
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-- [x] **Simplicity:** Three main nodes, clear flow
-- [x] **No touching:** All elements have visual separation
-- [x] **No hidden lines:** All arrows fully visible
-- [x] **Readable:** Labels clear, flow direction explicit
-- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed
+Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.live) or GitHub preview:
+
+- [x] **Simplicity:** Similar components collapsed (per 0006 §8.1)
+- [x] **No touching:** All elements have visual separation (per 0006 §8.2)
+- [x] **No hidden lines:** All arrows fully visible (per 0006 §8.3)
+- [x] **Readable:** Labels not truncated, flow direction clear
+- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed (per 0006 §8.5)
 
 **Auto-Inspection Results:**
 ```
@@ -405,32 +516,33 @@ Local development → CI tests with LocalFileReporter → Production runs with G
 - Flow clarity: [ ] Clear / [ ] Issue: ___
 ```
 
-*To be completed during implementation*
+*Note: Auto-inspection to be completed during implementation phase.*
 
 ### 6.2 Diagram
 
 ```mermaid
 flowchart TB
     subgraph CLI["CLI Entry Point"]
-        A[run_janitor_workflow.py]
+        A[tools/run_janitor_workflow.py]
     end
 
     subgraph Graph["LangGraph Workflow"]
-        B[N0_Sweeper]
-        C[N1_Fixer]
-        D[N2_Reporter]
+        direction TB
+        N0[N0: Sweeper]
+        N1[N1: Fixer]
+        N2[N2: Reporter]
+        
+        N0 -->|fixable findings| N1
+        N0 -->|no fixable| N2
+        N1 --> N2
+        N2 --> END[End]
     end
 
     subgraph Probes["Probe System"]
-        P1[probe_links]
-        P2[probe_worktrees]
-        P3[probe_harvest]
-        P4[probe_todo]
-    end
-
-    subgraph Fixers["Fixer System"]
-        F1[fix_broken_link]
-        F2[fix_stale_worktree]
+        P1[LinksProbe]
+        P2[WorktreesProbe]
+        P3[HarvestProbe]
+        P4[TodoProbe]
     end
 
     subgraph Reporters["Reporter System"]
@@ -438,46 +550,61 @@ flowchart TB
         R2[LocalFileReporter]
     end
 
-    A --> B
-    B --> P1 & P2 & P3 & P4
-    P1 & P2 & P3 & P4 --> B
-    B --> C
-    C --> F1 & F2
-    F1 & F2 --> C
-    C --> D
-    D --> R1
-    D --> R2
-
-    style A fill:#e1f5fe
-    style B fill:#fff3e0
-    style C fill:#e8f5e9
-    style D fill:#fce4ec
+    A --> N0
+    N0 --> P1
+    N0 --> P2
+    N0 --> P3
+    N0 --> P4
+    
+    N2 --> R1
+    N2 --> R2
 ```
 
 ```mermaid
 sequenceDiagram
-    participant CLI as CLI Entry
-    participant G as LangGraph
-    participant S as N0_Sweeper
-    participant F as N1_Fixer
-    participant R as N2_Reporter
-    participant GH as GitHub
+    participant CLI as CLI
+    participant Graph as LangGraph
+    participant Sweeper as N0_Sweeper
+    participant Probes as Probes
+    participant Fixer as N1_Fixer
+    participant Git as Git
+    participant Reporter as N2_Reporter
+    participant GitHub as GitHub/Local
 
-    CLI->>G: Initialize state
-    G->>S: Execute sweeper
-    S->>S: Run probes in parallel
-    S-->>G: Return findings
-    G->>F: Execute fixer
-    F->>F: Apply fixes (if auto_fix)
-    F->>F: Create commits
-    F-->>G: Return fix_actions
-    G->>R: Execute reporter
-    alt Unfixable findings exist
-        R->>GH: Create/update issue
-        GH-->>R: Issue URL
+    CLI->>Graph: Initialize state
+    Graph->>Sweeper: Execute
+    
+    par Parallel Probe Execution
+        Sweeper->>Probes: LinksProbe.run()
+        Probes-->>Sweeper: ProbeResult
+    and
+        Sweeper->>Probes: WorktreesProbe.run()
+        Probes-->>Sweeper: ProbeResult
+    and
+        Sweeper->>Probes: HarvestProbe.run()
+        Probes-->>Sweeper: ProbeResult
+    and
+        Sweeper->>Probes: TodoProbe.run()
+        Probes-->>Sweeper: ProbeResult
     end
-    R-->>G: Return final state
-    G-->>CLI: Exit code
+    
+    Sweeper-->>Graph: Updated state with findings
+    
+    alt Has fixable findings AND auto_fix=true
+        Graph->>Fixer: Execute
+        Fixer->>Git: Apply fixes
+        Git-->>Fixer: Commit SHA
+        Fixer-->>Graph: Updated state with fix_results
+    end
+    
+    alt Has unfixable findings
+        Graph->>Reporter: Execute
+        Reporter->>GitHub: Create/Update issue
+        GitHub-->>Reporter: Issue URL
+        Reporter-->>Graph: Updated state
+    end
+    
+    Graph-->>CLI: Final state (exit_code)
 ```
 
 ## 7. Security & Safety Considerations
@@ -486,27 +613,28 @@ sequenceDiagram
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Repository escape (writing outside repo) | All file operations constrained to `repo_root`, path traversal validated | Addressed |
-| GitHub token exposure | Token via environment variable, never logged or stored | Addressed |
-| Command injection in git operations | Use subprocess with list arguments, never shell=True | Addressed |
-| Malicious markdown content | Probes only read and parse, no execution of content | Addressed |
+| Arbitrary file modification | Only modifies files within repo root, validates paths | Addressed |
+| GitHub token exposure | Uses `gh` CLI auth or `GITHUB_TOKEN` env var, no token in logs | Addressed |
+| Code injection via findings | All commit messages use templates, no user input interpolation | Addressed |
+| External data transmission | No code/content sent externally, all processing local | Addressed |
+| Unauthorized commits | Commits use existing git identity, respects branch protections | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Accidental data loss from bad fixes | All fixes create git commits, fully reversible via `git revert` | Addressed |
-| Pruning active worktrees | Only prune if: branch deleted/merged AND no commits in 14+ days | Addressed |
-| Runaway execution | Probes have individual timeouts, overall workflow timeout | TODO |
-| Incorrect link fixes | Fixes only applied when target file definitively found | Addressed |
+| Accidental data loss | All changes via git commits (fully reversible) | Addressed |
+| Active worktree deletion | Only prunes detached/stale trees, never active work | Addressed |
+| Runaway fixing | Atomic commits per category, can revert individually | Addressed |
+| Probe crash cascade | Isolated probe execution, failures don't stop workflow | Addressed |
+| Incorrect link fixes | Dry-run mode for preview, conservative matching | Addressed |
 
-**Fail Mode:** Fail Closed - If any critical operation fails, workflow stops and reports error rather than continuing with potentially incorrect state.
+**Fail Mode:** Fail Closed - If authentication fails or critical error occurs, workflow exits with error code without making changes.
 
 **Recovery Strategy:** 
-- All git operations are atomic commits
-- `git revert <commit>` undoes any fix
-- GitHub issues can be manually closed if created in error
-- `--dry-run` allows preview before any changes
+- All fixes are git commits: `git revert <sha>` to undo
+- Worktree prune is non-destructive (worktree data preserved if branch exists)
+- GitHub issues can be manually closed/edited
 
 ## 8. Performance & Cost Considerations
 
@@ -514,126 +642,163 @@ sequenceDiagram
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Full scan latency | < 60s for typical repo | Parallel probe execution |
-| Memory | < 256MB | Stream file processing, don't load entire repo into memory |
-| Disk I/O | Minimal writes | Only fix files and git commits |
+| Total runtime | < 60s for typical repo | Parallel probe execution |
+| Memory | < 256MB | Stream large files, don't load all into memory |
+| Git operations | Minimize by batching | Single commit per fix category |
 
-**Bottlenecks:** 
-- Large repositories with many markdown files may slow link probe
-- Git worktree operations can be slow if many worktrees exist
+**Bottlenecks:**
+- `git blame` for TODO dating can be slow on large files
+- Link checking scales with number of markdown files
+- Harvest probe depends on external script performance
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| GitHub API (via gh) | Free | ~10 calls per run | $0 |
-| Compute | Developer machine / CI | Minutes per run | Negligible |
-| LLM API | N/A | None - deterministic | $0 |
+| GitHub API (via gh) | Free (rate limited) | ~10 calls/run | $0 |
+| Compute (local) | N/A | Developer machine | $0 |
+| CI minutes | Varies by plan | ~1 min/run | Minimal |
 
 **Cost Controls:**
-- [x] No LLM usage eliminates token costs
-- [x] GitHub API calls minimal (issue check, create/update)
-- [x] Local file reporter for testing avoids API calls entirely
+- [x] No paid API dependencies
+- [x] Local execution is free
+- [x] CI runs are brief (~1 minute)
 
-**Worst-Case Scenario:** Even with 1000 daily runs, costs remain negligible as no external paid APIs are used.
+**Worst-Case Scenario:** Large repos may take several minutes for full scan. Solution: `--scope` flag to run specific probes only.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Scans code/docs only, no personal data processed |
-| Third-Party Licenses | No | No new third-party data sources |
-| Terms of Service | Yes | GitHub API usage within gh CLI ToS |
-| Data Retention | N/A | No data stored beyond git commits |
+| PII/Personal Data | No | Only processes code/docs, no personal data |
+| Third-Party Licenses | No | No third-party content processed |
+| Terms of Service | N/A | Uses official gh CLI per GitHub ToS |
+| Data Retention | No | No data stored externally |
 | Export Controls | No | No restricted algorithms |
 
-**Data Classification:** Internal (repository code and documentation)
+**Data Classification:** Internal (operates on developer's own repository)
 
 **Compliance Checklist:**
-- [x] No PII stored without consent - N/A, no PII processed
-- [x] All third-party licenses compatible - LangGraph is MIT
-- [x] External API usage compliant with provider ToS - GitHub via official CLI
-- [x] Data retention policy documented - N/A, no external data storage
+- [x] No PII stored without consent - N/A
+- [x] All third-party licenses compatible with project license
+- [x] External API usage compliant with provider ToS
+- [x] Data retention policy documented - N/A (no external storage)
 
 ## 10. Verification & Testing
 
-**Testing Philosophy:** All scenarios automated using LocalFileReporter and temporary git repositories. No manual tests required.
+*Ref: [0005-testing-strategy-and-protocols.md](0005-testing-strategy-and-protocols.md)*
+
+**Testing Philosophy:** Strive for 100% automated test coverage. Manual tests are a last resort for scenarios that genuinely cannot be automated.
+
+### 10.0 Test Plan (TDD - Complete Before Implementation)
+
+**TDD Requirement:** Tests MUST be written and failing BEFORE implementation begins.
+
+| Test ID | Test Description | Expected Behavior | Status |
+|---------|------------------|-------------------|--------|
+| T010 | LinksProbe detects broken links | Returns findings for invalid link targets | RED |
+| T020 | LinksProbe ignores valid links | No findings for working links | RED |
+| T030 | WorktreesProbe detects stale worktrees | Returns findings for 14+ day inactive trees | RED |
+| T040 | WorktreesProbe ignores active worktrees | No findings for recent activity | RED |
+| T050 | TodoProbe finds old TODOs | Returns findings for 30+ day TODOs | RED |
+| T060 | TodoProbe ignores recent TODOs | No findings for recent TODOs | RED |
+| T070 | Fixer repairs broken links | File updated with correct link | RED |
+| T080 | Fixer prunes stale worktrees | Worktree removed from list | RED |
+| T090 | Fixer respects dry_run | No changes made when dry_run=True | RED |
+| T100 | GitHubReporter creates issue | Issue created with findings | RED |
+| T110 | GitHubReporter updates existing | Existing issue updated, not duplicated | RED |
+| T120 | LocalFileReporter writes file | Report written to local directory | RED |
+| T130 | Graph routes correctly | Conditional edges fire appropriately | RED |
+| T140 | Probe crash isolation | Other probes continue after one fails | RED |
+| T150 | CLI argument parsing | All flags parsed correctly | RED |
+| T160 | Exit code 0 on clean | Returns 0 when no unfixable issues | RED |
+| T170 | Exit code 1 on issues | Returns 1 when unfixable issues remain | RED |
+
+**Coverage Target:** ≥95% for all new code
+
+**TDD Checklist:**
+- [ ] All tests written before implementation
+- [ ] Tests currently RED (failing)
+- [ ] Test IDs match scenario IDs in 10.1
+- [ ] Test file created at: `tests/unit/test_janitor_*.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Link probe finds broken link | Auto | MD file with broken link | Finding with fixable=true | Finding contains correct file, line, old/new paths |
-| 020 | Link fixer repairs broken link | Auto | Broken link finding | File updated, commit created | Link updated in file, git log shows commit |
-| 030 | Worktree probe finds stale worktree | Auto | Worktree with deleted branch, 15 days old | Finding with fixable=true | Finding identifies worktree path |
-| 040 | Worktree fixer prunes stale worktree | Auto | Stale worktree finding | Worktree removed | `git worktree list` no longer shows worktree |
-| 050 | TODO probe finds old TODO | Auto | TODO comment dated 35 days ago | Finding with fixable=false | Finding includes file, line, age |
-| 060 | Probe crash isolation | Auto | Probe that raises exception | Other probes still run | Non-crashing probes return results |
-| 070 | Dry run mode | Auto | Fixable findings, --dry-run | No files modified | Git status clean, findings reported |
-| 080 | Silent mode success | Auto | No issues found, --silent | No stdout | stdout is empty |
-| 090 | Silent mode with issues | Auto | Unfixable issues, --silent | No stdout, exit code 1 | stdout empty, return code == 1 |
-| 100 | LocalFileReporter writes report | Auto | Unfixable findings, --reporter local | Report file created | File exists at expected path with content |
-| 110 | Issue deduplication | Auto | Existing report, new findings | Same issue updated | Issue number unchanged |
-| 120 | CLI scope validation | Auto | --scope invalid | Error message | CLI exits with error, helpful message |
-| 130 | Harvest probe graceful failure | Auto | Missing agentos-harvest.py | Error result, workflow continues | ProbeResult.status == "error" |
-| 140 | Create PR instead of commits | Auto | --create-pr flag | PR created | PR URL in output |
-| 150 | Exit code 0 when clean | Auto | No findings | exit_code = 0 | Process return code == 0 |
-| 160 | Exit code 1 when unfixable | Auto | Unfixable findings | exit_code = 1 | Process return code == 1 |
+| 010 | LinksProbe detects broken links | Auto | Markdown with invalid link | Finding with file/line | finding.fixable == True |
+| 020 | LinksProbe ignores valid links | Auto | Markdown with valid links | Empty findings | len(findings) == 0 |
+| 030 | WorktreesProbe detects stale | Auto | Worktree with no recent commits | Finding for worktree | finding.description contains path |
+| 040 | WorktreesProbe ignores active | Auto | Worktree with recent activity | Empty findings | len(findings) == 0 |
+| 050 | TodoProbe finds old TODOs | Auto | File with 30+ day TODO | Finding with line number | finding.severity == WARNING |
+| 060 | TodoProbe ignores recent | Auto | File with fresh TODO | Empty findings | len(findings) == 0 |
+| 070 | Fixer repairs broken links | Auto | Finding with fix_data | Updated file content | new link in file |
+| 080 | Fixer prunes stale worktrees | Auto | Stale worktree finding | Worktree removed | git worktree list shorter |
+| 090 | Fixer dry_run mode | Auto | findings, dry_run=True | No file changes | git status clean |
+| 100 | GitHubReporter creates issue | Auto-Live | Unfixable findings | Issue URL returned | URL matches pattern |
+| 110 | GitHubReporter updates existing | Auto-Live | Existing issue, new findings | Same issue number | issue_number unchanged |
+| 120 | LocalFileReporter writes file | Auto | Findings | File in ./janitor-reports/ | file exists |
+| 130 | Graph conditional routing | Auto | State with fixable findings | Fixer node executed | fix_results populated |
+| 140 | Probe crash isolation | Auto | One probe raises exception | Other results present | len(probe_results) == expected |
+| 150 | CLI --scope links | Auto | --scope links | Only links probe runs | len(probe_results) == 1 |
+| 160 | CLI --silent no output | Auto | --silent flag | Empty stdout | stdout == "" |
+| 170 | Exit code 1 unfixable | Auto | Unfixable findings | exit_code == 1 | return value is 1 |
+| 180 | Exit code 0 clean | Auto | All issues fixed | exit_code == 0 | return value is 0 |
 
 ### 10.2 Test Commands
 
 ```bash
-# Run all Janitor tests
-poetry run pytest tests/workflows/janitor/ -v
+# Run all automated tests
+poetry run pytest tests/unit/test_janitor*.py tests/integration/test_janitor*.py -v
 
-# Run only probe tests
-poetry run pytest tests/workflows/janitor/test_probes.py -v
+# Run only fast/mocked tests (exclude live)
+poetry run pytest tests/unit/test_janitor*.py -v -m "not live"
 
-# Run only fixer tests
-poetry run pytest tests/workflows/janitor/test_fixers.py -v
-
-# Run integration tests (full workflow)
-poetry run pytest tests/workflows/janitor/test_graph.py -v
+# Run live integration tests (requires gh auth)
+poetry run pytest tests/integration/test_janitor*.py -v -m live
 
 # Run with coverage
-poetry run pytest tests/workflows/janitor/ -v --cov=agentos/workflows/janitor
+poetry run pytest tests/unit/test_janitor*.py --cov=agentos/workflows/janitor --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
 
-N/A - All scenarios automated using temporary git repositories and LocalFileReporter.
+**If no manual tests required:** N/A - All scenarios automated.
 
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Link fixer creates incorrect links | Medium | Low | Validate target exists before fixing; dry-run mode |
-| Worktree pruning removes active work | High | Low | Multiple safety checks: branch status + staleness threshold |
-| `agentos-harvest.py` interface changes | Low | Medium | Probe fails gracefully, returns error result |
-| GitHub API rate limiting | Low | Low | Minimal API calls, LocalFileReporter for testing |
-| LangGraph version incompatibility | Medium | Low | Pin version in pyproject.toml |
-| Large repo performance | Medium | Medium | Parallel execution, configurable scope |
+| `agentos-harvest.py` format changes | Med | Low | Version check, graceful degradation |
+| gh CLI not installed | Med | Low | Clear error message with install instructions |
+| Large repo performance | Low | Med | `--scope` flag for targeted runs |
+| False positive link detection | Med | Med | Conservative matching, dry-run preview |
+| GitHub API rate limiting | Low | Low | Batch operations, respect limits |
+| Branch protection blocks commits | Med | Low | `--create-pr` option for protected branches |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] Implementation complete and linted
-- [ ] All files created per §2.1
 - [ ] Code comments reference this LLD (Issue #94)
+- [ ] All probe implementations complete
+- [ ] Fixer implementations for links and worktrees
+- [ ] Both reporter implementations complete
 
 ### Tests
-- [ ] All test scenarios (§10.1) pass
-- [ ] Test coverage ≥ 80% for janitor module
-- [ ] Integration test for full workflow passes
+- [ ] All test scenarios pass (≥95% coverage)
+- [ ] Unit tests use LocalFileReporter (no live API calls)
+- [ ] Integration tests validate full workflow
 
 ### Documentation
-- [ ] LLD updated with any deviations from implementation
-- [ ] Implementation Report (`docs/reports/94/implementation-report.md`) completed
-- [ ] Test Report (`docs/reports/94/test-report.md`) completed
+- [ ] LLD updated with any deviations
+- [ ] Implementation Report (0103) completed
+- [ ] Test Report (0113) completed
 - [ ] Wiki updated with Janitor workflow documentation
-- [ ] Superseded audit docs archived with pointer to Janitor
-- [ ] New files added to `docs/0003-file-inventory.md`
-- [ ] Example cron configuration documented
+- [ ] Superseded audit docs archived (0834, 0838, 0840)
+- [ ] Files added to `docs/0003-file-inventory.md`
+- [ ] Example cron configuration provided
+- [ ] CI example with `GITHUB_TOKEN` documented
 
 ### Review
 - [ ] Code review completed
@@ -649,6 +814,6 @@ N/A - All scenarios automated using temporary git repositories and LocalFileRepo
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| (none yet) | - | - | - |
+| - | - | - | Pending initial review |
 
 **Final Status:** PENDING
