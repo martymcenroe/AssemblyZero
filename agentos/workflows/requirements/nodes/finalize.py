@@ -316,6 +316,11 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
             if lineage_file.is_file():
                 created_files.append(str(lineage_file))
 
+    # Add lld-status.json to commit (Issue #279: was missing, causing stale status)
+    lld_status_path = target_repo / "docs" / "lld" / "lld-status.json"
+    if lld_status_path.exists():
+        created_files.append(str(lld_status_path))
+
     state["created_files"] = created_files
     state["final_lld_path"] = str(lld_path)
 

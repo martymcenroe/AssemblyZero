@@ -947,7 +947,9 @@ class TestShiftLineageVersions:
 
         operations = shift_lineage_versions(42, tmp_path)
 
-        assert operations == []
+        # Issue #279: Now always resets lld-status.json even if nothing else exists
+        assert len(operations) == 1
+        assert "Reset status" in operations[0]
 
     def test_handles_only_lld_file(self, tmp_path):
         """Test handles case where only LLD file exists."""
@@ -962,5 +964,7 @@ class TestShiftLineageVersions:
         operations = shift_lineage_versions(42, tmp_path)
 
         assert not lld_file.exists()
-        assert len(operations) == 1
+        # Issue #279: Now 2 operations - delete + reset status
+        assert len(operations) == 2
         assert "Deleted" in operations[0]
+        assert "Reset status" in operations[1]

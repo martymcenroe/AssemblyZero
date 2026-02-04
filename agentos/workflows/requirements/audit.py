@@ -445,6 +445,32 @@ def update_lld_status(
     save_lld_tracking(tracking, target_repo)
 
 
+def _reset_lld_status_entry(issue_number: int, target_repo: Path) -> None:
+    """Reset lld-status.json entry when regenerating an LLD.
+
+    Issue #279: When an LLD is regenerated, the old approval status is stale
+    and must be invalidated. The new LLD must go through fresh Gemini review.
+
+    Args:
+        issue_number: GitHub issue number.
+        target_repo: Target repository root.
+    """
+    tracking = load_lld_tracking(target_repo)
+    issue_key = str(issue_number)
+
+    if issue_key in tracking["issues"]:
+        # Reset to draft status, clear approval
+        tracking["issues"][issue_key] = {
+            "lld_path": f"docs\\lld\\active\\LLD-{issue_number:03d}.md",
+            "status": "draft",
+            "has_gemini_review": False,
+            "final_verdict": None,
+            "last_review_date": None,
+            "review_count": 0,
+        }
+        save_lld_tracking(tracking, target_repo)
+
+
 # =============================================================================
 # LLD Finalization
 # =============================================================================
@@ -570,6 +596,11 @@ def shift_lineage_versions(issue_number: int, target_repo: Path) -> list[str]:
     if lld_path.exists():
         lld_path.unlink()
         operations.append(f"Deleted: {lld_path.relative_to(target_repo)}")
+
+    # Step 1.5: Reset lld-status.json entry (Issue #279: prevent stale approval)
+    # When regenerating, the old approval is invalid - must go through fresh review
+    _reset_lld_status_entry(issue_number, target_repo)
+    operations.append(f"Reset status for issue #{issue_number} in lld-status.json")
 
     # Step 2: Shift n1 -> n2 (if n1 exists)
     if lineage_n1.exists():
