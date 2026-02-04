@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 114
+url: https://github.com/martymcenroe/AgentOS/issues/114
+fetched: 2026-02-04T07:57:29.070830Z
+---
+
 # Issue #114: DEATH: Documentation Reconciliation (Post-Implementation Cleanup)
 
 # DEATH: Documentation Reconciliation

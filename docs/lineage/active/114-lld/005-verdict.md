@@ -1,4 +1,4 @@
-# LLD Review: 114-Feature: DEATH Documentation Reconciliation
+# LLD Review: 114-DEATH: Documentation Reconciliation
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
@@ -7,26 +7,30 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The LLD is well-structured and has effectively addressed previous feedback regarding manual testing. The conversion of validation steps into automated shell scripts (using `grep`, `find`, and `mermaid-cli`) ensures robust, non-subjective verification. Requirement coverage is 100%. The plan is solid and ready for execution.
+The LLD is comprehensive and philosophically aligned with the project's persona structure. The logic flow is sound, and safety mechanisms (dry-run, fail-closed) are well-defined. Requirement coverage is excellent (100%).
+
+However, there is a **critical synchronization failure between Section 10.0 (Test Plan) and Section 10.1 (Test Scenarios)**. The IDs do not match (e.g., `T040` is "Orphan Detection" in 10.0 but "System Arch Generation" in 10.1). This will cause significant confusion during TDD implementation and breaks the specific "Test IDs match scenario IDs" checklist item. This must be reconciled before implementation.
+
+## Open Questions Resolved
+- [x] ~~What triggers DEATH workflow~~ **RESOLVED: Manual invocation.** (Agreed: Align with cost controls)
+- [x] ~~Should DEATH operate on the entire repository~~ **RESOLVED: Accept scope + auto-detect.** (Agreed: Provides flexibility)
+- [x] ~~What format for architecture diagrams~~ **RESOLVED: Mermaid only.** (Agreed: Adheres to standard 0006)
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
-| # | Requirement | Test(s) | Status |
+| # | Requirement | Test(s) (Ref: Section 10.1 Scenarios) | Status |
 |---|-------------|---------|--------|
-| R1 | System architecture diagram exists showing all Discworld personas | 005, 010 | ✓ Covered |
-| R2 | Data flow diagram shows how Brutha serves Librarian and Hex | 005, 010 | ✓ Covered |
-| R3 | Workflow interaction diagram shows persona coordination patterns | 005, 010 | ✓ Covered |
-| R4 | ADR exists documenting Discworld persona naming convention | 006 | ✓ Covered |
-| R5 | ADR exists documenting RAG architecture with Brutha as foundation | 006 | ✓ Covered |
-| R6 | ADR exists documenting local-only embeddings policy | 006 | ✓ Covered |
-| R7 | Wiki Workflow-Personas.md is current with all implemented workflows | 050 | ✓ Covered |
-| R8 | Wiki Home.md includes workflow family overview | 055 | ✓ Covered |
-| R9 | File inventory (0003) includes all new files from persona implementations | 030 | ✓ Covered |
-| R10 | README includes workflow family overview section | 060 | ✓ Covered |
-| R11 | All cross-references are valid and links work | 020 | ✓ Covered |
+| 1 | System architecture diagram exists showing all Discworld personas | Scenario 030, 040 | ✓ Covered |
+| 2 | Data flow diagram shows Brutha serving Librarian and Hex | Scenario 035, 045 | ✓ Covered |
+| 3 | ADRs exist for: naming, RAG, local-only | Scenario 025, 070 | ✓ Covered |
+| 4 | Workflow-Personas.md is complete and accurate | Scenario 065 | ✓ Covered |
+| 5 | File inventory (0003) reflects all new files | Scenario 060 | ✓ Covered |
+| 6 | README includes workflow family overview | Scenario 067 | ✓ Covered |
+| 7 | No orphaned documentation | Scenario 050 | ✓ Covered |
+| 8 | No undocumented major components | Scenario 055 | ✓ Covered |
 
-**Coverage Calculation:** 11 requirements covered / 11 total = **100%**
+**Coverage Calculation:** 8 requirements covered / 8 total = **100%**
 
 **Verdict:** PASS
 
@@ -34,37 +38,42 @@ The LLD is well-structured and has effectively addressed previous feedback regar
 No blocking issues found. LLD is approved for implementation.
 
 ### Cost
-- [ ] No issues found.
+- No issues found.
 
 ### Safety
-- [ ] No issues found.
+- No issues found.
 
 ### Security
-- [ ] No issues found.
+- No issues found.
 
 ### Legal
-- [ ] No issues found.
+- No issues found.
 
 ## Tier 2: HIGH PRIORITY Issues
-No high-priority issues found.
 
 ### Architecture
-- [ ] No issues found.
+- No issues found.
 
 ### Observability
-- [ ] No issues found.
+- No issues found.
 
 ### Quality
-- [ ] **Requirement Coverage:** PASS (100%).
+- [ ] **Test ID / Scenario ID Mismatch (CRITICAL):**
+    - **Description:** Table 10.0 (Test Plan) and Table 10.1 (Test Scenarios) use conflicting IDs.
+    - **Evidence:**
+        - `T040` in 10.0 is "Detect orphaned documentation".
+        - `Scenario 040` in 10.1 is "System architecture diagram generated".
+        - `T050` in 10.0 is "Sync file inventory".
+        - `Scenario 050` in 10.1 is "Orphan doc detected".
+    - **Recommendation:** Align IDs in Table 10.0 to match Table 10.1 exactly. The TDD process relies on `test_040_orphan_detection` mapping clearly to requirements. Update Section 10.0 to match the scenarios defined in 10.1.
 
 ## Tier 3: SUGGESTIONS
-- **Test 020 (Dependencies):** Consider using `npx markdown-link-check` (similar to the Mermaid test) or ensure the command is available in the CI/Dev environment, as `markdown-link-check` is not a standard Unix utility.
-- **Section 6.1 (Auto-Inspection):** While not a "Test Scenario," ensure that the "Agent Auto-Inspection" step is performed during the drafting phase to catch visual layout issues (overlapping nodes) that the CLI syntax check (Test 010) won't catch.
+- **ADR Specificity:** While Scenario 025 detects missing ADRs generally, ensure the fixture data specifically checks for the absence of "RAG Architecture" and "Persona Naming" to strictly satisfy Requirement 3.
 
 ## Questions for Orchestrator
 1. None.
 
 ## Verdict
-[x] **APPROVED** - Ready for implementation
-[ ] **REVISE** - Fix Tier 1/2 issues first
+[ ] **APPROVED** - Ready for implementation
+[x] **REVISE** - Fix Tier 1/2 issues first
 [ ] **DISCUSS** - Needs Orchestrator decision

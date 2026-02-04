@@ -3,7 +3,7 @@
 <!-- Template Metadata
 Last Updated: 2025-01-XX
 Updated By: Issue #114 creation
-Update Reason: Initial LLD creation for documentation reconciliation workflow
+Update Reason: Revision 2 - Fixed Test ID/Scenario ID synchronization per Gemini Review #2
 -->
 
 ## 1. Context & Goal
@@ -237,6 +237,7 @@ Code Files ──compare──► Doc Files ──► Undocumented Code Report
 | Sample incomplete docs | Hardcoded | Tests orphan detection |
 | Sample undocumented code | Hardcoded | Tests missing doc detection |
 | Mock GitHub issue data | Hardcoded | Tests implementation status detection |
+| Missing ADR fixtures | Hardcoded | Specifically tests absence of "RAG Architecture" and "Persona Naming" ADRs per Req 3 |
 
 ### 5.4 Deployment Pipeline
 
@@ -420,45 +421,50 @@ flowchart LR
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
 | T010 | Scan mock repo for personas | Returns list of persona skill directories | RED |
-| T020 | Detect missing system architecture diagram | Reports diagram needed when none exists | RED |
-| T025 | Detect missing data flow diagram | Reports data flow diagram needed (distinct from system arch) | RED |
-| T030 | Generate system architecture diagram | Valid Mermaid syntax with persona relationships | RED |
-| T035 | Generate data flow diagram | Valid Mermaid showing Brutha → Librarian/Hex flow | RED |
-| T040 | Detect orphaned documentation | Finds docs referencing removed code | RED |
-| T045 | Detect undocumented code | Finds code files missing corresponding documentation | RED |
-| T050 | Sync file inventory | Produces accurate diff report | RED |
-| T055 | Update Workflow-Personas.md | Wiki updated when new persona detected | RED |
-| T057 | Update README workflow overview | README patched with workflow family section | RED |
-| T060 | Dry-run mode prevents changes | No files modified, only report generated | RED |
-| T070 | ADR generation with correct numbering | Finds next available number, creates valid ADR | RED |
+| T020 | Empty scope defaults to all issues | Scans all issues when no scope param provided | RED |
+| T025 | Detect missing ADR (specifically RAG/Naming) | Reports ADR needed when RAG Architecture or Persona Naming ADR absent | RED |
+| T030 | Detect stale system architecture diagram | Reports "Update needed" when diagram missing a persona | RED |
+| T035 | Detect missing data flow diagram | Reports "Data flow diagram needed" when none exists | RED |
+| T040 | Generate system architecture diagram | Valid Mermaid syntax with all persona relationships | RED |
+| T045 | Generate data flow diagram | Valid Mermaid showing Brutha → Librarian/Hex flow | RED |
+| T050 | Detect orphaned documentation | Finds docs referencing removed code | RED |
+| T055 | Detect undocumented code | Finds code files missing corresponding documentation | RED |
+| T060 | Sync file inventory | Produces accurate diff report of additions/deletions | RED |
+| T065 | Update Workflow-Personas.md | Wiki updated when new persona detected | RED |
+| T067 | Update README workflow overview | README patched with workflow family section | RED |
+| T070 | Dry-run mode prevents changes | No files modified, only report generated | RED |
+| T080 | ADR generation with correct numbering | Finds next available number, creates valid ADR | RED |
+| T090 | Apply mode modifies files | Files updated and changes appear in Git status | RED |
+| T100 | DEATH quote in output | Persona quote included in any invocation output | RED |
 
 **Coverage Target:** ≥95% for all new code
 
 **TDD Checklist:**
 - [ ] All tests written before implementation
 - [ ] Tests currently RED (failing)
-- [ ] Test IDs match scenario IDs in 10.1
+- [x] Test IDs match scenario IDs in 10.1
 - [ ] Test file created at: `tests/skills/test_death.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria | Requirement |
 |----|----------|------|-------|-----------------|---------------|-------------|
-| 010 | Empty scope defaults to all | Auto | No scope param | Scans all issues | All persona dirs found | - |
-| 020 | Explicit scope respected | Auto | issues=[113,114] | Only those issues scanned | Correct subset returned | - |
-| 025 | Missing ADR detected | Auto | No ADR for Discworld naming | "ADR needed" in report | ADR gap identified | Req 3 |
-| 030 | Stale system architecture diagram detected | Auto | Diagram missing Angua | "Update needed" in report | Staleness flagged | Req 1 |
+| 010 | Scan mock repo for personas | Auto | Mock repo with persona dirs | List of PersonaInfo | All persona dirs found | - |
+| 020 | Empty scope defaults to all | Auto | No scope param | Scans all issues | Correct scope expansion | - |
+| 025 | Missing ADR detected | Auto | No ADR for "RAG Architecture" or "Persona Naming" | "ADR needed" in report | Specific ADR gaps identified | Req 3 |
+| 030 | Stale system architecture diagram detected | Auto | Diagram missing Angua persona | "Update needed" in report | Staleness flagged | Req 1 |
 | 035 | Missing data flow diagram detected | Auto | No data flow diagram exists | "Data flow diagram needed" in report | Gap identified | Req 2 |
-| 040 | System architecture diagram generated | Auto | Persona list | Valid Mermaid with all personas | Diagram validates | Req 1 |
-| 045 | Data flow diagram generated | Auto | Brutha + consumers | Valid Mermaid showing Brutha → Librarian/Hex | Diagram validates | Req 2 |
+| 040 | System architecture diagram generated | Auto | Persona list | Valid Mermaid with all personas | Diagram validates, all personas present | Req 1 |
+| 045 | Data flow diagram generated | Auto | Brutha + consumers list | Valid Mermaid showing Brutha → Librarian/Hex | Diagram validates, flow correct | Req 2 |
 | 050 | Orphan doc detected | Auto | Doc refs deleted module | Orphan in report | Cleanup suggested | Req 7 |
-| 055 | Undocumented code detected | Auto | Code file without doc | "Undocumented" in report | Gap identified | Req 8 |
+| 055 | Undocumented code detected | Auto | Code file without corresponding doc | "Undocumented" in report | Gap identified | Req 8 |
 | 060 | Inventory sync works | Auto | New files not in inventory | Diff shows additions | Accurate diff | Req 5 |
 | 065 | Wiki Workflow-Personas.md updated | Auto | New persona discovered | Persona added to wiki | Wiki reflects reality | Req 4 |
-| 067 | README workflow overview updated | Auto | New personas | README contains workflow family | Overview present | Req 6 |
+| 067 | README workflow overview updated | Auto | New personas | README contains workflow family section | Overview present | Req 6 |
 | 070 | Dry-run produces no changes | Auto | --dry-run flag | No file modifications | Git status clean | - |
-| 080 | Apply mode modifies files | Auto | --apply flag | Files updated | Changes in Git status | - |
-| 090 | DEATH quote in output | Auto | Any invocation | Persona quote included | Quote present | - |
+| 080 | ADR generation with correct numbering | Auto | Existing ADRs 0001-0041 | Creates ADR-0042 | Correct number assigned | Req 3 |
+| 090 | Apply mode modifies files | Auto | --apply flag | Files updated | Changes in Git status | - |
+| 100 | DEATH quote in output | Auto | Any invocation | Persona quote included | Quote present | - |
 
 ### 10.2 Test Commands
 
@@ -620,10 +626,23 @@ poetry run pytest tests/skills/test_death.py -v --cov=skills/death
 | G1.3 | "Consider max_files check in scan_implementation_state" | YES - Added max_files parameter to function signature |
 | G1.4 | "Consider JSON output option" | YES - Added --json flag to invocation pattern |
 
+### Gemini Review #2 (REVISE)
+
+**Reviewer:** Gemini 3 Pro
+**Verdict:** REVISE
+
+#### Comments
+
+| ID | Comment | Implemented? |
+|----|---------|--------------|
+| G2.1 | "Test ID / Scenario ID Mismatch - Table 10.0 and 10.1 use conflicting IDs" | YES - Completely realigned Section 10.0 Test Plan to match Section 10.1 Scenario IDs |
+| G2.2 | "ADR Specificity: Ensure fixtures check for absence of 'RAG Architecture' and 'Persona Naming'" | YES - Updated fixture description in 5.3; clarified T025/Scenario 025 to specifically check for these ADRs |
+
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
 | Gemini #1 | (auto) | REVISE | Test coverage 50% - missing tests for Req 2, 4, 6, 8 |
+| Gemini #2 | (auto) | REVISE | Test ID / Scenario ID Mismatch between 10.0 and 10.1 |
 
 **Final Status:** PENDING
