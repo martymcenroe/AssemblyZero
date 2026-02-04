@@ -39,7 +39,8 @@ def run_pytest(
     Returns:
         Dict with returncode, stdout, stderr, and parsed results.
     """
-    cmd = ["pytest", "-v", "--tb=short"]
+    # Issue #268: Use poetry run to ensure correct virtualenv with dependencies
+    cmd = ["poetry", "run", "pytest", "-v", "--tb=short"]
     cmd.extend(test_files)
 
     if coverage_module:

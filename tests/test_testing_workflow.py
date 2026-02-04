@@ -1551,6 +1551,26 @@ class TestVerifyPhasesModule:
         assert "--cov=mymodule" in call_args
         assert "--cov-fail-under=80" in call_args
 
+    def test_run_pytest_uses_poetry_run(self, tmp_path):
+        """Issue #268: run_pytest must use 'poetry run' for correct virtualenv."""
+        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+
+        test_file = tmp_path / "test_simple.py"
+        test_file.write_text("def test_pass():\n    assert True")
+
+        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "1 passed in 0.01s"
+            mock_run.return_value.stderr = ""
+
+            run_pytest([str(test_file)], repo_root=tmp_path)
+
+        # Verify poetry run is used
+        call_args = mock_run.call_args[0][0]
+        assert call_args[0] == "poetry", "Must use poetry as first command"
+        assert call_args[1] == "run", "Must use 'run' as second arg"
+        assert call_args[2] == "pytest", "pytest must follow poetry run"
+
     def test_run_pytest_timeout(self, tmp_path):
         """run_pytest handles timeout."""
         from agentos.workflows.testing.nodes.verify_phases import run_pytest
