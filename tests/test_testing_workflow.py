@@ -1499,22 +1499,6 @@ __pycache__/
                 assert isinstance(response, str)
                 assert isinstance(error, str)
 
-    def test_call_claude_headless_returns_tuple(self):
-        """call_claude_headless returns tuple of (response, error)."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
-
-        # Just verify the function returns the expected types
-        # It may use CLI or SDK depending on environment
-        response, error = call_claude_headless("What is 2+2?")
-
-        # Both should be strings
-        assert isinstance(response, str)
-        assert isinstance(error, str)
-        # Either response is non-empty (success) or error is non-empty (failure)
-        # Both being empty is also valid if CLI returns empty
-        assert True  # Just verify it returns without crashing
-
-
 class TestVerifyPhasesModule:
     """Tests for verify_phases.py module."""
 

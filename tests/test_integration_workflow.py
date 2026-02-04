@@ -14,10 +14,6 @@ import pytest
 # Mark all tests in this module as integration tests
 pytestmark = pytest.mark.integration
 
-# Check for claude CLI availability at module load time
-CLAUDE_AVAILABLE = shutil.which("claude") is not None
-
-
 class TestVSCodeIntegration:
     """Test actual VS Code launching - no mocks."""
 
@@ -60,7 +56,7 @@ class TestVSCodeIntegration:
 
 
 class TestClaudeHeadlessIntegration:
-    """Test actual claude -p execution - no mocks."""
+    """Test claude CLI availability - no API calls."""
 
     def test_claude_command_exists(self):
         """Verify 'claude' command is in PATH."""
@@ -72,36 +68,6 @@ class TestClaudeHeadlessIntegration:
                 claude_path = find_claude_cli()
             except RuntimeError:
                 pytest.fail("'claude' command not found. Install with: npm install -g @anthropic-ai/claude-code")
-
-    @pytest.mark.skipif(
-        not CLAUDE_AVAILABLE,
-        reason="claude CLI not found in PATH - install with: npm install -g @anthropic-ai/claude-code"
-    )
-    def test_claude_headless_generates_output(self):
-        """Test that claude -p actually works with real prompt."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
-
-        # Simple test prompt
-        prompt = "Respond with exactly: TEST_PASSED"
-
-        result = call_claude_headless(prompt)
-        assert result, "claude -p returned empty response"
-        assert "TEST_PASSED" in result or len(result) > 0, f"Unexpected response: {result}"
-
-    @pytest.mark.skipif(
-        not CLAUDE_AVAILABLE,
-        reason="claude CLI not found in PATH - install with: npm install -g @anthropic-ai/claude-code"
-    )
-    def test_claude_headless_with_unicode(self):
-        """Test that UTF-8 encoding works (Windows cp1252 issue)."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
-
-        # Prompt with unicode characters that cp1252 can't encode
-        prompt = "Echo back these characters: → ← ↑ ↓ • ★"
-
-        result = call_claude_headless(prompt)
-        # Should not raise UnicodeEncodeError
-        assert result, "claude -p returned empty response for unicode prompt"
 
 
 class TestCleanOption:
