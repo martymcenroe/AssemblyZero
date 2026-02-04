@@ -89,14 +89,35 @@ Generate the LLD following this EXACT structure:
 ### 6.2 Diagram
 {Mermaid sequence or flow diagram}
 
-## 7. Security Considerations
-{Table of concerns and mitigations}
+## 7. Security & Safety Considerations
+
+### 7.1 Security
+
+| Concern | Mitigation |
+|---------|------------|
+| {Threat 1} | {How it's prevented} |
+| {Threat 2} | {How it's prevented} |
+
+### 7.2 Safety
+
+| Concern | Mitigation |
+|---------|------------|
+| {User harm scenario} | {How it's prevented} |
+| {Data loss scenario} | {How it's prevented} |
+
+**Note:** Do NOT add a "Status" column. All mitigations must be specified, not marked TODO.
 
 ## 8. Performance Considerations
-{Table of metrics and budgets}
+
+| Metric | Budget | Approach |
+|--------|--------|----------|
+| {Latency/Memory/etc.} | {Target value} | {How achieved} |
 
 ## 9. Risks & Mitigations
-{Table of risks with impact/likelihood/mitigation}
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| {Risk 1} | High/Med/Low | High/Med/Low | {Specific mitigation} |
 
 ## 10. Verification & Testing
 
