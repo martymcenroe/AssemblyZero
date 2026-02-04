@@ -1,0 +1,60 @@
+name: Archive LLD on Issue Close
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Archive LLD and related files
+        run: |
+          ISSUE=${{ github.event.issue.number }}
+          ARCHIVED=false
+
+          # 1. Archive LLD if exists
+          LLD="docs/lld/active/LLD-${ISSUE}.md"
+          if [ -f "$LLD" ]; then
+            mkdir -p docs/lld/done
+            mv "$LLD" "docs/lld/done/"
+            echo "Archived LLD-${ISSUE}.md"
+            ARCHIVED=true
+          fi
+
+          # 2. Archive lineage folders if exist (pattern: {issue}-*)
+          for dir in docs/lineage/active/${ISSUE}-*/; do
+            if [ -d "$dir" ]; then
+              mkdir -p docs/lineage/archived
+              mv "$dir" "docs/lineage/archived/"
+              echo "Archived lineage: $(basename $dir)"
+              ARCHIVED=true
+            fi
+          done
+
+          # 3. Archive reports if exist (pattern: {issue}-*.md)
+          for report in docs/reports/active/${ISSUE}-*.md; do
+            if [ -f "$report" ]; then
+              mkdir -p docs/reports/done
+              mv "$report" "docs/reports/done/"
+              echo "Archived report: $(basename $report)"
+              ARCHIVED=true
+            fi
+          done
+
+          # Commit if anything was archived
+          if [ "$ARCHIVED" = true ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/lld/ docs/lineage/ docs/reports/
+            git commit -m "chore: archive docs for issue #${ISSUE} [skip ci]"
+            git push
+            echo "Committed archive for issue #${ISSUE}"
+          else
+            echo "No files found to archive for issue #${ISSUE}"
+          fi
