@@ -1,8 +1,8 @@
 # 0909 - TDD Implementation Workflow
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.0
-**Last Updated:** 2026-02-01
+**Version:** 1.1
+**Last Updated:** 2026-02-04
 
 ---
 
@@ -70,7 +70,7 @@ stateDiagram-v2
 | N4 | ImplementCode | Claude writes code to make tests pass |
 | N5 | VerifyGreen | Run tests, loop back if failures remain |
 | N6 | E2E | Run end-to-end validation (optional) |
-| N7 | Finalize | Generate test report, update status |
+| N7 | Finalize | Generate test report, archive LLD to `done/` |
 | N8 | Document | Create/update runbook, c/p docs |
 
 ---
@@ -119,8 +119,8 @@ poetry run python tools/run_implement_from_lld.py --issue 104 --scaffold-only
 | `--mock` | Use fixtures instead of real APIs |
 | `--skip-e2e` | Skip E2E validation phase |
 | `--scaffold-only` | Stop after scaffolding tests (red phase) |
-| `--green-only` | Only run green phase verification |
 | `--resume` | Resume from checkpoint |
+| `--no-worktree` | Skip worktree creation (use current directory) |
 
 **Note:** `--auto` is deprecated. Use `--gates none` instead.
 
@@ -190,6 +190,19 @@ So when you run this workflow for a CLI tool like Verdict Analyzer, N8 will auto
 2. CLI doc (copy-paste commands)
 3. Prompt doc (natural language examples)
 4. Lessons learned
+
+### LLD Archival (N7)
+
+When the workflow completes successfully, N7 automatically moves:
+- `docs/lld/active/LLD-{issue}.md` → `docs/lld/done/LLD-{issue}.md`
+- `docs/reports/active/{issue}-*.md` → `docs/reports/done/{issue}-*.md`
+
+**Known Limitation (Issue #276):** Archival only happens when you complete the full TDD workflow. If you:
+- Merge a PR manually (without running this workflow)
+- Close an issue without implementation
+- Implement via hotfix outside the workflow
+
+...the LLD remains in `active/`. A GitHub Action to archive on issue close is planned.
 
 ---
 
@@ -302,4 +315,5 @@ Brief → Issue (0907) → LLD (0907) → Code (0909) → PR → Merge
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1 | 2026-02-04 | Add `--no-worktree` flag, document LLD archival and limitations (#276), fix N7 description |
 | 1.0 | 2026-02-01 | Initial version documenting recovered TDD workflow |
