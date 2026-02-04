@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/state.py
+
+```python
 """Unified state definition for Requirements Workflow.
 
 Issue #101: Unified Requirements Workflow
@@ -339,3 +342,4 @@ def validate_state(state: RequirementsWorkflowState) -> list[str]:
             errors.append("issue_number must be set for LLD workflow")
 
     return errors
+```

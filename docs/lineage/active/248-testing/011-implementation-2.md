@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/graph.py
+
+```python
 """Parameterized StateGraph for Requirements Workflow.
 
 Issue #101: Unified Requirements Workflow
@@ -332,3 +335,4 @@ def create_requirements_graph() -> StateGraph:
     graph.add_edge(N5_FINALIZE, END)
 
     return graph
+```

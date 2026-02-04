@@ -1,0 +1,119 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AgentOS-248
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 15 items
+
+tests/test_issue_248.py::test_id FAILED                                  [  6%]
+tests/test_issue_248.py::test_t010 FAILED                                [ 13%]
+tests/test_issue_248.py::test_t020 FAILED                                [ 20%]
+tests/test_issue_248.py::test_t030 FAILED                                [ 26%]
+tests/test_issue_248.py::test_t040 FAILED                                [ 33%]
+tests/test_issue_248.py::test_t050 FAILED                                [ 40%]
+tests/test_issue_248.py::test_t060 FAILED                                [ 46%]
+tests/test_issue_248.py::test_t070 FAILED                                [ 53%]
+tests/test_issue_248.py::test_010 FAILED                                 [ 60%]
+tests/test_issue_248.py::test_020 FAILED                                 [ 66%]
+tests/test_issue_248.py::test_030 FAILED                                 [ 73%]
+tests/test_issue_248.py::test_040 FAILED                                 [ 80%]
+tests/test_issue_248.py::test_050 FAILED                                 [ 86%]
+tests/test_issue_248.py::test_060 FAILED                                 [ 93%]
+tests/test_issue_248.py::test_070 FAILED                                 [100%]
+
+================================== FAILURES ===================================
+___________________________________ test_id ___________________________________
+tests\test_issue_248.py:24: in test_id
+    assert False, "TDD: Implementation pending for test_id"
+E   AssertionError: TDD: Implementation pending for test_id
+E   assert False
+__________________________________ test_t010 __________________________________
+tests\test_issue_248.py:39: in test_t010
+    assert False, "TDD: Implementation pending for test_t010"
+E   AssertionError: TDD: Implementation pending for test_t010
+E   assert False
+__________________________________ test_t020 __________________________________
+tests\test_issue_248.py:53: in test_t020
+    assert False, "TDD: Implementation pending for test_t020"
+E   AssertionError: TDD: Implementation pending for test_t020
+E   assert False
+__________________________________ test_t030 __________________________________
+tests\test_issue_248.py:67: in test_t030
+    assert False, "TDD: Implementation pending for test_t030"
+E   AssertionError: TDD: Implementation pending for test_t030
+E   assert False
+__________________________________ test_t040 __________________________________
+tests\test_issue_248.py:81: in test_t040
+    assert False, "TDD: Implementation pending for test_t040"
+E   AssertionError: TDD: Implementation pending for test_t040
+E   assert False
+__________________________________ test_t050 __________________________________
+tests\test_issue_248.py:95: in test_t050
+    assert False, "TDD: Implementation pending for test_t050"
+E   AssertionError: TDD: Implementation pending for test_t050
+E   assert False
+__________________________________ test_t060 __________________________________
+tests\test_issue_248.py:110: in test_t060
+    assert False, "TDD: Implementation pending for test_t060"
+E   AssertionError: TDD: Implementation pending for test_t060
+E   assert False
+__________________________________ test_t070 __________________________________
+tests\test_issue_248.py:125: in test_t070
+    assert False, "TDD: Implementation pending for test_t070"
+E   AssertionError: TDD: Implementation pending for test_t070
+E   assert False
+__________________________________ test_010 ___________________________________
+tests\test_issue_248.py:140: in test_010
+    assert False, "TDD: Implementation pending for test_010"
+E   AssertionError: TDD: Implementation pending for test_010
+E   assert False
+__________________________________ test_020 ___________________________________
+tests\test_issue_248.py:155: in test_020
+    assert False, "TDD: Implementation pending for test_020"
+E   AssertionError: TDD: Implementation pending for test_020
+E   assert False
+__________________________________ test_030 ___________________________________
+tests\test_issue_248.py:170: in test_030
+    assert False, "TDD: Implementation pending for test_030"
+E   AssertionError: TDD: Implementation pending for test_030
+E   assert False
+__________________________________ test_040 ___________________________________
+tests\test_issue_248.py:185: in test_040
+    assert False, "TDD: Implementation pending for test_040"
+E   AssertionError: TDD: Implementation pending for test_040
+E   assert False
+__________________________________ test_050 ___________________________________
+tests\test_issue_248.py:200: in test_050
+    assert False, "TDD: Implementation pending for test_050"
+E   AssertionError: TDD: Implementation pending for test_050
+E   assert False
+__________________________________ test_060 ___________________________________
+tests\test_issue_248.py:215: in test_060
+    assert False, "TDD: Implementation pending for test_060"
+E   AssertionError: TDD: Implementation pending for test_060
+E   assert False
+__________________________________ test_070 ___________________________________
+tests\test_issue_248.py:230: in test_070
+    assert False, "TDD: Implementation pending for test_070"
+E   AssertionError: TDD: Implementation pending for test_070
+E   assert False
+=========================== short test summary info ===========================
+FAILED tests/test_issue_248.py::test_id - AssertionError: TDD: Implementation...
+FAILED tests/test_issue_248.py::test_t010 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t020 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t030 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t040 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t050 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t060 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t070 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_010 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_020 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_030 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_040 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_050 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_060 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_070 - AssertionError: TDD: Implementatio...
+============================= 15 failed in 0.10s ==============================
+

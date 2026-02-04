@@ -1,0 +1,206 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AgentOS-248
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 15 items
+
+tests/test_issue_248.py::test_id FAILED                                  [  6%]
+tests/test_issue_248.py::test_t010 FAILED                                [ 13%]
+tests/test_issue_248.py::test_t020 FAILED                                [ 20%]
+tests/test_issue_248.py::test_t030 FAILED                                [ 26%]
+tests/test_issue_248.py::test_t040 FAILED                                [ 33%]
+tests/test_issue_248.py::test_t050 FAILED                                [ 40%]
+tests/test_issue_248.py::test_t060 FAILED                                [ 46%]
+tests/test_issue_248.py::test_t070 FAILED                                [ 53%]
+tests/test_issue_248.py::test_010 FAILED                                 [ 60%]
+tests/test_issue_248.py::test_020 FAILED                                 [ 66%]
+tests/test_issue_248.py::test_030 FAILED                                 [ 73%]
+tests/test_issue_248.py::test_040 FAILED                                 [ 80%]
+tests/test_issue_248.py::test_050 FAILED                                 [ 86%]
+tests/test_issue_248.py::test_060 FAILED                                 [ 93%]
+tests/test_issue_248.py::test_070 FAILED                                 [100%]
+ERROR: Coverage failure: total of 0 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+___________________________________ test_id ___________________________________
+tests\test_issue_248.py:24: in test_id
+    assert False, "TDD: Implementation pending for test_id"
+E   AssertionError: TDD: Implementation pending for test_id
+E   assert False
+__________________________________ test_t010 __________________________________
+tests\test_issue_248.py:39: in test_t010
+    assert False, "TDD: Implementation pending for test_t010"
+E   AssertionError: TDD: Implementation pending for test_t010
+E   assert False
+__________________________________ test_t020 __________________________________
+tests\test_issue_248.py:53: in test_t020
+    assert False, "TDD: Implementation pending for test_t020"
+E   AssertionError: TDD: Implementation pending for test_t020
+E   assert False
+__________________________________ test_t030 __________________________________
+tests\test_issue_248.py:67: in test_t030
+    assert False, "TDD: Implementation pending for test_t030"
+E   AssertionError: TDD: Implementation pending for test_t030
+E   assert False
+__________________________________ test_t040 __________________________________
+tests\test_issue_248.py:81: in test_t040
+    assert False, "TDD: Implementation pending for test_t040"
+E   AssertionError: TDD: Implementation pending for test_t040
+E   assert False
+__________________________________ test_t050 __________________________________
+tests\test_issue_248.py:95: in test_t050
+    assert False, "TDD: Implementation pending for test_t050"
+E   AssertionError: TDD: Implementation pending for test_t050
+E   assert False
+__________________________________ test_t060 __________________________________
+tests\test_issue_248.py:110: in test_t060
+    assert False, "TDD: Implementation pending for test_t060"
+E   AssertionError: TDD: Implementation pending for test_t060
+E   assert False
+__________________________________ test_t070 __________________________________
+tests\test_issue_248.py:125: in test_t070
+    assert False, "TDD: Implementation pending for test_t070"
+E   AssertionError: TDD: Implementation pending for test_t070
+E   assert False
+__________________________________ test_010 ___________________________________
+tests\test_issue_248.py:140: in test_010
+    assert False, "TDD: Implementation pending for test_010"
+E   AssertionError: TDD: Implementation pending for test_010
+E   assert False
+__________________________________ test_020 ___________________________________
+tests\test_issue_248.py:155: in test_020
+    assert False, "TDD: Implementation pending for test_020"
+E   AssertionError: TDD: Implementation pending for test_020
+E   assert False
+__________________________________ test_030 ___________________________________
+tests\test_issue_248.py:170: in test_030
+    assert False, "TDD: Implementation pending for test_030"
+E   AssertionError: TDD: Implementation pending for test_030
+E   assert False
+__________________________________ test_040 ___________________________________
+tests\test_issue_248.py:185: in test_040
+    assert False, "TDD: Implementation pending for test_040"
+E   AssertionError: TDD: Implementation pending for test_040
+E   assert False
+__________________________________ test_050 ___________________________________
+tests\test_issue_248.py:200: in test_050
+    assert False, "TDD: Implementation pending for test_050"
+E   AssertionError: TDD: Implementation pending for test_050
+E   assert False
+__________________________________ test_060 ___________________________________
+tests\test_issue_248.py:215: in test_060
+    assert False, "TDD: Implementation pending for test_060"
+E   AssertionError: TDD: Implementation pending for test_060
+E   assert False
+__________________________________ test_070 ___________________________________
+tests\test_issue_248.py:230: in test_070
+    assert False, "TDD: Implementation pending for test_070"
+E   AssertionError: TDD: Implementation pending for test_070
+E   assert False
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                                         Stmts   Miss  Cover   Missing
+------------------------------------------------------------------------------------------
+agentos\__init__.py                                              1      1     0%   3
+agentos\core\__init__.py                                         5      5     0%   3-30
+agentos\core\audit.py                                          102    102     0%   12-328
+agentos\core\claude_client.py                                   36     36     0%   11-123
+agentos\core\config.py                                          16     16     0%   7-66
+agentos\core\gemini_client.py                                  281    281     0%   12-803
+agentos\core\llm_provider.py                                   147    147     0%   14-544
+agentos\core\state.py                                            4      4     0%   7-13
+agentos\graphs\__init__.py                                       0      0   100%
+agentos\nodes\__init__.py                                        3      3     0%   3-6
+agentos\nodes\designer.py                                      134    134     0%   15-501
+agentos\nodes\lld_reviewer.py                                   90     90     0%   7-335
+agentos\utils\__init__.py                                        2      2     0%   3-14
+agentos\utils\lld_verification.py                               98     98     0%   14-361
+agentos\workflow\__init__.py                                     2      2     0%   6-8
+agentos\workflow\checkpoint.py                                  27     27     0%   7-77
+agentos\workflows\__init__.py                                    0      0   100%
+agentos\workflows\issue\__init__.py                              3      3     0%   10-13
+agentos\workflows\issue\audit.py                               138    138     0%   12-474
+agentos\workflows\issue\graph.py                                59     59     0%   11-249
+agentos\workflows\issue\nodes\__init__.py                        8      8     0%   15-23
+agentos\workflows\issue\nodes\draft.py                          94     94     0%   10-294
+agentos\workflows\issue\nodes\file_issue.py                    185    185     0%   9-472
+agentos\workflows\issue\nodes\human_edit_draft.py              131    131     0%   9-252
+agentos\workflows\issue\nodes\human_edit_verdict.py            140    140     0%   10-278
+agentos\workflows\issue\nodes\load_brief.py                     49     49     0%   9-184
+agentos\workflows\issue\nodes\review.py                         77     77     0%   9-193
+agentos\workflows\issue\nodes\sandbox.py                        30     30     0%   11-104
+agentos\workflows\issue\state.py                                18     18     0%   9-40
+agentos\workflows\parallel\__init__.py                           5      5     0%   3-8
+agentos\workflows\parallel\coordinator.py                       85     85     0%   3-184
+agentos\workflows\parallel\credential_coordinator.py            59     59     0%   3-127
+agentos\workflows\parallel\input_sanitizer.py                   13     13     0%   3-39
+agentos\workflows\parallel\output_prefixer.py                   19     19     0%   3-45
+agentos\workflows\requirements\__init__.py                       4      4     0%   17-31
+agentos\workflows\requirements\audit.py                        175    175     0%   20-682
+agentos\workflows\requirements\config.py                        68     68     0%   11-240
+agentos\workflows\requirements\git_operations.py                30     30     0%   6-101
+agentos\workflows\requirements\graph.py                         77     77     0%   31-334
+agentos\workflows\requirements\nodes\__init__.py                 6      6     0%   14-23
+agentos\workflows\requirements\nodes\finalize.py               153    153     0%   7-363
+agentos\workflows\requirements\nodes\generate_draft.py          90     90     0%   13-274
+agentos\workflows\requirements\nodes\human_gate.py              88     88     0%   14-233
+agentos\workflows\requirements\nodes\load_input.py             114    114     0%   14-321
+agentos\workflows\requirements\nodes\review.py                  98     98     0%   10-289
+agentos\workflows\requirements\state.py                         43     43     0%   17-341
+agentos\workflows\scout\__init__.py                              3      3     0%   7-18
+agentos\workflows\scout\budget.py                               21     21     0%   7-76
+agentos\workflows\scout\graph.py                                 5      5     0%   6-62
+agentos\workflows\scout\instrumentation.py                      40     40     0%   6-126
+agentos\workflows\scout\nodes.py                               151    151     0%   6-342
+agentos\workflows\scout\prompts.py                              11     11     0%   7-76
+agentos\workflows\scout\security.py                             44     44     0%   6-132
+agentos\workflows\scout\templates.py                            33     33     0%   6-124
+agentos\workflows\testing\__init__.py                            3      3     0%   18-21
+agentos\workflows\testing\audit.py                              82     82     0%   13-307
+agentos\workflows\testing\graph.py                              98     98     0%   41-363
+agentos\workflows\testing\knowledge\__init__.py                  2      2     0%   8-10
+agentos\workflows\testing\knowledge\patterns.py                 60     60     0%   7-193
+agentos\workflows\testing\nodes\__init__.py                     10     10     0%   19-34
+agentos\workflows\testing\nodes\document.py                    140    140     0%   13-360
+agentos\workflows\testing\nodes\e2e_validation.py               93     93     0%   9-311
+agentos\workflows\testing\nodes\finalize.py                    103    103     0%   10-249
+agentos\workflows\testing\nodes\implement_code.py              247    247     0%   7-693
+agentos\workflows\testing\nodes\load_lld.py                    204    204     0%   10-602
+agentos\workflows\testing\nodes\review_test_plan.py            139    139     0%   9-496
+agentos\workflows\testing\nodes\scaffold_tests.py              162    162     0%   9-380
+agentos\workflows\testing\nodes\validate_commit_message.py      12     12     0%   7-47
+agentos\workflows\testing\nodes\verify_phases.py               160    160     0%   7-497
+agentos\workflows\testing\state.py                               9      9     0%   12-36
+agentos\workflows\testing\templates\__init__.py                  5      5     0%   12-23
+agentos\workflows\testing\templates\cp_docs.py                  73     73     0%   9-296
+agentos\workflows\testing\templates\lessons.py                 115    115     0%   8-304
+agentos\workflows\testing\templates\runbook.py                  94     94     0%   8-259
+agentos\workflows\testing\templates\wiki_page.py                74     74     0%   8-207
+------------------------------------------------------------------------------------------
+TOTAL                                                         5200   5200     0%
+FAIL Required test coverage of 95% not reached. Total coverage: 0.00%
+=========================== short test summary info ===========================
+FAILED tests/test_issue_248.py::test_id - AssertionError: TDD: Implementation...
+FAILED tests/test_issue_248.py::test_t010 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t020 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t030 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t040 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t050 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t060 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_t070 - AssertionError: TDD: Implementati...
+FAILED tests/test_issue_248.py::test_010 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_020 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_030 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_040 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_050 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_060 - AssertionError: TDD: Implementatio...
+FAILED tests/test_issue_248.py::test_070 - AssertionError: TDD: Implementatio...
+============================= 15 failed in 0.41s ==============================
+
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")

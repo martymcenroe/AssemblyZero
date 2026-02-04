@@ -1,3 +1,6 @@
+# File: agentos/workflows/requirements/nodes/review.py
+
+```python
 """N3: Review node for Requirements Workflow.
 
 Issue #101: Unified Requirements Workflow
@@ -287,3 +290,4 @@ def _verdict_has_resolved_questions(verdict_content: str) -> bool:
 
     # If we have resolutions and no unchecked items, questions are resolved
     return resolved_count > 0 and unchecked_count == 0
+```
