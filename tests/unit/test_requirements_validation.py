@@ -275,3 +275,63 @@ TODO: This is a note in prose, not a table cell.
         errors = validate_lld_final(content)
         assert len(errors) == 1
         assert "open questions" in errors[0].lower()
+
+    def test_skips_open_questions_when_resolved_flag_set(self):
+        """Issue #259: Skip open questions check when reviewer resolved them.
+
+        When the review node determines that Gemini resolved all open questions
+        in the verdict, we should trust that determination and skip the check.
+        """
+        content = """# LLD-123
+
+## Open Questions
+
+- [ ] Question that Gemini answered in verdict but draft wasn't updated
+"""
+        # Default behavior: catches unchecked questions
+        errors_default = validate_lld_final(content)
+        assert len(errors_default) == 1
+        assert "open questions" in errors_default[0].lower()
+
+        # With flag: skips open questions check
+        errors_resolved = validate_lld_final(content, open_questions_resolved=True)
+        assert len(errors_resolved) == 0
+
+    def test_still_catches_todo_when_open_questions_resolved(self):
+        """Issue #259: TODO check should still work when open questions are resolved.
+
+        Even when we skip the open questions check, we should still catch
+        TODO in table cells.
+        """
+        content = """# LLD-123
+
+## Open Questions
+
+- [ ] Resolved by Gemini but not in draft
+
+## Status
+
+| Task   | Status |
+|--------|--------|
+| Part 1 | TODO   |
+"""
+        # With open_questions_resolved=True, should skip open questions
+        # but still catch TODO
+        errors = validate_lld_final(content, open_questions_resolved=True)
+        assert len(errors) == 1
+        assert "TODO" in errors[0]
+
+    def test_catches_both_when_not_resolved(self):
+        """Verify both checks work when open_questions_resolved=False."""
+        content = """# LLD-123
+
+## Open Questions
+
+- [ ] Unresolved
+
+| Status |
+|--------|
+| TODO   |
+"""
+        errors = validate_lld_final(content, open_questions_resolved=False)
+        assert len(errors) == 2

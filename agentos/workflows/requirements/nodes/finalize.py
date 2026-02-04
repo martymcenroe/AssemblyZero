@@ -157,7 +157,7 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
-def validate_lld_final(content: str) -> list[str]:
+def validate_lld_final(content: str, open_questions_resolved: bool = False) -> list[str]:
     """Final structural checks before LLD finalization.
 
     Issue #235: Mechanical validation gate to catch structural issues
@@ -166,8 +166,15 @@ def validate_lld_final(content: str) -> list[str]:
     Issue #245: Only checks the 'Open Questions' section for unchecked items,
     ignoring Definition of Done and other sections.
 
+    Issue #259: Skip open questions check if reviewer already resolved them.
+    The review node sets open_questions_status="RESOLVED" when Gemini answers
+    all questions in the verdict. We trust that determination rather than
+    re-checking the draft (which hasn't been updated with the resolutions yet).
+
     Args:
         content: LLD content to validate.
+        open_questions_resolved: If True, skip checking for unchecked open questions
+            because the reviewer already resolved them in the verdict.
 
     Returns:
         List of error messages. Empty list if validation passes.
@@ -178,15 +185,17 @@ def validate_lld_final(content: str) -> list[str]:
         return errors
 
     # Check for unresolved open questions ONLY in the Open Questions section
-    # Pattern: from "### Open Questions" or "## Open Questions"
-    # until the next "##" header or end of document
-    pattern = r"(?:^##?#?\s*Open Questions\s*\n)(.*?)(?=^##|\Z)"
-    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    # Skip this check if reviewer already resolved them (Issue #259)
+    if not open_questions_resolved:
+        # Pattern: from "### Open Questions" or "## Open Questions"
+        # until the next "##" header or end of document
+        pattern = r"(?:^##?#?\s*Open Questions\s*\n)(.*?)(?=^##|\Z)"
+        match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
 
-    if match:
-        open_questions_section = match.group(1)
-        if re.search(r"^- \[ \]", open_questions_section, re.MULTILINE):
-            errors.append("Unresolved open questions remain")
+        if match:
+            open_questions_section = match.group(1)
+            if re.search(r"^- \[ \]", open_questions_section, re.MULTILINE):
+                errors.append("Unresolved open questions remain")
 
     # Check for unresolved TODO in table cells
     if re.search(r"\|\s*TODO\s*\|", content):
@@ -226,8 +235,13 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     if not current_draft:
         return state
 
+    # Issue #259: Check if reviewer already resolved open questions
+    # If so, skip the open questions check (but still check for TODOs)
+    open_questions_status = state.get("open_questions_status", "")
+    open_questions_resolved = open_questions_status == "RESOLVED"
+
     # Gate 2: Validate LLD structure before finalization (Issue #235)
-    validation_errors = validate_lld_final(current_draft)
+    validation_errors = validate_lld_final(current_draft, open_questions_resolved)
     if validation_errors:
         error_msg = "BLOCKED: " + "; ".join(validation_errors)
         print(f"    VALIDATION: {error_msg}")
