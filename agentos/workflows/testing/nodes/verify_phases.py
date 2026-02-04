@@ -143,7 +143,12 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     failed_count = parsed.get("failed", 0)
     error_count = parsed.get("errors", 0)
 
-    # Red phase success = ALL tests fail (none pass)
+    # Issue #263: Import errors are valid RED phase behavior
+    # With import-based TDD scaffolding, ImportError means "module doesn't exist"
+    # which is exactly what RED phase should catch.
+    total_red = failed_count + error_count
+
+    # Red phase success = ALL tests fail or error (none pass)
     if passed_count > 0:
         print(f"    [GUARD] WARNING: {passed_count} tests passed unexpectedly!")
         print("    This may indicate pre-existing implementation.")
@@ -153,7 +158,7 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             issue_number=state.get("issue_number", 0),
             workflow_type="testing",
             event="red_phase_unexpected_pass",
-            details={"passed": passed_count, "failed": failed_count},
+            details={"passed": passed_count, "failed": failed_count, "errors": error_count},
         )
 
         return {
@@ -164,17 +169,7 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "next_node": "END",
         }
 
-    if error_count > 0:
-        print(f"    [ERROR] {error_count} tests had errors (not assertion failures)")
-
-        return {
-            "red_phase_output": output,
-            "file_counter": file_num,
-            "error_message": f"Red phase error: {error_count} tests had syntax/import errors",
-            "next_node": "END",
-        }
-
-    if failed_count == 0:
+    if total_red == 0:
         print("    [GUARD] WARNING: No tests ran!")
 
         return {
@@ -184,15 +179,19 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "next_node": "END",
         }
 
-    # Success: all tests failed as expected
-    print(f"    Red phase PASSED: {failed_count} tests failed as expected")
+    # Success: all tests failed or errored as expected
+    # Note: errors include ImportError which is valid TDD RED behavior
+    if error_count > 0:
+        print(f"    Red phase PASSED: {error_count} import errors (module doesn't exist yet)")
+    else:
+        print(f"    Red phase PASSED: {failed_count} tests failed as expected")
 
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=state.get("issue_number", 0),
         workflow_type="testing",
         event="red_phase_complete",
-        details={"failed": failed_count},
+        details={"failed": failed_count, "errors": error_count},
     )
 
     return {

@@ -1639,8 +1639,12 @@ class TestVerifyPhasesModule:
 
         assert "passed unexpectedly" in result.get("error_message", "")
 
-    def test_verify_red_phase_errors(self, tmp_path):
-        """verify_red_phase blocks when tests have errors."""
+    def test_verify_red_phase_errors_are_valid_red(self, tmp_path):
+        """verify_red_phase accepts import errors as valid RED behavior.
+
+        Issue #263: Import errors mean "module doesn't exist yet" which is
+        exactly what TDD RED phase should catch.
+        """
         from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
 
         audit_dir = tmp_path / "audit"
@@ -1667,7 +1671,9 @@ class TestVerifyPhasesModule:
 
             result = verify_red_phase(state)
 
-        assert "error" in result.get("error_message", "").lower()
+        # Import errors now count as valid RED phase (Issue #263)
+        assert result.get("error_message") == ""
+        assert result.get("next_node") == "N4_implement_code"
 
     def test_verify_red_phase_no_tests_ran(self, tmp_path):
         """verify_red_phase blocks when no tests collected."""
