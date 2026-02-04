@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 166
+url: https://github.com/martymcenroe/AgentOS/issues/166
+fetched: 2026-02-04T01:42:58.175116Z
+---
+
 # Issue #166: feat: Add mechanical test plan validation to requirements workflow (pre-Gemini gate)
 
 ## Problem
@@ -12,7 +19,7 @@ LLDs pass Gemini review (0702c) but get blocked by N1 test plan review during im
 **Evidence (LLD-141):**
 - Gemini approved with "No high-priority issues found"
 - Gemini noted "Success Detection" as Tier 3 SUGGESTION
-- N1 mechanical review: 5/6 = 83% coverage â†’ BLOCKED
+- N1 mechanical review: 5/6 = 83% coverage → BLOCKED
 - Gemini saw the gap but didn't block on it
 
 ## Proposed Solution
@@ -21,11 +28,11 @@ Add a **mechanical pre-check** to the requirements workflow that runs the SAME c
 
 ```
 Requirements Workflow (current):
-  N1_draft â†’ N2_gemini_review â†’ N3_finalize
+  N1_draft → N2_gemini_review → N3_finalize
 
 Requirements Workflow (proposed):
-  N1_draft â†’ N1b_mechanical_validation â†’ N2_gemini_review â†’ N3_finalize
-                    â†“ (BLOCK)
+  N1_draft → N1b_mechanical_validation → N2_gemini_review → N3_finalize
+                    ↓ (BLOCK)
                N1_draft (loop with feedback)
 ```
 
@@ -33,7 +40,7 @@ Requirements Workflow (proposed):
 
 | Check | Method | Threshold |
 |-------|--------|-----------|
-| Requirement coverage | Count Section 3 reqs, map to Section 10 tests | â‰¥95% |
+| Requirement coverage | Count Section 3 reqs, map to Section 10 tests | ≥95% |
 | Test assertions | Regex for vague phrases ("verify it works") | 0 violations |
 | Human delegation | Regex for "manual", "visual check", etc. | 0 violations |
 | Test type consistency | Parse type column, validate against mock guidance | Warnings only |
