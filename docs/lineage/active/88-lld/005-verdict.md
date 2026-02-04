@@ -1,4 +1,4 @@
-# LLD Review: 188 - Feature: RAG Injection: Automated Context Retrieval ("The Librarian")
+# LLD Review: 188-Feature: RAG Injection: Automated Context Retrieval ("The Librarian")
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
@@ -7,65 +7,70 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The LLD proposes a robust, local-first RAG architecture with excellent attention to privacy, licensing, and graceful degradation. The document structure is sound, and the testing strategy is comprehensive for the local workflow. However, the review is **BLOCKED** due to a Requirement Coverage violation (90% < 95% threshold) regarding the optional external API support claimed in Section 3.
+The LLD is in excellent shape. It has been updated to fully address the previous coverage gaps, specifically regarding performance testing and configuration management. The test plan is comprehensive (100% requirement coverage), and the safety/security considerations for RAG implementation are well-handled via graceful degradation and local-first defaults.
+
+## Open Questions Resolved
+No open questions found in Section 1 (all were resolved by the author in the draft).
+- [x] ~~Should the similarity threshold (0.7) be configurable via environment variable or CLI flag?~~ **RESOLVED: Yes. Use environment variable `AGENTOS_RAG_THRESHOLD` with default 0.7.**
+- [x] ~~What is the expected cold-boot time budget for embedding model loading (currently specified as spinner at 500ms)?~~ **RESOLVED: 5-10s budget for model loading. 500ms is the spinner display threshold, not the loading budget.**
+- [x] ~~Should we support hybrid search (keyword + semantic) for edge cases where semantic similarity misses exact terminology matches?~~ **RESOLVED: No. Semantic search only for MVP. Hybrid search deferred to future enhancement if recall issues proven.**
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| 1 | Vector Infrastructure: ChromaDB-based local vector store | 030, 070, 080 | ✓ Covered |
-| 2 | Embedding Model: Default `all-MiniLM-L6-v2` with optional external API support | 060, 090 (Default only) | **GAP** |
-| 3 | Document Indexing: Index `docs/adrs/`, `docs/standards/`, `docs/LLDs/done/` | 070 | ✓ Covered |
-| 4 | Chunking: Split documents by H1/H2 headers | 010 (Content verification) | ✓ Covered |
-| 5 | Query Performance: <500ms after warm-up | 090 | ✓ Covered |
-| 6 | Graceful Degradation: Workflow continues if missing store/deps | 030, 040 | ✓ Covered |
-| 7 | Manual Override: `--context` flag takes precedence | 050 | ✓ Covered |
-| 8 | Transparency: Log retrieved documents at INFO level | 115 | ✓ Covered |
-| 9 | CLI Feedback: Display spinner during cold-boot | 060 | ✓ Covered |
-| 10 | Lightweight Core: Core package installs without ML dependencies | 10.2 (pip check) | ✓ Covered |
+| 1 | `tools/rebuild_knowledge_base.py` indexes 100+ files in < 10 seconds | T200 | ✓ Covered |
+| 2 | Queries complete in < 500ms after model warm-up | T210 | ✓ Covered |
+| 3 | Query "How do I log errors?" retrieves logging-related documents | T150 | ✓ Covered |
+| 4 | Query "authentication flow" retrieves identity/auth ADRs | T160 | ✓ Covered |
+| 5 | Workflow gracefully degrades when vector store is missing | T110 | ✓ Covered |
+| 6 | Workflow gracefully degrades when `[rag]` extra not installed | T100 | ✓ Covered |
+| 7 | Manual `--context` takes precedence over RAG results | T080 | ✓ Covered |
+| 8 | Vector store persists between sessions (no re-embedding on every run) | T120, T130 | ✓ Covered |
+| 9 | Core `pip install agentos` does not pull torch/chromadb | T180 | ✓ Covered |
+| 10 | `pip install agentos[rag]` works cleanly | T190 | ✓ Covered |
+| 11 | CLI spinner displays during cold-boot model loading (threshold: 500ms) | T170 | ✓ Covered |
+| 12 | Generated LLDs reference retrieved ADRs in Constraints section automatically | T220 | ✓ Covered |
 
-**Coverage Calculation:** 9 requirements covered / 10 total = **90%**
+**Coverage Calculation:** 12 requirements covered / 12 total = **100%**
 
-**Verdict:** **BLOCK**
-
-**Missing Test Scenarios:**
-*   **Req 2 (External API Support):** The requirement states "optional external API support". There is no test scenario (e.g., "Test 120") that configures the librarian to use an external provider (like OpenAI or Azure) to verify that the system correctly handles API keys and network calls instead of the local model. If this is out of scope for this MVP, remove the requirement. If it is in scope, it must be tested.
+**Verdict:** PASS
 
 ## Tier 1: BLOCKING Issues
-No blocking issues found. LLD is approved for implementation regarding Cost, Safety, Security, and Legal tiers.
+No blocking issues found. LLD is approved for implementation.
 
 ### Cost
-- [ ] No issues found. Local inference minimizes cost.
+- No issues found. Local model default prevents unexpected API costs.
 
 ### Safety
-- [ ] No issues found. Worktree scope and fail-open strategies are well-defined.
+- No issues found. Worktree scoping is correct (`docs/` inside repo). Fail-open strategy defined for missing RAG deps.
 
 ### Security
-- [ ] No issues found.
+- No issues found. Input sanitization handles text embedding safely. No external secrets required for default operation.
 
 ### Legal
-- [ ] No issues found. License compliance is thorough.
+- No issues found. License compliance for `chromadb` and `sentence-transformers` (Apache 2.0) verified.
 
 ## Tier 2: HIGH PRIORITY Issues
+No high-priority issues found.
 
 ### Architecture
-- [ ] **Design/Requirement Mismatch (Req 2):** Section 3 requires "optional external API support", but Section 2.5 (Logic Flow) and 2.4 (Function Signatures) do not describe how this is implemented. `load_embedding_model` implies loading a local model. There is no logic shown for "If model is OpenAI, verify API key, instantiate remote client." You must either detail the design for the external API adapter or remove it from the requirements.
+- No issues found. File structure and optional dependency strategy are consistent with project standards.
 
 ### Observability
-- [ ] No issues found.
+- No issues found. Logging and CLI feedback (spinner/progress bar) are well-defined.
 
 ### Quality
-- [ ] **Requirement Coverage:** **FAILED (90%)**. See Analysis above. The external API support is a stated requirement but is untested and effectively undesigned in the logic flow.
+- [x] **Requirement Coverage:** PASS (100%)
 
 ## Tier 3: SUGGESTIONS
-- **Unit Test for Splitter:** While Test 010 covers the happy path, adding a specific unit test for `index_document` to verify H1/H2 splitting logic on edge-case Markdown (e.g., headers inside code blocks, nested headers) would be beneficial.
-- **External API Configuration:** If keeping Req 2, explicitly define the environment variable naming convention (e.g., `AGENTOS_RAG_API_KEY`) in the design.
+- Consider adding a simple "integrity check" command to the CLI tool to verify the vector store isn't corrupted without running a full re-index.
 
 ## Questions for Orchestrator
-1. None.
+None.
 
 ## Verdict
-[ ] **APPROVED** - Ready for implementation
-[x] **REVISE** - Fix Tier 1/2 issues first
+[x] **APPROVED** - Ready for implementation
+[ ] **REVISE** - Fix Tier 1/2 issues first
 [ ] **DISCUSS** - Needs Orchestrator decision

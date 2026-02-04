@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 88
+url: https://github.com/martymcenroe/AgentOS/issues/88
+fetched: 2026-02-04T14:47:21.505049Z
+---
+
 # Issue #88: RAG Injection: Automated Context Retrieval ("The Librarian")
 
 # RAG Injection: Automated Context Retrieval ("The Librarian")
