@@ -493,25 +493,26 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     Issue #277: Validates LLD structure and paths without LLM calls.
     Fails hard on errors, warns on suspicious patterns.
 
+    Issue #294: Returns only state updates (not full state) for proper
+    LangGraph merge behavior, ensuring validation_errors persist.
+
     Args:
         state: Workflow state with current_draft and target_repo.
 
     Returns:
-        Updated state with validation_errors/warnings and possibly BLOCKED status.
+        Dict of state updates (validation_errors, validation_warnings, etc.)
     """
-    # Initialize result fields
-    state["validation_errors"] = []
-    state["validation_warnings"] = []
-
     lld_content = state.get("current_draft", "")
     target_repo = state.get("target_repo", "")
 
     # Handle empty draft
     if not lld_content or not lld_content.strip():
-        state["validation_errors"] = ["LLD content is empty"]
-        state["lld_status"] = "BLOCKED"
-        state["error_message"] = "MECHANICAL VALIDATION FAILED:\n  - LLD content is empty"
-        return state
+        return {
+            "validation_errors": ["LLD content is empty"],
+            "validation_warnings": [],
+            "lld_status": "BLOCKED",
+            "error_message": "MECHANICAL VALIDATION FAILED:\n  - LLD content is empty",
+        }
 
     # Get repo root for path validation
     repo_root = Path(target_repo) if target_repo else None
@@ -525,12 +526,14 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         all_errors.extend(section_errors)
         # Fail fast on missing sections - can't validate further
         error_messages = [e.message for e in all_errors]
-        state["validation_errors"] = error_messages
-        state["lld_status"] = "BLOCKED"
-        state["error_message"] = "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
-            f"  - {msg}" for msg in error_messages
-        )
-        return state
+        return {
+            "validation_errors": error_messages,
+            "validation_warnings": [],
+            "lld_status": "BLOCKED",
+            "error_message": "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
+                f"  - {msg}" for msg in error_messages
+            ),
+        }
 
     # Step 2: Parse Section 2.1 Files Changed table
     files, parse_errors = parse_files_changed_table(lld_content)
@@ -539,12 +542,14 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     if parse_errors:
         # Can't continue validation without file list
         error_messages = [e.message for e in all_errors]
-        state["validation_errors"] = error_messages
-        state["lld_status"] = "BLOCKED"
-        state["error_message"] = "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
-            f"  - {msg}" for msg in error_messages
-        )
-        return state
+        return {
+            "validation_errors": error_messages,
+            "validation_warnings": [],
+            "lld_status": "BLOCKED",
+            "error_message": "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
+                f"  - {msg}" for msg in error_messages
+            ),
+        }
 
     # Step 3: Validate file paths (only if we have repo_root)
     if repo_root and repo_root.exists():
@@ -569,19 +574,25 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     error_messages = [e.message for e in all_errors]
     warning_messages = [w.message for w in all_warnings]
 
-    state["validation_errors"] = error_messages
-    state["validation_warnings"] = warning_messages
-
     if all_errors:
-        state["lld_status"] = "BLOCKED"
-        state["error_message"] = "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
-            f"  - {msg}" for msg in error_messages
-        )
-    else:
-        # Log warnings but don't block
-        if warning_messages:
-            print("MECHANICAL VALIDATION WARNINGS:")
-            for msg in warning_messages:
-                print(f"  - {msg}")
+        return {
+            "validation_errors": error_messages,
+            "validation_warnings": warning_messages,
+            "lld_status": "BLOCKED",
+            "error_message": "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
+                f"  - {msg}" for msg in error_messages
+            ),
+        }
 
-    return state
+    # Log warnings but don't block
+    if warning_messages:
+        print("MECHANICAL VALIDATION WARNINGS:")
+        for msg in warning_messages:
+            print(f"  - {msg}")
+
+    # Validation passed - return updates without error
+    return {
+        "validation_errors": [],
+        "validation_warnings": warning_messages,
+        "error_message": "",
+    }
