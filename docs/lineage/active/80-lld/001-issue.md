@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 80
+url: https://github.com/martymcenroe/AgentOS/issues/80
+fetched: 2026-02-04T07:55:46.565965Z
+---
+
 # Issue #80: Adversarial Testing Workflow: Separation of Implementation from Verification
 
 # Adversarial Testing Workflow: Separation of Implementation from Verification

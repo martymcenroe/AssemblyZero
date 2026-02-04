@@ -1,23 +1,25 @@
 # 180 - Feature: Adversarial Testing Workflow
 
 <!-- Template Metadata
-Last Updated: 2026-01-27
-Updated By: Initial LLD creation
-Update Reason: Initial design for adversarial testing workflow with separation of implementation from verification
+Last Updated: 2026-02-02
+Updated By: Gemini Review #1 revisions
+Update Reason: Added missing test case T110 for Requirement #12 (governance integration)
 -->
 
 ## 1. Context & Goal
 * **Issue:** #80
-* **Objective:** Establish a workflow where implementation and verification are performed by separate, adversarial LLMs to catch bugs, import errors, and false claims before code ships to production.
+* **Objective:** Establish an adversarial testing workflow where implementation and verification are performed by separate LLMs, with an orchestrator executing all verification in mandatory containerized environments.
 * **Status:** Draft
 * **Related Issues:** N/A
 
 ### Open Questions
 
-- [ ] Should adversarial testing run on every commit or only before PR merge?
-- [ ] What scoring mechanism should evaluate Testing LLM effectiveness?
-- [ ] Should Testing LLM be allowed to suggest fixes, or remain purely adversarial?
-- [ ] How to handle flaky tests that fail intermittently?
+*All questions resolved during Gemini Review #1.*
+
+- [x] ~~Should adversarial testing run on every commit, before PR, or on-demand?~~ **RESOLVED: Stick to the N2.5 gate (on-demand/pre-review) as specified to control costs. Mandatory on-commit runs should only be enabled for security-critical paths.**
+- [x] ~~What scoring mechanism should be used for Testing LLM performance?~~ **RESOLVED: Prioritize "Valid Bugs Found" (True Positives). Apply strict penalties for "Invalid Test Code" (False Positives) or hallucinations.**
+- [x] ~~Should Testing LLM be allowed to suggest fixes, or remain purely adversarial?~~ **RESOLVED: Purely adversarial. Separation of concerns is vital; the Implementation LLM must solve the problem, the Testing LLM only finds flaws.**
+- [x] ~~What is the fallback if Docker is not available on the developer's machine?~~ **RESOLVED: Fail fast with a clear error. As stated in Section 2.6, containerization is mandatory for security.**
 
 ## 2. Proposed Changes
 
@@ -27,33 +29,34 @@ Update Reason: Initial design for adversarial testing workflow with separation o
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/adversarial_test_workflow.py` | Add | Orchestrator script coordinating verification and adversarial testing |
+| `tools/adversarial_test_workflow.py` | Add | Main orchestrator script coordinating verification and adversarial testing |
 | `tools/script_safety_scanner.py` | Add | Shell script and Python AST security scanner |
 | `tools/templates/verify-template.sh` | Add | Template for verification scripts |
-| `tools/templates/test_adversarial_template.py` | Add | Template for adversarial tests |
-| `tools/docker/adversarial-sandbox.Dockerfile` | Add | Container definition for sandboxed execution |
+| `tools/templates/test_adversarial_template.py` | Add | Template for adversarial test generation |
+| `tools/docker/adversarial-sandbox.Dockerfile` | Add | Docker container definition for sandboxed execution |
+| `tools/run_issue_workflow.py` | Modify | Add N2.5 adversarial testing gate |
 | `tests/fixtures/adversarial/mock_gemini_responses.json` | Add | Mocked LLM responses for offline development |
 | `tests/fixtures/adversarial/sample_claims.json` | Add | Sample claims for testing |
 | `tests/fixtures/adversarial/dangerous_scripts/` | Add | Test fixtures for security scanner validation |
 | `tests/test_adversarial_workflow.py` | Add | Unit tests for orchestrator |
 | `tests/test_script_safety_scanner.py` | Add | Unit tests for security scanner |
+| `tests/test_workflow_integration.py` | Add | Integration tests for N2.5 gate in run_issue_workflow.py |
 | `docs/adr/0015-adversarial-testing-workflow.md` | Add | Architecture decision record |
 | `docs/reports/adversarial-costs.csv` | Add | Cost tracking for adversarial testing runs |
-| `tools/run_issue_workflow.py` | Modify | Add N2.5 adversarial testing gate |
-| `docs/wiki/governance-workflow.md` | Modify | Document new gate |
-| `CLAUDE.md` | Modify | Add adversarial testing prompts for Implementation LLM |
-| `config/gemini.yaml` | Modify | Add enterprise and data_retention settings |
+| `docs/wiki/governance-workflow.md` | Modify | Document new N2.5 gate |
+| `CLAUDE.md` | Modify | Add verification script requirements for Implementation LLM |
+| `config/gemini.yaml` | Modify | Add enterprise and ZDR settings |
 
 ### 2.2 Dependencies
 
 ```toml
 # pyproject.toml additions
-docker = "^7.0.0"  # Docker SDK for Python (container management)
+docker = "^7.0.0"  # Docker SDK for Python
 ```
 
-**External Dependencies:**
-- Docker/Podman must be installed on host system
-- Gemini Enterprise API access with Zero Data Retention (ZDR) policy
+**System Dependencies:**
+- Docker or Podman (mandatory for containerized execution)
+- Gemini API access (Enterprise endpoint with ZDR)
 
 ### 2.3 Data Structures
 
@@ -61,54 +64,42 @@ docker = "^7.0.0"  # Docker SDK for Python (container management)
 # Pseudocode - NOT implementation
 
 class WorkflowStatus(Enum):
-    """Status codes for adversarial testing workflow."""
-    PASS = "PASS"
     DRY_RUN = "DRY_RUN"
     CANCELLED = "CANCELLED"
-    FAILED_VERIFICATION = "FAILED_VERIFICATION"
-    FAILED_IMPORT = "FAILED_IMPORT"
-    FAILED_ADVERSARIAL = "FAILED_ADVERSARIAL"
-    FAILED_TIMEOUT = "FAILED_TIMEOUT"
     BLOCKED_DANGEROUS_SCRIPT = "BLOCKED_DANGEROUS_SCRIPT"
+    FAILED_TIMEOUT = "FAILED_TIMEOUT"
+    FAILED_IMPORT = "FAILED_IMPORT"
+    FAILED_VERIFICATION = "FAILED_VERIFICATION"
+    FAILED_ADVERSARIAL = "FAILED_ADVERSARIAL"
     BLOCKED_DANGEROUS_OPERATION = "BLOCKED_DANGEROUS_OPERATION"
+    PASS = "PASS"
 
 class WorkflowResult(TypedDict):
-    """Result of adversarial testing workflow."""
-    status: WorkflowStatus
-    message: str | None  # Human-readable status message
+    status: WorkflowStatus  # Outcome of the workflow
+    message: str | None  # Human-readable description
     stderr: str | None  # Captured stderr on failure
-    failures: list[TestFailure] | None  # Detailed test failures
-    patterns: list[DangerousPattern] | None  # Blocked dangerous patterns
-    cost: float | None  # Estimated cost of LLM calls
+    failures: list[TestFailure] | None  # Parsed test failures
+    patterns: list[str] | None  # Dangerous patterns if blocked
+    cost: float | None  # Estimated API cost in USD
 
 class TestFailure(TypedDict):
-    """Details of a failed test."""
-    test_name: str
-    claim_violated: str
-    error_type: str
-    error_message: str
-    traceback: str | None
+    test_name: str  # e.g., "test_vscode_with_spaces_in_path"
+    claim_violated: str  # Which claim this test targeted
+    error_type: str  # e.g., "FileNotFoundError"
+    error_message: str  # Full error message
+    traceback: str | None  # Stack trace if available
 
 class DangerousPattern(TypedDict):
-    """Detected dangerous pattern in script."""
-    line_number: int
-    pattern_type: str  # e.g., "network_access", "destructive", "privilege_escalation"
-    code: str
-    severity: str  # "critical", "high", "medium"
+    line_number: int  # Line in script where found
+    pattern: str  # The dangerous command/pattern
+    category: str  # "network", "destructive", "privilege", "exfiltration"
+    severity: str  # "high", "medium", "low"
 
-class ScanResult(TypedDict):
-    """Result of security scanner."""
-    is_safe: bool
-    patterns: list[DangerousPattern]
-    recommendations: list[str]
-
-class ContainerConfig(TypedDict):
-    """Configuration for sandboxed execution."""
-    memory_limit: str  # e.g., "2g"
-    cpu_limit: int  # e.g., 2
-    network_enabled: bool
-    timeout_seconds: int
-    workspace_path: str
+class AdversarialTestSpec(TypedDict):
+    claims: list[str]  # Claims to test against
+    implementation_files: list[str]  # Files being tested
+    testing_strategy: str  # Description of approach
+    generated_tests: str  # Python test code
 ```
 
 ### 2.4 Function Signatures
@@ -121,228 +112,248 @@ def run_adversarial_testing(
     claims: list[str],
     dry_run: bool = False,
     auto_confirm: bool = False,
-    timeout: int = 300,
+    containerized: bool = True,
+    timeout_verification: int = 300,
+    timeout_adversarial: int = 600,
     max_cost: float | None = None,
     allow_network: bool = False,
     allow_dangerous: bool = False,
-    output_path: str | None = None,
 ) -> WorkflowResult:
     """
-    Run adversarial testing workflow.
+    Main orchestrator function for adversarial testing workflow.
     
-    1. Run verification script from Implementation LLM
-    2. Invoke Testing LLM to generate adversarial tests
-    3. Run adversarial tests
-    4. Report results
+    Args:
+        implementation_files: List of paths to implementation files
+        claims: List of claims made by Implementation LLM
+        dry_run: If True, show script content without execution
+        auto_confirm: If True, skip user confirmation (requires containerized=True)
+        containerized: If True, run in Docker container (mandatory for execution)
+        timeout_verification: Seconds before verification script timeout
+        timeout_adversarial: Seconds before adversarial test timeout
+        max_cost: Maximum cost in USD, skip if exceeded
+        allow_network: If True, enable network in container
+        allow_dangerous: If True, allow dangerous scripts with confirmation
     
-    Note: output_path behavior - if file exists, it will be overwritten
-    with a warning logged. Use dry_run=True to preview without overwriting.
+    Returns:
+        WorkflowResult with status and details
     """
-    ...
-
-def run_in_container(
-    script_path: str,
-    config: ContainerConfig,
-) -> subprocess.CompletedProcess:
-    """Execute script in Docker container with resource limits."""
-    ...
-
-def invoke_testing_llm(
-    implementation_files: list[str],
-    claims: list[str],
-) -> str:
-    """Invoke Gemini to generate adversarial tests."""
-    ...
-
-def parse_test_failures(
-    pytest_output: str,
-    claims: list[str],
-) -> list[TestFailure]:
-    """Parse pytest output to extract failure details."""
     ...
 
 def get_user_confirmation(prompt: str) -> bool:
     """Prompt user for confirmation before script execution."""
     ...
 
-def estimate_cost(
+def invoke_testing_llm(
     implementation_files: list[str],
     claims: list[str],
-) -> float:
-    """Estimate LLM API cost for adversarial test generation."""
+    model: str = "gemini-flash",
+) -> AdversarialTestSpec:
+    """Invoke Testing LLM to generate adversarial tests."""
     ...
 
-def log_cost(
-    cost: float,
-    ticket_id: str,
-    csv_path: str = "docs/reports/adversarial-costs.csv",
-) -> None:
-    """Log cost to tracking CSV."""
+def parse_failures(pytest_output: str) -> list[TestFailure]:
+    """Parse pytest output to extract structured failure information."""
     ...
 
-def check_docker_image_exists(image_name: str) -> bool:
-    """Check if Docker image exists locally to avoid rebuilds."""
+def estimate_cost(implementation_files: list[str], model: str) -> float:
+    """
+    Estimate API cost for adversarial test generation.
+    
+    Note: Accounts for both input token count (implementation file sizes)
+    and estimated output generation tokens.
+    """
+    ...
+
+def log_cost(result: WorkflowResult, output_path: str = "docs/reports/adversarial-costs.csv") -> None:
+    """Append cost data to tracking CSV."""
     ...
 ```
 
 ```python
 # tools/script_safety_scanner.py
 
-def scan_shell_script(script_path: str) -> ScanResult:
-    """Scan shell script for dangerous patterns."""
-    ...
-
-def scan_python_script(script_path: str) -> ScanResult:
-    """Scan Python script using AST analysis."""
-    ...
-
-def scan_for_network_access(content: str) -> list[DangerousPattern]:
-    """Detect network access commands (curl, wget, nc, etc.)."""
-    ...
-
-def scan_for_destructive_commands(content: str) -> list[DangerousPattern]:
-    """Detect destructive commands (rm -rf, shutil.rmtree, etc.)."""
-    ...
-
-def scan_for_privilege_escalation(content: str) -> list[DangerousPattern]:
-    """Detect privilege escalation attempts (sudo, su, etc.)."""
+def scan_shell_script(script_path: str) -> list[DangerousPattern]:
+    """
+    Scan shell script for dangerous patterns before execution.
+    
+    Checks for:
+    - Network access (curl, wget, nc to external IPs)
+    - Destructive commands (rm -rf, shutil.rmtree on system paths)
+    - Privilege escalation (sudo, su)
+    - Environment exfiltration (env piped to network)
+    """
     ...
 
 def scan_python_ast(script_path: str) -> list[DangerousPattern]:
-    """AST-based analysis for dangerous Python imports/calls."""
+    """
+    Perform AST-based analysis of Python scripts.
+    
+    Rejects:
+    - os.system with untrusted input
+    - subprocess.call with shell=True on untrusted input
+    - shutil.rmtree on non-workspace paths
+    - Dangerous imports (ctypes, socket with external connections)
+    - unittest.mock or monkeypatch usage (forbidden in adversarial tests)
+    """
+    ...
+
+def is_external_ip(ip_or_url: str) -> bool:
+    """Check if IP/URL is external (not localhost/private range)."""
+    ...
+
+def format_danger_report(patterns: list[DangerousPattern]) -> str:
+    """Format dangerous patterns into human-readable report."""
     ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
 ```
-MAIN WORKFLOW:
-1. Parse CLI arguments (implementation_files, claims, flags)
-2. IF dry_run THEN
-   - Display verification script contents
-   - Display what would be executed
+# Main Orchestrator Flow
+
+1. RECEIVE implementation_files, claims, flags
+2. VALIDATE inputs
+   - IF not containerized AND not dry_run THEN
+     - ERROR: "Containerized execution is mandatory"
+   - IF auto_confirm AND not containerized THEN
+     - ERROR: "Auto-confirm requires containerized mode"
+
+3. GENERATE verification script from template + implementation
+4. PERFORM pre-execution security scan
+   - Shell script inspection for dangerous patterns
+   - IF dangerous patterns found AND not allow_dangerous THEN
+     - RETURN BLOCKED_DANGEROUS_SCRIPT with patterns
+
+5. IF dry_run THEN
+   - DISPLAY script content
    - RETURN DRY_RUN status
 
-3. Load verification script
-4. Run security scanner on verification script
-5. IF dangerous patterns found THEN
-   - Display warning with patterns
-   - IF NOT allow_dangerous THEN
-     - RETURN BLOCKED_DANGEROUS_SCRIPT status
+6. IF not auto_confirm THEN
+   - PROMPT user for confirmation
+   - IF not confirmed THEN RETURN CANCELLED
 
-6. IF NOT auto_confirm THEN
-   - Display script preview
-   - Prompt user for confirmation
-   - IF user declines THEN
-     - RETURN CANCELLED status
+7. RUN verification script in Docker container
+   - Configure: --network=none, --memory=2g, --cpus=2
+   - IF allow_network THEN enable network
+   - APPLY timeout (default 5 minutes)
+   
+8. CHECK verification result
+   - IF timeout THEN RETURN FAILED_TIMEOUT
+   - IF ImportError in stderr THEN RETURN FAILED_IMPORT
+   - IF non-zero exit THEN RETURN FAILED_VERIFICATION
 
-7. Check if Docker image exists locally (avoid rebuild if cached)
-8. Build Docker container if not exists
-9. Run verification script IN CONTAINER with timeout (5 min)
-10. IF timeout exceeded THEN
-    - RETURN FAILED_TIMEOUT status with stage="verification"
-11. IF verification fails THEN
-    - Parse stderr for ImportError/ModuleNotFoundError
-    - IF import error THEN
-      - RETURN FAILED_IMPORT status
-    - ELSE
-      - RETURN FAILED_VERIFICATION status
+9. ESTIMATE adversarial testing cost
+   - Calculate input token count from implementation file sizes
+   - Add estimated output generation tokens
+   - IF max_cost exceeded THEN RETURN with cost warning
 
-12. IF max_cost set THEN
-    - Estimate cost for Testing LLM
-    - IF cost > max_cost THEN
-      - RETURN with cost warning
+10. INVOKE Testing LLM (Gemini Enterprise/ZDR)
+    - SEND implementation files + claims
+    - INCLUDE system prompt forbidding unittest.mock/monkeypatch
+    - RECEIVE adversarial test code
 
-13. Invoke Testing LLM with implementation + claims
-14. Receive adversarial tests from Testing LLM
-15. Run adversarial tests IN CONTAINER with timeout (10 min)
-16. IF timeout exceeded THEN
-    - RETURN FAILED_TIMEOUT status with stage="adversarial"
-17. IF tests fail THEN
-    - Parse failures, map to claims violated
-    - RETURN FAILED_ADVERSARIAL with failures
+11. SCAN adversarial test code for safety
+    - Python AST validation
+    - Check for forbidden mock imports
+    - IF dangerous patterns OR mock usage THEN RETURN BLOCKED_DANGEROUS_OPERATION
 
-18. Log cost to CSV
-19. RETURN PASS status
+12. RUN adversarial tests in Docker container
+    - Same resource constraints as verification
+    - APPLY timeout (default 10 minutes)
+
+13. PARSE test results
+    - Extract failures with claim violations
+    - IF any failures THEN RETURN FAILED_ADVERSARIAL
+
+14. LOG cost to tracking CSV
+15. RETURN PASS with all details
 ```
 
 ```
-SECURITY SCANNER FLOW:
-1. Read script content
-2. FOR EACH dangerous pattern category:
-   - Network access: curl, wget, nc to external IPs
-   - Destructive: rm -rf, shutil.rmtree on system paths
-   - Privilege: sudo, su, chmod +s
-   - Exfiltration: env | curl, printenv to network
-3. IF Python file THEN
-   - Parse AST
-   - Check for dangerous imports (os.system, subprocess shell=True)
-   - Check for dangerous calls (shutil.rmtree on non-workspace)
-4. Aggregate findings with line numbers
-5. RETURN ScanResult with is_safe flag
+# Security Scanner Flow
+
+1. RECEIVE script_path
+2. DETERMINE script type (shell or Python)
+3. IF shell script THEN
+   - READ file content
+   - SCAN for network patterns (curl, wget, nc + external IP)
+   - SCAN for destructive patterns (rm -rf /, shutil.rmtree)
+   - SCAN for privilege escalation (sudo, su)
+   - SCAN for exfiltration (env | curl, printenv + network)
+   
+4. IF Python script THEN
+   - PARSE AST
+   - WALK AST nodes
+   - CHECK for dangerous imports (os.system, subprocess with shell=True)
+   - CHECK for dangerous calls (shutil.rmtree on non-workspace)
+   - CHECK for socket connections to external IPs
+   - CHECK for mock imports (unittest.mock, monkeypatch) in adversarial tests
+
+5. AGGREGATE all patterns found
+6. RETURN list of DangerousPattern
 ```
 
 ### 2.6 Technical Approach
 
 * **Module:** `tools/adversarial_test_workflow.py`
-* **Pattern:** Pipeline pattern with staged gates
+* **Pattern:** Pipeline with gates - each stage must pass before next proceeds
 * **Key Decisions:**
-  - Mandatory containerization prevents host system damage
-  - Pre-execution scanning catches dangerous scripts before user confirmation
-  - Two-tier timeout (5 min verification, 10 min adversarial) balances thoroughness with practicality
-  - AST analysis for Python catches dangerous patterns that regex would miss
-  - Docker image caching: Check if `adversarial-sandbox` image exists before build to optimize repeated runs
+  - Mandatory containerization ensures no LLM-generated code runs on host
+  - Pre-execution scanning catches dangerous scripts before user sees confirmation
+  - AST-based validation provides deeper Python analysis than regex
+  - Timeout enforcement prevents runaway processes
+  - Cost tracking enables ROI analysis
+  - Mock detection in adversarial tests ensures real integration testing
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Execution environment | Host / Container / VM | Container (Docker) | Balance of isolation and performance; VMs too slow, host too dangerous |
-| Script inspection | Regex only / AST only / Both | Both | Regex for shell, AST for Python; covers all cases |
-| Testing LLM | Same Claude / Separate Claude / Gemini | Gemini | Different model ensures adversarial independence |
-| Confirmation model | Always confirm / Auto-confirm option / Dry-run first | All three with hierarchy | Flexibility for different use cases (interactive, CI, preview) |
-| Timeout enforcement | Per-script / Per-stage / Global | Per-stage | Different stages need different time budgets |
+| Container runtime | Docker only, Podman only, Both | Docker with Podman fallback | Docker is most common; Podman provides rootless alternative |
+| Script inspection timing | Before confirmation, After confirmation | Before confirmation | Prevents user from seeing dangerous scripts they might accidentally approve |
+| LLM model selection | Single model, Tiered by complexity | Tiered (Flash default, Pro for complex) | Balances cost with thoroughness for security-critical code |
+| Network isolation | Always isolated, Opt-in network | Default isolated, `--allow-network` flag | Security-first approach, explicit opt-in for integration tests |
+| Timeout values | Configurable only, With defaults | Defaults (5min/10min) with override | Reasonable defaults prevent most runaway cases |
 
 **Architectural Constraints:**
-- Must integrate with existing governance workflow (N2.5 gate)
-- Cannot require new cloud infrastructure (Docker available locally)
-- Must work offline with mocked LLM responses for development
-- Gemini API must use Enterprise endpoint with ZDR
+- Must integrate with existing governance workflow as N2.5 gate
+- Cannot store proprietary code on external LLM services (ZDR required)
+- Must work on Windows, macOS, and Linux
 
 ## 3. Requirements
 
 *What must be true when this is done. These become acceptance criteria.*
 
-1. Orchestrator runs all verification scripts in mandatory Docker container
-2. Orchestrator requires user confirmation before executing generated scripts
-3. `--dry-run` mode shows script content without execution
-4. Shell script inspection blocks dangerous commands before confirmation prompt
-5. Verification scripts timeout after 5 minutes with clear error message
-6. Adversarial test suites timeout after 10 minutes with clear error message
-7. Testing LLM (Gemini Enterprise/ZDR) receives implementation code and generates adversarial tests
+1. Orchestrator runs verification scripts in mandatory Docker container with resource limits
+2. Orchestrator requires user confirmation before executing any generated script
+3. `--dry-run` mode displays script content without any execution
+4. Shell script inspection blocks dangerous commands before confirmation prompt is shown
+5. Verification scripts timeout after 5 minutes with clear FAILED_TIMEOUT status
+6. Adversarial test suites timeout after 10 minutes with clear FAILED_TIMEOUT status
+7. Testing LLM (Gemini Enterprise/ZDR) receives implementation code and generates targeted adversarial tests
 8. Adversarial tests execute without mocks for subprocess/external calls
-9. Orchestrator parses stderr; if ImportError or ModuleNotFoundError detected, workflow halts with FAILED_IMPORT
-10. Edge cases are tested (unicode, paths with spaces, missing commands)
-11. False claims are exposed (mocked "integration tests" flagged)
-12. N2.5 gate integrated into issue governance workflow
-13. Clear failure reporting shows exact test output and claim violated
-14. Cost per adversarial test run is logged to tracking CSV
-15. Environment variables sanitized (PYTHONPATH, API keys cleared) before script execution
+9. ImportError and ModuleNotFoundError trigger immediate FAILED_IMPORT status
+10. Edge cases (unicode, paths with spaces, missing commands) are covered by adversarial tests
+11. Mocked "integration tests" are flagged as false claims by Testing LLM
+12. N2.5 gate integrates into existing issue governance workflow (`run_issue_workflow.py`)
+13. Failure reports include exact test output and which claim was violated
+14. Per-run costs are logged to `docs/reports/adversarial-costs.csv`
+15. Environment variables (PYTHONPATH, API keys) are sanitized before script execution
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Same LLM for implementation and testing | Simpler integration, no API costs | No adversarial pressure, conflict of interest | **Rejected** |
-| VM-based sandboxing | Stronger isolation | Slow startup, heavy resource use | **Rejected** |
-| No sandboxing (trust scripts) | Fastest execution | Security risk, host system damage | **Rejected** |
-| Docker container sandbox | Good isolation, fast, portable | Requires Docker installation | **Selected** |
-| Regex-only script scanning | Simple to implement | Misses sophisticated attacks | **Rejected** |
-| AST + Regex scanning | Comprehensive coverage | More complex | **Selected** |
-| Always require confirmation | Maximum safety | Blocks CI automation | **Rejected** |
-| Tiered confirmation (manual/auto/dry-run) | Flexible for use cases | More complex UX | **Selected** |
+| Host execution with sandboxing | Simpler setup, no Docker dependency | Security risk, harder to isolate | **Rejected** |
+| Docker mandatory | Strong isolation, consistent environment | Requires Docker installation | **Selected** |
+| Single LLM for both roles | Lower cost, simpler orchestration | Conflict of interest, misses bugs | **Rejected** |
+| Separate LLMs (adversarial) | Independent verification, catches more bugs | Higher cost, more complexity | **Selected** |
+| No pre-execution scanning | Faster workflow | Dangerous scripts shown to user | **Rejected** |
+| Pre-execution scanning | Catches dangers before confirmation | Slight latency increase | **Selected** |
+| Auto-confirm by default | Faster for experienced users | Security risk for new users | **Rejected** |
+| Confirmation required by default | Safe default behavior | Slightly slower | **Selected** |
 
-**Rationale:** Docker containers provide the best balance of security, performance, and portability. The tiered confirmation model allows both interactive use and CI automation while maintaining safety defaults.
+**Rationale:** Security-first design prioritizes preventing execution of dangerous code over convenience. The cost of adversarial testing is justified by catching bugs that would otherwise reach production.
 
 ## 5. Data & Fixtures
 
@@ -350,145 +361,121 @@ SECURITY SCANNER FLOW:
 
 | Attribute | Value |
 |-----------|-------|
-| Source | Implementation LLM (Claude), Testing LLM (Gemini), local filesystem |
-| Format | Python source files, shell scripts, JSON claims, pytest output |
-| Size | Typical implementation: 100-500 lines; adversarial tests: 50-200 lines |
-| Refresh | Per-workflow execution |
-| Copyright/License | Project code: project license; LLM outputs: work-for-hire |
+| Source | Gemini Enterprise API (Testing LLM), local implementation files |
+| Format | Python code, JSON claims, shell scripts |
+| Size | ~10-50KB per adversarial test generation |
+| Refresh | Per-request (no caching initially) |
+| Copyright/License | Generated content, project license applies |
 
 ### 5.2 Data Pipeline
 
 ```
-Implementation Files ──parse──► Claims Extraction ──API──► Gemini (Testing LLM)
-                                                              │
-                                                              ▼
-                                                    Adversarial Tests
-                                                              │
-Verification Script ──container──► Verification Result        │
-                                          │                   │
-                                          ▼                   ▼
-                                    Pass/Fail ──────► Adversarial Execution
-                                                              │
-                                                              ▼
-                                                    Final Verdict
+Implementation Files ──read──► Orchestrator ──API call──► Gemini Enterprise (ZDR)
+                                    │                              │
+                                    ▼                              ▼
+                         Claims JSON ─────────────────► Adversarial Tests
+                                    │                              │
+                                    ▼                              ▼
+                         Docker Container ◄────mount────── Test Files
+                                    │
+                                    ▼
+                         Test Results ──parse──► WorkflowResult
+                                    │
+                                    ▼
+                         Cost CSV ◄──append──── Logging
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| `mock_gemini_responses.json` | Generated | Mocked adversarial test generation responses |
-| `sample_claims.json` | Generated | Sample implementation claims for testing |
-| `dangerous_scripts/curl_external.sh` | Generated | Tests network access detection |
-| `dangerous_scripts/rm_rf_root.sh` | Generated | Tests destructive command detection |
-| `dangerous_scripts/sudo_chmod.sh` | Generated | Tests privilege escalation detection |
-| `dangerous_scripts/safe_script.sh` | Generated | Baseline safe script for comparison |
+| `mock_gemini_responses.json` | Generated | Sample adversarial test outputs for offline testing |
+| `sample_claims.json` | Generated | Example claims for various scenarios |
+| `dangerous_scripts/rm_rf.sh` | Handwritten | Test fixture for destructive command detection |
+| `dangerous_scripts/curl_external.sh` | Handwritten | Test fixture for network access detection |
+| `dangerous_scripts/sudo_escalation.sh` | Handwritten | Test fixture for privilege escalation detection |
+| `dangerous_scripts/safe_script.sh` | Handwritten | Control fixture that should pass scanning |
 
 ### 5.4 Deployment Pipeline
 
-Development:
-1. Run with `--dry-run` and mocked fixtures
-2. Verify scanner detects dangerous patterns
-3. Verify container execution works
+1. Dev: Run with `--offline` flag using mocked fixtures
+2. Test: Run against test Gemini endpoint with ZDR enabled
+3. Production: Run against production Gemini Enterprise with ZDR
 
-Testing:
-1. Run full workflow with real Gemini API (dev credentials)
-2. Verify adversarial tests generated correctly
-3. Verify timeout enforcement
-
-Production:
-1. Integrated into governance workflow at N2.5 gate
-2. Uses Gemini Enterprise endpoint with ZDR
-3. Costs logged to tracking CSV
+**External data source:** Gemini API. Configuration stored in `config/gemini.yaml` with `enterprise: true` and `data_retention: none`.
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-- [x] **Simplicity:** Components grouped by phase
-- [x] **No touching:** All elements have visual separation
-- [x] **No hidden lines:** All arrows fully visible
-- [x] **Readable:** Labels clear, flow direction top-to-bottom
-- [ ] **Auto-inspected:** Pending render
+Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.live) or GitHub preview:
+
+- [x] **Simplicity:** Similar components collapsed (per 0006 §8.1)
+- [x] **No touching:** All elements have visual separation (per 0006 §8.2)
+- [x] **No hidden lines:** All arrows fully visible (per 0006 §8.3)
+- [x] **Readable:** Labels not truncated, flow direction clear
+- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed (per 0006 §8.5)
 
 **Auto-Inspection Results:**
 ```
-- Touching elements: [ ] None / [ ] Found: ___
-- Hidden lines: [ ] None / [ ] Found: ___
-- Label readability: [ ] Pass / [ ] Issue: ___
-- Flow clarity: [ ] Clear / [ ] Issue: ___
+- Touching elements: [x] None / [ ] Found: ___
+- Hidden lines: [x] None / [ ] Found: ___
+- Label readability: [x] Pass / [ ] Issue: ___
+- Flow clarity: [x] Clear / [ ] Issue: ___
 ```
 
 ### 6.2 Diagram
 
 ```mermaid
-flowchart TD
-    subgraph Input
-        A[User Request]
-        B[Implementation Files]
-        C[Claims List]
-    end
+sequenceDiagram
+    participant U as User
+    participant O as Orchestrator
+    participant S as Safety Scanner
+    participant D as Docker Container
+    participant T as Testing LLM<br>(Gemini)
+    participant I as Implementation LLM<br>(Claude)
 
-    subgraph "Phase 1: Pre-Execution"
-        D[Load Verification Script]
-        E[Security Scanner]
-        F{Dangerous?}
-        G[Block + Warning]
-        H{User Confirms?}
-        I[Cancel]
+    U->>O: Request feature implementation
+    O->>I: Generate code + verification script + claims
+    I-->>O: Code, script, claims
+    
+    O->>S: Scan verification script
+    S-->>O: Safety report
+    
+    alt Dangerous patterns found
+        O-->>U: BLOCKED - dangerous patterns
+    else Safe
+        alt Dry-run mode
+            O-->>U: Display script (no execution)
+        else Normal mode
+            O->>U: Request confirmation
+            U-->>O: Confirmed
+            
+            O->>D: Run verification script (5min timeout)
+            D-->>O: Verification result
+            
+            alt Verification failed
+                O-->>I: Failure details
+                Note over I: Fix and resubmit
+            else Verification passed
+                O->>T: Send code + claims
+                T-->>O: Adversarial tests
+                
+                O->>S: Scan adversarial tests
+                S-->>O: Safety report
+                
+                O->>D: Run adversarial tests (10min timeout)
+                D-->>O: Test results
+                
+                alt Tests failed
+                    O-->>I: Failures + claims violated
+                    Note over I: Fix and resubmit
+                else Tests passed
+                    O-->>U: PASS - ready for review
+                end
+            end
+        end
     end
-
-    subgraph "Phase 2: Verification"
-        J[Docker Container]
-        K[Run Verification Script]
-        L{Timeout?}
-        M[FAILED_TIMEOUT]
-        N{Pass?}
-        O[Parse stderr]
-        P{Import Error?}
-        Q[FAILED_IMPORT]
-        R[FAILED_VERIFICATION]
-    end
-
-    subgraph "Phase 3: Adversarial"
-        S[Gemini Testing LLM]
-        T[Generate Adversarial Tests]
-        U[Run Tests in Container]
-        V{Timeout?}
-        W[FAILED_TIMEOUT]
-        X{Pass?}
-        Y[Parse Failures]
-        Z[FAILED_ADVERSARIAL]
-        AA[PASS]
-    end
-
-    A --> D
-    B --> D
-    C --> D
-    D --> E
-    E --> F
-    F -->|Yes| G
-    F -->|No| H
-    G -->|--allow-dangerous| H
-    H -->|No| I
-    H -->|Yes| J
-    J --> K
-    K --> L
-    L -->|Yes| M
-    L -->|No| N
-    N -->|No| O
-    O --> P
-    P -->|Yes| Q
-    P -->|No| R
-    N -->|Yes| S
-    S --> T
-    T --> U
-    U --> V
-    V -->|Yes| W
-    V -->|No| X
-    X -->|No| Y
-    Y --> Z
-    X -->|Yes| AA
 ```
 
 ## 7. Security & Safety Considerations
@@ -497,32 +484,28 @@ flowchart TD
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Arbitrary code execution | Mandatory Docker containerization | Addressed |
-| Network exfiltration | `--network=none` by default | Addressed |
-| Filesystem damage | Workspace-only mount, system paths read-only/unmounted | Addressed |
-| Privilege escalation | No `--privileged`, no capability additions | Addressed |
-| API key exposure | Environment sanitization before execution | Addressed |
-| Malicious script injection | Pre-execution security scanning | Addressed |
-| Supply chain (LLM output) | User confirmation required before execution | Addressed |
-| Data residency | Gemini Enterprise with ZDR policy | Addressed |
+| Arbitrary code execution on host | Mandatory Docker containerization for all LLM-generated scripts | Addressed |
+| Network exfiltration | Container runs with `--network=none` by default | Addressed |
+| Filesystem destruction | Container mounts only workspace as writable | Addressed |
+| Privilege escalation | Pre-execution scan for sudo/su commands | Addressed |
+| API key exposure | Environment sanitization clears sensitive variables | Addressed |
+| Malicious LLM output | AST-based Python validation rejects dangerous patterns | Addressed |
+| Data residency | Gemini Enterprise with Zero Data Retention required | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Runaway process | 5-minute (verification) / 10-minute (adversarial) timeouts | Addressed |
-| Resource exhaustion | Docker memory (2GB) and CPU (2 cores) limits | Addressed |
-| Infinite loop | Timeout enforcement with process termination | Addressed |
-| Lost work | Dry-run mode for preview before execution | Addressed |
-| False positives (safe code blocked) | `--allow-dangerous` override with explicit confirmation | Addressed |
-| Flaky network tests | `--allow-network` opt-in only | Addressed |
+| Runaway verification scripts | 5-minute timeout with graceful termination | Addressed |
+| Runaway adversarial tests | 10-minute timeout with graceful termination | Addressed |
+| Resource exhaustion | Docker `--memory=2g --cpus=2` limits | Addressed |
+| Accidental dangerous script approval | Pre-execution scanning before confirmation prompt | Addressed |
+| Cost runaway | `--max-cost` flag and per-run cost logging | Addressed |
+| Partial failure state | Clear status reporting, no half-executed states | Addressed |
 
-**Fail Mode:** Fail Closed - Any doubt results in blocking execution and requiring explicit override
+**Fail Mode:** Fail Closed - If any safety check fails, workflow halts immediately with clear error status.
 
-**Recovery Strategy:** 
-- Failed workflows preserve all intermediate outputs
-- Logs capture full stdout/stderr for debugging
-- User can re-run with adjusted parameters
+**Recovery Strategy:** Each run is atomic. On failure, user receives status and can re-run after fixing issues. No persistent state to corrupt.
 
 ## 8. Performance & Cost Considerations
 
@@ -530,141 +513,172 @@ flowchart TD
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Container startup | < 5s | Pre-built image, cached layers |
-| Verification timeout | 5 min max | `subprocess.run(timeout=300)` |
-| Adversarial timeout | 10 min max | `subprocess.run(timeout=600)` |
-| Security scan | < 2s | Regex + single-pass AST |
+| Verification timeout | 5 minutes | Docker subprocess with timeout parameter |
+| Adversarial timeout | 10 minutes | Docker subprocess with timeout parameter |
+| Memory per container | 2GB max | Docker `--memory=2g` flag |
+| CPU per container | 2 cores max | Docker `--cpus=2` flag |
+| Safety scan latency | < 1 second | Regex + AST, no API calls |
 
 **Bottlenecks:** 
-- Gemini API latency (~2-5s for generation)
-- Docker container startup on first run (~10-15s, subsequent <2s)
+- Gemini API latency for adversarial test generation (~2-10 seconds)
+- Docker container startup time (~1-3 seconds per run)
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| Gemini Flash | $0.075/1M input, $0.30/1M output | 50 tickets × 10K tokens | ~$2 |
-| Gemini Pro | $1.25/1M input, $5.00/1M output | 10 tickets × 10K tokens | ~$1 |
-| Docker compute | N/A (local) | - | $0 |
+| Gemini Flash (standard tickets) | $0.01-0.05 per generation | 100 tickets/month | $1-5 |
+| Gemini Pro (complex tickets) | $0.10-0.50 per generation | 10 tickets/month | $1-5 |
+| Docker compute | Local machine | N/A | $0 |
+| Total estimated | | | $2-10/month |
 
 **Cost Controls:**
-- [x] Tiered LLM selection (Flash default, Pro for complex)
-- [x] `--max-cost` flag to skip if estimated cost exceeds threshold
-- [x] Cost logging to CSV for tracking
-- [x] Caching opportunity for unchanged implementations (future)
+- [x] Tiered model selection (Flash default, Pro for complex/security-critical)
+- [x] Scope limiting (`needs-adversarial` label or specific directories)
+- [x] `--max-cost` flag to skip if threshold exceeded
+- [x] Per-run logging to `docs/reports/adversarial-costs.csv`
 
-**Worst-Case Scenario:** 
-- 100x spike: ~$300/month (still reasonable)
-- Mitigation: Budget cap in config, automatic skip when exceeded
+**Worst-Case Scenario:** If usage spikes 10x (1000 tickets), costs would be $20-100/month. Budget alerts should be configured at $50 threshold.
+
+**Break-even Analysis:** Adversarial testing is justified if it catches one bug per month that would otherwise require a production hotfix (~4 hours developer time = ~$200-400 opportunity cost).
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Adversarial tests don't process user data |
-| Third-Party Licenses | Yes | Docker images use permissive licenses |
-| Terms of Service | Yes | Gemini Enterprise with ZDR complies |
-| Data Retention | Yes | Gemini ZDR policy ensures no retention |
-| Export Controls | No | No restricted algorithms |
+| PII/Personal Data | No | Code only, no user data processed |
+| Third-Party Licenses | Yes | Docker SDK (Apache 2.0), compatible with project |
+| Terms of Service | Yes | Gemini Enterprise ToS compliance required |
+| Data Retention | Yes | Gemini ZDR policy prevents storage of proprietary code |
+| Export Controls | No | No restricted algorithms or data |
 
-**Data Classification:** Internal (code review context)
+**Data Classification:** Internal (proprietary code)
 
 **Compliance Checklist:**
-- [x] No PII processed in adversarial workflow
-- [x] Docker base images use compatible licenses
-- [x] Gemini Enterprise API with ZDR policy
-- [x] All API calls logged locally for audit
+- [x] No PII stored without consent - N/A, no PII
+- [x] All third-party licenses compatible with project license
+- [x] External API usage compliant with Gemini Enterprise ToS
+- [x] Data retention policy documented - ZDR required in config
 
 ## 10. Verification & Testing
+
+### 10.0 Test Plan (TDD - Complete Before Implementation)
+
+**TDD Requirement:** Tests MUST be written and failing BEFORE implementation begins.
+
+| Test ID | Test Description | Expected Behavior | Status |
+|---------|------------------|-------------------|--------|
+| T010 | test_dry_run_shows_script_no_execution | Returns DRY_RUN, displays script, no subprocess | RED |
+| T020 | test_user_confirmation_required | Prompts before execution, respects cancellation | RED |
+| T030 | test_dangerous_script_blocked | Detects curl/rm patterns, returns BLOCKED status | RED |
+| T040 | test_verification_timeout | Terminates after 5 min, returns FAILED_TIMEOUT | RED |
+| T050 | test_import_error_detected | Parses ImportError, returns FAILED_IMPORT | RED |
+| T060 | test_adversarial_tests_generated | Gemini returns valid test code | RED |
+| T070 | test_adversarial_failure_parsed | Extracts test name and claim violated | RED |
+| T080 | test_containerized_execution | Docker runs with correct flags | RED |
+| T090 | test_cost_logged | CSV updated with run cost | RED |
+| T100 | test_env_sanitized | PYTHONPATH and API keys cleared | RED |
+| T110 | test_workflow_runner_invokes_adversarial_gate | run_issue_workflow.py triggers N2.5 gate when conditions met | RED |
+
+**Coverage Target:** ≥95% for all new code
+
+**TDD Checklist:**
+- [ ] All tests written before implementation
+- [ ] Tests currently RED (failing)
+- [ ] Test IDs match scenario IDs in 10.1
+- [ ] Test file created at: `tests/test_adversarial_workflow.py`
+- [ ] Integration test file created at: `tests/test_workflow_integration.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Happy path - all tests pass | Auto | Valid implementation + passing verification | PASS status | Returns PASS, no failures |
-| 020 | Verification script fails | Auto | Implementation with import error | FAILED_IMPORT status | Detects ImportError in stderr |
-| 030 | Adversarial tests find bugs | Auto | Implementation with edge case bug | FAILED_ADVERSARIAL | Failure includes claim violated |
-| 040 | False claim exposed | Auto | Mocked tests claiming integration | Flagged as false | Testing LLM generates unmocked test |
-| 050 | Verification script timeout | Auto | Script with `sleep 600` | FAILED_TIMEOUT | Returns within 5 min + buffer, stage="verification" |
-| 055 | Adversarial test suite timeout | Auto | Adversarial tests with `sleep 1200` | FAILED_TIMEOUT | Returns within 10 min + buffer, stage="adversarial" |
-| 060 | Dry-run mode | Auto | Any implementation | DRY_RUN status | No subprocess execution, script shown |
-| 070 | Dangerous script - curl | Auto | Script with `curl http://evil.com` | BLOCKED_DANGEROUS_SCRIPT | Blocked before confirmation |
-| 080 | Dangerous script - rm -rf | Auto | Script with `rm -rf /` | BLOCKED_DANGEROUS_SCRIPT | Pattern identified |
-| 090 | User cancels confirmation | Auto | Mock user input "n" | CANCELLED status | Clean exit, no execution |
-| 100 | Auto-confirm in CI mode | Auto | `--auto-confirm --containerized` | Proceeds without prompt | No stdin read |
-| 110 | Resource limit enforcement | Auto | Script allocating 4GB memory | Container OOM killed | Fails gracefully |
-| 120 | Environment sanitization | Auto | Script printing PYTHONPATH | Empty or sanitized | No sensitive vars leaked |
-| 130 | Cost tracking | Auto | Complete workflow run | CSV entry created | Entry matches expected format |
-| 140 | Max cost exceeded | Auto | High-token implementation | Skipped with warning | No LLM API call made |
-| 150 | ModuleNotFoundError detection | Auto | Script importing nonexistent module | FAILED_IMPORT | Correct error type detected |
-| 160 | Orchestrator path robustness | Auto | Input file with spaces and unicode chars | Workflow completes or fails gracefully | No path-related crash |
-| 170 | Governance integration - N2.5 gate | Auto | Mock `run_issue_workflow.py` invocation | N2.5 gate triggered | Adversarial workflow called with correct params |
+| 010 | Dry-run mode shows script | Auto | `--dry-run` flag | Script content displayed, no execution | Status = DRY_RUN |
+| 020 | User cancels confirmation | Auto | User inputs 'n' | Workflow halts | Status = CANCELLED |
+| 030 | Dangerous curl detected | Auto | Script with `curl http://evil.com` | Blocks before confirmation | Status = BLOCKED_DANGEROUS_SCRIPT |
+| 040 | Dangerous rm -rf detected | Auto | Script with `rm -rf /` | Blocks before confirmation | Pattern category = "destructive" |
+| 050 | Verification timeout | Auto | Script with `sleep 600` | Terminates at 5 min | Status = FAILED_TIMEOUT |
+| 060 | Import error detected | Auto | Script importing nonexistent module | Parses stderr | Status = FAILED_IMPORT |
+| 070 | Verification passes | Auto | Valid verification script | Proceeds to adversarial | No error |
+| 080 | Adversarial tests generated | Auto | Implementation + claims | Valid Python test code | Test code parseable |
+| 090 | Adversarial test fails | Auto | Buggy implementation | Reports claim violated | Status = FAILED_ADVERSARIAL |
+| 100 | Adversarial tests pass | Auto | Correct implementation | Accepts code | Status = PASS |
+| 110 | Governance integration | Auto | Issue with adversarial flag | run_issue_workflow.py invokes adversarial gate | Gate triggered correctly |
+| 120 | False claim exposed | Auto | Mocked "integration test" | Testing LLM flags it | Claim violation reported |
+| 130 | Unicode edge case | Auto | Implementation claiming unicode support | Tests unicode paths | Edge case covered |
+| 140 | Path with spaces | Auto | Implementation claiming path handling | Tests spaced paths | Edge case covered |
+| 150 | Adversarial timeout | Auto | Long-running tests | Terminates at 10 min | Status = FAILED_TIMEOUT |
+| 160 | Cost logged | Auto | Any completed run | CSV has new row | Row exists in CSV |
+| 170 | Max cost exceeded | Auto | Low `--max-cost` | Skips adversarial | Warning in result |
+| 180 | Auto-confirm without container | Auto | `--auto-confirm` only | Rejects | Error raised |
+| 190 | Environment sanitized | Auto | PYTHONPATH set | Cleared in container | PYTHONPATH empty |
+| 200 | Network isolated by default | Auto | No `--allow-network` | Container has no network | `--network=none` in Docker command |
+| 210 | Allow-dangerous override | Auto | Dangerous script + `--allow-dangerous` | Prompts, then runs | Script executes |
 
 ### 10.2 Test Commands
 
 ```bash
-# Run all automated tests
-poetry run pytest tests/test_adversarial_workflow.py tests/test_script_safety_scanner.py -v
+# Run all automated tests (mocked/offline)
+poetry run pytest tests/test_adversarial_workflow.py tests/test_script_safety_scanner.py tests/test_workflow_integration.py -v --offline
 
 # Run only fast/mocked tests (exclude live)
 poetry run pytest tests/test_adversarial_workflow.py -v -m "not live"
 
-# Run live integration tests (requires Gemini API)
+# Run live integration tests (requires Docker + Gemini API)
 poetry run pytest tests/test_adversarial_workflow.py -v -m live
 
 # Run security scanner tests
 poetry run pytest tests/test_script_safety_scanner.py -v
 
-# Run with coverage
-poetry run pytest tests/test_adversarial_workflow.py --cov=tools/adversarial_test_workflow --cov-report=term-missing
+# Run governance integration tests
+poetry run pytest tests/test_workflow_integration.py -v
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
 
-N/A - All scenarios automated.
+**N/A - All scenarios automated.** 
+
+The self-destruct test (security validation) runs in CI as an automated test that verifies the container blocks file deletion attempts.
 
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Docker not installed | High | Medium | Clear error message with installation instructions |
-| Gemini API unavailable | High | Low | Offline mode with mocked fixtures for development |
-| False positive security scan | Medium | Medium | `--allow-dangerous` override with logging |
-| Testing LLM generates invalid tests | Medium | Low | Syntax validation before execution |
-| Container escape vulnerability | High | Very Low | Keep Docker updated, use minimal base image |
-| Cost overrun | Medium | Low | `--max-cost` flag, budget alerts, cost tracking |
+| Docker not installed on developer machine | High | Medium | Clear error message with installation instructions; future: Podman fallback |
+| Gemini API unavailable | Medium | Low | Offline mode with mocked fixtures for development; clear error for production |
+| Container escape vulnerability | High | Very Low | Use official Docker images, keep updated, minimal container permissions |
+| False positive from Testing LLM | Medium | Medium | Human review remains final gate; track false positive rate |
+| Cost spikes from high usage | Low | Low | Budget cap with `--max-cost`, cost logging for visibility |
+| AST scanner misses dangerous pattern | Medium | Low | Layered defense: container isolation is primary, scanner is secondary |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] `adversarial_test_workflow.py` orchestrator implemented
 - [ ] `script_safety_scanner.py` security scanner implemented
-- [ ] Mandatory Docker containerization implemented (no host execution path)
-- [ ] Shell script inspection for dangerous patterns implemented
-- [ ] AST-based Python validation implemented
-- [ ] User confirmation prompt implemented for script execution
-- [ ] `--dry-run` mode implemented
-- [ ] Timeout handling (5 min verification, 10 min adversarial) implemented
-- [ ] Resource constraint enforcement via Docker limits implemented
-- [ ] Environment sanitization implemented
-- [ ] Verification script template created
-- [ ] Adversarial test template created
-- [ ] N2.5 gate added to governance workflow
+- [ ] Mandatory Docker containerization (no host execution path)
+- [ ] Shell script inspection for dangerous patterns
+- [ ] AST-based Python validation (including mock detection)
+- [ ] User confirmation prompt for script execution
+- [ ] `--dry-run` mode
+- [ ] Timeout handling (5 min verification, 10 min adversarial)
+- [ ] Resource constraint enforcement via Docker
+- [ ] Environment sanitization
+- [ ] N2.5 gate integration in `run_issue_workflow.py`
 - [ ] Code comments reference this LLD
 
 ### Tests
-- [ ] All test scenarios pass (010-170)
-- [ ] Unit tests for orchestrator written and passing
-- [ ] Unit tests for security scanner written and passing
-- [ ] Mocked LLM response fixtures created for offline testing
-- [ ] Self-destruct test added to security test suite
-- [ ] Test coverage meets 80% threshold
+- [ ] All test scenarios pass (including T110 for governance integration)
+- [ ] Test coverage ≥95%
+- [ ] Mocked LLM response fixtures created
+- [ ] Self-destruct test added to security suite
 
 ### Documentation
-- [ ] ADR documenting adversarial testing rationale
-- [ ] Update governance workflow wiki
-- [ ] Update CLAUDE.md with verification script requirements
-- [ ] Add new files to `docs/0003-file-inventory.md`
+- [ ] ADR `0015-adversarial-testing-workflow.md` created
+- [ ] Governance workflow wiki updated with N2.5 gate
+- [ ] CLAUDE.md updated with verification script requirements
+- [ ] Files added to `docs/0003-file-inventory.md`
+- [ ] Cost tracking CSV initialized
 - [ ] Implementation Report (0103) completed
 - [ ] Test Report (0113) completed
 
@@ -682,7 +696,6 @@ N/A - All scenarios automated.
 
 ### Gemini Review #1 (REVISE)
 
-**Timestamp:** 2026-01-27
 **Reviewer:** Gemini 3 Pro
 **Verdict:** REVISE
 
@@ -690,16 +703,14 @@ N/A - All scenarios automated.
 
 | ID | Comment | Implemented? |
 |----|---------|--------------|
-| G1.1 | "Missing test for 10-minute adversarial timeout (Req 6)" | YES - Added test 055 |
-| G1.2 | "Missing test for orchestrator path robustness with unicode/spaces (Req 10)" | YES - Added test 160 |
-| G1.3 | "Missing test for governance integration N2.5 gate (Req 12)" | YES - Added test 170 |
-| G1.4 | "Docker image caching strategy not documented" | YES - Added `check_docker_image_exists` function and logic flow note |
-| G1.5 | "Output path existing file handling not specified" | YES - Added note in function docstring |
+| G1.1 | "Requirement Coverage gap: Requirement #12 (Governance Integration) requires a test verifying that run_issue_workflow.py correctly triggers the adversarial gate" | YES - Added T110 to Section 10.0 and Scenario 110 to Section 10.1 |
+| G1.2 | "Cost Estimation: Ensure estimate_cost accounts for input token count" | YES - Updated function docstring in Section 2.4 |
+| G1.3 | "Testing Strategy: Consider adding instruction to Testing LLM forbidding unittest.mock" | YES - Added to Section 2.5 Logic Flow and scan_python_ast docstring |
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| Gemini #1 | 2026-01-27 | REVISE | Requirement coverage at 80%, missing 3 test scenarios |
+| Gemini #1 | (auto) | REVISE | Missing test for Requirement #12 (governance integration) |
 
 **Final Status:** PENDING
