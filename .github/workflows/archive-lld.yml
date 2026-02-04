@@ -30,8 +30,8 @@ jobs:
           # 2. Archive lineage folders if exist (pattern: {issue}-*)
           for dir in docs/lineage/active/${ISSUE}-*/; do
             if [ -d "$dir" ]; then
-              mkdir -p docs/lineage/archived
-              mv "$dir" "docs/lineage/archived/"
+              mkdir -p docs/lineage/done
+              mv "$dir" "docs/lineage/done/"
               echo "Archived lineage: $(basename $dir)"
               ARCHIVED=true
             fi
