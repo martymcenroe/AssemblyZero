@@ -1,0 +1,44 @@
+[
+  {
+    "number": 42,
+    "title": "Add user authentication",
+    "body": "## Summary\n\nImplement OAuth2 authentication flow.\n\n## Acceptance Criteria\n\n- [ ] Support GitHub OAuth\n- [ ] Support Google OAuth\n- [ ] Session management",
+    "state": "open",
+    "createdAt": "2024-01-15T10:30:00Z",
+    "updatedAt": "2024-01-20T14:45:00Z",
+    "closedAt": null,
+    "author": {"login": "developer1"},
+    "labels": [{"name": "enhancement"}, {"name": "security"}],
+    "assignees": [{"login": "developer1"}],
+    "url": "https://github.com/example/repo/issues/42",
+    "comments": 2
+  },
+  {
+    "number": 17,
+    "title": "Fix database connection leak",
+    "body": "Database connections are not being properly closed after queries.\n\n### Steps to reproduce\n\n1. Run 100 queries\n2. Check connection pool\n\n### Expected\n\nConnections should be released.\n\n### Actual\n\nConnections accumulate.",
+    "state": "closed",
+    "createdAt": "2024-01-10T08:00:00Z",
+    "updatedAt": "2024-01-12T16:30:00Z",
+    "closedAt": "2024-01-12T16:30:00Z",
+    "author": {"login": "bugfinder"},
+    "labels": [{"name": "bug"}, {"name": "database"}],
+    "assignees": [{"login": "developer2"}, {"login": "developer3"}],
+    "url": "https://github.com/example/repo/issues/17",
+    "comments": 5
+  },
+  {
+    "number": 99,
+    "title": "Documentation: API reference",
+    "body": "Create comprehensive API documentation.\n\n- Endpoint descriptions\n- Request/response examples\n- Error codes",
+    "state": "open",
+    "createdAt": "2024-02-01T09:00:00Z",
+    "updatedAt": "2024-02-01T09:00:00Z",
+    "closedAt": null,
+    "author": {"login": "techwriter"},
+    "labels": [{"name": "documentation"}],
+    "assignees": [],
+    "url": "https://github.com/example/repo/issues/99",
+    "comments": 0
+  }
+]

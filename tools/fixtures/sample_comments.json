@@ -1,0 +1,42 @@
+{
+  "42": [
+    {
+      "id": 1001,
+      "user": {"login": "reviewer1"},
+      "body": "Looks good! Can you add tests for the OAuth flow?",
+      "created_at": "2024-01-16T11:00:00Z",
+      "html_url": "https://github.com/example/repo/issues/42#issuecomment-1001"
+    },
+    {
+      "id": 1002,
+      "user": {"login": "developer1"},
+      "body": "Good point, I'll add integration tests.",
+      "created_at": "2024-01-16T14:30:00Z",
+      "html_url": "https://github.com/example/repo/issues/42#issuecomment-1002"
+    }
+  ],
+  "17": [
+    {
+      "id": 2001,
+      "user": {"login": "developer2"},
+      "body": "I can reproduce this. Investigating...",
+      "created_at": "2024-01-10T10:00:00Z",
+      "html_url": "https://github.com/example/repo/issues/17#issuecomment-2001"
+    },
+    {
+      "id": 2002,
+      "user": {"login": "developer2"},
+      "body": "Found the issue - missing `connection.close()` in the query handler.",
+      "created_at": "2024-01-11T09:00:00Z",
+      "html_url": "https://github.com/example/repo/issues/17#issuecomment-2002"
+    },
+    {
+      "id": 2003,
+      "user": {"login": "bugfinder"},
+      "body": "Thanks for the quick fix!",
+      "created_at": "2024-01-12T16:00:00Z",
+      "html_url": "https://github.com/example/repo/issues/17#issuecomment-2003"
+    }
+  ],
+  "99": []
+}
