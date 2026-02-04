@@ -239,7 +239,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    DEBUG: implementation_files = {impl_files}")
 
     if impl_files:
-        # Find first non-test implementation file for coverage
+        # Find first non-test, non-init implementation file for coverage
         for impl_path in impl_files:
             print(f"    DEBUG: Checking impl_path = {impl_path}")
             # Skip test files (in tests/ directory)
@@ -247,6 +247,10 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"    DEBUG: path_parts = {path_parts}")
             if any(part.lower() in ("tests", "test") for part in path_parts):
                 print(f"    DEBUG: Skipping (test path)")
+                continue
+            # Issue #265: Skip __init__.py - pytest-cov doesn't work with it
+            if impl_path.endswith("__init__.py"):
+                print(f"    DEBUG: Skipping __init__.py")
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
             print(f"    DEBUG: rel_path = {rel_path}")
