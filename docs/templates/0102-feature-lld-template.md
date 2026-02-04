@@ -188,8 +188,8 @@ sequenceDiagram
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| {e.g., Input injection} | {e.g., Sanitize all inputs} | Addressed / TODO |
-| {e.g., Auth bypass} | {e.g., Validate tokens} | Addressed / TODO |
+| {e.g., Input injection} | {e.g., Sanitize all inputs} | Addressed / Pending |
+| {e.g., Auth bypass} | {e.g., Validate tokens} | Addressed / Pending |
 
 ### 7.2 Safety
 
@@ -197,9 +197,9 @@ sequenceDiagram
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| {e.g., Data loss on failure} | {e.g., Transaction rollback, backup before modify} | Addressed / TODO |
-| {e.g., Runaway process} | {e.g., Timeout limits, circuit breakers} | Addressed / TODO |
-| {e.g., Resource exhaustion} | {e.g., Rate limiting, queue bounds} | Addressed / TODO |
+| {e.g., Data loss on failure} | {e.g., Transaction rollback, backup before modify} | Addressed / Pending |
+| {e.g., Runaway process} | {e.g., Timeout limits, circuit breakers} | Addressed / Pending |
+| {e.g., Resource exhaustion} | {e.g., Rate limiting, queue bounds} | Addressed / Pending |
 
 **Fail Mode:** {Fail Open / Fail Closed} - {Justification}
 
