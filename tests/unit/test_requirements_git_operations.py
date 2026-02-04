@@ -31,13 +31,17 @@ class TestFormatCommitMessage:
     """Tests for format_commit_message function."""
 
     def test_lld_workflow_message(self):
-        """Test commit message for LLD workflow."""
+        """Test commit message for LLD workflow.
+
+        Note: LLD commits use "Ref #N" not "Closes #N" because the LLD
+        is just the design doc, not the implementation (see #238).
+        """
         from agentos.workflows.requirements.git_operations import format_commit_message
 
         msg = format_commit_message("lld", issue_number=42)
 
         assert "LLD-42" in msg
-        assert "Closes #42" in msg
+        assert "Ref #42" in msg
 
     def test_issue_workflow_message(self):
         """Test commit message for issue workflow."""
