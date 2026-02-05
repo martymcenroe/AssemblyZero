@@ -3,31 +3,32 @@
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
+Issue #335: Add mechanical test validation node (N2.5)
 
 Defines the compiled graph with:
-- N0-N8 nodes
+- N0-N8 nodes (plus N2.5 for test validation)
 - Conditional edges for routing
 - Checkpoint support via SqliteSaver
 
 Graph structure:
-    N0_load_lld -> N1_review_test_plan -> N2_scaffold_tests -> N3_verify_red
-           |              |                     |                   |
-           v              v                     v                   v
-         error         BLOCKED              scaffold_only      unexpected
-           |              |                     |               passes
-           v              v                     v                   |
-          END     loop back to LLD             END               error
-                  (outside workflow)                               |
-                                                                   v
-                                                                  END
-
-    N3_verify_red -> N4_implement_code -> N5_verify_green -> N6_e2e_validation
-           |                |                   |                   |
-           v                v                   v                   v
-        red OK          iteration           green OK              e2e OK
-           |            loop back              |                    |
-           v                |                  v                    v
-          N4               N4                  N6                  N7
+    N0_load_lld -> N1_review_test_plan -> N2_scaffold_tests -> N2_5_validate_tests
+           |              |                     |                      |
+           v              v                     v                      v
+         error         BLOCKED              scaffold_only         validation
+           |              |                     |                   result
+           v              v                     v                      |
+          END     loop back to LLD             END                    / \\
+                  (outside workflow)                                 /   \\
+                                                                pass   fail
+                                                                 |       |
+                                                                 v       v
+    N2_5 (pass) -> N3_verify_red -> N4_implement_code ------> N2 (retry)
+           |                |                   |               or escalate
+           v                v                   v               to N4
+        red OK          iteration            green
+           |            loop back              |
+           v                |                  v
+          N4               N4                  N6
 
     N6_e2e_validation -> N7_finalize -> N8_document -> END
            |                  |               |
@@ -52,6 +53,10 @@ from agentos.workflows.testing.nodes import (
     scaffold_tests,
     verify_green_phase,
     verify_red_phase,
+)
+from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+    validate_tests_mechanical_node,
+    should_regenerate,
 )
 from agentos.workflows.testing.state import TestingWorkflowState
 
@@ -105,8 +110,10 @@ def route_after_review(
 
 def route_after_scaffold(
     state: TestingWorkflowState,
-) -> Literal["N3_verify_red", "end"]:
+) -> Literal["N2_5_validate_tests", "end"]:
     """Route after N2 (scaffold_tests).
+
+    Issue #335: Updated to route to validation node instead of verify_red.
 
     Args:
         state: Current workflow state.
@@ -122,7 +129,45 @@ def route_after_scaffold(
     if state.get("scaffold_only"):
         return "end"
 
-    return "N3_verify_red"
+    return "N2_5_validate_tests"
+
+
+def route_after_validate(
+    state: TestingWorkflowState,
+) -> Literal["N3_verify_red", "N2_scaffold_tests", "N4_implement_code", "end"]:
+    """Route after N2.5 (validate_tests_mechanical).
+
+    Issue #335: Routes based on test validation results.
+
+    Routes to:
+    - N3_verify_red: Validation passed, continue normal flow
+    - N2_scaffold_tests: Validation failed, attempts < 3, retry
+    - N4_implement_code: Validation failed, attempts >= 3, escalate to Claude
+    - END: Error
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name or END.
+    """
+    error = state.get("error_message", "")
+    if error:
+        return "end"
+
+    # Use the should_regenerate function from validate_tests_mechanical
+    decision = should_regenerate(state)
+
+    if decision == "continue":
+        return "N3_verify_red"
+    elif decision == "regenerate":
+        return "N2_scaffold_tests"
+    elif decision == "escalate":
+        # Escalate to Claude - skip verify_red and go to implement
+        print("    [ESCALATE] Skipping verify_red, escalating to Claude implementation")
+        return "N4_implement_code"
+
+    return "end"
 
 
 def route_after_red(
@@ -264,6 +309,7 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N0_load_lld", load_lld)
     workflow.add_node("N1_review_test_plan", review_test_plan)
     workflow.add_node("N2_scaffold_tests", scaffold_tests)
+    workflow.add_node("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
     workflow.add_node("N3_verify_red", verify_red_phase)
     workflow.add_node("N4_implement_code", implement_code)
     workflow.add_node("N5_verify_green", verify_green_phase)
@@ -294,12 +340,24 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N2 -> N3 (with scaffold_only check)
+    # N2 -> N2.5 (with scaffold_only check) - Issue #335
     workflow.add_conditional_edges(
         "N2_scaffold_tests",
         route_after_scaffold,
         {
+            "N2_5_validate_tests": "N2_5_validate_tests",
+            "end": END,
+        },
+    )
+
+    # N2.5 -> N3 or N2 (retry) or N4 (escalate) - Issue #335
+    workflow.add_conditional_edges(
+        "N2_5_validate_tests",
+        route_after_validate,
+        {
             "N3_verify_red": "N3_verify_red",
+            "N2_scaffold_tests": "N2_scaffold_tests",
+            "N4_implement_code": "N4_implement_code",
             "end": END,
         },
     )

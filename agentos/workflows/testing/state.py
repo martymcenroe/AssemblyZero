@@ -3,6 +3,7 @@
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
+Issue #335: Scaffold validation fields
 
 This TypedDict travels through nodes N0-N8, tracking the testing workflow
 from LLD loading through test generation, implementation, E2E validation,
@@ -180,3 +181,9 @@ class TestingWorkflowState(TypedDict, total=False):
     # Documentation control
     skip_docs: bool
     doc_scope: Literal["full", "minimal", "auto", "none"]
+
+    # Issue #335: Scaffold validation
+    generated_tests: str  # Generated test file content
+    parsed_scenarios: dict  # ParsedLLDTests from Section 10.0
+    validation_result: dict  # TestValidationResult from mechanical validation
+    scaffold_attempts: int  # Number of scaffold regeneration attempts
