@@ -26,6 +26,9 @@ try:
         extract_keywords,
         ValidationSeverity,
         ValidationError,
+        # Issue #306: Title issue number validation
+        validate_title_issue_number,
+        extract_title_issue_number,
     )
 except ImportError:
     # Expected during TDD - tests will fail with import error
@@ -808,3 +811,239 @@ No table here.
 """
         mitigations = extract_mitigations_from_risks(content)
         assert mitigations == []
+
+
+# =============================================================================
+# Issue #306: Title Issue Number Validation Tests
+# =============================================================================
+
+
+class TestExtractTitleIssueNumber:
+    """Tests for extract_title_issue_number function."""
+
+    def test_extracts_standard_format(self):
+        """T010: Extract standard format # 306 - Feature."""
+        content = "# 306 - Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 306
+
+    def test_extracts_leading_zeros(self):
+        """T040: Extract number with leading zeros (099 -> 99)."""
+        content = "# 0099 - Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 99
+
+    def test_extracts_with_en_dash(self):
+        """T050: Extract with en-dash separator (–)."""
+        content = "# 306 – Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 306
+
+    def test_extracts_with_em_dash(self):
+        """T060: Extract with em-dash separator (—)."""
+        content = "# 306 — Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 306
+
+    def test_extracts_multi_digit(self):
+        """T080: Extract multi-digit issue numbers."""
+        content = "# 1234 - Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 1234
+
+    def test_extracts_single_digit(self):
+        """T090: Extract single digit issue numbers."""
+        content = "# 5 - Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result == 5
+
+    def test_returns_none_for_missing_number(self):
+        """T030: Return None when no number in title."""
+        content = "# Feature: Test Title\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result is None
+
+    def test_returns_none_for_no_h1(self):
+        """T070: Return None when no H1 heading."""
+        content = "## 306 - Not an H1\n\n## 1. Context"
+        result = extract_title_issue_number(content)
+        assert result is None
+
+
+class TestValidateTitleIssueNumber:
+    """Tests for validate_title_issue_number function."""
+
+    def test_matching_number_returns_empty_list(self):
+        """T010: Matching issue number returns empty error list."""
+        content = "# 306 - Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+        assert len(errors) == 0
+
+    def test_mismatched_number_returns_block_error(self):
+        """T020: Mismatched number returns BLOCK (ERROR severity) error."""
+        content = "# 199 - Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+
+        assert len(errors) == 1
+        assert errors[0].severity == ValidationSeverity.ERROR
+        assert "199" in errors[0].message
+        assert "306" in errors[0].message
+
+    def test_missing_number_returns_warning(self):
+        """T030: Missing number in title returns WARNING."""
+        content = "# Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+
+        assert len(errors) == 1
+        assert errors[0].severity == ValidationSeverity.WARNING
+        assert "extract" in errors[0].message.lower()
+
+    def test_leading_zeros_match(self):
+        """T040: Leading zeros match correctly (099 matches 99)."""
+        content = "# 0306 - Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+        assert len(errors) == 0
+
+    def test_en_dash_format_passes(self):
+        """T050: En-dash separator passes validation."""
+        content = "# 306 – Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+        assert len(errors) == 0
+
+    def test_em_dash_format_passes(self):
+        """T060: Em-dash separator passes validation."""
+        content = "# 306 — Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 306)
+        assert len(errors) == 0
+
+    def test_no_h1_returns_warning(self):
+        """T070: No H1 heading returns WARNING."""
+        content = "## 306 - Not an H1 Title\n\nContent here"
+        errors = validate_title_issue_number(content, 306)
+
+        assert len(errors) == 1
+        assert errors[0].severity == ValidationSeverity.WARNING
+        assert "H1" in errors[0].message
+
+    def test_multi_digit_numbers_work(self):
+        """T080: Multi-digit issue numbers validate correctly."""
+        content = "# 1234 - Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 1234)
+        assert len(errors) == 0
+
+    def test_single_digit_numbers_work(self):
+        """T090: Single digit issue numbers validate correctly."""
+        content = "# 5 - Feature: Test Title\n\n## 1. Context"
+        errors = validate_title_issue_number(content, 5)
+        assert len(errors) == 0
+
+
+class TestTitleValidationIntegration:
+    """Integration tests for title validation in mechanical validation pipeline."""
+
+    def test_validator_functions_exist(self):
+        """T100: Title validation functions are callable."""
+        # Verify functions exist and are callable
+        assert callable(validate_title_issue_number)
+        assert callable(extract_title_issue_number)
+
+    def test_pipeline_invokes_title_validation_on_mismatch(self, mock_repo):
+        """T110: validate_lld_mechanical calls title validation when issue_number provided."""
+        # LLD with mismatched title
+        content = """# 199 - Feature: Wrong Issue
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `agentos/test.py` | Add | New file |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| None | Low | Low | None |
+
+## 12. Definition of Done
+
+- [ ] Done
+"""
+        state = {
+            "current_draft": content,
+            "target_repo": str(mock_repo),
+            "issue_number": 306,
+            "lld_status": "PENDING",
+            "workflow_type": "lld",
+        }
+
+        result = validate_lld_mechanical(state)
+
+        # Should be blocked due to issue number mismatch
+        assert result.get("lld_status") == "BLOCKED"
+        assert any("199" in err and "306" in err for err in result.get("validation_errors", []))
+
+    def test_pipeline_passes_with_matching_title(self, mock_repo):
+        """Title validation passes when issue numbers match."""
+        content = """# 306 - Feature: Correct Issue
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `agentos/workflows/requirements/graph.py` | Modify | Update |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| None | Low | Low | None |
+
+## 12. Definition of Done
+
+- [ ] Done
+"""
+        state = {
+            "current_draft": content,
+            "target_repo": str(mock_repo),
+            "issue_number": 306,
+            "lld_status": "PENDING",
+            "workflow_type": "lld",
+        }
+
+        result = validate_lld_mechanical(state)
+
+        # Should NOT be blocked
+        assert result.get("lld_status") != "BLOCKED"
+
+    def test_pipeline_skips_title_validation_without_issue_number(self, mock_repo):
+        """Title validation skipped when issue_number not in state."""
+        content = """# 999 - Feature: Wrong Issue
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `agentos/workflows/requirements/graph.py` | Modify | Update |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| None | Low | Low | None |
+
+## 12. Definition of Done
+
+- [ ] Done
+"""
+        state = {
+            "current_draft": content,
+            "target_repo": str(mock_repo),
+            # No issue_number provided
+            "lld_status": "PENDING",
+            "workflow_type": "lld",
+        }
+
+        result = validate_lld_mechanical(state)
+
+        # Should NOT be blocked (issue number not validated)
+        assert result.get("lld_status") != "BLOCKED"
