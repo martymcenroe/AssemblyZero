@@ -139,6 +139,63 @@ Top blocking categories that are now addressed in templates:
 
 ---
 
+## Learning Loop #2: Verdict-to-AutoFix
+
+While the template improvement loop helps drafters write better LLDs, there's a faster path for **mechanical fixes**: promote common Gemini corrections directly to Ponder Stibbons (The Compositor).
+
+```mermaid
+flowchart LR
+    subgraph Before["Before Ponder"]
+        D1[Draft] --> G1[Gemini]
+        G1 -->|BLOCK: wrong format| D1
+        D1 --> G1
+        G1 -->|APPROVE| Done1[Done]
+    end
+
+    subgraph After["After Learning"]
+        D2[Draft] --> P[Ponder]
+        P -->|auto-fix| D3[Clean Draft]
+        D3 --> G2[Gemini]
+        G2 -->|APPROVE| Done2[Done]
+    end
+```
+
+### How It Works
+
+1. **Gemini blocks** a draft for a mechanical issue (e.g., "Section 11 uses ### instead of ##")
+2. **Verdict Analyzer** tracks this pattern across verdicts
+3. **Pattern threshold** reached (default: 3 occurrences)
+4. **Human approves** promotion to auto-fix
+5. **Ponder fixes** this automatically in future drafts
+
+### Example
+
+| Step | What Happens |
+|------|--------------|
+| **Verdict 1** | LLD-099 blocked: "Section header format wrong" |
+| **Verdict 2** | LLD-101 blocked: "Section header format wrong" |
+| **Verdict 3** | LLD-105 blocked: "Section header format wrong" |
+| **Analyzer** | Flags pattern: `### 11.` should be `## 11.` |
+| **Promotion** | Human approves auto-fix rule |
+| **Future** | Ponder fixes this before Gemini sees it |
+
+### Why This Matters
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Gemini calls for format issues | 2+ per LLD | 0 |
+| Time per format fix | 30-60 seconds | Instant |
+| Cost per format fix | ~$0.05 | $0 |
+
+**The system learns which corrections are mechanical and stops bothering Gemini with them.**
+
+### Related
+
+- [#307 - Ponder Stibbons (The Compositor)](https://github.com/martymcenroe/AgentOS/issues/307)
+- [#308 - Verdict-to-AutoFix Pipeline](https://github.com/martymcenroe/AgentOS/issues/308)
+
+---
+
 ## Future: The Janitor
 
 The current process requires manual invocation:
