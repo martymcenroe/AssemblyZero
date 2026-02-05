@@ -303,7 +303,7 @@ If you output anything other than a code block, the build will fail."""
                 claude_cli,
                 "--print",
                 "--dangerously-skip-permissions",
-                "--model", "sonnet",  # Sonnet for speed, Opus was overkill
+                "--model", "opus",  # Opus 4.5 for code quality
                 "--system-prompt", system_prompt,
             ]
 
@@ -335,8 +335,8 @@ If you output anything other than a code block, the build will fail."""
         client = anthropic.Anthropic()
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=8192,
+            model="claude-opus-4-5-20250514",
+            max_tokens=32768,
             messages=[{"role": "user", "content": prompt}]
         )
 
