@@ -12,6 +12,9 @@ to reduce false positive warnings.
 Issue #322: Add explicit check for invalid/missing repo_root, returning blocking
 error instead of silent skip.
 
+Issue #334: Normalize change types with parenthetical suffixes (e.g., "Add (Directory)")
+and save validation errors to lineage for audit trail.
+
 This node validates LLD content deterministically without LLM calls:
 - Mandatory sections exist (2.1, 11, 12)
 - File paths are valid (Modify/Delete exist, Add parents exist)
@@ -20,11 +23,13 @@ This node validates LLD content deterministically without LLM calls:
 - Risk mitigations trace to functions (warning only, with smart filtering)
 - LLD title issue number matches workflow issue number
 - Target repo validation (None, empty, non-existent paths are blocking errors)
+- Change type normalization (handles parenthetical suffixes like "Add (Directory)")
 """
 
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict
@@ -111,6 +116,191 @@ TITLE_ISSUE_NUMBER_PATTERN = re.compile(
 
 
 # =============================================================================
+# Issue #334: Change Type Normalization Functions
+# =============================================================================
+
+
+def normalize_change_type(raw_change_type: str) -> tuple[str, bool]:
+    """Normalize change types with parenthetical suffixes.
+    
+    Issue #334: Handles change types like "Add (Directory)" by extracting
+    the base type and setting an is_directory flag.
+    
+    Args:
+        raw_change_type: Raw change type string (e.g., "Add (Directory)", "Modify")
+        
+    Returns:
+        Tuple of (normalized_type, is_directory)
+        e.g., "Add (Directory)" -> ("add", True)
+             "Modify" -> ("modify", False)
+    """
+    if not raw_change_type:
+        return ("", False)
+    
+    # Strip whitespace
+    cleaned = raw_change_type.strip()
+    
+    # Check for parenthetical suffix
+    is_directory = False
+    if "(" in cleaned:
+        # Split on opening parenthesis
+        parts = cleaned.split("(", 1)
+        base_type = parts[0].strip()
+        
+        # Check if the parenthetical contains "directory"
+        if len(parts) > 1:
+            parenthetical = parts[1].lower()
+            is_directory = "directory" in parenthetical
+    else:
+        base_type = cleaned
+    
+    # Normalize to lowercase
+    normalized_type = base_type.lower().strip()
+    
+    return (normalized_type, is_directory)
+
+
+def save_validation_errors_to_lineage(
+    errors: list[str],
+    lineage_path: Path,
+    draft_number: int
+) -> Path:
+    """Save validation errors to lineage folder for audit trail.
+    
+    Issue #334: Creates a markdown file in the lineage folder documenting
+    all validation errors for a specific draft iteration.
+    
+    Args:
+        errors: List of validation error messages
+        lineage_path: Path to the lineage folder
+        draft_number: The draft iteration number
+        
+    Returns:
+        Path to the saved error file
+    """
+    # Sanitize draft number to prevent path traversal
+    safe_draft_number = abs(int(draft_number))
+    
+    # Create lineage directory if it doesn't exist
+    lineage_path = Path(lineage_path).resolve()
+    lineage_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create error file path
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    error_filename = f"validation-errors-draft{safe_draft_number:03d}-{timestamp}.md"
+    error_file_path = lineage_path / error_filename
+    
+    # Build markdown content
+    content_lines = [
+        f"# Validation Errors - Draft {safe_draft_number}",
+        "",
+        f"**Generated:** {datetime.now().isoformat()}",
+        f"**Draft Number:** {safe_draft_number}",
+        f"**Error Count:** {len(errors)}",
+        "",
+        "## Errors",
+        "",
+    ]
+    
+    for i, error in enumerate(errors, 1):
+        # Escape special characters to prevent log injection
+        escaped_error = error.replace("<", "&lt;").replace(">", "&gt;")
+        content_lines.append(f"{i}. {escaped_error}")
+    
+    content_lines.append("")
+    
+    # Write to file
+    error_file_path.write_text("\n".join(content_lines), encoding="utf-8")
+    
+    logger.info(f"Saved validation errors to: {error_file_path}")
+    
+    return error_file_path
+
+
+def validate_directory_creation_order(
+    changes: list[dict]
+) -> list[str]:
+    """Validate that directory entries appear before files that depend on them.
+    
+    Issue #334: Checks that when a directory is declared with "Add (Directory)",
+    any files within that directory can use it as a valid parent.
+    
+    Args:
+        changes: List of FileChange dicts with path, change_type, and is_directory
+        
+    Returns:
+        List of error messages if validation fails
+    """
+    errors = []
+    
+    # Track directories that will be created
+    directories_to_create: set[str] = set()
+    
+    # First pass: collect all directories that will be created
+    for change in changes:
+        if change.get("is_directory", False) and change.get("change_type", "").lower() == "add":
+            path = change.get("path", "").replace("\\", "/").rstrip("/")
+            directories_to_create.add(path)
+    
+    # Second pass: check file order (files should come after their parent directories)
+    seen_directories: set[str] = set()
+    
+    for change in changes:
+        path = change.get("path", "").replace("\\", "/")
+        is_directory = change.get("is_directory", False)
+        change_type = change.get("change_type", "").lower()
+        
+        if is_directory and change_type == "add":
+            seen_directories.add(path.rstrip("/"))
+        elif change_type == "add" and not is_directory:
+            # Check if parent directory is in directories_to_create but not yet seen
+            parent = str(Path(path).parent).replace("\\", "/")
+            
+            if parent in directories_to_create and parent not in seen_directories:
+                errors.append(
+                    f"File '{path}' depends on directory '{parent}' which appears later in the table. "
+                    "Reorder entries so directories come before their contents."
+                )
+    
+    return errors
+
+
+def print_validation_errors(
+    errors: list[str],
+    max_display: int = 5
+) -> None:
+    """Print validation errors to console with truncation for readability.
+    
+    Issue #334: Provides user-visible feedback about validation failures
+    with reasonable truncation for large error lists.
+    
+    Args:
+        errors: List of validation error messages
+        max_display: Maximum number of errors to display before truncation
+    """
+    if not errors:
+        return
+    
+    print("\n[ERROR] MECHANICAL VALIDATION FAILED:")
+    print("=" * 50)
+    
+    # Display up to max_display errors
+    displayed = errors[:max_display]
+    for i, error in enumerate(displayed, 1):
+        # Escape special characters for safe console output
+        safe_error = error.replace("<", "&lt;").replace(">", "&gt;")
+        print(f"  {i}. {safe_error}")
+    
+    # Show count of remaining errors
+    remaining = len(errors) - max_display
+    if remaining > 0:
+        print(f"\n  ... and {remaining} more error(s)")
+    
+    print("=" * 50)
+    print()
+
+
+# =============================================================================
 # Issue #322: Repo Root Validation Functions
 # =============================================================================
 
@@ -148,6 +338,7 @@ def validate_file_paths_with_repo_check(
     """Validate file paths against repo, with explicit repo validation.
     
     Issue #322: Explicit check for invalid/missing repo_root before path validation.
+    Issue #334: Supports is_directory flag for directory entries.
     
     Returns:
         tuple of (errors, was_validated)
@@ -407,12 +598,14 @@ def validate_mandatory_sections(lld_content: str) -> list[ValidationError]:
 
 def parse_files_changed_table(lld_content: str) -> tuple[list[dict], list[ValidationError]]:
     """Extract file entries from Section 2.1 table.
+    
+    Issue #334: Now normalizes change types and sets is_directory flag.
 
     Args:
         lld_content: The LLD markdown content.
 
     Returns:
-        Tuple of (list of file dicts with path/change_type/description, parse errors).
+        Tuple of (list of file dicts with path/change_type/description/is_directory, parse errors).
     """
     files = []
     errors = []
@@ -439,40 +632,46 @@ def parse_files_changed_table(lld_content: str) -> tuple[list[dict], list[Valida
     # Find markdown table rows (| file | type | description |)
     # Table format: | `path` | Type | Description |
     # Allow for variations: with/without backticks, varying whitespace
+    # Issue #334: Updated pattern to capture change types with parenthetical suffixes
     table_pattern = re.compile(
-        r"\|\s*`?([^`|]+?)`?\s*\|\s*(\w+)\s*\|\s*([^|]*)\s*\|",
+        r"\|\s*`?([^`|]+?)`?\s*\|\s*([^|]+?)\s*\|\s*([^|]*)\s*\|",
         re.MULTILINE,
     )
 
     matches = list(table_pattern.finditer(section_content))
 
-    # Valid change types we expect
+    # Valid base change types we expect (after normalization)
     valid_change_types = {"add", "modify", "delete", "create", "update", "remove"}
 
     # Filter out header rows and invalid entries
     data_rows = []
     for match in matches:
         path = match.group(1).strip()
-        change_type = match.group(2).strip()
+        raw_change_type = match.group(2).strip()
 
         # Skip header rows - check for common header text
         path_lower = path.lower()
-        change_type_lower = change_type.lower()
+        raw_change_type_lower = raw_change_type.lower()
 
         if path_lower in ("file", "---", "-") or "---" in path:
             continue
-        if change_type_lower in ("change type", "change", "type", "---", "-"):
+        if raw_change_type_lower in ("change type", "change", "type", "---", "-"):
             continue
 
-        # Only accept valid change types
-        if change_type_lower not in valid_change_types:
+        # Issue #334: Normalize the change type
+        normalized_type, is_directory = normalize_change_type(raw_change_type)
+
+        # Only accept valid base change types
+        if normalized_type not in valid_change_types:
             continue
 
-        # Path must look like a file path (contain / or . )
+        # Path must look like a file path (contain / or . ) OR be a directory
         if "/" not in path and "." not in path and "\\" not in path:
-            continue
+            # Allow paths without extensions if marked as directory
+            if not is_directory:
+                continue
 
-        data_rows.append(match)
+        data_rows.append((match, normalized_type, is_directory))
 
     if not data_rows:
         errors.append(
@@ -484,15 +683,15 @@ def parse_files_changed_table(lld_content: str) -> tuple[list[dict], list[Valida
         )
         return files, errors
 
-    for match in data_rows:
+    for match, normalized_type, is_directory in data_rows:
         path = match.group(1).strip()
-        change_type = match.group(2).strip()
         description = match.group(3).strip()
 
         files.append({
             "path": path,
-            "change_type": change_type,
+            "change_type": normalized_type.capitalize(),  # Store as "Add", "Modify", etc.
             "description": description,
+            "is_directory": is_directory,
         })
 
     return files, errors
@@ -556,19 +755,36 @@ def validate_file_paths(
     """Check that Modify/Delete files exist, Add files have valid parents.
 
     Issue #300: Include file path suggestions when files don't exist.
+    Issue #334: Track directories that will be created for parent validation.
 
     Args:
-        files: List of file dicts with path and change_type.
+        files: List of file dicts with path, change_type, and is_directory.
         repo_root: Path to repository root.
 
     Returns:
         List of ERRORs for invalid paths.
     """
     errors = []
+    
+    # Issue #334: Track directories that will be created by "Add (Directory)" entries
+    directories_to_create: set[str] = set()
+    
+    # First pass: collect all directories that will be created
+    for file_info in files:
+        if file_info.get("is_directory", False) and file_info.get("change_type") == "Add":
+            dir_path = file_info["path"].replace("\\", "/").rstrip("/")
+            directories_to_create.add(dir_path)
+            # Also add all parent paths that this directory implies
+            parts = dir_path.split("/")
+            for i in range(1, len(parts)):
+                parent = "/".join(parts[:i])
+                if parent:
+                    directories_to_create.add(parent)
 
     for file_info in files:
         path = file_info["path"]
         change_type = file_info["change_type"]
+        is_directory = file_info.get("is_directory", False)
         full_path = repo_root / path
 
         if change_type in ("Modify", "Delete"):
@@ -595,16 +811,38 @@ def validate_file_paths(
                     )
                 )
         elif change_type == "Add":
-            parent_dir = full_path.parent
-            if not parent_dir.exists():
-                errors.append(
-                    ValidationError(
-                        severity=ValidationSeverity.ERROR,
-                        section="2.1",
-                        message=f"Parent directory does not exist for Add file: {path}",
-                        file_path=path,
+            # Issue #334: For directories, check parent of directory
+            # For files, check parent directory exists or will be created
+            if is_directory:
+                # For directory creation, check parent exists or will be created
+                parent_dir = Path(path).parent
+                parent_str = str(parent_dir).replace("\\", "/")
+                full_parent = repo_root / parent_dir
+                
+                if parent_str and parent_str != ".":
+                    if not full_parent.exists() and parent_str not in directories_to_create:
+                        errors.append(
+                            ValidationError(
+                                severity=ValidationSeverity.ERROR,
+                                section="2.1",
+                                message=f"Parent directory does not exist for Add directory: {path}",
+                                file_path=path,
+                            )
+                        )
+            else:
+                # For file creation, check parent exists or will be created
+                parent_dir = full_path.parent
+                parent_rel = str(Path(path).parent).replace("\\", "/")
+                
+                if not parent_dir.exists() and parent_rel not in directories_to_create:
+                    errors.append(
+                        ValidationError(
+                            severity=ValidationSeverity.ERROR,
+                            section="2.1",
+                            message=f"Parent directory does not exist for Add file: {path}",
+                            file_path=path,
+                        )
                     )
-                )
 
     return errors
 
@@ -891,6 +1129,9 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     Issue #322: Explicit check for invalid/missing repo_root, returning
     blocking error instead of silent skip.
 
+    Issue #334: Normalize change types with parenthetical suffixes and
+    save validation errors to lineage for audit trail.
+
     Args:
         state: Workflow state with current_draft and target_repo.
 
@@ -900,11 +1141,25 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     lld_content = state.get("current_draft", "")
     target_repo = state.get("target_repo", "")
     issue_number = state.get("issue_number")
+    lineage_path = state.get("lineage_path")
+    draft_number = state.get("draft_number", 1)
 
     # Handle empty draft
     if not lld_content or not lld_content.strip():
+        error_messages = ["LLD content is empty"]
+        
+        # Issue #334: Save errors to lineage if path provided
+        if lineage_path:
+            try:
+                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+            except Exception as e:
+                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        
+        # Issue #334: Print errors to console
+        print_validation_errors(error_messages)
+        
         return {
-            "validation_errors": ["LLD content is empty"],
+            "validation_errors": error_messages,
             "validation_warnings": [],
             "lld_status": "BLOCKED",
             "error_message": "MECHANICAL VALIDATION FAILED:\n  - LLD content is empty",
@@ -926,6 +1181,17 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         all_errors.extend(section_errors)
         # Fail fast on missing sections - can't validate further
         error_messages = [e.message for e in all_errors]
+        
+        # Issue #334: Save errors to lineage
+        if lineage_path:
+            try:
+                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+            except Exception as e:
+                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        
+        # Issue #334: Print errors to console
+        print_validation_errors(error_messages)
+        
         return {
             "validation_errors": error_messages,
             "validation_warnings": [],
@@ -944,13 +1210,24 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 all_warnings.append(error)
 
-    # Step 3: Parse Section 2.1 Files Changed table
+    # Step 3: Parse Section 2.1 Files Changed table (now with normalization)
     files, parse_errors = parse_files_changed_table(lld_content)
     all_errors.extend(parse_errors)
 
     if parse_errors:
         # Can't continue validation without file list
         error_messages = [e.message for e in all_errors]
+        
+        # Issue #334: Save errors to lineage
+        if lineage_path:
+            try:
+                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+            except Exception as e:
+                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        
+        # Issue #334: Print errors to console
+        print_validation_errors(error_messages)
+        
         return {
             "validation_errors": error_messages,
             "validation_warnings": [],
@@ -960,6 +1237,17 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             ),
         }
 
+    # Step 3.5: Issue #334 - Validate directory creation order
+    order_errors = validate_directory_creation_order(files)
+    for error_msg in order_errors:
+        all_errors.append(
+            ValidationError(
+                severity=ValidationSeverity.ERROR,
+                section="2.1",
+                message=error_msg,
+            )
+        )
+
     # Step 4: Issue #322 - Validate file paths with explicit repo_root check
     # This replaces the old silent skip behavior
     path_errors, path_validation_ran = validate_file_paths_with_repo_check(files, repo_root)
@@ -968,6 +1256,17 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     # If repo_root validation failed, we have a blocking error - return early
     if not path_validation_ran and path_errors:
         error_messages = [e.message for e in all_errors]
+        
+        # Issue #334: Save errors to lineage
+        if lineage_path:
+            try:
+                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+            except Exception as e:
+                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        
+        # Issue #334: Print errors to console
+        print_validation_errors(error_messages)
+        
         return {
             "validation_errors": error_messages,
             "validation_warnings": [],
@@ -997,6 +1296,16 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     warning_messages = [w.message for w in all_warnings]
 
     if all_errors:
+        # Issue #334: Save errors to lineage
+        if lineage_path:
+            try:
+                save_validation_errors_to_lineage(error_messages, Path(lineage_path), draft_number)
+            except Exception as e:
+                logger.warning(f"Failed to save validation errors to lineage: {e}")
+        
+        # Issue #334: Print errors to console
+        print_validation_errors(error_messages)
+        
         return {
             "validation_errors": error_messages,
             "validation_warnings": warning_messages,

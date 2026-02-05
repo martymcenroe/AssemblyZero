@@ -3,6 +3,7 @@
 Issue #101: Unified Requirements Workflow
 Issue #248: Add conditional edge for question-loop after review
 Issue #277: Add mechanical validation node before human gate
+Issue #334: Print validation errors in route_after_validate function
 
 Creates a LangGraph StateGraph that connects:
 - N0: load_input (brief or issue loading)
@@ -25,6 +26,9 @@ loop back to N3 with a followup prompt. If HUMAN_REQUIRED, force N4.
 Issue #277 addition: N1.5 validates LLD structure mechanically (paths, sections)
 before any human or LLM review. Blocks on errors, warns on issues.
 
+Issue #334 addition: Validation errors are now printed to console in 
+route_after_validate_mechanical for immediate user feedback.
+
 Routing is controlled by:
 - error_message: Non-empty routes to END
 - config_gates_*: Whether human gates are enabled
@@ -45,6 +49,9 @@ from agentos.workflows.requirements.nodes import (
     load_input,
     review,
     validate_lld_mechanical,
+)
+from agentos.workflows.requirements.nodes.validate_mechanical import (
+    print_validation_errors,
 )
 from agentos.workflows.requirements.state import RequirementsWorkflowState
 
@@ -129,6 +136,7 @@ def route_after_validate_mechanical(
     """Route after validate_lld_mechanical node.
 
     Issue #277: Routes based on validation result.
+    Issue #334: Prints validation errors to console for immediate feedback.
 
     Routes to:
     - N2_human_gate_draft: Validation passed, gate enabled
@@ -144,6 +152,11 @@ def route_after_validate_mechanical(
     """
     # Check for validation failure (BLOCKED status)
     if state.get("lld_status") == "BLOCKED":
+        # Issue #334: Print validation errors to console for user visibility
+        validation_errors = state.get("validation_errors", [])
+        if validation_errors:
+            print_validation_errors(validation_errors)
+        
         # Check max iterations before looping back
         iteration_count = state.get("iteration_count", 0)
         max_iterations = state.get("max_iterations", 20)
@@ -349,6 +362,7 @@ def create_requirements_graph() -> StateGraph:
 
     # N1.5 -> N2 or N3 or N1 or END (based on validation result)
     # Issue #277: Mechanical validation routes based on BLOCKED status
+    # Issue #334: Prints validation errors before routing back to drafter
     graph.add_conditional_edges(
         N1_5_VALIDATE_MECHANICAL,
         route_after_validate_mechanical,

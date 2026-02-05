@@ -2,6 +2,7 @@
 
 Issue #101: Unified Requirements Workflow
 Issue #248: Added open_questions_status field
+Issue #334: Added is_directory flag to FileChange TypedDict
 
 This TypedDict merges IssueWorkflowState and LLDWorkflowState to support
 both workflow types through a single graph. Fields are organized by:
@@ -54,6 +55,24 @@ class SlugCollisionChoice(str, Enum):
     NEW_NAME = "N"
     CLEAN = "C"
     ABORT = "A"
+
+
+class FileChange(TypedDict, total=False):
+    """A file change entry from LLD Section 2.1.
+
+    Issue #334: Added is_directory flag for directory entries.
+
+    Attributes:
+        path: File or directory path.
+        change_type: Normalized change type ("add", "modify", "delete").
+        description: Brief description of the change.
+        is_directory: True if path represents a directory (e.g., from "Add (Directory)").
+    """
+
+    path: str
+    change_type: str
+    description: str
+    is_directory: bool
 
 
 class RequirementsWorkflowState(TypedDict, total=False):
@@ -130,6 +149,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
         created_files: List of files created by workflow for commit.
         commit_sha: SHA of commit if successfully pushed.
         commit_error: Error message if commit/push failed.
+
+        # Lineage tracking (Issue #334)
+        lineage_path: Path to lineage folder for audit trail.
+        draft_number: Current draft iteration number.
     """
 
     # Configuration
@@ -198,6 +221,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
     commit_sha: str
     commit_error: str
 
+    # Lineage tracking (Issue #334)
+    lineage_path: str
+    draft_number: int
+
 
 def create_initial_state(
     workflow_type: Literal["issue", "lld"],
@@ -216,6 +243,8 @@ def create_initial_state(
     # LLD-specific
     issue_number: int = 0,
     context_files: list[str] | None = None,
+    # Lineage tracking (Issue #334)
+    lineage_path: str = "",
 ) -> RequirementsWorkflowState:
     """Create initial state for requirements workflow.
 
@@ -234,6 +263,7 @@ def create_initial_state(
         source_idea: Path to source idea (issue workflow).
         issue_number: GitHub issue number (LLD workflow).
         context_files: Context file paths (LLD workflow).
+        lineage_path: Path to lineage folder for audit trail (Issue #334).
 
     Returns:
         Initialized RequirementsWorkflowState.
@@ -285,6 +315,9 @@ def create_initial_state(
         "created_files": [],
         "commit_sha": "",
         "commit_error": "",
+        # Lineage tracking (Issue #334)
+        "lineage_path": lineage_path,
+        "draft_number": 1,
     }
 
     # Add workflow-type specific fields
