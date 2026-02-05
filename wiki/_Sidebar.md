@@ -15,24 +15,34 @@
 ### Architecture
 
 - [Dramatis Personae](Dramatis-Personae)
-- [Governance Pipeline](Governance-Pipeline)
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration)
 - [Gemini Verification](Gemini-Verification)
 - [Governance Gates](Governance-Gates)
-- [LangGraph Evolution](LangGraph-Evolution)
 - [How the AgentOS Learns](How-the-AgentOS-Learns)
+- [LangGraph Evolution](LangGraph-Evolution)
 
 ---
 
-### Workflows
+### Core Workflows
 
-- [TDD Testing Workflow](TDD-Testing-Workflow)
+- [Requirements Workflow](Requirements-Workflow)
+- [Implementation Workflow](Implementation-Workflow)
+- [The Scout](The-Scout-External-Intelligence-Gathering-Workflow)
+
+---
+
+### Intelligence Layer
+
+- [Hex (Codebase)](Hex-Codebase-Intelligence)
+- [Ponder Stibbons](Ponder-Stibbons)
+- [History Monks](History-Monks)
 
 ---
 
 ### Core Solutions
 
 - [Permission Friction](Permission-Friction)
+- [Verdict Analyzer](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
 
 ---
 
@@ -46,8 +56,6 @@
 
 - [Audits Catalog](Audits-Catalog)
 - [Tools Reference](Tools-Reference)
-- [The Scout External Intelligence Gathering Workflow](The-Scout-External-Intelligence-Gathering-Workflow)
-- [Verdict Analyzer   Template Improvement from Gemini Verdicts](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
 
 ---
 

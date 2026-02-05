@@ -5,25 +5,49 @@
 > Run 12+ AI agents concurrently. One identity. Full governance. Measurable ROI.
 
 ```mermaid
-graph LR
+graph TD
+    subgraph Intent["THE GREAT GOD OM"]
+        O["Human Intent<br/>& Oversight"]
+    end
+
     subgraph Agents["CLAUDE AGENTS (12+)"]
-        A["Feature | Bug Fix | Docs | Review"]
+        A["Feature | Bug Fix<br/>Docs | Review"]
     end
 
-    subgraph Gemini["GEMINI 3 PRO"]
-        G["Issue | LLD | Code | Security"]
+    subgraph Verify["GEMINI VERIFICATION"]
+        G["LLD Review | Code Review<br/>Security | Quality"]
     end
 
-    subgraph Gov["GOVERNANCE"]
-        M["34 Audits | Friction | KPIs"]
+    subgraph Gov["GOVERNANCE GATES"]
+        M["Requirements | Implementation<br/>Reports | Audit Trail"]
     end
 
-    subgraph Road["LANGGRAPH"]
-        R["State Machines | Checkpoints"]
+    subgraph Future["LANGGRAPH EVOLUTION"]
+        R["State Machines<br/>Checkpoints | Supervisors"]
     end
 
-    Agents --> Gemini --> Gov --> Road
+    O --> A
+    A --> G
+    G --> Gov
+    Gov --> R
+    R -.->|"Feedback Loop"| A
 ```
+
+---
+
+## Production Evidence: 50 Issues Closed
+
+AgentOS isn't theoretical. It's been battle-tested through **50 completed issues** spanning:
+
+| Theme | Issues | Examples |
+|-------|--------|----------|
+| **Workflow Automation** | 15 | LLD workflow, implementation workflow, report generation |
+| **Governance & Gates** | 12 | Gemini verification, skipped test gates, mechanical validation |
+| **Developer Experience** | 10 | Permission friction, worktree isolation, CI/CD |
+| **Intelligence Layer** | 8 | Scout workflow, verdict analyzer, template learning |
+| **Infrastructure** | 5 | GitHub Actions, Poetry dependencies, cross-platform |
+
+**Current velocity:** ~3 issues/day with multi-agent orchestration
 
 ---
 
@@ -69,14 +93,66 @@ AgentOS provides that infrastructure layer:
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration) - **The headline feature**
 - [Gemini Verification](Gemini-Verification) - Claude + Gemini architecture
 - [LangGraph Evolution](LangGraph-Evolution) - **The roadmap** (state machines, checkpointing)
+- [How the AgentOS Learns](How-the-AgentOS-Learns) - Self-improving governance feedback loop
 
 ### Developers
 - [Quick Start](Quick-Start) - 5-minute setup
 - [Permission Friction](Permission-Friction) - The #1 adoption blocker solved
+- [Why Windows?](Why-Windows) - Cross-platform design decisions
 
 ### Security & Compliance Teams
 - [Governance Gates](Governance-Gates) - LLD, implementation, report gates
 - [Security Compliance](Security-Compliance) - OWASP, GDPR, AI Safety audits
+
+---
+
+## Core Workflows
+
+AgentOS implements two primary governed workflows:
+
+### Requirements Workflow
+```mermaid
+graph TD
+    I["Issue Created"]
+    L["Write LLD"]
+    G{"Gemini<br/>Review"}
+    R["Revise"]
+    A["APPROVED"]
+    C["Ready for<br/>Implementation"]
+
+    I --> L
+    L --> G
+    G -->|"BLOCK"| R
+    R --> G
+    G -->|"APPROVE"| A
+    A --> C
+```
+
+Design documents are reviewed by Gemini before any code is written. [Learn more](Requirements-Workflow)
+
+### Implementation Workflow
+```mermaid
+graph TD
+    S["Start Coding"]
+    W["Create Worktree"]
+    I["Implement"]
+    T["Run Tests"]
+    R["Generate Reports"]
+    G{"Gemini<br/>Review"}
+    P["Create PR"]
+    M["Merge & Cleanup"]
+
+    S --> W
+    W --> I
+    I --> T
+    T --> R
+    R --> G
+    G -->|"BLOCK"| I
+    G -->|"APPROVE"| P
+    P --> M
+```
+
+Code is reviewed by Gemini before PR creation. [Learn more](Implementation-Workflow)
 
 ---
 
@@ -97,27 +173,32 @@ See: [LangGraph Evolution](LangGraph-Evolution) for the full technical vision.
 ## Key Differentiators
 
 ### 1. Multi-Model Verification (Unique)
-Claude builds code. Gemini 3 Pro reviews it. This isn't just "two models" - it's adversarial verification where one AI checks another's work before humans approve. [Learn more](Gemini-Verification)
+Claude builds code. Gemini reviews it. This isn't just "two models" - it's adversarial verification where one AI checks another's work before humans approve. [Learn more](Gemini-Verification)
 
 ### 2. Friction-First Approach
 We obsess over permission friction because it's the #1 adoption killer. Our friction logging protocol (Zugzwang) identifies patterns, and our tools auto-remediate them. [Learn more](Permission-Friction)
 
-### 3. Adversarial Audits
-34 audits that actively seek violations, not confirm compliance. Security teams trust this approach because it's designed to find problems. [Learn more](Security-Compliance)
+### 3. Self-Improving Governance
+The system learns from Gemini verdicts to improve templates automatically. 164 verdicts analyzed, 6 template sections added. [Learn more](How-the-AgentOS-Learns)
 
-### 4. Enterprise-Ready Governance
-LLD gates, implementation gates, report generation - the checkpoints security teams require. And they're enforced, not suggested. [Learn more](Governance-Gates)
+### 4. Discworld Personas
+Every workflow has a [Discworld character](Dramatis-Personae) defining its philosophy. This isn't whimsy - it's intuitive system design. Vimes guards (regression tests), Lu-Tze sweeps (janitor), Brutha remembers (RAG).
 
 ---
 
-## Production Evidence
+## The Cast
 
-This isn't theoretical. AgentOS is used daily:
+| Persona | Function | Philosophy |
+|---------|----------|------------|
+| **[The Great God Om](The-Great-God-Om)** | Human Orchestrator | Pure Intent |
+| **Moist von Lipwig** | Pipeline Orchestration | Keep messages moving |
+| **Lord Vetinari** | Work Visibility | Information is power |
+| **Commander Vimes** | Regression Tests | Deep suspicion |
+| **Captain Angua** | External Intelligence | Sensory awareness |
+| **Brutha** | RAG Memory | Perfect recall |
+| **Lu-Tze** | Maintenance | Constant sweeping |
 
-- **12+ concurrent agents** running in parallel
-- **Gemini verification** catching issues before code review
-- **Permission patterns** eliminating 95% of approval friction
-- **34 audits** covering OWASP, GDPR, NIST AI safety
+[Full cast →](Dramatis-Personae)
 
 ---
 
@@ -127,3 +208,8 @@ This isn't theoretical. AgentOS is used daily:
 2. **Understand the roadmap**: [LangGraph Evolution](LangGraph-Evolution)
 3. **See the metrics**: [Measuring Productivity](Measuring-Productivity)
 4. **Try it**: [Quick Start](Quick-Start)
+
+---
+
+*"A man is not dead while his name is still spoken."*
+**GNU Terry Pratchett**

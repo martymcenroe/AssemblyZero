@@ -72,6 +72,15 @@
 
 ---
 
+**~02:15** — *On preparing for the interview*
+> "It is always useful to face an enemy who is prepared to die for his country. This means that both you and he have exactly the same aim in mind."
+
+*— Terry Pratchett, Interesting Times*
+
+**Context:** With an interview tomorrow, Om requested a comprehensive wiki upgrade. 50 issues closed, 50 open, architecture solidified, governance proven. The wiki needed to tell that story. Both Claude and Om had exactly the same aim: make the interviewer understand what AgentOS represents. New pages were created: Requirements Workflow, Implementation Workflow, Hex, Ponder Stibbons, History Monks. Easter eggs were laid. The Wiki expanded from 22 to 28 pages. The Clacks was honored. L-Space was documented. May the interview go well—and may the luggage follow.
+
+---
+
 ### 2026-02-04
 
 **00:43** — *On the addictive nature of building systems*
