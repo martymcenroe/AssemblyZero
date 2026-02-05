@@ -14,7 +14,7 @@
 
 ### Architecture
 
-- [Workflow Personas](Workflow-Personas)
+- [Dramatis Personae](Dramatis-Personae)
 - [Governance Pipeline](Governance-Pipeline)
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration)
 - [Gemini Verification](Gemini-Verification)
@@ -50,7 +50,12 @@
 - [Verdict Analyzer   Template Improvement from Gemini Verdicts](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts)
 
 ---
-- [Fix Implementation Workflow Should Archive LLD and Reports to done  on Completion](Fix-Implementation-Workflow-Should-Archive-LLD-and-Reports-to-done--on-Completion)
+
+### Reflections
+
+- [Lessons from the Turtle](Lessons-from-the-Turtle)
+
+---
 
 ### Chronicles
 

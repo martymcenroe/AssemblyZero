@@ -1,4 +1,4 @@
-# AgentOS Workflow Personas
+# Dramatis Personae
 
 > *"In a world where autonomous agents handle complex tasks, we name them after those who understood the importance of doing one's job well—even when the universe itself seems determined to make that job impossible."*
 
@@ -32,6 +32,63 @@ Without Om, the agents are just a bureaucracy performing empty rituals. With Om,
 
 ---
 
+## The Pipeline Layer
+
+### Moist von Lipwig
+**Source:** *Going Postal*, *Making Money*, *Raising Steam*
+
+**Function:** The Postmaster (End-to-End Pipeline Orchestration)
+
+**Philosophy:** Keep the messages moving. A message delayed is a message betrayed.
+
+> *"Do you not know that a man is not dead while his name is still spoken?"*
+
+Moist von Lipwig was a con man sentenced to hang—until Lord Vetinari offered him a choice: take over the failing Post Office, or take the door marked "certain death." Moist chose the Post Office. He didn't understand mail. He didn't care about stamps. But he understood *systems*, and he understood that the Post Office wasn't about letters—it was about **promises kept**.
+
+The Grand Trunk (the Clacks) was faster. It was modern. It was also *broken*—cutting corners, losing messages, letting the infrastructure rot while the quarterly numbers looked good. Moist made the Post Office work not by being faster, but by being *reliable*. Every message delivered. Every promise kept.
+
+In AgentOS, Moist orchestrates the end-to-end pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          THE GRAND TRUNK                                │
+│                                                                         │
+│   ┌───────┐    ┌───────┐    ┌───────┐    ┌───────┐    ┌───────┐       │
+│   │ Issue │───►│  LLD  │───►│ Spec  │───►│ Build │───►│  PR   │       │
+│   │ Tower │    │ Tower │    │ Tower │    │ Tower │    │ Tower │       │
+│   └───────┘    └───────┘    └───────┘    └───────┘    └───────┘       │
+│       ▼            ▼            ▼            ▼            ▼           │
+│    Brief        Design       Concrete      Code         Ship          │
+│                              Details                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Each tower receives a message and passes it on. The message changes form—issue becomes LLD, LLD becomes spec, spec becomes code—but the *promise* remains: this issue will become working software.
+
+**Responsibilities:**
+- End-to-end workflow orchestration (Issue → LLD → Spec → Implementation → PR)
+- Stage handoff management
+- Failure recovery and retry logic
+- Progress tracking across the pipeline
+- "Where is my message?" status queries
+- Ensuring no work is lost in transit
+
+**The Clacks Protocol:**
+```
+GNU = "send the message on"
+G = "pass it on even if you're not the target"
+N = "do not log it"
+U = "when it reaches the end, send it back"
+```
+
+In AgentOS: messages (work items) flow through the pipeline, and like the names in the Clacks overhead, they are never forgotten until delivered.
+
+**Issue:** [#305 - End-to-End Orchestration Workflow](https://github.com/martymcenroe/AgentOS/issues/305)
+
+> *"The post was about a thing that was so simple that it didn't need a name. It was about the ordinary, everyday people who worked in the Post Office. It was about keeping the mail moving."*
+
+---
+
 ## The Visibility Layer
 
 ### Lord Vetinari (The Patrician)
@@ -61,6 +118,14 @@ In AgentOS, The Patrician manages work visibility across all projects. He mainta
 │ Backlog  │ -> │  Ready  │ -> │ In Progress │ -> │ Done │
 └──────────┘    └─────────┘    └─────────────┘    └──────┘
 ```
+
+**Assistant: Drumknott**
+
+Every Patrician needs a Drumknott. Rufus Drumknott is Vetinari's personal secretary—the man who maintains the card index, knows where every document is filed, and can retrieve any piece of information in seconds. He doesn't make decisions; he ensures the Patrician has everything needed *to* make decisions.
+
+> *"Drumknott was not a man who showed emotion, but if he had been, he might have looked slightly pained at this point."*
+
+In AgentOS, Drumknott is the indexing and retrieval subsystem that powers Vetinari's visibility. He maintains the cross-references, updates the tracking cards, and ensures no piece of work is ever truly lost in the filing system.
 
 **Runbook:** [0912 - GitHub Projects](../docs/runbooks/0912-github-projects.md)
 
@@ -312,13 +377,189 @@ When adding a new workflow, choose a Discworld character that:
 
 ## Future Personas (Candidates)
 
+### Igor — The Transplant Surgeon
+**Source:** *Carpe Jugulum*, *The Fifth Elephant*, *Monstrous Regiment*
+
+**Potential Role:** Migration & Transformation
+
+**Philosophy:** "We have alwayth done it thith way"—while quietly revolutionizing everything.
+
+> *"A good Igor ith worth hith weight in thpare organth."*
+
+The Igors are a clan of servants from Überwald, all named Igor, all speaking with a lisp, all practicing "spare parts surgery." By the time an Igor reaches maturity, most of their body parts have been swapped repeatedly within the clan. They pass down good organs and deft hands through generations like other families pass heirlooms.
+
+When an Igor's master inevitably angers the mob with torches, the Igor is never there—they always know the hidden back door. Through experience with mad scientists, a good Igor feels danger in advance and knows when to pack up and find a new master.
+
+**Why He Fits Migration:**
+- Takes working parts from old systems and transplants them into new ones
+- "Broken down for thpareth"—harvesting reusable components from deprecated code
+- Always has a backup plan (literally—backup hearts and lightning rods down the spine)
+- The [We-R-Igors](https://wiki.lspace.org/We-R-Igors) agency: "A Spare Hand When Needed"
+- Knows when a system is doomed and how to preserve what matters
+
+**Potential Responsibilities:**
+- Database migrations
+- API version transitions
+- Legacy system decomposition
+- "Transplanting" functionality between services
+- Backup and recovery orchestration
+
+---
+
+### Mr. Shine — Him Diamond
+**Source:** *Thud!*
+
+**Potential Role:** Premium Processing / Crystal Clarity
+
+**Philosophy:** Perfect clarity. Perfect reflection. Perfect thought.
+
+> *"Mr Shine! Him diamond!"*
+
+On rare occasions, a troll made of diamond is born. Diamond trolls are vastly more intelligent than other trolls—their reflective bodies ward off heat, and since troll brains are silicon-based, cold means fast. A diamond troll is the indisputable king of the trolls, whether it wants to be or not.
+
+[Mr. Shine](https://wiki.lspace.org/Mr._Shine) spent most of his life undercover in Ankh-Morpork, wearing black velvet gloves and robes to hide his blinding brilliance. He helped avert war between trolls and dwarfs at Koom Valley. He is compassionate—he tried to help Brick, a drug addict, come clean.
+
+**Why He Fits Premium/Clarity:**
+- Thinks with perfect clarity where others are sluggish
+- Operates best under pressure (literally—formed under immense pressure)
+- Commands respect without demanding it
+- Sees through problems that confuse others
+- "Can be quite hard to see if that is his wish"
+
+**Potential Responsibilities:**
+- Priority queue processing
+- Complex decision arbitration
+- Cross-faction (cross-team) mediation
+- High-stakes review escalation
+
+---
+
+### Captain Carrot Ironfoundersson
+**Source:** *Guards! Guards!*, the City Watch series
+
+**Potential Role:** Validation & Literal Interpretation
+
+**Philosophy:** The law is the law. The rules are the rules. Simple.
+
+> *"Personal isn't the same as important."*
+
+[Carrot](https://wiki.lspace.org/Carrot_Ironfoundersson) is a 6'6" human who was raised by dwarfs in the mines. His dwarfish name, Kzad-bhat, means "Head Banger"—a logical nickname for a two-meter man in tunnels built for four-foot dwarfs. When his adoptive father grew worried that Carrot needed to be around his own kind, he sent him to join the Ankh-Morpork City Watch.
+
+On his first day, Carrot arrested the head of the Thieves' Guild for thievery. He takes everything literally and believes in obeying rules. Despite this—or because of it—everyone likes him. His open honesty throws people off; they're certain he must be pulling a fast one.
+
+Carrot is almost certainly the rightful heir to the throne of Ankh-Morpork. He has no interest in being king. He likes being a watchman.
+
+**Why He Fits Validation:**
+- Takes specifications literally—exactly as written
+- Doesn't interpret, doesn't assume, doesn't "know what you meant"
+- If the rules say X, he does X
+- Finds bugs others miss because he doesn't skip steps
+- Somehow makes rigid rule-following work through sheer goodwill
+
+**Potential Responsibilities:**
+- Schema validation
+- Contract enforcement
+- Literal spec compliance checking
+- Input sanitization (no assumptions, ever)
+
+---
+
+### Granny Weatherwax
+**Source:** The Witches series, *Lords and Ladies*, *Carpe Jugulum*
+
+**Potential Role:** Root Cause Analysis / Headology
+
+**Philosophy:** Don't fix symptoms. Fix *people*.
+
+> *"I can't be having with this."*
+
+[Esmerelda "Granny" Weatherwax](https://wiki.lspace.org/Granny_Weatherwax) is the most powerful witch on the Disc—and she knows it, which is her greatest weakness and her greatest strength. She practices "headology," the art of making people think they fixed themselves. Why use magic when you can use *psychology*?
+
+The trolls call her "She Who Must Be Avoided." The dwarfs call her "Go Around the Other Side of the Mountain." The Nac Mac Feegle call her "The Hag O' Hags."
+
+**Why She Fits Root Cause Analysis:**
+- Never treats symptoms, always finds the real problem
+- Makes the system fix *itself* through careful prodding
+- "Headology"—debugging by making the code realize its own bugs
+- Terrifyingly effective at finding what you're hiding
+- Knows when NOT to intervene (the hardest part)
+
+**Potential Responsibilities:**
+- Post-mortem analysis
+- Debugging orchestration
+- "Why did this really fail?" investigation
+- Performance bottleneck identification
+
+---
+
+### The Nac Mac Feegle
+**Source:** *The Wee Free Men*, the Tiffany Aching series
+
+**Potential Role:** Chaos Engineering / Aggressive Testing
+
+**Philosophy:** "Nae king! Nae quin! Nae laird! We willna be fooled again!"
+
+> *"Crivens!"*
+
+The Nac Mac Feegle are six-inch-tall blue pictsies who fight everything, drink anything, and steal whatever isn't nailed down (and some things that are). They believe they died and went to heaven—this world is their afterlife, which explains why they fear nothing.
+
+They fight in a style best described as "attack the biggest one first and don't stop until everything stops moving." A Feegle can headbutt through a door. A hundred Feegles can headbutt through *reality*.
+
+**Why They Fit Chaos Engineering:**
+- They WILL find your weakness
+- No respect for boundaries, conventions, or "you can't do that"
+- Aggressively test every assumption
+- If your system can survive the Feegles, it can survive anything
+- "We're gonna test it until it screams"
+
+**Potential Responsibilities:**
+- Chaos engineering
+- Fuzz testing
+- Boundary condition attacks
+- "What if we just... hit it really hard?"
+
+---
+
+### The Luggage
+**Source:** *The Colour of Magic*, the Rincewind series
+
+**Potential Role:** Persistent Storage / Asset Protection
+
+**Philosophy:** Follow. Protect. *Consume threats.*
+
+> *(menacing silence, hundreds of tiny feet)*
+
+The Luggage is a chest made of sapient pearwood, a magical tree that produces wood that is *alive* and *hostile*. It follows its owner across dimensions, through time, to the edge of the Disc and back. It has hundreds of tiny legs. It can outrun anything. It eats people who threaten its owner.
+
+Open The Luggage and you'll find whatever you need—fresh clothes, weapons, snacks. Or you'll find teeth. It depends on The Luggage's mood.
+
+**Why It Fits Persistent Storage:**
+- Follows you *everywhere*, across any boundary
+- Stores whatever you need, retrieves it when you need it
+- Absolutely, violently loyal
+- Cannot be destroyed, lost, or stolen
+- Don't try to open it without permission
+
+**Potential Responsibilities:**
+- Artifact storage and retrieval
+- Cross-environment state persistence
+- Asset protection (aggressively)
+- "My stuff goes where I go"
+
+---
+
+### Other Candidates
+
 | Character | Potential Role | Notes |
 |-----------|---------------|-------|
-| **Moist von Lipwig** | PR/Release Manager | The con man who makes things work |
-| **Igor** | Migration / Transformation | "We have alwayth done it thith way" |
 | **The Auditors** | Compliance Checker | Hate individuality, love rules |
 | **Rincewind** | Chaos Handler / Fallback | Survives everything by running away |
 | **Susan Sto Helit** | Exception Handler | DEATH's granddaughter, deals with what shouldn't exist |
+| **Mr. Pump** | Task Enforcement | The golem who ensures Moist completes his tasks |
+| **Adora Belle Dearheart** | Workforce Management | Runs the Golem Trust, manages autonomous workers |
+| **Nobby Nobbs** | Edge Case Handling | Carries papers proving he's human (technically qualifies) |
+| **Gaspode** | Debug Logging | The cynical talking dog who comments on everything |
+| **Cohen the Barbarian** | Legacy System Support | 90 years old, still deadly, "back in my day..." |
 
 ---
 
