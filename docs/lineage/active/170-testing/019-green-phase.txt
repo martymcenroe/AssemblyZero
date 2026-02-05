@@ -1,0 +1,220 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AgentOS-170
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.4, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 25 items
+
+tests/test_issue_170.py::test_id FAILED                                  [  4%]
+tests/test_issue_170.py::test_t010 FAILED                                [  8%]
+tests/test_issue_170.py::test_t020 FAILED                                [ 12%]
+tests/test_issue_170.py::test_t030 FAILED                                [ 16%]
+tests/test_issue_170.py::test_t040 FAILED                                [ 20%]
+tests/test_issue_170.py::test_t050 FAILED                                [ 24%]
+tests/test_issue_170.py::test_t060 FAILED                                [ 28%]
+tests/test_issue_170.py::test_t070 FAILED                                [ 32%]
+tests/test_issue_170.py::test_t080 FAILED                                [ 36%]
+tests/test_issue_170.py::test_t090 FAILED                                [ 40%]
+tests/test_issue_170.py::test_t100 FAILED                                [ 44%]
+tests/test_issue_170.py::test_t110 FAILED                                [ 48%]
+tests/test_issue_170.py::test_t120 FAILED                                [ 52%]
+tests/test_issue_170.py::test_010 FAILED                                 [ 56%]
+tests/test_issue_170.py::test_020 FAILED                                 [ 60%]
+tests/test_issue_170.py::test_030 FAILED                                 [ 64%]
+tests/test_issue_170.py::test_040 FAILED                                 [ 68%]
+tests/test_issue_170.py::test_050 FAILED                                 [ 72%]
+tests/test_issue_170.py::test_060 FAILED                                 [ 76%]
+tests/test_issue_170.py::test_070 FAILED                                 [ 80%]
+tests/test_issue_170.py::test_080 FAILED                                 [ 84%]
+tests/test_issue_170.py::test_090 FAILED                                 [ 88%]
+tests/test_issue_170.py::test_100 FAILED                                 [ 92%]
+tests/test_issue_170.py::test_110 FAILED                                 [ 96%]
+tests/test_issue_170.py::test_120 FAILED                                 [100%]
+ERROR: Coverage failure: total of 11 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+___________________________________ test_id ___________________________________
+tests\test_issue_170.py:37: in test_id
+    assert False, 'TDD RED: test_id not implemented'
+E   AssertionError: TDD RED: test_id not implemented
+E   assert False
+__________________________________ test_t010 __________________________________
+tests\test_issue_170.py:52: in test_t010
+    assert False, 'TDD RED: test_t010 not implemented'
+E   AssertionError: TDD RED: test_t010 not implemented
+E   assert False
+__________________________________ test_t020 __________________________________
+tests\test_issue_170.py:67: in test_t020
+    assert False, 'TDD RED: test_t020 not implemented'
+E   AssertionError: TDD RED: test_t020 not implemented
+E   assert False
+__________________________________ test_t030 __________________________________
+tests\test_issue_170.py:82: in test_t030
+    assert False, 'TDD RED: test_t030 not implemented'
+E   AssertionError: TDD RED: test_t030 not implemented
+E   assert False
+__________________________________ test_t040 __________________________________
+tests\test_issue_170.py:97: in test_t040
+    assert False, 'TDD RED: test_t040 not implemented'
+E   AssertionError: TDD RED: test_t040 not implemented
+E   assert False
+__________________________________ test_t050 __________________________________
+tests\test_issue_170.py:113: in test_t050
+    assert False, 'TDD RED: test_t050 not implemented'
+E   AssertionError: TDD RED: test_t050 not implemented
+E   assert False
+__________________________________ test_t060 __________________________________
+tests\test_issue_170.py:128: in test_t060
+    assert False, 'TDD RED: test_t060 not implemented'
+E   AssertionError: TDD RED: test_t060 not implemented
+E   assert False
+__________________________________ test_t070 __________________________________
+tests\test_issue_170.py:144: in test_t070
+    assert False, 'TDD RED: test_t070 not implemented'
+E   AssertionError: TDD RED: test_t070 not implemented
+E   assert False
+__________________________________ test_t080 __________________________________
+tests\test_issue_170.py:159: in test_t080
+    assert False, 'TDD RED: test_t080 not implemented'
+E   AssertionError: TDD RED: test_t080 not implemented
+E   assert False
+__________________________________ test_t090 __________________________________
+tests\test_issue_170.py:174: in test_t090
+    assert False, 'TDD RED: test_t090 not implemented'
+E   AssertionError: TDD RED: test_t090 not implemented
+E   assert False
+__________________________________ test_t100 __________________________________
+tests\test_issue_170.py:189: in test_t100
+    assert False, 'TDD RED: test_t100 not implemented'
+E   AssertionError: TDD RED: test_t100 not implemented
+E   assert False
+__________________________________ test_t110 __________________________________
+tests\test_issue_170.py:205: in test_t110
+    assert False, 'TDD RED: test_t110 not implemented'
+E   AssertionError: TDD RED: test_t110 not implemented
+E   assert False
+__________________________________ test_t120 __________________________________
+tests\test_issue_170.py:221: in test_t120
+    assert False, 'TDD RED: test_t120 not implemented'
+E   AssertionError: TDD RED: test_t120 not implemented
+E   assert False
+__________________________________ test_010 ___________________________________
+tests\test_issue_170.py:237: in test_010
+    assert False, 'TDD RED: test_010 not implemented'
+E   AssertionError: TDD RED: test_010 not implemented
+E   assert False
+__________________________________ test_020 ___________________________________
+tests\test_issue_170.py:253: in test_020
+    assert False, 'TDD RED: test_020 not implemented'
+E   AssertionError: TDD RED: test_020 not implemented
+E   assert False
+__________________________________ test_030 ___________________________________
+tests\test_issue_170.py:269: in test_030
+    assert False, 'TDD RED: test_030 not implemented'
+E   AssertionError: TDD RED: test_030 not implemented
+E   assert False
+__________________________________ test_040 ___________________________________
+tests\test_issue_170.py:285: in test_040
+    assert False, 'TDD RED: test_040 not implemented'
+E   AssertionError: TDD RED: test_040 not implemented
+E   assert False
+__________________________________ test_050 ___________________________________
+tests\test_issue_170.py:301: in test_050
+    assert False, 'TDD RED: test_050 not implemented'
+E   AssertionError: TDD RED: test_050 not implemented
+E   assert False
+__________________________________ test_060 ___________________________________
+tests\test_issue_170.py:317: in test_060
+    assert False, 'TDD RED: test_060 not implemented'
+E   AssertionError: TDD RED: test_060 not implemented
+E   assert False
+__________________________________ test_070 ___________________________________
+tests\test_issue_170.py:333: in test_070
+    assert False, 'TDD RED: test_070 not implemented'
+E   AssertionError: TDD RED: test_070 not implemented
+E   assert False
+__________________________________ test_080 ___________________________________
+tests\test_issue_170.py:349: in test_080
+    assert False, 'TDD RED: test_080 not implemented'
+E   AssertionError: TDD RED: test_080 not implemented
+E   assert False
+__________________________________ test_090 ___________________________________
+tests\test_issue_170.py:365: in test_090
+    assert False, 'TDD RED: test_090 not implemented'
+E   AssertionError: TDD RED: test_090 not implemented
+E   assert False
+__________________________________ test_100 ___________________________________
+tests\test_issue_170.py:381: in test_100
+    assert False, 'TDD RED: test_100 not implemented'
+E   AssertionError: TDD RED: test_100 not implemented
+E   assert False
+__________________________________ test_110 ___________________________________
+tests\test_issue_170.py:397: in test_110
+    assert False, 'TDD RED: test_110 not implemented'
+E   AssertionError: TDD RED: test_110 not implemented
+E   assert False
+__________________________________ test_120 ___________________________________
+tests\test_issue_170.py:413: in test_120
+    assert False, 'TDD RED: test_120 not implemented'
+E   AssertionError: TDD RED: test_120 not implemented
+E   assert False
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:27
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:27: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77: DeprecationWarning: ForwardRef._evaluate is a private API and is retained for compatibility, but will be removed in Python 3.16. Use ForwardRef.evaluate() or typing.evaluate_forward_ref() instead.
+    return cast(Any, type_)._evaluate(globalns, localns, type_params=(), recursive_guard=set())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                  Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------
+agentos\nodes\check_type_renames.py     128    114    11%   57-99, 125-195, 207-237, 248, 272-361
+-------------------------------------------------------------------
+TOTAL                                   128    114    11%
+FAIL Required test coverage of 95% not reached. Total coverage: 10.94%
+=========================== short test summary info ===========================
+FAILED tests/test_issue_170.py::test_id - AssertionError: TDD RED: test_id no...
+FAILED tests/test_issue_170.py::test_t010 - AssertionError: TDD RED: test_t01...
+FAILED tests/test_issue_170.py::test_t020 - AssertionError: TDD RED: test_t02...
+FAILED tests/test_issue_170.py::test_t030 - AssertionError: TDD RED: test_t03...
+FAILED tests/test_issue_170.py::test_t040 - AssertionError: TDD RED: test_t04...
+FAILED tests/test_issue_170.py::test_t050 - AssertionError: TDD RED: test_t05...
+FAILED tests/test_issue_170.py::test_t060 - AssertionError: TDD RED: test_t06...
+FAILED tests/test_issue_170.py::test_t070 - AssertionError: TDD RED: test_t07...
+FAILED tests/test_issue_170.py::test_t080 - AssertionError: TDD RED: test_t08...
+FAILED tests/test_issue_170.py::test_t090 - AssertionError: TDD RED: test_t09...
+FAILED tests/test_issue_170.py::test_t100 - AssertionError: TDD RED: test_t10...
+FAILED tests/test_issue_170.py::test_t110 - AssertionError: TDD RED: test_t11...
+FAILED tests/test_issue_170.py::test_t120 - AssertionError: TDD RED: test_t12...
+FAILED tests/test_issue_170.py::test_010 - AssertionError: TDD RED: test_010 ...
+FAILED tests/test_issue_170.py::test_020 - AssertionError: TDD RED: test_020 ...
+FAILED tests/test_issue_170.py::test_030 - AssertionError: TDD RED: test_030 ...
+FAILED tests/test_issue_170.py::test_040 - AssertionError: TDD RED: test_040 ...
+FAILED tests/test_issue_170.py::test_050 - AssertionError: TDD RED: test_050 ...
+FAILED tests/test_issue_170.py::test_060 - AssertionError: TDD RED: test_060 ...
+FAILED tests/test_issue_170.py::test_070 - AssertionError: TDD RED: test_070 ...
+FAILED tests/test_issue_170.py::test_080 - AssertionError: TDD RED: test_080 ...
+FAILED tests/test_issue_170.py::test_090 - AssertionError: TDD RED: test_090 ...
+FAILED tests/test_issue_170.py::test_100 - AssertionError: TDD RED: test_100 ...
+FAILED tests/test_issue_170.py::test_110 - AssertionError: TDD RED: test_110 ...
+FAILED tests/test_issue_170.py::test_120 - AssertionError: TDD RED: test_120 ...
+======================= 25 failed, 9 warnings in 0.97s ========================
+

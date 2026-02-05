@@ -1,0 +1,16 @@
+```python
+diff --git a/agentos/types.py b/agentos/types.py
+index 1234567..abcdef0 100644
+--- a/agentos/types.py
++++ b/agentos/types.py
+@@ -10,9 +10,6 @@ from typing import Any, TypedDict
+ 
+ logger = logging.getLogger(__name__)
+ 
+-RemovedTypeAlias = TypedDict('RemovedTypeAlias', {'field': str})
+-
+-
+ class WorkflowState(TypedDict):
+     """State for workflow execution."""
+     pass
+```
