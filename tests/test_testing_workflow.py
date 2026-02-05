@@ -3701,7 +3701,8 @@ class TestImplementCodeCLIPaths:
 
                 response, error = call_claude_headless("test prompt")
 
-                assert "timed out" in error.lower()
+                # Issue #321: Error message now includes timeout duration
+                assert "timeout" in error.lower()
 
     def test_call_claude_headless_cli_empty_response(self):
         """call_claude_headless handles empty CLI response."""
