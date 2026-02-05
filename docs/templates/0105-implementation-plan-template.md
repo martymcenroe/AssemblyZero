@@ -1,4 +1,4 @@
-# 1{IssueID} - Implementation Plan: {Title}
+# {IssueID} - Implementation Plan: {Title}
 
 **Issue:** #{IssueID}
 **Status:** Draft | Active | Complete

@@ -1,4 +1,4 @@
-# 1{IssueID} - Feature: {Title}
+# {IssueID} - Feature: {Title}
 
 <!-- Template Metadata
 Last Updated: 2026-02-02
