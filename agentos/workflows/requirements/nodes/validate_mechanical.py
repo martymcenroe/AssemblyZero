@@ -658,8 +658,12 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             print(f"  - {msg}")
 
     # Validation passed - return updates without error
+    # Issue #302: Explicitly set lld_status to clear any previous BLOCKED status
+    # (e.g., from a Gemini verdict). This prevents the router from thinking
+    # validation failed when it actually passed.
     return {
         "validation_errors": [],
         "validation_warnings": warning_messages,
+        "lld_status": "PENDING",  # Clear BLOCKED status from previous Gemini verdicts
         "error_message": "",
     }
