@@ -3,6 +3,9 @@
 Issue #277: Add mechanical validation to catch path errors and section
 inconsistencies before Gemini review.
 
+Issue #306: Add title issue number validation to detect mismatches before
+human or Gemini review.
+
 Issue #312: Add pattern detection for function references vs approach mitigations
 to reduce false positive warnings.
 
@@ -12,6 +15,7 @@ This node validates LLD content deterministically without LLM calls:
 - No placeholder prefixes (src/, lib/, app/) unless they exist
 - Definition of Done matches Files Changed
 - Risk mitigations trace to functions (warning only, with smart filtering)
+- LLD title issue number matches workflow issue number
 """
 
 import logging
@@ -92,6 +96,14 @@ APPROACH_MITIGATION_PATTERNS = [
     re.compile(r'\b(UTF-8|encoding|codec)\b', re.IGNORECASE),  # Encoding references
     re.compile(r'\b(opt-in|default\s+unchanged|explicitly)\b', re.IGNORECASE),  # Practices
 ]
+
+# Issue #306: Pattern for extracting issue number from LLD title
+# Supports: hyphen (-), en-dash (–), em-dash (—)
+# Handles leading zeros: # 099 - Feature or # 99 - Feature
+TITLE_ISSUE_NUMBER_PATTERN = re.compile(
+    r'^#\s+0*(\d+)\s+[-–—]',  # Matches "# 0099 -" or "# 99 –" or "# 99 —"
+    re.MULTILINE
+)
 
 
 # =============================================================================
@@ -210,6 +222,86 @@ def log_skipped_mitigation(mitigation_text: str, matched_patterns: list[str]) ->
         f"Skipped approach-style mitigation: '{mitigation_text[:80]}...' "
         f"(matched patterns: {', '.join(matched_patterns)})"
     )
+
+
+# =============================================================================
+# Issue #306: Title Issue Number Validation
+# =============================================================================
+
+
+def extract_title_issue_number(content: str) -> int | None:
+    """Extract issue number from LLD title line.
+    
+    Handles:
+        - Standard format: # 306 - Feature: Title
+        - Leading zeros: # 099 - Feature: Title
+        - Various dashes: hyphen (-), en-dash (–), em-dash (—)
+        
+    Args:
+        content: Full LLD markdown content
+        
+    Returns:
+        Extracted issue number as int, or None if not found/parseable.
+    """
+    match = TITLE_ISSUE_NUMBER_PATTERN.search(content)
+    if not match:
+        return None
+    
+    try:
+        # Group 1 is the number without leading zeros
+        return int(match.group(1))
+    except (ValueError, IndexError):
+        return None
+
+
+def validate_title_issue_number(content: str, issue_number: int) -> list[ValidationError]:
+    """Verify the LLD title contains the correct issue number.
+    
+    Args:
+        content: Full LLD markdown content
+        issue_number: Expected issue number from workflow context
+        
+    Returns:
+        List of ValidationError dicts. Empty if valid.
+    """
+    errors = []
+    
+    # Check if H1 heading exists
+    h1_match = re.search(r'^#\s+', content, re.MULTILINE)
+    if not h1_match:
+        errors.append(
+            ValidationError(
+                severity=ValidationSeverity.WARNING,
+                section="Title",
+                message="No H1 title found in LLD",
+            )
+        )
+        return errors
+    
+    # Extract issue number from title
+    extracted_number = extract_title_issue_number(content)
+    
+    if extracted_number is None:
+        errors.append(
+            ValidationError(
+                severity=ValidationSeverity.WARNING,
+                section="Title",
+                message="Could not extract issue number from title",
+            )
+        )
+        return errors
+    
+    # Compare extracted number with expected number
+    if extracted_number != issue_number:
+        errors.append(
+            ValidationError(
+                severity=ValidationSeverity.ERROR,
+                section="Title",
+                message=f"Title issue number ({extracted_number}) doesn't match workflow issue ({issue_number})",
+            )
+        )
+    
+    return errors
 
 
 # =============================================================================
@@ -721,6 +813,8 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     Issue #294: Returns only state updates (not full state) for proper
     LangGraph merge behavior, ensuring validation_errors persist.
 
+    Issue #306: Validates LLD title issue number matches workflow issue number.
+
     Issue #312: Smart filtering for approach-style mitigations to reduce
     false positive warnings.
 
@@ -732,6 +826,7 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     lld_content = state.get("current_draft", "")
     target_repo = state.get("target_repo", "")
+    issue_number = state.get("issue_number")
 
     # Handle empty draft
     if not lld_content or not lld_content.strip():
@@ -763,7 +858,16 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             ),
         }
 
-    # Step 2: Parse Section 2.1 Files Changed table
+    # Step 2: Validate title issue number (Issue #306)
+    if issue_number is not None:
+        title_errors = validate_title_issue_number(lld_content, issue_number)
+        for error in title_errors:
+            if error.severity == ValidationSeverity.ERROR:
+                all_errors.append(error)
+            else:
+                all_warnings.append(error)
+
+    # Step 3: Parse Section 2.1 Files Changed table
     files, parse_errors = parse_files_changed_table(lld_content)
     all_errors.extend(parse_errors)
 
@@ -779,20 +883,20 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             ),
         }
 
-    # Step 3: Validate file paths (only if we have repo_root)
+    # Step 4: Validate file paths (only if we have repo_root)
     if repo_root and repo_root.exists():
         path_errors = validate_file_paths(files, repo_root)
         all_errors.extend(path_errors)
 
-        # Step 4: Detect placeholder prefixes
+        # Step 5: Detect placeholder prefixes
         placeholder_errors = detect_placeholder_prefixes(files, repo_root)
         all_errors.extend(placeholder_errors)
 
-    # Step 5: Cross-reference DoD with Files Changed
+    # Step 6: Cross-reference DoD with Files Changed
     xref_errors = cross_reference_sections(lld_content, files)
     all_errors.extend(xref_errors)
 
-    # Step 6: Trace risk mitigations (warnings only, with Issue #312 smart filtering)
+    # Step 7: Trace risk mitigations (warnings only, with Issue #312 smart filtering)
     mitigations = extract_mitigations_from_risks(lld_content)
     functions = extract_function_names(lld_content)
     mitigation_warnings = trace_mitigations_to_functions(mitigations, functions)
