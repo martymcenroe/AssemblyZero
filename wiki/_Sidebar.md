@@ -54,6 +54,7 @@
 ### Reflections
 
 - [Lessons from the Turtle](Lessons-from-the-Turtle)
+- [Why Windows?](Why-Windows)
 
 ---
 
