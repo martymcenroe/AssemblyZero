@@ -9,6 +9,9 @@ human or Gemini review.
 Issue #312: Add pattern detection for function references vs approach mitigations
 to reduce false positive warnings.
 
+Issue #322: Add explicit check for invalid/missing repo_root, returning blocking
+error instead of silent skip.
+
 This node validates LLD content deterministically without LLM calls:
 - Mandatory sections exist (2.1, 11, 12)
 - File paths are valid (Modify/Delete exist, Add parents exist)
@@ -16,6 +19,7 @@ This node validates LLD content deterministically without LLM calls:
 - Definition of Done matches Files Changed
 - Risk mitigations trace to functions (warning only, with smart filtering)
 - LLD title issue number matches workflow issue number
+- Target repo validation (None, empty, non-existent paths are blocking errors)
 """
 
 import logging
@@ -104,6 +108,72 @@ TITLE_ISSUE_NUMBER_PATTERN = re.compile(
     r'^#\s+0*(\d+)\s+[-–—]',  # Matches "# 0099 -" or "# 99 –" or "# 99 —"
     re.MULTILINE
 )
+
+
+# =============================================================================
+# Issue #322: Repo Root Validation Functions
+# =============================================================================
+
+
+def validate_repo_root(repo_root: Path | None) -> tuple[bool, str | None]:
+    """Validate that repo_root is valid and exists.
+    
+    Issue #322: Explicit check for invalid/missing repo_root.
+    
+    Returns:
+        tuple of (is_valid, error_message)
+        - (True, None) if valid
+        - (False, error_message) if invalid
+    """
+    # Check for None
+    if repo_root is None:
+        return (False, "Cannot validate file paths: target_repo not specified")
+    
+    # Check for empty string (Path("") becomes "." in pathlib - current directory)
+    repo_str = str(repo_root)
+    if not repo_str or repo_str.strip() == "" or repo_str == ".":
+        return (False, "Cannot validate file paths: target_repo not specified (empty value)")
+    
+    # Check if path exists on filesystem
+    if not repo_root.exists():
+        return (False, f"Cannot validate file paths: target_repo '{repo_root}' does not exist")
+    
+    return (True, None)
+
+
+def validate_file_paths_with_repo_check(
+    files: list[dict],
+    repo_root: Path | None
+) -> tuple[list[ValidationError], bool]:
+    """Validate file paths against repo, with explicit repo validation.
+    
+    Issue #322: Explicit check for invalid/missing repo_root before path validation.
+    
+    Returns:
+        tuple of (errors, was_validated)
+        - errors: List of validation errors (may include blocking repo error)
+        - was_validated: Whether path validation actually ran
+    """
+    errors: list[ValidationError] = []
+    
+    # First validate repo_root
+    is_valid, error_message = validate_repo_root(repo_root)
+    
+    if not is_valid:
+        errors.append(
+            ValidationError(
+                severity=ValidationSeverity.ERROR,
+                section="2.1",
+                message=error_message,
+            )
+        )
+        return (errors, False)
+    
+    # repo_root is valid, proceed with file path validation
+    path_errors = validate_file_paths(files, repo_root)
+    errors.extend(path_errors)
+    
+    return (errors, True)
 
 
 # =============================================================================
@@ -818,6 +888,9 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     Issue #312: Smart filtering for approach-style mitigations to reduce
     false positive warnings.
 
+    Issue #322: Explicit check for invalid/missing repo_root, returning
+    blocking error instead of silent skip.
+
     Args:
         state: Workflow state with current_draft and target_repo.
 
@@ -837,8 +910,12 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             "error_message": "MECHANICAL VALIDATION FAILED:\n  - LLD content is empty",
         }
 
-    # Get repo root for path validation
-    repo_root = Path(target_repo) if target_repo else None
+    # Issue #322: Get repo root for path validation with explicit validation
+    # Convert to Path if non-empty, otherwise None
+    if target_repo and str(target_repo).strip():
+        repo_root = Path(target_repo)
+    else:
+        repo_root = None
 
     all_errors: list[ValidationError] = []
     all_warnings: list[ValidationError] = []
@@ -883,12 +960,25 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
             ),
         }
 
-    # Step 4: Validate file paths (only if we have repo_root)
-    if repo_root and repo_root.exists():
-        path_errors = validate_file_paths(files, repo_root)
-        all_errors.extend(path_errors)
+    # Step 4: Issue #322 - Validate file paths with explicit repo_root check
+    # This replaces the old silent skip behavior
+    path_errors, path_validation_ran = validate_file_paths_with_repo_check(files, repo_root)
+    all_errors.extend(path_errors)
 
-        # Step 5: Detect placeholder prefixes
+    # If repo_root validation failed, we have a blocking error - return early
+    if not path_validation_ran and path_errors:
+        error_messages = [e.message for e in all_errors]
+        return {
+            "validation_errors": error_messages,
+            "validation_warnings": [],
+            "lld_status": "BLOCKED",
+            "error_message": "MECHANICAL VALIDATION FAILED:\n" + "\n".join(
+                f"  - {msg}" for msg in error_messages
+            ),
+        }
+
+    # Step 5: Detect placeholder prefixes (only if repo_root is valid)
+    if path_validation_ran and repo_root:
         placeholder_errors = detect_placeholder_prefixes(files, repo_root)
         all_errors.extend(placeholder_errors)
 

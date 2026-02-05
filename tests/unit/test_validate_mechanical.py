@@ -938,6 +938,166 @@ class TestValidateTitleIssueNumber:
         assert len(errors) == 0
 
 
+# =============================================================================
+# Issue #322: Repo Root Validation Tests
+# =============================================================================
+
+
+class TestRepoRootValidation:
+    """Tests for repo_root validation in mechanical validation.
+
+    Issue #322: Explicit check for invalid/missing repo_root, returning
+    blocking error instead of silent skip.
+    """
+
+    def test_validation_blocks_when_repo_root_none(self):
+        """T010: repo_root=None returns blocking error with BLOCKED status."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_repo_root,
+        )
+
+        is_valid, error = validate_repo_root(None)
+
+        assert is_valid is False
+        assert error is not None
+        assert "not specified" in error.lower()
+
+    def test_validation_blocks_when_repo_root_empty(self):
+        """T020: repo_root=Path("") returns blocking error with BLOCKED status."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_repo_root,
+        )
+
+        is_valid, error = validate_repo_root(Path(""))
+
+        assert is_valid is False
+        assert error is not None
+        assert "not specified" in error.lower() or "empty" in error.lower()
+
+    def test_validation_blocks_when_repo_root_nonexistent(self):
+        """T030: Non-existent repo_root returns blocking error with path in message."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_repo_root,
+        )
+
+        nonexistent_path = Path("/nonexistent/path/that/does/not/exist")
+        is_valid, error = validate_repo_root(nonexistent_path)
+
+        assert is_valid is False
+        assert error is not None
+        assert "does not exist" in error.lower()
+
+    def test_validation_proceeds_when_repo_root_valid(self, tmp_path):
+        """T040: Valid existing repo_root passes validation."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_repo_root,
+        )
+
+        is_valid, error = validate_repo_root(tmp_path)
+
+        assert is_valid is True
+        assert error is None
+
+    def test_error_message_includes_path(self):
+        """T050: Error message contains the invalid path for debugging."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_repo_root,
+        )
+
+        specific_path = Path("/specific/test/path/for/debugging")
+        is_valid, error = validate_repo_root(specific_path)
+
+        assert is_valid is False
+        assert error is not None
+        # Path separators vary by OS (/ on Unix, \ on Windows)
+        assert "specific" in error and "test" in error and "path" in error
+
+
+class TestRepoRootValidationIntegration:
+    """Integration tests for repo_root validation in full mechanical validation."""
+
+    def test_full_validation_blocks_on_none_repo(self):
+        """Integration: validate_lld_mechanical returns BLOCKED when target_repo is None."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_lld_mechanical,
+        )
+
+        # Complete LLD with all required sections so we reach repo_root validation
+        lld_content = """# 100 - Feature: Test
+
+## 2. Proposed Changes
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `test.py` | Add | Test file |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| None | Low | Low | None |
+
+## 12. Definition of Done
+
+- [ ] Done
+"""
+
+        state = {
+            "current_draft": lld_content,
+            "target_repo": None,
+            "issue_number": 100,
+        }
+
+        result = validate_lld_mechanical(state)
+
+        assert result.get("lld_status") == "BLOCKED"
+        assert len(result.get("validation_errors", [])) > 0
+        # Check for repo-related error message
+        errors_str = " ".join(str(e) for e in result.get("validation_errors", []))
+        assert "target_repo" in errors_str.lower() or "not specified" in errors_str.lower()
+
+    def test_full_validation_blocks_on_empty_repo(self):
+        """Integration: validate_lld_mechanical returns BLOCKED when target_repo is empty."""
+        from agentos.workflows.requirements.nodes.validate_mechanical import (
+            validate_lld_mechanical,
+        )
+
+        # Complete LLD with all required sections so we reach repo_root validation
+        lld_content = """# 100 - Feature: Test
+
+## 2. Proposed Changes
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `test.py` | Add | Test file |
+
+## 11. Risks & Mitigations
+
+| Risk | Impact | Likelihood | Mitigation |
+|------|--------|------------|------------|
+| None | Low | Low | None |
+
+## 12. Definition of Done
+
+- [ ] Done
+"""
+
+        state = {
+            "current_draft": lld_content,
+            "target_repo": "",
+            "issue_number": 100,
+        }
+
+        result = validate_lld_mechanical(state)
+
+        assert result.get("lld_status") == "BLOCKED"
+        assert len(result.get("validation_errors", [])) > 0
+
+
 class TestTitleValidationIntegration:
     """Integration tests for title validation in mechanical validation pipeline."""
 
