@@ -1,5 +1,7 @@
 # AgentOS
 
+[![CI](https://github.com/martymcenroe/AgentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/martymcenroe/AgentOS/actions/workflows/ci.yml)
+
 ## Multi-Agent Orchestration Platform for Enterprise AI Development
 
 > **Run 12+ AI agents concurrently. One identity. Full governance. Measurable ROI.**
