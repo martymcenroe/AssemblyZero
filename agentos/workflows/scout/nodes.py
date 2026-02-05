@@ -213,8 +213,6 @@ def gap_analyst_node(state: ScoutState) -> dict[str, Any]:
     Returns:
         State updates with gap analysis.
     """
-    import google.generativeai as genai
-
     internal_code = state.get("internal_code_content", "")
     found_repos = state.get("found_repos", [])
     offline_mode = state.get("offline_mode", False)
@@ -275,12 +273,17 @@ Please also identify GAPS between our implementation and the external best pract
     except ImportError:
         # Fallback to direct API if client not available
         try:
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if api_key:
-                genai.configure(api_key=api_key)
+            from google import genai
 
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            response = model.generate_content(prompt)
+            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            if not api_key:
+                raise Exception("No API key found in GEMINI_API_KEY or GOOGLE_API_KEY")
+
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
             analysis = response.text
         except Exception as e2:
             raise Exception(f"Fallback also failed: {e2}")
