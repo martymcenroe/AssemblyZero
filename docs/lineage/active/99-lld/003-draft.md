@@ -3,20 +3,20 @@
 <!-- Template Metadata
 Last Updated: 2025-01-XX
 Updated By: Issue #99 LLD creation
-Update Reason: Revised per Gemini Review #2 feedback - added overwrite protection, added documentation validation test, added logging suggestion
+Update Reason: Initial LLD for schema-driven project structure
 -->
 
 ## 1. Context & Goal
 * **Issue:** #99
 * **Objective:** Create a JSON schema as the single source of truth for project structure, eliminating drift between standard 0009 documentation and the `new-repo-setup.py` tool.
-* **Status:** Approved (gemini-3-pro-preview, 2026-02-04)
+* **Status:** Draft
 * **Related Issues:** None identified
 
 ### Open Questions
-*All questions resolved per Gemini Reviews.*
+*Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [x] ~~Should the schema support conditional directories (e.g., `docs/lineage/` only for certain project types)?~~ **RESOLVED: No.** To maintain a "canonical" source of truth, the schema should remain declarative and flat. Use the `required: boolean` field. If complex logic is needed later, use overlay profiles, but do not embed logic in the JSON data.
-- [x] ~~Should templates referenced in the schema be validated for existence during schema load?~~ **RESOLVED: Yes.** The `load_structure_schema` function should verify that any referenced template files actually exist. This ensures "Fail Fast" behavior (Safety) rather than failing halfway through project creation.
+- [ ] Should the schema support conditional directories (e.g., `docs/lineage/` only for certain project types)?
+- [ ] Should templates referenced in the schema be validated for existence during schema load?
 
 ## 2. Proposed Changes
 
@@ -69,18 +69,6 @@ class ProjectStructureSchema(TypedDict):
     version: str  # Schema version for compatibility
     directories: dict[str, DirectoryEntry]  # Top-level directory definitions
     files: dict[str, FileEntry]  # Top-level file definitions
-
-class AuditResult(TypedDict):
-    missing_required_dirs: list[str]
-    missing_required_files: list[str]
-    missing_optional_dirs: list[str]
-    missing_optional_files: list[str]
-    valid: bool
-
-class CreateResult(TypedDict):
-    created_dirs: list[str]
-    created_files: list[str]
-    skipped_files: list[str]  # Files skipped due to existing (no --force)
 ```
 
 ### 2.4 Function Signatures
@@ -101,30 +89,6 @@ def load_structure_schema(schema_path: Path | None = None) -> ProjectStructureSc
         FileNotFoundError: If schema file doesn't exist.
         json.JSONDecodeError: If schema is invalid JSON.
         SchemaValidationError: If schema structure is invalid.
-        SchemaValidationError: If referenced template files don't exist.
-    """
-    ...
-
-def create_structure(
-    root: Path, 
-    schema: ProjectStructureSchema, 
-    force: bool = False,
-    logger: logging.Logger | None = None
-) -> CreateResult:
-    """Create project directory structure from schema.
-    
-    Args:
-        root: Root directory where structure should be created.
-        schema: The loaded project structure schema.
-        force: If True, overwrite existing files. If False, skip existing files.
-        logger: Optional logger for progress output.
-    
-    Returns:
-        CreateResult with lists of created and skipped items.
-    
-    Raises:
-        OSError: If directory creation fails.
-        SchemaValidationError: If schema contains invalid paths.
     """
     ...
 
@@ -175,17 +139,12 @@ def validate_paths_no_traversal(schema: ProjectStructureSchema) -> None:
     """
     ...
 
-def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: Path) -> None:
-    """Validate that all referenced template files exist.
-    
-    Args:
-        schema: The loaded project structure schema.
-        template_dir: Directory containing template files.
-    
-    Raises:
-        SchemaValidationError: If any referenced template file doesn't exist.
-    """
-    ...
+class AuditResult(TypedDict):
+    missing_required_dirs: list[str]
+    missing_required_files: list[str]
+    missing_optional_dirs: list[str]
+    missing_optional_files: list[str]
+    valid: bool
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
@@ -197,39 +156,15 @@ def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: 
 3. Parse JSON into dict
 4. Validate schema structure (version, required keys)
 5. Validate no path traversal sequences
-6. Validate referenced template files exist
-7. Return typed schema dict
-
-# Directory Creation
-1. Load schema
-2. Flatten directories to list of paths
-3. Initialize result tracking (created_dirs, created_files, skipped_files)
-4. FOR EACH directory path:
-   a. Construct full path (root + relative path)
-   b. Create directory with parents (mkdir -p equivalent)
-   c. Log created directory
-   d. Add to created_dirs list
-5. FOR EACH file in schema:
-   a. Construct full destination path
-   b. IF destination exists AND NOT force THEN
-      - Log skipping file (would overwrite)
-      - Add to skipped_files list
-      - CONTINUE to next file
-   c. IF template specified THEN
-      - Copy template to destination
-   d. ELSE
-      - Create empty file
-   e. Log created file
-   f. Add to created_files list
-6. Return CreateResult
+6. Return typed schema dict
 
 # Directory Flattening (recursive)
 1. For each entry in directories:
-   a. IF required_only AND not entry.required THEN
-      - Skip this entry
-   b. Add current path to result
-   c. IF entry has children THEN
+   a. Add current path to result
+   b. IF entry has children THEN
       - Recursively process children with path prefix
+   c. IF required_only AND not entry.required THEN
+      - Skip this entry
 2. Return flattened list
 
 # Audit Flow
@@ -253,8 +188,6 @@ def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: 
   - JSON schema format chosen for simplicity and wide tooling support
   - Recursive directory structure allows natural representation of hierarchy
   - Schema includes both required and optional items for flexibility
-  - Template file validation at load time ensures fail-fast behavior
-  - No-overwrite default with `--force` flag for safety
 
 ### 2.7 Architecture Decisions
 
@@ -266,8 +199,6 @@ def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: 
 | Schema location | Same dir as standard, separate schema dir | Same dir as standard | Co-location improves discoverability |
 | Directory representation | Flat list, Nested object | Nested object | Natural hierarchy, easier to read and maintain |
 | Required/optional handling | Separate lists, Inline flags | Inline flags | Less duplication, single definition per item |
-| Template validation | Lazy (at use), Eager (at load) | Eager (at load) | Fail-fast behavior, better error messages |
-| File overwrite behavior | Always overwrite, Never overwrite, Flag-controlled | Flag-controlled (`--force`) | Preserves customized files by default, allows intentional overwrites |
 
 **Architectural Constraints:**
 - Must work with existing `tools/new-repo-setup.py` CLI interface
@@ -285,7 +216,6 @@ def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: 
 5. `tools/new-repo-setup.py --audit` validates against schema
 6. Standard 0009 markdown references schema as authoritative source
 7. All existing tests pass after refactor
-8. File creation does not overwrite existing files unless `--force` flag is provided
 
 ## 4. Alternatives Considered
 
@@ -326,8 +256,6 @@ def validate_template_files_exist(schema: ProjectStructureSchema, template_dir: 
 | Invalid schema JSON | Generated | Missing required fields |
 | Malformed JSON | Generated | Syntax errors |
 | Project directory tree | tempfile.mkdtemp() | Ephemeral test directories |
-| Production schema | Real file | `docs/standards/0009-structure-schema.json` for integrity tests |
-| Existing file for overwrite test | Generated | Pre-existing file to verify skip behavior |
 
 ### 5.4 Deployment Pipeline
 
@@ -408,8 +336,6 @@ flowchart TB
 | Schema parse failure | Fail fast with clear error message, don't create partial structure | Addressed |
 | Missing schema file | Check file exists before loading, provide helpful error | Addressed |
 | Corrupted schema | JSON parse errors caught and reported | Addressed |
-| Missing template files | `validate_template_files_exist()` checks at load time | Addressed |
-| Overwriting customized files | Skip existing files by default, require `--force` flag for overwrite | Addressed |
 
 **Fail Mode:** Fail Closed - If schema cannot be loaded or validated, tool exits with error rather than using fallback/hardcoded values.
 
@@ -485,12 +411,6 @@ flowchart TB
 | T110 | test_audit_missing_optional | Returns valid=True with optional missing | RED |
 | T120 | test_validate_paths_rejects_traversal | Raises SchemaValidationError for `..` paths | RED |
 | T130 | test_validate_paths_rejects_absolute | Raises SchemaValidationError for absolute paths | RED |
-| T140 | test_create_structure_happy_path | Creates all directories from schema on disk | RED |
-| T150 | test_production_schema_integrity | Production schema contains required paths | RED |
-| T160 | test_schema_template_validation | Raises error for missing template files | RED |
-| T170 | test_standard_documentation_references_schema | Standard 0009 markdown contains schema reference | RED |
-| T180 | test_create_structure_no_overwrite | Skips existing files without --force | RED |
-| T190 | test_create_structure_force_overwrite | Overwrites existing files with --force | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -517,12 +437,6 @@ flowchart TB
 | 110 | Audit missing optional | Auto | Project missing optional | valid=True | Optional in missing_optional list |
 | 120 | Validate paths rejects traversal | Auto | Schema with `../etc/passwd` path | SchemaValidationError | Exception raised with clear message |
 | 130 | Validate paths rejects absolute | Auto | Schema with `/etc/passwd` path | SchemaValidationError | Exception raised with clear message |
-| 140 | Create structure happy path | Auto | Valid schema, temp directory | Directories created on disk | All directories exist after call |
-| 150 | Production schema integrity | Auto | Real `0009-structure-schema.json` | Contains required paths | Schema has all DOCS_STRUCTURE, SRC_STRUCTURE paths, plus `docs/lineage/active`, `docs/lineage/done` |
-| 160 | Schema template validation | Auto | Schema referencing non-existent template | SchemaValidationError | Exception raised with template name |
-| 170 | Standard documentation references schema | Auto | Real `0009-canonical-project-structure.md` | Contains schema reference text | File contains `0009-structure-schema.json` |
-| 180 | Create structure no overwrite | Auto | Existing file in target, no --force | File not overwritten | Original content preserved, file in skipped_files |
-| 190 | Create structure force overwrite | Auto | Existing file in target, --force=True | File overwritten | New content present, file in created_files |
 
 ### 10.2 Test Commands
 
@@ -548,8 +462,6 @@ poetry run pytest tests/test_new_repo_setup.py -v --cov=new_repo_setup --cov-rep
 | Schema format changes break existing scripts | Med | Low | Version field enables migration path |
 | Schema gets out of sync with actual usage | Med | Med | Audit command validates against schema |
 | Complex nested structure hard to maintain | Low | Low | Clear documentation, JSON syntax highlighting |
-| Missing template files cause runtime failures | Med | Low | `validate_template_files_exist()` at load time |
-| Accidental overwrite of customized files | High | Med | Default no-overwrite behavior, `--force` flag required |
 
 ## 12. Definition of Done
 
@@ -582,51 +494,14 @@ Mechanical validation automatically checks:
 
 ---
 
-## Reviewer Suggestions
-
-*Non-blocking recommendations from the reviewer.*
-
-- **Template Path Resolution:** While `validate_template_files_exist` checks for template existence, ensure the `tools/new-repo-setup.py` implementation has a robust way to determine the absolute path of the `templates/` directory relative to the script location, ensuring it works regardless of where the script is invoked from (CWD vs Script Dir).
-
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
-
-### Gemini Review #1 (REVISE)
-
-**Reviewer:** Gemini 3 Pro
-**Verdict:** REVISE
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| G1.1 | "Missing Function Signature: Section 2.4 does not define the function responsible for actually creating the directories" | YES - Added `create_structure()` function signature in Section 2.4 |
-| G1.2 | "Requirement Coverage: BLOCK. Coverage is 40%. The core feature (creation) and data integrity (schema content) are untested" | YES - Added T140, T150, T160 test scenarios |
-| G1.3 | "Open Question: Should the schema support conditional directories?" | YES - Resolved as No, added resolution note |
-| G1.4 | "Open Question: Should templates referenced in schema be validated?" | YES - Resolved as Yes, added `validate_template_files_exist()` function |
-| G1.5 | "Consider adding test_schema_template_validation" | YES - Added T160 test scenario |
-
-### Gemini Review #2 (REVISE)
-
-**Reviewer:** Gemini 3 Pro
-**Verdict:** REVISE
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| G2.1 | "Destructive Acts (Overwrite Risk): The Logic Flow for `create_structure` specifies unconditional overwriting of existing files" | YES - Added `force` parameter to `create_structure()`, updated logic flow to check existence, added `skipped_files` to CreateResult |
-| G2.2 | "Requirement Coverage: Requirement #6 regarding documentation consistency is untested" | YES - Added T170 test scenario for standard documentation validation |
-| G2.3 | "Logging: Logic flow doesn't explicitly mention feedback to the user" | YES - Added `logger` parameter to `create_structure()`, added logging steps in logic flow |
-| G2.4 | "Consider adding a dry-run capability" | NOTED - Out of scope for initial implementation, could be future enhancement |
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| 3 | 2026-02-04 | APPROVED | `gemini-3-pro-preview` |
-| Gemini #1 | (auto) | REVISE | Missing test coverage for creation and schema integrity (40% → target ≥95%) |
-| Gemini #2 | (auto) | REVISE | Safety: Overwrite risk, Quality: Documentation test missing |
+| - | - | - | Awaiting initial review |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING

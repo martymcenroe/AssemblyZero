@@ -9,7 +9,7 @@ Update Reason: Revised per Gemini Review #2 feedback - added overwrite protectio
 ## 1. Context & Goal
 * **Issue:** #99
 * **Objective:** Create a JSON schema as the single source of truth for project structure, eliminating drift between standard 0009 documentation and the `new-repo-setup.py` tool.
-* **Status:** Approved (gemini-3-pro-preview, 2026-02-04)
+* **Status:** Draft
 * **Related Issues:** None identified
 
 ### Open Questions
@@ -582,12 +582,6 @@ Mechanical validation automatically checks:
 
 ---
 
-## Reviewer Suggestions
-
-*Non-blocking recommendations from the reviewer.*
-
-- **Template Path Resolution:** While `validate_template_files_exist` checks for template existence, ensure the `tools/new-repo-setup.py` implementation has a robust way to determine the absolute path of the `templates/` directory relative to the script location, ensuring it works regardless of where the script is invoked from (CWD vs Script Dir).
-
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
@@ -625,8 +619,7 @@ Mechanical validation automatically checks:
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| 3 | 2026-02-04 | APPROVED | `gemini-3-pro-preview` |
 | Gemini #1 | (auto) | REVISE | Missing test coverage for creation and schema integrity (40% → target ≥95%) |
 | Gemini #2 | (auto) | REVISE | Safety: Overwrite risk, Quality: Documentation test missing |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING
