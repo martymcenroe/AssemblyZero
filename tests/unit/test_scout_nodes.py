@@ -682,13 +682,13 @@ class TestGapAnalystNode:
 
         # Simulate ImportError for GeminiClient
         with patch.dict("sys.modules", {"agentos.core.gemini_client": None}):
-            with patch("google.generativeai.configure"):
-                with patch("google.generativeai.GenerativeModel") as MockModel:
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+                with patch("google.genai.Client") as MockClient:
                     mock_response = MagicMock()
                     mock_response.text = "Fallback analysis"
-                    mock_model = MagicMock()
-                    mock_model.generate_content.return_value = mock_response
-                    MockModel.return_value = mock_model
+                    mock_client = MagicMock()
+                    mock_client.models.generate_content.return_value = mock_response
+                    MockClient.return_value = mock_client
 
                     # This will raise ImportError internally and use fallback
                     result = gap_analyst_node(state)
