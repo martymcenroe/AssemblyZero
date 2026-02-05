@@ -46,8 +46,9 @@ class ValidationError:
 # Constants
 # =============================================================================
 
-# Section headers that must be present (using ### format)
-MANDATORY_SECTIONS = ["### 2.1", "### 11", "### 12"]
+# Section headers that must be present
+# Note: 2.1 is h3 (###), but 11 and 12 are h2 (##) in the LLD template
+MANDATORY_SECTIONS = ["### 2.1", "## 11", "## 12"]
 
 # Common placeholder prefixes that often indicate hallucinated paths
 PLACEHOLDER_PREFIXES = ["src", "lib", "app"]
@@ -277,15 +278,15 @@ def extract_files_from_section(lld_content: str, section_header: str) -> set[str
 
     Args:
         lld_content: The LLD markdown content.
-        section_header: The section header to search (e.g., "### 12").
+        section_header: The section header to search (e.g., "## 12").
 
     Returns:
         Set of file paths mentioned in the section.
     """
     files = set()
 
-    # Find the section
-    pattern = rf"{re.escape(section_header)}[^\n]*\n(.*?)(?=###|\Z)"
+    # Find the section (stop at next ## or ### heading, or end of string)
+    pattern = rf"{re.escape(section_header)}[^\n]*\n(.*?)(?=##|\Z)"
     section_match = re.search(pattern, lld_content, re.DOTALL)
 
     if not section_match:
@@ -320,8 +321,8 @@ def cross_reference_sections(
     """
     errors = []
 
-    # Get files mentioned in Section 12 (Definition of Done)
-    dod_files = extract_files_from_section(lld_content, "### 12")
+    # Get files mentioned in Section 12 (Definition of Done, uses ## heading)
+    dod_files = extract_files_from_section(lld_content, "## 12")
 
     # Get files from Section 2.1
     fc_files = {f["path"] for f in files_changed}
@@ -355,9 +356,9 @@ def extract_mitigations_from_risks(lld_content: str) -> list[str]:
     """
     mitigations = []
 
-    # Find Section 11
+    # Find Section 11 (uses ## heading in LLD template)
     section_match = re.search(
-        r"###\s*11[^\n]*\n(.*?)(?=###|\Z)",
+        r"##\s*11[^\n]*\n(.*?)(?=##|\Z)",
         lld_content,
         re.DOTALL,
     )

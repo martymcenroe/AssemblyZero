@@ -81,14 +81,14 @@ def validate_file_paths(files, repo_root):
     ...
 ```
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | Regex fails | Med | Low | Add comprehensive tests |
 | False positives | High | Med | Validate file paths conservatively |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] `agentos/workflows/requirements/nodes/validate_mechanical.py` implemented
 - [ ] `agentos/workflows/requirements/graph.py` updated
@@ -104,13 +104,13 @@ def lld_missing_section_21():
 ## 1. Context & Goal
 Test objective.
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
 | Test | Low |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Something done
 """
@@ -130,7 +130,7 @@ Test objective.
 |------|-------------|-------------|
 | `test.py` | Add | Test file |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Something done
 """
@@ -150,7 +150,7 @@ Test objective.
 |------|-------------|-------------|
 | `test.py` | Add | Test file |
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
@@ -170,13 +170,13 @@ def lld_with_invalid_modify_path():
 | `agentos/workflows/requirements/nonexistent.py` | Modify | Does not exist |
 | `agentos/workflows/requirements/graph.py` | Modify | Exists |
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
 | Test | Low |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Done
 """
@@ -193,13 +193,13 @@ def lld_with_placeholder_prefix():
 |------|-------------|-------------|
 | `src/components/Button.tsx` | Add | New component |
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
 | Test | Low |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Done
 """
@@ -216,13 +216,13 @@ def lld_with_dod_mismatch():
 |------|-------------|-------------|
 | `agentos/workflows/requirements/graph.py` | Modify | Update graph |
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
 | Test | Low |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] `agentos/workflows/requirements/graph.py` updated
 - [ ] `agentos/workflows/requirements/extra_file.py` created
@@ -249,13 +249,13 @@ def do_something():
     ...
 ```
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | Token exhaustion | High | Med | Track token count and implement rate limiting |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Done
 """
@@ -272,13 +272,13 @@ This section has text but no proper table format.
 
 Just some random content without table structure.
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 | Risk | Impact |
 |------|--------|
 | Test | Low |
 
-### 12. Definition of Done
+## 12. Definition of Done
 
 - [ ] Done
 """
@@ -688,7 +688,7 @@ class TestExtractMitigationsFromRisks:
         """LLD without proper Section 11 returns empty list."""
         content = """# Test LLD
 
-### 11. Risks & Mitigations
+## 11. Risks & Mitigations
 
 No table here.
 """
