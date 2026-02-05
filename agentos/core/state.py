@@ -45,3 +45,39 @@ class AgentState(TypedDict):
 
     # Safety: loop prevention
     iteration_count: int
+
+
+class TDDState(TypedDict):
+    """State for TDD workflow tracking.
+
+    Attributes:
+        issue_number: Issue being worked on.
+        phase: Current TDD phase.
+        test_file_path: Canonical path to test file (Issue #311).
+        test_file_history: Track if file was moved (Issue #311).
+        implementation_file_path: Path to implementation.
+        last_verification_result: Result of last verification run.
+    """
+
+    issue_number: int
+    phase: Literal["scaffold", "red", "green", "refactor"]
+    test_file_path: str | None
+    test_file_history: list[str]
+    implementation_file_path: str | None
+    last_verification_result: dict | None
+
+
+class _TestFileLocation(TypedDict):
+    """Record of a test file location at a point in time.
+
+    Attributes:
+        path: Absolute or project-relative path.
+        created_at: ISO timestamp.
+        created_by_phase: Phase that created/moved to this location.
+        moved_from: Previous path if relocated, None if initial creation.
+    """
+
+    path: str
+    created_at: str
+    created_by_phase: str
+    moved_from: str | None
