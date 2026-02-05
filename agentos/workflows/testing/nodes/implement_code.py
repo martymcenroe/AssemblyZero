@@ -37,6 +37,10 @@ MAX_FILE_RETRIES = 3
 LARGE_FILE_LINE_THRESHOLD = 500  # Lines
 LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
 
+# Issue #321: Timeout constants
+CLI_TIMEOUT = 300  # 5 minutes for CLI subprocess
+SDK_TIMEOUT = 300  # 5 minutes for SDK API call
+
 
 class ImplementationError(Exception):
     """Raised when implementation fails mechanically.
@@ -626,7 +630,7 @@ If you output anything other than a code block, the build will fail."""
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=300,  # 5 min timeout per file
+                timeout=CLI_TIMEOUT,  # Issue #321: Use constant
             )
 
             if result.returncode == 0 and result.stdout.strip():
@@ -637,14 +641,19 @@ If you output anything other than a code block, the build will fail."""
                 print(f"    [WARN] CLI failed (exit {result.returncode}): {stderr}")
 
         except subprocess.TimeoutExpired:
-            return "", "Request timed out (5 minutes)"
+            return "", f"CLI timeout after {CLI_TIMEOUT}s waiting for response"
         except Exception as e:
             print(f"    [WARN] CLI error: {e}")
 
     # Fallback to SDK
     try:
         import anthropic
-        client = anthropic.Anthropic()
+        import httpx
+
+        # Issue #321: Add timeout to SDK client
+        client = anthropic.Anthropic(
+            timeout=httpx.Timeout(SDK_TIMEOUT, connect=30.0)
+        )
 
         message = client.messages.create(
             model="claude-opus-4-5-20250514",
@@ -661,6 +670,10 @@ If you output anything other than a code block, the build will fail."""
 
     except ImportError:
         return "", "Neither Claude CLI nor Anthropic SDK available"
+    except httpx.TimeoutException:
+        return "", f"SDK timeout after {SDK_TIMEOUT}s waiting for response"
+    except TimeoutError:
+        return "", f"SDK timeout after {SDK_TIMEOUT}s waiting for response"
     except Exception as e:
         return "", f"SDK error: {e}"
 
