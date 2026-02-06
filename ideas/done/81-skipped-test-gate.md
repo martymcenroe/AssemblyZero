@@ -67,7 +67,7 @@ SKIPPED TEST AUDIT:
 
 ### Option A: CLAUDE.md Rule (Soft Gate)
 
-Add to AgentOS CLAUDE.md under test reporting:
+Add to AssemblyZero CLAUDE.md under test reporting:
 
 ```markdown
 ### SKIPPED TEST GATE (MANDATORY)

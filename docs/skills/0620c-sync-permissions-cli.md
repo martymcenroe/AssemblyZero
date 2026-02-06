@@ -1,7 +1,7 @@
 # Sync Permissions User Guide
 
 **File:** `docs/skills/0620-sync-permissions.md`
-**Tool:** `AgentOS/tools/agentos-permissions.py`
+**Tool:** `AssemblyZero/tools/assemblyzero-permissions.py`
 **Slash Command:** `/sync-permissions`
 **Version:** 2026-01-14
 
@@ -23,16 +23,16 @@ These are useless clutter. This tool removes them while keeping useful patterns 
 
 ```bash
 # Show help
-poetry run python tools/agentos-permissions.py --help
+poetry run python tools/assemblyzero-permissions.py --help
 
 # Audit a project (read-only)
-poetry run python tools/agentos-permissions.py --audit --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --audit --project Aletheia
 
 # Clean a project (dry-run first)
-poetry run python tools/agentos-permissions.py --clean --project Aletheia --dry-run
+poetry run python tools/assemblyzero-permissions.py --clean --project Aletheia --dry-run
 
 # Clean all projects
-poetry run python tools/agentos-permissions.py --clean --all-projects
+poetry run python tools/assemblyzero-permissions.py --clean --all-projects
 ```
 
 ---
@@ -40,7 +40,7 @@ poetry run python tools/agentos-permissions.py --clean --all-projects
 ## Command Reference
 
 ```
-usage: agentos-permissions.py [-h] (--audit | --clean | --quick-check |
+usage: assemblyzero-permissions.py [-h] (--audit | --clean | --quick-check |
                               --merge-up | --restore | --repair) [--project PROJECT]
                               [--all-projects] [--dry-run]
 
@@ -66,7 +66,7 @@ options:
 Analyzes permissions and categorizes them. Does not modify files.
 
 ```bash
-poetry run python tools/agentos-permissions.py --audit --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --audit --project Aletheia
 ```
 
 **Output:**
@@ -81,10 +81,10 @@ Removes session vends from project settings. Always creates a backup first.
 
 ```bash
 # Always dry-run first
-poetry run python tools/agentos-permissions.py --clean --project Aletheia --dry-run
+poetry run python tools/assemblyzero-permissions.py --clean --project Aletheia --dry-run
 
 # Then clean for real
-poetry run python tools/agentos-permissions.py --clean --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --clean --project Aletheia
 ```
 
 **Safety features:**
@@ -100,7 +100,7 @@ Fast check for cleanup script integration. Returns exit code:
 - `2` = Error
 
 ```bash
-poetry run python tools/agentos-permissions.py --quick-check --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --quick-check --project Aletheia
 echo $?  # Check exit code
 ```
 
@@ -110,10 +110,10 @@ Collects unique reusable patterns from all projects and merges into master (`~/.
 
 ```bash
 # Dry-run first
-poetry run python tools/agentos-permissions.py --merge-up --all-projects --dry-run
+poetry run python tools/assemblyzero-permissions.py --merge-up --all-projects --dry-run
 
 # Then merge
-poetry run python tools/agentos-permissions.py --merge-up --all-projects
+poetry run python tools/assemblyzero-permissions.py --merge-up --all-projects
 ```
 
 **Locked steps:**
@@ -126,7 +126,7 @@ poetry run python tools/agentos-permissions.py --merge-up --all-projects
 Restores from backup created by --clean or --merge-up.
 
 ```bash
-poetry run python tools/agentos-permissions.py --restore --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --restore --project Aletheia
 ```
 
 ### --repair
@@ -138,10 +138,10 @@ Found 1 invalid settings file · /doctor for details
 
 ```bash
 # Dry-run first (see what would be fixed)
-poetry run python tools/agentos-permissions.py --repair --dry-run
+poetry run python tools/assemblyzero-permissions.py --repair --dry-run
 
 # Actually repair
-poetry run python tools/agentos-permissions.py --repair
+poetry run python tools/assemblyzero-permissions.py --repair
 ```
 
 **How it works:**
@@ -179,7 +179,7 @@ Permissions longer than 300 characters are almost certainly one-time garbage (e.
 
 **Example caught:**
 ```
-Bash(gemini-model-check.sh "You are reviewing an issue draft for the AgentOS project...")
+Bash(gemini-model-check.sh "You are reviewing an issue draft for the AssemblyZero project...")
 [6230 chars - REMOVED]
 ```
 
@@ -296,10 +296,10 @@ This means a settings.local.json file has corrupted JSON. **Use --repair:**
 
 ```bash
 # See which file is broken
-poetry run python tools/agentos-permissions.py --repair --dry-run
+poetry run python tools/assemblyzero-permissions.py --repair --dry-run
 
 # Fix it (deletes broken file, inheritance kicks in)
-poetry run python tools/agentos-permissions.py --repair
+poetry run python tools/assemblyzero-permissions.py --repair
 ```
 
 **Common causes:**
@@ -314,9 +314,9 @@ poetry run python tools/agentos-permissions.py --repair
 If --audit or --clean fails with invalid JSON, use --repair first:
 
 ```bash
-poetry run python tools/agentos-permissions.py --repair
+poetry run python tools/assemblyzero-permissions.py --repair
 # Then retry your original command
-poetry run python tools/agentos-permissions.py --clean --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --clean --project Aletheia
 ```
 
 ### Restore from Backup
@@ -331,7 +331,7 @@ cp ~/.claude/settings.local.json.bak ~/.claude/settings.local.json
 
 Or use the tool:
 ```bash
-poetry run python tools/agentos-permissions.py --restore --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --restore --project Aletheia
 ```
 
 ### Settings Not Taking Effect
@@ -358,6 +358,6 @@ Check the inheritance chain:
 
 ## Source of Truth
 
-**Canonical location:** `AgentOS/tools/agentos-permissions.py`
+**Canonical location:** `AssemblyZero/tools/assemblyzero-permissions.py`
 
-If the tool needs fixing, fix it in AgentOS - not locally.
+If the tool needs fixing, fix it in AssemblyZero - not locally.

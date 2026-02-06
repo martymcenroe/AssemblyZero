@@ -1,6 +1,6 @@
 # Test Report: #62 Governance Workflow StateGraph
 
-**Issue:** [#62](https://github.com/martymcenroe/AgentOS/issues/62)
+**Issue:** [#62](https://github.com/martymcenroe/AssemblyZero/issues/62)
 **Branch:** `62-governance-workflow-stategraph`
 **Date:** 2026-01-26
 
@@ -8,7 +8,7 @@
 
 **Command:**
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-62 pytest /c/Users/mcwiz/Projects/AgentOS-62/tests/test_issue_workflow.py -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-62 pytest /c/Users/mcwiz/Projects/AssemblyZero-62/tests/test_issue_workflow.py -v
 ```
 
 ## Results Summary
@@ -27,7 +27,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-62 pytest /c/Users/mcwiz/
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-8.4.2, pluggy-1.6.0
-rootdir: C:\Users\mcwiz\Projects\AgentOS-62
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-62
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 collecting ... collected 42 items

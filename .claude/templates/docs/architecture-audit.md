@@ -102,4 +102,4 @@ For security/correctness drift (Tier 1):
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/architecture-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/architecture-audit.md*

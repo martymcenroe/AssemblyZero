@@ -1,7 +1,7 @@
 # Implementation Report: Issue #70 - Fix Resume Workflow
 
 ## Issue Reference
-https://github.com/martymcenroe/AgentOS/issues/70
+https://github.com/martymcenroe/AssemblyZero/issues/70
 
 ## Summary
 
@@ -9,7 +9,7 @@ Fixed the resume workflow functionality to properly save and restore state when 
 
 ## Changes Made
 
-### 1. KeyboardInterrupt Fix for Save/Resume (`agentos/workflows/issue/nodes/human_edit_draft.py`)
+### 1. KeyboardInterrupt Fix for Save/Resume (`assemblyzero/workflows/issue/nodes/human_edit_draft.py`)
 
 **The root cause:** When user chose `[M]anual` (now `[S]ave`), the node returned `error_message: "User chose manual handling"` which completed the node and routed to END. This meant the checkpoint was saved AFTER the node, so resume had nothing to do.
 
@@ -24,7 +24,7 @@ if decision == HumanDecision.MANUAL:
     raise KeyboardInterrupt("User chose manual handling")
 ```
 
-### 2. UX Improvements (`agentos/workflows/issue/nodes/human_edit_draft.py`)
+### 2. UX Improvements (`assemblyzero/workflows/issue/nodes/human_edit_draft.py`)
 
 Changed menu options for clarity:
 - `[S]end to Gemini` → `[G]emini - send to Gemini for review`
@@ -54,8 +54,8 @@ def get_checkpoint_db_path() -> Path:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return db_path
 
-    # Default: ~/.agentos/issue_workflow.db
-    db_dir = Path.home() / ".agentos"
+    # Default: ~/.assemblyzero/issue_workflow.db
+    db_dir = Path.home() / ".assemblyzero"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "issue_workflow.db"
 ```
@@ -70,7 +70,7 @@ This enables:
 Added 4 new integration tests that verify the checkpoint/resume mechanism:
 
 1. **test_checkpoint_db_path_env_var** - Verifies AGENTOS_WORKFLOW_DB env var works
-2. **test_checkpoint_db_path_default** - Verifies default path (~/. agentos/issue_workflow.db)
+2. **test_checkpoint_db_path_default** - Verifies default path (~/. assemblyzero/issue_workflow.db)
 3. **test_sqlite_checkpointer_saves_state** - Verifies SQLite actually persists workflow state
 4. **test_workflow_resume_from_checkpoint** - Verifies stream(None, config) continues correctly
 
@@ -135,13 +135,13 @@ Slug: test-resume-brief
 
 ## Files Changed
 
-- `agentos/workflows/issue/nodes/human_edit_draft.py` - KeyboardInterrupt fix, UX improvements
+- `assemblyzero/workflows/issue/nodes/human_edit_draft.py` - KeyboardInterrupt fix, UX improvements
 - `tools/run_issue_workflow.py` - AGENTOS_WORKFLOW_DB support, poetry run in resume commands
 - `tests/test_issue_workflow.py` - Added 4 integration tests
 
 ## Known Limitations
 
-1. The shared database at `~/.agentos/issue_workflow.db` is still the default - users working on multiple workflows simultaneously should use AGENTOS_WORKFLOW_DB to isolate.
+1. The shared database at `~/.assemblyzero/issue_workflow.db` is still the default - users working on multiple workflows simultaneously should use AGENTOS_WORKFLOW_DB to isolate.
 
 ## Verification
 

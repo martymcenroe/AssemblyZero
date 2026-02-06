@@ -1,6 +1,6 @@
 REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES.
 
-This is an implementation review for commit 30f8482 on the AgentOS project.
+This is an implementation review for commit 30f8482 on the AssemblyZero project.
 
 ---
 

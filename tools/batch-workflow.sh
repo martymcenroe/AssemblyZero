@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# batch-workflow.sh - Run AgentOS workflows on multiple issues sequentially
+# batch-workflow.sh - Run AssemblyZero workflows on multiple issues sequentially
 #
 # Usage: batch-workflow --type <issue|lld|impl> [options] <issues>
 #
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 # Configuration
-AGENTOS_ROOT="/c/Users/mcwiz/Projects/AgentOS"
+AGENTOS_ROOT="/c/Users/mcwiz/Projects/AssemblyZero"
 LOG_DIR="$AGENTOS_ROOT/logs/batch"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
@@ -313,7 +313,7 @@ done
 # Auto-detect repo if not specified
 if [[ -z "$REPO" ]]; then
     # Try to get repo from git remote
-    REPO=$(git remote get-url origin 2>/dev/null | sed -E 's|.*github.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|' || echo "martymcenroe/AgentOS")
+    REPO=$(git remote get-url origin 2>/dev/null | sed -E 's|.*github.com[:/]([^/]+/[^/.]+)(\.git)?$|\1|' || echo "martymcenroe/AssemblyZero")
 fi
 
 # If --all specified, fetch issues from GitHub

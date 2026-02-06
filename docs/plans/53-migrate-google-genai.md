@@ -68,13 +68,13 @@
 
 ```bash
 # Create worktree for issue #53
-git worktree add ../AgentOS-53-migrate-genai -b 53-migrate-google-genai
+git worktree add ../AssemblyZero-53-migrate-genai -b 53-migrate-google-genai
 
 # Push branch immediately
-git -C ../AgentOS-53-migrate-genai push -u origin HEAD
+git -C ../AssemblyZero-53-migrate-genai push -u origin HEAD
 
 # Work ONLY in worktree, never in main
-cd ../AgentOS-53-migrate-genai
+cd ../AssemblyZero-53-migrate-genai
 ```
 
 ### Phase 3: Code Changes
@@ -86,7 +86,7 @@ cd ../AgentOS-53-migrate-genai
    - Update: `langchain-google-genai` to `>=4.2.0,<5.0.0`
    - Run: `poetry lock && poetry install`
 
-2. **`agentos/core/gemini_client.py`** (Critical Changes)
+2. **`assemblyzero/core/gemini_client.py`** (Critical Changes)
 
    **Import (Line 21):**
    ```python

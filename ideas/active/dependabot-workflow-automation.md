@@ -172,5 +172,5 @@ Medium - Similar to TDD workflow but simpler (no LLM-generated code, just orches
 ## References
 
 - `docs/runbooks/0911-dependabot-pr-audit.md` - Manual procedure
-- `agentos/workflows/testing/` - Similar workflow pattern
+- `assemblyzero/workflows/testing/` - Similar workflow pattern
 - GitHub Dependabot API docs

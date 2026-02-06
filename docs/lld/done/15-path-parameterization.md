@@ -21,7 +21,7 @@
 
 ## 1. Problem Statement
 
-Hardcoded paths throughout AgentOS (`C:\Users\mcwiz\Projects\...`, `/c/Users/mcwiz/Projects/...`) prevent:
+Hardcoded paths throughout AssemblyZero (`C:\Users\mcwiz\Projects\...`, `/c/Users/mcwiz/Projects/...`) prevent:
 - Portability to other machines
 - CI/CD automation
 - Multi-user support
@@ -37,7 +37,7 @@ Hardcoded paths throughout AgentOS (`C:\Users\mcwiz\Projects\...`, `/c/Users/mcw
 ## 3. Non-Goals
 
 - Dynamic path discovery (we'll use explicit config, not magic)
-- Supporting arbitrary project structures (we assume AgentOS conventions)
+- Supporting arbitrary project structures (we assume AssemblyZero conventions)
 - Environment variable injection into Claude prompts (not possible)
 
 ---
@@ -46,7 +46,7 @@ Hardcoded paths throughout AgentOS (`C:\Users\mcwiz\Projects\...`, `/c/Users/mcw
 
 ### 4.1 Config File Location
 
-**Primary:** `~/.agentos/config.json`
+**Primary:** `~/.assemblyzero/config.json`
 
 Rationale:
 - User-level (not project-level) because paths are machine-specific
@@ -61,9 +61,9 @@ Rationale:
 {
   "version": "1.0",
   "paths": {
-    "agentos_root": {
-      "windows": "C:\\Users\\mcwiz\\Projects\\AgentOS",
-      "unix": "/c/Users/mcwiz/Projects/AgentOS"
+    "assemblyzero_root": {
+      "windows": "C:\\Users\\mcwiz\\Projects\\AssemblyZero",
+      "unix": "/c/Users/mcwiz/Projects/AssemblyZero"
     },
     "projects_root": {
       "windows": "C:\\Users\\mcwiz\\Projects",
@@ -84,21 +84,21 @@ Rationale:
 
 ### 4.3 Python Config Loader (Updated with Review Findings)
 
-**File:** `AgentOS/tools/agentos_config.py`
+**File:** `AssemblyZero/tools/assemblyzero_config.py`
 
 ```python
 """
-AgentOS configuration loader.
+AssemblyZero configuration loader.
 
 Usage:
-    from agentos_config import config
+    from assemblyzero_config import config
 
     # Get paths
-    root = config.agentos_root()        # Returns Windows path
-    root_unix = config.agentos_root_unix()  # Returns Unix path
+    root = config.assemblyzero_root()        # Returns Windows path
+    root_unix = config.assemblyzero_root_unix()  # Returns Unix path
 
     # Or use format parameter
-    root = config.agentos_root(fmt='unix')
+    root = config.assemblyzero_root(fmt='unix')
 """
 
 import json
@@ -114,14 +114,14 @@ logger = logging.getLogger(__name__)
 PathFormat = Literal['windows', 'unix', 'auto']
 
 # Expected config schema keys (for validation)
-REQUIRED_PATH_KEYS = {'agentos_root', 'projects_root', 'user_claude_dir'}
+REQUIRED_PATH_KEYS = {'assemblyzero_root', 'projects_root', 'user_claude_dir'}
 REQUIRED_FORMAT_KEYS = {'windows', 'unix'}
 
 # Default paths (SINGLE SOURCE OF TRUTH)
 DEFAULTS = {
-    "agentos_root": {
-        "windows": r"C:\Users\mcwiz\Projects\AgentOS",
-        "unix": "/c/Users/mcwiz/Projects/AgentOS"
+    "assemblyzero_root": {
+        "windows": r"C:\Users\mcwiz\Projects\AssemblyZero",
+        "unix": "/c/Users/mcwiz/Projects/AssemblyZero"
     },
     "projects_root": {
         "windows": r"C:\Users\mcwiz\Projects",
@@ -133,7 +133,7 @@ DEFAULTS = {
     }
 }
 
-CONFIG_PATH = Path.home() / ".agentos" / "config.json"
+CONFIG_PATH = Path.home() / ".assemblyzero" / "config.json"
 
 
 class ConfigError(Exception):
@@ -141,8 +141,8 @@ class ConfigError(Exception):
     pass
 
 
-class AgentOSConfig:
-    """Configuration manager for AgentOS paths."""
+class AssemblyZeroConfig:
+    """Configuration manager for AssemblyZero paths."""
 
     # Cache OS detection result (implementation review suggestion)
     _detected_os: Optional[str] = None
@@ -262,7 +262,7 @@ class AgentOSConfig:
         Get a path value from config with format selection.
 
         Args:
-            key: The path key (e.g., 'agentos_root')
+            key: The path key (e.g., 'assemblyzero_root')
             fmt: Path format ('windows', 'unix', or 'auto')
 
         Returns:
@@ -281,13 +281,13 @@ class AgentOSConfig:
         # Sanitize for security
         return self._sanitize_path(raw_path)
 
-    def agentos_root(self, fmt: PathFormat = 'windows') -> str:
-        """Get AgentOS root directory path."""
-        return self._get_path('agentos_root', fmt)
+    def assemblyzero_root(self, fmt: PathFormat = 'windows') -> str:
+        """Get AssemblyZero root directory path."""
+        return self._get_path('assemblyzero_root', fmt)
 
-    def agentos_root_unix(self) -> str:
-        """Get AgentOS root directory path in Unix format."""
-        return self._get_path('agentos_root', 'unix')
+    def assemblyzero_root_unix(self) -> str:
+        """Get AssemblyZero root directory path in Unix format."""
+        return self._get_path('assemblyzero_root', 'unix')
 
     def projects_root(self, fmt: PathFormat = 'windows') -> str:
         """Get projects root directory path."""
@@ -311,7 +311,7 @@ class AgentOSConfig:
 
 
 # Singleton instance
-config = AgentOSConfig()
+config = AssemblyZeroConfig()
 ```
 
 ### 4.4 CLAUDE.md Updates
@@ -320,25 +320,25 @@ Replace hardcoded paths with documentation about the config:
 
 **Before:**
 ```markdown
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py
 ```
 
 **After:**
 ```markdown
-poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/agentos-generate.py
+poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/assemblyzero-generate.py
 
-Where $AGENTOS_ROOT is defined in ~/.agentos/config.json (default: /c/Users/mcwiz/Projects/AgentOS)
+Where $AGENTOS_ROOT is defined in ~/.assemblyzero/config.json (default: /c/Users/mcwiz/Projects/AssemblyZero)
 ```
 
 **Add new section:**
 ```markdown
 ## Path Configuration
 
-AgentOS paths are configured in `~/.agentos/config.json`:
+AssemblyZero paths are configured in `~/.assemblyzero/config.json`:
 
 | Variable | Default (Unix) | Used For |
 |----------|----------------|----------|
-| `agentos_root` | `/c/Users/mcwiz/Projects/AgentOS` | Tool execution, config source |
+| `assemblyzero_root` | `/c/Users/mcwiz/Projects/AssemblyZero` | Tool execution, config source |
 | `projects_root` | `/c/Users/mcwiz/Projects` | Project detection |
 | `user_claude_dir` | `/c/Users/mcwiz/.claude` | User-level commands |
 
@@ -351,15 +351,15 @@ Skills like `/sync-permissions` currently have hardcoded paths:
 
 **Before:**
 ```markdown
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-permissions.py
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-permissions.py
 ```
 
 **After:**
 ```markdown
-poetry run --directory {{AGENTOS_ROOT_UNIX}} python {{AGENTOS_ROOT_UNIX}}/tools/agentos-permissions.py
+poetry run --directory {{AGENTOS_ROOT_UNIX}} python {{AGENTOS_ROOT_UNIX}}/tools/assemblyzero-permissions.py
 
-Note: {{AGENTOS_ROOT_UNIX}} is /c/Users/mcwiz/Projects/AgentOS by default.
-See ~/.agentos/config.json to customize.
+Note: {{AGENTOS_ROOT_UNIX}} is /c/Users/mcwiz/Projects/AssemblyZero by default.
+See ~/.assemblyzero/config.json to customize.
 ```
 
 **Alternative approach:** Keep examples with actual paths but add a note:
@@ -369,10 +369,10 @@ See ~/.agentos/config.json to customize.
 
 ### 4.6 Tool Updates
 
-Each Python tool in `AgentOS/tools/` that uses hardcoded paths will import the config:
+Each Python tool in `AssemblyZero/tools/` that uses hardcoded paths will import the config:
 
 ```python
-from agentos_config import config
+from assemblyzero_config import config
 
 # Before
 SETTINGS_PATH = Path(r"C:\Users\mcwiz\Projects\.claude\settings.local.json")
@@ -387,8 +387,8 @@ SETTINGS_PATH = Path(config.projects_root()) / ".claude" / "settings.local.json"
 
 ### 5.1 Phase 1: Add Config System (No Breaking Changes)
 
-1. Create `agentos_config.py` with defaults matching current hardcoded values
-2. Create example config file at `AgentOS/.agentos/config.example.json`
+1. Create `assemblyzero_config.py` with defaults matching current hardcoded values
+2. Create example config file at `AssemblyZero/.assemblyzero/config.example.json`
 3. Update Python tools to use config (but defaults = current behavior)
 
 ### 5.2 Phase 2: Update Documentation
@@ -400,7 +400,7 @@ SETTINGS_PATH = Path(config.projects_root()) / ".claude" / "settings.local.json"
 ### 5.3 Phase 3: User Setup (Optional)
 
 Users who want custom paths:
-1. Copy `config.example.json` to `~/.agentos/config.json`
+1. Copy `config.example.json` to `~/.assemblyzero/config.json`
 2. Edit paths
 3. Everything works
 
@@ -412,12 +412,12 @@ Users who don't customize: No action needed, defaults continue working.
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/agentos_config.py` | New | Config loader module |
-| `tests/test_agentos_config.py` | New | Unit tests |
-| `.agentos/config.example.json` | New | Example config |
+| `tools/assemblyzero_config.py` | New | Config loader module |
+| `tests/test_assemblyzero_config.py` | New | Unit tests |
+| `.assemblyzero/config.example.json` | New | Example config |
 | `CLAUDE.md` | Modify | Add Path Configuration section |
-| `tools/agentos-permissions.py` | Modify | Use config for paths |
-| `tools/agentos-generate.py` | Modify | Use config for paths |
+| `tools/assemblyzero-permissions.py` | Modify | Use config for paths |
+| `tools/assemblyzero-generate.py` | Modify | Use config for paths |
 | `.claude/commands/*.md` | Modify | Add config notes |
 | `~/.claude/commands/*.md` | Modify | Add config notes |
 
@@ -434,19 +434,19 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 
-# Test imports assume agentos_config is importable
-# from agentos_config import AgentOSConfig, ConfigError, DEFAULTS
+# Test imports assume assemblyzero_config is importable
+# from assemblyzero_config import AssemblyZeroConfig, ConfigError, DEFAULTS
 
 
-class TestAgentOSConfig:
-    """Test suite for AgentOSConfig."""
+class TestAssemblyZeroConfig:
+    """Test suite for AssemblyZeroConfig."""
 
     def test_loads_defaults_when_no_file(self, tmp_path):
         """Config uses defaults when file doesn't exist."""
-        with patch('agentos_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
-            assert config.agentos_root() == DEFAULTS['agentos_root']['windows']
+        with patch('assemblyzero_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
+            assert config.assemblyzero_root() == DEFAULTS['assemblyzero_root']['windows']
 
     def test_loads_custom_values(self, tmp_path):
         """Config loads custom values from file."""
@@ -454,9 +454,9 @@ class TestAgentOSConfig:
         custom_config = {
             "version": "1.0",
             "paths": {
-                "agentos_root": {
-                    "windows": r"D:\Custom\AgentOS",
-                    "unix": "/d/Custom/AgentOS"
+                "assemblyzero_root": {
+                    "windows": r"D:\Custom\AssemblyZero",
+                    "unix": "/d/Custom/AssemblyZero"
                 },
                 "projects_root": {
                     "windows": r"D:\Custom",
@@ -470,31 +470,31 @@ class TestAgentOSConfig:
         }
         config_file.write_text(json.dumps(custom_config))
 
-        with patch('agentos_config.CONFIG_PATH', config_file):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
-            assert config.agentos_root() == r"D:\Custom\AgentOS"
+        with patch('assemblyzero_config.CONFIG_PATH', config_file):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
+            assert config.assemblyzero_root() == r"D:\Custom\AssemblyZero"
 
     def test_handles_invalid_json(self, tmp_path):
         """Config falls back to defaults on invalid JSON."""
         config_file = tmp_path / 'config.json'
         config_file.write_text("{ invalid json }")
 
-        with patch('agentos_config.CONFIG_PATH', config_file):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
+        with patch('assemblyzero_config.CONFIG_PATH', config_file):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
             # Should use defaults, not crash
-            assert config.agentos_root() == DEFAULTS['agentos_root']['windows']
+            assert config.assemblyzero_root() == DEFAULTS['assemblyzero_root']['windows']
 
     def test_auto_format_selection(self, tmp_path):
         """The 'auto' format selects based on OS."""
-        with patch('agentos_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
+        with patch('assemblyzero_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
             with patch('platform.system', return_value='Windows'):
-                from agentos_config import AgentOSConfig
-                config = AgentOSConfig()
+                from assemblyzero_config import AssemblyZeroConfig
+                config = AssemblyZeroConfig()
                 # Force recalculation
-                AgentOSConfig._detected_os = None
-                result = config.agentos_root(fmt='auto')
+                AssemblyZeroConfig._detected_os = None
+                result = config.assemblyzero_root(fmt='auto')
                 assert '\\' in result  # Windows path
 
     def test_missing_key_uses_default(self, tmp_path):
@@ -503,18 +503,18 @@ class TestAgentOSConfig:
         partial_config = {
             "version": "1.0",
             "paths": {
-                "agentos_root": {
-                    "windows": r"D:\Custom\AgentOS",
-                    "unix": "/d/Custom/AgentOS"
+                "assemblyzero_root": {
+                    "windows": r"D:\Custom\AssemblyZero",
+                    "unix": "/d/Custom/AssemblyZero"
                 }
                 # Missing projects_root and user_claude_dir
             }
         }
         config_file.write_text(json.dumps(partial_config))
 
-        with patch('agentos_config.CONFIG_PATH', config_file):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
+        with patch('assemblyzero_config.CONFIG_PATH', config_file):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
             # Schema validation should fail, use defaults for all
             assert config.projects_root() == DEFAULTS['projects_root']['windows']
 
@@ -524,7 +524,7 @@ class TestAgentOSConfig:
         malicious_config = {
             "version": "1.0",
             "paths": {
-                "agentos_root": {
+                "assemblyzero_root": {
                     "windows": r"C:\Users\..\..\Windows\System32",
                     "unix": "/c/Users/../../etc/passwd"
                 },
@@ -540,19 +540,19 @@ class TestAgentOSConfig:
         }
         config_file.write_text(json.dumps(malicious_config))
 
-        with patch('agentos_config.CONFIG_PATH', config_file):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
+        with patch('assemblyzero_config.CONFIG_PATH', config_file):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
             # Path should have ../ removed
-            result = config.agentos_root()
+            result = config.assemblyzero_root()
             assert '..' not in result
 
     def test_unix_format_explicit(self, tmp_path):
         """Explicitly requesting unix format works."""
-        with patch('agentos_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
-            result = config.agentos_root(fmt='unix')
+        with patch('assemblyzero_config.CONFIG_PATH', tmp_path / 'nonexistent.json'):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
+            result = config.assemblyzero_root(fmt='unix')
             assert result.startswith('/')
 
     def test_reload_picks_up_changes(self, tmp_path):
@@ -561,30 +561,30 @@ class TestAgentOSConfig:
         initial_config = {
             "version": "1.0",
             "paths": {
-                "agentos_root": {"windows": r"C:\Initial", "unix": "/c/Initial"},
+                "assemblyzero_root": {"windows": r"C:\Initial", "unix": "/c/Initial"},
                 "projects_root": {"windows": r"C:\Initial", "unix": "/c/Initial"},
                 "user_claude_dir": {"windows": r"C:\Initial", "unix": "/c/Initial"}
             }
         }
         config_file.write_text(json.dumps(initial_config))
 
-        with patch('agentos_config.CONFIG_PATH', config_file):
-            from agentos_config import AgentOSConfig
-            config = AgentOSConfig()
-            assert config.agentos_root() == r"C:\Initial"
+        with patch('assemblyzero_config.CONFIG_PATH', config_file):
+            from assemblyzero_config import AssemblyZeroConfig
+            config = AssemblyZeroConfig()
+            assert config.assemblyzero_root() == r"C:\Initial"
 
             # Update file
-            initial_config['paths']['agentos_root']['windows'] = r"C:\Updated"
+            initial_config['paths']['assemblyzero_root']['windows'] = r"C:\Updated"
             config_file.write_text(json.dumps(initial_config))
 
             # Reload
             config.reload()
-            assert config.agentos_root() == r"C:\Updated"
+            assert config.assemblyzero_root() == r"C:\Updated"
 ```
 
 ### 7.2 Integration Tests
 
-1. Run `agentos-permissions.py --audit` with default config → works
+1. Run `assemblyzero-permissions.py --audit` with default config → works
 2. Run with custom config pointing to different location → works
 3. Run with missing config file → uses defaults, works
 4. Run with malformed config → uses defaults, logs warning
@@ -606,7 +606,7 @@ If issues arise:
    - Decision: Start with config file only, add env var support later if needed
 
 2. **Where should config.example.json live?**
-   - Decision: `AgentOS/.agentos/config.example.json`
+   - Decision: `AssemblyZero/.assemblyzero/config.example.json`
 
 3. **How do we handle the first-time setup?**
    - Decision: Use defaults, let user create manually

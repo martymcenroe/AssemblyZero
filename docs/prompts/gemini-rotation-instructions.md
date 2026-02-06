@@ -32,7 +32,7 @@
 3. **DO NOT create issues, merge PRs, or take any action based on the invalid review**
 4. **Use rotation tool to retry with Pro model:**
    ```bash
-   python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "..."
+   python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "..."
    ```
 
 ### Why This Matters
@@ -75,7 +75,7 @@ Use ASCII alternatives:
 **Option 2: Use stdin with UTF-8 file**
 Write your prompt to a file (UTF-8 encoded), then pipe it:
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
 ```
 
 **Option 3: Use the Write tool first**
@@ -111,18 +111,18 @@ Use `gemini-rotate.py` instead of calling `gemini` directly. It rotates through 
 gemini --model gemini-3-pro-preview -p "your prompt"
 
 # Use:
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "your prompt"
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "your prompt"
 
 # For long prompts via stdin:
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
 
 # Check credential status:
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
 ```
 
 ### What It Does
 
-1. Loads credentials from `~/.agentos/gemini-credentials.json`
+1. Loads credentials from `~/.assemblyzero/gemini-credentials.json`
 2. Skips credentials marked as quota-exhausted
 3. Tries each available credential until one succeeds
 4. Tracks exhaustion per credential with reset times
@@ -137,7 +137,7 @@ When you see: `All credentials exhausted`
 
 The user can:
 1. Wait for quota reset (~24h)
-2. Add more API keys to `~/.agentos/gemini-credentials.json`
+2. Add more API keys to `~/.assemblyzero/gemini-credentials.json`
 
 ## Model Requirements (MANDATORY)
 
@@ -151,15 +151,15 @@ The user can:
 
 Check status:
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
 ```
 
 Simple test:
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "Say hello"
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "Say hello"
 ```
 
 Review with rotation:
 ```bash
-python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/review-prompt.txt
+python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/review-prompt.txt
 ```

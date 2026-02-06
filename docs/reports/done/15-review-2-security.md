@@ -64,7 +64,7 @@ Despite the critical issue, the implementation has good defensive practices:
 
 ## Additional Recommendation
 
-**Config File Permissions:** Ensure `~/.agentos/config.json` is validated to be owner-writable only to prevent privilege escalation if the agent runs with elevated rights.
+**Config File Permissions:** Ensure `~/.assemblyzero/config.json` is validated to be owner-writable only to prevent privilege escalation if the agent runs with elevated rights.
 
 ---
 

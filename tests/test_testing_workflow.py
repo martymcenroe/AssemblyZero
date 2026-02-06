@@ -13,34 +13,34 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.workflows.testing import TestingWorkflowState, build_testing_workflow
-from agentos.workflows.testing.audit import (
+from assemblyzero.workflows.testing import TestingWorkflowState, build_testing_workflow
+from assemblyzero.workflows.testing.audit import (
     create_testing_audit_dir,
     next_file_number,
     parse_pytest_output,
     save_audit_file,
 )
-from agentos.workflows.testing.knowledge.patterns import (
+from assemblyzero.workflows.testing.knowledge.patterns import (
     detect_test_types,
     get_mock_guidance,
     get_required_tools,
 )
-from agentos.workflows.testing.nodes.load_lld import (
+from assemblyzero.workflows.testing.nodes.load_lld import (
     extract_coverage_target,
     extract_requirements,
     extract_test_plan_section,
     parse_test_scenarios,
 )
-from agentos.workflows.testing.nodes.review_test_plan import (
+from assemblyzero.workflows.testing.nodes.review_test_plan import (
     check_requirement_coverage,
     extract_covered_requirements,
     extract_requirement_ids,
 )
-from agentos.workflows.testing.nodes.scaffold_tests import (
+from assemblyzero.workflows.testing.nodes.scaffold_tests import (
     _extract_impl_module,
     generate_test_file_content,
 )
-from agentos.workflows.testing.state import TestScenario
+from assemblyzero.workflows.testing.state import TestScenario
 
 
 class TestAuditUtilities:
@@ -529,7 +529,7 @@ class TestNodeFunctions:
 
     def test_load_lld_mock_mode(self, tmp_path):
         """load_lld works in mock mode."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         # Create lineage directory
         lineage_dir = tmp_path / "docs" / "lineage" / "active"
@@ -549,7 +549,7 @@ class TestNodeFunctions:
 
     def test_review_test_plan_mock_mode_full_coverage(self, tmp_path):
         """review_test_plan returns APPROVED with 100% coverage in mock mode."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         # Create lineage directory
         lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -585,7 +585,7 @@ class TestNodeFunctions:
 
     def test_review_test_plan_mock_mode_partial_coverage(self, tmp_path):
         """review_test_plan returns BLOCKED with <100% coverage in mock mode."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         # Create lineage directory
         lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -622,7 +622,7 @@ class TestNodeFunctions:
 
     def test_route_after_review_auto_mode_continues_on_blocked(self, tmp_path):
         """route_after_review continues to scaffold in auto mode even when BLOCKED."""
-        from agentos.workflows.testing.graph import route_after_review
+        from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -639,7 +639,7 @@ class TestNodeFunctions:
 
     def test_route_after_review_stops_on_blocked_without_auto(self, tmp_path):
         """route_after_review stops at end when BLOCKED without auto mode."""
-        from agentos.workflows.testing.graph import route_after_review
+        from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -656,7 +656,7 @@ class TestNodeFunctions:
 
     def test_scaffold_tests_creates_files(self, tmp_path):
         """scaffold_tests creates test files."""
-        from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 
         # Create directories
         tests_dir = tmp_path / "tests"
@@ -701,42 +701,42 @@ class TestDocumentNode:
 
     def test_detect_doc_scope_explicit_full(self):
         """detect_doc_scope returns full for explicit marker."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "<!-- doc-scope: full -->\nSome content"
         assert detect_doc_scope(lld) == "full"
 
     def test_detect_doc_scope_explicit_none(self):
         """detect_doc_scope returns none for explicit marker."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "<!-- doc-scope: none -->\nSome content"
         assert detect_doc_scope(lld) == "none"
 
     def test_detect_doc_scope_bugfix(self):
         """detect_doc_scope returns minimal for bugfix."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "This is a bugfix for issue #123"
         assert detect_doc_scope(lld) == "minimal"
 
     def test_detect_doc_scope_new_feature(self):
         """detect_doc_scope returns full for new feature."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "Implement new feature for workflow management"
         assert detect_doc_scope(lld) == "full"
 
     def test_detect_doc_scope_workflow(self):
         """detect_doc_scope returns full for workflow."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "This workflow handles state machine transitions"
         assert detect_doc_scope(lld) == "full"
 
     def test_should_generate_wiki_feature(self):
         """should_generate_wiki returns True for feature with architecture."""
-        from agentos.workflows.testing.nodes.document import should_generate_wiki
+        from assemblyzero.workflows.testing.nodes.document import should_generate_wiki
 
         state: TestingWorkflowState = {
             "lld_content": "This new feature includes architecture changes",
@@ -745,7 +745,7 @@ class TestDocumentNode:
 
     def test_should_generate_wiki_bugfix(self):
         """should_generate_wiki returns False for bugfix."""
-        from agentos.workflows.testing.nodes.document import should_generate_wiki
+        from assemblyzero.workflows.testing.nodes.document import should_generate_wiki
 
         state: TestingWorkflowState = {
             "lld_content": "This is a bugfix for an edge case",
@@ -754,17 +754,17 @@ class TestDocumentNode:
 
     def test_is_operational_feature_workflow(self):
         """is_operational_feature returns True for workflow."""
-        from agentos.workflows.testing.nodes.document import is_operational_feature
+        from assemblyzero.workflows.testing.nodes.document import is_operational_feature
 
         state: TestingWorkflowState = {
             "lld_content": "This workflow manages state transitions",
-            "implementation_files": ["agentos/workflows/test/graph.py"],
+            "implementation_files": ["assemblyzero/workflows/test/graph.py"],
         }
         assert is_operational_feature(state) is True
 
     def test_is_operational_feature_cli_tool(self):
         """is_operational_feature returns True for CLI tool."""
-        from agentos.workflows.testing.nodes.document import is_operational_feature
+        from assemblyzero.workflows.testing.nodes.document import is_operational_feature
 
         state: TestingWorkflowState = {
             "lld_content": "Some content",
@@ -774,7 +774,7 @@ class TestDocumentNode:
 
     def test_is_cli_tool_tools_dir(self):
         """is_cli_tool returns True for tools/ directory."""
-        from agentos.workflows.testing.nodes.document import is_cli_tool
+        from assemblyzero.workflows.testing.nodes.document import is_cli_tool
 
         state: TestingWorkflowState = {
             "implementation_files": ["tools/new_tool.py"],
@@ -783,7 +783,7 @@ class TestDocumentNode:
 
     def test_is_cli_tool_cli_file(self):
         """is_cli_tool returns True for cli in filename."""
-        from agentos.workflows.testing.nodes.document import is_cli_tool
+        from assemblyzero.workflows.testing.nodes.document import is_cli_tool
 
         state: TestingWorkflowState = {
             "implementation_files": ["src/feature_cli.py"],
@@ -792,7 +792,7 @@ class TestDocumentNode:
 
     def test_is_cli_tool_not_cli(self):
         """is_cli_tool returns False for non-CLI file."""
-        from agentos.workflows.testing.nodes.document import is_cli_tool
+        from assemblyzero.workflows.testing.nodes.document import is_cli_tool
 
         state: TestingWorkflowState = {
             "implementation_files": ["src/feature.py", "tests/test_feature.py"],
@@ -801,7 +801,7 @@ class TestDocumentNode:
 
     def test_extract_feature_name_from_title(self):
         """extract_feature_name extracts from LLD title."""
-        from agentos.workflows.testing.nodes.document import extract_feature_name
+        from assemblyzero.workflows.testing.nodes.document import extract_feature_name
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -811,7 +811,7 @@ class TestDocumentNode:
 
     def test_extract_feature_name_fallback(self):
         """extract_feature_name falls back to issue number."""
-        from agentos.workflows.testing.nodes.document import extract_feature_name
+        from assemblyzero.workflows.testing.nodes.document import extract_feature_name
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -821,7 +821,7 @@ class TestDocumentNode:
 
     def test_document_generates_lessons_learned(self, tmp_path):
         """document node always generates lessons learned."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         # Setup directories
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -851,7 +851,7 @@ class TestDocumentNode:
 
     def test_document_skips_with_none_scope(self, tmp_path):
         """document node respects doc_scope: none."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         # Setup directories
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -885,7 +885,7 @@ class TestDocumentTemplates:
 
     def test_generate_wiki_page(self, tmp_path):
         """generate_wiki_page creates wiki file."""
-        from agentos.workflows.testing.templates.wiki_page import generate_wiki_page
+        from assemblyzero.workflows.testing.templates.wiki_page import generate_wiki_page
 
         lld_content = """# Test Feature
 
@@ -918,7 +918,7 @@ graph TD
 
     def test_generate_runbook(self, tmp_path):
         """generate_runbook creates runbook file."""
-        from agentos.workflows.testing.templates.runbook import generate_runbook
+        from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = """# Workflow Feature
 
@@ -949,7 +949,7 @@ graph TD
 
     def test_generate_lessons_learned(self, tmp_path):
         """generate_lessons_learned creates lessons file."""
-        from agentos.workflows.testing.templates.lessons import generate_lessons_learned
+        from assemblyzero.workflows.testing.templates.lessons import generate_lessons_learned
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -982,7 +982,7 @@ graph TD
 
     def test_generate_cli_doc(self, tmp_path):
         """generate_cli_doc creates CLI documentation."""
-        from agentos.workflows.testing.templates.cp_docs import generate_cli_doc
+        from assemblyzero.workflows.testing.templates.cp_docs import generate_cli_doc
 
         lld_content = """# CLI Tool
 
@@ -1006,7 +1006,7 @@ poetry run python tools/run_tool.py --issue 42
 
     def test_generate_prompt_doc(self, tmp_path):
         """generate_prompt_doc creates Prompt documentation."""
-        from agentos.workflows.testing.templates.cp_docs import generate_prompt_doc
+        from assemblyzero.workflows.testing.templates.cp_docs import generate_prompt_doc
 
         lld_content = """# CLI Tool
 
@@ -1030,7 +1030,7 @@ poetry run python tools/run_tool.py --issue 42
 
     def test_update_wiki_sidebar_adds_link(self, tmp_path):
         """update_wiki_sidebar adds link to sidebar."""
-        from agentos.workflows.testing.templates.wiki_page import update_wiki_sidebar
+        from assemblyzero.workflows.testing.templates.wiki_page import update_wiki_sidebar
 
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -1056,7 +1056,7 @@ poetry run python tools/run_tool.py --issue 42
 
     def test_update_wiki_sidebar_skips_duplicate(self, tmp_path):
         """update_wiki_sidebar skips existing link."""
-        from agentos.workflows.testing.templates.wiki_page import update_wiki_sidebar
+        from assemblyzero.workflows.testing.templates.wiki_page import update_wiki_sidebar
 
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -1085,7 +1085,7 @@ class TestE2EValidationReturnCodes:
 
     def test_e2e_validation_return_code_5_proceeds_to_finalize(self, tmp_path):
         """Return code 5 (no tests collected) should proceed to finalize, not loop."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         # Create audit directory
         audit_dir = tmp_path / "audit"
@@ -1104,7 +1104,7 @@ class TestE2EValidationReturnCodes:
         }
 
         # Mock subprocess.run to return code 5 (no tests collected)
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 5
             mock_run.return_value.stdout = "collected 0 items\n\nno tests ran in 0.01s"
             mock_run.return_value.stderr = ""
@@ -1117,7 +1117,7 @@ class TestE2EValidationReturnCodes:
 
     def test_e2e_validation_return_code_1_loops_back(self, tmp_path):
         """Return code 1 (tests failed) should loop back to implementation."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         # Create audit directory
         audit_dir = tmp_path / "audit"
@@ -1136,7 +1136,7 @@ class TestE2EValidationReturnCodes:
         }
 
         # Mock subprocess.run to return code 1 (tests failed)
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 1
             mock_run.return_value.stdout = "1 failed, 0 passed"
             mock_run.return_value.stderr = ""
@@ -1149,7 +1149,7 @@ class TestE2EValidationReturnCodes:
 
     def test_e2e_validation_return_code_3_does_not_loop(self, tmp_path):
         """Return code 3 (internal error) should fail without looping."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         # Create audit directory
         audit_dir = tmp_path / "audit"
@@ -1168,7 +1168,7 @@ class TestE2EValidationReturnCodes:
         }
 
         # Mock subprocess.run to return code 3 (internal error)
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 3
             mock_run.return_value.stdout = ""
             mock_run.return_value.stderr = "INTERNAL ERROR"
@@ -1185,7 +1185,7 @@ class TestImplementCodeModule:
 
     def test_find_claude_cli_with_shutil_which(self):
         """_find_claude_cli finds CLI via shutil.which."""
-        from agentos.workflows.testing.nodes.implement_code import _find_claude_cli
+        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
 
         with patch("shutil.which") as mock_which:
             mock_which.return_value = "/usr/bin/claude"
@@ -1194,7 +1194,7 @@ class TestImplementCodeModule:
 
     def test_find_claude_cli_fallback_to_paths(self, tmp_path):
         """_find_claude_cli checks common paths when which fails."""
-        from agentos.workflows.testing.nodes.implement_code import _find_claude_cli
+        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
 
         with patch("shutil.which", return_value=None):
             # None of the fallback paths exist, so should return None
@@ -1204,7 +1204,7 @@ class TestImplementCodeModule:
 
     def test_build_implementation_prompt_basic(self, tmp_path):
         """build_implementation_prompt creates valid prompt."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -1235,7 +1235,7 @@ class TestImplementCodeModule:
 
     def test_build_implementation_prompt_with_test_file(self, tmp_path):
         """build_implementation_prompt includes test file content."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         # Create a test file
         test_file = tmp_path / "tests" / "test_example.py"
@@ -1259,7 +1259,7 @@ class TestImplementCodeModule:
 
     def test_build_implementation_prompt_with_iteration(self, tmp_path):
         """build_implementation_prompt includes failure output on iteration."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -1279,7 +1279,7 @@ class TestImplementCodeModule:
 
     def test_build_implementation_prompt_with_files_to_modify(self, tmp_path):
         """build_implementation_prompt includes source files to modify."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         # Create source file
         src_file = tmp_path / "src" / "module.py"
@@ -1308,7 +1308,7 @@ class TestImplementCodeModule:
 
     def test_parse_implementation_response_file_header(self):
         """parse_implementation_response extracts files with # File: header."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         response = """Here's the implementation:
 
@@ -1337,7 +1337,7 @@ def helper():
 
     def test_parse_implementation_response_markdown_header(self):
         """parse_implementation_response handles markdown header format."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         response = """### 1. `src/module.py`
 
@@ -1361,7 +1361,7 @@ def helper():
 
     def test_parse_implementation_response_comment_path(self):
         """parse_implementation_response handles comment-style paths."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         response = """```python
 # src/module.py
@@ -1377,7 +1377,7 @@ def example():
 
     def test_parse_implementation_response_gitignore(self):
         """parse_implementation_response handles gitignore files."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         response = """```gitignore
 # File: .gitignore
@@ -1393,7 +1393,7 @@ __pycache__/
 
     def test_write_implementation_files_basic(self, tmp_path):
         """write_implementation_files writes files correctly."""
-        from agentos.workflows.testing.nodes.implement_code import write_implementation_files
+        from assemblyzero.workflows.testing.nodes.implement_code import write_implementation_files
 
         files = [
             {"path": "src/module.py", "content": "def example():\n    pass"},
@@ -1408,7 +1408,7 @@ __pycache__/
 
     def test_write_implementation_files_protects_test_files(self, tmp_path):
         """write_implementation_files skips protected test files."""
-        from agentos.workflows.testing.nodes.implement_code import write_implementation_files
+        from assemblyzero.workflows.testing.nodes.implement_code import write_implementation_files
 
         # Create test file
         test_file = tmp_path / "tests" / "test_example.py"
@@ -1427,7 +1427,7 @@ __pycache__/
 
     def test_write_implementation_files_skips_tests_dir(self, tmp_path):
         """write_implementation_files skips files in tests/ directory."""
-        from agentos.workflows.testing.nodes.implement_code import write_implementation_files
+        from assemblyzero.workflows.testing.nodes.implement_code import write_implementation_files
 
         files = [
             {"path": "tests/new_test.py", "content": "test content"},
@@ -1440,7 +1440,7 @@ __pycache__/
 
     def test_implement_code_non_mock_error_handling(self, tmp_path):
         """implement_code raises ImplementationError when Claude returns API error."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             implement_code,
             ImplementationError,
         )
@@ -1468,7 +1468,7 @@ __pycache__/
         }
 
         # Mock call_claude_for_file to return error - should raise ImplementationError
-        with patch("agentos.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
             mock_call.return_value = ("", "Claude not available")
 
             with pytest.raises(ImplementationError) as exc_info:
@@ -1479,7 +1479,7 @@ __pycache__/
 
     def test_call_claude_headless_sdk_fallback(self):
         """call_claude_headless falls back to SDK when CLI unavailable."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         # Create a mock module for anthropic
         import sys
@@ -1504,13 +1504,13 @@ class TestVerifyPhasesModule:
 
     def test_run_pytest_success(self, tmp_path):
         """run_pytest returns successful result."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
         # Create a simple test file
         test_file = tmp_path / "test_simple.py"
         test_file.write_text("def test_pass():\n    assert True")
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "1 passed in 0.01s"
             mock_run.return_value.stderr = ""
@@ -1522,12 +1522,12 @@ class TestVerifyPhasesModule:
 
     def test_run_pytest_with_coverage(self, tmp_path):
         """run_pytest includes coverage options."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
         test_file = tmp_path / "test_simple.py"
         test_file.write_text("def test_pass():\n    assert True")
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "1 passed\nTOTAL 100 10 90%"
             mock_run.return_value.stderr = ""
@@ -1546,12 +1546,12 @@ class TestVerifyPhasesModule:
 
     def test_run_pytest_uses_poetry_run(self, tmp_path):
         """Issue #268: run_pytest must use 'poetry run' for correct virtualenv."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
         test_file = tmp_path / "test_simple.py"
         test_file.write_text("def test_pass():\n    assert True")
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "1 passed in 0.01s"
             mock_run.return_value.stderr = ""
@@ -1566,12 +1566,12 @@ class TestVerifyPhasesModule:
 
     def test_run_pytest_timeout(self, tmp_path):
         """run_pytest handles timeout."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
         test_file = tmp_path / "test_simple.py"
         test_file.write_text("def test_pass():\n    assert True")
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("pytest", 300)
 
             result = run_pytest([str(test_file)], repo_root=tmp_path)
@@ -1581,9 +1581,9 @@ class TestVerifyPhasesModule:
 
     def test_run_pytest_not_found(self, tmp_path):
         """run_pytest handles missing pytest."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError("pytest not found")
 
             result = run_pytest([], repo_root=tmp_path)
@@ -1593,7 +1593,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_red_phase_no_test_files(self, tmp_path):
         """verify_red_phase blocks when no test files."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -1608,7 +1608,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_red_phase_missing_test_file(self, tmp_path):
         """verify_red_phase blocks when test file missing."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -1623,7 +1623,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_red_phase_unexpected_pass(self, tmp_path):
         """verify_red_phase blocks when tests pass unexpectedly."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         # Create audit dir and test file
         audit_dir = tmp_path / "audit"
@@ -1640,7 +1640,7 @@ class TestVerifyPhasesModule:
             "file_counter": 1,
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 0,
                 "stdout": "1 passed in 0.01s",
@@ -1658,7 +1658,7 @@ class TestVerifyPhasesModule:
         Issue #263: Import errors mean "module doesn't exist yet" which is
         exactly what TDD RED phase should catch.
         """
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1674,7 +1674,7 @@ class TestVerifyPhasesModule:
             "file_counter": 1,
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "",
@@ -1690,7 +1690,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_red_phase_no_tests_ran(self, tmp_path):
         """verify_red_phase blocks when no tests collected."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1706,7 +1706,7 @@ class TestVerifyPhasesModule:
             "file_counter": 1,
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 5,
                 "stdout": "collected 0 items",
@@ -1720,7 +1720,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_red_phase_success(self, tmp_path):
         """verify_red_phase succeeds when all tests fail."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1736,7 +1736,7 @@ class TestVerifyPhasesModule:
             "file_counter": 1,
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "3 failed in 0.01s",
@@ -1751,7 +1751,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_green_phase_success(self, tmp_path):
         """verify_green_phase succeeds when all tests pass with coverage."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1765,11 +1765,11 @@ class TestVerifyPhasesModule:
             "file_counter": 1,
             "coverage_target": 80,
             "iteration_count": 0,
-            "implementation_files": [str(tmp_path / "agentos" / "module.py")],
+            "implementation_files": [str(tmp_path / "assemblyzero" / "module.py")],
             "skip_e2e": True,
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 0,
                 "stdout": "3 passed\nTOTAL 100 10 90%",
@@ -1784,7 +1784,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_green_phase_iteration_on_failure(self, tmp_path):
         """verify_green_phase iterates on test failure."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1802,7 +1802,7 @@ class TestVerifyPhasesModule:
             "implementation_files": [],
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "1 failed, 2 passed",
@@ -1817,7 +1817,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_green_phase_max_iterations(self, tmp_path):
         """verify_green_phase stops at max iterations."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1835,7 +1835,7 @@ class TestVerifyPhasesModule:
             "implementation_files": [],
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "1 failed",
@@ -1851,7 +1851,7 @@ class TestVerifyPhasesModule:
 
     def test_verify_green_phase_low_coverage_iteration(self, tmp_path):
         """verify_green_phase iterates on low coverage."""
-        from agentos.workflows.testing.nodes.verify_phases import verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -1869,7 +1869,7 @@ class TestVerifyPhasesModule:
             "implementation_files": [],
         }
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest") as mock_run:
             mock_run.return_value = {
                 "returncode": 0,
                 "stdout": "3 passed\nTOTAL 100 30 70%",
@@ -1887,7 +1887,7 @@ class TestReviewTestPlanModule:
 
     def test_load_review_prompt_file_exists(self, tmp_path):
         """load_review_prompt loads from file when it exists."""
-        from agentos.workflows.testing.nodes.review_test_plan import load_review_prompt
+        from assemblyzero.workflows.testing.nodes.review_test_plan import load_review_prompt
 
         # Create prompt file
         prompt_dir = tmp_path / "docs" / "skills"
@@ -1901,7 +1901,7 @@ class TestReviewTestPlanModule:
 
     def test_load_review_prompt_file_missing(self, tmp_path):
         """load_review_prompt uses default when file missing."""
-        from agentos.workflows.testing.nodes.review_test_plan import load_review_prompt
+        from assemblyzero.workflows.testing.nodes.review_test_plan import load_review_prompt
 
         result = load_review_prompt(tmp_path)
 
@@ -1911,7 +1911,7 @@ class TestReviewTestPlanModule:
 
     def test_default_review_prompt(self):
         """_default_review_prompt returns valid content."""
-        from agentos.workflows.testing.nodes.review_test_plan import _default_review_prompt
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _default_review_prompt
 
         result = _default_review_prompt()
 
@@ -1921,7 +1921,7 @@ class TestReviewTestPlanModule:
 
     def test_build_review_context(self, tmp_path):
         """build_review_context creates formatted context."""
-        from agentos.workflows.testing.nodes.review_test_plan import build_review_context
+        from assemblyzero.workflows.testing.nodes.review_test_plan import build_review_context
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -1950,7 +1950,7 @@ class TestReviewTestPlanModule:
 
     def test_parse_verdict_approved_explicit(self):
         """_parse_verdict detects explicit APPROVED."""
-        from agentos.workflows.testing.nodes.review_test_plan import _parse_verdict
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
         verdict = "[x] **APPROVED** - Test plan is ready"
         result = _parse_verdict(verdict)
@@ -1959,7 +1959,7 @@ class TestReviewTestPlanModule:
 
     def test_parse_verdict_blocked_explicit(self):
         """_parse_verdict detects explicit BLOCKED."""
-        from agentos.workflows.testing.nodes.review_test_plan import _parse_verdict
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
         verdict = "[x] **BLOCKED** - Test plan needs revision"
         result = _parse_verdict(verdict)
@@ -1968,7 +1968,7 @@ class TestReviewTestPlanModule:
 
     def test_parse_verdict_approved_implicit(self):
         """_parse_verdict detects implicit APPROVED."""
-        from agentos.workflows.testing.nodes.review_test_plan import _parse_verdict
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
         verdict = "The test plan is APPROVED for implementation."
         result = _parse_verdict(verdict)
@@ -1977,7 +1977,7 @@ class TestReviewTestPlanModule:
 
     def test_parse_verdict_blocked_default(self):
         """_parse_verdict defaults to BLOCKED for unclear verdict."""
-        from agentos.workflows.testing.nodes.review_test_plan import _parse_verdict
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
         verdict = "Some unclear response"
         result = _parse_verdict(verdict)
@@ -1986,7 +1986,7 @@ class TestReviewTestPlanModule:
 
     def test_extract_feedback_required_changes_section(self):
         """_extract_feedback extracts from Required Changes section."""
-        from agentos.workflows.testing.nodes.review_test_plan import _extract_feedback
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         verdict = """## Verdict
 [x] **BLOCKED**
@@ -2001,7 +2001,7 @@ class TestReviewTestPlanModule:
 
     def test_extract_feedback_numbered_list(self):
         """_extract_feedback extracts numbered items after BLOCKED."""
-        from agentos.workflows.testing.nodes.review_test_plan import _extract_feedback
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         verdict = """BLOCKED - needs revision
 
@@ -2014,7 +2014,7 @@ class TestReviewTestPlanModule:
 
     def test_extract_feedback_fallback(self):
         """_extract_feedback returns fallback for unclear feedback."""
-        from agentos.workflows.testing.nodes.review_test_plan import _extract_feedback
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         verdict = "BLOCKED but no clear feedback"
         result = _extract_feedback(verdict)
@@ -2023,7 +2023,7 @@ class TestReviewTestPlanModule:
 
     def test_review_test_plan_no_scenarios(self, tmp_path):
         """review_test_plan blocks when no test scenarios."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -2049,7 +2049,7 @@ class TestLoadLLDModule:
 
     def test_find_lld_path_padded(self, tmp_path):
         """find_lld_path finds LLD-086.md format."""
-        from agentos.workflows.testing.nodes.load_lld import find_lld_path
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
 
         lld_dir = tmp_path / "docs" / "lld" / "active"
         lld_dir.mkdir(parents=True)
@@ -2062,7 +2062,7 @@ class TestLoadLLDModule:
 
     def test_find_lld_path_with_description(self, tmp_path):
         """find_lld_path finds LLD-086-feature.md format."""
-        from agentos.workflows.testing.nodes.load_lld import find_lld_path
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
 
         lld_dir = tmp_path / "docs" / "lld" / "active"
         lld_dir.mkdir(parents=True)
@@ -2075,7 +2075,7 @@ class TestLoadLLDModule:
 
     def test_find_lld_path_unpadded(self, tmp_path):
         """find_lld_path finds LLD-86.md format."""
-        from agentos.workflows.testing.nodes.load_lld import find_lld_path
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
 
         lld_dir = tmp_path / "docs" / "lld" / "active"
         lld_dir.mkdir(parents=True)
@@ -2087,7 +2087,7 @@ class TestLoadLLDModule:
 
     def test_find_lld_path_not_found(self, tmp_path):
         """find_lld_path returns None when not found."""
-        from agentos.workflows.testing.nodes.load_lld import find_lld_path
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
 
         lld_dir = tmp_path / "docs" / "lld" / "active"
         lld_dir.mkdir(parents=True)
@@ -2098,7 +2098,7 @@ class TestLoadLLDModule:
 
     def test_find_lld_path_no_dir(self, tmp_path):
         """find_lld_path returns None when directory missing."""
-        from agentos.workflows.testing.nodes.load_lld import find_lld_path
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
 
         result = find_lld_path(86, tmp_path)
 
@@ -2106,7 +2106,7 @@ class TestLoadLLDModule:
 
     def test_parse_test_scenarios_table_format(self):
         """parse_test_scenarios parses table format."""
-        from agentos.workflows.testing.nodes.load_lld import parse_test_scenarios
+        from assemblyzero.workflows.testing.nodes.load_lld import parse_test_scenarios
 
         # Use a table format that matches the expected patterns better
         test_plan = """
@@ -2126,7 +2126,7 @@ class TestLoadLLDModule:
 
     def test_parse_test_scenarios_bold_format(self):
         """parse_test_scenarios parses bold format."""
-        from agentos.workflows.testing.nodes.load_lld import parse_test_scenarios
+        from assemblyzero.workflows.testing.nodes.load_lld import parse_test_scenarios
 
         test_plan = """
 **test_login**: Verify that login works correctly.
@@ -2140,7 +2140,7 @@ class TestLoadLLDModule:
 
     def test_infer_test_type_e2e(self):
         """_infer_test_type detects e2e tests."""
-        from agentos.workflows.testing.nodes.load_lld import _infer_test_type
+        from assemblyzero.workflows.testing.nodes.load_lld import _infer_test_type
 
         result = _infer_test_type("test_e2e_flow", "Tests the complete flow")
         assert result == "e2e"
@@ -2150,28 +2150,28 @@ class TestLoadLLDModule:
 
     def test_infer_test_type_integration(self):
         """_infer_test_type detects integration tests."""
-        from agentos.workflows.testing.nodes.load_lld import _infer_test_type
+        from assemblyzero.workflows.testing.nodes.load_lld import _infer_test_type
 
         result = _infer_test_type("test_integration_api", "Integration test")
         assert result == "integration"
 
     def test_infer_test_type_browser(self):
         """_infer_test_type detects browser tests."""
-        from agentos.workflows.testing.nodes.load_lld import _infer_test_type
+        from assemblyzero.workflows.testing.nodes.load_lld import _infer_test_type
 
         result = _infer_test_type("test_ui_button", "Tests the browser UI")
         assert result == "browser"
 
     def test_infer_test_type_default_unit(self):
         """_infer_test_type defaults to unit."""
-        from agentos.workflows.testing.nodes.load_lld import _infer_test_type
+        from assemblyzero.workflows.testing.nodes.load_lld import _infer_test_type
 
         result = _infer_test_type("test_function", "Tests a function")
         assert result == "unit"
 
     def test_needs_mock(self):
         """_needs_mock detects mock indicators."""
-        from agentos.workflows.testing.nodes.load_lld import _needs_mock
+        from assemblyzero.workflows.testing.nodes.load_lld import _needs_mock
 
         assert _needs_mock("This uses the mock API") is True
         assert _needs_mock("Stub the database") is True
@@ -2180,7 +2180,7 @@ class TestLoadLLDModule:
 
     def test_extract_assertions(self):
         """_extract_assertions extracts assertion descriptions."""
-        from agentos.workflows.testing.nodes.load_lld import _extract_assertions
+        from assemblyzero.workflows.testing.nodes.load_lld import _extract_assertions
 
         content = "Verify that login returns success. Assert the session is valid. Should return 200."
         result = _extract_assertions(content)
@@ -2190,7 +2190,7 @@ class TestLoadLLDModule:
 
     def test_extract_files_to_modify(self):
         """extract_files_to_modify parses Section 2.1 table."""
-        from agentos.workflows.testing.nodes.load_lld import extract_files_to_modify
+        from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
 
         lld_content = """# LLD
 
@@ -2212,7 +2212,7 @@ class TestLoadLLDModule:
 
     def test_extract_files_to_modify_no_table(self):
         """extract_files_to_modify returns empty when no table."""
-        from agentos.workflows.testing.nodes.load_lld import extract_files_to_modify
+        from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
 
         lld_content = "# LLD\n\n## 2. Scope\n\nNo files changed."
         result = extract_files_to_modify(lld_content)
@@ -2221,7 +2221,7 @@ class TestLoadLLDModule:
 
     def test_load_lld_non_mock(self, tmp_path):
         """load_lld loads actual LLD file."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         # Create LLD file
         lld_dir = tmp_path / "docs" / "lld" / "active"
@@ -2261,7 +2261,7 @@ Requirement: REQ-1
 
     def test_load_lld_not_found(self, tmp_path):
         """load_lld returns error when LLD not found."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         # Create empty LLD directory
         lld_dir = tmp_path / "docs" / "lld" / "active"
@@ -2279,7 +2279,7 @@ Requirement: REQ-1
 
     def test_load_lld_short_content(self, tmp_path):
         """load_lld blocks when LLD content too short."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         lld_dir = tmp_path / "docs" / "lld" / "active"
         lld_dir.mkdir(parents=True)
@@ -2301,7 +2301,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_load_error(self, tmp_path):
         """route_after_load returns end on error."""
-        from agentos.workflows.testing.graph import route_after_load
+        from assemblyzero.workflows.testing.graph import route_after_load
 
         state: TestingWorkflowState = {
             "error_message": "Some error",
@@ -2311,7 +2311,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_load_success(self, tmp_path):
         """route_after_load continues on success."""
-        from agentos.workflows.testing.graph import route_after_load
+        from assemblyzero.workflows.testing.graph import route_after_load
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2321,7 +2321,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_scaffold_scaffold_only(self, tmp_path):
         """route_after_scaffold returns end for scaffold_only."""
-        from agentos.workflows.testing.graph import route_after_scaffold
+        from assemblyzero.workflows.testing.graph import route_after_scaffold
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2332,7 +2332,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_red_error(self, tmp_path):
         """route_after_red returns end on error."""
-        from agentos.workflows.testing.graph import route_after_red
+        from assemblyzero.workflows.testing.graph import route_after_red
 
         state: TestingWorkflowState = {
             "error_message": "Tests failed",
@@ -2342,7 +2342,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_red_success(self, tmp_path):
         """route_after_red continues to implement."""
-        from agentos.workflows.testing.graph import route_after_red
+        from assemblyzero.workflows.testing.graph import route_after_red
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2353,7 +2353,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_red_no_next_node(self, tmp_path):
         """route_after_red returns end when no next_node."""
-        from agentos.workflows.testing.graph import route_after_red
+        from assemblyzero.workflows.testing.graph import route_after_red
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2364,7 +2364,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_implement_error(self, tmp_path):
         """route_after_implement returns end on error."""
-        from agentos.workflows.testing.graph import route_after_implement
+        from assemblyzero.workflows.testing.graph import route_after_implement
 
         state: TestingWorkflowState = {
             "error_message": "Implementation failed",
@@ -2374,7 +2374,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_green_iteration_max(self, tmp_path):
         """route_after_green returns end at max iterations."""
-        from agentos.workflows.testing.graph import route_after_green
+        from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2387,7 +2387,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_green_to_e2e(self, tmp_path):
         """route_after_green routes to E2E validation."""
-        from agentos.workflows.testing.graph import route_after_green
+        from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2398,7 +2398,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_green_skip_e2e(self, tmp_path):
         """route_after_green routes to finalize when skipping e2e."""
-        from agentos.workflows.testing.graph import route_after_green
+        from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2409,7 +2409,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_e2e_iteration(self, tmp_path):
         """route_after_e2e routes back to implement."""
-        from agentos.workflows.testing.graph import route_after_e2e
+        from assemblyzero.workflows.testing.graph import route_after_e2e
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2422,7 +2422,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_e2e_max_iterations(self, tmp_path):
         """route_after_e2e returns end at max iterations."""
-        from agentos.workflows.testing.graph import route_after_e2e
+        from assemblyzero.workflows.testing.graph import route_after_e2e
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2435,7 +2435,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_finalize_skip_docs(self, tmp_path):
         """route_after_finalize returns end when skip_docs."""
-        from agentos.workflows.testing.graph import route_after_finalize
+        from assemblyzero.workflows.testing.graph import route_after_finalize
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2446,7 +2446,7 @@ class TestGraphRoutingFunctions:
 
     def test_route_after_finalize_continue(self, tmp_path):
         """route_after_finalize continues to document."""
-        from agentos.workflows.testing.graph import route_after_finalize
+        from assemblyzero.workflows.testing.graph import route_after_finalize
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -2461,7 +2461,7 @@ class TestFinalizeModule:
 
     def test_archive_file_to_done_basic(self, tmp_path):
         """archive_file_to_done moves file to done directory."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Create active file
         active_dir = tmp_path / "docs" / "lld" / "active"
@@ -2478,7 +2478,7 @@ class TestFinalizeModule:
 
     def test_archive_file_to_done_not_in_active(self, tmp_path):
         """archive_file_to_done skips files not in active/."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Create file not in active
         other_dir = tmp_path / "docs" / "other"
@@ -2493,7 +2493,7 @@ class TestFinalizeModule:
 
     def test_archive_file_to_done_not_found(self, tmp_path):
         """archive_file_to_done handles missing file."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         result = archive_file_to_done(tmp_path / "nonexistent.md")
 
@@ -2501,7 +2501,7 @@ class TestFinalizeModule:
 
     def test_archive_file_to_done_conflict(self, tmp_path):
         """archive_file_to_done handles name conflict with timestamp."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Create active and done files with same name
         active_dir = tmp_path / "docs" / "lld" / "active"
@@ -2522,7 +2522,7 @@ class TestFinalizeModule:
 
     def test_archive_workflow_artifacts_unsuccessful(self, tmp_path):
         """_archive_workflow_artifacts skips archival on failure."""
-        from agentos.workflows.testing.nodes.finalize import _archive_workflow_artifacts
+        from assemblyzero.workflows.testing.nodes.finalize import _archive_workflow_artifacts
 
         state: TestingWorkflowState = {
             "workflow_success": False,
@@ -2536,7 +2536,7 @@ class TestFinalizeModule:
 
     def test_generate_summary(self):
         """_generate_summary creates valid markdown."""
-        from agentos.workflows.testing.nodes.finalize import _generate_summary
+        from assemblyzero.workflows.testing.nodes.finalize import _generate_summary
 
         metadata = {
             "issue_number": 42,
@@ -2561,7 +2561,7 @@ class TestFinalizeModule:
 
     def test_generate_summary_skipped_e2e(self):
         """_generate_summary shows skipped E2E."""
-        from agentos.workflows.testing.nodes.finalize import _generate_summary
+        from assemblyzero.workflows.testing.nodes.finalize import _generate_summary
 
         metadata = {
             "issue_number": 42,
@@ -2588,14 +2588,14 @@ class TestDocumentModule:
 
     def test_detect_doc_scope_minimal_marker(self):
         """detect_doc_scope detects explicit minimal marker."""
-        from agentos.workflows.testing.nodes.document import detect_doc_scope
+        from assemblyzero.workflows.testing.nodes.document import detect_doc_scope
 
         lld = "<!-- doc-scope: minimal -->\nContent"
         assert detect_doc_scope(lld) == "minimal"
 
     def test_should_update_readme_explicit_true(self):
         """should_update_readme detects explicit true marker."""
-        from agentos.workflows.testing.nodes.document import should_update_readme
+        from assemblyzero.workflows.testing.nodes.document import should_update_readme
 
         state: TestingWorkflowState = {
             "lld_content": "<!-- update-readme: true -->\nContent",
@@ -2604,7 +2604,7 @@ class TestDocumentModule:
 
     def test_should_update_readme_explicit_false(self):
         """should_update_readme detects explicit false marker."""
-        from agentos.workflows.testing.nodes.document import should_update_readme
+        from assemblyzero.workflows.testing.nodes.document import should_update_readme
 
         state: TestingWorkflowState = {
             "lld_content": "<!-- update-readme: false -->\nContent",
@@ -2613,7 +2613,7 @@ class TestDocumentModule:
 
     def test_should_update_readme_major_feature(self):
         """should_update_readme detects major feature."""
-        from agentos.workflows.testing.nodes.document import should_update_readme
+        from assemblyzero.workflows.testing.nodes.document import should_update_readme
 
         state: TestingWorkflowState = {
             "lld_content": "This is a major feature with breaking change.",
@@ -2622,7 +2622,7 @@ class TestDocumentModule:
 
     def test_update_readme_adds_entry(self, tmp_path):
         """update_readme adds feature entry."""
-        from agentos.workflows.testing.nodes.document import update_readme
+        from assemblyzero.workflows.testing.nodes.document import update_readme
 
         # Create README
         readme = tmp_path / "README.md"
@@ -2641,7 +2641,7 @@ class TestDocumentModule:
 
     def test_update_readme_no_readme(self, tmp_path):
         """update_readme returns False when no README."""
-        from agentos.workflows.testing.nodes.document import update_readme
+        from assemblyzero.workflows.testing.nodes.document import update_readme
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -2654,7 +2654,7 @@ class TestDocumentModule:
 
     def test_update_readme_already_mentioned(self, tmp_path):
         """update_readme skips when feature already mentioned."""
-        from agentos.workflows.testing.nodes.document import update_readme
+        from assemblyzero.workflows.testing.nodes.document import update_readme
 
         # Create README with feature already mentioned
         readme = tmp_path / "README.md"
@@ -2675,9 +2675,9 @@ class TestE2EValidationModule:
 
     def test_run_e2e_tests_filters_e2e_files(self, tmp_path):
         """run_e2e_tests filters for e2e/integration files."""
-        from agentos.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "passed"
             mock_run.return_value.stderr = ""
@@ -2694,9 +2694,9 @@ class TestE2EValidationModule:
 
     def test_run_e2e_tests_timeout(self, tmp_path):
         """run_e2e_tests handles timeout."""
-        from agentos.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired("pytest", 600)
 
             result = run_e2e_tests([], None, tmp_path)
@@ -2706,9 +2706,9 @@ class TestE2EValidationModule:
 
     def test_run_e2e_tests_not_found(self, tmp_path):
         """run_e2e_tests handles missing pytest."""
-        from agentos.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
 
             result = run_e2e_tests([], None, tmp_path)
@@ -2717,7 +2717,7 @@ class TestE2EValidationModule:
 
     def test_cleanup_sandbox(self):
         """cleanup_sandbox returns success."""
-        from agentos.workflows.testing.nodes.e2e_validation import cleanup_sandbox
+        from assemblyzero.workflows.testing.nodes.e2e_validation import cleanup_sandbox
 
         success, error = cleanup_sandbox("some/repo")
 
@@ -2726,7 +2726,7 @@ class TestE2EValidationModule:
 
     def test_verify_safety_limits(self):
         """verify_safety_limits returns safe."""
-        from agentos.workflows.testing.nodes.e2e_validation import verify_safety_limits
+        from assemblyzero.workflows.testing.nodes.e2e_validation import verify_safety_limits
 
         safe, error = verify_safety_limits("repo", 5, 3)
 
@@ -2735,7 +2735,7 @@ class TestE2EValidationModule:
 
     def test_e2e_validation_success(self, tmp_path):
         """e2e_validation succeeds on all tests passing."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -2752,7 +2752,7 @@ class TestE2EValidationModule:
             "sandbox_repo": "",
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 0,
                 "stdout": "1 passed",
@@ -2766,7 +2766,7 @@ class TestE2EValidationModule:
 
     def test_e2e_validation_max_iterations(self, tmp_path):
         """e2e_validation stops at max iterations."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -2784,7 +2784,7 @@ class TestE2EValidationModule:
             "sandbox_repo": "",
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "1 failed",
@@ -2797,7 +2797,7 @@ class TestE2EValidationModule:
 
     def test_e2e_validation_no_tests_collected_string(self, tmp_path):
         """e2e_validation handles 'no tests ran' string."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -2814,7 +2814,7 @@ class TestE2EValidationModule:
             "sandbox_repo": "",
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 2,
                 "stdout": "no tests ran",
@@ -2831,7 +2831,7 @@ class TestPatternsModule:
 
     def test_load_test_types_yaml_missing(self, tmp_path):
         """load_test_types uses defaults when YAML missing."""
-        from agentos.workflows.testing.knowledge.patterns import _default_test_types
+        from assemblyzero.workflows.testing.knowledge.patterns import _default_test_types
 
         result = _default_test_types()
 
@@ -2841,7 +2841,7 @@ class TestPatternsModule:
 
     def test_get_test_type_info(self):
         """get_test_type_info returns type definition."""
-        from agentos.workflows.testing.knowledge.patterns import get_test_type_info
+        from assemblyzero.workflows.testing.knowledge.patterns import get_test_type_info
 
         result = get_test_type_info("unit")
 
@@ -2850,7 +2850,7 @@ class TestPatternsModule:
 
     def test_get_test_type_info_unknown(self):
         """get_test_type_info returns empty for unknown type."""
-        from agentos.workflows.testing.knowledge.patterns import get_test_type_info
+        from assemblyzero.workflows.testing.knowledge.patterns import get_test_type_info
 
         result = get_test_type_info("unknown_type")
 
@@ -2858,7 +2858,7 @@ class TestPatternsModule:
 
     def test_get_mock_guidance_with_types(self):
         """get_mock_guidance returns combined guidance."""
-        from agentos.workflows.testing.knowledge.patterns import get_mock_guidance
+        from assemblyzero.workflows.testing.knowledge.patterns import get_mock_guidance
 
         result = get_mock_guidance(["unit", "browser"])
 
@@ -2866,7 +2866,7 @@ class TestPatternsModule:
 
     def test_get_mock_guidance_no_guidance(self):
         """get_mock_guidance handles types without guidance."""
-        from agentos.workflows.testing.knowledge.patterns import get_mock_guidance
+        from assemblyzero.workflows.testing.knowledge.patterns import get_mock_guidance
 
         result = get_mock_guidance(["e2e"])
 
@@ -2875,7 +2875,7 @@ class TestPatternsModule:
 
     def test_calculate_coverage_target(self):
         """calculate_coverage_target returns highest target."""
-        from agentos.workflows.testing.knowledge.patterns import calculate_coverage_target
+        from assemblyzero.workflows.testing.knowledge.patterns import calculate_coverage_target
 
         result = calculate_coverage_target(["unit", "integration"])
 
@@ -2884,7 +2884,7 @@ class TestPatternsModule:
 
     def test_calculate_coverage_target_empty(self):
         """calculate_coverage_target handles empty list."""
-        from agentos.workflows.testing.knowledge.patterns import calculate_coverage_target
+        from assemblyzero.workflows.testing.knowledge.patterns import calculate_coverage_target
 
         result = calculate_coverage_target([])
 
@@ -2896,7 +2896,7 @@ class TestScaffoldTestsEdgeCases:
 
     def test_scaffold_tests_creates_directory(self, tmp_path):
         """scaffold_tests creates tests directory if missing."""
-        from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 
         lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         lineage_dir.mkdir(parents=True)
@@ -2932,7 +2932,7 @@ class TestAuditModuleExtras:
 
     def test_create_testing_audit_dir(self, tmp_path):
         """create_testing_audit_dir creates proper structure."""
-        from agentos.workflows.testing.audit import create_testing_audit_dir
+        from assemblyzero.workflows.testing.audit import create_testing_audit_dir
 
         result = create_testing_audit_dir(42, tmp_path)
 
@@ -2941,7 +2941,7 @@ class TestAuditModuleExtras:
 
     def test_parse_pytest_output_no_coverage(self):
         """parse_pytest_output handles output without coverage."""
-        from agentos.workflows.testing.audit import parse_pytest_output
+        from assemblyzero.workflows.testing.audit import parse_pytest_output
 
         output = "5 passed, 1 failed in 2.3s"
         result = parse_pytest_output(output)
@@ -2956,7 +2956,7 @@ class TestDocumentModuleFull:
 
     def test_document_full_scope_with_wiki(self, tmp_path):
         """document generates wiki page for full scope."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -2988,7 +2988,7 @@ class TestDocumentModuleFull:
 
     def test_document_generates_runbook(self, tmp_path):
         """document generates runbook for operational feature."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3012,7 +3012,7 @@ class TestDocumentModuleFull:
 
     def test_document_generates_cp_docs(self, tmp_path):
         """document generates c/p docs for CLI tool."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3043,7 +3043,7 @@ class TestImplementCodeFullCoverage:
 
     def test_implement_code_successful_implementation(self, tmp_path):
         """implement_code successfully writes implementation files."""
-        from agentos.workflows.testing.nodes.implement_code import implement_code
+        from assemblyzero.workflows.testing.nodes.implement_code import implement_code
 
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3072,7 +3072,7 @@ def example():
     return True
 ```
 """
-        with patch("agentos.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
             mock_call.return_value = (mock_response, "")
 
             result = implement_code(state)
@@ -3082,7 +3082,7 @@ def example():
 
     def test_implement_code_no_files_extracted(self, tmp_path):
         """implement_code raises ImplementationError when Claude gives no code."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             implement_code,
             ImplementationError,
         )
@@ -3109,7 +3109,7 @@ def example():
         }
 
         # Mock empty response (no code blocks) - should raise ImplementationError
-        with patch("agentos.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
             mock_call.return_value = ("I cannot help with that.", "")
 
             with pytest.raises(ImplementationError) as exc_info:
@@ -3119,7 +3119,7 @@ def example():
 
     def test_parse_implementation_response_various_formats(self):
         """parse_implementation_response handles various formats."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         # Test with multiple file types
         response = """```yaml
@@ -3139,7 +3139,7 @@ key: value
 
     def test_write_implementation_files_creates_parent_dirs(self, tmp_path):
         """write_implementation_files creates parent directories."""
-        from agentos.workflows.testing.nodes.implement_code import write_implementation_files
+        from assemblyzero.workflows.testing.nodes.implement_code import write_implementation_files
 
         files = [
             {"path": "deep/nested/path/module.py", "content": "def f(): pass"},
@@ -3156,7 +3156,7 @@ class TestE2EValidationFullCoverage:
 
     def test_e2e_validation_with_sandbox(self, tmp_path):
         """e2e_validation handles sandbox repo."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3175,7 +3175,7 @@ class TestE2EValidationFullCoverage:
             "e2e_max_prs": 3,
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 0,
                 "stdout": "1 passed",
@@ -3188,7 +3188,7 @@ class TestE2EValidationFullCoverage:
 
     def test_e2e_validation_internal_error(self, tmp_path):
         """e2e_validation handles internal error (code 3)."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3205,7 +3205,7 @@ class TestE2EValidationFullCoverage:
             "sandbox_repo": "",
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 3,
                 "stdout": "",
@@ -3218,7 +3218,7 @@ class TestE2EValidationFullCoverage:
 
     def test_e2e_validation_failure_loops(self, tmp_path):
         """e2e_validation loops back on test failure."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3236,7 +3236,7 @@ class TestE2EValidationFullCoverage:
             "sandbox_repo": "",
         }
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.run_e2e_tests") as mock_run:
             mock_run.return_value = {
                 "returncode": 1,
                 "stdout": "1 failed",
@@ -3250,9 +3250,9 @@ class TestE2EValidationFullCoverage:
 
     def test_run_e2e_tests_with_sandbox_env(self, tmp_path):
         """run_e2e_tests sets sandbox environment variable."""
-        from agentos.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "passed"
             mock_run.return_value.stderr = ""
@@ -3273,7 +3273,7 @@ class TestReviewTestPlanFullCoverage:
 
     def test_review_test_plan_import_error(self, tmp_path):
         """review_test_plan handles import error gracefully."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3295,7 +3295,7 @@ class TestReviewTestPlanFullCoverage:
         original_modules = sys.modules.copy()
 
         # Try to trigger import error by patching at different level
-        with patch.dict(sys.modules, {"agentos.core.gemini_client": None}):
+        with patch.dict(sys.modules, {"assemblyzero.core.gemini_client": None}):
             # The function should handle ImportError gracefully
             result = review_test_plan(state)
 
@@ -3304,7 +3304,7 @@ class TestReviewTestPlanFullCoverage:
 
     def test_review_test_plan_with_test_plan_section(self, tmp_path):
         """review_test_plan includes test plan section in context."""
-        from agentos.workflows.testing.nodes.review_test_plan import build_review_context
+        from assemblyzero.workflows.testing.nodes.review_test_plan import build_review_context
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -3326,7 +3326,7 @@ class TestGraphRoutingEdgeCases:
 
     def test_route_after_review_error_without_auto(self):
         """route_after_review returns end on error without auto mode."""
-        from agentos.workflows.testing.graph import route_after_review
+        from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "error_message": "Some error",
@@ -3338,7 +3338,7 @@ class TestGraphRoutingEdgeCases:
 
     def test_route_after_green_no_next_node(self):
         """route_after_green returns end when no next_node."""
-        from agentos.workflows.testing.graph import route_after_green
+        from assemblyzero.workflows.testing.graph import route_after_green
 
         state: TestingWorkflowState = {
             "error_message": "",
@@ -3349,7 +3349,7 @@ class TestGraphRoutingEdgeCases:
 
     def test_route_after_e2e_error(self):
         """route_after_e2e returns end on error."""
-        from agentos.workflows.testing.graph import route_after_e2e
+        from assemblyzero.workflows.testing.graph import route_after_e2e
 
         state: TestingWorkflowState = {
             "error_message": "E2E failed",
@@ -3359,7 +3359,7 @@ class TestGraphRoutingEdgeCases:
 
     def test_route_after_finalize_error(self):
         """route_after_finalize returns end on error."""
-        from agentos.workflows.testing.graph import route_after_finalize
+        from assemblyzero.workflows.testing.graph import route_after_finalize
 
         state: TestingWorkflowState = {
             "error_message": "Finalize error",
@@ -3373,7 +3373,7 @@ class TestTemplatesFullCoverage:
 
     def test_runbook_generates_file(self, tmp_path):
         """generate_runbook creates runbook file."""
-        from agentos.workflows.testing.templates.runbook import generate_runbook
+        from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = """# Workflow Feature
 
@@ -3398,7 +3398,7 @@ class TestTemplatesFullCoverage:
 
     def test_cp_docs_cli_extracts_commands(self, tmp_path):
         """generate_cli_doc extracts bash commands."""
-        from agentos.workflows.testing.templates.cp_docs import generate_cli_doc
+        from assemblyzero.workflows.testing.templates.cp_docs import generate_cli_doc
 
         lld_content = """# CLI Tool
 
@@ -3420,7 +3420,7 @@ poetry run python tools/tool.py --issue 42
 
     def test_lessons_learned_with_e2e(self, tmp_path):
         """generate_lessons_learned includes E2E info."""
-        from agentos.workflows.testing.templates.lessons import generate_lessons_learned
+        from assemblyzero.workflows.testing.templates.lessons import generate_lessons_learned
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3455,7 +3455,7 @@ class TestScaffoldEdgeCases:
 
     def test_generate_test_file_content_browser_type(self):
         """generate_test_file_content handles browser test type."""
-        from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
         scenarios: list[TestScenario] = [
             {
@@ -3477,7 +3477,7 @@ class TestScaffoldEdgeCases:
 
     def test_generate_test_file_content_integration_type(self):
         """generate_test_file_content handles integration test type."""
-        from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
         scenarios: list[TestScenario] = [
             {
@@ -3500,7 +3500,7 @@ class TestScaffoldEdgeCases:
 
         This enables e2e_validation.py to filter tests with '-m e2e or integration'.
         """
-        from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
         scenarios: list[TestScenario] = [
             {
@@ -3528,7 +3528,7 @@ class TestScaffoldEdgeCases:
 
         This enables e2e_validation.py to filter tests with '-m e2e or integration'.
         """
-        from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
         scenarios: list[TestScenario] = [
             {
@@ -3557,7 +3557,7 @@ class TestAuditFullCoverage:
 
     def test_next_file_number_handles_invalid_names(self, tmp_path):
         """next_file_number skips files without number prefix."""
-        from agentos.workflows.testing.audit import next_file_number
+        from assemblyzero.workflows.testing.audit import next_file_number
 
         # Create files with and without number prefix
         (tmp_path / "001-test.md").write_text("test")
@@ -3569,7 +3569,7 @@ class TestAuditFullCoverage:
 
     def test_parse_pytest_output_with_skipped(self):
         """parse_pytest_output handles skipped tests."""
-        from agentos.workflows.testing.audit import parse_pytest_output
+        from assemblyzero.workflows.testing.audit import parse_pytest_output
 
         output = "5 passed, 2 skipped in 1.23s"
         result = parse_pytest_output(output)
@@ -3584,7 +3584,7 @@ class TestFinalizeFullCoverage:
 
     def test_finalize_with_e2e_failed(self, tmp_path):
         """finalize handles failed E2E status."""
-        from agentos.workflows.testing.nodes.finalize import finalize
+        from assemblyzero.workflows.testing.nodes.finalize import finalize
 
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         audit_dir.mkdir(parents=True)
@@ -3615,7 +3615,7 @@ class TestFinalizeFullCoverage:
 
     def test_finalize_archives_lld(self, tmp_path):
         """finalize archives LLD to done directory."""
-        from agentos.workflows.testing.nodes.finalize import finalize
+        from assemblyzero.workflows.testing.nodes.finalize import finalize
 
         # Create LLD in active
         lld_dir = tmp_path / "docs" / "lld" / "active"
@@ -3660,11 +3660,11 @@ class TestImplementCodeCLIPaths:
 
     def test_call_claude_headless_cli_success(self):
         """call_claude_headless succeeds with CLI."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         # Mock successful CLI call
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agentos.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
                 mock_run.return_value.returncode = 0
                 mock_run.return_value.stdout = "```python\n# File: test.py\npass\n```"
                 mock_run.return_value.stderr = ""
@@ -3676,10 +3676,10 @@ class TestImplementCodeCLIPaths:
 
     def test_call_claude_headless_cli_error(self):
         """call_claude_headless handles CLI error."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agentos.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
                 mock_run.return_value.returncode = 1
                 mock_run.return_value.stdout = ""
                 mock_run.return_value.stderr = "Error"
@@ -3693,10 +3693,10 @@ class TestImplementCodeCLIPaths:
 
     def test_call_claude_headless_cli_timeout(self):
         """call_claude_headless handles CLI timeout."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agentos.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
                 mock_run.side_effect = subprocess.TimeoutExpired("claude", 600)
 
                 response, error = call_claude_headless("test prompt")
@@ -3706,10 +3706,10 @@ class TestImplementCodeCLIPaths:
 
     def test_call_claude_headless_cli_empty_response(self):
         """call_claude_headless handles empty CLI response."""
-        from agentos.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agentos.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
                 mock_run.return_value.returncode = 0
                 mock_run.return_value.stdout = ""
                 mock_run.return_value.stderr = ""
@@ -3725,7 +3725,7 @@ class TestE2EValidationMockPath:
 
     def test_mock_e2e_validation(self, tmp_path):
         """_mock_e2e_validation returns mock results."""
-        from agentos.workflows.testing.nodes.e2e_validation import _mock_e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import _mock_e2e_validation
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3744,7 +3744,7 @@ class TestE2EValidationMockPath:
 
     def test_e2e_validation_skip_flag(self, tmp_path):
         """e2e_validation respects skip_e2e flag."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -3763,7 +3763,7 @@ class TestVerifyPhasesMockPaths:
 
     def test_mock_verify_red_phase(self, tmp_path):
         """_mock_verify_red_phase returns mock results."""
-        from agentos.workflows.testing.nodes.verify_phases import _mock_verify_red_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import _mock_verify_red_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3781,7 +3781,7 @@ class TestVerifyPhasesMockPaths:
 
     def test_mock_verify_green_phase_first_iteration(self, tmp_path):
         """_mock_verify_green_phase fails on first iteration."""
-        from agentos.workflows.testing.nodes.verify_phases import _mock_verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import _mock_verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3800,7 +3800,7 @@ class TestVerifyPhasesMockPaths:
 
     def test_mock_verify_green_phase_later_iteration(self, tmp_path):
         """_mock_verify_green_phase passes on later iteration."""
-        from agentos.workflows.testing.nodes.verify_phases import _mock_verify_green_phase
+        from assemblyzero.workflows.testing.nodes.verify_phases import _mock_verify_green_phase
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -3825,7 +3825,7 @@ class TestLoadLLDEdgeCases:
 
     def test_load_lld_no_issue_number(self, tmp_path):
         """load_lld returns error when no issue number."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         state: TestingWorkflowState = {
             "issue_number": 0,
@@ -3838,7 +3838,7 @@ class TestLoadLLDEdgeCases:
 
     def test_load_lld_with_explicit_path(self, tmp_path):
         """load_lld uses explicit lld_path when provided."""
-        from agentos.workflows.testing.nodes.load_lld import load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
         # Create LLD file at custom path
         custom_path = tmp_path / "custom" / "lld.md"
@@ -3878,7 +3878,7 @@ class TestDocumentReadmePaths:
 
     def test_update_readme_no_features_section(self, tmp_path):
         """update_readme handles README without Features section."""
-        from agentos.workflows.testing.nodes.document import update_readme
+        from assemblyzero.workflows.testing.nodes.document import update_readme
 
         # Create README without Features section
         readme = tmp_path / "README.md"
@@ -3900,7 +3900,7 @@ class TestScaffoldMockPath:
 
     def test_scaffold_tests_mock_mode(self, tmp_path):
         """scaffold_tests uses mock mode."""
-        from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 
         lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         lineage_dir.mkdir(parents=True)
@@ -3937,7 +3937,7 @@ class TestRunbookEdgeCases:
 
     def test_generate_runbook_with_prerequisites(self, tmp_path):
         """generate_runbook extracts prerequisites."""
-        from agentos.workflows.testing.templates.runbook import generate_runbook
+        from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = """# Feature
 
@@ -3970,7 +3970,7 @@ class TestPatternsYamlLoading:
 
     def test_load_test_types_uses_yaml(self, tmp_path):
         """load_test_types loads from YAML file."""
-        from agentos.workflows.testing.knowledge.patterns import load_test_types
+        from assemblyzero.workflows.testing.knowledge.patterns import load_test_types
 
         # Should load either from YAML or use defaults
         result = load_test_types()
@@ -3980,7 +3980,7 @@ class TestPatternsYamlLoading:
 
     def test_calculate_coverage_target_unknown_types(self):
         """calculate_coverage_target handles unknown types."""
-        from agentos.workflows.testing.knowledge.patterns import calculate_coverage_target
+        from assemblyzero.workflows.testing.knowledge.patterns import calculate_coverage_target
 
         result = calculate_coverage_target(["unknown", "nonexistent"])
 
@@ -3993,7 +3993,7 @@ class TestFinalizeEdgeCases:
 
     def test_finalize_no_audit_dir(self, tmp_path):
         """finalize handles missing audit directory."""
-        from agentos.workflows.testing.nodes.finalize import finalize
+        from assemblyzero.workflows.testing.nodes.finalize import finalize
 
         reports_dir = tmp_path / "docs" / "reports" / "active"
         reports_dir.mkdir(parents=True)
@@ -4022,7 +4022,7 @@ class TestGraphBuildWorkflow:
 
     def test_build_workflow_node_count(self):
         """build_testing_workflow creates all nodes."""
-        from agentos.workflows.testing.graph import build_testing_workflow
+        from assemblyzero.workflows.testing.graph import build_testing_workflow
 
         workflow = build_testing_workflow()
         nodes = workflow.nodes
@@ -4049,7 +4049,7 @@ class TestDocumentAdditional:
 
     def test_document_no_audit_dir(self, tmp_path):
         """document creates audit dir if missing."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         # Don't create audit dir - should be created by document
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -4079,7 +4079,7 @@ class TestScaffoldTestsAdditional:
 
     def test_scaffold_tests_no_test_scenarios(self, tmp_path):
         """scaffold_tests handles empty scenarios."""
-        from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
 
         lineage_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
         lineage_dir.mkdir(parents=True)
@@ -4106,7 +4106,7 @@ class TestRunbookAdditional:
 
     def test_generate_runbook_minimal_lld(self, tmp_path):
         """generate_runbook handles minimal LLD."""
-        from agentos.workflows.testing.templates.runbook import generate_runbook
+        from assemblyzero.workflows.testing.templates.runbook import generate_runbook
 
         lld_content = "# Feature\n\nSimple description."
 
@@ -4126,7 +4126,7 @@ class TestLessonsAdditional:
 
     def test_generate_lessons_with_mock(self, tmp_path):
         """generate_lessons_learned with mock fixture used."""
-        from agentos.workflows.testing.templates.lessons import generate_lessons_learned
+        from assemblyzero.workflows.testing.templates.lessons import generate_lessons_learned
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -4159,7 +4159,7 @@ class TestAuditAdditional:
 
     def test_next_file_number_gap_in_sequence(self, tmp_path):
         """next_file_number handles gaps in sequence."""
-        from agentos.workflows.testing.audit import next_file_number
+        from assemblyzero.workflows.testing.audit import next_file_number
 
         # Create files with gap in sequence
         (tmp_path / "001-test.md").write_text("test")
@@ -4175,7 +4175,7 @@ class TestFinalizeAdditional:
 
     def test_archive_file_error_handling(self, tmp_path):
         """archive_file_to_done handles OSError."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Test with non-existent path
         result = archive_file_to_done(tmp_path / "nonexistent" / "file.md")
@@ -4188,12 +4188,12 @@ class TestImplementCodeAdditional:
 
     def test_mock_implement_code(self, tmp_path):
         """_mock_implement_code creates mock implementation."""
-        from agentos.workflows.testing.nodes.implement_code import _mock_implement_code
+        from assemblyzero.workflows.testing.nodes.implement_code import _mock_implement_code
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
-        agentos_dir = tmp_path / "agentos"
-        agentos_dir.mkdir()
+        assemblyzero_dir = tmp_path / "assemblyzero"
+        assemblyzero_dir.mkdir()
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -4210,7 +4210,7 @@ class TestImplementCodeAdditional:
 
     def test_parse_response_empty_code_block(self):
         """parse_implementation_response handles empty code blocks."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         response = """```python
 ```
@@ -4233,9 +4233,9 @@ class TestE2EValidationAdditional:
 
     def test_run_e2e_tests_uses_all_files_when_no_e2e(self, tmp_path):
         """run_e2e_tests uses all files when no e2e-specific files."""
-        from agentos.workflows.testing.nodes.e2e_validation import run_e2e_tests
+        from assemblyzero.workflows.testing.nodes.e2e_validation import run_e2e_tests
 
-        with patch("agentos.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.e2e_validation.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "1 passed"
             mock_run.return_value.stderr = ""
@@ -4256,7 +4256,7 @@ class TestGraphAdditional:
 
     def test_route_after_review_with_auto_mode_and_error(self):
         """route_after_review with auto mode and error still returns end."""
-        from agentos.workflows.testing.graph import route_after_review
+        from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
             "error_message": "Error",
@@ -4275,7 +4275,7 @@ class TestLoadLLDMockPath:
 
     def test_mock_load_lld_creates_all_fields(self, tmp_path):
         """_mock_load_lld creates complete state."""
-        from agentos.workflows.testing.nodes.load_lld import _mock_load_lld
+        from assemblyzero.workflows.testing.nodes.load_lld import _mock_load_lld
 
         # Create lineage dir
         lineage_dir = tmp_path / "docs" / "lineage" / "active"
@@ -4304,7 +4304,7 @@ class TestReviewTestPlanCoverageGaps:
 
     def test_review_test_plan_no_audit_dir(self, tmp_path):
         """review_test_plan with non-existent audit_dir uses file_counter from state."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         # Don't create audit_dir - tests line 293: file_num = state.get("file_counter", 0)
         state: TestingWorkflowState = {
@@ -4334,7 +4334,7 @@ class TestReviewTestPlanCoverageGaps:
 
     def test_review_test_plan_no_scenarios_guard(self, tmp_path):
         """review_test_plan guard blocks when no test scenarios."""
-        from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -4357,7 +4357,7 @@ class TestReviewTestPlanCoverageGaps:
         # Save and remove the module to simulate ImportError
         saved_modules = {}
         for mod_name in list(sys.modules.keys()):
-            if "gemini" in mod_name.lower() or mod_name == "agentos.core.gemini_client":
+            if "gemini" in mod_name.lower() or mod_name == "assemblyzero.core.gemini_client":
                 saved_modules[mod_name] = sys.modules.pop(mod_name)
 
         try:
@@ -4370,11 +4370,11 @@ class TestReviewTestPlanCoverageGaps:
                 return original_import(name, *args, **kwargs)
 
             # Reload the review_test_plan module to clear cached imports
-            if "agentos.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["agentos.workflows.testing.nodes.review_test_plan"]
+            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
+                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
 
             with patch.dict("builtins.__dict__", {"__import__": mock_import}):
-                from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+                from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
                 state: TestingWorkflowState = {
                     "issue_number": 42,
@@ -4430,14 +4430,14 @@ class TestReviewTestPlanCoverageGaps:
 
         # Patch the modules
         with patch.dict(sys.modules, {
-            "agentos.core.config": mock_config,
-            "agentos.core.gemini_client": mock_gemini,
+            "assemblyzero.core.config": mock_config,
+            "assemblyzero.core.gemini_client": mock_gemini,
         }):
             # Reload to pick up mocked modules
-            if "agentos.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["agentos.workflows.testing.nodes.review_test_plan"]
+            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
+                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
 
-            from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
             audit_dir = tmp_path / "audit"
             audit_dir.mkdir()
@@ -4493,13 +4493,13 @@ class TestReviewTestPlanCoverageGaps:
         mock_gemini.GeminiClient = MockGeminiClient
 
         with patch.dict(sys.modules, {
-            "agentos.core.config": mock_config,
-            "agentos.core.gemini_client": mock_gemini,
+            "assemblyzero.core.config": mock_config,
+            "assemblyzero.core.gemini_client": mock_gemini,
         }):
-            if "agentos.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["agentos.workflows.testing.nodes.review_test_plan"]
+            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
+                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
 
-            from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
             audit_dir = tmp_path / "audit"
             audit_dir.mkdir()
@@ -4550,13 +4550,13 @@ class TestReviewTestPlanCoverageGaps:
         mock_gemini.GeminiClient = MockGeminiClient
 
         with patch.dict(sys.modules, {
-            "agentos.core.config": mock_config,
-            "agentos.core.gemini_client": mock_gemini,
+            "assemblyzero.core.config": mock_config,
+            "assemblyzero.core.gemini_client": mock_gemini,
         }):
-            if "agentos.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["agentos.workflows.testing.nodes.review_test_plan"]
+            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
+                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
 
-            from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
             state: TestingWorkflowState = {
                 "issue_number": 42,
@@ -4599,13 +4599,13 @@ class TestReviewTestPlanCoverageGaps:
         mock_gemini.GeminiClient = MockGeminiClient
 
         with patch.dict(sys.modules, {
-            "agentos.core.config": mock_config,
-            "agentos.core.gemini_client": mock_gemini,
+            "assemblyzero.core.config": mock_config,
+            "assemblyzero.core.gemini_client": mock_gemini,
         }):
-            if "agentos.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["agentos.workflows.testing.nodes.review_test_plan"]
+            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
+                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
 
-            from agentos.workflows.testing.nodes.review_test_plan import review_test_plan
+            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 
             state: TestingWorkflowState = {
                 "issue_number": 42,
@@ -4636,7 +4636,7 @@ class TestImplementCodeCoverageGaps:
 
     def test_find_claude_cli_returns_string_or_none(self):
         """_find_claude_cli returns a string path or None."""
-        from agentos.workflows.testing.nodes.implement_code import _find_claude_cli
+        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
 
         result = _find_claude_cli()
         # Should return either a valid path string or None
@@ -4644,7 +4644,7 @@ class TestImplementCodeCoverageGaps:
 
     def test_parse_response_pattern4_fallback_with_comment_path(self):
         """parse_implementation_response uses pattern 4 fallback with path in comment."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         # Response with no explicit path markers - triggers pattern 4 fallback (lines 375-399)
         response = """Here's the implementation:
@@ -4670,7 +4670,7 @@ export function formatData(input) {
 
     def test_parse_response_pattern4_generates_implementation_name(self):
         """parse_implementation_response generates implementation_N.py when no path found."""
-        from agentos.workflows.testing.nodes.implement_code import parse_implementation_response
+        from assemblyzero.workflows.testing.nodes.implement_code import parse_implementation_response
 
         # Response with Python code but no path hints
         response = """Here's the code:
@@ -4693,7 +4693,7 @@ class Calculator:
 
     def test_build_prompt_with_file_read_exception(self, tmp_path):
         """build_implementation_prompt handles exceptions when reading source files."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -4733,7 +4733,7 @@ class TestRunbookCoverageGaps:
 
     def test_extract_verification_from_lld_with_items(self, tmp_path):
         """extract_verification_from_lld extracts bullet items from Verification section."""
-        from agentos.workflows.testing.templates.runbook import extract_verification_from_lld
+        from assemblyzero.workflows.testing.templates.runbook import extract_verification_from_lld
 
         # LLD with Verification section containing bullet items (lines 77-79)
         lld_content = """# Feature
@@ -4754,7 +4754,7 @@ class TestRunbookCoverageGaps:
 
     def test_get_next_runbook_number_nonexistent_dir(self, tmp_path):
         """get_next_runbook_number returns 907 when runbooks_dir doesn't exist."""
-        from agentos.workflows.testing.templates.runbook import get_next_runbook_number
+        from assemblyzero.workflows.testing.templates.runbook import get_next_runbook_number
 
         # Pass non-existent dir (line 94)
         nonexistent_dir = tmp_path / "docs" / "runbooks" / "nonexistent"
@@ -4765,7 +4765,7 @@ class TestRunbookCoverageGaps:
 
     def test_get_next_runbook_number_with_existing_numbered_files(self, tmp_path):
         """get_next_runbook_number finds highest number in existing files."""
-        from agentos.workflows.testing.templates.runbook import get_next_runbook_number
+        from assemblyzero.workflows.testing.templates.runbook import get_next_runbook_number
 
         # Create runbooks dir with numbered files (lines 98-101)
         runbooks_dir = tmp_path / "runbooks"
@@ -4786,7 +4786,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_mock_patterns_detects_decorator_patch(self, tmp_path):
         """_analyze_mock_patterns detects @patch decorator usage."""
-        from agentos.workflows.testing.templates.lessons import _detect_mock_patterns
+        from assemblyzero.workflows.testing.templates.lessons import _detect_mock_patterns
 
         # Output containing @patch (line 182)
         patterns = _detect_mock_patterns(
@@ -4798,7 +4798,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_mock_patterns_detects_magicmock(self, tmp_path):
         """_analyze_mock_patterns detects MagicMock usage."""
-        from agentos.workflows.testing.templates.lessons import _detect_mock_patterns
+        from assemblyzero.workflows.testing.templates.lessons import _detect_mock_patterns
 
         # Output containing MagicMock (line 185)
         patterns = _detect_mock_patterns(
@@ -4810,7 +4810,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_mock_patterns_detects_monkeypatch(self, tmp_path):
         """_analyze_mock_patterns detects pytest monkeypatch usage."""
-        from agentos.workflows.testing.templates.lessons import _detect_mock_patterns
+        from assemblyzero.workflows.testing.templates.lessons import _detect_mock_patterns
 
         # Output containing monkeypatch (line 191)
         patterns = _detect_mock_patterns(
@@ -4822,7 +4822,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_mock_patterns_detects_httpretty(self, tmp_path):
         """_analyze_mock_patterns detects HTTP mocking libraries."""
-        from agentos.workflows.testing.templates.lessons import _detect_mock_patterns
+        from assemblyzero.workflows.testing.templates.lessons import _detect_mock_patterns
 
         # Output containing httpretty (line 194)
         patterns = _detect_mock_patterns(
@@ -4834,7 +4834,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_mock_patterns_detects_subprocess_mocking(self, tmp_path):
         """_analyze_mock_patterns detects subprocess mocking."""
-        from agentos.workflows.testing.templates.lessons import _detect_mock_patterns
+        from assemblyzero.workflows.testing.templates.lessons import _detect_mock_patterns
 
         # Output containing subprocess + mock (line 197)
         patterns = _detect_mock_patterns(
@@ -4846,7 +4846,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_coverage_challenges_large_gap(self, tmp_path):
         """_analyze_coverage_challenges detects large coverage gap."""
-        from agentos.workflows.testing.templates.lessons import _analyze_coverage_challenges
+        from assemblyzero.workflows.testing.templates.lessons import _analyze_coverage_challenges
 
         # Large gap: 90 - 50 = 40% (line 219)
         challenges = _analyze_coverage_challenges(
@@ -4859,7 +4859,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_coverage_challenges_moderate_gap(self, tmp_path):
         """_analyze_coverage_challenges detects moderate coverage gap."""
-        from agentos.workflows.testing.templates.lessons import _analyze_coverage_challenges
+        from assemblyzero.workflows.testing.templates.lessons import _analyze_coverage_challenges
 
         # Moderate gap: 90 - 75 = 15% (line 221)
         challenges = _analyze_coverage_challenges(
@@ -4872,7 +4872,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_coverage_challenges_detects_missing_lines(self, tmp_path):
         """_analyze_coverage_challenges detects missing line coverage."""
-        from agentos.workflows.testing.templates.lessons import _analyze_coverage_challenges
+        from assemblyzero.workflows.testing.templates.lessons import _analyze_coverage_challenges
 
         # Output with Missing keyword (line 229)
         challenges = _analyze_coverage_challenges(
@@ -4885,7 +4885,7 @@ class TestLessonsCoverageGaps:
 
     def test_analyze_blockers_with_error_and_feedback(self, tmp_path):
         """_analyze_blockers detects error messages and gemini feedback."""
-        from agentos.workflows.testing.templates.lessons import _analyze_blockers
+        from assemblyzero.workflows.testing.templates.lessons import _analyze_blockers
 
         # State with error and feedback (lines 247, 251, 255)
         state = {
@@ -4907,7 +4907,7 @@ class TestFinalizeCoverageGaps:
 
     def test_archive_workflow_artifacts_skipped_on_failure(self, tmp_path):
         """_archive_workflow_artifacts skips archival when workflow failed."""
-        from agentos.workflows.testing.nodes.finalize import _archive_workflow_artifacts
+        from assemblyzero.workflows.testing.nodes.finalize import _archive_workflow_artifacts
 
         # Create active directory with files
         active_dir = tmp_path / "docs" / "lld" / "active"
@@ -4929,7 +4929,7 @@ class TestFinalizeCoverageGaps:
 
     def test_archive_file_not_in_active_directory(self, tmp_path):
         """archive_file_to_done skips files not in active/ directory."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # File not in active/ (line 48-49)
         other_dir = tmp_path / "other"
@@ -4947,7 +4947,7 @@ class TestDocumentCoverageGaps:
 
     def test_document_with_full_scope(self, tmp_path):
         """document with full scope generates all documentation."""
-        from agentos.workflows.testing.nodes.document import document
+        from assemblyzero.workflows.testing.nodes.document import document
 
         # Create necessary directories
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -4984,7 +4984,7 @@ class TestE2EValidationCoverageGaps:
 
     def test_e2e_validation_skip_when_flagged(self, tmp_path):
         """e2e_validation skips tests when skip_e2e is True."""
-        from agentos.workflows.testing.nodes.e2e_validation import e2e_validation
+        from assemblyzero.workflows.testing.nodes.e2e_validation import e2e_validation
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -5004,7 +5004,7 @@ class TestExtractFeedbackCoverageGaps:
 
     def test_extract_feedback_fallback_pattern(self):
         """_extract_feedback uses fallback pattern when Required Changes not found."""
-        from agentos.workflows.testing.nodes.review_test_plan import _extract_feedback
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         # Verdict with BLOCKED and numbered items but no "Required Changes" section
         verdict_content = """## Coverage Analysis
@@ -5027,7 +5027,7 @@ class TestExtractFeedbackCoverageGaps:
 
     def test_extract_feedback_default_message(self):
         """_extract_feedback returns default message when no patterns match."""
-        from agentos.workflows.testing.nodes.review_test_plan import _extract_feedback
+        from assemblyzero.workflows.testing.nodes.review_test_plan import _extract_feedback
 
         # Verdict with no extractable feedback
         verdict_content = """## Verdict
@@ -5045,7 +5045,7 @@ class TestAuditCoverageGaps:
 
     def test_get_repo_root_not_in_git_repo(self, tmp_path, monkeypatch):
         """get_repo_root raises RuntimeError when not in a git repo."""
-        from agentos.workflows.testing.audit import get_repo_root
+        from assemblyzero.workflows.testing.audit import get_repo_root
 
         # Change to non-git directory
         monkeypatch.chdir(tmp_path)
@@ -5056,7 +5056,7 @@ class TestAuditCoverageGaps:
 
     def test_parse_pytest_output_with_error_line(self):
         """parse_pytest_output extracts error count from output."""
-        from agentos.workflows.testing.audit import parse_pytest_output
+        from assemblyzero.workflows.testing.audit import parse_pytest_output
 
         output = "===== 3 passed, 2 failed, 1 error in 1.23s ====="
         result = parse_pytest_output(output)
@@ -5071,7 +5071,7 @@ class TestImplementCodeMoreGaps:
 
     def test_build_prompt_handles_modify_with_missing_description(self, tmp_path):
         """build_implementation_prompt handles Modify with missing file description."""
-        from agentos.workflows.testing.nodes.implement_code import build_implementation_prompt
+        from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
 
         # Create a source file that exists
         src_dir = tmp_path / "src"
@@ -5111,7 +5111,7 @@ This is a different file description.
 
     def test_write_implementation_files_skips_test_files(self, tmp_path):
         """write_implementation_files skips writing to test file paths."""
-        from agentos.workflows.testing.nodes.implement_code import write_implementation_files
+        from assemblyzero.workflows.testing.nodes.implement_code import write_implementation_files
 
         files = [
             {"path": "src/module.py", "content": "def new(): pass"},
@@ -5131,7 +5131,7 @@ class TestLoadLLDMoreGaps:
 
     def test_extract_requirements_from_lld_numbered_format(self, tmp_path):
         """extract_requirements extracts numbered list format."""
-        from agentos.workflows.testing.nodes.load_lld import extract_requirements
+        from assemblyzero.workflows.testing.nodes.load_lld import extract_requirements
 
         lld_content = """# Feature
 
@@ -5153,7 +5153,7 @@ class TestVerifyPhasesMoreGaps:
 
     def test_run_pytest_with_mock_subprocess(self, tmp_path):
         """run_pytest calls subprocess correctly."""
-        from agentos.workflows.testing.nodes.verify_phases import run_pytest
+        from assemblyzero.workflows.testing.nodes.verify_phases import run_pytest
 
         # Create a test file
         tests_dir = tmp_path / "tests"
@@ -5161,7 +5161,7 @@ class TestVerifyPhasesMoreGaps:
         test_file = tests_dir / "test_example.py"
         test_file.write_text("def test_pass(): pass")
 
-        with patch("agentos.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.testing.nodes.verify_phases.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "1 passed"
             mock_run.return_value.stderr = ""
@@ -5178,7 +5178,7 @@ class TestScaffoldTestsMoreGaps:
 
     def test_generate_test_file_content_with_multiple_scenarios(self, tmp_path):
         """generate_test_file_content handles multiple scenarios."""
-        from agentos.workflows.testing.nodes.scaffold_tests import generate_test_file_content
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import generate_test_file_content
 
         scenarios: list[TestScenario] = [
             {
@@ -5223,48 +5223,48 @@ class TestExtractImplModule:
     def test_prioritizes_add_over_modify(self):
         """Add files should be selected before Modify files."""
         files_to_modify = [
-            {"path": "agentos/existing/module.py", "change_type": "Modify"},
-            {"path": "agentos/new/parser.py", "change_type": "Add"},
+            {"path": "assemblyzero/existing/module.py", "change_type": "Modify"},
+            {"path": "assemblyzero/new/parser.py", "change_type": "Add"},
         ]
         result = _extract_impl_module(files_to_modify)
-        assert result == "agentos.new.parser"
+        assert result == "assemblyzero.new.parser"
 
     def test_returns_add_file_even_if_second(self):
         """Add file should be returned even if listed after Modify."""
         files_to_modify = [
-            {"path": "agentos/review.py", "change_type": "Modify"},
-            {"path": "agentos/finalize.py", "change_type": "Modify"},
-            {"path": "agentos/parsers/verdict_parser.py", "change_type": "Add"},
+            {"path": "assemblyzero/review.py", "change_type": "Modify"},
+            {"path": "assemblyzero/finalize.py", "change_type": "Modify"},
+            {"path": "assemblyzero/parsers/verdict_parser.py", "change_type": "Add"},
         ]
         result = _extract_impl_module(files_to_modify)
-        assert result == "agentos.parsers.verdict_parser"
+        assert result == "assemblyzero.parsers.verdict_parser"
 
     def test_falls_back_to_modify_if_no_add(self):
         """If no Add files, should return first Modify file."""
         files_to_modify = [
-            {"path": "agentos/review.py", "change_type": "Modify"},
-            {"path": "agentos/finalize.py", "change_type": "Modify"},
+            {"path": "assemblyzero/review.py", "change_type": "Modify"},
+            {"path": "assemblyzero/finalize.py", "change_type": "Modify"},
         ]
         result = _extract_impl_module(files_to_modify)
-        assert result == "agentos.review"
+        assert result == "assemblyzero.review"
 
     def test_skips_test_files(self):
         """Test files should be skipped."""
         files_to_modify = [
             {"path": "tests/test_parser.py", "change_type": "Add"},
-            {"path": "agentos/parser.py", "change_type": "Add"},
+            {"path": "assemblyzero/parser.py", "change_type": "Add"},
         ]
         result = _extract_impl_module(files_to_modify)
-        assert result == "agentos.parser"
+        assert result == "assemblyzero.parser"
 
     def test_skips_init_files(self):
         """__init__.py files should be skipped."""
         files_to_modify = [
-            {"path": "agentos/parsers/__init__.py", "change_type": "Add"},
-            {"path": "agentos/parsers/verdict_parser.py", "change_type": "Add"},
+            {"path": "assemblyzero/parsers/__init__.py", "change_type": "Add"},
+            {"path": "assemblyzero/parsers/verdict_parser.py", "change_type": "Add"},
         ]
         result = _extract_impl_module(files_to_modify)
-        assert result == "agentos.parsers.verdict_parser"
+        assert result == "assemblyzero.parsers.verdict_parser"
 
     def test_returns_none_for_empty(self):
         """Returns None for empty list."""
@@ -5285,7 +5285,7 @@ class TestImplementCodeNoAuditDir:
 
     def test_implement_code_no_audit_dir_uses_file_counter(self, tmp_path):
         """implement_code uses file_counter when audit_dir doesn't exist."""
-        from agentos.workflows.testing.nodes.implement_code import implement_code
+        from assemblyzero.workflows.testing.nodes.implement_code import implement_code
 
         # Don't create audit dir (line 487)
         state: TestingWorkflowState = {
@@ -5313,7 +5313,7 @@ class TestDocumentReadmeUpdate:
 
     def test_update_readme_empty_features_section(self, tmp_path):
         """update_readme handles empty features section."""
-        from agentos.workflows.testing.nodes.document import update_readme
+        from assemblyzero.workflows.testing.nodes.document import update_readme
 
         # Create README with empty Features section (line 205)
         readme_path = tmp_path / "README.md"
@@ -5340,7 +5340,7 @@ class TestPatternsMoreGaps:
 
     def test_detect_test_types_cli_type(self):
         """detect_test_types identifies CLI test requirements."""
-        from agentos.workflows.testing.knowledge.patterns import detect_test_types
+        from assemblyzero.workflows.testing.knowledge.patterns import detect_test_types
 
         lld_content = """# CLI Tool Feature
 
@@ -5368,7 +5368,7 @@ class TestWikiPageGaps:
 
     def test_generate_wiki_page_with_long_feature_name(self, tmp_path):
         """generate_wiki_page handles long feature names."""
-        from agentos.workflows.testing.templates.wiki_page import generate_wiki_page
+        from assemblyzero.workflows.testing.templates.wiki_page import generate_wiki_page
 
         wiki_dir = tmp_path / "wiki"
         wiki_dir.mkdir()
@@ -5390,7 +5390,7 @@ class TestFinalizeCoverageMore:
 
     def test_archive_file_name_conflict(self, tmp_path):
         """archive_file_to_done handles filename conflicts."""
-        from agentos.workflows.testing.nodes.finalize import archive_file_to_done
+        from assemblyzero.workflows.testing.nodes.finalize import archive_file_to_done
 
         # Create active and done directories
         active_dir = tmp_path / "docs" / "lld" / "active"
@@ -5424,7 +5424,7 @@ class TestValidateCommitMessage:
 
     def test_valid_message_with_fixes(self):
         """Commit message with 'fixes #N' should pass validation."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5440,7 +5440,7 @@ class TestValidateCommitMessage:
 
     def test_valid_message_with_closes(self):
         """Commit message with 'closes #N' should pass validation."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5455,7 +5455,7 @@ class TestValidateCommitMessage:
 
     def test_valid_message_with_resolves(self):
         """Commit message with 'resolves #N' should pass validation."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5470,7 +5470,7 @@ class TestValidateCommitMessage:
 
     def test_valid_message_case_insensitive(self):
         """Validation should be case-insensitive."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5485,7 +5485,7 @@ class TestValidateCommitMessage:
 
     def test_invalid_message_missing_keyword(self):
         """Commit message without fixes/closes/resolves should be BLOCKED."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5501,7 +5501,7 @@ class TestValidateCommitMessage:
 
     def test_invalid_message_wrong_issue_number(self):
         """Commit message with wrong issue number should be BLOCKED."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5517,7 +5517,7 @@ class TestValidateCommitMessage:
 
     def test_invalid_message_empty(self):
         """Empty commit message should be BLOCKED."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5532,7 +5532,7 @@ class TestValidateCommitMessage:
 
     def test_invalid_message_no_commit_message_key(self):
         """Missing commit_message key should be BLOCKED."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 
@@ -5546,7 +5546,7 @@ class TestValidateCommitMessage:
 
     def test_valid_message_inline_format(self):
         """Commit message with inline 'fixes #N' should pass."""
-        from agentos.workflows.testing.nodes.validate_commit_message import (
+        from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
 

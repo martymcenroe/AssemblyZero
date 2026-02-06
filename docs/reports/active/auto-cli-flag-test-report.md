@@ -6,7 +6,7 @@
 ## Test Command
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-auto-cli-flag python test_auto_mode.py
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-auto-cli-flag python test_auto_mode.py
 ```
 
 ## Test Output

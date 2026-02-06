@@ -15,7 +15,7 @@ Usage:
     # Check credential status
     python gemini-rotate.py --status
 
-Credentials are stored in: ~/.agentos/gemini-credentials.json
+Credentials are stored in: ~/.assemblyzero/gemini-credentials.json
 
 See that file for instructions on adding new API keys.
 """
@@ -32,7 +32,7 @@ from typing import Optional
 
 # Import secure credential manager (handles keychain + legacy file)
 try:
-    from agentos_credentials import CredentialManager as SecureCredentialManager
+    from assemblyzero_credentials import CredentialManager as SecureCredentialManager
     HAS_SECURE_CREDENTIALS = True
 except ImportError:
     HAS_SECURE_CREDENTIALS = False
@@ -41,11 +41,11 @@ except ImportError:
 # Configuration
 # =============================================================================
 
-CREDENTIALS_FILE = Path.home() / ".agentos" / "gemini-credentials.json"
+CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
 OAUTH_CREDS_FILE = Path.home() / ".gemini" / "oauth_creds.json"
 OAUTH_CREDS_BACKUP = Path.home() / ".gemini" / "oauth_creds.json.bak"
 OAUTH_CREDS_DISABLED = Path.home() / ".gemini" / "oauth_creds.json.disabled"
-STATE_FILE = Path.home() / ".agentos" / "gemini-rotation-state.json"
+STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
 
@@ -107,7 +107,7 @@ def load_credentials() -> list[Credential]:
 
     Priority:
     1. Secure credential manager (keychain + env vars) if available
-    2. Legacy plaintext file (~/.agentos/gemini-credentials.json)
+    2. Legacy plaintext file (~/.assemblyzero/gemini-credentials.json)
 
     Note: OAuth credentials are handled separately by gemini CLI.
     """
@@ -136,7 +136,7 @@ def load_credentials() -> list[Credential]:
     # Legacy: Load from plaintext file
     if not CREDENTIALS_FILE.exists():
         print(f"ERROR: Credentials file not found: {CREDENTIALS_FILE}", file=sys.stderr)
-        print("Create it with your API keys. See AgentOS docs.", file=sys.stderr)
+        print("Create it with your API keys. See AssemblyZero docs.", file=sys.stderr)
         sys.exit(2)
 
     try:
@@ -419,7 +419,7 @@ def rotate_and_invoke(
         if exhausted_creds:
             return False, "", f"All credentials exhausted: {', '.join(exhausted_creds)}. Wait for quota reset."
         else:
-            return False, "", "No enabled credentials found. Edit ~/.agentos/gemini-credentials.json"
+            return False, "", "No enabled credentials found. Edit ~/.assemblyzero/gemini-credentials.json"
 
     # Try each credential
     errors = []
@@ -449,7 +449,7 @@ def rotate_and_invoke(
         # Check if auth error - these should be fixed, not retried
         is_auth_error = any(p.lower() in output.lower() for p, _ in AUTH_ERROR_PATTERNS)
         if is_auth_error:
-            print(f"[ROTATE] ⚠️  AUTH ERROR: Check API key for '{account_info}' in ~/.agentos/gemini-credentials.json", file=sys.stderr)
+            print(f"[ROTATE] ⚠️  AUTH ERROR: Check API key for '{account_info}' in ~/.assemblyzero/gemini-credentials.json", file=sys.stderr)
 
         errors.append(friendly_error)
 
@@ -516,7 +516,7 @@ Examples:
   # Check status
   python gemini-rotate.py --status
 
-Credentials: ~/.agentos/gemini-credentials.json
+Credentials: ~/.assemblyzero/gemini-credentials.json
 """
     )
 

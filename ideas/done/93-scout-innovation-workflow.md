@@ -23,9 +23,9 @@ Create `tools/run_scout_workflow.py`, a proactive research agent that acts as an
 
 ## Proposed Architecture
 
-### 1. The State Graph (`agentos/workflows/scout/graph.py`)
+### 1. The State Graph (`assemblyzero/workflows/scout/graph.py`)
 
-* **Input:** `research_topic` (e.g., "LangGraph persistence patterns"), `internal_target` (optional file path, e.g., `agentos/core/state.py`).
+* **Input:** `research_topic` (e.g., "LangGraph persistence patterns"), `internal_target` (optional file path, e.g., `assemblyzero/core/state.py`).
 * **Nodes:**
 * **N0_Explorer:**
 * Tools: `Google Search`, `github_search` (Search for "python langgraph persistence stars:>500").
@@ -39,7 +39,7 @@ Create `tools/run_scout_workflow.py`, a proactive research agent that acts as an
 
 * **N2_Gap_Analyst:**
 * Input: "External Standard" + `internal_target` (our code).
-* Prompt: "Compare the External Standard to our `agentos/core/state.py`. Identify 3 specific ways we are deficient (Complexity, Performance, Reliability)."
+* Prompt: "Compare the External Standard to our `assemblyzero/core/state.py`. Identify 3 specific ways we are deficient (Complexity, Performance, Reliability)."
 
 
 * **N3_Innovation_Scribe:**
@@ -79,7 +79,7 @@ Deficiency:
 ```bash
 python tools/run_scout_workflow.py \
   --topic "secure api key rotation python" \
-  --internal agentos/core/gemini_client.py
+  --internal assemblyzero/core/gemini_client.py
 
 ```
 

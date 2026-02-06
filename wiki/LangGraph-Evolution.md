@@ -6,7 +6,7 @@
 
 ## Vision
 
-AgentOS is **production-ready today** with prompt-based orchestration. The LangGraph evolution transforms it from sophisticated scripting into an enterprise agentic platform with:
+AssemblyZero is **production-ready today** with prompt-based orchestration. The LangGraph evolution transforms it from sophisticated scripting into an enterprise agentic platform with:
 
 - **Enforced state machines** - Gates are impossible to skip, not just discouraged
 - **Checkpoint recovery** - Long tasks survive interruptions
@@ -276,7 +276,7 @@ import os
 # Enable tracing
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_API_KEY"] = "..."
-os.environ["LANGCHAIN_PROJECT"] = "agentos-production"
+os.environ["LANGCHAIN_PROJECT"] = "assemblyzero-production"
 
 # Every agent action is now traced automatically
 # No code changes needed - just environment variables
@@ -438,7 +438,7 @@ Each phase can be adopted independently. Organizations can run prompt-based and 
 | "Hard to scale to teams" | Multi-tenant orchestration |
 | "Security can't approve" | Enforced gates + full observability |
 
-**Bottom line:** AgentOS is production-ready TODAY. The LangGraph evolution transforms it from "sophisticated scripting" into "enterprise agentic platform" - the infrastructure that scales AI coding assistants across engineering organizations.
+**Bottom line:** AssemblyZero is production-ready TODAY. The LangGraph evolution transforms it from "sophisticated scripting" into "enterprise agentic platform" - the infrastructure that scales AI coding assistants across engineering organizations.
 
 ---
 

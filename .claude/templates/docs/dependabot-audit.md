@@ -141,4 +141,4 @@ This audit is a **prerequisite** for Security Audit. Run before vulnerability an
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/dependabot-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/dependabot-audit.md*

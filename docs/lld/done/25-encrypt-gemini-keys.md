@@ -13,7 +13,7 @@ This LLD describes the implementation of secure credential storage for Gemini AP
 
 ### 2.1 Storage Location
 ```
-~/.agentos/gemini-credentials.json
+~/.assemblyzero/gemini-credentials.json
 ```
 
 ### 2.2 Current Format
@@ -74,17 +74,17 @@ Priority 3: Legacy plaintext file (with deprecation warning)
 
 | Platform | Service | Username Format |
 |----------|---------|-----------------|
-| Windows | `AgentOS-Gemini` | `credential-{name}` |
-| macOS | `AgentOS-Gemini` | `credential-{name}` |
-| Linux | `AgentOS-Gemini` | `credential-{name}` |
+| Windows | `AssemblyZero-Gemini` | `credential-{name}` |
+| macOS | `AssemblyZero-Gemini` | `credential-{name}` |
+| Linux | `AssemblyZero-Gemini` | `credential-{name}` |
 
 ## 4. Detailed Design
 
-### 4.1 New Module: `agentos_credentials.py`
+### 4.1 New Module: `assemblyzero_credentials.py`
 
 ```python
 """
-agentos_credentials.py - Secure credential management for AgentOS
+assemblyzero_credentials.py - Secure credential management for AssemblyZero
 
 Provides a unified interface for storing and retrieving API credentials
 with support for OS keychain, environment variables, and legacy file storage.
@@ -157,7 +157,7 @@ class EnvBackend(CredentialBackend):
 class KeychainBackend(CredentialBackend):
     """OS Keychain backend using keyring library."""
 
-    SERVICE_NAME = "AgentOS-Gemini"
+    SERVICE_NAME = "AssemblyZero-Gemini"
     INDEX_KEY = "_credential_index"
 
     def get_credentials(self) -> List[Credential]:
@@ -234,7 +234,7 @@ class LegacyFileBackend(CredentialBackend):
     """Legacy plaintext file backend (deprecated)."""
 
     def __init__(self, path: Optional[Path] = None):
-        self.path = path or Path.home() / ".agentos" / "gemini-credentials.json"
+        self.path = path or Path.home() / ".assemblyzero" / "gemini-credentials.json"
 
     def get_credentials(self) -> List[Credential]:
         if not self.path.exists():
@@ -294,7 +294,7 @@ class CredentialManager:
                     import sys
                     print(
                         "[WARNING] Using deprecated plaintext credentials. "
-                        "Run 'agentos migrate-credentials' to secure them.",
+                        "Run 'assemblyzero migrate-credentials' to secure them.",
                         file=sys.stderr
                     )
                 return credentials
@@ -329,7 +329,7 @@ class CredentialManager:
 ```python
 # Replace direct file reading with CredentialManager
 
-from agentos_credentials import CredentialManager
+from assemblyzero_credentials import CredentialManager
 
 def get_credentials():
     """Get credentials using the credential manager."""
@@ -339,7 +339,7 @@ def get_credentials():
 
 ### 4.3 Migration Command
 
-New CLI command: `agentos migrate-credentials`
+New CLI command: `assemblyzero migrate-credentials`
 
 ```python
 def migrate_credentials_command(auto_yes: bool = False):
@@ -455,7 +455,7 @@ def test_credential_manager_priority():
 
 ### Phase 1: Add New Code (Non-Breaking)
 1. Add `keyring` dependency
-2. Add `agentos_credentials.py` module
+2. Add `assemblyzero_credentials.py` module
 3. Add migration command
 4. Keep existing file-based code working
 
@@ -478,7 +478,7 @@ def test_credential_manager_priority():
 
 | File | Action |
 |------|--------|
-| `tools/agentos_credentials.py` | Create |
+| `tools/assemblyzero_credentials.py` | Create |
 | `tools/gemini-retry.py` | Modify |
 | `pyproject.toml` | Add keyring dependency |
 | `tests/test_credentials.py` | Create |

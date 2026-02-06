@@ -8,7 +8,7 @@
 
 ## Problem
 
-The issue workflow and LLD workflow currently do not use the canonical `docs/lineage/` structure for storing design review artifacts. This was developed organically in RCA-PDF-extraction-pipeline and needs to be formally integrated into the AgentOS workflows.
+The issue workflow and LLD workflow currently do not use the canonical `docs/lineage/` structure for storing design review artifacts. This was developed organically in RCA-PDF-extraction-pipeline and needs to be formally integrated into the AssemblyZero workflows.
 
 Currently:
 - Issue workflow creates artifacts but placement is inconsistent

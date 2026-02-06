@@ -1,6 +1,6 @@
 # Implementation Report: Encrypt Gemini API Keys at Rest
 
-**Issue:** [#25](https://github.com/martymcenroe/AgentOS/issues/25)
+**Issue:** [#25](https://github.com/martymcenroe/AssemblyZero/issues/25)
 **Date:** 2026-01-17
 **Branch:** `25-encrypt-gemini-keys`
 
@@ -12,7 +12,7 @@ Implemented secure credential storage for Gemini API keys using OS keychain inte
 
 | File | Action | Description |
 |------|--------|-------------|
-| `tools/agentos_credentials.py` | Created | New credential manager module with keychain, env, and legacy backends |
+| `tools/assemblyzero_credentials.py` | Created | New credential manager module with keychain, env, and legacy backends |
 | `tools/gemini-rotate.py` | Modified | Updated to use CredentialManager for API keys |
 | `tests/test_credentials.py` | Created | 22 unit tests for credential management |
 | `pyproject.toml` | Modified | Added `keyring ^25.7.0` dependency |
@@ -47,7 +47,7 @@ Migration command detects `sys.stdin.isatty()` and requires `--yes` flag for scr
 ### 4. Service Name Convention
 
 Keychain entries use:
-- Service: `AgentOS-Gemini`
+- Service: `AssemblyZero-Gemini`
 - Username: `credential-{name}` for keys, `_credential_index` for index
 
 **Rationale:** Namespaced to avoid conflicts with other applications.
@@ -58,7 +58,7 @@ Keychain entries use:
 
 2. **Keychain index stored in keychain** - The list of credential names is stored as JSON in the keychain itself. This is a simple approach but means the index can't be inspected without keychain access.
 
-3. **No automatic migration** - Users must run `python -m tools.agentos_credentials migrate` manually. We chose not to auto-migrate to avoid unexpected prompts.
+3. **No automatic migration** - Users must run `python -m tools.assemblyzero_credentials migrate` manually. We chose not to auto-migrate to avoid unexpected prompts.
 
 ## Backward Compatibility
 

@@ -53,7 +53,7 @@ A precision agent that performs **Targeted Inhumation** — complete removal of 
 
 ## Architecture
 
-### State Definition (`agentos/workflows/inhumer/state.py`)
+### State Definition (`assemblyzero/workflows/inhumer/state.py`)
 
 ```python
 from typing import TypedDict, List, Optional
@@ -85,7 +85,7 @@ class InhumerState(TypedDict):
     commit_sha: Optional[str]         # SHA of inhumation commit (only after success)
 ```
 
-### State Graph (`agentos/workflows/inhumer/graph.py`)
+### State Graph (`assemblyzero/workflows/inhumer/graph.py`)
 
 ```
 N0_Contract_Review (The Scout)
@@ -332,7 +332,7 @@ BODYGUARDS (tests to remove): 2
 WITNESSES (files with references): 3
   - tools/__init__.py
   - tools/main_workflow.py
-  - agentos/utils/helpers.py
+  - assemblyzero/utils/helpers.py
 
 ⚠️  WARNING: References must be cleaned from witness files.
 
@@ -345,7 +345,7 @@ Executing contract...
   ✓ git rm tests/integration/test_deprecated_integration.py
   ✓ Cleaned reference in tools/__init__.py
   ✓ Cleaned reference in tools/main_workflow.py
-  ✓ Cleaned reference in agentos/utils/helpers.py
+  ✓ Cleaned reference in assemblyzero/utils/helpers.py
 
 Verifying clean escape...
   Running pytest...

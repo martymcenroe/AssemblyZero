@@ -2,7 +2,7 @@
 """
 gemini-retry.py - Retry Gemini CLI with credential rotation and backoff
 
-AgentOS Core Tool - Ensures gemini-3-pro-preview reviews succeed even under load.
+AssemblyZero Core Tool - Ensures gemini-3-pro-preview reviews succeed even under load.
 
 Usage:
     python gemini-retry.py --prompt "Your prompt" [--model gemini-3-pro-preview]

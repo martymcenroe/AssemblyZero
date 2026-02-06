@@ -11,7 +11,7 @@ Fix: Implement actual input() prompts in interactive mode.
 from unittest.mock import patch, MagicMock
 import pytest
 
-from agentos.workflows.requirements.state import create_initial_state, HumanDecision
+from assemblyzero.workflows.requirements.state import create_initial_state, HumanDecision
 
 
 class TestDraftGateInteractive:
@@ -20,11 +20,11 @@ class TestDraftGateInteractive:
     @patch("builtins.input", return_value="S")
     def test_draft_gate_prompts_for_input(self, mock_input, tmp_path):
         """Draft gate should prompt user for input when gate is enabled."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,  # Gate enabled
@@ -40,11 +40,11 @@ class TestDraftGateInteractive:
     @patch("builtins.input", return_value="S")
     def test_draft_gate_send_routes_to_review(self, mock_input, tmp_path):
         """User choosing 'S' (Send) should route to review."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,
@@ -59,11 +59,11 @@ class TestDraftGateInteractive:
     @patch("builtins.input", return_value="R")
     def test_draft_gate_revise_routes_to_generate(self, mock_input, tmp_path):
         """User choosing 'R' (Revise) should route back to draft generation."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,
@@ -78,11 +78,11 @@ class TestDraftGateInteractive:
     @patch("builtins.input", return_value="M")
     def test_draft_gate_manual_routes_to_end(self, mock_input, tmp_path):
         """User choosing 'M' (Manual) should end workflow."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,
@@ -96,11 +96,11 @@ class TestDraftGateInteractive:
 
     def test_draft_gate_no_prompt_when_disabled(self, tmp_path):
         """Draft gate should NOT prompt when gate is disabled."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=False,  # Gate disabled
@@ -114,11 +114,11 @@ class TestDraftGateInteractive:
 
     def test_draft_gate_no_prompt_in_auto_mode(self, tmp_path):
         """Draft gate should NOT prompt when in auto mode."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,
@@ -136,11 +136,11 @@ class TestVerdictGateInteractive:
     @patch("builtins.input", return_value="A")
     def test_verdict_gate_prompts_for_input(self, mock_input, tmp_path):
         """Verdict gate should prompt user for input when gate is enabled."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,  # Gate enabled
@@ -156,11 +156,11 @@ class TestVerdictGateInteractive:
     @patch("builtins.input", return_value="A")
     def test_verdict_gate_approve_routes_to_finalize(self, mock_input, tmp_path):
         """User choosing 'A' (Approve) should route to finalize."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,
@@ -176,11 +176,11 @@ class TestVerdictGateInteractive:
     @patch("builtins.input", return_value="R")
     def test_verdict_gate_revise_routes_to_generate(self, mock_input, tmp_path):
         """User choosing 'R' (Revise) should route back to draft generation."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,
@@ -196,11 +196,11 @@ class TestVerdictGateInteractive:
     @patch("builtins.input", return_value="M")
     def test_verdict_gate_manual_routes_to_end(self, mock_input, tmp_path):
         """User choosing 'M' (Manual) should end workflow."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,
@@ -214,11 +214,11 @@ class TestVerdictGateInteractive:
 
     def test_verdict_gate_no_prompt_when_disabled(self, tmp_path):
         """Verdict gate should NOT prompt when gate is disabled."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=False,  # Gate disabled
@@ -232,11 +232,11 @@ class TestVerdictGateInteractive:
 
     def test_verdict_gate_no_prompt_in_auto_mode(self, tmp_path):
         """Verdict gate should NOT prompt when in auto mode."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,
@@ -255,11 +255,11 @@ class TestInvalidInputHandling:
     @patch("builtins.input", side_effect=["X", "invalid", "S"])
     def test_draft_gate_reprompts_on_invalid_input(self, mock_input, tmp_path):
         """Draft gate should reprompt when user enters invalid choice."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_draft
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_draft
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_draft=True,
@@ -276,11 +276,11 @@ class TestInvalidInputHandling:
     @patch("builtins.input", side_effect=["invalid", "A"])
     def test_verdict_gate_reprompts_on_invalid_input(self, mock_input, tmp_path):
         """Verdict gate should reprompt when user enters invalid choice."""
-        from agentos.workflows.requirements.nodes.human_gate import human_gate_verdict
+        from assemblyzero.workflows.requirements.nodes.human_gate import human_gate_verdict
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             issue_number=42,
             gates_verdict=True,

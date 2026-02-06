@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.nodes.smoke_test_node import (
+from assemblyzero.nodes.smoke_test_node import (
     SmokeTestResult,
     SmokeTestState,
     discover_entry_points,

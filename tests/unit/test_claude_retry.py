@@ -14,7 +14,7 @@ class TestClaudeRetryBackoff:
 
     def test_successful_call_no_retry(self):
         """Successful Claude call should not retry."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -29,7 +29,7 @@ class TestClaudeRetryBackoff:
 
     def test_retry_on_rate_limit_429(self):
         """Should retry with backoff on 429 rate limit."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         # Create mock results: fail twice with 429, then succeed
         fail_result = MagicMock()
@@ -52,7 +52,7 @@ class TestClaudeRetryBackoff:
 
     def test_retry_on_rate_limit_text(self):
         """Should retry when stderr contains 'rate limit' text."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         fail_result = MagicMock()
         fail_result.returncode = 1
@@ -73,7 +73,7 @@ class TestClaudeRetryBackoff:
 
     def test_max_retries_exceeded(self):
         """Should raise after max retries."""
-        from agentos.core.claude_client import ClaudeRateLimitError, invoke_claude
+        from assemblyzero.core.claude_client import ClaudeRateLimitError, invoke_claude
 
         fail_result = MagicMock()
         fail_result.returncode = 1
@@ -89,7 +89,7 @@ class TestClaudeRetryBackoff:
 
     def test_no_retry_on_other_errors(self):
         """Non-rate-limit errors should not retry."""
-        from agentos.core.claude_client import ClaudeClientError, invoke_claude
+        from assemblyzero.core.claude_client import ClaudeClientError, invoke_claude
 
         fail_result = MagicMock()
         fail_result.returncode = 1
@@ -105,7 +105,7 @@ class TestClaudeRetryBackoff:
 
     def test_exponential_backoff_timing(self):
         """Backoff should be exponential: ~1s, ~2s, ~4s, ~8s..."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         fail_result = MagicMock()
         fail_result.returncode = 1
@@ -144,7 +144,7 @@ class TestClaudeRetryBackoff:
 
     def test_jitter_applied_to_backoff(self):
         """Backoff should include jitter so delays vary."""
-        from agentos.core.claude_client import _calculate_backoff
+        from assemblyzero.core.claude_client import _calculate_backoff
 
         # Generate many backoff values for the same attempt
         delays = [_calculate_backoff(0) for _ in range(100)]
@@ -160,7 +160,7 @@ class TestClaudeRetryBackoff:
 
     def test_timeout_does_not_retry(self):
         """Timeout errors should not retry."""
-        from agentos.core.claude_client import ClaudeClientError, invoke_claude
+        from assemblyzero.core.claude_client import ClaudeClientError, invoke_claude
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 300)) as mock_run:
             with pytest.raises(ClaudeClientError) as exc_info:
@@ -171,7 +171,7 @@ class TestClaudeRetryBackoff:
 
     def test_max_delay_cap(self):
         """Backoff delay should be capped at MAX_DELAY."""
-        from agentos.core.claude_client import MAX_DELAY, _calculate_backoff
+        from assemblyzero.core.claude_client import MAX_DELAY, _calculate_backoff
 
         # At attempt 10, base delay would be 2^10 = 1024 seconds
         # But should be capped at MAX_DELAY (60 seconds)
@@ -180,7 +180,7 @@ class TestClaudeRetryBackoff:
 
     def test_working_dir_parameter(self):
         """Working directory should be passed to subprocess."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -196,7 +196,7 @@ class TestClaudeRetryBackoff:
 
     def test_too_many_requests_text(self):
         """Should retry when stderr contains 'too many requests' text."""
-        from agentos.core.claude_client import invoke_claude
+        from assemblyzero.core.claude_client import invoke_claude
 
         fail_result = MagicMock()
         fail_result.returncode = 1

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agentos.core.audit import (
+from assemblyzero.core.audit import (
     ReviewAuditLog,
     ReviewLogEntry,
     create_log_entry,

@@ -35,8 +35,8 @@ Examples:
 ## Step 0: Project Detection (ALWAYS FIRST)
 
 Detect the current project from working directory:
-1. Get working directory (e.g., `/c/Users/mcwiz/Projects/AgentOS`)
-2. Extract project name from path → `AgentOS`
+1. Get working directory (e.g., `/c/Users/mcwiz/Projects/AssemblyZero`)
+2. Extract project name from path → `AssemblyZero`
 3. Project root (Windows): `C:\Users\mcwiz\Projects\{PROJECT}`
 4. Project root (Unix): `/c/Users/mcwiz/Projects/{PROJECT}`
 
@@ -44,13 +44,13 @@ Detect the current project from working directory:
 
 | Project | GitHub Repo | Main Guide | Immediate Plan |
 |---------|-------------|------------|----------------|
-| AgentOS | martymcenroe/AgentOS | `docs/index.md` | `docs/10000a-IMMEDIATE-PLAN.md` |
+| AssemblyZero | martymcenroe/AssemblyZero | `docs/index.md` | `docs/10000a-IMMEDIATE-PLAN.md` |
 | Aletheia | martymcenroe/Aletheia | `docs/10000-GUIDE.md` | `docs/10000a-IMMEDIATE-PLAN.md` |
 | Talos | martymcenroe/Talos | `docs/10000-GUIDE.md` | `docs/10000a-IMMEDIATE-PLAN.md` |
 | maintenance | martymcenroe/maintenance | `docs/10000-GUIDE.md` | `docs/10000a-IMMEDIATE-PLAN.md` |
 | claude-code | anthropics/claude-code | `README.md` | None |
 
-**CRITICAL:** Use the correct file paths for the detected project. Do NOT use Aletheia paths when in AgentOS.
+**CRITICAL:** Use the correct file paths for the detected project. Do NOT use Aletheia paths when in AssemblyZero.
 
 ## Modes
 
@@ -74,8 +74,8 @@ Detect the current project from working directory:
 
 **Steps (parallel reads):**
 
-1. Read AgentOS core rules:
-   `C:\Users\mcwiz\Projects\AgentOS\CLAUDE.md`
+1. Read AssemblyZero core rules:
+   `C:\Users\mcwiz\Projects\AssemblyZero\CLAUDE.md`
 
 2. Read Projects root rules (if exists):
    `C:\Users\mcwiz\Projects\CLAUDE.md`
@@ -83,7 +83,7 @@ Detect the current project from working directory:
 3. Read current project CLAUDE.md (detected from working directory)
 
 4. Read Gemini rotation instructions (CRITICAL for reviews):
-   `C:\Users\mcwiz\Projects\AgentOS\docs\prompts\gemini-rotation-instructions.md`
+   `C:\Users\mcwiz\Projects\AssemblyZero\docs\prompts\gemini-rotation-instructions.md`
 
 5. Optionally scan current permissions:
    `C:\Users\mcwiz\Projects\.claude\settings.local.json` (just the `allow` array)
@@ -91,7 +91,7 @@ Detect the current project from working directory:
 **Report format:**
 ```
 ✓ Rules refreshed for {PROJECT}
-• AgentOS core: Bash constraints, worktree isolation, visible self-check
+• AssemblyZero core: Bash constraints, worktree isolation, visible self-check
 • Gemini: Rotation tool, encoding rules, model verification
 • Project rules: {one-line summary}
 • Session permissions: {count} active allows
@@ -118,10 +118,10 @@ Complete onboarding for the **detected project**:
 
 Read these files simultaneously based on project:
 
-**For AgentOS:**
+**For AssemblyZero:**
 - `CLAUDE.md` - Core rules
 - `docs/index.md` - Documentation index
-- `docs/10000a-IMMEDIATE-PLAN.md` - Current focus (AgentOS-specific work only)
+- `docs/10000a-IMMEDIATE-PLAN.md` - Current focus (AssemblyZero-specific work only)
 
 **For Aletheia:**
 - `CLAUDE.md` - Project rules

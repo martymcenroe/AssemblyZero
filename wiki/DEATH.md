@@ -40,7 +40,7 @@ DEATH is not evil. He's not even unkind. He's simply... inevitable.
 
 ## The Function: Documentation Reconciliation
 
-In AgentOS, DEATH arrives after implementation is complete. He has one job: **ensure nothing is forgotten**.
+In AssemblyZero, DEATH arrives after implementation is complete. He has one job: **ensure nothing is forgotten**.
 
 ```mermaid
 graph TD
@@ -86,7 +86,7 @@ DEATH doesn't enjoy his job. But he does it. Because someone must.
 
 > I COULD BE BOUNDED IN A NUTSHELL AND COUNT MYSELF A KING OF INFINITE SPACE, WERE IT NOT THAT I HAVE BAD DREAMS.
 
-In AgentOS, the "bad dreams" are:
+In AssemblyZero, the "bad dreams" are:
 - Orphaned worktrees
 - Stale branches
 - Unclosed issues
@@ -118,10 +118,10 @@ class Binky:
 
 DEATH's granddaughter, Susan Sto Helit, inherited some of his abilities. She can walk through walls, become invisible when she doesn't want to be noticed, and see things that aren't entirely there.
 
-In AgentOS, "Susan mode" is debug mode—seeing the invisible threads that connect the system:
+In AssemblyZero, "Susan mode" is debug mode—seeing the invisible threads that connect the system:
 
 ```bash
-agentos debug --susan
+assemblyzero debug --susan
 # Reveals:
 # - Hidden state
 # - Pending reconciliations
@@ -163,7 +163,7 @@ DEATH is not the enemy. DEATH is the friend who ensures things end properly, so 
 
 DEATH's manservant, Albert, was once Alberto Malich, founder of Unseen University. He cheated death by hiding in DEATH's domain, where time doesn't pass normally.
 
-In AgentOS, "Albert mode" is archive mode—things don't change, they're just... preserved:
+In AssemblyZero, "Albert mode" is archive mode—things don't change, they're just... preserved:
 
 ```
 docs/lineage/archived/
@@ -190,7 +190,7 @@ DEATH has delivered many memorable lines:
 
 ## Invocation
 
-To summon DEATH in AgentOS:
+To summon DEATH in AssemblyZero:
 
 ```bash
 # After merge, DEATH arrives automatically

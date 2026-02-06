@@ -39,7 +39,7 @@ The audit rotates through these projects (one per night):
 | Index | Project | Path |
 |-------|---------|------|
 | 0 | Aletheia | `C:\Users\mcwiz\Projects\Aletheia` |
-| 1 | AgentOS | `C:\Users\mcwiz\Projects\AgentOS` |
+| 1 | AssemblyZero | `C:\Users\mcwiz\Projects\AssemblyZero` |
 | 2 | Talos | `C:\Users\mcwiz\Projects\Talos` |
 | 3 | maintenance | `C:\Users\mcwiz\Projects\maintenance` |
 
@@ -63,7 +63,7 @@ State file format:
 {
     "lastRepoIndex": 1,
     "lastRun": "2026-01-16 04:30:02",
-    "lastRepo": "AgentOS"
+    "lastRepo": "AssemblyZero"
 }
 ```
 
@@ -207,7 +207,7 @@ claude -p "Run /audit for this project. Save results to docs/audit-results/$(dat
 **Solution:**
 1. Test the scraper manually:
    ```bash
-   poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/claude-usage-scraper.py
+   poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/claude-usage-scraper.py
    ```
 2. Check if Claude desktop app is running (scraper reads from app data)
 
@@ -258,7 +258,7 @@ Edit the `$repos` array in `claude-daily-audit.ps1`:
 ```powershell
 $repos = @(
     @{ Name = "Aletheia"; Path = "C:\Users\mcwiz\Projects\Aletheia" },
-    @{ Name = "AgentOS"; Path = "C:\Users\mcwiz\Projects\AgentOS" },
+    @{ Name = "AssemblyZero"; Path = "C:\Users\mcwiz\Projects\AssemblyZero" },
     # Add or remove entries here
 )
 ```
@@ -296,7 +296,7 @@ Register-ScheduledTask -TaskName 'Claude-Heartbeat' -Action $action -Trigger $tr
 ## Related Documents
 
 - [0800 - Audit Index](../audits/0800-audit-index.md) - List of all audits
-- [0902 - Nightly AgentOS Audit](0902-nightly-agentos-audit.md) - Conceptual audit runbook
+- [0902 - Nightly AssemblyZero Audit](0902-nightly-assemblyzero-audit.md) - Conceptual audit runbook
 - [claude-usage-scraper.py](../../tools/claude-usage-scraper.py) - Usage data scraper
 
 ---

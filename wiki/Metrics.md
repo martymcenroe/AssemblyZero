@@ -1,4 +1,4 @@
-# AgentOS Metrics
+# AssemblyZero Metrics
 
 > *"Taxation, gentlemen, is very much like dairy farming. The task is to extract the maximum amount of milk with the minimum amount of moo."*
 > — Lord Vetinari
@@ -58,7 +58,7 @@ Jan 21-29:  ██████████░░░░░░░░░░  37 ope
 Feb 01-05:  ████████████████████ 136 opened, 118 closed (hyperdrive)
 ```
 
-**The inflection point:** Feb 2, when 55 issues were created in a single day. This marked the transition from "building AgentOS" to "AgentOS building itself."
+**The inflection point:** Feb 2, when 55 issues were created in a single day. This marked the transition from "building AssemblyZero" to "AssemblyZero building itself."
 
 ---
 
@@ -90,15 +90,15 @@ pie title Issue Status Distribution
 
 ## Cross-Project Usage
 
-AgentOS is used by multiple repositories:
+AssemblyZero is used by multiple repositories:
 
 | Repository | Status | Issues Processed |
 |------------|--------|------------------|
-| **AgentOS** | Active | 207 |
+| **AssemblyZero** | Active | 207 |
 | **RCA-PDF** | Active | TBD |
 | **dispatch** | Planned | - |
 
-> **Note:** Cross-project metrics aggregation is tracked in [#329](https://github.com/martymcenroe/AgentOS/issues/329)
+> **Note:** Cross-project metrics aggregation is tracked in [#329](https://github.com/martymcenroe/AssemblyZero/issues/329)
 
 ---
 
@@ -160,7 +160,7 @@ Every metric travels the [Clacks](The-Clacks). Every issue, every verdict, every
 
 ```
 GNU Terry Pratchett
-GNU AgentOS Contributors
+GNU AssemblyZero Contributors
 ```
 
 ---
@@ -186,7 +186,7 @@ February 3rd saw 55 issues closed—a testament to the multi-agent architecture.
 ## Related
 
 - [Measuring Productivity](Measuring-Productivity) - KPI framework
-- [How the AgentOS Learns](How-the-AgentOS-Learns) - Self-improvement metrics
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Self-improvement metrics
 - [Governance Gates](Governance-Gates) - Gate performance metrics
 
 ---

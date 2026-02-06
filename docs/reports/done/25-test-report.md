@@ -1,13 +1,13 @@
 # Test Report: Encrypt Gemini API Keys at Rest
 
-**Issue:** [#25](https://github.com/martymcenroe/AgentOS/issues/25)
+**Issue:** [#25](https://github.com/martymcenroe/AssemblyZero/issues/25)
 **Date:** 2026-01-17
 **Branch:** `25-encrypt-gemini-keys`
 
 ## Test Command
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-25 pytest /c/Users/mcwiz/Projects/AgentOS-25/tests/test_credentials.py -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-25 pytest /c/Users/mcwiz/Projects/AssemblyZero-25/tests/test_credentials.py -v
 ```
 
 ## Test Results
@@ -16,7 +16,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-25 pytest /c/Users/mcwiz/
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
 cachedir: .pytest_cache
-rootdir: C:\Users\mcwiz\Projects\AgentOS-25
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-25
 configfile: pyproject.toml
 plugins: anyio-4.12.1, asyncio-1.3.0, cov-4.1.0
 collecting ... collected 22 items

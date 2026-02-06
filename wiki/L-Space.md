@@ -12,7 +12,7 @@ This is why librarians are so protective of their collections. They're not just 
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
 Every sufficiently large codebase develops its own L-Space.
 

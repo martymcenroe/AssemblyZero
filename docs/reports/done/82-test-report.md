@@ -1,11 +1,11 @@
 # Test Report: Issue #82
 
 ## Issue Reference
-https://github.com/martymcenroe/AgentOS/issues/82
+https://github.com/martymcenroe/AssemblyZero/issues/82
 
 ## Test Command
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-82 pytest tests/test_issue_workflow.py::TestBriefIdeaDetection -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-82 pytest tests/test_issue_workflow.py::TestBriefIdeaDetection -v
 ```
 
 ## Full Test Output
@@ -14,7 +14,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-82 pytest tests/test_issu
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
 cachedir: .pytest_cache
-rootdir: C:\Users\mcwiz\Projects\AgentOS-82
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-82
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 collecting ... collected 5 items
@@ -41,7 +41,7 @@ tests/test_issue_workflow.py::TestBriefIdeaDetection::test_main_no_source_idea_f
 ## Full Test Suite
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-82 pytest tests/test_issue_workflow.py -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-82 pytest tests/test_issue_workflow.py -v
 ```
 
 **Result:** 63 passed, 1 failed, 75 warnings
@@ -63,7 +63,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-82 pytest tests/test_issu
 | 33 | `DeprecationWarning` | langgraph.utils.runnable:226 | "'asyncio.iscoroutinefunction' is deprecated... use inspect.iscoroutinefunction()" |
 
 **Analysis:**
-- All 75 warnings are from **dependencies**, not AgentOS project code
+- All 75 warnings are from **dependencies**, not AssemblyZero project code
 - Python 3.14 compatibility: Pydantic v1 and asyncio APIs are deprecated (affects langchain, langgraph)
 - Google SDK migration needed: `google-generativeai` → `google-genai` package
 - **Action items:**

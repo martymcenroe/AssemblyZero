@@ -6,13 +6,13 @@
 
 ```bash
 # Check credential status
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
 
 # Direct usage (like gemini CLI)
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --prompt "Review this" --model gemini-3-pro-preview
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --prompt "Review this" --model gemini-3-pro-preview
 
 # With stdin
-cat prompt.txt | poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --model gemini-3-pro-preview
+cat prompt.txt | poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview
 ```
 
 ## Parameters
@@ -25,7 +25,7 @@ cat prompt.txt | poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /
 
 ## Credential Storage
 
-Credentials are stored in: `~/.agentos/gemini-credentials.json`
+Credentials are stored in: `~/.assemblyzero/gemini-credentials.json`
 
 ```json
 {
@@ -48,7 +48,7 @@ Credentials are stored in: `~/.agentos/gemini-credentials.json`
 
 ## Rotation State
 
-Tracks exhausted credentials in: `~/.agentos/gemini-rotation-state.json`
+Tracks exhausted credentials in: `~/.assemblyzero/gemini-rotation-state.json`
 
 State is automatically managed:
 - Credentials marked exhausted on quota errors

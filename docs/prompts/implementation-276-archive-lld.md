@@ -25,8 +25,8 @@ Issue #276 identifies that LLDs remain in `docs/lld/active/` when issues are clo
 **MANDATORY:** All code changes happen in a worktree.
 
 ```bash
-git worktree add ../AgentOS-276 -b 276-archive-lld-action
-git -C ../AgentOS-276 push -u origin HEAD
+git worktree add ../AssemblyZero-276 -b 276-archive-lld-action
+git -C ../AssemblyZero-276 push -u origin HEAD
 ```
 
 ---
@@ -141,6 +141,6 @@ EOF
 ```bash
 git checkout main
 git pull
-git worktree remove ../AgentOS-276
+git worktree remove ../AssemblyZero-276
 git branch -d 276-archive-lld-action
 ```

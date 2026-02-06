@@ -1,6 +1,6 @@
 # LLD: Report Generation Gate (#29)
 
-**Issue:** https://github.com/mcwiz/AgentOS/issues/29
+**Issue:** https://github.com/mcwiz/AssemblyZero/issues/29
 **Author:** Claude Agent
 **Date:** 2026-01-16
 **Status:** Draft - Pending Gemini Review

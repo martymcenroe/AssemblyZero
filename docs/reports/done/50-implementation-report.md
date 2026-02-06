@@ -1,7 +1,7 @@
 # Implementation Report: Issue #50 - Governance Node & Audit Logger
 
 ## Issue Reference
-- **Issue:** [#50 - Implement Governance Node & Audit Logger](https://github.com/martymcenroe/AgentOS/issues/50)
+- **Issue:** [#50 - Implement Governance Node & Audit Logger](https://github.com/martymcenroe/AssemblyZero/issues/50)
 - **Branch:** `50-governance-node`
 - **LLD:** `docs/LLDs/active/50-governance-node-audit-logger.md`
 
@@ -9,12 +9,12 @@
 
 | File | Change Type | Lines | Description |
 |------|-------------|-------|-------------|
-| `agentos/core/config.py` | Add | 47 | Configuration constants (GOVERNANCE_MODEL, credential paths, retry settings) |
-| `agentos/core/gemini_client.py` | Add | 295 | Custom Gemini client with credential rotation logic |
-| `agentos/core/audit.py` | Add | 161 | JSONL audit logging infrastructure |
-| `agentos/nodes/governance.py` | Add | 215 | `review_lld_node` LangGraph node implementation |
-| `agentos/core/__init__.py` | Modify | +50 | Export new modules |
-| `agentos/nodes/__init__.py` | Modify | +4 | Export `review_lld_node` |
+| `assemblyzero/core/config.py` | Add | 47 | Configuration constants (GOVERNANCE_MODEL, credential paths, retry settings) |
+| `assemblyzero/core/gemini_client.py` | Add | 295 | Custom Gemini client with credential rotation logic |
+| `assemblyzero/core/audit.py` | Add | 161 | JSONL audit logging infrastructure |
+| `assemblyzero/nodes/governance.py` | Add | 215 | `review_lld_node` LangGraph node implementation |
+| `assemblyzero/core/__init__.py` | Modify | +50 | Export new modules |
+| `assemblyzero/nodes/__init__.py` | Modify | +4 | Export `review_lld_node` |
 | `tools/view_audit.py` | Add | 224 | Live audit viewer CLI |
 | `logs/.gitkeep` | Add | 2 | Ensure logs directory tracked |
 | `logs/.gitignore` | Add | 6 | Ignore *.jsonl log files |
@@ -128,7 +128,7 @@ google-generativeai = "^0.8.6"  # Direct Gemini SDK
 - **LLD Compliance:** Implementation follows "Nuclear Winter" requirements (rotation logic, model hierarchy, observability)
 - **Resource Hygiene:** Dependencies added as specified, watchdog event-driven approach noted
 - **Secrets:** Credential paths in config, not keys; credential_alias logged instead of raw key
-- **Permission Scope:** All changes within agentos/, tools/, logs/
+- **Permission Scope:** All changes within assemblyzero/, tools/, logs/
 
 ### Tier 2: No High-Priority Issues
 

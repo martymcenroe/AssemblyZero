@@ -2,7 +2,7 @@
 
 **Generated:** 2026-02-01
 **Template Analyzed:** `docs/templates/0102-feature-lld-template.md`
-**Database:** `.agentos/verdicts.db`
+**Database:** `.assemblyzero/verdicts.db`
 
 ## Summary Statistics
 
@@ -99,5 +99,5 @@ Also analyzed `docs/templates/0101-issue-template.md`:
 To see the actual blocking issue descriptions for each category, run:
 ```bash
 # View all blocking issues grouped by category
-sqlite3 .agentos/verdicts.db "SELECT category, description FROM blocking_issues ORDER BY category, tier"
+sqlite3 .assemblyzero/verdicts.db "SELECT category, description FROM blocking_issues ORDER BY category, tier"
 ```

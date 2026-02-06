@@ -1,12 +1,12 @@
 # Tools Reference
 
-> AgentOS core tools for multi-agent orchestration, Gemini verification, and permission management
+> AssemblyZero core tools for multi-agent orchestration, Gemini verification, and permission management
 
 ---
 
 ## Overview
 
-AgentOS provides a suite of Python tools that enable enterprise-grade AI agent orchestration. These tools handle:
+AssemblyZero provides a suite of Python tools that enable enterprise-grade AI agent orchestration. These tools handle:
 
 - **Gemini Integration** - Credential rotation, retry logic, model validation
 - **Permission Management** - Friction tracking, permission propagation
@@ -77,7 +77,7 @@ poetry run python tools/gemini-rotate.py --status
 ```
 
 **Configuration:**
-Credentials stored in: `~/.agentos/gemini-credentials.json`
+Credentials stored in: `~/.assemblyzero/gemini-credentials.json`
 
 ---
 
@@ -131,7 +131,7 @@ poetry run python tools/zugzwang.py --clear
 
 ---
 
-### agentos-permissions.py
+### assemblyzero-permissions.py
 
 **Purpose:** Manage permissions across master (user-level) and project-level settings files.
 
@@ -151,19 +151,19 @@ poetry run python tools/zugzwang.py --clear
 **Usage:**
 ```bash
 # Audit a project
-poetry run python tools/agentos-permissions.py --audit --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --audit --project Aletheia
 
 # Clean with dry-run
-poetry run python tools/agentos-permissions.py --clean --project AgentOS --dry-run
+poetry run python tools/assemblyzero-permissions.py --clean --project AssemblyZero --dry-run
 
 # Quick check for cleanup scripts
-poetry run python tools/agentos-permissions.py --quick-check --project Aletheia
+poetry run python tools/assemblyzero-permissions.py --quick-check --project Aletheia
 
 # Merge up and sync across all projects
-poetry run python tools/agentos-permissions.py --merge-up --all-projects
+poetry run python tools/assemblyzero-permissions.py --merge-up --all-projects
 
 # Repair broken JSON
-poetry run python tools/agentos-permissions.py --repair --all-projects
+poetry run python tools/assemblyzero-permissions.py --repair --all-projects
 ```
 
 **Protected Permissions:**
@@ -175,12 +175,12 @@ These are NEVER allowed in deny lists (automatically removed):
 
 ## Configuration Tools
 
-### agentos-generate.py
+### assemblyzero-generate.py
 
 **Purpose:** Generate concrete configs from parameterized templates.
 
 **How It Works:**
-1. Reads templates from `AgentOS/.claude/templates/`
+1. Reads templates from `AssemblyZero/.claude/templates/`
 2. Reads variables from project's `.claude/project.json`
 3. Outputs concrete configs to project's `.claude/` directory
 
@@ -192,13 +192,13 @@ These are NEVER allowed in deny lists (automatically removed):
 **Usage:**
 ```bash
 # Generate configs for a project
-poetry run python tools/agentos-generate.py --project /path/to/project
+poetry run python tools/assemblyzero-generate.py --project /path/to/project
 
 # Relative to Projects directory
-poetry run python tools/agentos-generate.py --project Aletheia
+poetry run python tools/assemblyzero-generate.py --project Aletheia
 
 # Also set up encrypted ideas folder
-poetry run python tools/agentos-generate.py --project Aletheia --ideas
+poetry run python tools/assemblyzero-generate.py --project Aletheia --ideas
 ```
 
 **Template Variables:**
@@ -209,55 +209,55 @@ Templates use `{{VARIABLE}}` syntax. Common variables:
 
 ---
 
-### agentos_config.py
+### assemblyzero_config.py
 
-**Purpose:** Centralized configuration management for AgentOS paths.
+**Purpose:** Centralized configuration management for AssemblyZero paths.
 
 **Usage in Python:**
 ```python
-from agentos_config import config
+from assemblyzero_config import config
 
 # Get paths in Windows format
-root = config.agentos_root()           # C:\Users\...\AgentOS
+root = config.assemblyzero_root()           # C:\Users\...\AssemblyZero
 projects = config.projects_root()       # C:\Users\...\Projects
 
 # Get paths in Unix format (for Bash)
-root_unix = config.agentos_root_unix()  # /c/Users/.../AgentOS
+root_unix = config.assemblyzero_root_unix()  # /c/Users/.../AssemblyZero
 ```
 
-**Configuration File:** `~/.agentos/config.json`
+**Configuration File:** `~/.assemblyzero/config.json`
 
 ---
 
 ## Cross-Project Tools
 
-### agentos-harvest.py
+### assemblyzero-harvest.py
 
-**Purpose:** Scan child projects to discover patterns that should be promoted to AgentOS.
+**Purpose:** Scan child projects to discover patterns that should be promoted to AssemblyZero.
 
 Part of the bidirectional sync architecture - patterns emerge in projects, get harvested, and promoted to core.
 
 **Usage:**
 ```bash
 # Scan all registered projects
-poetry run python tools/agentos-harvest.py
+poetry run python tools/assemblyzero-harvest.py
 
 # Scan specific project
-poetry run python tools/agentos-harvest.py --project Talos
+poetry run python tools/assemblyzero-harvest.py --project Talos
 
 # Output as JSON
-poetry run python tools/agentos-harvest.py --format json
+poetry run python tools/assemblyzero-harvest.py --format json
 ```
 
 **What It Finds:**
-- Commands that exist in child projects but not AgentOS
+- Commands that exist in child projects but not AssemblyZero
 - Tools that have been duplicated
 - Permissions that should be elevated
 - CLAUDE.md patterns worth generalizing
 
 ---
 
-### agentos_credentials.py
+### assemblyzero_credentials.py
 
 **Purpose:** Secure credential management using system keychain with fallback to encrypted files.
 
@@ -295,7 +295,7 @@ poetry run python tools/agentos-harvest.py --format json
 Always run tools through Poetry to ensure correct dependencies:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/TOOL_NAME.py [args]
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/TOOL_NAME.py [args]
 ```
 
 ### Path Formats
@@ -324,5 +324,5 @@ poetry run python tools/gemini-retry.py --prompt "..." --model gemini-3-pro-prev
 
 - [Gemini Verification](Gemini-Verification) - How Gemini integration works
 - [Permission Friction](Permission-Friction) - Why friction tracking matters
-- [Quick Start](Quick-Start) - Getting started with AgentOS
+- [Quick Start](Quick-Start) - Getting started with AssemblyZero
 - [Audits Catalog](Audits-Catalog) - Available governance audits

@@ -16,7 +16,7 @@ He's the youngest faculty member but the most senior in terms of actual knowledg
 
 ## The Function: Mechanical Auto-Fix Layer
 
-In AgentOS, Ponder Stibbons is **The Compositor**—the mechanical auto-fix layer that cleans drafts before they reach Gemini review.
+In AssemblyZero, Ponder Stibbons is **The Compositor**—the mechanical auto-fix layer that cleans drafts before they reach Gemini review.
 
 ```mermaid
 graph TD
@@ -134,8 +134,8 @@ If it requires thinking, Gemini handles it. If it's just cleanup, Ponder handles
 
 | Component | Status |
 |-----------|--------|
-| Issue | [#307](https://github.com/martymcenroe/AgentOS/issues/307) |
-| Verdict-to-AutoFix Pipeline | [#308](https://github.com/martymcenroe/AgentOS/issues/308) |
+| Issue | [#307](https://github.com/martymcenroe/AssemblyZero/issues/307) |
+| Verdict-to-AutoFix Pipeline | [#308](https://github.com/martymcenroe/AssemblyZero/issues/308) |
 | Core fix library | In design |
 | Human approval workflow | Planned |
 
@@ -145,7 +145,7 @@ If it requires thinking, Gemini handles it. If it's just cleanup, Ponder handles
 
 > *"The senior wizards had long since learned that the best way to get Ponder to do something was to tell him it was impossible."*
 
-Ponder embodies the AgentOS philosophy: **let agents handle what agents handle well**. Mechanical fixes don't need a 2B parameter model—they need pattern matching and string replacement.
+Ponder embodies the AssemblyZero philosophy: **let agents handle what agents handle well**. Mechanical fixes don't need a 2B parameter model—they need pattern matching and string replacement.
 
 By separating mechanical fixes from substantive review:
 - Gemini focuses on what it's good at (reasoning)
@@ -174,7 +174,7 @@ When Ponder detects missing sections, he can:
 
 ## Related
 
-- [How the AgentOS Learns](How-the-AgentOS-Learns) - The learning loop
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - The learning loop
 - [Verdict Analyzer](Verdict-Analyzer---Template-Improvement-from-Gemini-Verdicts) - Pattern extraction
 - [Requirements Workflow](Requirements-Workflow) - Where Ponder fits
 - [Hex](Hex-Codebase-Intelligence) - Ponder's colleague

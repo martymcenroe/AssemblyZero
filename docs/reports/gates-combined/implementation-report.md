@@ -1,10 +1,10 @@
 # Implementation Report: Development Workflow Gates
 
 **Issues:**
-- #27: https://github.com/mcwiz/AgentOS/issues/27
-- #28: https://github.com/mcwiz/AgentOS/issues/28
-- #29: https://github.com/mcwiz/AgentOS/issues/29
-- #30: https://github.com/mcwiz/AgentOS/issues/30
+- #27: https://github.com/mcwiz/AssemblyZero/issues/27
+- #28: https://github.com/mcwiz/AssemblyZero/issues/28
+- #29: https://github.com/mcwiz/AssemblyZero/issues/29
+- #30: https://github.com/mcwiz/AssemblyZero/issues/30
 
 **Branch:** `gates-claude-md`
 **Date:** 2026-01-16

@@ -2,7 +2,7 @@
 
 **Issue:** #95
 **Date:** 2026-01-29
-**Worktree:** AgentOS-86 (extending existing #86 implementation)
+**Worktree:** AssemblyZero-86 (extending existing #86 implementation)
 
 ## Summary
 
@@ -12,8 +12,8 @@ Added `--select` flag to `run_lld_workflow.py` that presents open GitHub issues 
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/lld/audit.py` | Modified | Added LLD detection and tracking functions |
-| `agentos/workflows/lld/nodes.py` | Modified | Embed review evidence in finalize node |
+| `assemblyzero/workflows/lld/audit.py` | Modified | Added LLD detection and tracking functions |
+| `assemblyzero/workflows/lld/nodes.py` | Modified | Embed review evidence in finalize node |
 | `tools/run_lld_workflow.py` | Modified | Added --select and --audit flags |
 | `tests/test_lld_workflow.py` | Modified | Fixed path assertion for docs/lld/ |
 | `docs/lld/lld-status.json` | Added | Initial empty cache file |
@@ -53,7 +53,7 @@ This makes the review status discoverable by both humans and automated tools.
 
 ## Code References
 
-- LLD detection: `agentos/workflows/lld/audit.py:286-350`
-- Review embedding: `agentos/workflows/lld/audit.py:558-621`
+- LLD detection: `assemblyzero/workflows/lld/audit.py:286-350`
+- Review embedding: `assemblyzero/workflows/lld/audit.py:558-621`
 - Interactive selector: `tools/run_lld_workflow.py:53-145`
-- Finalize with embedding: `agentos/workflows/lld/nodes.py:395-462`
+- Finalize with embedding: `assemblyzero/workflows/lld/nodes.py:395-462`

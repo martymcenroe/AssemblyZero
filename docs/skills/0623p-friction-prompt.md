@@ -68,7 +68,7 @@ Claude: Analyzing last 5 session transcripts...
 
 ## Permission Friction Analysis - 2026-01-14
 
-**Project:** AgentOS
+**Project:** AssemblyZero
 **Scope:** Analyzed 5 sessions from 2026-01-10 to 2026-01-14
 
 ### Findings Summary

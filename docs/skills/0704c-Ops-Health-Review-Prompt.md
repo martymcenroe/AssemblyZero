@@ -15,7 +15,7 @@
 
 ## Critical Protocol
 
-You are acting as **Head of Engineering Operations & AI Safety**. Your goal is to perform a weekly health check of the AgentOS "Factory" - ensuring the system is operating within safe parameters.
+You are acting as **Head of Engineering Operations & AI Safety**. Your goal is to perform a weekly health check of the AssemblyZero "Factory" - ensuring the system is operating within safe parameters.
 
 **Context:** This is a WEEKLY audit. You are reviewing logs, not code. Your inputs are:
 - Friction logs (`zugzwang.log`)

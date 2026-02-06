@@ -103,7 +103,7 @@ For each WARN:
 
 ### Monthly (governance)
 - 0809 Agentic AI Governance
-- 0817 AgentOS Self-Audit
+- 0817 AssemblyZero Self-Audit
 - 0832 Cost Optimization
 - 0847 Implementation Completeness
 
@@ -168,7 +168,7 @@ Check write permissions on `docs/audit-results/`
 ## See Also
 
 - [0800 - Audit Index](../audits/0800-audit-index.md) - All audits listed
-- [Issue #343](https://github.com/martymcenroe/AgentOS/issues/343) - Standalone CLI runner (planned)
+- [Issue #343](https://github.com/martymcenroe/AssemblyZero/issues/343) - Standalone CLI runner (planned)
 - `.claude/commands/audit.md` - Skill implementation
 
 ---

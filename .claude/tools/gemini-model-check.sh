@@ -1,6 +1,6 @@
 #!/bin/bash
 # gemini-model-check.sh - Detect Gemini model downgrades
-# AgentOS Core Tool - Available to all child projects
+# AssemblyZero Core Tool - Available to all child projects
 #
 # Usage: ./tools/gemini-model-check.sh "prompt text" [required-model]
 #

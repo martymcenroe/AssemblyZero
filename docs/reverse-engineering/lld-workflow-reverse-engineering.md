@@ -77,7 +77,7 @@ graph TB
         N4[N4: finalize]
     end
 
-    subgraph "Existing AgentOS Nodes"
+    subgraph "Existing AssemblyZero Nodes"
         DESIGNER[designer.py: design_lld_node]
         GOVERNANCE[governance.py: review_lld_node]
     end
@@ -92,7 +92,7 @@ graph TB
         LINEAGE[docs/lineage/active/]
         LLD_ACTIVE[docs/lld/active/]
         STATUS[docs/lld/lld-status.json]
-        DB[(~/.agentos/lld_workflow.db)]
+        DB[(~/.assemblyzero/lld_workflow.db)]
     end
 
     CLI --> GRAPH
@@ -117,7 +117,7 @@ graph TB
 ### File Structure
 
 ```
-agentos/workflows/lld/
+assemblyzero/workflows/lld/
 ├── __init__.py
 ├── graph.py              # StateGraph definition with routing
 ├── state.py              # LLDWorkflowState TypedDict
@@ -127,7 +127,7 @@ agentos/workflows/lld/
 tools/
 └── run_lld_workflow.py   # CLI entry point (587 lines)
 
-agentos/nodes/
+assemblyzero/nodes/
 ├── designer.py           # External: Claude LLD generation
 └── governance.py         # External: Gemini LLD review
 ```
@@ -255,7 +255,7 @@ Select issue [1-3, q]: 1
 LLD Governance Workflow - Issue #42
 ============================================================
 Mode: INTERACTIVE
-Checkpoint DB: ~/.agentos/lld_workflow.db
+Checkpoint DB: ~/.assemblyzero/lld_workflow.db
 Max iterations: 20 (recursion_limit: 200)
 ============================================================
 
@@ -412,7 +412,7 @@ flowchart TD
 
 **Purpose:** Generate LLD draft using existing designer node
 
-**Key Design:** Delegates to `agentos.nodes.designer.design_lld_node()` rather than implementing its own LLM call.
+**Key Design:** Delegates to `assemblyzero.nodes.designer.design_lld_node()` rather than implementing its own LLM call.
 
 **Inputs:**
 - Issue content from N0
@@ -502,7 +502,7 @@ if lld_draft_path and Path(lld_draft_path).exists():
 
 **Purpose:** Gemini governance review of LLD
 
-**Key Design:** Delegates to `agentos.nodes.governance.review_lld_node()`.
+**Key Design:** Delegates to `assemblyzero.nodes.governance.review_lld_node()`.
 
 **Process:**
 1. Check mock mode -> use mock implementation
@@ -690,10 +690,10 @@ gh issue view 42 --json title,body
 gh issue list --state open --json number,title --limit 50
 ```
 
-### Designer Node (agentos.nodes.designer)
+### Designer Node (assemblyzero.nodes.designer)
 
 ```python
-from agentos.nodes.designer import design_lld_node
+from assemblyzero.nodes.designer import design_lld_node
 
 result = design_lld_node({
     "issue_id": 42,
@@ -708,10 +708,10 @@ result = design_lld_node({
 # Returns: design_status, lld_draft_path, lld_content, iteration_count
 ```
 
-### Governance Node (agentos.nodes.governance)
+### Governance Node (assemblyzero.nodes.governance)
 
 ```python
-from agentos.nodes.governance import review_lld_node
+from assemblyzero.nodes.governance import review_lld_node
 
 result = review_lld_node({
     "issue_id": 42,
@@ -726,8 +726,8 @@ result = review_lld_node({
 ### Gemini API (via GeminiClient)
 
 ```python
-from agentos.core.gemini_client import GeminiClient
-from agentos.core.config import GOVERNANCE_MODEL
+from assemblyzero.core.gemini_client import GeminiClient
+from assemblyzero.core.config import GOVERNANCE_MODEL
 
 client = GeminiClient(model=GOVERNANCE_MODEL)
 result = client.invoke(
@@ -835,7 +835,7 @@ if choice.isdigit():
 **Decision:** Accept `--repo` parameter for cross-repo LLD generation.
 
 **Rationale:**
-- AgentOS can generate LLDs for other projects
+- AssemblyZero can generate LLDs for other projects
 - Uses target repo's git context for `gh` commands
 - Writes LLD to target repo's docs/
 

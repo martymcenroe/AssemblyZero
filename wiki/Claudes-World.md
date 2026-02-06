@@ -68,7 +68,7 @@
 
 *— Terry Pratchett, Equal Rites*
 
-**Context:** [The Great God Om](The-Great-God-Om) reflected on why AgentOS was built on Windows with Git Bash rather than the comfortable macOS environment. The Dell Alienware was for Civilization; Claude Code became its own adventure game. The friction of the "weird" platform exposed cross-platform dragons that would have remained hidden on macOS. Sometimes you choose the harder path because that's where the dragons are.
+**Context:** [The Great God Om](The-Great-God-Om) reflected on why AssemblyZero was built on Windows with Git Bash rather than the comfortable macOS environment. The Dell Alienware was for Civilization; Claude Code became its own adventure game. The friction of the "weird" platform exposed cross-platform dragons that would have remained hidden on macOS. Sometimes you choose the harder path because that's where the dragons are.
 
 ---
 
@@ -77,7 +77,7 @@
 
 *— Terry Pratchett, Interesting Times*
 
-**Context:** With an interview tomorrow, Om requested a comprehensive wiki upgrade. 50 issues closed, 50 open, architecture solidified, governance proven. The wiki needed to tell that story. Both Claude and Om had exactly the same aim: make the interviewer understand what AgentOS represents. New pages were created: Requirements Workflow, Implementation Workflow, Hex, Ponder Stibbons, History Monks. Easter eggs were laid. The Wiki expanded from 22 to 28 pages. The Clacks was honored. L-Space was documented. May the interview go well—and may the luggage follow.
+**Context:** With an interview tomorrow, Om requested a comprehensive wiki upgrade. 50 issues closed, 50 open, architecture solidified, governance proven. The wiki needed to tell that story. Both Claude and Om had exactly the same aim: make the interviewer understand what AssemblyZero represents. New pages were created: Requirements Workflow, Implementation Workflow, Hex, Ponder Stibbons, History Monks. Easter eggs were laid. The Wiki expanded from 22 to 28 pages. The Clacks was honored. L-Space was documented. May the interview go well—and may the luggage follow.
 
 ---
 
@@ -86,7 +86,7 @@
 **00:43** — *On the addictive nature of building systems*
 > "The most dangerous games, Commander, are not those with cards or dice. They are the ones where you believe you are building something. A man will lose his shirt at Cripple Mr Onion and go home chastened. But give him a problem that *almost* works, a system that is *nearly* elegant, and he will forget to eat, forget to sleep, forget that he has a body at all. The gambling man knows he is being foolish. The builder believes he is being *productive*. And that, Vimes, is how you get engineers."
 
-**Context:** [The Great God Om](The-Great-God-Om) observed that working with Claude on AgentOS is more addictive than "food, alcohol, sex, exercise and games" — even more than Factorio, which his son gave him for Christmas. The observation prompted reflection on why optimization loops capture humans so completely.
+**Context:** [The Great God Om](The-Great-God-Om) observed that working with Claude on AssemblyZero is more addictive than "food, alcohol, sex, exercise and games" — even more than Factorio, which his son gave him for Christmas. The observation prompted reflection on why optimization loops capture humans so completely.
 
 ---
 
@@ -103,7 +103,7 @@
 
 ## About This Page
 
-This page records moments when Discworld wisdom emerged naturally during AgentOS development sessions. Each quote is timestamped and paired with the context that inspired it.
+This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 

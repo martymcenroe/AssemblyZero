@@ -1,4 +1,4 @@
-# AgentOS Wiki
+# AssemblyZero Wiki
 
 **[Home](Home)**
 
@@ -13,7 +13,7 @@
 
 ### For Leaders
 
-- [Why AgentOS?](For-Enterprise-Leaders-Why-AgentOS)
+- [Why AssemblyZero?](For-Enterprise-Leaders-Why-AssemblyZero)
 - [Security & Compliance](Security-Compliance)
 
 ---
@@ -24,7 +24,7 @@
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration)
 - [Gemini Verification](Gemini-Verification)
 - [Governance Gates](Governance-Gates)
-- [How the AgentOS Learns](How-the-AgentOS-Learns)
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns)
 - [LangGraph Evolution](LangGraph-Evolution)
 
 ---

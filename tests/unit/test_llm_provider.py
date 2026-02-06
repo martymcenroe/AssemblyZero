@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch, MagicMock
 import json
 import subprocess
 
-from agentos.core.llm_provider import (
+from assemblyzero.core.llm_provider import (
     LLMCallResult,
     LLMProvider,
     ClaudeCLIProvider,
@@ -269,7 +269,7 @@ class TestGeminiProvider:
         provider = GeminiProvider(model="PRO")
         assert provider.model == "pro"
 
-    @patch("agentos.core.llm_provider.GeminiProvider._get_client")
+    @patch("assemblyzero.core.llm_provider.GeminiProvider._get_client")
     def test_invoke_success(self, mock_get_client):
         """Test successful invocation."""
         mock_client = Mock()
@@ -296,7 +296,7 @@ class TestGeminiProvider:
         assert result.response == "Reviewed content"
         assert result.provider == "gemini"
 
-    @patch("agentos.core.llm_provider.GeminiProvider._get_client")
+    @patch("assemblyzero.core.llm_provider.GeminiProvider._get_client")
     def test_invoke_with_rotation(self, mock_get_client):
         """Test invocation with credential rotation."""
         mock_client = Mock()

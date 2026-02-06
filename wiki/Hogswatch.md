@@ -16,7 +16,7 @@ When the Hogfather was threatened with un-existence, DEATH had to take over the 
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
 Every year, we celebrate Hogswatch. It's the night when the code freezes, the deploys stop, and we remember why we built this thing in the first place.
 
@@ -36,7 +36,7 @@ This isn't superstition—it's *tradition*. And tradition matters.
 
 The Hogfather doesn't just bring toys. He brings *belief*. Children believe, and so the Hogfather exists.
 
-In AgentOS, belief looks like:
+In AssemblyZero, belief looks like:
 - Trust that the governance works
 - Faith that the agents will do their jobs
 - Confidence that the system improves itself
@@ -113,7 +113,7 @@ class Hogfather:
             raise UnExistenceError("The Hogfather fades...")
 ```
 
-The Hogfather exists because children believe. AgentOS works because users believe.
+The Hogfather exists because children believe. AssemblyZero works because users believe.
 
 Don't stop believing.
 

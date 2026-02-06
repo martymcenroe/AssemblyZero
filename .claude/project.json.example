@@ -45,7 +45,7 @@
   "// USAGE": [
     "1. Copy this file to your project: cp .claude/project.json.example YourProject/.claude/project.json",
     "2. Edit the values in 'variables' section",
-    "3. Run the generator: poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py --project YourProject",
+    "3. Run the generator: poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project YourProject",
     "4. The generator will create concrete configs from templates",
     "5. Make tools/gemini-model-check.sh executable: chmod +x tools/gemini-model-check.sh"
   ]

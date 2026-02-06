@@ -1,6 +1,6 @@
 # Implementation Report: Issue #15 - Path Parameterization
 
-**Issue:** [#15](https://github.com/martymcenroe/AgentOS/issues/15)
+**Issue:** [#15](https://github.com/martymcenroe/AssemblyZero/issues/15)
 **Date:** 2026-01-14
 **Status:** Complete
 
@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implemented `agentos_config.py`, a configuration loader that replaces hardcoded paths throughout AgentOS with configurable values. Paths are loaded from `~/.agentos/config.json` with fallback to backward-compatible defaults.
+Implemented `assemblyzero_config.py`, a configuration loader that replaces hardcoded paths throughout AssemblyZero with configurable values. Paths are loaded from `~/.assemblyzero/config.json` with fallback to backward-compatible defaults.
 
 ---
 
@@ -16,8 +16,8 @@ Implemented `agentos_config.py`, a configuration loader that replaces hardcoded 
 
 | File | Action | Description |
 |------|--------|-------------|
-| `tools/agentos_config.py` | Created | Configuration loader (331 lines) |
-| `~/.agentos/config.json` | Created | User-level path configuration |
+| `tools/assemblyzero_config.py` | Created | Configuration loader (331 lines) |
+| `~/.assemblyzero/config.json` | Created | User-level path configuration |
 
 ---
 
@@ -33,14 +33,14 @@ Implemented `agentos_config.py`, a configuration loader that replaces hardcoded 
 **Implementation:** Each path key contains a dictionary with `windows` and `unix` formats:
 ```json
 {
-  "agentos_root": {
-    "windows": "C:\\Users\\mcwiz\\Projects\\AgentOS",
-    "unix": "/c/Users/mcwiz/Projects/AgentOS"
+  "assemblyzero_root": {
+    "windows": "C:\\Users\\mcwiz\\Projects\\AssemblyZero",
+    "unix": "/c/Users/mcwiz/Projects/AssemblyZero"
   }
 }
 ```
 
-### 2. Singleton Pattern (`tools/agentos_config.py:309-310`)
+### 2. Singleton Pattern (`tools/assemblyzero_config.py:309-310`)
 
 **Why singleton:**
 - Config should be loaded once per process
@@ -49,18 +49,18 @@ Implemented `agentos_config.py`, a configuration loader that replaces hardcoded 
 
 **Usage:**
 ```python
-from agentos_config import config
-root = config.agentos_root()
+from assemblyzero_config import config
+root = config.assemblyzero_root()
 ```
 
 ### 3. Backward Compatibility
 
 **Defaults match existing hardcoded values:**
-- If `~/.agentos/config.json` doesn't exist, defaults are used
+- If `~/.assemblyzero/config.json` doesn't exist, defaults are used
 - Existing setups continue working without any changes
 - No migration required for current users
 
-### 4. Path Traversal Security (`tools/agentos_config.py:128-190`)
+### 4. Path Traversal Security (`tools/assemblyzero_config.py:128-190`)
 
 **Security fix identified in Gemini review:**
 - Original single-pass regex could be bypassed (`....//` → `../`)
@@ -76,11 +76,11 @@ root = config.agentos_root()
 User
   |
   v
-agentos_config.py
+assemblyzero_config.py
   |
   +---> _load_config()
   |         |
-  |         +---> Check ~/.agentos/config.json
+  |         +---> Check ~/.assemblyzero/config.json
   |         +---> Validate schema
   |         +---> Fall back to DEFAULTS if invalid
   |         v
@@ -94,21 +94,21 @@ agentos_config.py
   |         v
   |     Safe path string
   |
-  +---> Public methods: agentos_root(), projects_root(), user_claude_dir()
+  +---> Public methods: assemblyzero_root(), projects_root(), user_claude_dir()
 ```
 
 ---
 
 ## Key Implementation Details
 
-### Schema Validation (`tools/agentos_config.py:95-126`)
+### Schema Validation (`tools/assemblyzero_config.py:95-126`)
 
 Required structure:
 - `version` key for future migrations
-- `paths` dictionary with `agentos_root`, `projects_root`, `user_claude_dir`
+- `paths` dictionary with `assemblyzero_root`, `projects_root`, `user_claude_dir`
 - Each path must have `windows` and `unix` formats
 
-### Format Selection (`tools/agentos_config.py:227-249`)
+### Format Selection (`tools/assemblyzero_config.py:227-249`)
 
 Supports three modes:
 - `'windows'` - Returns Windows format path
@@ -140,7 +140,7 @@ Supports three modes:
 
 ## Exit Codes (CLI Mode)
 
-When run as `python agentos_config.py`:
+When run as `python assemblyzero_config.py`:
 - Prints current configuration
 - No error codes (informational only)
 

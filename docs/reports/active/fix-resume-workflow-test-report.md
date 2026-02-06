@@ -3,7 +3,7 @@
 ## Test Command Executed
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-fix-resume pytest tests/test_issue_workflow.py::TestWorkflowResume -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-fix-resume pytest tests/test_issue_workflow.py::TestWorkflowResume -v
 ```
 
 ## Test Output
@@ -12,7 +12,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-fix-resume pytest tests/t
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
 cachedir: .pytest_cache
-rootdir: C:\Users\mcwiz\Projects\AgentOS-fix-resume
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-fix-resume
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 collecting ... collected 6 items
@@ -33,8 +33,8 @@ tests/test_issue_workflow.py::TestWorkflowResume::test_resume_empty_stream_compl
   C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pydantic\v1\typing.py:77: DeprecationWarning: ForwardRef._evaluate is a private API and is retained for compatibility, but will be removed in Python 3.16. Use ForwardRef.evaluate() or typing.evaluate_forward_ref() instead.
     return cast(Any, type_)._evaluate(globalns, localns, type_params=(), recursive_guard=set())
 
-agentos\core\gemini_client.py:21
-  C:\Users\mcwiz\Projects\AgentOS-fix-resume\agentos\core\gemini_client.py:21: FutureWarning:
+assemblyzero\core\gemini_client.py:21
+  C:\Users\mcwiz\Projects\AssemblyZero-fix-resume\assemblyzero\core\gemini_client.py:21: FutureWarning:
 
   All support for the `google.generativeai` package has ended. It will no longer be receiving
   updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
@@ -51,7 +51,7 @@ agentos\core\gemini_client.py:21
 ## Full Test Suite Results
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-fix-resume pytest tests/test_issue_workflow.py -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-fix-resume pytest tests/test_issue_workflow.py -v
 ```
 
 **Results:** 54 passed, 1 failed (pre-existing), 65 warnings

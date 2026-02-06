@@ -308,7 +308,7 @@ class TestWorktreeHandling:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(
                 returncode=0,
-                stdout="worktree /c/Projects/AgentOS\nworktree /c/Projects/AgentOS-42\n",
+                stdout="worktree /c/Projects/AssemblyZero\nworktree /c/Projects/AssemblyZero-42\n",
             )
 
             result = find_existing_worktree(tmp_path, 42)
@@ -323,7 +323,7 @@ class TestWorktreeHandling:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(
                 returncode=0,
-                stdout="worktree /c/Projects/AgentOS\n",
+                stdout="worktree /c/Projects/AssemblyZero\n",
             )
 
             result = find_existing_worktree(tmp_path, 42)

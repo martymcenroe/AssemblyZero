@@ -1,4 +1,4 @@
-# AgentOS - File Inventory & Status Map
+# AssemblyZero - File Inventory & Status Map
 
 **Document:** 0003
 **Version:** 1.2
@@ -89,8 +89,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0626p-gemini-rotate-prompt.md` | Stable | Prompt: Gemini rotation |
 | `0627c-test-gaps-cli.md` | Stable | CLI: Test gap analysis |
 | `0627p-test-gaps-prompt.md` | Stable | Prompt: Test gap analysis |
-| `0627c-agentos-harvest-cli.md` | Stable | CLI: Pattern harvester |
-| `0627p-agentos-harvest-prompt.md` | Stable | Prompt: Pattern harvester |
+| `0627c-assemblyzero-harvest-cli.md` | Stable | CLI: Pattern harvester |
+| `0627p-assemblyzero-harvest-prompt.md` | Stable | Prompt: Pattern harvester |
 | `0628c-Manual-Issue-Review-Prompt.md` | Stable | Manual issue review |
 | `0629c-Manual-LLD-Review-Prompt.md` | Stable | Manual LLD review |
 | `0630c-Manual-Implementation-Review-Prompt.md` | Stable | Manual implementation review |
@@ -116,7 +116,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0814-horizon-scanning-protocol.md` | Stable | Threat monitoring |
 | `0815-permission-friction.md` | Stable | Approval overhead |
 | `0816-permission-permissiveness.md` | Stable | Access control |
-| `0817-agentos-audit.md` | Stable | Self-audit |
+| `0817-assemblyzero-audit.md` | Stable | Self-audit |
 | `0817-audit-wiki-alignment.md` | Stable | Wiki sync |
 | `0832-cross-project-harvest.md` | Stable | Pattern harvesting |
 | `0832-audit-cost-optimization.md` | Stable | Token efficiency |
@@ -134,7 +134,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 |------|--------|-------------|
 | `0900-runbook-index.md` | Stable | All runbooks |
 | `0901-new-project-setup.md` | Stable | Project init |
-| `0902-nightly-agentos-audit.md` | Stable | Scheduled audit |
+| `0902-nightly-assemblyzero-audit.md` | Stable | Scheduled audit |
 | `0903-windows-scheduled-tasks.md` | Stable | Windows Task Scheduler |
 | `0905-gemini-credentials.md` | Stable | Gemini credential management |
 
@@ -146,11 +146,11 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 
 | File | Status | Description |
 |------|--------|-------------|
-| `tools/agentos-generate.py` | Stable | Config generator from templates |
-| `tools/agentos-permissions.py` | Stable | Permission manager (sync, clean, merge-up) |
-| `tools/agentos_config.py` | Stable | Config loader for path parameterization |
-| `tools/agentos_credentials.py` | Stable | Credential management utilities |
-| `tools/agentos-harvest.py` | Beta | Pattern harvester for permission discovery |
+| `tools/assemblyzero-generate.py` | Stable | Config generator from templates |
+| `tools/assemblyzero-permissions.py` | Stable | Permission manager (sync, clean, merge-up) |
+| `tools/assemblyzero_config.py` | Stable | Config loader for path parameterization |
+| `tools/assemblyzero_credentials.py` | Stable | Credential management utilities |
+| `tools/assemblyzero-harvest.py` | Beta | Pattern harvester for permission discovery |
 
 ### Gemini Integration
 
@@ -190,7 +190,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `.claude/commands/commit-push-pr.md` | Stable | Git workflow |
 | `.claude/commands/friction.md` | Stable | Permission friction analysis |
 | `.claude/commands/onboard.md` | Stable | Agent onboarding |
-| `.claude/commands/promote.md` | Stable | Pattern promotion to AgentOS |
+| `.claude/commands/promote.md` | Stable | Pattern promotion to AssemblyZero |
 | `.claude/commands/test-gaps.md` | Stable | Test gap mining |
 | `.claude/commands/zugzwang.md` | Stable | Real-time friction logger |
 

@@ -18,7 +18,7 @@ Lu-Tze, the sweeper, is their most accomplished member. He appears to be a simpl
 
 ## The Function: Historical Intelligence Layer
 
-In AgentOS, The History Monks ensure we learn from the past before creating the future.
+In AssemblyZero, The History Monks ensure we learn from the past before creating the future.
 
 ```mermaid
 graph TD
@@ -109,7 +109,7 @@ monks.have_we_solved("handle API timeouts gracefully")
 
 ## The Time Jars Pattern
 
-Monks store time in glass jars, redistributing it where needed. In AgentOS, we store **context** in structured formats:
+Monks store time in glass jars, redistributing it where needed. In AssemblyZero, we store **context** in structured formats:
 
 | Jar Type | Contents | Use |
 |----------|----------|-----|
@@ -165,7 +165,7 @@ graph LR
 
 When time shatters, causality breaks. Issues reference PRs that don't exist yet. Commits mention bugs not yet reported.
 
-In AgentOS, this happens when:
+In AssemblyZero, this happens when:
 - Lineage files get corrupted
 - Issues are deleted mid-workflow
 - Branches are force-pushed
@@ -179,7 +179,7 @@ In AgentOS, this happens when:
 
 | Component | Status |
 |-----------|--------|
-| Issue | [#91](https://github.com/martymcenroe/AgentOS/issues/91) |
+| Issue | [#91](https://github.com/martymcenroe/AssemblyZero/issues/91) |
 | Duplicate detection | Planned |
 | Similar issue search | Planned |
 | Lessons learned DB | Planned |
@@ -212,7 +212,7 @@ history_monks/
 
 > *"Do not act incautiously when confronting little bald wrinkly smiling men."*
 
-The History Monks' Rule One applies to AgentOS:
+The History Monks' Rule One applies to AssemblyZero:
 
 **Don't dismiss history as irrelevant.**
 
@@ -226,7 +226,7 @@ The Monks are always watching.
 
 In the books, History Monks have specialties:
 
-| Monk Type | Discworld Function | AgentOS Equivalent |
+| Monk Type | Discworld Function | AssemblyZero Equivalent |
 |-----------|-------------------|-------------------|
 | **Procrastinators** | Slow down time | Rate limiting, debouncing |
 | **Accelerators** | Speed up time | Priority queuing |
@@ -239,7 +239,7 @@ In the books, History Monks have specialties:
 
 - [Lu-Tze](Dramatis-Personae#lu-tze) - The Sweeper/Janitor
 - [Brutha](Dramatis-Personae#brutha) - RAG memory (different role)
-- [How the AgentOS Learns](How-the-AgentOS-Learns) - Learning from history
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Learning from history
 - [Requirements Workflow](Requirements-Workflow) - Where Monks inject context
 
 ---

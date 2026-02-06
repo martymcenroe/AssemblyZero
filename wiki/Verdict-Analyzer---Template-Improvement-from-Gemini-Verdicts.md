@@ -68,7 +68,7 @@ flowchart TB
 - for implementation. Describe exactly what will be built.*
 - **Module:** `tools/verdict_analyzer/`
 - **Pattern:** CLI with subcommand-style flags, SQLite for persistence, safe file operations
-- Database stored in project-local `.agentos/` directory (worktree-scoped)
+- Database stored in project-local `.assemblyzero/` directory (worktree-scoped)
 
 ---
 

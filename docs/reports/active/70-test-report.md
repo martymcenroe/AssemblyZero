@@ -3,7 +3,7 @@
 ## Test Command Executed
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-70 pytest tests/test_issue_workflow.py -v
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-70 pytest tests/test_issue_workflow.py -v
 ```
 
 ## Test Output
@@ -11,7 +11,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-70 pytest tests/test_issu
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\Users\mcwiz\Projects\AgentOS-70
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-70
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 

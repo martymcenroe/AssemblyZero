@@ -1,4 +1,4 @@
-# Gemini Operational Protocols - AgentOS
+# Gemini Operational Protocols - AssemblyZero
 
 ## 1. Session Initialization (The Handshake)
 
@@ -30,12 +30,12 @@
 
 ---
 
-## 4. AgentOS Context
+## 4. AssemblyZero Context
 
-**Project:** AgentOS
-**Repository:** martymcenroe/AgentOS
-**Project Root (Windows):** `C:\Users\mcwiz\Projects\AgentOS`
-**Project Root (Unix):** `/c/Users/mcwiz/Projects/AgentOS`
+**Project:** AssemblyZero
+**Repository:** martymcenroe/AssemblyZero
+**Project Root (Windows):** `C:\Users\mcwiz\Projects\AssemblyZero`
+**Project Root (Unix):** `/c/Users/mcwiz/Projects/AssemblyZero`
 
 This is the **framework repository**. Standards defined here apply to all projects.
 

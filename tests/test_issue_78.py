@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from agentos.workflow.checkpoint import get_checkpoint_db_path, get_repo_root
+from assemblyzero.workflow.checkpoint import get_checkpoint_db_path, get_repo_root
 
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def mock_external_service():
 def test_010(temp_git_repo: Path, clean_env: None):
     """
     Per-repo database creation | Auto | Run workflow in git repo |
-    `.agentos/issue_workflow.db` created in repo root | File exists at
+    `.assemblyzero/issue_workflow.db` created in repo root | File exists at
     expected path
     """
     original_cwd = os.getcwd()
@@ -81,7 +81,7 @@ def test_010(temp_git_repo: Path, clean_env: None):
     try:
         db_path = get_checkpoint_db_path()
         
-        expected_path = temp_git_repo / ".agentos" / "issue_workflow.db"
+        expected_path = temp_git_repo / ".assemblyzero" / "issue_workflow.db"
         assert db_path == expected_path
         assert db_path.parent.exists()
     finally:
@@ -92,7 +92,7 @@ def test_020(tmp_path: Path, clean_env: None):
     """
     Different repos get different databases | Auto | Run workflow in
     repo1, then repo2 | Two separate database files |
-    `repo1/.agentos/issue_workflow.db` != `repo2/.agentos/issue_workflow.db`
+    `repo1/.assemblyzero/issue_workflow.db` != `repo2/.assemblyzero/issue_workflow.db`
     """
     repo1 = tmp_path / "repo1"
     repo2 = tmp_path / "repo2"
@@ -112,8 +112,8 @@ def test_020(tmp_path: Path, clean_env: None):
         db_path2 = get_checkpoint_db_path()
         
         assert db_path1 != db_path2
-        assert db_path1 == repo1 / ".agentos" / "issue_workflow.db"
-        assert db_path2 == repo2 / ".agentos" / "issue_workflow.db"
+        assert db_path1 == repo1 / ".assemblyzero" / "issue_workflow.db"
+        assert db_path2 == repo2 / ".assemblyzero" / "issue_workflow.db"
     finally:
         os.chdir(original_cwd)
 
@@ -159,7 +159,7 @@ def test_040(temp_non_git_dir: Path, clean_env: None):
 def test_050(temp_git_repo: Path, clean_env: None):
     """
     Worktree isolation | Auto | Create worktree, run workflow | Worktree
-    gets own `.agentos/` | `worktree/.agentos/issue_workflow.db` exists
+    gets own `.assemblyzero/` | `worktree/.assemblyzero/issue_workflow.db` exists
     """
     readme = temp_git_repo / "README.md"
     readme.write_text("# Test")
@@ -185,7 +185,7 @@ def test_050(temp_git_repo: Path, clean_env: None):
     try:
         db_path = get_checkpoint_db_path()
         
-        expected_path = worktree_path / ".agentos" / "issue_workflow.db"
+        expected_path = worktree_path / ".assemblyzero" / "issue_workflow.db"
         assert db_path == expected_path
         assert db_path.parent.exists()
     finally:
@@ -200,14 +200,14 @@ def test_050(temp_git_repo: Path, clean_env: None):
 def test_060(temp_git_repo: Path, tmp_path: Path, clean_env: None):
     """
     Global database untouched | Auto | Run workflow in repo |
-    `~/.agentos/issue_workflow.db` unchanged | Global DB not modified
+    `~/.assemblyzero/issue_workflow.db` unchanged | Global DB not modified
     (timestamp unchanged)
     """
     mock_home = tmp_path / "mock_home"
     mock_home.mkdir()
-    global_agentos = mock_home / ".agentos"
-    global_agentos.mkdir()
-    global_db = global_agentos / "issue_workflow.db"
+    global_assemblyzero = mock_home / ".assemblyzero"
+    global_assemblyzero.mkdir()
+    global_db = global_assemblyzero / "issue_workflow.db"
     global_db.write_text("existing global db")
     
     original_mtime = global_db.stat().st_mtime
@@ -228,7 +228,7 @@ def test_070(temp_git_repo: Path, clean_env: None):
     """
     Nested repo detection (deep subdirectory) | Auto | Run in
     `repo/src/lib/` subdirectory | Database in repo root, not subdirectory
-    | `repo_root/.agentos/` not `repo_root/src/lib/.agentos/`
+    | `repo_root/.assemblyzero/` not `repo_root/src/lib/.assemblyzero/`
     """
     deep_dir = temp_git_repo / "src" / "lib" / "utils"
     deep_dir.mkdir(parents=True)
@@ -239,31 +239,31 @@ def test_070(temp_git_repo: Path, clean_env: None):
     try:
         db_path = get_checkpoint_db_path()
         
-        expected_path = temp_git_repo / ".agentos" / "issue_workflow.db"
+        expected_path = temp_git_repo / ".assemblyzero" / "issue_workflow.db"
         assert db_path == expected_path
-        assert db_path != deep_dir / ".agentos" / "issue_workflow.db"
+        assert db_path != deep_dir / ".assemblyzero" / "issue_workflow.db"
     finally:
         os.chdir(original_cwd)
 
 
 def test_080(temp_git_repo: Path, clean_env: None):
     """
-    .agentos directory creation | Auto | Run in repo without .agentos |
+    .assemblyzero directory creation | Auto | Run in repo without .assemblyzero |
     Directory created with proper permissions | Directory exists with user
     read/write
     """
     original_cwd = os.getcwd()
     os.chdir(temp_git_repo)
-    agentos_dir = temp_git_repo / ".agentos"
+    assemblyzero_dir = temp_git_repo / ".assemblyzero"
     
-    assert not agentos_dir.exists()
+    assert not assemblyzero_dir.exists()
     
     try:
         db_path = get_checkpoint_db_path()
         
-        assert agentos_dir.exists()
-        assert agentos_dir.is_dir()
-        test_file = agentos_dir / "test_write.tmp"
+        assert assemblyzero_dir.exists()
+        assert assemblyzero_dir.is_dir()
+        test_file = assemblyzero_dir / "test_write.tmp"
         test_file.write_text("test")
         assert test_file.exists()
         test_file.unlink()
@@ -306,7 +306,7 @@ def test_100(temp_git_repo: Path):
         with mock.patch.dict(os.environ, {"AGENTOS_WORKFLOW_DB": ""}):
             db_path = get_checkpoint_db_path()
         
-        expected_path = temp_git_repo / ".agentos" / "issue_workflow.db"
+        expected_path = temp_git_repo / ".assemblyzero" / "issue_workflow.db"
         assert db_path == expected_path
     finally:
         os.chdir(original_cwd)
@@ -318,20 +318,20 @@ def test_100(temp_git_repo: Path):
 )
 def test_110(temp_git_repo: Path):
     """
-    .gitignore contains .agentos/ pattern | Auto | Check `.gitignore`
-    after workflow run | `.agentos/` entry exists | Parse `.gitignore`,
+    .gitignore contains .assemblyzero/ pattern | Auto | Check `.gitignore`
+    after workflow run | `.assemblyzero/` entry exists | Parse `.gitignore`,
     assert pattern present
     """
     source_gitignore = Path(__file__).parent.parent / ".gitignore"
     content = source_gitignore.read_text()
-    assert ".agentos/" in content or ".agentos/issue_workflow.db" in content
+    assert ".assemblyzero/" in content or ".assemblyzero/issue_workflow.db" in content
 
 
 def test_120(tmp_path: Path, clean_env: None):
     """
     Concurrent execution (3 repos) | Auto | Spawn 3 subprocess workflows
     in parallel | Each repo has independent database, no errors | All 3
-    processes exit 0; 3 distinct `.agentos/issue_workflow.db` files
+    processes exit 0; 3 distinct `.assemblyzero/issue_workflow.db` files
     """
     repos = []
     for i in range(3):
@@ -345,7 +345,7 @@ def test_120(tmp_path: Path, clean_env: None):
 import sys
 import os
 sys.path.insert(0, os.environ["PYTHONPATH"])
-from agentos.workflow.checkpoint import get_checkpoint_db_path
+from assemblyzero.workflow.checkpoint import get_checkpoint_db_path
 path = get_checkpoint_db_path()
 print(path)
 ''')
@@ -424,7 +424,7 @@ def test_get_repo_root_git_not_installed():
     
     This covers the FileNotFoundError exception handling (lines 35-37).
     """
-    with mock.patch("agentos.workflow.checkpoint.subprocess.run") as mock_run:
+    with mock.patch("assemblyzero.workflow.checkpoint.subprocess.run") as mock_run:
         mock_run.side_effect = FileNotFoundError("git not found")
         result = get_repo_root()
         assert result is None

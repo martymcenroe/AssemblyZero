@@ -19,7 +19,7 @@ The Janitor does not ask for permission to clean. It fixes what is mechanically 
 
 ## Proposed Architecture
 
-### 1. The State Graph (`agentos/workflows/janitor/graph.py`)
+### 1. The State Graph (`assemblyzero/workflows/janitor/graph.py`)
 
 * **Input:** `scope` (Default: "all"), `auto_fix` (Boolean: True).
 * **Nodes:**
@@ -27,7 +27,7 @@ The Janitor does not ask for permission to clean. It fixes what is mechanically 
 * Runs a battery of "Probe Scripts" (returning JSON status):
 * `probe_links`: Checks for broken internal markdown links.
 * `probe_worktrees`: Lists stale/detached worktrees.
-* `probe_harvest`: Runs `agentos-harvest.py` to check for cross-project drift.
+* `probe_harvest`: Runs `assemblyzero-harvest.py` to check for cross-project drift.
 * `probe_todo`: Scans for `TODO` comments older than 30 days.
 
 
@@ -57,7 +57,7 @@ The Janitor does not ask for permission to clean. It fixes what is mechanically 
 
 
 
-### 2. State Management (`agentos/workflows/janitor/state.py`)
+### 2. State Management (`assemblyzero/workflows/janitor/state.py`)
 
 ```python
 class JanitorState(TypedDict):

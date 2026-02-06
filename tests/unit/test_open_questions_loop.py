@@ -14,7 +14,7 @@ class TestDraftHasOpenQuestions:
 
     def test_detects_unchecked_questions(self):
         """Should detect unchecked checkboxes in Open Questions section."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         draft = """# LLD
 
@@ -26,7 +26,7 @@ class TestDraftHasOpenQuestions:
 
     def test_ignores_checked_questions(self):
         """Should not count checked questions as open."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         draft = """### Open Questions
 - [x] Answered question
@@ -35,7 +35,7 @@ class TestDraftHasOpenQuestions:
 
     def test_handles_mixed_questions(self):
         """Should detect if ANY unchecked questions exist."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         draft = """### Open Questions
 - [x] Answered
@@ -45,7 +45,7 @@ class TestDraftHasOpenQuestions:
 
     def test_handles_no_section(self):
         """Should return False if no Open Questions section exists."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         draft = """# LLD
 ## Design
@@ -54,13 +54,13 @@ Just design content."""
 
     def test_handles_empty_string(self):
         """Should return False for empty string."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         assert _draft_has_open_questions("") is False
 
     def test_handles_different_header_levels(self):
         """Should match ## or ### Open Questions headers."""
-        from agentos.workflows.requirements.nodes.review import _draft_has_open_questions
+        from assemblyzero.workflows.requirements.nodes.review import _draft_has_open_questions
 
         draft_h2 = """## Open Questions
 - [ ] Question"""
@@ -76,7 +76,7 @@ class TestVerdictHasHumanRequired:
 
     def test_detects_human_required_formats(self):
         """Should detect various HUMAN REQUIRED patterns."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_human_required
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_human_required
 
         patterns = [
             "HUMAN REQUIRED",
@@ -94,7 +94,7 @@ class TestVerdictHasHumanRequired:
 
     def test_case_insensitive(self):
         """Should match case insensitively."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_human_required
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_human_required
 
         assert _verdict_has_human_required("human required") is True
         assert _verdict_has_human_required("Human Required") is True
@@ -102,7 +102,7 @@ class TestVerdictHasHumanRequired:
 
     def test_returns_false_without_marker(self):
         """Should return False when no HUMAN REQUIRED marker."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_human_required
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_human_required
 
         verdict = "All questions resolved. [x] APPROVED"
         assert _verdict_has_human_required(verdict) is False
@@ -113,7 +113,7 @@ class TestVerdictHasResolvedQuestions:
 
     def test_detects_resolved_section(self):
         """Should detect Open Questions Resolved section with [x] items."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_resolved_questions
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_resolved_questions
 
         verdict = """## Open Questions Resolved
 - [x] ~~Question~~ **RESOLVED: Answer here.**
@@ -124,14 +124,14 @@ class TestVerdictHasResolvedQuestions:
 
     def test_detects_inline_resolved(self):
         """Should detect RESOLVED: text even without explicit section."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_resolved_questions
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_resolved_questions
 
         verdict = "The caching question is RESOLVED: Use Redis."
         assert _verdict_has_resolved_questions(verdict) is True
 
     def test_returns_false_without_resolution(self):
         """Should return False when no resolution markers found."""
-        from agentos.workflows.requirements.nodes.review import _verdict_has_resolved_questions
+        from assemblyzero.workflows.requirements.nodes.review import _verdict_has_resolved_questions
 
         verdict = "## Verdict\n[x] APPROVED - looks good"
         assert _verdict_has_resolved_questions(verdict) is False
@@ -142,7 +142,7 @@ class TestCheckOpenQuestionsStatus:
 
     def test_returns_none_when_no_questions(self):
         """Should return NONE when draft has no open questions."""
-        from agentos.workflows.requirements.nodes.review import _check_open_questions_status
+        from assemblyzero.workflows.requirements.nodes.review import _check_open_questions_status
 
         draft = "# LLD\n## Design\nContent"
         verdict = "[x] APPROVED"
@@ -151,7 +151,7 @@ class TestCheckOpenQuestionsStatus:
 
     def test_returns_human_required(self):
         """Should return HUMAN_REQUIRED when verdict contains marker."""
-        from agentos.workflows.requirements.nodes.review import _check_open_questions_status
+        from assemblyzero.workflows.requirements.nodes.review import _check_open_questions_status
 
         draft = """### Open Questions
 - [ ] Architecture choice?"""
@@ -161,7 +161,7 @@ class TestCheckOpenQuestionsStatus:
 
     def test_returns_resolved(self):
         """Should return RESOLVED when questions are answered."""
-        from agentos.workflows.requirements.nodes.review import _check_open_questions_status
+        from assemblyzero.workflows.requirements.nodes.review import _check_open_questions_status
 
         draft = """### Open Questions
 - [ ] Which database?"""
@@ -172,7 +172,7 @@ class TestCheckOpenQuestionsStatus:
 
     def test_returns_unanswered(self):
         """Should return UNANSWERED when questions not addressed."""
-        from agentos.workflows.requirements.nodes.review import _check_open_questions_status
+        from assemblyzero.workflows.requirements.nodes.review import _check_open_questions_status
 
         draft = """### Open Questions
 - [ ] Open question here"""
@@ -186,7 +186,7 @@ class TestRouteAfterReviewOpenQuestions:
 
     def test_human_required_goes_to_gate(self):
         """HUMAN_REQUIRED should route to N4 even with gates disabled."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -198,7 +198,7 @@ class TestRouteAfterReviewOpenQuestions:
 
     def test_unanswered_loops_to_drafter(self):
         """UNANSWERED should loop back to N1 if under max iterations."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -213,7 +213,7 @@ class TestRouteAfterReviewOpenQuestions:
 
     def test_unanswered_at_max_iterations_goes_to_gate(self):
         """UNANSWERED at max iterations should go to human gate."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -228,7 +228,7 @@ class TestRouteAfterReviewOpenQuestions:
 
     def test_resolved_proceeds_to_finalize(self):
         """RESOLVED with APPROVED should go to N5."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -241,7 +241,7 @@ class TestRouteAfterReviewOpenQuestions:
 
     def test_none_status_normal_routing(self):
         """NONE (no questions) should route based on lld_status."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -258,7 +258,7 @@ class TestPreReviewValidationRemoved:
 
     def test_generate_draft_no_longer_blocks_on_questions(self):
         """generate_draft should not block even with open questions."""
-        from agentos.workflows.requirements.graph import route_after_generate_draft
+        from assemblyzero.workflows.requirements.graph import route_after_generate_draft
 
         # Routing after draft generation should proceed regardless of questions
         state = {
@@ -271,7 +271,7 @@ class TestPreReviewValidationRemoved:
 
     def test_validate_draft_structure_kept_for_compat(self):
         """validate_draft_structure exists but is no longer used in flow."""
-        from agentos.workflows.requirements.nodes.generate_draft import validate_draft_structure
+        from assemblyzero.workflows.requirements.nodes.generate_draft import validate_draft_structure
 
         # Function still exists for backward compatibility
         draft = """### Open Questions
@@ -290,7 +290,7 @@ class TestPromptFile:
         possible_paths = [
             Path(__file__).parent.parent.parent / "docs" / "skills" / "0702c-LLD-Review-Prompt.md",
             Path("docs/skills/0702c-LLD-Review-Prompt.md"),
-            Path("C:/Users/mcwiz/Projects/AgentOS-248/docs/skills/0702c-LLD-Review-Prompt.md"),
+            Path("C:/Users/mcwiz/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
         ]
 
         content = None
@@ -311,7 +311,7 @@ class TestPromptFile:
         possible_paths = [
             Path(__file__).parent.parent.parent / "docs" / "skills" / "0702c-LLD-Review-Prompt.md",
             Path("docs/skills/0702c-LLD-Review-Prompt.md"),
-            Path("C:/Users/mcwiz/Projects/AgentOS-248/docs/skills/0702c-LLD-Review-Prompt.md"),
+            Path("C:/Users/mcwiz/Projects/AssemblyZero-248/docs/skills/0702c-LLD-Review-Prompt.md"),
         ]
 
         content = None
@@ -334,11 +334,11 @@ class TestStateHasOpenQuestionsStatus:
 
     def test_initial_state_has_field(self):
         """Initial state should have open_questions_status field."""
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/tmp/agentos",
+            assemblyzero_root="/tmp/assemblyzero",
             target_repo="/tmp/repo",
             issue_number=248,
         )
@@ -348,10 +348,10 @@ class TestStateHasOpenQuestionsStatus:
 
     def test_review_node_sets_status(self, tmp_path):
         """Review node should set open_questions_status."""
-        from agentos.workflows.requirements.nodes.review import review
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.nodes.review import review
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
-        with patch("agentos.workflows.requirements.nodes.review.get_provider") as mock_get:
+        with patch("assemblyzero.workflows.requirements.nodes.review.get_provider") as mock_get:
             mock_provider = Mock()
             mock_provider.invoke.return_value = Mock(
                 success=True,
@@ -366,7 +366,7 @@ class TestStateHasOpenQuestionsStatus:
 
             state = create_initial_state(
                 workflow_type="lld",
-                agentos_root=str(tmp_path),
+                assemblyzero_root=str(tmp_path),
                 target_repo=str(tmp_path),
                 issue_number=248,
             )

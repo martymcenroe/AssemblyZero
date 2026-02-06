@@ -4,7 +4,7 @@
 
 ## Problem
 
-We have individual nodes for designing LLDs (`agentos/nodes/designer.py`) and reviewing them (`agentos/nodes/governance.py`), but they are currently disconnected.
+We have individual nodes for designing LLDs (`assemblyzero/nodes/designer.py`) and reviewing them (`assemblyzero/nodes/governance.py`), but they are currently disconnected.
 
 * There is no orchestrator to pass data between them.
 * There is no enforcement of the "Design -> Human Edit -> Governance Review" loop.
@@ -23,7 +23,7 @@ Create a new LangGraph workflow (`tools/run_lld_workflow.py`) that strictly enfo
 
 ### 1. The State Graph
 
-Create `agentos/workflows/lld/graph.py`.
+Create `assemblyzero/workflows/lld/graph.py`.
 
 * **Input:** `issue_id` (Integer)
 * **Nodes:**
@@ -45,7 +45,7 @@ Create `agentos/workflows/lld/graph.py`.
 
 ### 2. State Management
 
-Create `agentos/workflows/lld/state.py`.
+Create `assemblyzero/workflows/lld/state.py`.
 
 * **Attributes:**
 * `issue_id`: int

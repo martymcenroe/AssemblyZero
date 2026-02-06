@@ -17,7 +17,7 @@ class TestValidateMechanicalNode:
 
     def test_node_returns_valid_for_good_tests(self):
         """Validation node passes for well-structured tests."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_tests_mechanical_node,
         )
 
@@ -45,7 +45,7 @@ def test_add():
 
     def test_node_returns_invalid_for_stubs(self):
         """Validation node fails for stub tests."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_tests_mechanical_node,
         )
 
@@ -72,7 +72,7 @@ def test_example():
 
     def test_node_increments_attempts(self):
         """Validation node increments scaffold_attempts on failure."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_tests_mechanical_node,
         )
 
@@ -100,7 +100,7 @@ class TestShouldRegenerate:
 
     def test_regenerate_on_validation_failure(self):
         """Routes to regenerate when validation fails and attempts < 3."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             should_regenerate,
         )
 
@@ -118,7 +118,7 @@ class TestShouldRegenerate:
 
     def test_continue_on_validation_success(self):
         """Routes to continue when validation passes."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             should_regenerate,
         )
 
@@ -136,7 +136,7 @@ class TestShouldRegenerate:
 
     def test_escalate_after_max_attempts(self):
         """Routes to escalate after 3 failed attempts."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             should_regenerate,
         )
 
@@ -163,7 +163,7 @@ class TestValidationFlow:
 
     def test_validation_catches_common_stub_patterns(self):
         """Validates all common stub patterns are detected."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
         )
 
@@ -185,7 +185,7 @@ def test_example():
 
     def test_validation_accepts_various_assertion_styles(self):
         """Accepts different valid assertion styles."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
             validate_test_structure,
         )

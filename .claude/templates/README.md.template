@@ -45,7 +45,7 @@ See `docs/00003-file-inventory.md` for complete file inventory.
 
 ## Development
 
-This project follows [AgentOS](https://github.com/martymcenroe/AgentOS) conventions:
+This project follows [AssemblyZero](https://github.com/martymcenroe/AssemblyZero) conventions:
 - Worktree isolation for all code changes
 - Pre-merge gates (implementation + test reports)
 - Session logging for agent continuity
@@ -56,4 +56,4 @@ This project follows [AgentOS](https://github.com/martymcenroe/AgentOS) conventi
 
 ---
 
-*Managed under [AgentOS](https://github.com/martymcenroe/AgentOS) governance.*
+*Managed under [AssemblyZero](https://github.com/martymcenroe/AssemblyZero) governance.*

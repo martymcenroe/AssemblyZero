@@ -32,8 +32,8 @@ Before writing any code:
 **MANDATORY:** All code changes happen in a worktree.
 
 ```bash
-git worktree add ../AgentOS-{IssueID} -b {IssueID}-short-description
-git -C ../AgentOS-{IssueID} push -u origin HEAD
+git worktree add ../AssemblyZero-{IssueID} -b {IssueID}-short-description
+git -C ../AssemblyZero-{IssueID} push -u origin HEAD
 ```
 
 ---
@@ -136,7 +136,7 @@ After PR is merged:
 
 ```bash
 git -C /path/to/main pull
-git worktree remove ../AgentOS-{IssueID}
+git worktree remove ../AssemblyZero-{IssueID}
 git branch -d {IssueID}-short-description
 ```
 

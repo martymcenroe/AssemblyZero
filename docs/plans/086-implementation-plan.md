@@ -4,14 +4,14 @@
 
 ### 0.1 Create Worktree
 ```bash
-git worktree add ../AgentOS-86 -b 86-lld-governance-workflow
-git -C ../AgentOS-86 push -u origin HEAD
-poetry install --directory ../AgentOS-86
+git worktree add ../AssemblyZero-86 -b 86-lld-governance-workflow
+git -C ../AssemblyZero-86 push -u origin HEAD
+poetry install --directory ../AssemblyZero-86
 ```
 
 ### 0.2 Verify Dependencies
-- Confirm `agentos/nodes/designer.py` exists and is functional
-- Confirm `agentos/nodes/governance.py` exists and is functional
+- Confirm `assemblyzero/nodes/designer.py` exists and is functional
+- Confirm `assemblyzero/nodes/governance.py` exists and is functional
 - Confirm LLD template exists at `docs/templates/0102-feature-lld-template.md`
 
 ---
@@ -19,16 +19,16 @@ poetry install --directory ../AgentOS-86
 ## Phase 1: Core Infrastructure (Foundation)
 
 ### 1.1 State Schema
-**File:** `agentos/workflows/lld/state.py`
+**File:** `assemblyzero/workflows/lld/state.py`
 
 Create `LLDWorkflowState` TypedDict and enums exactly as specified in LLD Section 2.3.
 
 **Test:** Unit test that state can be instantiated and type-checked.
 
 ### 1.2 Audit Trail Module
-**File:** `agentos/workflows/lld/audit.py`
+**File:** `assemblyzero/workflows/lld/audit.py`
 
-Port pattern from `agentos/workflows/issue/audit.py`:
+Port pattern from `assemblyzero/workflows/issue/audit.py`:
 - `get_repo_root()`
 - `create_audit_dir()` → `docs/audit/active/{issue_number}-lld/`
 - `save_audit_file()` with sequential numbering
@@ -37,7 +37,7 @@ Port pattern from `agentos/workflows/issue/audit.py`:
 **Test:** Unit test audit file creation and numbering.
 
 ### 1.3 Package Init
-**File:** `agentos/workflows/lld/__init__.py`
+**File:** `assemblyzero/workflows/lld/__init__.py`
 
 Export public interface.
 
@@ -46,7 +46,7 @@ Export public interface.
 ## Phase 2: Nodes (Core Logic)
 
 ### 2.1 Fetch Issue Node (N0)
-**File:** `agentos/workflows/lld/nodes.py`
+**File:** `assemblyzero/workflows/lld/nodes.py`
 
 ```python
 def fetch_issue(state: LLDWorkflowState) -> dict:
@@ -64,7 +64,7 @@ def fetch_issue(state: LLDWorkflowState) -> dict:
 - Test missing issue returns error
 
 ### 2.2 Design Node (N1)
-**File:** `agentos/workflows/lld/nodes.py`
+**File:** `assemblyzero/workflows/lld/nodes.py`
 
 ```python
 def design(state: LLDWorkflowState) -> dict:
@@ -81,7 +81,7 @@ def design(state: LLDWorkflowState) -> dict:
 - Verify VS Code skipped in auto mode
 
 ### 2.3 Human Edit Node (N2)
-**File:** `agentos/workflows/lld/nodes.py`
+**File:** `assemblyzero/workflows/lld/nodes.py`
 
 ```python
 def human_edit(state: LLDWorkflowState) -> dict:
@@ -98,7 +98,7 @@ def human_edit(state: LLDWorkflowState) -> dict:
 - Verify auto mode bypasses prompt
 
 ### 2.4 Review Node (N3)
-**File:** `agentos/workflows/lld/nodes.py`
+**File:** `assemblyzero/workflows/lld/nodes.py`
 
 ```python
 def review(state: LLDWorkflowState) -> dict:
@@ -115,7 +115,7 @@ def review(state: LLDWorkflowState) -> dict:
 - Verify max iteration enforcement
 
 ### 2.5 Finalize Node (N4)
-**File:** `agentos/workflows/lld/nodes.py`
+**File:** `assemblyzero/workflows/lld/nodes.py`
 
 ```python
 def finalize(state: LLDWorkflowState) -> dict:
@@ -133,7 +133,7 @@ def finalize(state: LLDWorkflowState) -> dict:
 ## Phase 3: Graph Assembly
 
 ### 3.1 Routing Functions
-**File:** `agentos/workflows/lld/graph.py`
+**File:** `assemblyzero/workflows/lld/graph.py`
 
 - `route_after_human_edit()` → N3_review | N1_design | END
 - `route_after_review()` → N4_finalize | N2_human_edit | END
@@ -142,7 +142,7 @@ def finalize(state: LLDWorkflowState) -> dict:
 **Test:** Unit test each routing function with mock states.
 
 ### 3.2 StateGraph Definition
-**File:** `agentos/workflows/lld/graph.py`
+**File:** `assemblyzero/workflows/lld/graph.py`
 
 ```python
 def build_lld_workflow() -> StateGraph:
@@ -168,7 +168,7 @@ def build_lld_workflow() -> StateGraph:
 | `governance_rejected.json` | `{"verdict": "REVISE", "critique": "Missing error handling"}` |
 
 ### 4.2 Mock Module
-**File:** `agentos/workflows/lld/mock.py`
+**File:** `assemblyzero/workflows/lld/mock.py`
 
 ```python
 def mock_fetch_issue(state): ...  # Load from fixture
@@ -300,7 +300,7 @@ poetry run pytest tests/test_lld_workflow.py -v -m "mock"
 poetry run pytest tests/test_lld_workflow.py -v -m "integration"
 
 # All tests with coverage
-poetry run pytest tests/test_lld_workflow.py -v --cov=agentos/workflows/lld
+poetry run pytest tests/test_lld_workflow.py -v --cov=assemblyzero/workflows/lld
 
 # Manual E2E
 python tools/run_lld_workflow.py --issue 42 --mock  # Dry run

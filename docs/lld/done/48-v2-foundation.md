@@ -1,4 +1,4 @@
-# 148 - Feature: AgentOS v2 Foundation - Dependencies & State Definition
+# 148 - Feature: AssemblyZero v2 Foundation - Dependencies & State Definition
 
 ## 1. Context & Goal
 * **Issue:** #48
@@ -25,7 +25,7 @@ langchain-anthropic = "^0.3.0"
 ### 2.2 Directory Structure
 
 ```
-agentos/
+assemblyzero/
 ├── __init__.py
 ├── core/
 │   ├── __init__.py
@@ -36,7 +36,7 @@ agentos/
     └── __init__.py       # Future: compiled workflows
 ```
 
-### 2.3 State Definition (agentos/core/state.py)
+### 2.3 State Definition (assemblyzero/core/state.py)
 
 ```python
 from typing import TypedDict, Annotated, Literal
@@ -44,7 +44,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict):
-    """Core state shared across all AgentOS LangGraph nodes."""
+    """Core state shared across all AssemblyZero LangGraph nodes."""
 
     # Standard LangGraph message accumulator
     messages: Annotated[list[BaseMessage], add_messages]
@@ -67,7 +67,7 @@ class AgentState(TypedDict):
 ## 3. Requirements
 
 1. LangGraph and LangChain dependencies installed via Poetry
-2. Directory structure for `agentos/` module created
+2. Directory structure for `assemblyzero/` module created
 3. `AgentState` TypedDict defined with governance-relevant fields
 4. Code passes mypy type checking
 5. No business logic - structure only
@@ -117,7 +117,7 @@ N/A - simple module structure doesn't require a diagram.
 ### 6.2 Diagram
 
 ```
-agentos/
+assemblyzero/
 ├── __init__.py
 ├── core/
 │   ├── __init__.py
@@ -130,7 +130,7 @@ agentos/
 
 ## 7. Technical Approach
 
-* **Module:** `agentos/`
+* **Module:** `assemblyzero/`
 * **Dependencies:** langgraph, langchain, langchain-google-genai, langchain-anthropic
 * **Pattern:** LangGraph state machine with TypedDict state
 
@@ -144,7 +144,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict):
-    """Core state shared across all AgentOS LangGraph nodes."""
+    """Core state shared across all AssemblyZero LangGraph nodes."""
 
     # Standard LangGraph message accumulator
     messages: Annotated[list[BaseMessage], add_messages]
@@ -201,18 +201,18 @@ N/A - no business logic in this issue.
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Import state module | Auto | `from agentos.core.state import AgentState` | No import error | Import succeeds |
-| 020 | mypy type check | Auto | `mypy agentos/` | Exit code 0 | No type errors |
+| 010 | Import state module | Auto | `from assemblyzero.core.state import AgentState` | No import error | Import succeeds |
+| 020 | mypy type check | Auto | `mypy assemblyzero/` | Exit code 0 | No type errors |
 | 030 | Poetry install clean | Auto | `poetry install` on clean env | Exit code 0 | No dependency conflicts |
 
 ### 12.2 Test Commands
 
 ```bash
 # Verify import works
-python -c "from agentos.core.state import AgentState; print('OK')"
+python -c "from assemblyzero.core.state import AgentState; print('OK')"
 
 # Run mypy
-poetry run mypy agentos/
+poetry run mypy assemblyzero/
 
 # Clean install test (in CI or fresh venv)
 poetry install
@@ -225,12 +225,12 @@ N/A - All scenarios automated.
 ## 13. Definition of Done
 
 ### Code
-- [ ] `agentos/` directory structure created
-- [ ] `agentos/core/state.py` contains AgentState TypedDict
+- [ ] `assemblyzero/` directory structure created
+- [ ] `assemblyzero/core/state.py` contains AgentState TypedDict
 - [ ] All `__init__.py` files present
 
 ### Tests
-- [ ] `mypy agentos/` passes with no errors
+- [ ] `mypy assemblyzero/` passes with no errors
 - [ ] Import test passes
 
 ### Documentation

@@ -47,7 +47,7 @@ flowchart TD
 ## Key Features
 
 - for implementation. Describe exactly what will be built.*
-- **Module:** `agentos/workflows/testing/nodes/finalize.py`
+- **Module:** `assemblyzero/workflows/testing/nodes/finalize.py`
 - **Pattern:** Helper function extraction for testability
 - Gracefully handle missing files (don't fail workflow)
 - - Must integrate with existing finalize node structure

@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Created:** 2026-01-20
-**Applies to:** All projects under AgentOS governance
+**Applies to:** All projects under AssemblyZero governance
 
 ---
 
@@ -220,16 +220,16 @@ tests/
 
 ---
 
-## Project-Specific vs AgentOS
+## Project-Specific vs AssemblyZero
 
-| AgentOS (0xxxx) | Project (1xxxx+) |
+| AssemblyZero (0xxxx) | Project (1xxxx+) |
 |-----------------|------------------|
 | Generic standards | Project-specific implementations |
 | Reusable templates | Filled-in templates |
 | Framework audits | Project audit results |
 | Shared tools | Project-specific utilities |
 
-Projects **inherit** from AgentOS but can override with project-specific docs.
+Projects **inherit** from AssemblyZero but can override with project-specific docs.
 
 ---
 

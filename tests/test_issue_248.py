@@ -17,16 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from agentos.workflows.requirements.nodes.generate_draft import (
+from assemblyzero.workflows.requirements.nodes.generate_draft import (
     validate_draft_structure,
 )
-from agentos.workflows.requirements.nodes.review import (
+from assemblyzero.workflows.requirements.nodes.review import (
     _check_open_questions_status,
     _draft_has_open_questions,
     _verdict_has_human_required,
     _verdict_has_resolved_questions,
 )
-from agentos.workflows.requirements.graph import (
+from assemblyzero.workflows.requirements.graph import (
     route_after_generate_draft,
     route_after_validate_mechanical,
     route_after_review,
@@ -156,7 +156,7 @@ def mock_state_base():
     """Base workflow state for testing."""
     return {
         "workflow_type": "lld",
-        "agentos_root": "C:\\Users\\mcwiz\\Projects\\AgentOS",
+        "assemblyzero_root": "C:\\Users\\mcwiz\\Projects\\AssemblyZero",
         "target_repo": "C:\\Users\\mcwiz\\Projects\\TestRepo",
         "config_gates_draft": False,
         "config_gates_verdict": False,
@@ -179,8 +179,8 @@ def test_id():
     Test that the module can be imported and basic structures exist.
     """
     # TDD: Arrange - verify imports work
-    from agentos.workflows.requirements.nodes.review import review
-    from agentos.workflows.requirements.graph import create_requirements_graph
+    from assemblyzero.workflows.requirements.nodes.review import review
+    from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
     # TDD: Act - verify functions exist
     assert callable(review)

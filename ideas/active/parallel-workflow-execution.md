@@ -11,8 +11,8 @@ Parallel execution would dramatically improve throughput, but requires solving s
 ### 1. SQLite Single-Writer Limitation (CRITICAL)
 
 Both workflows use SQLite for LangGraph checkpointing:
-- `~/.agentos/lld_workflow.db`
-- `~/.agentos/issue_workflow.db`
+- `~/.assemblyzero/lld_workflow.db`
+- `~/.assemblyzero/issue_workflow.db`
 
 SQLite allows only ONE writer at a time. Concurrent workflows would cause "database is locked" errors.
 

@@ -1,7 +1,7 @@
 # Implementation Report: Issue #82
 
 ## Issue Reference
-https://github.com/martymcenroe/AgentOS/issues/82
+https://github.com/martymcenroe/AssemblyZero/issues/82
 
 ## Summary
 Fixed the `--brief` flag to properly clean up idea files from `ideas/active/` after issue creation.

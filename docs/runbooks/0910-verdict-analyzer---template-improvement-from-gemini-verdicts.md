@@ -22,7 +22,7 @@ Analyze Gemini governance verdicts across repositories to identify recurring blo
 | Requirement | Check |
 |-------------|-------|
 | Poetry environment | `poetry run python --version` |
-| AgentOS installed | `ls tools/verdict-analyzer.py` |
+| AssemblyZero installed | `ls tools/verdict-analyzer.py` |
 | Verdicts exist | `ls docs/lineage/active/*/verdict.md` |
 
 ---
@@ -144,7 +144,7 @@ poetry run python tools/verdict-analyzer.py recommend docs/templates/0102-featur
 |--------|-------------|
 | `-v` | Verbose mode (INFO level) |
 | `-vv` | Debug mode |
-| `--db PATH` | Database path (default: `.agentos/verdicts.db`) |
+| `--db PATH` | Database path (default: `.assemblyzero/verdicts.db`) |
 
 ### Commands
 
@@ -211,7 +211,7 @@ poetry run python tools/verdict-analyzer.py stats
 
 ## Database Schema
 
-The SQLite database (`.agentos/verdicts.db`) contains:
+The SQLite database (`.assemblyzero/verdicts.db`) contains:
 
 | Table | Purpose |
 |-------|---------|
@@ -239,7 +239,7 @@ Check that your governance workflow is generating verdicts correctly.
 Provide the full path to the template file:
 ```bash
 poetry run python tools/verdict-analyzer.py recommend \
-  C:\Users\mcwiz\Projects\AgentOS\docs\templates\lld-template.md
+  C:\Users\mcwiz\Projects\AssemblyZero\docs\templates\lld-template.md
 ```
 
 ### Stale patterns
@@ -254,7 +254,7 @@ poetry run python tools/verdict-analyzer.py scan --force
 
 ## Related Documents
 
-- [Issue #104](https://github.com/martymcenroe/AgentOS/issues/104)
+- [Issue #104](https://github.com/martymcenroe/AssemblyZero/issues/104)
 - [LLD-104](../lld/active/LLD-104.md)
 - [0907-unified-governance-workflow](0907-unified-governance-workflow.md)
 

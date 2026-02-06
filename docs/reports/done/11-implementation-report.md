@@ -1,6 +1,6 @@
 # Implementation Report: Issue #11 - Gemini Retry with Exponential Backoff
 
-**Issue:** [#11](https://github.com/martymcenroe/AgentOS/issues/11)
+**Issue:** [#11](https://github.com/martymcenroe/AssemblyZero/issues/11)
 **Commit:** `d1ad005`
 **Date:** 2026-01-14
 **Status:** Complete

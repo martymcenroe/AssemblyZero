@@ -2,7 +2,7 @@
 
 **File:** `docs/skills/0624c-zugzwang-cli.md`
 **Prompt Guide:** [0624p-zugzwang-prompt.md](0624p-zugzwang-prompt.md)
-**Tool:** `AgentOS/tools/zugzwang.py`
+**Tool:** `AssemblyZero/tools/zugzwang.py`
 **Version:** 2026-01-14
 
 ---
@@ -11,16 +11,16 @@
 
 ```bash
 # Show recent log entries
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/zugzwang.py --tail 10
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/zugzwang.py --tail 10
 
 # Log a single event
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/zugzwang.py --log "head -n 5 ~/.claude/file"
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/zugzwang.py --log "head -n 5 ~/.claude/file"
 
 # Clear the log
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/zugzwang.py --clear
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/zugzwang.py --clear
 
 # Show help
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/zugzwang.py --help
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/zugzwang.py --help
 ```
 
 ---
@@ -45,7 +45,7 @@ options:
 ## Log Location
 
 ```
-C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
+C:\Users\mcwiz\Projects\AssemblyZero\logs\zugzwang.log
 ```
 
 ---
@@ -78,14 +78,14 @@ Example:
 
 ```bash
 # View entire log
-cat /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
+cat /c/Users/mcwiz/Projects/AssemblyZero/logs/zugzwang.log
 
 # Count events by type
-grep -c "TOOL_BLOCKED" /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
-grep -c "TOOL_DENIED" /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
+grep -c "TOOL_BLOCKED" /c/Users/mcwiz/Projects/AssemblyZero/logs/zugzwang.log
+grep -c "TOOL_DENIED" /c/Users/mcwiz/Projects/AssemblyZero/logs/zugzwang.log
 
 # View recent entries
-tail -20 /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
+tail -20 /c/Users/mcwiz/Projects/AssemblyZero/logs/zugzwang.log
 ```
 
 ---
@@ -104,6 +104,6 @@ tail -20 /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log
 
 ## Related Files
 
-- Log file: `AgentOS/logs/zugzwang.log`
-- Tool: `AgentOS/tools/zugzwang.py`
+- Log file: `AssemblyZero/logs/zugzwang.log`
+- Tool: `AssemblyZero/tools/zugzwang.py`
 - Skill definition: `~/.claude/commands/zugzwang.md`

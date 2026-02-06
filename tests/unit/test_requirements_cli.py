@@ -165,7 +165,7 @@ class TestResolveRoots:
         args = Mock()
         args.repo = str(tmp_path)
 
-        agentos_root, target_repo = resolve_roots(args)
+        assemblyzero_root, target_repo = resolve_roots(args)
 
         # target_repo should be the explicit path
         assert target_repo == tmp_path.resolve()
@@ -184,7 +184,7 @@ class TestResolveRoots:
         args.repo = None
         args.brief = None  # No brief provided, fall back to CWD
 
-        agentos_root, target_repo = resolve_roots(args)
+        assemblyzero_root, target_repo = resolve_roots(args)
 
         # target_repo should be detected from git
         assert target_repo == tmp_path
@@ -209,7 +209,7 @@ class TestBuildInitialState:
 
         state = build_initial_state(
             args,
-            agentos_root=tmp_path,
+            assemblyzero_root=tmp_path,
             target_repo=tmp_path,
         )
 
@@ -235,7 +235,7 @@ class TestBuildInitialState:
 
         state = build_initial_state(
             args,
-            agentos_root=tmp_path,
+            assemblyzero_root=tmp_path,
             target_repo=tmp_path,
         )
 
@@ -957,7 +957,7 @@ class TestCheckAndShiftExistingLLD:
     def test_returns_true_with_yes_flag(self, tmp_path):
         """Test returns True with --yes even when LLD exists."""
         from tools.run_requirements_workflow import check_and_shift_existing_lld
-        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+        from assemblyzero.workflows.requirements.audit import LLD_ACTIVE_DIR
 
         # Create existing LLD
         lld_dir = tmp_path / LLD_ACTIVE_DIR
@@ -975,7 +975,7 @@ class TestCheckAndShiftExistingLLD:
     def test_auto_confirms_in_test_mode(self, tmp_path):
         """Test auto-confirms YES in test mode."""
         from tools.run_requirements_workflow import check_and_shift_existing_lld
-        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR, AUDIT_ACTIVE_DIR
+        from assemblyzero.workflows.requirements.audit import LLD_ACTIVE_DIR, AUDIT_ACTIVE_DIR
 
         # Create existing LLD and lineage
         lld_dir = tmp_path / LLD_ACTIVE_DIR
@@ -998,7 +998,7 @@ class TestCheckAndShiftExistingLLD:
     def test_proceeds_on_yes_confirmation(self, mock_input, tmp_path):
         """Test proceeds when user types YES."""
         from tools.run_requirements_workflow import check_and_shift_existing_lld
-        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+        from assemblyzero.workflows.requirements.audit import LLD_ACTIVE_DIR
 
         # Create existing LLD
         lld_dir = tmp_path / LLD_ACTIVE_DIR
@@ -1014,7 +1014,7 @@ class TestCheckAndShiftExistingLLD:
     def test_aborts_on_non_yes_response(self, mock_input, tmp_path):
         """Test aborts when user doesn't type YES."""
         from tools.run_requirements_workflow import check_and_shift_existing_lld
-        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+        from assemblyzero.workflows.requirements.audit import LLD_ACTIVE_DIR
 
         # Create existing LLD
         lld_dir = tmp_path / LLD_ACTIVE_DIR
@@ -1032,7 +1032,7 @@ class TestCheckAndShiftExistingLLD:
     def test_aborts_on_lowercase_yes(self, mock_input, tmp_path):
         """Test aborts when user types lowercase 'yes' instead of 'YES'."""
         from tools.run_requirements_workflow import check_and_shift_existing_lld
-        from agentos.workflows.requirements.audit import LLD_ACTIVE_DIR
+        from assemblyzero.workflows.requirements.audit import LLD_ACTIVE_DIR
 
         # Create existing LLD
         lld_dir = tmp_path / LLD_ACTIVE_DIR

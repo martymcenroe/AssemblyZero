@@ -91,28 +91,28 @@ The workflow auto-detects the target repository using `git rev-parse --show-topl
 
 **Case 1: Running from the target repo (recommended)**
 
-If you're already in the target repo's directory, just point poetry at AgentOS:
+If you're already in the target repo's directory, just point poetry at AssemblyZero:
 
 ```bash
 # From /c/Users/mcwiz/Projects/OtherProject
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_requirements_workflow.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_requirements_workflow.py \
   --type lld --select --gates none
 ```
 
 The workflow auto-detects `OtherProject` as the target because that's your current working directory.
 
-**Case 2: Running from AgentOS, targeting another repo**
+**Case 2: Running from AssemblyZero, targeting another repo**
 
-If you're in the AgentOS directory but want to work on a different repo, use `--repo`:
+If you're in the AssemblyZero directory but want to work on a different repo, use `--repo`:
 
 ```bash
-# From /c/Users/mcwiz/Projects/AgentOS
+# From /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/run_requirements_workflow.py \
   --type lld --repo /c/Users/mcwiz/Projects/OtherProject --issue 42
 ```
 
-Without `--repo`, it would target AgentOS itself.
+Without `--repo`, it would target AssemblyZero itself.
 
 ---
 
@@ -329,7 +329,7 @@ The drafter and reviewer can't agree. Options:
 
 Another workflow is running. Either:
 1. Wait for it to finish
-2. Delete the checkpoint: `rm ~/.agentos/governance_workflow.db`
+2. Delete the checkpoint: `rm ~/.assemblyzero/governance_workflow.db`
 
 ---
 
@@ -357,7 +357,7 @@ Another workflow is running. Either:
 
 ## Related Documents
 
-- [Issue #101](https://github.com/martymcenroe/AgentOS/issues/101) - Unified Requirements Workflow
+- [Issue #101](https://github.com/martymcenroe/AssemblyZero/issues/101) - Unified Requirements Workflow
 - [LLD-101](../lld/active/LLD-101.md) - Design document
 - [0904-issue-governance-workflow](0904-issue-governance-workflow.md) - Legacy issue workflow
 - [0906-lld-governance-workflow](0906-lld-governance-workflow.md) - Legacy LLD workflow

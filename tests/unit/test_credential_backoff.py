@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.workflows.parallel import CredentialCoordinator
+from assemblyzero.workflows.parallel import CredentialCoordinator
 
 
 class TestCredentialBackoff:

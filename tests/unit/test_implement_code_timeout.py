@@ -21,14 +21,14 @@ class TestSDKTimeout:
 
     def test_sdk_timeout_returns_error(self):
         """T010: SDK call that times out should return error tuple."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
         )
         import httpx
 
         # Mock the CLI to not exist, forcing SDK fallback
         with patch(
-            "agentos.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
             return_value=None,
         ):
             # Mock anthropic module at import time
@@ -52,7 +52,7 @@ class TestSDKTimeout:
 
     def test_sdk_timeout_does_not_hang(self):
         """SDK should not hang indefinitely on slow responses."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
             SDK_TIMEOUT,
         )
@@ -60,7 +60,7 @@ class TestSDKTimeout:
         # Verify SDK_TIMEOUT constant exists and is reasonable
         assert hasattr(
             __import__(
-                "agentos.workflows.testing.nodes.implement_code",
+                "assemblyzero.workflows.testing.nodes.implement_code",
                 fromlist=["SDK_TIMEOUT"],
             ),
             "SDK_TIMEOUT",
@@ -79,14 +79,14 @@ class TestErrorPropagation:
 
     def test_api_error_raises_implementation_error(self):
         """API errors should raise ImplementationError, not return success."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             generate_file_with_retry,
             ImplementationError,
         )
 
         # Mock call_claude_for_file to always return error
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.return_value = ("", "API timeout after 300s")
 
@@ -102,14 +102,14 @@ class TestErrorPropagation:
 
     def test_timeout_error_includes_duration(self):
         """Timeout errors should include how long we waited."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
             SDK_TIMEOUT,
         )
         import httpx
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
             return_value=None,
         ):
             mock_anthropic = MagicMock()
@@ -138,17 +138,17 @@ class TestCLITimeout:
 
     def test_cli_timeout_returns_error(self):
         """CLI timeout should return error tuple, not hang."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
         )
         import subprocess
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
             return_value="/usr/bin/claude",
         ):
             with patch(
-                "agentos.workflows.testing.nodes.implement_code.subprocess.run"
+                "assemblyzero.workflows.testing.nodes.implement_code.subprocess.run"
             ) as mock_run:
                 mock_run.side_effect = subprocess.TimeoutExpired(
                     cmd="claude", timeout=300
@@ -161,7 +161,7 @@ class TestCLITimeout:
 
     def test_cli_timeout_value(self):
         """CLI timeout should be 5 minutes (300 seconds)."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             CLI_TIMEOUT,
         )
 
@@ -178,11 +178,11 @@ class TestWorkflowExitCode:
 
     def test_implementation_error_has_nonzero_exit(self, tmp_path):
         """ImplementationError should cause workflow to exit non-zero."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             implement_code,
             ImplementationError,
         )
-        from agentos.workflows.testing.state import TestingWorkflowState
+        from assemblyzero.workflows.testing.state import TestingWorkflowState
 
         # Create required directories
         audit_dir = tmp_path / "docs" / "lineage" / "active" / "42-testing"
@@ -205,7 +205,7 @@ class TestWorkflowExitCode:
         }
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             # Return timeout error
             mock_call.return_value = ("", "SDK timeout after 300s")

@@ -17,8 +17,8 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/core/config.py` | Modify | Add `LOGS_ACTIVE_DIR` constant |
-| `agentos/core/audit.py` | Modify | Refactor for session sharding and unified reads |
+| `assemblyzero/core/config.py` | Modify | Add `LOGS_ACTIVE_DIR` constant |
+| `assemblyzero/core/audit.py` | Modify | Refactor for session sharding and unified reads |
 | `.gitignore` | Modify | Add `logs/active/` pattern |
 | `tools/consolidate_logs.py` | Add | Atomic merge script for post-commit hook |
 | `.claude/hooks/post-commit` | Add | Git hook to trigger consolidation |
@@ -37,7 +37,7 @@
 ### 2.3 Data Structures
 
 ```python
-# agentos/core/audit.py - MODIFICATIONS
+# assemblyzero/core/audit.py - MODIFICATIONS
 
 class GovernanceAuditLog:
     """Refactored for session sharding."""
@@ -59,7 +59,7 @@ class GovernanceAuditLog:
 ### 2.4 Function Signatures
 
 ```python
-# agentos/core/audit.py - MODIFICATIONS
+# assemblyzero/core/audit.py - MODIFICATIONS
 
 class GovernanceAuditLog:
     def __init__(
@@ -255,7 +255,7 @@ def main() -> None:
 
 ### 2.6 Technical Approach
 
-* **Module:** `agentos/core/audit.py` (primary), `tools/consolidate_logs.py` (new)
+* **Module:** `assemblyzero/core/audit.py` (primary), `tools/consolidate_logs.py` (new)
 * **Pattern:** Session-Sharded Append with Lazy Consolidation
 * **Key Decisions:**
   - **Auto-detect repo root** via `git rev-parse` - Works in worktrees
@@ -481,13 +481,13 @@ sequenceDiagram
 poetry run pytest tests/test_audit_sharding.py -v
 
 # Run with coverage
-poetry run pytest tests/test_audit_sharding.py -v --cov=agentos.core.audit
+poetry run pytest tests/test_audit_sharding.py -v --cov=assemblyzero.core.audit
 
 # Run concurrent test only
 poetry run pytest tests/test_audit_sharding.py::test_120_concurrent_writers -v
 
 # Type check
-poetry run mypy agentos/
+poetry run mypy assemblyzero/
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)

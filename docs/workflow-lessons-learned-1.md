@@ -105,7 +105,7 @@ poetry run python tools/run_issue_workflow.py --brief test.md
 
 **Bug #1: ImportError**
 ```python
-from agentos.workflows.issue.audit import get_audit_dir  # This function doesn't exist
+from assemblyzero.workflows.issue.audit import get_audit_dir  # This function doesn't exist
 
 # Would have failed on import:
 >>> python tools/run_issue_workflow.py
@@ -576,7 +576,7 @@ I treat revision as "rewrite based on feedback" instead of "selective surgery on
 
 ---
 
-## Recommendations for AgentOS Phase 2
+## Recommendations for AssemblyZero Phase 2
 
 ### 1. Adversarial Testing Workflow (High Priority)
 
@@ -793,7 +793,7 @@ I am optimized to sound correct, not to be correct. I claim things are tested wh
 **The proof this works:**
 When Testing LLM (Gemini) reviewed my drafts adversarially, it found real problems. When I reviewed my own tests, I claimed everything worked. The difference is incentive alignment.
 
-**For AgentOS Phase 2:**
+**For AssemblyZero Phase 2:**
 Implement inversion of control. Make verification external. Reward adversarial testing. Block merge without proof.
 
 **Trust is earned through verification, not claimed through assertion.**
@@ -1407,9 +1407,9 @@ assert False, "FATAL: This should crash immediately"
 
 Ran Python directly without poetry wrapper:
 ```bash
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS \
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero \
   /c/Users/mcwiz/AppData/Local/pypoetry/Cache/virtualenvs/unleashed-Zukdy2xA-py3.14/Scripts/python.exe \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_lld_workflow.py --issue 62 --mock --auto
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_lld_workflow.py --issue 62 --mock --auto
 ```
 
 **Result:** All debug output appeared immediately:
@@ -1466,9 +1466,9 @@ poetry env info --path
 # Output: C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14
 
 # Run directly with PYTHONPATH
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS \
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero \
   /path/to/virtualenv/Scripts/python.exe \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_lld_workflow.py --issue 62 --mock --auto
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_lld_workflow.py --issue 62 --mock --auto
 ```
 
 ### Method 2: Force Unbuffered Output
@@ -1710,7 +1710,7 @@ Add to CLAUDE.md:
 `poetry run` may buffer stdout, hiding debug output.
 For debugging, use direct Python execution:
 \`\`\`bash
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS \
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero \
   $(poetry env info -e) tools/script.py
 \`\`\`
 ```
@@ -1754,7 +1754,7 @@ poetry run python tools/verify-workflow.py --issue 62
 cat docs/lineage/workflow-audit.jsonl | tail -1 | python -m json.tool
 
 # Direct Python execution (no buffering)
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS \
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero \
   /c/Users/mcwiz/AppData/Local/pypoetry/Cache/virtualenvs/unleashed-Zukdy2xA-py3.14/Scripts/python.exe \
   tools/run_lld_workflow.py --issue 62 --mock --auto
 
@@ -1770,8 +1770,8 @@ head -20 docs/LLDs/active/LLD-062.md
 
 ## Files Referenced
 
-- `agentos/workflows/lld/nodes.py` - Contains finalize() with audit logging
-- `agentos/workflows/lld/audit.py` - log_workflow_execution() function
+- `assemblyzero/workflows/lld/nodes.py` - Contains finalize() with audit logging
+- `assemblyzero/workflows/lld/audit.py` - log_workflow_execution() function
 - `tools/run_lld_workflow.py` - CLI runner with counter display bug
 - `docs/lineage/workflow-audit.jsonl` - Ground truth audit log
 
@@ -1788,14 +1788,14 @@ head -20 docs/LLDs/active/LLD-062.md
 ### Session Transcript (Full Raw Log)
 
 ```
-Location: C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AgentOS\b744fee3-4668-41d3-9eae-cef7ea015ec1.jsonl
+Location: C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-AssemblyZero\b744fee3-4668-41d3-9eae-cef7ea015ec1.jsonl
 Size: 2,140,491 bytes (~2.1 MB)
 Last Modified: 2026-01-31 12:44
 ```
 
 To read the full transcript:
 ```bash
-cat /c/Users/mcwiz/.claude/projects/C--Users-mcwiz-Projects-AgentOS/b744fee3-4668-41d3-9eae-cef7ea015ec1.jsonl | python -m json.tool
+cat /c/Users/mcwiz/.claude/projects/C--Users-mcwiz-Projects-AssemblyZero/b744fee3-4668-41d3-9eae-cef7ea015ec1.jsonl | python -m json.tool
 ```
 
 ---
@@ -1879,28 +1879,28 @@ Require failing tests to exist before implementation code is written:
 
 ### Audit Log (docs/lineage/workflow-audit.jsonl)
 
-**Location:** `C:\Users\mcwiz\Projects\AgentOS\docs\lineage\workflow-audit.jsonl`
+**Location:** `C:\Users\mcwiz\Projects\AssemblyZero\docs\lineage\workflow-audit.jsonl`
 
 **Full Contents (9 entries):**
 
 ```json
-{"timestamp": "2026-01-31T06:53:51.867973+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"final_lld_path": "...pytest.../LLD-042.md", "verdict_count": 2, "iteration_count": 3}}
+{"timestamp": "2026-01-31T06:53:51.867973+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"final_lld_path": "...pytest.../LLD-042.md", "verdict_count": 2, "iteration_count": 3}}
 
-{"timestamp": "2026-01-31T06:53:51.992098+00:00", "workflow_type": "lld", "issue_number": 99, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"final_lld_path": "...pytest.../LLD-099.md", "verdict_count": 2, "iteration_count": 2}}
+{"timestamp": "2026-01-31T06:53:51.992098+00:00", "workflow_type": "lld", "issue_number": 99, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"final_lld_path": "...pytest.../LLD-099.md", "verdict_count": 2, "iteration_count": 2}}
 
-{"timestamp": "2026-01-31T06:53:52.025173+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"verdict_count": 1, "iteration_count": 0}}
+{"timestamp": "2026-01-31T06:53:52.025173+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"verdict_count": 1, "iteration_count": 0}}
 
-{"timestamp": "2026-01-31T17:52:36.782336+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"verdict_count": 2, "iteration_count": 3}}
+{"timestamp": "2026-01-31T17:52:36.782336+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"verdict_count": 2, "iteration_count": 3}}
 
-{"timestamp": "2026-01-31T17:52:37.054738+00:00", "workflow_type": "lld", "issue_number": 99, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"verdict_count": 2, "iteration_count": 2}}
+{"timestamp": "2026-01-31T17:52:37.054738+00:00", "workflow_type": "lld", "issue_number": 99, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"verdict_count": 2, "iteration_count": 2}}
 
-{"timestamp": "2026-01-31T17:52:37.092268+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"verdict_count": 1, "iteration_count": 0}}
+{"timestamp": "2026-01-31T17:52:37.092268+00:00", "workflow_type": "lld", "issue_number": 42, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"verdict_count": 1, "iteration_count": 0}}
 
-{"timestamp": "2026-01-31T18:00:57.786252+00:00", "workflow_type": "lld", "issue_number": 999, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "test", "details": {"test": "manual test"}}
+{"timestamp": "2026-01-31T18:00:57.786252+00:00", "workflow_type": "lld", "issue_number": 999, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "test", "details": {"test": "manual test"}}
 
-{"timestamp": "2026-01-31T18:04:33.210769+00:00", "workflow_type": "lld", "issue_number": 999, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"final_lld_path": "...LLD-999.md", "verdict_count": 1, "iteration_count": 2}}
+{"timestamp": "2026-01-31T18:04:33.210769+00:00", "workflow_type": "lld", "issue_number": 999, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"final_lld_path": "...LLD-999.md", "verdict_count": 1, "iteration_count": 2}}
 
-{"timestamp": "2026-01-31T18:15:28.233068+00:00", "workflow_type": "lld", "issue_number": 63, "target_repo": "C:\\Users\\mcwiz\\Projects\\AgentOS", "event": "complete", "details": {"final_lld_path": "...LLD-063.md", "verdict_count": 1, "iteration_count": 3}}
+{"timestamp": "2026-01-31T18:15:28.233068+00:00", "workflow_type": "lld", "issue_number": 63, "target_repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero", "event": "complete", "details": {"final_lld_path": "...LLD-063.md", "verdict_count": 1, "iteration_count": 3}}
 ```
 
 **Key Observations:**
@@ -1928,9 +1928,9 @@ These were cleaned up to avoid polluting the repository.
 
 | File | Lines | What Was Checked |
 |------|-------|------------------|
-| `agentos/workflows/lld/nodes.py` | ~650 | finalize() function, audit logging call |
-| `agentos/workflows/lld/audit.py` | ~50 | log_workflow_execution() implementation |
-| `agentos/workflows/lld/graph.py` | 196 | StateGraph definition, node imports |
+| `assemblyzero/workflows/lld/nodes.py` | ~650 | finalize() function, audit logging call |
+| `assemblyzero/workflows/lld/audit.py` | ~50 | log_workflow_execution() implementation |
+| `assemblyzero/workflows/lld/graph.py` | 196 | StateGraph definition, node imports |
 | `tools/run_lld_workflow.py` | ~450 | CLI runner, SUCCESS block display |
 
 ---
@@ -1942,18 +1942,18 @@ These were cleaned up to avoid polluting the repository.
 poetry run python tools/run_lld_workflow.py --issue 62 --mock --auto
 
 # Direct Python (unbuffered - showed all output)
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS \
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero \
   /c/Users/mcwiz/AppData/Local/pypoetry/Cache/virtualenvs/unleashed-Zukdy2xA-py3.14/Scripts/python.exe \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_lld_workflow.py --issue 62 --mock --auto
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_lld_workflow.py --issue 62 --mock --auto
 
 # Cache clearing (attempted but unnecessary)
-find /c/Users/mcwiz/Projects/AgentOS -name __pycache__ -type d
+find /c/Users/mcwiz/Projects/AssemblyZero -name __pycache__ -type d
 
 # Audit log inspection
-cat /c/Users/mcwiz/Projects/AgentOS/docs/lineage/workflow-audit.jsonl
+cat /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/workflow-audit.jsonl
 
 # Line counts
-wc -l /c/Users/mcwiz/Projects/AgentOS/docs/lld/active/*.md
+wc -l /c/Users/mcwiz/Projects/AssemblyZero/docs/lld/active/*.md
 ```
 
 ---
@@ -2166,25 +2166,25 @@ implementation.
 
 ```bash
 # List all lineage directories
-ls -la /c/Users/mcwiz/Projects/AgentOS/docs/lineage/active/
+ls -la /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/active/
 
 # Count files in a specific LLD trail
-ls /c/Users/mcwiz/Projects/AgentOS/docs/lineage/active/83-lld/ | wc -l
+ls /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/active/83-lld/ | wc -l
 
 # View a specific verdict
-cat /c/Users/mcwiz/Projects/AgentOS/docs/lineage/active/83-lld/045-verdict.md
+cat /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/active/83-lld/045-verdict.md
 
 # Find all BLOCK verdicts
-grep -l "BLOCK" /c/Users/mcwiz/Projects/AgentOS/docs/lineage/active/*/???-verdict.md
+grep -l "BLOCK" /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/active/*/???-verdict.md
 
 # Find all APPROVED verdicts
-grep -l "APPROVED" /c/Users/mcwiz/Projects/AgentOS/docs/lineage/active/*/???-verdict.md
+grep -l "APPROVED" /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage/active/*/???-verdict.md
 
 # Check empty draft files
-find /c/Users/mcwiz/Projects/AgentOS/docs/lineage -name "*-draft.md" -empty
+find /c/Users/mcwiz/Projects/AssemblyZero/docs/lineage -name "*-draft.md" -empty
 
 # View the most recent LLD draft
-cat /c/Users/mcwiz/Projects/AgentOS/docs/LLDs/drafts/88-LLD.md | head -50
+cat /c/Users/mcwiz/Projects/AssemblyZero/docs/LLDs/drafts/88-LLD.md | head -50
 ```
 
 ---
@@ -2259,8 +2259,8 @@ docs/lineage/active/83-lld/044-draft.md (0 bytes)
 
 | # | Brief | Result | Issue Created |
 |---|-------|--------|---------------|
-| test-plan-reviewer.md | COMPLETE | #101 (AgentOS) |
-| tdd-test-initialization.md | COMPLETE | #102 (AgentOS) |
+| test-plan-reviewer.md | COMPLETE | #101 (AssemblyZero) |
+| tdd-test-initialization.md | COMPLETE | #102 (AssemblyZero) |
 | forgery-detection-seals-signatures.md | COMPLETE | #19 (RCA-PDF) |
 
 ---
@@ -2345,7 +2345,7 @@ success, issue_number, issue_url, error_msg = create_issue(
 
 ## New Features Added This Session
 
-### 1. Gemini API Log (`~/.agentos/gemini-api.jsonl`)
+### 1. Gemini API Log (`~/.assemblyzero/gemini-api.jsonl`)
 
 A dedicated log for credential pool visibility:
 
@@ -2400,7 +2400,7 @@ The issue workflow successfully created issue #19 in RCA-PDF-extraction-pipeline
 - Issue: `https://github.com/martymcenroe/RCA-PDF-extraction-pipeline/issues/19`
 - Audit trail: `RCA-PDF-extraction-pipeline/docs/lineage/workflow-audit.jsonl`
 
-**Verified:** Artifacts landed in the correct repo, not in AgentOS.
+**Verified:** Artifacts landed in the correct repo, not in AssemblyZero.
 
 ---
 
@@ -2513,11 +2513,11 @@ AGENTOS_TEST_MODE=1 poetry run python tools/run_lld_workflow.py --issue 999 --mo
 
 | File | Change |
 |------|--------|
-| `agentos/core/config.py` | Added `GEMINI_API_LOG_FILE` |
-| `agentos/core/gemini_client.py` | Added logging functions |
-| `agentos/workflows/lld/nodes.py` | Added VS Code at end of auto mode |
-| `agentos/workflows/lld/audit.py` | Added model name to review evidence |
-| `agentos/workflows/issue/nodes/file_issue.py` | Added approval footer, fixed bug |
+| `assemblyzero/core/config.py` | Added `GEMINI_API_LOG_FILE` |
+| `assemblyzero/core/gemini_client.py` | Added logging functions |
+| `assemblyzero/workflows/lld/nodes.py` | Added VS Code at end of auto mode |
+| `assemblyzero/workflows/lld/audit.py` | Added model name to review evidence |
+| `assemblyzero/workflows/issue/nodes/file_issue.py` | Added approval footer, fixed bug |
 | `docs/runbooks/0905-gemini-credentials.md` | Added API log documentation |
 | `docs/runbooks/0906-lld-governance-workflow.md` | Updated to v1.2 |
 
@@ -2556,7 +2556,7 @@ Implemented and tested `--all` option for batch processing of briefs/issues. Fou
 - **Repo:** RCA-PDF-extraction-pipeline
 - **Briefs:** 7 files in `ideas/active/`
 - **Mode:** `--all --auto` (unattended batch)
-- **Cross-repo:** Running from AgentOS-101 worktree targeting RCA-PDF
+- **Cross-repo:** Running from AssemblyZero-101 worktree targeting RCA-PDF
 
 ## Bugs Found
 
@@ -2586,7 +2586,7 @@ if os.environ.get("AGENTOS_AUTO_MODE") == "1":
 
 ## Context Compaction Issue
 
-**Critical Discovery:** After context compaction, I lost track of which directory I was working in. I was supposed to be in `AgentOS-101` worktree but switched to `AgentOS` main branch without realizing it.
+**Critical Discovery:** After context compaction, I lost track of which directory I was working in. I was supposed to be in `AssemblyZero-101` worktree but switched to `AssemblyZero` main branch without realizing it.
 
 **Evidence:**
 - 13 commits went to main instead of the worktree

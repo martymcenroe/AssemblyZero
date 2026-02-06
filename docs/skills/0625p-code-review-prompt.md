@@ -37,7 +37,7 @@ Runs 5 parallel review agents:
 | Agent | Model | Focus |
 |-------|-------|-------|
 | Security Reviewer | Opus | Injection, auth, data exposure |
-| CLAUDE.md Compliance | Sonnet | AgentOS rule violations |
+| CLAUDE.md Compliance | Sonnet | AssemblyZero rule violations |
 | Bug Detector | Sonnet | Null handling, race conditions |
 | Code Quality | Sonnet | SOLID, DRY, complexity |
 | Test Coverage | Sonnet | Missing tests, coverage gaps |

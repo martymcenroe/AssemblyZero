@@ -127,5 +127,5 @@ Projects/
 
 ---
 
-*Source: AgentOS/docs/standards/coding-standards.md*
+*Source: AssemblyZero/docs/standards/coding-standards.md*
 *Project-specific extensions may exist in project's local documentation.*

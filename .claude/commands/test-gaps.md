@@ -9,7 +9,7 @@ argument-hint: "[--full] [--file path/to/report.md]"
 
 **Purpose:** Analyze implementation reports, test reports, and code to identify testing gaps and automation opportunities.
 
-**Per AgentOS:adrs/test-first-philosophy:** Continuous test improvement requires systematic mining of existing documentation for test debt.
+**Per AssemblyZero:adrs/test-first-philosophy:** Continuous test improvement requires systematic mining of existing documentation for test debt.
 
 ---
 

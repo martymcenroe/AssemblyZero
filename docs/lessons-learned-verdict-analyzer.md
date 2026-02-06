@@ -129,7 +129,7 @@ Categories addressed: architecture (23), safety (9), legal (8), cost (6)
 Governance Reviews → Verdicts → Pattern Analysis → Template Updates → Better Documents → Fewer Blocks
 ```
 
-This is the first implementation of AgentOS learning from its own failures. The "Janitor" agent will eventually run this automatically.
+This is the first implementation of AssemblyZero learning from its own failures. The "Janitor" agent will eventually run this automatically.
 
 ---
 
@@ -142,7 +142,7 @@ This is the first implementation of AgentOS learning from its own failures. The 
 | `tools/verdict_analyzer/scanner.py` | Path fixes |
 | `docs/templates/0102-feature-lld-template.md` | Added 4 sections |
 | `docs/templates/0101-issue-template.md` | Added Risk Checklist |
-| `wiki/How-the-AgentOS-Learns.md` | New page |
+| `wiki/How-the-AssemblyZero-Learns.md` | New page |
 | `docs/runbooks/0910-verdict-analyzer-*.md` | Updated examples |
 
 ---

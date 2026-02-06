@@ -1,6 +1,6 @@
 # Test Report: Issue #3 - Claude Code Usage Quota Scraper
 
-**Issue:** [#3](https://github.com/martymcenroe/AgentOS/issues/3)
+**Issue:** [#3](https://github.com/martymcenroe/AssemblyZero/issues/3)
 **Date:** 2026-01-11
 **Status:** Tested and Validated
 
@@ -163,7 +163,7 @@ Cannot run while another Claude Code instance is active (PTY spawns new process)
 
 ## Conclusion
 
-The Claude Code usage scraper is **production-ready** for AgentOS workflows. All acceptance criteria met. The tool provides reliable quota visibility that is otherwise unavailable programmatically.
+The Claude Code usage scraper is **production-ready** for AssemblyZero workflows. All acceptance criteria met. The tool provides reliable quota visibility that is otherwise unavailable programmatically.
 
 ---
 

@@ -13,7 +13,7 @@ This is a CLI tool, not a slash command. Use it as part of post-merge cleanup.
 
 ```
 # After merging a PR, run:
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-{ID} --issue {ID}
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-{ID} --issue {ID}
 ```
 
 ---
@@ -34,10 +34,10 @@ When the user says "merge the PR" and Claude merges it, the post-merge cleanup s
 
 ```python
 # Step 1: Archive lineage (NEW - Issue #189)
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-{ID} --issue {ID}
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-{ID} --issue {ID}
 
 # Step 2: Remove worktree
-git worktree remove ../AgentOS-{ID}
+git worktree remove ../AssemblyZero-{ID}
 
 # Step 3: Delete local branch
 git branch -d {ID}-desc
@@ -56,14 +56,14 @@ git pull
 ```
 PR merged. Executing post-merge cleanup:
 
-**Bash Check:** `python tools/archive_worktree_lineage.py --worktree ../AgentOS-155 --issue 155`
+**Bash Check:** `python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-155 --issue 155`
 **Scan:** No &&, no |, no ;, no cd at start → CLEAN
 **Friction Risk:** LOW
 **Action:** Execute
 
 [runs archive tool]
 
-**Bash Check:** `git worktree remove ../AgentOS-155`
+**Bash Check:** `git worktree remove ../AssemblyZero-155`
 **Scan:** No &&, no |, no ;, no cd at start → CLEAN
 **Friction Risk:** LOW
 **Action:** Execute

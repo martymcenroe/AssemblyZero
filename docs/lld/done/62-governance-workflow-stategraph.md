@@ -21,16 +21,16 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/graphs/governance.py` | Add | StateGraph definition with N0-N6 nodes and conditional edges |
-| `agentos/graphs/state.py` | Add | TypedDict for workflow state |
-| `agentos/nodes/load_brief.py` | Add | N0: Load user's ideation notes, create audit dir |
-| `agentos/nodes/sandbox.py` | Add | N1: Worktree creation, permission stripping, pre-flight checks |
-| `agentos/nodes/draft.py` | Add | N2: Claude drafting node |
-| `agentos/nodes/human_edit_draft.py` | Add | N3: VS Code interrupt post-Claude |
-| `agentos/nodes/review.py` | Add | N4: Gemini review with hard-coded 0701c |
-| `agentos/nodes/human_edit_verdict.py` | Add | N5: VS Code interrupt post-Gemini |
-| `agentos/nodes/file_issue.py` | Add | N6: gh execution, label handling, audit finalization |
-| `agentos/audit.py` | Add | Audit trail utilities |
+| `assemblyzero/graphs/governance.py` | Add | StateGraph definition with N0-N6 nodes and conditional edges |
+| `assemblyzero/graphs/state.py` | Add | TypedDict for workflow state |
+| `assemblyzero/nodes/load_brief.py` | Add | N0: Load user's ideation notes, create audit dir |
+| `assemblyzero/nodes/sandbox.py` | Add | N1: Worktree creation, permission stripping, pre-flight checks |
+| `assemblyzero/nodes/draft.py` | Add | N2: Claude drafting node |
+| `assemblyzero/nodes/human_edit_draft.py` | Add | N3: VS Code interrupt post-Claude |
+| `assemblyzero/nodes/review.py` | Add | N4: Gemini review with hard-coded 0701c |
+| `assemblyzero/nodes/human_edit_verdict.py` | Add | N5: VS Code interrupt post-Gemini |
+| `assemblyzero/nodes/file_issue.py` | Add | N6: gh execution, label handling, audit finalization |
+| `assemblyzero/audit.py` | Add | Audit trail utilities |
 | `tools/run_workflow.py` | Add | CLI runner with `--brief` and `--resume` flags |
 | `docs/audit/active/.gitkeep` | Add | Directory structure |
 | `docs/audit/done/.gitkeep` | Add | Directory structure |
@@ -86,7 +86,7 @@ class ErrorRecovery(Enum):
 ### 2.4 Function Signatures
 
 ```python
-# agentos/nodes/load_brief.py
+# assemblyzero/nodes/load_brief.py
 def load_brief(state: GovernanceState) -> GovernanceState:
     """N0: Load user's brief file, create audit directory, save 001-brief.md.
 
@@ -94,7 +94,7 @@ def load_brief(state: GovernanceState) -> GovernanceState:
     """
     ...
 
-# agentos/nodes/sandbox.py
+# assemblyzero/nodes/sandbox.py
 def create_sandbox(state: GovernanceState) -> GovernanceState:
     """N1: Create worktree, strip permissions, run pre-flight checks."""
     ...
@@ -109,27 +109,27 @@ def check_gh_authenticated() -> bool:
     """Verify gh CLI is authenticated."""
     ...
 
-# agentos/nodes/draft.py
+# assemblyzero/nodes/draft.py
 def generate_draft(state: GovernanceState) -> GovernanceState:
     """N2: Call Claude with brief + template, save NNN-draft.md."""
     ...
 
-# agentos/nodes/human_edit_draft.py
+# assemblyzero/nodes/human_edit_draft.py
 def human_edit_draft(state: GovernanceState) -> GovernanceState:
     """N3: Open VS Code, wait for close, prompt S/R/M."""
     ...
 
-# agentos/nodes/review.py
+# assemblyzero/nodes/review.py
 def gemini_review(state: GovernanceState) -> GovernanceState:
     """N4: Load 0701c + draft, call Gemini, save NNN-verdict.md."""
     ...
 
-# agentos/nodes/human_edit_verdict.py
+# assemblyzero/nodes/human_edit_verdict.py
 def human_edit_verdict(state: GovernanceState) -> GovernanceState:
     """N5: Open VS Code with draft + verdict, wait, prompt A/R/M."""
     ...
 
-# agentos/nodes/file_issue.py
+# assemblyzero/nodes/file_issue.py
 def file_issue(state: GovernanceState) -> GovernanceState:
     """N6: Parse labels, create missing, gh issue create, handle errors."""
     ...
@@ -142,7 +142,7 @@ def ensure_labels_exist(labels: list[str], repo: str) -> None:
     """Check/create labels via gh CLI."""
     ...
 
-# agentos/audit.py
+# assemblyzero/audit.py
 def next_file_number(audit_dir: str) -> int:
     """Return next sequential file number (001, 002, ...)."""
     ...
@@ -159,7 +159,7 @@ def batch_commit(audit_dir: str, issue_number: int) -> None:
     """Commit all audit files in single commit."""
     ...
 
-# agentos/graphs/governance.py
+# assemblyzero/graphs/governance.py
 def build_governance_graph() -> StateGraph:
     """Construct the governance workflow StateGraph."""
     ...
@@ -273,7 +273,7 @@ N6: FILE ISSUE
 
 ### 2.6 Technical Approach
 
-* **Module:** `agentos/graphs/`, `agentos/nodes/`, `tools/`
+* **Module:** `assemblyzero/graphs/`, `assemblyzero/nodes/`, `tools/`
 * **Pattern:** LangGraph StateGraph with interrupt_before for human nodes
 * **Key Decisions:**
   - Sequential file numbering preserves exact event order across loops
@@ -494,16 +494,16 @@ poetry run pytest tests/test_governance_workflow.py -v -m integration
 ## 11. Definition of Done
 
 ### Code
-- [ ] `agentos/graphs/governance.py` - StateGraph with N0-N6
-- [ ] `agentos/graphs/state.py` - TypedDict state
-- [ ] `agentos/audit.py` - Audit trail utilities
-- [ ] `agentos/nodes/load_brief.py` - N0 implementation
-- [ ] `agentos/nodes/sandbox.py` - N1 implementation
-- [ ] `agentos/nodes/draft.py` - N2 implementation
-- [ ] `agentos/nodes/human_edit_draft.py` - N3 implementation
-- [ ] `agentos/nodes/review.py` - N4 implementation
-- [ ] `agentos/nodes/human_edit_verdict.py` - N5 implementation
-- [ ] `agentos/nodes/file_issue.py` - N6 implementation
+- [ ] `assemblyzero/graphs/governance.py` - StateGraph with N0-N6
+- [ ] `assemblyzero/graphs/state.py` - TypedDict state
+- [ ] `assemblyzero/audit.py` - Audit trail utilities
+- [ ] `assemblyzero/nodes/load_brief.py` - N0 implementation
+- [ ] `assemblyzero/nodes/sandbox.py` - N1 implementation
+- [ ] `assemblyzero/nodes/draft.py` - N2 implementation
+- [ ] `assemblyzero/nodes/human_edit_draft.py` - N3 implementation
+- [ ] `assemblyzero/nodes/review.py` - N4 implementation
+- [ ] `assemblyzero/nodes/human_edit_verdict.py` - N5 implementation
+- [ ] `assemblyzero/nodes/file_issue.py` - N6 implementation
 - [ ] `tools/run_workflow.py` - CLI runner
 - [ ] Code comments reference this LLD
 

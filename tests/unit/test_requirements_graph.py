@@ -15,7 +15,7 @@ class TestRequirementsGraph:
 
     def test_graph_creation(self):
         """Test that graph can be created with expected nodes."""
-        from agentos.workflows.requirements.graph import create_requirements_graph
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         assert graph is not None
@@ -36,7 +36,7 @@ class TestRequirementsGraph:
 
     def test_graph_has_all_nodes(self):
         """Test that graph has all expected nodes."""
-        from agentos.workflows.requirements.graph import create_requirements_graph
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         compiled = graph.compile()
@@ -67,7 +67,7 @@ class TestRequirementsGraph:
 
     def test_graph_compiles(self):
         """Test that graph compiles and can be invoked."""
-        from agentos.workflows.requirements.graph import create_requirements_graph
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         compiled = graph.compile()
@@ -91,7 +91,7 @@ class TestGraphRouting:
 
     def test_route_from_load_input_to_generate_draft(self):
         """Test routing from load_input to generate_draft on success."""
-        from agentos.workflows.requirements.graph import route_after_load_input
+        from assemblyzero.workflows.requirements.graph import route_after_load_input
 
         state = {"error_message": ""}
         result = route_after_load_input(state)
@@ -99,7 +99,7 @@ class TestGraphRouting:
 
     def test_route_from_load_input_to_end_on_error(self):
         """Test routing from load_input to END on error."""
-        from agentos.workflows.requirements.graph import route_after_load_input
+        from assemblyzero.workflows.requirements.graph import route_after_load_input
 
         state = {"error_message": "File not found"}
         result = route_after_load_input(state)
@@ -107,7 +107,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_with_gate(self):
         """Test routing from generate_draft to human gate when enabled."""
-        from agentos.workflows.requirements.graph import route_after_generate_draft
+        from assemblyzero.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "", "config_gates_draft": True}
         result = route_after_generate_draft(state)
@@ -115,7 +115,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_without_gate(self):
         """Test routing from generate_draft to review when gate disabled."""
-        from agentos.workflows.requirements.graph import route_after_generate_draft
+        from assemblyzero.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "", "config_gates_draft": False}
         result = route_after_generate_draft(state)
@@ -123,7 +123,7 @@ class TestGraphRouting:
 
     def test_route_from_generate_draft_on_error(self):
         """Test routing from generate_draft to END on error."""
-        from agentos.workflows.requirements.graph import route_after_generate_draft
+        from assemblyzero.workflows.requirements.graph import route_after_generate_draft
 
         state = {"error_message": "API error", "config_gates_draft": True}
         result = route_after_generate_draft(state)
@@ -131,7 +131,7 @@ class TestGraphRouting:
 
     def test_route_from_human_gate_draft(self):
         """Test routing from human gate draft based on next_node."""
-        from agentos.workflows.requirements.graph import route_from_human_gate_draft
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_draft
 
         # Route to review
         state = {"next_node": "N3_review"}
@@ -147,7 +147,7 @@ class TestGraphRouting:
 
     def test_route_from_review_with_gate(self):
         """Test routing from review to human gate when enabled."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {"error_message": "", "config_gates_verdict": True}
         result = route_after_review(state)
@@ -155,7 +155,7 @@ class TestGraphRouting:
 
     def test_route_from_review_without_gate(self):
         """Test routing from review based on verdict when gate disabled."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         # Approved - go to finalize
         state = {"error_message": "", "config_gates_verdict": False, "lld_status": "APPROVED"}
@@ -169,7 +169,7 @@ class TestGraphRouting:
 
     def test_route_from_human_gate_verdict(self):
         """Test routing from human gate verdict based on next_node."""
-        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
 
         # Route to finalize
         state = {"next_node": "N5_finalize"}
@@ -183,15 +183,15 @@ class TestGraphRouting:
 class TestGraphExecution:
     """Tests for full graph execution paths."""
 
-    @patch("agentos.workflows.requirements.nodes.load_input.load_input")
-    @patch("agentos.workflows.requirements.nodes.generate_draft.get_provider")
-    @patch("agentos.workflows.requirements.nodes.review.get_provider")
+    @patch("assemblyzero.workflows.requirements.nodes.load_input.load_input")
+    @patch("assemblyzero.workflows.requirements.nodes.generate_draft.get_provider")
+    @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_full_issue_workflow_mock(
         self, mock_review_provider, mock_draft_provider, mock_load, tmp_path
     ):
         """Test full issue workflow with mocks."""
-        from agentos.workflows.requirements.graph import create_requirements_graph
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
         # Setup mocks
         mock_load.return_value = {
@@ -233,7 +233,7 @@ class TestGraphExecution:
         # Create initial state
         state = create_initial_state(
             workflow_type="issue",
-            agentos_root=str(tmp_path),
+            assemblyzero_root=str(tmp_path),
             target_repo=str(tmp_path),
             brief_file="brief.md",
             auto_mode=True,  # Skip interactive prompts
@@ -274,7 +274,7 @@ class TestNodeNames:
 
     def test_node_names_defined(self):
         """Test that node name constants are defined."""
-        from agentos.workflows.requirements.graph import (
+        from assemblyzero.workflows.requirements.graph import (
             N0_LOAD_INPUT,
             N1_GENERATE_DRAFT,
             N2_HUMAN_GATE_DRAFT,
@@ -296,7 +296,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_review_to_end_on_error(self):
         """Test routing from review to END on error."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {"error_message": "Review failed", "config_gates_verdict": True}
         result = route_after_review(state)
@@ -304,7 +304,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_review_to_finalize_on_max_iterations(self):
         """Test routing from review to finalize when max iterations reached."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -318,7 +318,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_review_to_draft_when_under_max_iterations(self):
         """Test routing from review to draft when under max iterations."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
@@ -332,7 +332,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_human_gate_verdict_to_end(self):
         """Test routing from human gate verdict to END for unknown next_node."""
-        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
 
         state = {"next_node": "unknown_node"}
         result = route_from_human_gate_verdict(state)
@@ -340,7 +340,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_human_gate_verdict_empty_next_node(self):
         """Test routing from human gate verdict to END when next_node is empty."""
-        from agentos.workflows.requirements.graph import route_from_human_gate_verdict
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_verdict
 
         state = {"next_node": ""}
         result = route_from_human_gate_verdict(state)
@@ -348,7 +348,7 @@ class TestGraphRoutingExtended:
 
     def test_route_after_finalize(self):
         """Test routing after finalize always returns END."""
-        from agentos.workflows.requirements.graph import route_after_finalize
+        from assemblyzero.workflows.requirements.graph import route_after_finalize
 
         # Should always return END regardless of state
         state = {"error_message": "", "lld_status": "APPROVED"}
@@ -361,7 +361,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_human_gate_draft_unknown_next_node(self):
         """Test routing from human gate draft to END for unknown next_node."""
-        from agentos.workflows.requirements.graph import route_from_human_gate_draft
+        from assemblyzero.workflows.requirements.graph import route_from_human_gate_draft
 
         state = {"next_node": "unknown"}
         result = route_from_human_gate_draft(state)
@@ -369,7 +369,7 @@ class TestGraphRoutingExtended:
 
     def test_route_from_review_uses_default_max_iterations(self):
         """Test routing from review uses default max_iterations of 20."""
-        from agentos.workflows.requirements.graph import route_after_review
+        from assemblyzero.workflows.requirements.graph import route_after_review
 
         # No max_iterations set, should use default of 20
         state = {

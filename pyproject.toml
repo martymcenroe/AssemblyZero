@@ -1,7 +1,7 @@
 [project]
-name = "agentos-tools"
+name = "assemblyzero-tools"
 version = "0.1.0"
-description = "AgentOS configuration and tooling"
+description = "AssemblyZero configuration and tooling"
 authors = [{name = "Marty McEnroe"}]
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [tool.poetry]
-packages = [{include = "agentos"}]
+packages = [{include = "assemblyzero"}]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

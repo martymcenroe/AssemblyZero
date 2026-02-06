@@ -1,6 +1,6 @@
 # RAG Injection: Knowledge Management (The Historian)
 
-**Context:** We are implementing a local vector store for "The Librarian" (#DN-002) to enforce architectural consistency. However, `AgentOS` is rapidly accumulating completed work in `docs/audit/done/` and `docs/LLDs/done/`. As the project scales, "Institutional Amnesia" becomes a risk—we might solve the same problem twice because we forgot we solved it two months ago.
+**Context:** We are implementing a local vector store for "The Librarian" (#DN-002) to enforce architectural consistency. However, `AssemblyZero` is rapidly accumulating completed work in `docs/audit/done/` and `docs/LLDs/done/`. As the project scales, "Institutional Amnesia" becomes a risk—we might solve the same problem twice because we forgot we solved it two months ago.
 
 ## Problem
 
@@ -31,7 +31,7 @@ Modify `tools/rebuild_knowledge_base.py` (from the Librarian brief) to also scan
 
 *Note: These should be tagged with metadata `type: history` to distinguish them from `type: standard`.*
 
-### 2. The Historian Node (`agentos/nodes/historian.py`)
+### 2. The Historian Node (`assemblyzero/nodes/historian.py`)
 
 A new node for the `issue_workflow` graph.
 
@@ -47,7 +47,7 @@ A new node for the `issue_workflow` graph.
 
 ### 3. Workflow Integration
 
-Modify `agentos/workflows/issue/graph.py`:
+Modify `assemblyzero/workflows/issue/graph.py`:
 
 **Current:**
 `Load Brief -> Sandbox -> Draft -> ...`

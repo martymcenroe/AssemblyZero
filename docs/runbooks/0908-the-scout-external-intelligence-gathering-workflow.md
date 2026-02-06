@@ -137,7 +137,7 @@ Offline mode uses fixtures in `tests/fixtures/scout/`:
 | CLI help | `python tools/run_scout_workflow.py --help` | Shows all options |
 | Offline test | `python tools/run_scout_workflow.py --topic test --offline --yes` | Creates `ideas/active/innovation-test.md` |
 | GitHub auth | `gh auth token` | Returns valid token |
-| Gemini creds | Check `~/.agentos/gemini_credentials.json` | At least one valid key |
+| Gemini creds | Check `~/.assemblyzero/gemini_credentials.json` | At least one valid key |
 | Unit tests | `poetry run pytest tests/unit/test_scout*.py -v` | All pass |
 
 ---
@@ -184,7 +184,7 @@ UnicodeEncodeError: 'charmap' codec can't encode character '\u2713'
 
 **Fix:** The Scout uses `GeminiClient` with credential rotation. Add fresh keys to:
 ```
-~/.agentos/gemini_credentials.json
+~/.assemblyzero/gemini_credentials.json
 ```
 
 Format:
@@ -231,18 +231,18 @@ PermissionError: [Errno 13] Permission denied: 'ideas/active/...'
 
 ## Related Documents
 
-- [Issue #93](https://github.com/mcwizard/AgentOS/issues/93) - The Scout: External Intelligence Gathering Workflow
+- [Issue #93](https://github.com/mcwizard/AssemblyZero/issues/93) - The Scout: External Intelligence Gathering Workflow
 - [LLD-093](../lld/active/LLD-093.md) - Low-Level Design document
 - [Innovation Brief Example](../../ideas/active/innovation-langgraph-workflow.md) - Sample output
 
 ## Implementation Files
 
 ### Core Workflow
-- `agentos/workflows/scout/graph.py` - StateGraph definition, ExternalRepo TypedDict
-- `agentos/workflows/scout/nodes.py` - Node implementations (Explorer, Extractor, Analyst, Scribe)
-- `agentos/workflows/scout/budget.py` - Token budget management
-- `agentos/workflows/scout/security.py` - Content sanitization, path validation
-- `agentos/workflows/scout/templates.py` - Output formatting (markdown, JSON)
+- `assemblyzero/workflows/scout/graph.py` - StateGraph definition, ExternalRepo TypedDict
+- `assemblyzero/workflows/scout/nodes.py` - Node implementations (Explorer, Extractor, Analyst, Scribe)
+- `assemblyzero/workflows/scout/budget.py` - Token budget management
+- `assemblyzero/workflows/scout/security.py` - Content sanitization, path validation
+- `assemblyzero/workflows/scout/templates.py` - Output formatting (markdown, JSON)
 
 ### CLI Entry Point
 - `tools/run_scout_workflow.py` - Command-line interface

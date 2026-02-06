@@ -187,8 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--db",
-        default=".agentos/verdicts.db",
-        help="Path to SQLite database (default: .agentos/verdicts.db)",
+        default=".assemblyzero/verdicts.db",
+        help="Path to SQLite database (default: .assemblyzero/verdicts.db)",
     )
     
     subparsers = parser.add_subparsers(dest="command", required=True)

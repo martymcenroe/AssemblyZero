@@ -20,7 +20,7 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | ID | Runbook | Trigger | Frequency | Model |
 |----|---------|---------|-----------|-------|
 | 0901 | [New Project Setup](0901-new-project-setup.md) | Manual | On new project | - |
-| 0902 | [Nightly AgentOS Audit](0902-nightly-agentos-audit.md) | PowerShell | Nightly | Opus + ultrathink |
+| 0902 | [Nightly AssemblyZero Audit](0902-nightly-assemblyzero-audit.md) | PowerShell | Nightly | Opus + ultrathink |
 | 0903 | [Windows Scheduled Tasks](0903-windows-scheduled-tasks.md) | Reference | - | Sonnet |
 | 0904 | [Issue Governance Workflow](0904-issue-governance-workflow.md) | Manual | Per issue | Claude + Gemini |
 | 0905 | [Gemini Credentials](0905-gemini-credentials.md) | Manual | On credential issues | - |
@@ -54,7 +54,7 @@ See `docs/0800-common-audits.md` for per-audit model recommendations.
 "Ultrathink" is the term we use to invoke extended thinking. This is done via PowerShell by the orchestrator and provides deeper analysis for complex audits.
 
 **When to use ultrathink:**
-- Nightly AgentOS self-audits
+- Nightly AssemblyZero self-audits
 - Architecture reviews
 - Conflict detection across documents
 - Any task requiring multi-step reasoning
@@ -64,6 +64,6 @@ See `docs/0800-common-audits.md` for per-audit model recommendations.
 ## Related Documents
 
 - `CLAUDE.md` - Agent operating procedures
-- `docs/0000-GUIDE.md` - AgentOS overview and filing system
+- `docs/0000-GUIDE.md` - AssemblyZero overview and filing system
 - `docs/0800-common-audits.md` - Audit index and procedures
 - `docs/0008-orchestrator-instructions.md` - (Deprecated, see this index)

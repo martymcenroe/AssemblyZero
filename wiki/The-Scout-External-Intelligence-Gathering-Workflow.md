@@ -82,7 +82,7 @@ sequenceDiagram
 - **langsmith**: For optional trace observability.
 - **tenacity**: For robust retry logic on API calls.
 - Optional
-- **Module Location:** `agentos/workflows/scout/`
+- **Module Location:** `assemblyzero/workflows/scout/`
 - **Design Pattern:** Chain of Responsibility (LangGraph).
 - **Budget Bound:** `Extractor` node checks `budget.check_and_update_budget` inside its loop.
 

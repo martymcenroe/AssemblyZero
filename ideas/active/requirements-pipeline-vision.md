@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The AgentOS Governance Pipeline is a four-stage workflow system that transforms ideas into production-ready code through AI-assisted design, human oversight, and automated testing. Each stage is a LangGraph workflow that enforces quality gates before progressing.
+The AssemblyZero Governance Pipeline is a four-stage workflow system that transforms ideas into production-ready code through AI-assisted design, human oversight, and automated testing. Each stage is a LangGraph workflow that enforces quality gates before progressing.
 
 ---
 
@@ -23,7 +23,7 @@ STAGE 4: LEARN        Feedback Loop     (#77 - FUTURE)
 
 ### Stage 1: Ideation (Brief → Issue)
 
-**Workflow:** `agentos/workflows/issue/`
+**Workflow:** `assemblyzero/workflows/issue/`
 **Status:** Complete and Production
 
 Transforms rough ideas captured in markdown briefs into well-structured GitHub issues:
@@ -36,7 +36,7 @@ Transforms rough ideas captured in markdown briefs into well-structured GitHub i
 
 ### Stage 2: Design (Issue → LLD)
 
-**Workflow:** `agentos/workflows/lld/`
+**Workflow:** `assemblyzero/workflows/lld/`
 **Status:** Complete and Production
 
 Transforms GitHub issues into Low-Level Design documents:
@@ -49,7 +49,7 @@ Transforms GitHub issues into Low-Level Design documents:
 
 ### Stage 3: Build (LLD → Code)
 
-**Workflow:** `agentos/workflows/testing/` (THIS IMPLEMENTATION)
+**Workflow:** `assemblyzero/workflows/testing/` (THIS IMPLEMENTATION)
 **Status:** In Development
 
 Transforms approved LLDs into tested, production-ready code:
@@ -169,7 +169,7 @@ python tools/run_governance_pipeline.py --brief my-idea.md
 ### Workflow Directories
 
 ```
-agentos/workflows/
+assemblyzero/workflows/
 ├── issue/      # Stage 1: Brief → Issue
 ├── lld/        # Stage 2: Issue → LLD
 └── testing/    # Stage 3: LLD → Code (this implementation)

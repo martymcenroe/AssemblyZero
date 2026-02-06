@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Issue** | [#56 - Implement Designer Node with Human Edit Loop](https://github.com/martymcenroe/AgentOS/issues/56) |
+| **Issue** | [#56 - Implement Designer Node with Human Edit Loop](https://github.com/martymcenroe/AssemblyZero/issues/56) |
 | **Branch** | `56-designer-node` |
 | **LLD** | `docs/LLDs/active/56-designer-node.md` |
 | **Status** | Implementation Complete |
@@ -13,11 +13,11 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/nodes/designer.py` | Added | Designer Node implementation with human edit loop |
-| `agentos/nodes/__init__.py` | Modified | Export `design_lld_node` |
-| `agentos/core/state.py` | Modified | Added `lld_draft_path` and `design_status` fields |
-| `agentos/core/config.py` | Modified | Added `LLD_GENERATOR_PROMPT_PATH` and `LLD_DRAFTS_DIR` |
-| `agentos/nodes/governance.py` | Modified | Read from disk if `lld_draft_path` present |
+| `assemblyzero/nodes/designer.py` | Added | Designer Node implementation with human edit loop |
+| `assemblyzero/nodes/__init__.py` | Modified | Export `design_lld_node` |
+| `assemblyzero/core/state.py` | Modified | Added `lld_draft_path` and `design_status` fields |
+| `assemblyzero/core/config.py` | Modified | Added `LLD_GENERATOR_PROMPT_PATH` and `LLD_DRAFTS_DIR` |
+| `assemblyzero/nodes/governance.py` | Modified | Read from disk if `lld_draft_path` present |
 | `docs/skills/0705-lld-generator.md` | Added | System instruction for LLD generation |
 | `docs/LLDs/drafts/.gitkeep` | Added | Ensure drafts directory exists |
 | `tests/test_designer.py` | Added | 17 tests for Designer Node |

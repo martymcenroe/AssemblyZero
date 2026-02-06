@@ -2,7 +2,7 @@
 
 ## Overview
 
-This runbook describes how an **Orchestrator** (human operator) manages multiple AI agents across multiple projects using AgentOS. It covers the complete workflow from issue triage to PR merge, with emphasis on tracking LLD review status across projects.
+This runbook describes how an **Orchestrator** (human operator) manages multiple AI agents across multiple projects using AssemblyZero. It covers the complete workflow from issue triage to PR merge, with emphasis on tracking LLD review status across projects.
 
 **Target Audience:** Senior engineers or technical leads orchestrating AI agent development.
 
@@ -14,7 +14,7 @@ You have multiple projects with open issues. Some have LLDs, some don't. Some LL
 
 > "I have 15 issues in Talos, 6 in Clio, and 5 in Aletheia. Which ones can I actually start coding?"
 
-AgentOS solves this with:
+AssemblyZero solves this with:
 1. **Structured LLD/Report workflow** - Every issue follows the same gates
 2. **Session-sharded audit logging** - Track Gemini reviews across all sessions
 3. **Unified view tools** - See status at a glance
@@ -194,8 +194,8 @@ END OF LLD. Respond with JSON only.
 EOF
 
 # Submit to Gemini
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py \
   --model gemini-3-pro-preview \
   --prompt-file /tmp/lld-review-prompt.txt
 ```
@@ -362,7 +362,7 @@ After merge:
 The retry tool handles this automatically by rotating credentials. If all credentials exhausted:
 
 1. Wait 24 hours for quota reset
-2. Or add more credentials to `~/.agentos/gemini-credentials.json`
+2. Or add more credentials to `~/.assemblyzero/gemini-credentials.json`
 
 ### "Can't find LLD for issue X"
 

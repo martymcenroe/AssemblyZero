@@ -1,6 +1,6 @@
 # LLD: LLD Review Gate (#27)
 
-**Issue:** https://github.com/mcwiz/AgentOS/issues/27
+**Issue:** https://github.com/mcwiz/AssemblyZero/issues/27
 **Author:** Claude Agent
 **Date:** 2026-01-16
 **Status:** Draft - Pending Gemini Review

@@ -19,23 +19,23 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.workflows.issue.audit import (
+from assemblyzero.workflows.issue.audit import (
     generate_slug,
     next_file_number,
     save_audit_file,
     save_filed_metadata,
     slug_exists,
 )
-from agentos.workflows.issue.nodes.file_issue import (
+from assemblyzero.workflows.issue.nodes.file_issue import (
     parse_labels_from_draft,
     parse_title_from_draft,
 )
-from agentos.workflows.issue.nodes.load_brief import load_brief
-from agentos.workflows.issue.nodes.sandbox import (
+from assemblyzero.workflows.issue.nodes.load_brief import load_brief
+from assemblyzero.workflows.issue.nodes.sandbox import (
     check_gh_authenticated,
     check_vscode_available,
 )
-from agentos.workflows.issue.state import (
+from assemblyzero.workflows.issue.state import (
     HumanDecision,
     IssueWorkflowState,
     SlugCollisionChoice,
@@ -173,10 +173,10 @@ class TestLoadBrief:
         assert "error_message" in result
         assert "not found" in result["error_message"]
 
-    @patch("agentos.workflows.issue.nodes.load_brief.get_repo_root")
-    @patch("agentos.workflows.issue.nodes.load_brief.slug_exists")
-    @patch("agentos.workflows.issue.nodes.load_brief.create_audit_dir")
-    @patch("agentos.workflows.issue.nodes.load_brief.save_audit_file")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.get_repo_root")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.slug_exists")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.create_audit_dir")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.save_audit_file")
     def test_loads_brief_content(
         self, mock_save, mock_create, mock_exists, mock_root, tmp_path
     ):
@@ -195,8 +195,8 @@ class TestLoadBrief:
         assert result.get("brief_content") == "# My Brief\n\nContent here."
         assert result.get("slug") == "test-brief"
 
-    @patch("agentos.workflows.issue.nodes.load_brief.get_repo_root")
-    @patch("agentos.workflows.issue.nodes.load_brief.slug_exists")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.get_repo_root")
+    @patch("assemblyzero.workflows.issue.nodes.load_brief.slug_exists")
     def test_detects_slug_collision(self, mock_exists, mock_root, tmp_path):
         """Test collision detection."""
         brief_path = tmp_path / "existing.md"
@@ -339,7 +339,7 @@ class TestGraphRouting:
 
     def test_route_after_draft_send(self):
         """Test routing to review after Send."""
-        from agentos.workflows.issue.graph import route_after_draft_edit
+        from assemblyzero.workflows.issue.graph import route_after_draft_edit
 
         state: IssueWorkflowState = {"next_node": "N4_review", "error_message": ""}
         result = route_after_draft_edit(state)
@@ -347,7 +347,7 @@ class TestGraphRouting:
 
     def test_route_after_draft_revise(self):
         """Test routing to draft after Revise."""
-        from agentos.workflows.issue.graph import route_after_draft_edit
+        from assemblyzero.workflows.issue.graph import route_after_draft_edit
 
         state: IssueWorkflowState = {"next_node": "N2_draft", "error_message": ""}
         result = route_after_draft_edit(state)
@@ -355,7 +355,7 @@ class TestGraphRouting:
 
     def test_route_after_verdict_approve(self):
         """Test routing to file after Approve."""
-        from agentos.workflows.issue.graph import route_after_verdict_edit
+        from assemblyzero.workflows.issue.graph import route_after_verdict_edit
 
         state: IssueWorkflowState = {"next_node": "N6_file", "error_message": ""}
         result = route_after_verdict_edit(state)
@@ -363,7 +363,7 @@ class TestGraphRouting:
 
     def test_route_after_verdict_revise(self):
         """Test routing to draft after Revise."""
-        from agentos.workflows.issue.graph import route_after_verdict_edit
+        from assemblyzero.workflows.issue.graph import route_after_verdict_edit
 
         state: IssueWorkflowState = {"next_node": "N2_draft", "error_message": ""}
         result = route_after_verdict_edit(state)
@@ -373,11 +373,11 @@ class TestGraphRouting:
 class TestClaudeHeadless:
     """Test Claude headless mode (claude -p) integration."""
 
-    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
     @patch("subprocess.run")
     def test_call_claude_headless_success(self, mock_run, mock_find):
         """Test successful claude -p call."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
+        from assemblyzero.workflows.issue.nodes.draft import call_claude_headless
 
         mock_find.return_value = "/usr/bin/claude"
         mock_run.return_value = MagicMock(
@@ -390,11 +390,11 @@ class TestClaudeHeadless:
         assert result == "# Test Issue\n\nThis is a test."
         mock_run.assert_called_once()
 
-    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
     @patch("subprocess.run")
     def test_call_claude_headless_with_system_prompt(self, mock_run, mock_find):
         """Test claude -p with system prompt."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
+        from assemblyzero.workflows.issue.nodes.draft import call_claude_headless
 
         mock_find.return_value = "/usr/bin/claude"
         mock_run.return_value = MagicMock(
@@ -415,11 +415,11 @@ class TestClaudeHeadless:
         # Verify tools are disabled
         assert "--tools" in call_args
 
-    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
     @patch("subprocess.run")
     def test_call_claude_headless_failure(self, mock_run, mock_find):
         """Test claude -p failure handling."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
+        from assemblyzero.workflows.issue.nodes.draft import call_claude_headless
 
         mock_find.return_value = "/usr/bin/claude"
         mock_run.return_value = MagicMock(
@@ -432,12 +432,12 @@ class TestClaudeHeadless:
             call_claude_headless("Test prompt")
         assert "claude -p failed" in str(exc_info.value)
 
-    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
     @patch("subprocess.run")
     def test_call_claude_headless_timeout(self, mock_run, mock_find):
         """Test claude -p timeout handling."""
         import subprocess
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
+        from assemblyzero.workflows.issue.nodes.draft import call_claude_headless
 
         mock_find.return_value = "/usr/bin/claude"
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=300)
@@ -446,10 +446,10 @@ class TestClaudeHeadless:
             call_claude_headless("Test prompt")
         assert "timed out" in str(exc_info.value)
 
-    @patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+    @patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
     def test_call_claude_headless_not_found(self, mock_find):
         """Test claude command not found."""
-        from agentos.workflows.issue.nodes.draft import call_claude_headless
+        from assemblyzero.workflows.issue.nodes.draft import call_claude_headless
 
         mock_find.side_effect = RuntimeError("claude command not found")
 
@@ -461,11 +461,11 @@ class TestClaudeHeadless:
 class TestDraftNode:
     """Test N2 draft node."""
 
-    @patch("agentos.workflows.issue.nodes.draft.call_claude_headless")
-    @patch("agentos.workflows.issue.nodes.draft.load_issue_template")
+    @patch("assemblyzero.workflows.issue.nodes.draft.call_claude_headless")
+    @patch("assemblyzero.workflows.issue.nodes.draft.load_issue_template")
     def test_draft_success(self, mock_template, mock_claude, tmp_path):
         """Test successful draft generation."""
-        from agentos.workflows.issue.nodes.draft import draft
+        from assemblyzero.workflows.issue.nodes.draft import draft
 
         # Setup mocks
         mock_template.return_value = "# Template\n\n## Section"
@@ -489,11 +489,11 @@ class TestDraftNode:
         assert result["draft_count"] == 1
         assert (audit_dir / "001-draft.md").exists()
 
-    @patch("agentos.workflows.issue.nodes.draft.call_claude_headless")
-    @patch("agentos.workflows.issue.nodes.draft.load_issue_template")
+    @patch("assemblyzero.workflows.issue.nodes.draft.call_claude_headless")
+    @patch("assemblyzero.workflows.issue.nodes.draft.load_issue_template")
     def test_draft_revision_mode(self, mock_template, mock_claude, tmp_path):
         """Test draft revision with feedback."""
-        from agentos.workflows.issue.nodes.draft import draft
+        from assemblyzero.workflows.issue.nodes.draft import draft
 
         mock_template.return_value = "# Template"
         mock_claude.return_value = "# Revised Issue"
@@ -526,7 +526,7 @@ class TestGraphCompilation:
 
     def test_build_graph(self):
         """Test graph builds successfully with correct structure."""
-        from agentos.workflows.issue.graph import build_issue_workflow
+        from assemblyzero.workflows.issue.graph import build_issue_workflow
 
         workflow = build_issue_workflow()
         assert workflow is not None
@@ -554,7 +554,7 @@ class TestGraphCompilation:
 
     def test_graph_has_all_nodes(self):
         """Test all expected nodes exist."""
-        from agentos.workflows.issue.graph import build_issue_workflow
+        from assemblyzero.workflows.issue.graph import build_issue_workflow
 
         workflow = build_issue_workflow()
         nodes = workflow.nodes
@@ -825,7 +825,7 @@ class TestWorkflowResumeIntegration:
         try:
             os.environ.pop("AGENTOS_WORKFLOW_DB", None)
             result = get_checkpoint_db_path()
-            expected = Path.home() / ".agentos" / "issue_workflow.db"
+            expected = Path.home() / ".assemblyzero" / "issue_workflow.db"
             assert result == expected
         finally:
             if old_env:

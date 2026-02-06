@@ -13,7 +13,7 @@ Most AI coding workflows have one model doing everything:
 
 This is like letting a student grade their own exam.
 
-AgentOS uses **multi-model verification**:
+AssemblyZero uses **multi-model verification**:
 - **Claude** (Opus/Sonnet) generates designs and code
 - **Gemini 3 Pro** reviews the work before it proceeds
 - **Different model families** catch different mistakes

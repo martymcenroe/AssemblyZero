@@ -17,10 +17,10 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/nodes/designer.py` | Add | Designer Node implementation |
-| `agentos/nodes/__init__.py` | Modify | Export `design_lld_node` |
-| `agentos/core/state.py` | Modify | Add `lld_draft_path` and `design_status` fields |
-| `agentos/core/config.py` | Modify | Add `LLD_GENERATOR_PROMPT_PATH` constant |
+| `assemblyzero/nodes/designer.py` | Add | Designer Node implementation |
+| `assemblyzero/nodes/__init__.py` | Modify | Export `design_lld_node` |
+| `assemblyzero/core/state.py` | Modify | Add `lld_draft_path` and `design_status` fields |
+| `assemblyzero/core/config.py` | Modify | Add `LLD_GENERATOR_PROMPT_PATH` constant |
 | `docs/skills/0705-lld-generator.md` | Add | System instruction for LLD generation |
 | `docs/llds/drafts/.gitkeep` | Add | Ensure drafts directory exists |
 | `tests/test_designer.py` | Add | Unit tests for designer node |
@@ -37,10 +37,10 @@
 ### 2.3 Data Structures
 
 ```python
-# agentos/core/state.py - MODIFICATIONS
+# assemblyzero/core/state.py - MODIFICATIONS
 
 class AgentState(TypedDict):
-    """Core state shared across all AgentOS LangGraph nodes."""
+    """Core state shared across all AssemblyZero LangGraph nodes."""
 
     # ... existing fields ...
 
@@ -50,7 +50,7 @@ class AgentState(TypedDict):
 ```
 
 ```python
-# agentos/core/audit.py - NEW TypedDict for Designer logs
+# assemblyzero/core/audit.py - NEW TypedDict for Designer logs
 
 class DesignerLogEntry(TypedDict):
     """Single entry in the governance audit log for Designer Node."""
@@ -73,9 +73,9 @@ class DesignerLogEntry(TypedDict):
 ### 2.4 Function Signatures
 
 ```python
-# agentos/nodes/designer.py
+# assemblyzero/nodes/designer.py
 
-from agentos.core.state import AgentState
+from assemblyzero.core.state import AgentState
 
 def design_lld_node(state: AgentState) -> dict[str, Any]:
     """
@@ -164,7 +164,7 @@ def _human_edit_pause(draft_path: Path) -> None:
 ```
 
 ```python
-# agentos/core/config.py - ADDITIONS
+# assemblyzero/core/config.py - ADDITIONS
 
 # Prompt path for LLD generator
 LLD_GENERATOR_PROMPT_PATH = Path("docs/skills/0705-lld-generator.md")
@@ -181,7 +181,7 @@ LLD_DRAFTS_DIR = Path("docs/llds/drafts")
 2. Get issue_id from state
 3. TRY:
    a. Fetch issue from GitHub:
-      - Run: gh issue view {issue_id} --repo martymcenroe/AgentOS --json title,body
+      - Run: gh issue view {issue_id} --repo martymcenroe/AssemblyZero --json title,body
       - Parse JSON response
       - IF exit code != 0 OR issue not found:
          - Log failure to audit trail
@@ -253,7 +253,7 @@ AFTER (with Designer integration):
 
 ### 2.6 Technical Approach
 
-* **Module:** `agentos/nodes/designer.py`
+* **Module:** `assemblyzero/nodes/designer.py`
 * **Pattern:** LangGraph state machine node with side effects (file I/O, subprocess)
 * **Key Decisions:**
   - **Reuse GeminiClient** - Same rotation/model enforcement as Governance Node
@@ -486,10 +486,10 @@ sequenceDiagram
 poetry run pytest tests/test_designer.py -v
 
 # Run with coverage
-poetry run pytest tests/test_designer.py -v --cov=agentos
+poetry run pytest tests/test_designer.py -v --cov=assemblyzero
 
 # Type check
-poetry run mypy agentos/
+poetry run mypy assemblyzero/
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -503,10 +503,10 @@ poetry run mypy agentos/
 ## 11. Definition of Done
 
 ### Code
-- [ ] `agentos/nodes/designer.py` implemented with `design_lld_node`
-- [ ] `agentos/core/state.py` extended with `lld_draft_path`, `design_status`
-- [ ] `agentos/core/config.py` extended with `LLD_GENERATOR_PROMPT_PATH`
-- [ ] `agentos/nodes/governance.py` reads from disk if `lld_draft_path` present
+- [ ] `assemblyzero/nodes/designer.py` implemented with `design_lld_node`
+- [ ] `assemblyzero/core/state.py` extended with `lld_draft_path`, `design_status`
+- [ ] `assemblyzero/core/config.py` extended with `LLD_GENERATOR_PROMPT_PATH`
+- [ ] `assemblyzero/nodes/governance.py` reads from disk if `lld_draft_path` present
 - [ ] `docs/skills/0705-lld-generator.md` created
 - [ ] `docs/llds/drafts/.gitkeep` created
 

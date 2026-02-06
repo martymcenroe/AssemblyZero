@@ -116,4 +116,4 @@ echo "docs/: $(find docs -name '*.md' 2>/dev/null | wc -l)"
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/inventory-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/inventory-audit.md*

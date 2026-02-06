@@ -6,7 +6,7 @@ REVIEW THE FOLLOWING LLD DOCUMENT:
 
 # LLD: Gemini Submission Gate (#30)
 
-**Issue:** https://github.com/mcwiz/AgentOS/issues/30
+**Issue:** https://github.com/mcwiz/AssemblyZero/issues/30
 **Author:** Claude Agent
 **Date:** 2026-01-16
 
@@ -57,7 +57,7 @@ Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
 - Logs all attempts for audit trail
 
 Required command pattern:
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
 
 If all credentials exhausted (exit code 1):
 1. STOP - Do not bypass the review

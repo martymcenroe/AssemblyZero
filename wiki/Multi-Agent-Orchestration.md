@@ -13,7 +13,7 @@ Individual AI coding assistants are powerful. But real software development requ
 - **Coordination** - Agents must not conflict or duplicate work
 - **Human oversight** - One person orchestrating many agents
 
-AgentOS enables this pattern at scale.
+AssemblyZero enables this pattern at scale.
 
 ---
 

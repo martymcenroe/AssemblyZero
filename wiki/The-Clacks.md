@@ -19,9 +19,9 @@ When a beloved clacks operator died, their name would be sent as a GNU message�
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
-Every message that flows through AgentOS—every issue, every LLD, every commit, every PR—carries something of its creator forward.
+Every message that flows through AssemblyZero—every issue, every LLD, every commit, every PR—carries something of its creator forward.
 
 The lineage system ensures nothing is truly lost:
 - Every draft preserved

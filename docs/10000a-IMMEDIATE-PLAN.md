@@ -1,4 +1,4 @@
-# AgentOS Immediate Plan
+# AssemblyZero Immediate Plan
 
 **Last Updated:** 2026-01-14
 
@@ -6,7 +6,7 @@
 
 ## Current Focus
 
-AgentOS core infrastructure and skill maintenance.
+AssemblyZero core infrastructure and skill maintenance.
 
 ### Active Work
 
@@ -27,13 +27,13 @@ AgentOS core infrastructure and skill maintenance.
 
 - [ ] Issue #9: Create workflow wrapper scripts for permission friction
 - [ ] Issue #8: Research Claude Code Discord for support escalation
-- [ ] Enhance agentos-generate.py to generate docs from templates
+- [ ] Enhance assemblyzero-generate.py to generate docs from templates
 
 ---
 
-## Out of Scope for AgentOS Onboarding
+## Out of Scope for AssemblyZero Onboarding
 
-These are child project concerns, not AgentOS concerns:
+These are child project concerns, not AssemblyZero concerns:
 - Aletheia cross-reference updates (tracked in Aletheia)
 - Talos LLD reviews (tracked in Talos)
 - maintenance file inventory work (tracked in maintenance)

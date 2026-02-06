@@ -161,11 +161,11 @@ git-crypt unlock
 | ~/.ssh/ folder | Already secured, familiar | Mixes keys, no UI | Acceptable |
 | USB drive | Airgapped | Easy to lose, no sync | Not recommended |
 
-**Key naming convention:** `{repo-name}-ideas-key` (e.g., `agentos-ideas-key`)
+**Key naming convention:** `{repo-name}-ideas-key` (e.g., `assemblyzero-ideas-key`)
 
 ### 4.6 Repo Generator Integration
 
-**File: `AgentOS/tools/agentos-generate.py`**
+**File: `AssemblyZero/tools/assemblyzero-generate.py`**
 
 Add new function:
 
@@ -227,10 +227,10 @@ ideas/**/* filter=git-crypt diff=git-crypt
 
 ```bash
 # With encryption (default)
-poetry run python agentos-generate.py --project myproject --ideas
+poetry run python assemblyzero-generate.py --project myproject --ideas
 
 # Without encryption (not recommended for public repos)
-poetry run python agentos-generate.py --project myproject --ideas --no-encrypt
+poetry run python assemblyzero-generate.py --project myproject --ideas --no-encrypt
 ```
 
 ### 4.7 New Audit: Gitignore Review (0833)
@@ -398,15 +398,15 @@ def run_audits(tier: str = 'standard', specific: list[int] = None):
 
 ### 7.1 Phase 1: Infrastructure (This Issue)
 
-1. Add `setup_ideas_folder()` to agentos-generate.py
+1. Add `setup_ideas_folder()` to assemblyzero-generate.py
 2. Create 0833-audit-gitignore-encryption.md
 3. Add `--ultimate` tier to audit system
-4. Document git-crypt setup in AgentOS CLAUDE.md
+4. Document git-crypt setup in AssemblyZero CLAUDE.md
 5. Create template `.gitattributes` for ideas encryption
 
-### 7.2 Phase 2: AgentOS Dogfood
+### 7.2 Phase 2: AssemblyZero Dogfood
 
-1. Set up `ideas/` folder in AgentOS itself
+1. Set up `ideas/` folder in AssemblyZero itself
 2. Initialize git-crypt
 3. Store key securely
 4. Verify workflow on multiple machines
@@ -423,7 +423,7 @@ def run_audits(tier: str = 'standard', specific: list[int] = None):
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/agentos-generate.py` | Modify | Add `setup_ideas_folder()` function |
+| `tools/assemblyzero-generate.py` | Modify | Add `setup_ideas_folder()` function |
 | `docs/audits/0833-audit-gitignore-encryption.md` | New | Ultimate-tier audit for gitignore review |
 | `docs/audits/0800-audit-index.md` | Modify | Add 0833, document --ultimate tier |
 | `.claude/commands/audit.md` | Modify | Add --ultimate flag |
@@ -471,8 +471,8 @@ Most scenarios require git operations, file system changes, and multi-machine ve
 - [ ] Automated tests for 0833 audit logic
 
 ### Deployment
-- [ ] ideas/ folder created in AgentOS
-- [ ] git-crypt initialized in AgentOS
+- [ ] ideas/ folder created in AssemblyZero
+- [ ] git-crypt initialized in AssemblyZero
 - [ ] Key stored securely
 
 ---
@@ -491,7 +491,7 @@ Most scenarios require git operations, file system changes, and multi-machine ve
 
 ```bash
 # 1. Generate ideas folder
-poetry run python agentos-generate.py --project myproject --ideas
+poetry run python assemblyzero-generate.py --project myproject --ideas
 
 # 2. Initialize git-crypt
 cd /path/to/myproject

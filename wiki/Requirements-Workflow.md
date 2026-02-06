@@ -195,7 +195,7 @@ Based on 164 verdicts analyzed:
 | After 2 revisions | 90% |
 | After 3+ revisions | 99% |
 
-**The 22% first-pass rate is improving** as the [self-improvement loop](How-the-AgentOS-Learns) adds sections to templates based on common block reasons.
+**The 22% first-pass rate is improving** as the [self-improvement loop](How-the-AssemblyZero-Learns) adds sections to templates based on common block reasons.
 
 ---
 
@@ -241,7 +241,7 @@ The waiver is logged in the lineage for audit purposes.
 
 - [Implementation Workflow](Implementation-Workflow) - What happens after LLD approval
 - [Governance Gates](Governance-Gates) - All gates explained
-- [How the AgentOS Learns](How-the-AgentOS-Learns) - Template improvement from verdicts
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Template improvement from verdicts
 - [Ponder Stibbons](Ponder-Stibbons) - Mechanical auto-fix layer
 
 ---

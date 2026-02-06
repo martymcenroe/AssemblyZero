@@ -1,6 +1,6 @@
 # Test Report: Issue #5 - Permission Propagation Tool
 
-**Issue:** [#5](https://github.com/martymcenroe/AgentOS/issues/5)
+**Issue:** [#5](https://github.com/martymcenroe/AssemblyZero/issues/5)
 **Date:** 2026-01-12
 **Status:** Tested and Validated
 
@@ -8,7 +8,7 @@
 
 ## Testing Methodology
 
-Testing was performed iteratively during development and subsequent enhancements. Each mode was validated against real project settings files across the AgentOS ecosystem (AgentOS, Aletheia, Talos, maintenance).
+Testing was performed iteratively during development and subsequent enhancements. Each mode was validated against real project settings files across the AssemblyZero ecosystem (AssemblyZero, Aletheia, Talos, maintenance).
 
 ---
 
@@ -17,12 +17,12 @@ Testing was performed iteratively during development and subsequent enhancements
 ### 1. Audit Mode
 
 **Test:** Read-only analysis of project permissions
-**Command:** `poetry run python tools/agentos-permissions.py --audit --project AgentOS`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --audit --project AssemblyZero`
 **Result:** PASS
 
 ```
 ============================================================
-Audit: AgentOS
+Audit: AssemblyZero
 ============================================================
 Total: 56 allow, 7 deny
 
@@ -42,7 +42,7 @@ Total: 56 allow, 7 deny
 ### 2. Clean Mode (Dry Run)
 
 **Test:** Preview what would be removed
-**Command:** `poetry run python tools/agentos-permissions.py --clean --project Talos-62 --dry-run`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --clean --project Talos-62 --dry-run`
 **Result:** PASS
 
 ```
@@ -57,7 +57,7 @@ Vends to remove:
 ### 3. Clean Mode (Execute)
 
 **Test:** Actually remove session vends
-**Command:** `poetry run python tools/agentos-permissions.py --clean --project Talos-62`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --clean --project Talos-62`
 **Result:** PASS
 
 - Backup created: `settings.local.local.json.bak`
@@ -68,7 +68,7 @@ Vends to remove:
 ### 4. Quick Check Mode
 
 **Test:** Fast check for cleanup integration
-**Command:** `poetry run python tools/agentos-permissions.py --quick-check --project AgentOS`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --quick-check --project AssemblyZero`
 **Result:** PASS
 
 ```
@@ -80,7 +80,7 @@ Exit code: 0 (OK)
 ### 5. Merge-Up Mode (Dry Run)
 
 **Test:** Preview pattern collection from all projects
-**Command:** `poetry run python tools/agentos-permissions.py --merge-up --all-projects --dry-run`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --merge-up --all-projects --dry-run`
 **Result:** PASS
 
 **Key Behavior:** Merge-up is a **manual, user-triggered operation** (not automatic). The user explicitly decides when to consolidate patterns from projects into master.
@@ -96,7 +96,7 @@ Step 2: Merge up to master
 ============================================================
 ### New Allow Patterns to Merge: 4
   Bash wildcard: 4
-    [AgentOS] Bash(GEMINI_RETRY_DEBUG=1...
+    [AssemblyZero] Bash(GEMINI_RETRY_DEBUG=1...
 
 ## DRY RUN - No changes made
 Would merge: +4 allow, +0 deny
@@ -108,7 +108,7 @@ Would clean: -2 vends from master
 ### 6. Merge-Up Mode (Execute)
 
 **Test:** Actually merge patterns to master
-**Command:** `poetry run python tools/agentos-permissions.py --merge-up --all-projects`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --merge-up --all-projects`
 **Result:** PASS
 
 **Key Behavior:** This is a manual operation - no automatic threshold-based promotion. User explicitly runs this when they want to consolidate.
@@ -124,7 +124,7 @@ Would clean: -2 vends from master
 ### 7. Restore Mode
 
 **Test:** Restore from backup after accidental changes
-**Command:** `poetry run python tools/agentos-permissions.py --restore --project Talos`
+**Command:** `poetry run python tools/assemblyzero-permissions.py --restore --project Talos`
 **Result:** PASS
 
 - Backup detected and restored
@@ -246,7 +246,7 @@ These behaviors intentionally differ from the original Issue #5 spec:
 
 ## Conclusion
 
-The permission propagation tool is **production-ready** for AgentOS workflows. All modes tested and validated:
+The permission propagation tool is **production-ready** for AssemblyZero workflows. All modes tested and validated:
 
 - **Audit:** Accurate classification of permissions
 - **Clean:** Safe removal of vends with backup

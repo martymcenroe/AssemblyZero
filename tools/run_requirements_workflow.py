@@ -42,16 +42,16 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agentos.workflows.requirements.audit import (
+from assemblyzero.workflows.requirements.audit import (
     AUDIT_ACTIVE_DIR,
     IDEAS_ACTIVE_DIR,
     check_existing_lld,
     generate_slug,
     shift_lineage_versions,
 )
-from agentos.workflows.requirements.config import GateConfig
-from agentos.workflows.requirements.graph import create_requirements_graph
-from agentos.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
+from assemblyzero.workflows.requirements.config import GateConfig
+from assemblyzero.workflows.requirements.graph import create_requirements_graph
+from assemblyzero.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
 
 
 # =============================================================================
@@ -72,7 +72,7 @@ def get_checkpoint_db_path() -> Path:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return db_path
 
-    db_dir = Path.home() / ".agentos"
+    db_dir = Path.home() / ".assemblyzero"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "requirements_workflow.db"
 
@@ -468,9 +468,9 @@ def _detect_repo_from_cwd() -> Path:
 
 
 def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
-    """Resolve agentos_root and target_repo paths.
+    """Resolve assemblyzero_root and target_repo paths.
 
-    agentos_root: Where AgentOS is installed (for templates/prompts).
+    assemblyzero_root: Where AssemblyZero is installed (for templates/prompts).
     target_repo: Where the work happens (outputs, context, gh CLI).
 
     Priority for target_repo:
@@ -483,15 +483,15 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
         args: Parsed CLI arguments.
 
     Returns:
-        Tuple of (agentos_root, target_repo) as Path objects.
+        Tuple of (assemblyzero_root, target_repo) as Path objects.
     """
-    # agentos_root: from env var or package location
-    agentos_root_env = os.environ.get("AGENTOS_ROOT")
-    if agentos_root_env:
-        agentos_root = Path(agentos_root_env).resolve()
+    # assemblyzero_root: from env var or package location
+    assemblyzero_root_env = os.environ.get("AGENTOS_ROOT")
+    if assemblyzero_root_env:
+        assemblyzero_root = Path(assemblyzero_root_env).resolve()
     else:
         # Default to parent of tools/ directory
-        agentos_root = Path(__file__).parent.parent.resolve()
+        assemblyzero_root = Path(__file__).parent.parent.resolve()
 
     # target_repo: explicit --repo takes precedence
     if args.repo:
@@ -509,19 +509,19 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
         # Fall back to CWD detection
         target_repo = _detect_repo_from_cwd()
 
-    return agentos_root, target_repo
+    return assemblyzero_root, target_repo
 
 
 def build_initial_state(
     args: argparse.Namespace,
-    agentos_root: Path,
+    assemblyzero_root: Path,
     target_repo: Path,
 ) -> RequirementsWorkflowState:
     """Build initial workflow state from CLI arguments.
 
     Args:
         args: Parsed CLI arguments.
-        agentos_root: Path to AgentOS installation.
+        assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
 
     Returns:
@@ -542,7 +542,7 @@ def build_initial_state(
 
         return create_initial_state(
             workflow_type="issue",
-            agentos_root=str(agentos_root),
+            assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
             drafter=args.drafter,
             reviewer=args.reviewer,
@@ -557,7 +557,7 @@ def build_initial_state(
     else:  # lld
         return create_initial_state(
             workflow_type="lld",
-            agentos_root=str(agentos_root),
+            assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
             drafter=args.drafter,
             reviewer=args.reviewer,
@@ -573,14 +573,14 @@ def build_initial_state(
 
 def run_single_workflow(
     args: argparse.Namespace,
-    agentos_root: Path,
+    assemblyzero_root: Path,
     target_repo: Path,
 ) -> int:
     """Run a single workflow instance.
 
     Args:
         args: Parsed CLI arguments.
-        agentos_root: Path to AgentOS installation.
+        assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
 
     Returns:
@@ -590,7 +590,7 @@ def run_single_workflow(
     print_header(args)
 
     # Build initial state
-    state = build_initial_state(args, agentos_root, target_repo)
+    state = build_initial_state(args, assemblyzero_root, target_repo)
 
     if args.debug:
         print(f"DEBUG: Initial state keys: {list(state.keys())}")
@@ -642,14 +642,14 @@ def run_single_workflow(
 
 def run_all_briefs(
     args: argparse.Namespace,
-    agentos_root: Path,
+    assemblyzero_root: Path,
     target_repo: Path,
 ) -> int:
     """Process all briefs in ideas/active/ sequentially.
 
     Args:
         args: Parsed CLI arguments.
-        agentos_root: Path to AgentOS installation.
+        assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
 
     Returns:
@@ -690,7 +690,7 @@ def run_all_briefs(
         args.brief = str(brief_path.relative_to(target_repo))
 
         print("        Status: PROCESSING...")
-        exit_code = run_single_workflow(args, agentos_root, target_repo)
+        exit_code = run_single_workflow(args, assemblyzero_root, target_repo)
 
         if exit_code == 0:
             processed += 1
@@ -717,14 +717,14 @@ def run_all_briefs(
 
 def run_resume_workflow(
     args: argparse.Namespace,
-    agentos_root: Path,
+    assemblyzero_root: Path,
     target_repo: Path,
 ) -> int:
     """Resume an interrupted workflow.
 
     Args:
         args: Parsed CLI arguments (args.resume contains the brief filename).
-        agentos_root: Path to AgentOS installation.
+        assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
 
     Returns:
@@ -766,7 +766,7 @@ def run_resume_workflow(
             return 1
 
         args.brief = str(brief_path.relative_to(target_repo))
-        return run_single_workflow(args, agentos_root, target_repo)
+        return run_single_workflow(args, assemblyzero_root, target_repo)
 
     # Resume: set brief and run
     print()
@@ -790,7 +790,7 @@ def run_resume_workflow(
         return 1
 
     args.brief = str(brief_path.relative_to(target_repo))
-    return run_single_workflow(args, agentos_root, target_repo)
+    return run_single_workflow(args, assemblyzero_root, target_repo)
 
 
 def check_and_shift_existing_lld(
@@ -961,19 +961,19 @@ def main() -> int:
         return 1
 
     # Resolve paths (needed for --select, --all, --resume)
-    agentos_root, target_repo = resolve_roots(args)
+    assemblyzero_root, target_repo = resolve_roots(args)
 
     if args.debug:
-        print(f"DEBUG: agentos_root = {agentos_root}")
+        print(f"DEBUG: assemblyzero_root = {assemblyzero_root}")
         print(f"DEBUG: target_repo = {target_repo}")
 
     # Handle --all: process all briefs
     if args.all:
-        return run_all_briefs(args, agentos_root, target_repo)
+        return run_all_briefs(args, assemblyzero_root, target_repo)
 
     # Handle --resume: resume interrupted workflow
     if args.resume:
-        return run_resume_workflow(args, agentos_root, target_repo)
+        return run_resume_workflow(args, assemblyzero_root, target_repo)
 
     # Handle --select: interactive selection
     if args.select:
@@ -996,7 +996,7 @@ def main() -> int:
             return 0  # User aborted
 
     # Run single workflow
-    return run_single_workflow(args, agentos_root, target_repo)
+    return run_single_workflow(args, assemblyzero_root, target_repo)
 
 
 if __name__ == "__main__":

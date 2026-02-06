@@ -1,6 +1,6 @@
 # Test Report: Issue #11 - Gemini Retry with Exponential Backoff
 
-**Issue:** [#11](https://github.com/martymcenroe/AgentOS/issues/11)
+**Issue:** [#11](https://github.com/martymcenroe/AssemblyZero/issues/11)
 **Date:** 2026-01-14
 **Status:** Tested and Validated
 
@@ -140,7 +140,7 @@ Each attempt has a 5-minute timeout. Long prompts may take 1-3 minutes to proces
 
 ## Conclusion
 
-The Gemini retry mechanism is **production-ready** for AgentOS workflows. It successfully handles:
+The Gemini retry mechanism is **production-ready** for AssemblyZero workflows. It successfully handles:
 - Transient capacity exhaustion with exponential backoff
 - Both JSON and plain text responses
 - Model validation (when JSON response available)

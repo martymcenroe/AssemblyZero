@@ -1,16 +1,16 @@
 # gemini-retry - CLI Reference
 
 **Tool:** `tools/gemini-retry.py`
-**Issue:** [#11](https://github.com/martymcenroe/AgentOS/issues/11)
+**Issue:** [#11](https://github.com/martymcenroe/AssemblyZero/issues/11)
 
 ## Quick Start
 
 ```bash
 # Basic usage with prompt
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --prompt "Review this code" --model gemini-3-pro-preview
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py --prompt "Review this code" --model gemini-3-pro-preview
 
 # With prompt file (for long prompts)
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --prompt-file /path/to/prompt.txt --model gemini-3-pro-preview
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py --prompt-file /path/to/prompt.txt --model gemini-3-pro-preview
 ```
 
 ## Parameters

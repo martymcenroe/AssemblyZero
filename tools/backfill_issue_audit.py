@@ -8,19 +8,19 @@ directories with issue content, comments, and metadata files.
 
 Usage:
     # Dry run to preview
-    python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --dry-run
+    python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --dry-run
 
     # Process single repo
-    python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --verbose
+    python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --verbose
 
     # Skip existing directories
-    python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --skip-existing
+    python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --skip-existing
 
     # Force update managed files only
-    python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --force
+    python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --force
 
     # Limit number of issues (for testing)
-    python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --limit 5
+    python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --limit 5
 """
 
 import argparse
@@ -37,7 +37,7 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agentos.workflows.requirements.audit import generate_slug
+from assemblyzero.workflows.requirements.audit import generate_slug
 
 
 # =============================================================================

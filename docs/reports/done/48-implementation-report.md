@@ -1,6 +1,6 @@
 # Implementation Report: Issue #48
 
-**Issue:** [AgentOS v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AgentOS/issues/48)
+**Issue:** [AssemblyZero v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AssemblyZero/issues/48)
 **LLD:** [docs/LLDs/active/48-v2-foundation.md](../../LLDs/active/48-v2-foundation.md)
 **Date:** 2026-01-22
 
@@ -10,11 +10,11 @@
 |------|-------------|-------------|
 | `pyproject.toml` | Modified | Added LangGraph/LangChain dependencies, mypy to dev |
 | `poetry.lock` | Modified | Updated lock file with new dependencies |
-| `agentos/__init__.py` | Added | Package root with version |
-| `agentos/core/__init__.py` | Added | Core module, exports AgentState |
-| `agentos/core/state.py` | Added | AgentState TypedDict definition |
-| `agentos/nodes/__init__.py` | Added | Placeholder for future governance nodes |
-| `agentos/graphs/__init__.py` | Added | Placeholder for future workflows |
+| `assemblyzero/__init__.py` | Added | Package root with version |
+| `assemblyzero/core/__init__.py` | Added | Core module, exports AgentState |
+| `assemblyzero/core/state.py` | Added | AgentState TypedDict definition |
+| `assemblyzero/nodes/__init__.py` | Added | Placeholder for future governance nodes |
+| `assemblyzero/graphs/__init__.py` | Added | Placeholder for future workflows |
 
 ## Dependencies Added
 
@@ -79,7 +79,7 @@ None found.
 - Dependencies: Verified - versions match LLD
 - Resource Hygiene: N/A - data structures only, no runtime resources
 - Secrets: None found in pyproject.toml or state.py
-- Permission Scope: Validated - changes within agentos/ only
+- Permission Scope: Validated - changes within assemblyzero/ only
 
 #### Tier 2: HIGH PRIORITY Issues
 

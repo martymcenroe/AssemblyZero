@@ -1,1 +1,1 @@
-"""Test package for AgentOS."""
+"""Test package for AssemblyZero."""

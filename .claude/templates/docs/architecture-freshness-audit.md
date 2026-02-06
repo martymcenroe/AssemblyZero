@@ -118,4 +118,4 @@ grep -E "^\| " docs/0001-architecture.md
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/architecture-freshness-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/architecture-freshness-audit.md*

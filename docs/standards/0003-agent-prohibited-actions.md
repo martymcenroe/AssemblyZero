@@ -120,5 +120,5 @@ When in doubt, ask. It's always better to:
 
 ---
 
-*Source: AgentOS/docs/standards/agent-prohibited-actions.md*
+*Source: AssemblyZero/docs/standards/agent-prohibited-actions.md*
 *Projects may extend with additional project-specific prohibitions.*

@@ -38,11 +38,11 @@ Currently:
 - Work starts (worktree created) but Stage doesn't update to "In Progress"
 - PRs merge but Stage doesn't update to "Done"
 
-The AgentOS workflows already know when these transitions happen but don't communicate them to GitHub Projects.
+The AssemblyZero workflows already know when these transitions happen but don't communicate them to GitHub Projects.
 
 ## Proposed Solution
 
-Integrate `gh project item-edit` calls into existing AgentOS workflow nodes to automatically update the Stage field at key lifecycle events.
+Integrate `gh project item-edit` calls into existing AssemblyZero workflow nodes to automatically update the Stage field at key lifecycle events.
 
 ### Stage Transitions
 
@@ -119,7 +119,7 @@ Based on user feedback, simplify from 5 stages to 4:
 | Repository | GitHub Project |
 |------------|----------------|
 | `martymcenroe/Aletheia` | Aletheia (#1) |
-| `martymcenroe/AgentOS` | Infrastructure (#2) |
+| `martymcenroe/AssemblyZero` | Infrastructure (#2) |
 | `martymcenroe/maintenance` | Infrastructure (#2) |
 | `martymcenroe/unleashed` | Infrastructure (#2) |
 | `martymcenroe/Talos` | Talos (#3) |
@@ -208,7 +208,7 @@ jobs:
           # Update Stage to Done
 ```
 
-**Option B: Post-merge hook in AgentOS**
+**Option B: Post-merge hook in AssemblyZero**
 - Hook into the PR merge detection in existing workflows
 - Call `gh project item-edit` to set Stage to "Done"
 
@@ -232,16 +232,16 @@ Create `tools/project_stage.py`:
 
 Choose between:
 - GitHub Action (runs in CI, needs secrets)
-- AgentOS hook (runs locally, uses existing `gh` auth)
+- AssemblyZero hook (runs locally, uses existing `gh` auth)
 
 ## Configuration
 
-Store project/field mappings in `~/.agentos/project-mappings.json`:
+Store project/field mappings in `~/.assemblyzero/project-mappings.json`:
 
 ```json
 {
   "repos": {
-    "martymcenroe/AgentOS": {
+    "martymcenroe/AssemblyZero": {
       "project_id": "PVT_kwHOABGrz84BOCN9",
       "project_number": 2,
       "stage_field_id": "PVTSSF_lAHOABGrz84BOCN9zg83eCU",
@@ -278,7 +278,7 @@ Or query dynamically via `gh` CLI (slower but always current).
 ## Dependencies
 
 - GitHub CLI (`gh`) with `project` scope
-- Existing AgentOS workflows (`run_issue_workflow.py`, `run_lld_workflow.py`)
+- Existing AssemblyZero workflows (`run_issue_workflow.py`, `run_lld_workflow.py`)
 - Per-repo `.claude/project.json` or global config
 
 ## Open Questions
@@ -341,8 +341,8 @@ MATTERS REQUIRING ATTENTION:
 - [Workflow Personas](../wiki/Workflow-Personas.md) - Lord Vetinari entry
 - GitHub Projects v2 API: https://docs.github.com/en/issues/planning-and-tracking-with-projects
 - `gh project` CLI: https://cli.github.com/manual/gh_project
-- AgentOS issue workflow: `tools/run_issue_workflow.py`
-- AgentOS LLD workflow: `tools/run_lld_workflow.py`
+- AssemblyZero issue workflow: `tools/run_issue_workflow.py`
+- AssemblyZero LLD workflow: `tools/run_lld_workflow.py`
 - *Going Postal* by Terry Pratchett (Vetinari's management style)
 - *Night Watch* by Terry Pratchett (The wall map)
 

@@ -1,4 +1,4 @@
-# AgentOS Command Index
+# AssemblyZero Command Index
 
 **File:** `docs/skills/0600-command-index.md`
 **Version:** 2026-01-14
@@ -88,10 +88,10 @@ Each skill has two documentation files:
 
 | Type | Location |
 |------|----------|
-| Canonical implementations | `AgentOS/.claude/commands/` |
+| Canonical implementations | `AssemblyZero/.claude/commands/` |
 | User-level stubs | `~/.claude/commands/` |
-| CLI tools | `AgentOS/tools/` |
-| This documentation | `AgentOS/docs/skills/` |
+| CLI tools | `AssemblyZero/tools/` |
+| This documentation | `AssemblyZero/docs/skills/` |
 
 ---
 

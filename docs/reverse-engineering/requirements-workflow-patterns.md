@@ -337,8 +337,8 @@ def call_claude_headless(prompt: str, system_prompt: str | None = None) -> str:
 ### Gemini Client Pattern
 
 ```python
-from agentos.core.gemini_client import GeminiClient
-from agentos.core.config import GOVERNANCE_MODEL
+from assemblyzero.core.gemini_client import GeminiClient
+from assemblyzero.core.config import GOVERNANCE_MODEL
 
 client = GeminiClient(model=GOVERNANCE_MODEL)
 result = client.invoke(
@@ -381,7 +381,7 @@ def run_pytest(test_files: list[str], coverage_target: int = 90) -> dict:
     cmd = [
         "pytest",
         *test_files,
-        f"--cov=agentos",
+        f"--cov=assemblyzero",
         f"--cov-fail-under={coverage_target}",
         "--tb=short",
         "-v",
@@ -460,7 +460,7 @@ def node_with_fallback(state):
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pathlib import Path
 
-db_path = Path.home() / ".agentos" / "testing_workflow.db"
+db_path = Path.home() / ".assemblyzero" / "testing_workflow.db"
 db_path.parent.mkdir(parents=True, exist_ok=True)
 
 with SqliteSaver.from_conn_string(str(db_path)) as memory:

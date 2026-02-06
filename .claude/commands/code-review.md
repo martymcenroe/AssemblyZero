@@ -110,7 +110,7 @@ Return findings in format:
 #### Agent 2: CLAUDE.md Compliance (Sonnet)
 
 ```
-Review code changes for AgentOS compliance.
+Review code changes for AssemblyZero compliance.
 
 IMPORTANT: All context is provided below. Do NOT use Read/Grep tools except for CLAUDE.md reference.
 

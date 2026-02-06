@@ -161,7 +161,7 @@ Labels: enhancement, security
 Pick from ideas already in `ideas/active/`:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py --select
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/run_issue_workflow.py --select
 ```
 
 You'll see a numbered list of available ideas:
@@ -183,22 +183,22 @@ After the issue is filed, the idea file is automatically moved to `ideas/done/{i
 
 **Option B: Cross-repo usage**
 
-Run the workflow from AgentOS against a different repository:
+Run the workflow from AssemblyZero against a different repository:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_issue_workflow.py \
   --repo /c/Users/mcwiz/Projects/YourProject --select
 ```
 
-The `--repo` flag specifies the target repository. This is required when running from a different working directory because `poetry run --directory` changes the working directory to AgentOS.
+The `--repo` flag specifies the target repository. This is required when running from a different working directory because `poetry run --directory` changes the working directory to AssemblyZero.
 
 **Option C: Direct path**
 
 Specify any brief file directly:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py --brief /path/to/your-brief.md
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/run_issue_workflow.py --brief /path/to/your-brief.md
 ```
 
 The workflow creates an audit directory at `docs/audit/active/{slug}/` where all artifacts are saved.
@@ -328,7 +328,7 @@ Your choice:
 If VS Code crashes, terminal closes, or you need to continue later:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/run_issue_workflow.py --resume /path/to/your-brief.md
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/run_issue_workflow.py --resume /path/to/your-brief.md
 ```
 
 Or just run with the same `--brief` and choose **[R]esume** when prompted about the existing slug.
@@ -420,7 +420,7 @@ The workflow will pause. Wait for quota reset (~24h) or the orchestrator will ro
 
 ## Related Documents
 
-- [Issue #62](https://github.com/martymcenroe/AgentOS/issues/62) - Governance Workflow StateGraph
+- [Issue #62](https://github.com/martymcenroe/AssemblyZero/issues/62) - Governance Workflow StateGraph
 - [0701c-Issue-Review-Prompt.md](../skills/0701c-Issue-Review-Prompt.md) - Gemini's review prompt
 - [CLAUDE.md](../../CLAUDE.md) - Core rules including Gemini orchestrator protocol
 - [workflow-lessons-learned-1.md](../workflow-lessons-learned-1.md) - Testing lessons from initial implementation

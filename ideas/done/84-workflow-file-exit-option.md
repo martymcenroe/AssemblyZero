@@ -53,7 +53,7 @@ Checking labels...
   ✓ maintenance (creating...)
 
 Filing issue...
-✓ Created: https://github.com/martymcenroe/AgentOS/issues/72
+✓ Created: https://github.com/martymcenroe/AssemblyZero/issues/72
 
 Workflow complete.
 ```
@@ -103,5 +103,5 @@ The draft follows a predictable format:
 ## Related
 
 - Issue #72: Filed manually after workflow exit friction
-- `agentos/workflows/issue/run_issue_workflow.py`: Main entry point
+- `assemblyzero/workflows/issue/run_issue_workflow.py`: Main entry point
 - `tools/backfill_issue_audit.py`: Similar label-checking logic could be shared

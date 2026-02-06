@@ -1,7 +1,7 @@
 # gemini-retry - Prompt Reference
 
 **Tool:** `tools/gemini-retry.py`
-**Issue:** [#11](https://github.com/martymcenroe/AgentOS/issues/11)
+**Issue:** [#11](https://github.com/martymcenroe/AssemblyZero/issues/11)
 
 ## When to Use
 
@@ -18,7 +18,7 @@ Use `gemini-retry.py` when you need to run Gemini 3 Pro reviews and want automat
 
 Agent will use:
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt "Review this LLD for security issues: [content]"
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py --model gemini-3-pro-preview --prompt "Review this LLD for security issues: [content]"
 ```
 
 ### Long Prompt (File-Based)
@@ -38,8 +38,8 @@ Agent will set environment variable:
 GEMINI_RETRY_DEBUG=1 poetry run ... gemini-retry.py ...
 ```
 
-## Integration with AgentOS
+## Integration with AssemblyZero
 
 This tool is called by the `/audit` skill for Gemini reviews. It integrates with:
 - `gemini-rotate.py` for credential management
-- `~/.agentos/gemini-credentials.json` for credential storage
+- `~/.assemblyzero/gemini-credentials.json` for credential storage

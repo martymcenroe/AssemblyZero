@@ -1,6 +1,6 @@
 # Implementation Report: #62 Governance Workflow StateGraph
 
-**Issue:** [#62](https://github.com/martymcenroe/AgentOS/issues/62)
+**Issue:** [#62](https://github.com/martymcenroe/AssemblyZero/issues/62)
 **Branch:** `62-governance-workflow-stategraph`
 **Date:** 2026-01-26
 
@@ -12,19 +12,19 @@ Implemented a LangGraph StateGraph that enforces the issue lifecycle via Inversi
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/__init__.py` | Add | Package init for workflows |
-| `agentos/workflows/issue/__init__.py` | Add | Issue workflow package |
-| `agentos/workflows/issue/state.py` | Add | TypedDict state definition |
-| `agentos/workflows/issue/audit.py` | Add | Audit trail utilities |
-| `agentos/workflows/issue/graph.py` | Add | StateGraph with N0-N6 nodes |
-| `agentos/workflows/issue/nodes/__init__.py` | Add | Nodes package |
-| `agentos/workflows/issue/nodes/load_brief.py` | Add | N0: Load user's brief |
-| `agentos/workflows/issue/nodes/sandbox.py` | Add | N1: Pre-flight checks |
-| `agentos/workflows/issue/nodes/draft.py` | Add | N2: Claude drafting |
-| `agentos/workflows/issue/nodes/human_edit_draft.py` | Add | N3: VS Code post-Claude |
-| `agentos/workflows/issue/nodes/review.py` | Add | N4: Gemini review |
-| `agentos/workflows/issue/nodes/human_edit_verdict.py` | Add | N5: VS Code post-Gemini |
-| `agentos/workflows/issue/nodes/file_issue.py` | Add | N6: gh issue create |
+| `assemblyzero/workflows/__init__.py` | Add | Package init for workflows |
+| `assemblyzero/workflows/issue/__init__.py` | Add | Issue workflow package |
+| `assemblyzero/workflows/issue/state.py` | Add | TypedDict state definition |
+| `assemblyzero/workflows/issue/audit.py` | Add | Audit trail utilities |
+| `assemblyzero/workflows/issue/graph.py` | Add | StateGraph with N0-N6 nodes |
+| `assemblyzero/workflows/issue/nodes/__init__.py` | Add | Nodes package |
+| `assemblyzero/workflows/issue/nodes/load_brief.py` | Add | N0: Load user's brief |
+| `assemblyzero/workflows/issue/nodes/sandbox.py` | Add | N1: Pre-flight checks |
+| `assemblyzero/workflows/issue/nodes/draft.py` | Add | N2: Claude drafting |
+| `assemblyzero/workflows/issue/nodes/human_edit_draft.py` | Add | N3: VS Code post-Claude |
+| `assemblyzero/workflows/issue/nodes/review.py` | Add | N4: Gemini review |
+| `assemblyzero/workflows/issue/nodes/human_edit_verdict.py` | Add | N5: VS Code post-Gemini |
+| `assemblyzero/workflows/issue/nodes/file_issue.py` | Add | N6: gh issue create |
 | `tools/run_issue_workflow.py` | Add | CLI runner |
 | `docs/audit/active/.gitkeep` | Add | Audit directory |
 | `docs/audit/done/.gitkeep` | Add | Audit directory |

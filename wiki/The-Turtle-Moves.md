@@ -29,11 +29,11 @@ No one knows where A'Tuin is going. No one knows why. But the turtle moves.
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
 Every system needs a foundation. Something that just... moves. Something you don't question, you just trust.
 
-For AgentOS, the turtle is **the orchestrator**. The human who provides Intent. The Great God Om riding on the shell of Great A'Tuin, carried through the cosmos by a turtle that simply *moves*.
+For AssemblyZero, the turtle is **the orchestrator**. The human who provides Intent. The Great God Om riding on the shell of Great A'Tuin, carried through the cosmos by a turtle that simply *moves*.
 
 ---
 
@@ -57,7 +57,7 @@ The scientist asked: "What is the tortoise standing on?"
 
 ---
 
-In AgentOS:
+In AssemblyZero:
 - The agents stand on the workflows
 - The workflows stand on the governance
 - The governance stands on the orchestrator

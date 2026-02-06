@@ -14,7 +14,7 @@ Operational runbook for Fix: Implementation Workflow Should Archive LLD and Repo
 
 ## Prerequisites
 
-- Standard AgentOS environment
+- Standard AssemblyZero environment
 - GitHub CLI authenticated (`gh auth status`)
 - Poetry environment active
 
@@ -74,7 +74,7 @@ flowchart TD
 
 ## Implementation Files
 
-- `C:\Users\mcwiz\Projects\AgentOS\agentos\workflows\testing\nodes\finalize.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\testing\nodes\finalize.py`
 
 ---
 

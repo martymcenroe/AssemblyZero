@@ -41,7 +41,7 @@ Create a registry mapping templates to their dependent documents:
 0102-feature-lld-template.md:
   sync_targets:
     - docs/skills/0702c-LLD-Review-Prompt.md
-    - agentos/workflows/testing/nodes/load_lld.py
+    - assemblyzero/workflows/testing/nodes/load_lld.py
   sync_fields:
     - section_numbers:
         - "Test Scenarios": ["Section 10", "Section 11"]

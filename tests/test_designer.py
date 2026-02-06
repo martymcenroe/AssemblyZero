@@ -26,15 +26,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.core.gemini_client import GeminiCallResult, GeminiErrorType
-from agentos.nodes.designer import (
+from assemblyzero.core.gemini_client import GeminiCallResult, GeminiErrorType
+from assemblyzero.nodes.designer import (
     _fetch_github_issue,
     _human_edit_pause,
     _load_generator_instruction,
     _write_draft,
     design_lld_node,
 )
-from agentos.nodes.lld_reviewer import review_lld_node
+from assemblyzero.nodes.lld_reviewer import review_lld_node
 
 
 @pytest.fixture
@@ -96,7 +96,7 @@ class TestIntegrationGhCli:
         """Test fetching a real issue from GitHub."""
         # Issue #1 exists in most repos - use a known issue
         result = subprocess.run(
-            ["gh", "issue", "view", "56", "--repo", "martymcenroe/AgentOS", "--json", "title,body"],
+            ["gh", "issue", "view", "56", "--repo", "martymcenroe/AssemblyZero", "--json", "title,body"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -118,7 +118,7 @@ class TestIntegrationFileSystem:
             temp_path = Path(tmpdir)
             content = "# Test LLD\n\n## Context\nReal file test"
 
-            with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_path):
+            with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_path):
                 draft_path = _write_draft(999, content)
 
             # Verify ACTUAL file exists (not mocked)
@@ -152,7 +152,7 @@ class TestFetchGithubIssue:
 
     def test_020_issue_not_found_returns_error_message(self):
         """Test that non-existent issue raises ValueError with descriptive message."""
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=1,
                 stdout="",
@@ -176,7 +176,7 @@ class TestFetchGithubIssue:
 
     def test_gh_not_installed_gives_helpful_message(self):
         """Test error message helps user when gh CLI not installed."""
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
 
             with pytest.raises(ValueError) as exc_info:
@@ -193,7 +193,7 @@ class TestFetchGithubIssue:
             "body": "Test body content with **markdown**",
         })
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=mock_response,
@@ -215,7 +215,7 @@ class TestFetchGithubIssue:
             "body": "",
         })
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout=mock_response,
@@ -236,7 +236,7 @@ class TestWriteDraft:
         """Test that draft file contains the exact content provided."""
         content = "# Test LLD\n\n## Context\nTest content with special chars: éàü"
 
-        with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+        with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
             draft_path = _write_draft(56, content)
 
         # Verify ACTUAL file state, not mock state
@@ -247,7 +247,7 @@ class TestWriteDraft:
 
     def test_060_draft_path_follows_convention(self, temp_drafts_dir):
         """Test that draft path follows the {issue_id}-LLD.md convention."""
-        with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+        with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
             draft_path = _write_draft(123, "content")
 
         # Verify OUTCOME: path convention is correct
@@ -258,7 +258,7 @@ class TestWriteDraft:
         """Test that missing directories are created."""
         nested_dir = temp_drafts_dir / "deeply" / "nested" / "path"
 
-        with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", nested_dir):
+        with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", nested_dir):
             draft_path = _write_draft(56, "# Test")
 
         # Verify OUTCOME: directory structure exists
@@ -321,17 +321,17 @@ class TestDesignLldNode:
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+            with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.invoke.return_value = mock_gemini_result
                 mock_client_class.return_value = mock_client
-                with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                    with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.ReviewAuditLog"):
+                with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                    with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+                        with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                             with patch("builtins.input", return_value=""):
                                 result = design_lld_node(mock_state)
 
@@ -350,13 +350,13 @@ class TestDesignLldNode:
         """Test that non-existent issue returns FAILED status."""
         mock_state["issue_id"] = 99999
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=1,
                 stdout="",
                 stderr="Could not resolve to an Issue with the number of 99999",
             )
-            with patch("agentos.nodes.designer.ReviewAuditLog"):
+            with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                 result = design_lld_node(mock_state)
 
         # Verify OUTCOME: state indicates failure
@@ -370,16 +370,16 @@ class TestDesignLldNode:
             "body": "Test body",
         })
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+            with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                     mock_client_class.side_effect = ValueError(
                         "Model 'gemini-2.5-flash' is explicitly forbidden"
                     )
-                    with patch("agentos.nodes.designer.ReviewAuditLog"):
+                    with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                         result = design_lld_node(mock_state)
 
         # Verify OUTCOME: state indicates failure
@@ -405,16 +405,16 @@ class TestDesignLldNode:
             model_verified="",
         )
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+            with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.invoke.return_value = mock_gemini_result
                 mock_client_class.return_value = mock_client
-                with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                    with patch("agentos.nodes.designer.ReviewAuditLog"):
+                with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                    with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                         result = design_lld_node(mock_state)
 
         # Verify OUTCOME: state indicates failure
@@ -427,13 +427,13 @@ class TestDesignLldNode:
             "body": "Test body",
         })
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer._load_generator_instruction") as mock_load:
+            with patch("assemblyzero.nodes.designer._load_generator_instruction") as mock_load:
                 mock_load.side_effect = FileNotFoundError("Generator prompt not found")
-                with patch("agentos.nodes.designer.ReviewAuditLog"):
+                with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                     result = design_lld_node(mock_state)
 
         # Verify OUTCOME: state indicates failure
@@ -459,17 +459,17 @@ class TestDesignLldNode:
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+            with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.invoke.return_value = mock_gemini_result
                 mock_client_class.return_value = mock_client
-                with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                    with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
+                with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                    with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+                        with patch("assemblyzero.nodes.designer.ReviewAuditLog") as mock_log_class:
                             mock_log = MagicMock()
                             mock_log_class.return_value = mock_log
                             with patch("builtins.input", return_value=""):
@@ -506,17 +506,17 @@ class TestDesignLldNode:
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout=mock_issue_response, stderr=""
             )
-            with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+            with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.invoke.return_value = mock_gemini_result
                 mock_client_class.return_value = mock_client
-                with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                    with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.ReviewAuditLog") as mock_log_class:
+                with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                    with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+                        with patch("assemblyzero.nodes.designer.ReviewAuditLog") as mock_log_class:
                             mock_log = MagicMock()
                             mock_log_class.return_value = mock_log
                             with patch("builtins.input", return_value=""):
@@ -545,14 +545,14 @@ class TestDesignLldNode:
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.designer.subprocess.run") as mock_run:
-            with patch("agentos.nodes.designer.GeminiClient") as mock_client_class:
+        with patch("assemblyzero.nodes.designer.subprocess.run") as mock_run:
+            with patch("assemblyzero.nodes.designer.GeminiClient") as mock_client_class:
                 mock_client = MagicMock()
                 mock_client.invoke.return_value = mock_gemini_result
                 mock_client_class.return_value = mock_client
-                with patch("agentos.nodes.designer._load_generator_instruction", return_value="System instruction"):
-                    with patch("agentos.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
-                        with patch("agentos.nodes.designer.ReviewAuditLog"):
+                with patch("assemblyzero.nodes.designer._load_generator_instruction", return_value="System instruction"):
+                    with patch("assemblyzero.nodes.designer.LLD_DRAFTS_DIR", temp_drafts_dir):
+                        with patch("assemblyzero.nodes.designer.ReviewAuditLog"):
                             with patch("builtins.input", return_value=""):
                                 result = design_lld_node(mock_state)
 
@@ -597,12 +597,12 @@ class TestGovernanceReadsFromDisk:
             model_verified="gemini-3-pro-preview",
         )
 
-        with patch("agentos.nodes.lld_reviewer.GeminiClient") as mock_client_class:
+        with patch("assemblyzero.nodes.lld_reviewer.GeminiClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.invoke.return_value = mock_result
             mock_client_class.return_value = mock_client
-            with patch("agentos.nodes.lld_reviewer._load_system_instruction", return_value="System instruction"):
-                with patch("agentos.nodes.lld_reviewer.ReviewAuditLog"):
+            with patch("assemblyzero.nodes.lld_reviewer._load_system_instruction", return_value="System instruction"):
+                with patch("assemblyzero.nodes.lld_reviewer.ReviewAuditLog"):
                     review_lld_node(state)
 
         # Verify OUTCOME: Gemini was called with the EDITED content from disk

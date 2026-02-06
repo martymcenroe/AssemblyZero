@@ -65,12 +65,12 @@ graph TD
 
 ### Why Worktrees?
 
-Multiple agents work on AgentOS simultaneously. Direct commits to main would cause conflicts and corruption.
+Multiple agents work on AssemblyZero simultaneously. Direct commits to main would cause conflicts and corruption.
 
 ```bash
 # Create worktree for issue #123
-git worktree add ../AgentOS-123 -b 123-feature-name
-cd ../AgentOS-123
+git worktree add ../AssemblyZero-123 -b 123-feature-name
+cd ../AssemblyZero-123
 poetry install
 ```
 
@@ -252,10 +252,10 @@ After PR merge:
 
 ```bash
 # 1. Archive lineage
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-123 --issue 123
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-123 --issue 123
 
 # 2. Remove worktree
-git worktree remove ../AgentOS-123
+git worktree remove ../AssemblyZero-123
 
 # 3. Delete branches
 git branch -d 123-feature-name

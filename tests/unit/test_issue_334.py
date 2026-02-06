@@ -21,7 +21,7 @@ class TestNormalizeChangeType:
 
     def test_add_directory_returns_add_with_flag(self):
         """'Add (Directory)' normalizes to ('add', True)."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -31,7 +31,7 @@ class TestNormalizeChangeType:
 
     def test_plain_add_returns_add_no_flag(self):
         """'Add' normalizes to ('add', False)."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -41,7 +41,7 @@ class TestNormalizeChangeType:
 
     def test_modify_returns_modify_no_flag(self):
         """'Modify' normalizes to ('modify', False)."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -51,7 +51,7 @@ class TestNormalizeChangeType:
 
     def test_delete_returns_delete_no_flag(self):
         """'Delete' normalizes to ('delete', False)."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -61,7 +61,7 @@ class TestNormalizeChangeType:
 
     def test_case_insensitive(self):
         """Normalization is case-insensitive."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -76,7 +76,7 @@ class TestNormalizeChangeType:
 
     def test_create_directory_also_works(self):
         """'Create (Directory)' also normalizes correctly."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             normalize_change_type,
         )
 
@@ -95,7 +95,7 @@ class TestDirectoryEntriesNotSkipped:
 
     def test_parse_files_includes_directory_entries(self):
         """parse_files_changed_table includes directory entries."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             parse_files_changed_table,
         )
 
@@ -128,7 +128,7 @@ class TestValidationErrorsPrinted:
 
     def test_route_after_validate_prints_errors(self, capsys):
         """route_after_validate prints validation errors when BLOCKED."""
-        from agentos.workflows.requirements.graph import route_after_validate_mechanical
+        from assemblyzero.workflows.requirements.graph import route_after_validate_mechanical
 
         state = {
             "lld_status": "BLOCKED",
@@ -148,7 +148,7 @@ class TestValidationErrorsPrinted:
 
     def test_route_prints_truncated_if_many_errors(self, capsys):
         """If many errors, only first N are printed."""
-        from agentos.workflows.requirements.graph import route_after_validate_mechanical
+        from assemblyzero.workflows.requirements.graph import route_after_validate_mechanical
 
         state = {
             "lld_status": "BLOCKED",
@@ -175,7 +175,7 @@ class TestValidationErrorsSavedToLineage:
 
     def test_validation_errors_saved_to_file(self, tmp_path):
         """Validation errors are saved to lineage audit folder."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_lld_mechanical,
         )
 

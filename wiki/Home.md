@@ -1,4 +1,4 @@
-# AgentOS
+# AssemblyZero
 
 ## Multi-Agent Orchestration Platform for Enterprise AI Development
 
@@ -37,7 +37,7 @@ graph TD
 
 ## Production Evidence: 207 Issues, 159 Closed
 
-AgentOS isn't theoretical. It's been battle-tested through **207 issues** (159 closed, 48 open) in 27 days:
+AssemblyZero isn't theoretical. It's been battle-tested through **207 issues** (159 closed, 48 open) in 27 days:
 
 **[View Full Metrics Dashboard →](Metrics)**
 
@@ -82,7 +82,7 @@ Organizations run pilots. Developers love the tools. Then adoption plateaus at 1
 
 ## The Solution
 
-AgentOS provides that infrastructure layer:
+AssemblyZero provides that infrastructure layer:
 
 | Capability | What It Does | Enterprise Value |
 |------------|--------------|------------------|
@@ -98,7 +98,7 @@ AgentOS provides that infrastructure layer:
 ## For Different Audiences
 
 ### Engineering Leaders
-- [Why AgentOS?](For-Enterprise-Leaders-Why-AgentOS) - Business case, ROI, adoption strategy
+- [Why AssemblyZero?](For-Enterprise-Leaders-Why-AssemblyZero) - Business case, ROI, adoption strategy
 - [Measuring Productivity](Measuring-Productivity) - KPIs, dashboards, metrics that matter
 - [Security & Compliance](Security-Compliance) - What security teams need to approve
 
@@ -106,7 +106,7 @@ AgentOS provides that infrastructure layer:
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration) - **The headline feature**
 - [Gemini Verification](Gemini-Verification) - Claude + Gemini architecture
 - [LangGraph Evolution](LangGraph-Evolution) - **The roadmap** (state machines, checkpointing)
-- [How the AgentOS Learns](How-the-AgentOS-Learns) - Self-improving governance feedback loop
+- [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Self-improving governance feedback loop
 
 ### Developers
 - [Quick Start](Quick-Start) - 5-minute setup
@@ -121,7 +121,7 @@ AgentOS provides that infrastructure layer:
 
 ## Core Workflows
 
-AgentOS implements two primary governed workflows:
+AssemblyZero implements two primary governed workflows:
 
 ### Requirements Workflow
 ```mermaid
@@ -171,7 +171,7 @@ Code is reviewed by Gemini before PR creation. [Learn more](Implementation-Workf
 
 ## Roadmap: LangGraph Evolution
 
-AgentOS is **production-ready today** with prompt-based orchestration. The roadmap transforms it into an enterprise-grade state machine platform:
+AssemblyZero is **production-ready today** with prompt-based orchestration. The roadmap transforms it into an enterprise-grade state machine platform:
 
 | Timeline | Milestone | Impact |
 |----------|-----------|--------|
@@ -192,7 +192,7 @@ Claude builds code. Gemini reviews it. This isn't just "two models" - it's adver
 We obsess over permission friction because it's the #1 adoption killer. Our friction logging protocol (Zugzwang) identifies patterns, and our tools auto-remediate them. [Learn more](Permission-Friction)
 
 ### 3. Self-Improving Governance
-The system learns from Gemini verdicts to improve templates automatically. 164 verdicts analyzed, 6 template sections added. [Learn more](How-the-AgentOS-Learns)
+The system learns from Gemini verdicts to improve templates automatically. 164 verdicts analyzed, 6 template sections added. [Learn more](How-the-AssemblyZero-Learns)
 
 ### 4. Discworld Personas
 Every workflow has a [Discworld character](Dramatis-Personae) defining its philosophy. This isn't whimsy - it's intuitive system design. Vimes guards (regression tests), Lu-Tze sweeps (janitor), Brutha remembers (RAG).

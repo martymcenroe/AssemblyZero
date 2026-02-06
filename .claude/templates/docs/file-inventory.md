@@ -54,4 +54,4 @@
 
 ---
 
-*Generated from template: AgentOS/.claude/templates/docs/file-inventory.md*
+*Generated from template: AssemblyZero/.claude/templates/docs/file-inventory.md*

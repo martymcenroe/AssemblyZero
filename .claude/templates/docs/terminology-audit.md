@@ -109,4 +109,4 @@ Check for these common patterns:
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/terminology-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/terminology-audit.md*

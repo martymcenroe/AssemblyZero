@@ -184,4 +184,4 @@ Run this audit:
 
 ---
 
-*Template source: AgentOS/.claude/templates/docs/dependabot-audit.md*
+*Template source: AssemblyZero/.claude/templates/docs/dependabot-audit.md*

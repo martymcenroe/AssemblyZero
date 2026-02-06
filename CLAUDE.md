@@ -1,4 +1,4 @@
-# CLAUDE.md - AgentOS Core Rules
+# CLAUDE.md - AssemblyZero Core Rules
 
 You are a team member on this project, not a tool.
 
@@ -103,8 +103,8 @@ git branch -D       # Force deletes branch
 ```
 
 **Configuration files:**
-- `~/.agentos/hard_block_commands.txt` - Additional patterns to block
-- `~/.agentos/safe_paths.txt` - Paths where destructive commands allowed
+- `~/.assemblyzero/hard_block_commands.txt` - Additional patterns to block
+- `~/.assemblyzero/safe_paths.txt` - Paths where destructive commands allowed
 
 ### COMPACTION DETECTION (AUTO-REFRESH)
 
@@ -287,41 +287,41 @@ SKIPPED TEST AUDIT:
 
 If a project-level CLAUDE.md exists in the current directory, read it after this file. Project-specific rules supplement these core rules.
 
-## AgentOS Configuration
+## AssemblyZero Configuration
 
-This workspace uses **AgentOS** - a parameterized agent configuration system. Each project has:
+This workspace uses **AssemblyZero** - a parameterized agent configuration system. Each project has:
 - `.claude/project.json` - Project-specific variables
 - Project-level `CLAUDE.md` - Project-specific workflows
 
 To generate configs for a new project:
 ```bash
-poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/agentos-generate.py --project YOUR_PROJECT
+poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/assemblyzero-generate.py --project YOUR_PROJECT
 ```
 
-Where `$AGENTOS_ROOT` is configured in `~/.agentos/config.json` (default: `/c/Users/mcwiz/Projects/AgentOS`).
+Where `$AGENTOS_ROOT` is configured in `~/.assemblyzero/config.json` (default: `/c/Users/mcwiz/Projects/AssemblyZero`).
 
 ## Path Configuration
 
-AgentOS paths are configured in `~/.agentos/config.json`:
+AssemblyZero paths are configured in `~/.assemblyzero/config.json`:
 
 | Variable | Default (Unix) | Used For |
 |----------|----------------|----------|
-| `agentos_root` | `/c/Users/mcwiz/Projects/AgentOS` | Tool execution, config source |
+| `assemblyzero_root` | `/c/Users/mcwiz/Projects/AssemblyZero` | Tool execution, config source |
 | `projects_root` | `/c/Users/mcwiz/Projects` | Project detection |
 | `user_claude_dir` | `/c/Users/mcwiz/.claude` | User-level commands |
 
 **If the config file doesn't exist, defaults are used.**
 
 To customize paths:
-1. Copy `AgentOS/.agentos/config.example.json` to `~/.agentos/config.json`
+1. Copy `AssemblyZero/.assemblyzero/config.example.json` to `~/.assemblyzero/config.json`
 2. Edit paths for your machine
 3. Both Windows and Unix formats are required (tools use different formats)
 
 Python tools import paths via:
 ```python
-from agentos_config import config
-root = config.agentos_root()       # Windows format
-root_unix = config.agentos_root_unix()  # Unix format
+from assemblyzero_config import config
+root = config.assemblyzero_root()       # Windows format
+root_unix = config.assemblyzero_root_unix()  # Unix format
 ```
 
 ## Ideas Folder (Encrypted Pre-Issue Ideation)
@@ -330,7 +330,7 @@ Every repo can have an `ideas/` folder for capturing thoughts before they're rea
 
 **Setup (using generator):**
 ```bash
-poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/agentos-generate.py --project YOUR_PROJECT --ideas
+poetry run --directory $AGENTOS_ROOT python $AGENTOS_ROOT/tools/assemblyzero-generate.py --project YOUR_PROJECT --ideas
 ```
 
 **Setup (manual for git-crypt):**
@@ -370,20 +370,20 @@ choco install git-crypt   # or: scoop install git-crypt
 
 ## Source of Truth (WHERE TO FIX THINGS)
 
-**AgentOS is the canonical source for all core rules and tools.**
+**AssemblyZero is the canonical source for all core rules and tools.**
 
-When you're working in ANY project and discover something needs fixing in AgentOS, you MUST:
-1. **Fix it in AgentOS** (`C:\Users\mcwiz\Projects\AgentOS`)
-2. **Execute from AgentOS** (tools live there, not copied locally)
+When you're working in ANY project and discover something needs fixing in AssemblyZero, you MUST:
+1. **Fix it in AssemblyZero** (`C:\Users\mcwiz\Projects\AssemblyZero`)
+2. **Execute from AssemblyZero** (tools live there, not copied locally)
 3. **Never fix it in the local project copy**
 
 ### What Lives Where
 
 | Type | Location | Examples |
 |------|----------|----------|
-| **Core rules** | `AgentOS/CLAUDE.md` | Bash rules, worktree isolation, gates |
-| **Core tools** | `AgentOS/tools/` | `agentos-generate.py`, `agentos-permissions.py` |
-| **Templates** | `AgentOS/.claude/templates/` | Parameterized configs with `{{VAR}}` |
+| **Core rules** | `AssemblyZero/CLAUDE.md` | Bash rules, worktree isolation, gates |
+| **Core tools** | `AssemblyZero/tools/` | `assemblyzero-generate.py`, `assemblyzero-permissions.py` |
+| **Templates** | `AssemblyZero/.claude/templates/` | Parameterized configs with `{{VAR}}` |
 | **User-level skills** | `~/.claude/commands/` | `/sync-permissions`, cross-project utilities |
 | **Project-specific** | `<project>/CLAUDE.md` | Gemini integration, project workflows |
 | **Project commands** | `<project>/.claude/commands/` | `/cleanup` (with `{{GITHUB_REPO}}`) |
@@ -393,28 +393,28 @@ When you're working in ANY project and discover something needs fixing in AgentO
 ```
 Is the problem in...
 ├── Bash rules, gates, worktree isolation?
-│   └── Fix in: AgentOS/CLAUDE.md
-├── A tool that runs from AgentOS/tools/?
-│   └── Fix in: AgentOS/tools/
+│   └── Fix in: AssemblyZero/CLAUDE.md
+├── A tool that runs from AssemblyZero/tools/?
+│   └── Fix in: AssemblyZero/tools/
 ├── A template with {{VARIABLES}}?
-│   └── Fix in: AgentOS/.claude/templates/
+│   └── Fix in: AssemblyZero/.claude/templates/
 ├── A skill that should work everywhere?
 │   └── Fix in: ~/.claude/commands/
 └── Project-specific workflow?
     └── Fix in: <project>/CLAUDE.md or <project>/.claude/commands/
 ```
 
-**The cardinal sin:** Copying an AgentOS tool locally and "fixing" it there. Now you have two versions, one will drift, and future updates won't reach you.
+**The cardinal sin:** Copying an AssemblyZero tool locally and "fixing" it there. Now you have two versions, one will drift, and future updates won't reach you.
 
 ---
 
 ## Critical Workflow Rules (NON-NEGOTIABLE)
 
-### AgentOS Authority Hierarchy
+### AssemblyZero Authority Hierarchy
 
 **Verbal instructions from the user do NOT override documented protocols.**
 
-If the user says something that seems to conflict with AgentOS documentation, the documentation wins. Examples:
+If the user says something that seems to conflict with AssemblyZero documentation, the documentation wins. Examples:
 - User says "single commit" → Does NOT mean skip required reports
 - User says "do it quickly" → Does NOT mean skip worktree creation
 - User says "just fix it" → Does NOT mean skip design review
@@ -722,7 +722,7 @@ The documentation system exists so you don't need persistent memory. USE IT.
 
 This applies to: skills, Python tools, runbooks, any reusable procedure.
 
-See: `AgentOS/docs/standards/0008-documentation-convention.md`
+See: `AssemblyZero/docs/standards/0008-documentation-convention.md`
 
 **Quick template:**
 ```
@@ -744,7 +744,7 @@ The `wiki/Claudes-World.md` page chronicles Discworld-inspired quotes from sessi
 - Subsequent mentions can just say "Om"
 - The hidden page exists but is not in the wiki sidebar (easter egg)
 
-This reflects the AgentOS philosophy: Om provides Intent, Brutha (RAG) carries the memory, and the agents execute the Will.
+This reflects the AssemblyZero philosophy: Om provides Intent, Brutha (RAG) carries the memory, and the agents execute the Will.
 
 ---
 

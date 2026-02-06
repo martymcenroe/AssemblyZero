@@ -1,4 +1,4 @@
-# Implementation Review Request: Issue #48 - AgentOS v2 Foundation
+# Implementation Review Request: Issue #48 - AssemblyZero v2 Foundation
 
 REVIEW THE FOLLOWING IMPLEMENTATION ONLY. DO NOT SEARCH FOR OTHER FILES.
 
@@ -19,7 +19,7 @@ You are a Senior Software Architect performing a strict gatekeeper review before
 ```markdown
 # Implementation Report: Issue #48
 
-**Issue:** [AgentOS v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AgentOS/issues/48)
+**Issue:** [AssemblyZero v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AssemblyZero/issues/48)
 **LLD:** [docs/LLDs/active/48-v2-foundation.md](../../LLDs/active/48-v2-foundation.md)
 **Date:** 2026-01-22
 
@@ -29,11 +29,11 @@ You are a Senior Software Architect performing a strict gatekeeper review before
 |------|-------------|-------------|
 | `pyproject.toml` | Modified | Added LangGraph/LangChain dependencies, mypy to dev |
 | `poetry.lock` | Modified | Updated lock file with new dependencies |
-| `agentos/__init__.py` | Added | Package root with version |
-| `agentos/core/__init__.py` | Added | Core module, exports AgentState |
-| `agentos/core/state.py` | Added | AgentState TypedDict definition |
-| `agentos/nodes/__init__.py` | Added | Placeholder for future governance nodes |
-| `agentos/graphs/__init__.py` | Added | Placeholder for future workflows |
+| `assemblyzero/__init__.py` | Added | Package root with version |
+| `assemblyzero/core/__init__.py` | Added | Core module, exports AgentState |
+| `assemblyzero/core/state.py` | Added | AgentState TypedDict definition |
+| `assemblyzero/nodes/__init__.py` | Added | Placeholder for future governance nodes |
+| `assemblyzero/graphs/__init__.py` | Added | Placeholder for future workflows |
 
 ## Dependencies Added
 
@@ -77,7 +77,7 @@ None. Implementation matches LLD exactly.
 ```markdown
 # Test Report: Issue #48
 
-**Issue:** [AgentOS v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AgentOS/issues/48)
+**Issue:** [AssemblyZero v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AssemblyZero/issues/48)
 **Date:** 2026-01-22
 
 ## Test Scenarios Executed
@@ -93,7 +93,7 @@ None. Implementation matches LLD exactly.
 ### Test 010: Import Test
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-48 python -c "from agentos.core.state import AgentState; print('OK')"
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-48 python -c "from assemblyzero.core.state import AgentState; print('OK')"
 ```
 
 **Output:**
@@ -108,7 +108,7 @@ C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.1
 ### Test 020: mypy Type Check
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-48 mypy /c/Users/mcwiz/Projects/AgentOS-48/agentos
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-48 mypy /c/Users/mcwiz/Projects/AssemblyZero-48/assemblyzero
 ```
 
 **Output:**
@@ -121,8 +121,8 @@ Success: no issues found in 5 source files
 ### Test 030: Poetry Install
 
 ```bash
-poetry lock --directory /c/Users/mcwiz/Projects/AgentOS-48
-poetry install --directory /c/Users/mcwiz/Projects/AgentOS-48
+poetry lock --directory /c/Users/mcwiz/Projects/AssemblyZero-48
+poetry install --directory /c/Users/mcwiz/Projects/AssemblyZero-48
 ```
 
 **Output:**
@@ -159,33 +159,33 @@ All 3 test scenarios from LLD Section 12 passed. The implementation is ready for
 ## Code Diff
 
 ```diff
-diff --git a/agentos/__init__.py b/agentos/__init__.py
+diff --git a/assemblyzero/__init__.py b/assemblyzero/__init__.py
 new file mode 100644
 index 0000000..845b89c
 --- /dev/null
-+++ b/agentos/__init__.py
++++ b/assemblyzero/__init__.py
 @@ -0,0 +1,3 @@
-+"""AgentOS - LangGraph-based agent orchestration with programmatic governance."""
++"""AssemblyZero - LangGraph-based agent orchestration with programmatic governance."""
 +
 +__version__ = "0.1.0"
-diff --git a/agentos/core/__init__.py b/agentos/core/__init__.py
+diff --git a/assemblyzero/core/__init__.py b/assemblyzero/core/__init__.py
 new file mode 100644
 index 0000000..cab7105
 --- /dev/null
-+++ b/agentos/core/__init__.py
++++ b/assemblyzero/core/__init__.py
 @@ -0,0 +1,5 @@
-+"""Core components for AgentOS state management."""
++"""Core components for AssemblyZero state management."""
 +
-+from agentos.core.state import AgentState
++from assemblyzero.core.state import AgentState
 +
 +__all__ = ["AgentState"]
-diff --git a/agentos/core/state.py b/agentos/core/state.py
+diff --git a/assemblyzero/core/state.py b/assemblyzero/core/state.py
 new file mode 100644
 index 0000000..f3e4ded
 --- /dev/null
-+++ b/agentos/core/state.py
++++ b/assemblyzero/core/state.py
 @@ -0,0 +1,41 @@
-+"""Core state definition for AgentOS LangGraph workflows.
++"""Core state definition for AssemblyZero LangGraph workflows.
 +
 +This module defines the AgentState TypedDict that travels through
 +the governance pipeline: Issue -> LLD Review -> Implementation -> Code Review -> Merge
@@ -198,7 +198,7 @@ index 0000000..f3e4ded
 +
 +
 +class AgentState(TypedDict):
-+    """Core state shared across all AgentOS LangGraph nodes.
++    """Core state shared across all AssemblyZero LangGraph nodes.
 +
 +    Attributes:
 +        messages: Standard LangGraph message accumulator with add_messages annotation.
@@ -226,20 +226,20 @@ index 0000000..f3e4ded
 +
 +    # Safety: loop prevention
 +    iteration_count: int
-diff --git a/agentos/graphs/__init__.py b/agentos/graphs/__init__.py
+diff --git a/assemblyzero/graphs/__init__.py b/assemblyzero/graphs/__init__.py
 new file mode 100644
 index 0000000..84e81fd
 --- /dev/null
-+++ b/agentos/graphs/__init__.py
++++ b/assemblyzero/graphs/__init__.py
 @@ -0,0 +1 @@
-+"""Compiled LangGraph workflows for AgentOS governance."""
-diff --git a/agentos/nodes/__init__.py b/agentos/nodes/__init__.py
++"""Compiled LangGraph workflows for AssemblyZero governance."""
+diff --git a/assemblyzero/nodes/__init__.py b/assemblyzero/nodes/__init__.py
 new file mode 100644
 index 0000000..c4fdf0a
 --- /dev/null
-+++ b/agentos/nodes/__init__.py
++++ b/assemblyzero/nodes/__init__.py
 @@ -0,0 +1 @@
-+"""Governance nodes for AgentOS LangGraph workflows."""
++"""Governance nodes for AssemblyZero LangGraph workflows."""
 diff --git a/pyproject.toml b/pyproject.toml
 index f2eefe3..cd99886 100644
 --- a/pyproject.toml
@@ -288,7 +288,7 @@ Verify:
 Respond with this exact structure:
 
 ```markdown
-# Implementation Review: #48-AgentOS-v2-Foundation
+# Implementation Review: #48-AssemblyZero-v2-Foundation
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect.

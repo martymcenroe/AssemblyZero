@@ -125,4 +125,4 @@ Implementation:
 - ADR 0205 - Test-First Philosophy
 - Issue #101 - Test Plan Reviewer
 - Issue #102 - TDD Initialization
-- `agentos/workflows/testing/` - Implementation
+- `assemblyzero/workflows/testing/` - Implementation

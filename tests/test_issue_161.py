@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from agentos.workflows.requirements.nodes.load_input import _load_issue
-from agentos.workflows.requirements.nodes.finalize import _finalize_issue
+from assemblyzero.workflows.requirements.nodes.load_input import _load_issue
+from assemblyzero.workflows.requirements.nodes.finalize import _finalize_issue
 
 
 # Fixtures for mocking
@@ -53,8 +53,8 @@ def test_005():
     """
     # TDD: Arrange
     changed_files = [
-        "agentos/workflows/requirements/nodes/load_input.py",
-        "agentos/workflows/requirements/nodes/finalize.py",
+        "assemblyzero/workflows/requirements/nodes/load_input.py",
+        "assemblyzero/workflows/requirements/nodes/finalize.py",
         "tools/run_requirements_workflow.py",
     ]
 
@@ -81,9 +81,9 @@ def test_010(mock_subprocess_run, mock_state):
     })
     mock_subprocess_run.return_value = mock_result
 
-    with patch("agentos.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
-         patch("agentos.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
-         patch("agentos.workflows.requirements.nodes.load_input.save_audit_file"):
+    with patch("assemblyzero.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.save_audit_file"):
         mock_audit_dir.return_value = Path("/tmp/audit")
         mock_file_num.return_value = 1
 
@@ -110,8 +110,8 @@ def test_020(mock_subprocess_run, mock_state):
     mock_result.stdout = "https://github.com/owner/repo/issues/161"
     mock_subprocess_run.return_value = mock_result
 
-    with patch("agentos.workflows.requirements.nodes.finalize.next_file_number") as mock_file_num, \
-         patch("agentos.workflows.requirements.nodes.finalize.save_audit_file"):
+    with patch("assemblyzero.workflows.requirements.nodes.finalize.next_file_number") as mock_file_num, \
+         patch("assemblyzero.workflows.requirements.nodes.finalize.save_audit_file"):
         mock_file_num.return_value = 1
         mock_state["audit_dir"] = str(Path("/tmp/audit"))
         Path(mock_state["audit_dir"]).mkdir(parents=True, exist_ok=True)
@@ -145,9 +145,9 @@ def test_030(mock_subprocess_run, mock_state):
     })
     mock_subprocess_run.return_value = mock_result
 
-    with patch("agentos.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
-         patch("agentos.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
-         patch("agentos.workflows.requirements.nodes.load_input.save_audit_file"):
+    with patch("assemblyzero.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.save_audit_file"):
         mock_audit_dir.return_value = Path("/tmp/audit")
         mock_file_num.return_value = 1
 
@@ -175,9 +175,9 @@ def test_040(mock_subprocess_run, mock_state):
     })
     mock_subprocess_run.return_value = mock_result
 
-    with patch("agentos.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
-         patch("agentos.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
-         patch("agentos.workflows.requirements.nodes.load_input.save_audit_file"):
+    with patch("assemblyzero.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.save_audit_file"):
         mock_audit_dir.return_value = Path("/tmp/audit")
         mock_file_num.return_value = 1
 
@@ -206,9 +206,9 @@ def test_050(mock_subprocess_run, mock_state):
     })
     mock_subprocess_run.return_value = mock_result
 
-    with patch("agentos.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
-         patch("agentos.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
-         patch("agentos.workflows.requirements.nodes.load_input.save_audit_file"):
+    with patch("assemblyzero.workflows.requirements.nodes.load_input.create_audit_dir") as mock_audit_dir, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.next_file_number") as mock_file_num, \
+         patch("assemblyzero.workflows.requirements.nodes.load_input.save_audit_file"):
         mock_audit_dir.return_value = Path("/tmp/audit")
         mock_file_num.return_value = 1
 

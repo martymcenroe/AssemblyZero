@@ -37,7 +37,7 @@
 Reload rules only - for post-compact or resumed sessions.
 
 **What it reads:**
-- `AgentOS/CLAUDE.md` - core rules (bash constraints, worktree isolation)
+- `AssemblyZero/CLAUDE.md` - core rules (bash constraints, worktree isolation)
 - `Projects/CLAUDE.md` - root rules
 - Project `CLAUDE.md` - project-specific rules
 - `settings.local.json` - current permissions (optional scan)
@@ -74,7 +74,7 @@ Comprehensive onboarding for complex work.
 
 | Check | Refresh | Quick | Full |
 |-------|:-------:|:-----:|:----:|
-| AgentOS CLAUDE.md | YES | | |
+| AssemblyZero CLAUDE.md | YES | | |
 | Projects CLAUDE.md | YES | | |
 | Project CLAUDE.md | YES | YES | YES |
 | settings.local.json | optional | | |
@@ -92,9 +92,9 @@ Comprehensive onboarding for complex work.
 ```
 User: /onboard --quick
 
-Claude: Quick onboarding for AgentOS...
+Claude: Quick onboarding for AssemblyZero...
 
-## Project: AgentOS
+## Project: AssemblyZero
 **Type:** Agent configuration system
 **Status:** Active development
 
@@ -113,11 +113,11 @@ Ready to assist. What would you like to work on?
 
 ## Fallback for Unknown Projects
 
-If project lacks AgentOS documentation:
+If project lacks AssemblyZero documentation:
 1. Reads CLAUDE.md (if exists)
 2. Reads README.md
 3. Lists top-level directories
-4. Reports: "Minimal onboarding - no AgentOS docs found"
+4. Reports: "Minimal onboarding - no AssemblyZero docs found"
 
 ---
 
@@ -125,7 +125,7 @@ If project lacks AgentOS documentation:
 
 ### "No CLAUDE.md found"
 
-The project may not use AgentOS conventions. Claude will fall back to README.md.
+The project may not use AssemblyZero conventions. Claude will fall back to README.md.
 
 ### Onboard seems outdated
 
@@ -147,5 +147,5 @@ poetry run python tools/generate_onboard_digest.py
 
 ## Source of Truth
 
-**Skill definition:** `AgentOS/.claude/commands/onboard.md`
+**Skill definition:** `AssemblyZero/.claude/commands/onboard.md`
 **User stub:** `~/.claude/commands/onboard.md`

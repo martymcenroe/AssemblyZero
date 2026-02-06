@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live audit viewer for AgentOS governance log.
+"""Live audit viewer for AssemblyZero governance log.
 
 Usage:
     python tools/view_audit.py [--tail N] [--live|--follow]
@@ -19,8 +19,8 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agentos.core.audit import GovernanceAuditLog, GovernanceLogEntry
-from agentos.core.config import DEFAULT_AUDIT_LOG_PATH
+from assemblyzero.core.audit import GovernanceAuditLog, GovernanceLogEntry
+from assemblyzero.core.config import DEFAULT_AUDIT_LOG_PATH
 
 
 def format_timestamp(iso_timestamp: str) -> str:
@@ -181,7 +181,7 @@ def watch_live(log_path: Path, verbose: bool = False) -> None:
 def main() -> None:
     """CLI entry point for audit viewer."""
     parser = argparse.ArgumentParser(
-        description="View AgentOS governance audit log",
+        description="View AssemblyZero governance audit log",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

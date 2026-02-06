@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 # Import will fail until implementation exists - that's expected for TDD
 try:
-    from agentos.workflows.requirements.nodes.validate_mechanical import (
+    from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
         validate_lld_mechanical,
         validate_mandatory_sections,
         parse_files_changed_table,
@@ -44,14 +44,14 @@ except ImportError:
 def mock_repo(tmp_path):
     """Create a mock repository structure for path validation tests."""
     # Create directories
-    (tmp_path / "agentos" / "workflows" / "requirements" / "nodes").mkdir(parents=True)
+    (tmp_path / "assemblyzero" / "workflows" / "requirements" / "nodes").mkdir(parents=True)
     (tmp_path / "tests" / "unit").mkdir(parents=True)
     (tmp_path / "docs" / "templates").mkdir(parents=True)
 
     # Create some existing files
-    (tmp_path / "agentos" / "workflows" / "requirements" / "nodes" / "finalize.py").write_text("# existing")
-    (tmp_path / "agentos" / "workflows" / "requirements" / "graph.py").write_text("# existing")
-    (tmp_path / "agentos" / "workflows" / "requirements" / "state.py").write_text("# existing")
+    (tmp_path / "assemblyzero" / "workflows" / "requirements" / "nodes" / "finalize.py").write_text("# existing")
+    (tmp_path / "assemblyzero" / "workflows" / "requirements" / "graph.py").write_text("# existing")
+    (tmp_path / "assemblyzero" / "workflows" / "requirements" / "state.py").write_text("# existing")
 
     return tmp_path
 
@@ -68,9 +68,9 @@ Test objective.
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/nodes/validate_mechanical.py` | Add | New validation node |
-| `agentos/workflows/requirements/graph.py` | Modify | Insert validation node |
-| `agentos/workflows/requirements/state.py` | Modify | Add validation fields |
+| `assemblyzero/workflows/requirements/nodes/validate_mechanical.py` | Add | New validation node |
+| `assemblyzero/workflows/requirements/graph.py` | Modify | Insert validation node |
+| `assemblyzero/workflows/requirements/state.py` | Modify | Add validation fields |
 
 ### 2.4 Function Signatures
 
@@ -93,9 +93,9 @@ def validate_file_paths(files, repo_root):
 
 ## 12. Definition of Done
 
-- [ ] `agentos/workflows/requirements/nodes/validate_mechanical.py` implemented
-- [ ] `agentos/workflows/requirements/graph.py` updated
-- [ ] `agentos/workflows/requirements/state.py` updated
+- [ ] `assemblyzero/workflows/requirements/nodes/validate_mechanical.py` implemented
+- [ ] `assemblyzero/workflows/requirements/graph.py` updated
+- [ ] `assemblyzero/workflows/requirements/state.py` updated
 """
 
 
@@ -170,8 +170,8 @@ def lld_with_invalid_modify_path():
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/nonexistent.py` | Modify | Does not exist |
-| `agentos/workflows/requirements/graph.py` | Modify | Exists |
+| `assemblyzero/workflows/requirements/nonexistent.py` | Modify | Does not exist |
+| `assemblyzero/workflows/requirements/graph.py` | Modify | Exists |
 
 ## 11. Risks & Mitigations
 
@@ -217,7 +217,7 @@ def lld_with_dod_mismatch():
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/graph.py` | Modify | Update graph |
+| `assemblyzero/workflows/requirements/graph.py` | Modify | Update graph |
 
 ## 11. Risks & Mitigations
 
@@ -227,8 +227,8 @@ def lld_with_dod_mismatch():
 
 ## 12. Definition of Done
 
-- [ ] `agentos/workflows/requirements/graph.py` updated
-- [ ] `agentos/workflows/requirements/extra_file.py` created
+- [ ] `assemblyzero/workflows/requirements/graph.py` updated
+- [ ] `assemblyzero/workflows/requirements/extra_file.py` created
 - [ ] Tests pass
 """
 
@@ -306,11 +306,11 @@ class TestParseFilesChangedTable:
         assert len(files) == 3
 
         # Check first file
-        assert files[0]["path"] == "agentos/workflows/requirements/nodes/validate_mechanical.py"
+        assert files[0]["path"] == "assemblyzero/workflows/requirements/nodes/validate_mechanical.py"
         assert files[0]["change_type"] == "Add"
 
         # Check second file
-        assert files[1]["path"] == "agentos/workflows/requirements/graph.py"
+        assert files[1]["path"] == "assemblyzero/workflows/requirements/graph.py"
         assert files[1]["change_type"] == "Modify"
 
     def test_parse_malformed_table_returns_error(self, lld_with_malformed_table):
@@ -370,14 +370,14 @@ class TestValidateFilePaths:
 
     def test_existing_modify_file_no_error(self, mock_repo):
         """T030: Validate existing Modify file returns no error."""
-        files = [{"path": "agentos/workflows/requirements/graph.py", "change_type": "Modify"}]
+        files = [{"path": "assemblyzero/workflows/requirements/graph.py", "change_type": "Modify"}]
         errors = validate_file_paths(files, mock_repo)
 
         assert len(errors) == 0
 
     def test_nonexistent_modify_file_returns_error(self, mock_repo):
         """T040: Validate non-existent Modify file returns ERROR."""
-        files = [{"path": "agentos/workflows/requirements/nonexistent.py", "change_type": "Modify"}]
+        files = [{"path": "assemblyzero/workflows/requirements/nonexistent.py", "change_type": "Modify"}]
         errors = validate_file_paths(files, mock_repo)
 
         assert len(errors) == 1
@@ -386,14 +386,14 @@ class TestValidateFilePaths:
 
     def test_add_file_with_valid_parent_no_error(self, mock_repo):
         """T050: Validate Add file with valid parent returns no error."""
-        files = [{"path": "agentos/workflows/requirements/nodes/new_file.py", "change_type": "Add"}]
+        files = [{"path": "assemblyzero/workflows/requirements/nodes/new_file.py", "change_type": "Add"}]
         errors = validate_file_paths(files, mock_repo)
 
         assert len(errors) == 0
 
     def test_add_file_with_invalid_parent_returns_error(self, mock_repo):
         """T060: Validate Add file with invalid parent returns ERROR."""
-        files = [{"path": "agentos/nonexistent_dir/new_file.py", "change_type": "Add"}]
+        files = [{"path": "assemblyzero/nonexistent_dir/new_file.py", "change_type": "Add"}]
         errors = validate_file_paths(files, mock_repo)
 
         assert len(errors) == 1
@@ -402,7 +402,7 @@ class TestValidateFilePaths:
 
     def test_delete_nonexistent_file_returns_error(self, mock_repo):
         """Delete file that doesn't exist returns ERROR."""
-        files = [{"path": "agentos/workflows/requirements/deleted.py", "change_type": "Delete"}]
+        files = [{"path": "assemblyzero/workflows/requirements/deleted.py", "change_type": "Delete"}]
         errors = validate_file_paths(files, mock_repo)
 
         assert len(errors) == 1
@@ -453,8 +453,8 @@ class TestDetectPlaceholderPrefixes:
         assert "app" in errors[0].message.lower()
 
     def test_existing_prefix_not_flagged(self, mock_repo):
-        """Existing directory prefix (agentos/) not flagged."""
-        files = [{"path": "agentos/new_module.py", "change_type": "Add"}]
+        """Existing directory prefix (assemblyzero/) not flagged."""
+        files = [{"path": "assemblyzero/new_module.py", "change_type": "Add"}]
         errors = detect_placeholder_prefixes(files, mock_repo)
 
         assert len(errors) == 0
@@ -567,7 +567,7 @@ class TestContainsExplicitFunctionReference:
 
     def test_detects_backtick_reference(self):
         """Backtick function reference detected."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             contains_explicit_function_reference,
         )
 
@@ -578,7 +578,7 @@ class TestContainsExplicitFunctionReference:
 
     def test_detects_parentheses_reference(self):
         """Parentheses function reference detected."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             contains_explicit_function_reference,
         )
 
@@ -589,7 +589,7 @@ class TestContainsExplicitFunctionReference:
 
     def test_no_reference_returns_false(self):
         """Plain text without function reference returns False."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             contains_explicit_function_reference,
         )
 
@@ -604,7 +604,7 @@ class TestIsApproachMitigation:
 
     def test_detects_complexity_notation(self):
         """Complexity notation O(n) detected."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             is_approach_mitigation,
         )
 
@@ -615,7 +615,7 @@ class TestIsApproachMitigation:
 
     def test_detects_encoding_reference(self):
         """Encoding reference detected."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             is_approach_mitigation,
         )
 
@@ -625,7 +625,7 @@ class TestIsApproachMitigation:
 
     def test_function_description_not_approach(self):
         """Function description is not classified as approach."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             is_approach_mitigation,
         )
 
@@ -952,7 +952,7 @@ class TestRepoRootValidation:
 
     def test_validation_blocks_when_repo_root_none(self):
         """T010: repo_root=None returns blocking error with BLOCKED status."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_repo_root,
         )
 
@@ -964,7 +964,7 @@ class TestRepoRootValidation:
 
     def test_validation_blocks_when_repo_root_empty(self):
         """T020: repo_root=Path("") returns blocking error with BLOCKED status."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_repo_root,
         )
 
@@ -976,7 +976,7 @@ class TestRepoRootValidation:
 
     def test_validation_blocks_when_repo_root_nonexistent(self):
         """T030: Non-existent repo_root returns blocking error with path in message."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_repo_root,
         )
 
@@ -989,7 +989,7 @@ class TestRepoRootValidation:
 
     def test_validation_proceeds_when_repo_root_valid(self, tmp_path):
         """T040: Valid existing repo_root passes validation."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_repo_root,
         )
 
@@ -1000,7 +1000,7 @@ class TestRepoRootValidation:
 
     def test_error_message_includes_path(self):
         """T050: Error message contains the invalid path for debugging."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_repo_root,
         )
 
@@ -1018,7 +1018,7 @@ class TestRepoRootValidationIntegration:
 
     def test_full_validation_blocks_on_none_repo(self):
         """Integration: validate_lld_mechanical returns BLOCKED when target_repo is None."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_lld_mechanical,
         )
 
@@ -1060,7 +1060,7 @@ class TestRepoRootValidationIntegration:
 
     def test_full_validation_blocks_on_empty_repo(self):
         """Integration: validate_lld_mechanical returns BLOCKED when target_repo is empty."""
-        from agentos.workflows.requirements.nodes.validate_mechanical import (
+        from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
             validate_lld_mechanical,
         )
 
@@ -1116,7 +1116,7 @@ class TestTitleValidationIntegration:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/test.py` | Add | New file |
+| `assemblyzero/test.py` | Add | New file |
 
 ## 11. Risks & Mitigations
 
@@ -1150,7 +1150,7 @@ class TestTitleValidationIntegration:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/graph.py` | Modify | Update |
+| `assemblyzero/workflows/requirements/graph.py` | Modify | Update |
 
 ## 11. Risks & Mitigations
 
@@ -1183,7 +1183,7 @@ class TestTitleValidationIntegration:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/requirements/graph.py` | Modify | Update |
+| `assemblyzero/workflows/requirements/graph.py` | Modify | Update |
 
 ## 11. Risks & Mitigations
 

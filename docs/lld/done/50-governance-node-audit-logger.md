@@ -25,12 +25,12 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/nodes/__init__.py` | Modify | Export `review_lld_node` |
-| `agentos/nodes/governance.py` | Add | Governance node implementation |
-| `agentos/core/__init__.py` | Modify | Export `GovernanceAuditLog`, `GovernanceLogEntry`, `GeminiClient` |
-| `agentos/core/audit.py` | Add | Audit logging infrastructure |
-| `agentos/core/gemini_client.py` | Add | **Custom Gemini client with rotation logic** |
-| `agentos/core/config.py` | Add | Configuration constants including `GOVERNANCE_MODEL` |
+| `assemblyzero/nodes/__init__.py` | Modify | Export `review_lld_node` |
+| `assemblyzero/nodes/governance.py` | Add | Governance node implementation |
+| `assemblyzero/core/__init__.py` | Modify | Export `GovernanceAuditLog`, `GovernanceLogEntry`, `GeminiClient` |
+| `assemblyzero/core/audit.py` | Add | Audit logging infrastructure |
+| `assemblyzero/core/gemini_client.py` | Add | **Custom Gemini client with rotation logic** |
+| `assemblyzero/core/config.py` | Add | Configuration constants including `GOVERNANCE_MODEL` |
 | `tools/view_audit.py` | Add | Live audit viewer CLI |
 | `logs/.gitkeep` | Add | Ensure logs directory exists in repo |
 | `logs/.gitignore` | Add | Ignore `*.jsonl` files (production logs) |
@@ -63,7 +63,7 @@ The custom client encapsulates ALL Gemini API interaction for governance, ensuri
 #### 2.3.1 Configuration Constants
 
 ```python
-# agentos/core/config.py
+# assemblyzero/core/config.py
 
 from pathlib import Path
 
@@ -81,8 +81,8 @@ FORBIDDEN_MODELS = [
 ]
 
 # Credential paths
-CREDENTIALS_FILE = Path.home() / ".agentos" / "gemini-credentials.json"
-ROTATION_STATE_FILE = Path.home() / ".agentos" / "gemini-rotation-state.json"
+CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
+ROTATION_STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
 
 # Retry configuration
 MAX_RETRIES_PER_CREDENTIAL = 3
@@ -95,7 +95,7 @@ BACKOFF_MAX_SECONDS = 60.0
 **Ported from gemini-rotate.py patterns:**
 
 ```python
-# agentos/core/gemini_client.py
+# assemblyzero/core/gemini_client.py
 
 from enum import Enum
 
@@ -130,7 +130,7 @@ AUTH_ERROR_PATTERNS = [
 #### 2.3.3 Gemini Client Class
 
 ```python
-# agentos/core/gemini_client.py
+# assemblyzero/core/gemini_client.py
 
 from dataclasses import dataclass
 from typing import Optional
@@ -235,7 +235,7 @@ class GeminiClient:
 invoke(system_instruction, content)
     |
     v
-Load credentials from ~/.agentos/gemini-credentials.json
+Load credentials from ~/.assemblyzero/gemini-credentials.json
     |
     v
 Filter: enabled=True AND NOT exhausted
@@ -271,7 +271,7 @@ All credentials failed --> Return BLOCK (fail closed)
 ### 2.4 Data Structures
 
 ```python
-# agentos/core/audit.py
+# assemblyzero/core/audit.py
 
 from typing import TypedDict
 
@@ -305,11 +305,11 @@ class GeminiReviewResponse(TypedDict):
 ### 2.5 Function Signatures
 
 ```python
-# agentos/nodes/governance.py
+# assemblyzero/nodes/governance.py
 
-from agentos.core.state import AgentState
-from agentos.core.gemini_client import GeminiClient, GeminiCallResult
-from agentos.core.config import GOVERNANCE_MODEL
+from assemblyzero.core.state import AgentState
+from assemblyzero.core.gemini_client import GeminiClient, GeminiCallResult
+from assemblyzero.core.config import GOVERNANCE_MODEL
 
 def review_lld_node(state: AgentState) -> dict:
     """
@@ -340,7 +340,7 @@ def _load_system_instruction() -> str:
 ```
 
 ```python
-# agentos/core/audit.py
+# assemblyzero/core/audit.py
 
 from pathlib import Path
 from typing import Iterator
@@ -414,8 +414,8 @@ def watch_live(log_path: Path) -> None:
 
 **Gemini Client (`invoke` method) - Rotation Logic:**
 ```
-1. Load credentials from ~/.agentos/gemini-credentials.json
-2. Load state from ~/.agentos/gemini-rotation-state.json
+1. Load credentials from ~/.assemblyzero/gemini-credentials.json
+2. Load state from ~/.assemblyzero/gemini-rotation-state.json
 3. Filter to enabled, non-exhausted credentials
 4. IF no credentials available:
    - Return failure (all exhausted)
@@ -462,7 +462,7 @@ def watch_live(log_path: Path) -> None:
 
 ### 2.7 Technical Approach
 
-* **Module:** `agentos/nodes/` for LangGraph nodes, `agentos/core/` for shared infrastructure
+* **Module:** `assemblyzero/nodes/` for LangGraph nodes, `assemblyzero/core/` for shared infrastructure
 * **Pattern:** LangGraph state machine node with side effects (logging)
 * **Key Decisions:**
   - **Use `google-generativeai` SDK directly** - Full control over retry/rotation (not LangChain wrapper)
@@ -520,8 +520,8 @@ def watch_live(log_path: Path) -> None:
 | Attribute | Value |
 |-----------|-------|
 | Source | Gemini API (via google-generativeai SDK) |
-| Credentials | `~/.agentos/gemini-credentials.json` |
-| Rotation State | `~/.agentos/gemini-rotation-state.json` |
+| Credentials | `~/.assemblyzero/gemini-credentials.json` |
+| Rotation State | `~/.assemblyzero/gemini-rotation-state.json` |
 | Format | JSON structured output |
 | Size | ~1-5KB per response |
 | Refresh | On-demand (per governance call) |
@@ -536,7 +536,7 @@ LLD Content (state)
 +-------------------+
 | GeminiClient      |
 | - Load creds from |
-|   ~/.agentos/     |
+|   ~/.assemblyzero/     |
 | - Rotation logic  |
 +-------------------+
         |
@@ -646,7 +646,7 @@ sequenceDiagram
 | Log file tampering | Append-only, no delete API exposed | Addressed |
 | Sensitive data in LLD | LLD content logged - acceptable for internal audit | Accepted |
 | Model downgrade attack | Strict model verification, fail closed on wrong model | Addressed |
-| Credential file security | Uses existing ~/.agentos/ with user-only permissions | Addressed |
+| Credential file security | Uses existing ~/.assemblyzero/ with user-only permissions | Addressed |
 
 **Fail Mode:** Fail Closed - The node defaults to BLOCK if:
 - JSON parsing fails
@@ -679,7 +679,7 @@ This ensures governance cannot be bypassed by API failures or malformed response
 | Log file corruption | Low | Low | JSONL is line-independent; one bad line doesn't affect others |
 | watchdog not available | Low | Low | Fallback to polling if import fails |
 | 0702c prompt file missing | High | Low | Fail with clear error at startup |
-| Credential file missing | High | Low | Clear error directing user to ~/.agentos/ setup |
+| Credential file missing | High | Low | Clear error directing user to ~/.assemblyzero/ setup |
 
 ## 10. Verification & Testing
 
@@ -709,10 +709,10 @@ This ensures governance cannot be bypassed by API failures or malformed response
 poetry run pytest tests/test_governance.py tests/test_audit.py tests/test_gemini_client.py -v
 
 # Run with coverage
-poetry run pytest tests/test_governance.py tests/test_audit.py tests/test_gemini_client.py -v --cov=agentos
+poetry run pytest tests/test_governance.py tests/test_audit.py tests/test_gemini_client.py -v --cov=assemblyzero
 
 # Type check
-poetry run mypy agentos/
+poetry run mypy assemblyzero/
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -727,10 +727,10 @@ poetry run mypy agentos/
 ## 11. Definition of Done
 
 ### Code
-- [ ] `agentos/core/config.py` implemented with `GOVERNANCE_MODEL` constant
-- [ ] `agentos/core/gemini_client.py` implemented with rotation logic
-- [ ] `agentos/nodes/governance.py` implemented with `review_lld_node`
-- [ ] `agentos/core/audit.py` implemented with `GovernanceAuditLog`
+- [ ] `assemblyzero/core/config.py` implemented with `GOVERNANCE_MODEL` constant
+- [ ] `assemblyzero/core/gemini_client.py` implemented with rotation logic
+- [ ] `assemblyzero/nodes/governance.py` implemented with `review_lld_node`
+- [ ] `assemblyzero/core/audit.py` implemented with `GovernanceAuditLog`
 - [ ] `tools/view_audit.py` implemented with `--live` support
 - [ ] `watchdog` and `google-generativeai` added to `pyproject.toml`
 - [ ] `logs/.gitkeep` and `logs/.gitignore` created

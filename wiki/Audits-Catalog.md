@@ -6,7 +6,7 @@
 
 ## Overview
 
-AgentOS includes a comprehensive audit suite designed with an **adversarial philosophy**: audits exist to find violations, not confirm compliance.
+AssemblyZero includes a comprehensive audit suite designed with an **adversarial philosophy**: audits exist to find violations, not confirm compliance.
 
 | Category | Count | Focus |
 |----------|-------|-------|
@@ -83,7 +83,7 @@ Audits MUST fix errors, not just document them:
 |-------|-------------|----------|
 | **0815** | Permission Friction | **Yes** |
 | **0816** | Permission Permissiveness | **Yes** |
-| **0817** | AgentOS Self-Audit | **Yes** |
+| **0817** | AssemblyZero Self-Audit | **Yes** |
 
 ### Extended Audits
 

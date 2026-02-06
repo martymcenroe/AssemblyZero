@@ -7,7 +7,7 @@
 ---
 
 ## Review Summary
-The LLD is well-structured and addresses the problem of hardcoded paths in AgentOS. The design uses a configuration file to manage paths, which improves portability and maintainability. The document is comprehensive and covers various aspects of the implementation, testing, and migration.
+The LLD is well-structured and addresses the problem of hardcoded paths in AssemblyZero. The design uses a configuration file to manage paths, which improves portability and maintainability. The document is comprehensive and covers various aspects of the implementation, testing, and migration.
 
 ## Tier 1: BLOCKING Issues
 No blocking issues found.

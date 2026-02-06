@@ -77,7 +77,7 @@ class Binky:
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
 Binky represents **instant context switching**—the ability to be exactly where you need to be, when you need to be there.
 
@@ -99,10 +99,10 @@ Binky's stable is in DEATH's domain, which exists outside of normal space and ti
 - A brush that grooms without being used
 - A window that looks out on *all* of time
 
-In AgentOS, Binky's stable is the **context cache**:
+In AssemblyZero, Binky's stable is the **context cache**:
 
 ```
-~/.agentos/binky/
+~/.assemblyzero/binky/
 ├── contexts/       # Pre-loaded contexts for instant switching
 ├── checkpoints/    # Saved states to return to
 └── oats/           # Metadata that keeps Binky happy

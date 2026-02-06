@@ -48,12 +48,12 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/lld/__init__.py` | Add | Package init, exports |
-| `agentos/workflows/lld/state.py` | Add | LLDWorkflowState TypedDict |
-| `agentos/workflows/lld/graph.py` | Add | LangGraph StateGraph definition |
-| `agentos/workflows/lld/nodes.py` | Add | Node wrapper functions (design, human_edit, review) |
-| `agentos/workflows/lld/audit.py` | Add | Audit trail management (pattern from issue workflow) |
-| `agentos/workflows/lld/mock.py` | Add | Mock implementations for offline testing |
+| `assemblyzero/workflows/lld/__init__.py` | Add | Package init, exports |
+| `assemblyzero/workflows/lld/state.py` | Add | LLDWorkflowState TypedDict |
+| `assemblyzero/workflows/lld/graph.py` | Add | LangGraph StateGraph definition |
+| `assemblyzero/workflows/lld/nodes.py` | Add | Node wrapper functions (design, human_edit, review) |
+| `assemblyzero/workflows/lld/audit.py` | Add | Audit trail management (pattern from issue workflow) |
+| `assemblyzero/workflows/lld/mock.py` | Add | Mock implementations for offline testing |
 | `tools/run_lld_workflow.py` | Add | CLI entry point |
 | `tests/test_lld_workflow.py` | Add | Unit and integration tests |
 | `tests/fixtures/lld_workflow/issue_42.json` | Add | Mock issue fixture |
@@ -72,13 +72,13 @@ langgraph = "^0.2"  # StateGraph, SqliteSaver
 ```
 
 **Existing modules reused (NOT modified):**
-- `agentos/nodes/designer.py` - LLD generation
-- `agentos/nodes/governance.py` - Gemini review
+- `assemblyzero/nodes/designer.py` - LLD generation
+- `assemblyzero/nodes/governance.py` - Gemini review
 
 ### 2.3 Data Structures
 
 ```python
-# agentos/workflows/lld/state.py
+# assemblyzero/workflows/lld/state.py
 from enum import Enum
 from typing import TypedDict
 
@@ -121,7 +121,7 @@ class LLDWorkflowState(TypedDict, total=False):
 ### 2.4 Function Signatures
 
 ```python
-# agentos/workflows/lld/nodes.py
+# assemblyzero/workflows/lld/nodes.py
 
 def fetch_issue(state: LLDWorkflowState) -> dict:
     """N0: Fetch issue from GitHub and assemble context.
@@ -175,7 +175,7 @@ def finalize(state: LLDWorkflowState) -> dict:
     """
     ...
 
-# agentos/workflows/lld/graph.py
+# assemblyzero/workflows/lld/graph.py
 
 def route_after_human_edit(state: LLDWorkflowState) -> str:
     """Route based on human decision: review, design, or end."""
@@ -248,7 +248,7 @@ def build_lld_workflow() -> StateGraph:
 
 ### 2.6 Technical Approach
 
-* **Module:** `agentos/workflows/lld/`
+* **Module:** `assemblyzero/workflows/lld/`
 * **Pattern:** LangGraph StateGraph with SqliteSaver checkpointer (same as issue workflow)
 * **Key Decisions:**
   1. **Reuse existing nodes** - designer.py and governance.py are imported, not copied, per issue requirements
@@ -431,7 +431,7 @@ poetry run pytest tests/test_lld_workflow.py -v
 poetry run pytest tests/test_lld_workflow.py -v -m "not live"
 
 # Run with coverage
-poetry run pytest tests/test_lld_workflow.py -v --cov=agentos/workflows/lld
+poetry run pytest tests/test_lld_workflow.py -v --cov=assemblyzero/workflows/lld
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)

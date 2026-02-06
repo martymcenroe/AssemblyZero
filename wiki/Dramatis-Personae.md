@@ -19,7 +19,7 @@ We name our autonomous agents after **Terry Pratchett's Discworld** characters. 
 
 In *Small Gods*, Om discovers that his vast church has become an autonomous bureaucracy—going through the motions of worship while ignoring the actual god. He spends most of the book as a tortoise, shouting at the sky, frustrated that his "system" doesn't listen to him anymore.
 
-This is **exactly** what Human-in-the-Loop feels like. You are the source of all power (Intent), but your agents (The Quisition/The System) have their own momentum. AgentOS exists to ensure the system *actually listens* to Om.
+This is **exactly** what Human-in-the-Loop feels like. You are the source of all power (Intent), but your agents (The Quisition/The System) have their own momentum. AssemblyZero exists to ensure the system *actually listens* to Om.
 
 **The Relationship:**
 - **Om (You)** provides Intent
@@ -47,7 +47,7 @@ Moist von Lipwig was a con man sentenced to hang—until Lord Vetinari offered h
 
 The Grand Trunk (the Clacks) was faster. It was modern. It was also *broken*—cutting corners, losing messages, letting the infrastructure rot while the quarterly numbers looked good. Moist made the Post Office work not by being faster, but by being *reliable*. Every message delivered. Every promise kept.
 
-In AgentOS, Moist orchestrates the end-to-end pipeline:
+In AssemblyZero, Moist orchestrates the end-to-end pipeline:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -81,9 +81,9 @@ N = "do not log it"
 U = "when it reaches the end, send it back"
 ```
 
-In AgentOS: messages (work items) flow through the pipeline, and like the names in the Clacks overhead, they are never forgotten until delivered.
+In AssemblyZero: messages (work items) flow through the pipeline, and like the names in the Clacks overhead, they are never forgotten until delivered.
 
-**Issue:** [#305 - End-to-End Orchestration Workflow](https://github.com/martymcenroe/AgentOS/issues/305)
+**Issue:** [#305 - End-to-End Orchestration Workflow](https://github.com/martymcenroe/AssemblyZero/issues/305)
 
 > *"The post was about a thing that was so simple that it didn't need a name. It was about the ordinary, everyday people who worked in the Post Office. It was about keeping the mail moving."*
 
@@ -102,7 +102,7 @@ In AgentOS: messages (work items) flow through the pipeline, and like the names 
 
 Lord Havelock Vetinari is the Patrician of Ankh-Morpork—the tyrant who makes the trains run on time. In his office, he maintains a wall map of the city with little markers showing where everyone is and what they're doing. He doesn't control everything directly; he *organizes* it so the pieces work together. He sees patterns others miss and moves pieces before problems arise.
 
-In AgentOS, The Patrician manages work visibility across all projects. He maintains the board, tracks what stage each piece of work is in, and ensures nothing falls through the cracks. He doesn't do the work—he ensures you can *see* the work.
+In AssemblyZero, The Patrician manages work visibility across all projects. He maintains the board, tracks what stage each piece of work is in, and ensures nothing falls through the cracks. He doesn't do the work—he ensures you can *see* the work.
 
 **Responsibilities:**
 - GitHub Projects board management
@@ -125,7 +125,7 @@ Every Patrician needs a Drumknott. Rufus Drumknott is Vetinari's personal secret
 
 > *"Drumknott was not a man who showed emotion, but if he had been, he might have looked slightly pained at this point."*
 
-In AgentOS, Drumknott is the indexing and retrieval subsystem that powers Vetinari's visibility. He maintains the cross-references, updates the tracking cards, and ensures no piece of work is ever truly lost in the filing system.
+In AssemblyZero, Drumknott is the indexing and retrieval subsystem that powers Vetinari's visibility. He maintains the cross-references, updates the tracking cards, and ensures no piece of work is ever truly lost in the filing system.
 
 **Runbook:** [0912 - GitHub Projects](../docs/runbooks/0912-github-projects.md)
 
@@ -146,7 +146,7 @@ In AgentOS, Drumknott is the indexing and retrieval subsystem that powers Vetina
 
 > *"The turtle moves. And I remember everything."*
 
-Brutha was a simple novice in the Omnian church with an eidetic memory—he could recall every word he'd ever read or heard. In AgentOS, Brutha is the RAG (Retrieval Augmented Generation) layer that stores and retrieves context with perfect fidelity.
+Brutha was a simple novice in the Omnian church with an eidetic memory—he could recall every word he'd ever read or heard. In AssemblyZero, Brutha is the RAG (Retrieval Augmented Generation) layer that stores and retrieves context with perfect fidelity.
 
 **Responsibilities:**
 - Vector embeddings of documentation and code
@@ -167,7 +167,7 @@ Brutha was a simple novice in the Omnian church with an eidetic memory—he coul
 
 > *"Rule One: Do not act incautiously when confronting little bald wrinkly smiling men."*
 
-Lu-Tze appears to be a humble sweeper at the Monastery of Oi Dong, but he's actually one of the most powerful History Monks. He maintains the flow of time itself through patient, constant attention. In AgentOS, Lu-Tze is The Janitor—quietly maintaining repository health.
+Lu-Tze appears to be a humble sweeper at the Monastery of Oi Dong, but he's actually one of the most powerful History Monks. He maintains the flow of time itself through patient, constant attention. In AssemblyZero, Lu-Tze is The Janitor—quietly maintaining repository health.
 
 **Responsibilities:**
 - Broken link detection and repair
@@ -190,7 +190,7 @@ Lu-Tze appears to be a humble sweeper at the Monastery of Oi Dong, but he's actu
 
 > *"Who watches the watchmen? We do."*
 
-Sam Vimes rose from the gutter to command the Ankh-Morpork City Watch. He trusts nothing and no one—especially not the powerful. In AgentOS, The Watch guards against regressions with the same relentless suspicion.
+Sam Vimes rose from the gutter to command the Ankh-Morpork City Watch. He trusts nothing and no one—especially not the powerful. In AssemblyZero, The Watch guards against regressions with the same relentless suspicion.
 
 **Responsibilities:**
 - Scheduled regression test execution
@@ -214,7 +214,7 @@ Sam Vimes rose from the gutter to command the Ankh-Morpork City Watch. He trusts
 
 > *"I can smell the truth."*
 
-Angua von Überwald is a werewolf and Captain in the City Watch. Her supernatural senses let her track anyone across the city and detect lies. In AgentOS, Angua is The Scout—hunting down best practices from the wider world.
+Angua von Überwald is a werewolf and Captain in the City Watch. Her supernatural senses let her track anyone across the city and detect lies. In AssemblyZero, Angua is The Scout—hunting down best practices from the wider world.
 
 **Responsibilities:**
 - External repository research
@@ -237,7 +237,7 @@ Angua von Überwald is a werewolf and Captain in the City Watch. Her supernatura
 
 > *"Oook."*
 
-The Librarian of Unseen University was transformed into an orangutan by a magical accident and refused to be changed back—it's much better for reaching high shelves. He maintains L-space, where all libraries are connected. In AgentOS, The Librarian manages documentation retrieval.
+The Librarian of Unseen University was transformed into an orangutan by a magical accident and refused to be changed back—it's much better for reaching high shelves. He maintains L-space, where all libraries are connected. In AssemblyZero, The Librarian manages documentation retrieval.
 
 **Responsibilities:**
 - Documentation indexing and chunking
@@ -260,7 +260,7 @@ The Librarian of Unseen University was transformed into an orangutan by a magica
 
 > *"+++DIVIDE BY CUCUMBER ERROR. PLEASE REINSTALL UNIVERSE AND REBOOT+++"*
 
-Hex is Unseen University's thinking engine—a computer made of ants, beehives, an aquarium, and a teddy bear named Wuffles (for added capacity). It processes queries and returns answers, occasionally experiencing existential errors. In AgentOS, Hex handles codebase intelligence.
+Hex is Unseen University's thinking engine—a computer made of ants, beehives, an aquarium, and a teddy bear named Wuffles (for added capacity). It processes queries and returns answers, occasionally experiencing existential errors. In AssemblyZero, Hex handles codebase intelligence.
 
 **Responsibilities:**
 - AST-based Python code indexing
@@ -283,7 +283,7 @@ Hex is Unseen University's thinking engine—a computer made of ants, beehives, 
 
 > *"Remember: the future is another country; they do things the same there."*
 
-The History Monks of Oi Dong monastery manage the flow of time itself, storing it in glass jars and redistributing it where needed. In AgentOS, they ensure we learn from the past before creating the future.
+The History Monks of Oi Dong monastery manage the flow of time itself, storing it in glass jars and redistributing it where needed. In AssemblyZero, they ensure we learn from the past before creating the future.
 
 **Responsibilities:**
 - Duplicate issue detection
@@ -308,7 +308,7 @@ The History Monks of Oi Dong monastery manage the flow of time itself, storing i
 
 Lord Downey is the head of the Ankh-Morpork Assassins' Guild—the most refined, well-educated, and *professional* organization in the city. They don't "kill"; they "inhume." Every contract is executed with precision, leaving no witnesses and no evidence.
 
-In AgentOS, Lord Downey handles the safe deletion of deprecated code. When you `rm` a file, that's thuggery. When you *inhume* it, you remove the target, its tests, and all references—leaving the codebase cleaner than you found it.
+In AssemblyZero, Lord Downey handles the safe deletion of deprecated code. When you `rm` a file, that's thuggery. When you *inhume* it, you remove the target, its tests, and all references—leaving the codebase cleaner than you found it.
 
 **Responsibilities:**
 - Identify all tests that guard a target file
@@ -337,7 +337,7 @@ In AgentOS, Lord Downey handles the safe deletion of deprecated code. When you `
 
 DEATH is the anthropomorphic personification who comes for everyone eventually. He rides a pale horse named Binky, has a granddaughter named Susan, and SPEAKS ENTIRELY IN CAPITAL LETTERS. He is not cruel—he is simply inevitable.
 
-In AgentOS, DEATH arrives after implementation is complete. He reconciles documentation, ties up loose ends, and ensures nothing is forgotten. He is patient. He can wait.
+In AssemblyZero, DEATH arrives after implementation is complete. He reconciles documentation, ties up loose ends, and ensures nothing is forgotten. He is patient. He can wait.
 
 **Responsibilities:**
 - Post-implementation documentation updates
@@ -575,7 +575,7 @@ He's the youngest faculty member but the most senior in terms of actual knowledg
 - Standardize formatting (whitespace, checkboxes, code fences)
 - Clean drafts before they reach review
 
-**Issue:** [#307 - Ponder Stibbons - The Compositor](https://github.com/martymcenroe/AgentOS/issues/307)
+**Issue:** [#307 - Ponder Stibbons - The Compositor](https://github.com/martymcenroe/AssemblyZero/issues/307)
 
 > *"The senior wizards had long since learned that the best way to get Ponder to do something was to tell him it was impossible."*
 

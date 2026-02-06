@@ -6,19 +6,19 @@
 
 ## 1. Context
 
-AgentOS serves as the "upstream" repository providing generic frameworks (4-digit 0xxx docs) to child projects like Aletheia, Talos, and maintenance, which have project-specific implementations (5-digit 10xxx docs).
+AssemblyZero serves as the "upstream" repository providing generic frameworks (4-digit 0xxx docs) to child projects like Aletheia, Talos, and maintenance, which have project-specific implementations (5-digit 10xxx docs).
 
 ### Current State: Unidirectional Flow
 
 ```
-AgentOS ──push──> Aletheia
+AssemblyZero ──push──> Aletheia
          ──push──> Talos
          ──push──> maintenance
 ```
 
-The current `agentos-generate.py` tool pushes templates, commands, and permissions FROM AgentOS TO child projects. But there is **no mechanism** for:
+The current `assemblyzero-generate.py` tool pushes templates, commands, and permissions FROM AssemblyZero TO child projects. But there is **no mechanism** for:
 
-1. **Process innovations** discovered in child projects to flow back to AgentOS
+1. **Process innovations** discovered in child projects to flow back to AssemblyZero
 2. **Permissions** added by agents in child projects to propagate
 3. **Commands** developed locally to be recognized as generic
 4. **Conflict resolution** when multiple agents evolve process simultaneously
@@ -30,7 +30,7 @@ The current `agentos-generate.py` tool pushes templates, commands, and permissio
 - Exit code verification (0=success, 2=quota, 3=downgrade)
 - Stderr marker verification (`---GEMINI-MODEL-VERIFIED---`)
 
-This knowledge is **trapped in Talos**. Aletheia agents don't benefit. If this is genuinely good process, it should live in AgentOS and propagate to all projects.
+This knowledge is **trapped in Talos**. Aletheia agents don't benefit. If this is genuinely good process, it should live in AssemblyZero and propagate to all projects.
 
 ### Fundamental Tensions
 
@@ -39,24 +39,24 @@ This knowledge is **trapped in Talos**. Aletheia agents don't benefit. If this i
 | **Local Innovation vs. Global Consistency** | Agents need freedom to innovate in context, but good innovations should propagate |
 | **Immediacy vs. Quality Control** | Want improvements available immediately, but untested changes could break other projects |
 | **Autonomy vs. Coordination** | Each agent operates independently, but they share infrastructure |
-| **Write Location** | Should agents update AgentOS directly, or their project, or both? |
+| **Write Location** | Should agents update AssemblyZero directly, or their project, or both? |
 
 ## 2. Decision
 
 **We will implement a hybrid bidirectional sync model with three propagation mechanisms:**
 
-### 2.1 Layer 1: AgentOS → Projects (Push) — Existing
+### 2.1 Layer 1: AssemblyZero → Projects (Push) — Existing
 
-The current `agentos-generate.py` continues to push:
+The current `assemblyzero-generate.py` continues to push:
 - Templates with `{{VAR}}` substitution
 - Generic commands
 - Base permissions
 
-**Trigger:** Manual invocation or post-commit hook in AgentOS.
+**Trigger:** Manual invocation or post-commit hook in AssemblyZero.
 
-### 2.2 Layer 2: Projects → AgentOS (Promote) — NEW
+### 2.2 Layer 2: Projects → AssemblyZero (Promote) — NEW
 
-Agents can explicitly promote patterns to AgentOS via the `/promote` command:
+Agents can explicitly promote patterns to AssemblyZero via the `/promote` command:
 
 ```bash
 /promote --file docs/standards/10002-coding-standards-local.md --section "Gemini Review Protocol"
@@ -66,7 +66,7 @@ Agents can explicitly promote patterns to AgentOS via the `/promote` command:
 1. Agent recognizes "this pattern should be global"
 2. Invokes `/promote` with file and section
 3. Tool extracts content, generalizes it (adds `{{VAR}}` placeholders)
-4. Creates PR to AgentOS
+4. Creates PR to AssemblyZero
 5. Orchestrator reviews and merges
 6. Next sync propagates to all projects
 
@@ -77,19 +77,19 @@ Agents can explicitly promote patterns to AgentOS via the `/promote` command:
 
 ### 2.3 Layer 3: Cross-Project Discovery (Harvest) — NEW
 
-An AgentOS audit (`0010-cross-project-harvest.md`) proactively scans child projects:
+An AssemblyZero audit (`0010-cross-project-harvest.md`) proactively scans child projects:
 
 ```
-AgentOS <──harvest──┬── Aletheia
+AssemblyZero <──harvest──┬── Aletheia
                     ├── Talos
                     └── maintenance
 ```
 
 **Detection patterns:**
 1. **Convergent evolution:** Same pattern appears in multiple children independently
-2. **Override detection:** Child has `-local.md` extension with content that doesn't exist in AgentOS parent
-3. **Permission accumulation:** Child has permissions not in AgentOS base set
-4. **Command divergence:** Child commands differ from AgentOS templates
+2. **Override detection:** Child has `-local.md` extension with content that doesn't exist in AssemblyZero parent
+3. **Permission accumulation:** Child has permissions not in AssemblyZero base set
+4. **Command divergence:** Child commands differ from AssemblyZero templates
 
 **Output:** Report of promotion candidates for human review.
 
@@ -97,10 +97,10 @@ AgentOS <──harvest──┬── Aletheia
 
 ### 3.1 Project Registry
 
-AgentOS must know about its children:
+AssemblyZero must know about its children:
 
 ```json
-// AgentOS/.claude/project-registry.json
+// AssemblyZero/.claude/project-registry.json
 {
   "children": [
     {
@@ -132,9 +132,9 @@ AgentOS must know about its children:
 
 | Direction | Mechanism | Trigger | Tool |
 |-----------|-----------|---------|------|
-| AgentOS → Projects | Push | Manual, post-commit hook | `agentos-generate.py` |
-| Project → AgentOS | Promote | Agent explicit call | `/promote` command |
-| All Projects → AgentOS | Harvest | `/cleanup --full`, scheduled | `agentos-harvest.py` |
+| AssemblyZero → Projects | Push | Manual, post-commit hook | `assemblyzero-generate.py` |
+| Project → AssemblyZero | Promote | Agent explicit call | `/promote` command |
+| All Projects → AssemblyZero | Harvest | `/cleanup --full`, scheduled | `assemblyzero-harvest.py` |
 
 ### 3.3 Permission Sync (Enhanced)
 
@@ -144,38 +144,38 @@ The existing `/sync-permissions` command is enhanced:
 
 **New behavior:**
 1. Remove one-time permissions (existing)
-2. Detect permissions added to project that should be in AgentOS
-3. Offer to promote permission patterns to AgentOS base set
+2. Detect permissions added to project that should be in AssemblyZero
+3. Offer to promote permission patterns to AssemblyZero base set
 4. Sync permissions across all registered projects
 
 ### 3.4 CLAUDE.md Inheritance (Enhanced)
 
-**Current:** Projects read AgentOS CLAUDE.md first, then their own.
+**Current:** Projects read AssemblyZero CLAUDE.md first, then their own.
 
 **Enhanced:**
-1. Detect when project CLAUDE.md duplicates AgentOS content
+1. Detect when project CLAUDE.md duplicates AssemblyZero content
 2. Flag duplicates for removal during `/cleanup --full`
 3. Ensure project CLAUDE.md only contains project-specific rules
 
 ### 3.5 Immediate Propagation
 
-**Problem:** When AgentOS changes, how do all projects get updates immediately?
+**Problem:** When AssemblyZero changes, how do all projects get updates immediately?
 
-**Solution: Post-commit hook in AgentOS:**
+**Solution: Post-commit hook in AssemblyZero:**
 
 ```bash
 #!/bin/bash
-# AgentOS/.git/hooks/post-commit
+# AssemblyZero/.git/hooks/post-commit
 
 REGISTRY="$GIT_DIR/../.claude/project-registry.json"
 if [ -f "$REGISTRY" ]; then
   for project in $(jq -r '.children[].path' "$REGISTRY"); do
-    poetry run python tools/agentos-generate.py --project "$project" --quiet
+    poetry run python tools/assemblyzero-generate.py --project "$project" --quiet
   done
 fi
 ```
 
-This ensures changes to AgentOS templates/commands immediately propagate to all registered projects.
+This ensures changes to AssemblyZero templates/commands immediately propagate to all registered projects.
 
 ## 4. Alternatives Considered
 
@@ -184,11 +184,11 @@ This ensures changes to AgentOS templates/commands immediately propagate to all 
 - Innovations trapped in child projects
 - No feedback loop for process improvement
 
-### Option B: Agent Direct-Write to AgentOS
+### Option B: Agent Direct-Write to AssemblyZero
 **Decision:** Rejected as risky
 - No review gate for untested changes
 - Conflict potential when multiple agents write simultaneously
-- May pollute AgentOS with project-specific content
+- May pollute AssemblyZero with project-specific content
 
 ### Option C: RFC-Only Pattern (Issues/PRs for all changes)
 **Decision:** Rejected as too slow
@@ -199,7 +199,7 @@ This ensures changes to AgentOS templates/commands immediately propagate to all 
 ### Option D: Hybrid (Selected)
 **Decision:** Accepted
 - Local innovation allowed (write to project docs)
-- Explicit promotion path (agent-initiated PR to AgentOS)
+- Explicit promotion path (agent-initiated PR to AssemblyZero)
 - Proactive discovery (harvest audit finds patterns worth promoting)
 - Quality gate preserved (human review before merge)
 
@@ -233,18 +233,18 @@ For non-conflicting changes, most recent wins (git's default behavior). For conf
 
 | Content Type | Write To | Example |
 |--------------|----------|---------|
-| **Generic process** | AgentOS directly | Bash rules, worktree protocol |
+| **Generic process** | AssemblyZero directly | Bash rules, worktree protocol |
 | **Project-specific process** | Project docs | Gemini integration for Aletheia |
 | **Unsure/experimental** | Project docs | Test locally, promote if valuable |
-| **Permissions (generic)** | AgentOS base set | `Bash(npm install:*)` |
+| **Permissions (generic)** | AssemblyZero base set | `Bash(npm install:*)` |
 | **Permissions (project)** | Project settings | Project-specific tool paths |
 
-### 6.2 The AgentOS-First Rule
+### 6.2 The AssemblyZero-First Rule
 
 **When an agent discovers a pattern that should be generic:**
 
 1. **Recognize:** "This would help all projects"
-2. **Write:** Add to AgentOS directly (if permitted) OR use `/promote`
+2. **Write:** Add to AssemblyZero directly (if permitted) OR use `/promote`
 3. **Never:** Add to project docs hoping it will "bubble up" magically
 
 ### 6.3 Project-Specific Detection
@@ -296,10 +296,10 @@ The full cleanup mode will include:
 ### Phase 1: Infrastructure (Week 1)
 - [ ] Create `project-registry.json` schema
 - [ ] Register existing projects (Aletheia, Talos, maintenance)
-- [ ] Add post-commit hook skeleton to AgentOS
+- [ ] Add post-commit hook skeleton to AssemblyZero
 
 ### Phase 2: Harvest Tooling (Week 2)
-- [ ] Implement `agentos-harvest.py`
+- [ ] Implement `assemblyzero-harvest.py`
 - [ ] Create 0010-cross-project-harvest.md audit
 - [ ] Test on registered projects
 
@@ -317,7 +317,7 @@ The full cleanup mode will include:
 
 | Risk | Mitigation |
 |------|------------|
-| **Malicious content promotion** | Human review required before merge to AgentOS |
+| **Malicious content promotion** | Human review required before merge to AssemblyZero |
 | **Permission escalation** | Promoted permissions reviewed before adding to base set |
 | **Cross-project leakage** | Registry only includes orchestrator-approved projects |
 | **Automated propagation failures** | Post-commit hook has error handling, logs failures |
@@ -326,7 +326,7 @@ The full cleanup mode will include:
 
 ### Positive
 - **Knowledge flows freely:** Innovations in any project benefit all projects
-- **Reduced duplication:** Good patterns live in one place (AgentOS)
+- **Reduced duplication:** Good patterns live in one place (AssemblyZero)
 - **Faster iteration:** Agents can experiment locally, promote winners
 - **Audit trail:** All promotions go through PR review
 
@@ -339,12 +339,12 @@ The full cleanup mode will include:
 ## 11. Open Questions
 
 1. **Should harvest run automatically?** (e.g., GitHub Action on schedule)
-2. **Version AgentOS?** (breaking changes could affect all projects)
-3. **Cross-org projects?** (what if AgentOS is used by external teams)
+2. **Version AssemblyZero?** (breaking changes could affect all projects)
+3. **Cross-org projects?** (what if AssemblyZero is used by external teams)
 4. **Rollback mechanism?** (if promoted content causes issues)
 
 ## 12. References
 
 - [0203-git-worktree-isolation.md](0203-git-worktree-isolation.md) - Isolation pattern
 - [0204-single-identity-orchestration.md](0204-single-identity-orchestration.md) - Orchestrator role
-- AgentOS CLAUDE.md § "Source of Truth" - Current unidirectional model
+- AssemblyZero CLAUDE.md § "Source of Truth" - Current unidirectional model

@@ -39,7 +39,7 @@ Usage: `/zugzwang [--help] [--tail N] [--clear] [--review] [--blast]`
 4. Propagates logging to spawned agents
 
 **Log location:**
-`C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log`
+`C:\Users\mcwiz\Projects\AssemblyZero\logs\zugzwang.log`
 
 **Why "zugzwang"?**
 Chess term: a position where any move worsens your situation. Perfect metaphor for permission friction - you're stuck waiting for approval, unable to proceed.
@@ -60,8 +60,8 @@ Parse `$ARGUMENTS`:
 ### Step 2: Log File Path
 
 ```
-LOG_PATH = C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
-(Bash path: /c/Users/mcwiz/Projects/AgentOS/logs/zugzwang.log)
+LOG_PATH = C:\Users\mcwiz\Projects\AssemblyZero\logs\zugzwang.log
+(Bash path: /c/Users/mcwiz/Projects/AssemblyZero/logs/zugzwang.log)
 ```
 
 ### Step 3: Execute Based on Mode
@@ -115,7 +115,7 @@ Output to user:
 **Zugzwang Active**
 
 From this point forward, I will log all permission-related events to:
-`C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log`
+`C:\Users\mcwiz\Projects\AssemblyZero\logs\zugzwang.log`
 
 Events logged:
 - PATTERN_RISKY: Commands with |, &&, ; before execution
@@ -175,7 +175,7 @@ TIMESTAMP | TOOL_BLOCKED | agent:opus | tool:TOOL_NAME | context:"ERROR_MSG" | s
 **ZUGZWANG LOGGING ACTIVE:**
 
 You MUST log permission-related events to:
-C:\Users\mcwiz\Projects\AgentOS\logs\zugzwang.log
+C:\Users\mcwiz\Projects\AssemblyZero\logs\zugzwang.log
 
 **Before ANY Bash command that:**
 - Contains | (pipe), && (chain), or ; (separator)

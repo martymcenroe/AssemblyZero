@@ -2,7 +2,7 @@
 
 ## Problem
 
-We have a new governance workflow (#62) that creates `docs/audit/active/{slug}/` directories with sequential numbered files for each issue. But we have dozens of existing issues across multiple repos (AgentOS, Aletheia, Talos) that predate this structure.
+We have a new governance workflow (#62) that creates `docs/audit/active/{slug}/` directories with sequential numbered files for each issue. But we have dozens of existing issues across multiple repos (AssemblyZero, Aletheia, Talos) that predate this structure.
 
 Currently these repos have no audit trail for historical issues - no record of the original brief, drafts, or review verdicts.
 
@@ -18,7 +18,7 @@ Create a Python tool that backfills the audit directory structure for existing G
 
 ## Slug Generation
 
-Use the same algorithm from `agentos/workflows/issue/audit.py`:
+Use the same algorithm from `assemblyzero/workflows/issue/audit.py`:
 - Lowercase
 - Replace spaces/underscores with hyphens
 - Remove special characters
@@ -80,7 +80,7 @@ docs/audit/active/
 ## CLI Interface
 
 ```bash
-python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS
+python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero
 python tools/backfill_issue_audit.py --repo martymcenroe/Aletheia
 python tools/backfill_issue_audit.py --all-registered  # All repos in project-registry.json
 ```

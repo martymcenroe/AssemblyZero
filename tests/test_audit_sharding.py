@@ -30,7 +30,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.core.audit import (
+from assemblyzero.core.audit import (
     ReviewAuditLog,
     ReviewLogEntry,
     create_log_entry,
@@ -124,7 +124,7 @@ class TestRepoRootDetection:
     def test_030_auto_detection_in_git_repo(self, temp_repo: Path) -> None:
         """Should auto-detect repo root when not provided."""
         # Patch subprocess to return our temp repo path
-        with patch("agentos.core.audit.subprocess.run") as mock_run:
+        with patch("assemblyzero.core.audit.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = str(temp_repo)
 
@@ -138,7 +138,7 @@ class TestRepoRootDetection:
         non_git.mkdir()
 
         # Patch subprocess to simulate git failure
-        with patch("agentos.core.audit.subprocess.run") as mock_run:
+        with patch("assemblyzero.core.audit.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 128
             mock_run.return_value.stderr = "fatal: not a git repository"
 
@@ -211,7 +211,7 @@ class TestFailClosed:
         logs_dir.mkdir(parents=True)
 
         # Mock git detection to return our readonly path
-        with patch("agentos.core.audit.subprocess.run") as mock_run:
+        with patch("assemblyzero.core.audit.subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = str(readonly_dir)
 

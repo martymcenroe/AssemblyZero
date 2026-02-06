@@ -1,6 +1,6 @@
 # Implementation Report: Issue #5 - Permission Propagation Tool
 
-**Issue:** [#5](https://github.com/martymcenroe/AgentOS/issues/5)
+**Issue:** [#5](https://github.com/martymcenroe/AssemblyZero/issues/5)
 **Commit:** `5d76523`
 **Date:** 2026-01-12
 **Status:** Complete
@@ -9,7 +9,7 @@
 
 ## Summary
 
-Implemented `agentos-permissions.py`, a tool that manages Claude Code permissions across master (user-level) and project-level settings files. The tool identifies and removes one-time "session vend" permissions while preserving reusable patterns, and can merge unique patterns from projects into the master configuration.
+Implemented `assemblyzero-permissions.py`, a tool that manages Claude Code permissions across master (user-level) and project-level settings files. The tool identifies and removes one-time "session vend" permissions while preserving reusable patterns, and can merge unique patterns from projects into the master configuration.
 
 ---
 
@@ -17,7 +17,7 @@ Implemented `agentos-permissions.py`, a tool that manages Claude Code permission
 
 | File | Action | Description |
 |------|--------|-------------|
-| `tools/agentos-permissions.py` | Created | Core permission management tool (798 lines) |
+| `tools/assemblyzero-permissions.py` | Created | Core permission management tool (798 lines) |
 | `docs/skills/0620c-sync-permissions-cli.md` | Created | CLI documentation (c/p pattern) |
 | `docs/skills/0620p-sync-permissions-prompt.md` | Created | Prompt documentation (c/p pattern) |
 | `~/.claude/commands/sync-permissions.md` | Created | User-level skill wrapper |
@@ -45,16 +45,16 @@ Implemented `agentos-permissions.py`, a tool that manages Claude Code permission
 
 **Hard-coded protection:** `Bash(python:*)` and `Bash(python3:*)` are NEVER allowed in deny lists. The tool automatically removes these if found.
 
-**Rationale:** Blocking Python execution would cripple AgentOS tools. This protection cannot be overridden.
+**Rationale:** Blocking Python execution would cripple AssemblyZero tools. This protection cannot be overridden.
 
-### 3. Giant Permission Detection (`tools/agentos-permissions.py:150-162`)
+### 3. Giant Permission Detection (`tools/assemblyzero-permissions.py:150-162`)
 
 Permissions over 300 characters are flagged as "giant" and removed. These are typically:
 - Gemini prompts saved as permissions
 - Commit messages with full bodies
 - PR descriptions embedded in commands
 
-### 4. Embedded Content Detection (`tools/agentos-permissions.py:164-181`)
+### 4. Embedded Content Detection (`tools/assemblyzero-permissions.py:164-181`)
 
 Markers that indicate corrupted permissions:
 - Actual newlines (`\n`)
@@ -92,7 +92,7 @@ Step 3: Sync to Projects-level settings
 User
   |
   v
-agentos-permissions.py
+assemblyzero-permissions.py
   |
   +---> load_settings() → Parse JSON
   |
@@ -123,7 +123,7 @@ agentos-permissions.py
 
 ## Key Implementation Details
 
-### Session Vend Detection (`tools/agentos-permissions.py:183-261`)
+### Session Vend Detection (`tools/assemblyzero-permissions.py:183-261`)
 
 Ordered checks:
 1. Giant permission (>300 chars)
@@ -135,7 +135,7 @@ Ordered checks:
 7. One-time push with tracking
 8. PR merge commands
 
-### Reusable Pattern Detection (`tools/agentos-permissions.py:280-315`)
+### Reusable Pattern Detection (`tools/assemblyzero-permissions.py:280-315`)
 
 Patterns that are kept:
 - Skills: `Skill(...)`
@@ -144,7 +144,7 @@ Patterns that are kept:
 - Bash wildcards: `Bash(...:*)`
 - Environment variable prefixed wildcards
 
-### JSON Validation (`tools/agentos-permissions.py:105-147`)
+### JSON Validation (`tools/assemblyzero-permissions.py:105-147`)
 
 Paranoid validation before writing:
 1. Serialize to JSON
@@ -205,7 +205,7 @@ The manual approach provides:
 - **Session awareness** - Users run it when cleaning up, not as a background process
 - **Clear ownership** - The commit log shows when permissions were consolidated
 
-This aligns with AgentOS's principle: **visible, auditable operations over magical automation**.
+This aligns with AssemblyZero's principle: **visible, auditable operations over magical automation**.
 
 ---
 

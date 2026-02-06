@@ -4,7 +4,7 @@
 Issue #189: Add pre-worktree-removal cleanup protocol to save audit artifacts.
 
 Usage:
-    python tools/archive-worktree-lineage.py --worktree ../AgentOS-42 --issue 42
+    python tools/archive-worktree-lineage.py --worktree ../AssemblyZero-42 --issue 42
 
 This script:
 1. Copies docs/lineage/active/{issue}-*/ to main repo's docs/lineage/archived/
@@ -63,7 +63,7 @@ def clean_ephemeral(worktree_path: Path) -> None:
     Args:
         worktree_path: Path to the worktree being cleaned
     """
-    ephemeral = [".coverage", "__pycache__", ".pytest_cache", ".agentos/audit"]
+    ephemeral = [".coverage", "__pycache__", ".pytest_cache", ".assemblyzero/audit"]
 
     for name in ephemeral:
         target = worktree_path / name

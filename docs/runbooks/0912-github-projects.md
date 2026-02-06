@@ -9,7 +9,7 @@ GitHub Projects v2 is used to track work across all repositories. Projects are u
 | # | Project | Repos | URL |
 |---|---------|-------|-----|
 | 1 | Aletheia | Aletheia | [projects/1](https://github.com/users/martymcenroe/projects/1) |
-| 2 | Infrastructure | AgentOS, maintenance, unleashed | [projects/2](https://github.com/users/martymcenroe/projects/2) |
+| 2 | Infrastructure | AssemblyZero, maintenance, unleashed | [projects/2](https://github.com/users/martymcenroe/projects/2) |
 | 3 | Talos | Talos | [projects/3](https://github.com/users/martymcenroe/projects/3) |
 | 4 | Clio | Clio | [projects/4](https://github.com/users/martymcenroe/projects/4) |
 | 5 | RCA-PDF | RCA-PDF-extraction-pipeline | [projects/5](https://github.com/users/martymcenroe/projects/5) |
@@ -89,7 +89,7 @@ gh project item-list 2 --owner @me --format json \
 
 ```bash
 # Add by issue URL
-gh project item-add 2 --owner @me --url https://github.com/martymcenroe/AgentOS/issues/89
+gh project item-add 2 --owner @me --url https://github.com/martymcenroe/AssemblyZero/issues/89
 
 # Add multiple issues (loop)
 for url in URL1 URL2 URL3; do
@@ -228,7 +228,7 @@ Views are configured in the GitHub web UI only (not via CLI).
 ### Filtering Views
 
 In the view settings (gear icon):
-- **Filter** - e.g., `label:priority:high` or `repo:martymcenroe/AgentOS`
+- **Filter** - e.g., `label:priority:high` or `repo:martymcenroe/AssemblyZero`
 - **Group by** - Stage, Assignee, Label, etc.
 - **Sort by** - Created, Updated, custom fields
 
@@ -238,11 +238,11 @@ Use labels on issues for simple sprint tracking:
 
 ```bash
 # Create sprint labels
-gh label create "sprint-1" --repo martymcenroe/AgentOS --color "1d76db"
-gh label create "sprint-2" --repo martymcenroe/AgentOS --color "1d76db"
+gh label create "sprint-1" --repo martymcenroe/AssemblyZero --color "1d76db"
+gh label create "sprint-2" --repo martymcenroe/AssemblyZero --color "1d76db"
 
 # Add label to issue
-gh issue edit 89 --repo martymcenroe/AgentOS --add-label "sprint-1"
+gh issue edit 89 --repo martymcenroe/AssemblyZero --add-label "sprint-1"
 ```
 
 Then filter your board view by label to see only current sprint items.
@@ -253,7 +253,7 @@ Then filter your board view by label to see only current sprint items.
 
 ```bash
 # Get all open issue URLs and add to project
-gh issue list --repo martymcenroe/AgentOS --state open --json url --jq '.[].url' | \
+gh issue list --repo martymcenroe/AssemblyZero --state open --json url --jq '.[].url' | \
   while read url; do
     gh project item-add 2 --owner @me --url "$url"
   done
@@ -286,7 +286,7 @@ gh project item-list 2 --owner @me --format json \
 
 ## Automation
 
-Stage updates can be automated by integrating with AgentOS workflows.
+Stage updates can be automated by integrating with AssemblyZero workflows.
 
 See: `ideas/active/github-project-stage-automation.md`
 

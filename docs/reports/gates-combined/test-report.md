@@ -66,7 +66,7 @@
 ### Scenario 2: Verify worktree isolation
 **Steps:**
 1. Run `git worktree list`
-2. Confirm working in AgentOS-gates worktree
+2. Confirm working in AssemblyZero-gates worktree
 3. Verify branch is gates-claude-md
 
 **Expected Result:** Changes isolated in worktree

@@ -1,6 +1,6 @@
 # Test Report: Issue #15 - Path Parameterization
 
-**Issue:** [#15](https://github.com/martymcenroe/AgentOS/issues/15)
+**Issue:** [#15](https://github.com/martymcenroe/AssemblyZero/issues/15)
 **Date:** 2026-01-14
 **Status:** Tested and Validated
 
@@ -19,13 +19,13 @@ Testing was performed during development with focus on:
 
 ### 1. Default Paths (No Config File)
 
-**Test:** Run without `~/.agentos/config.json`
+**Test:** Run without `~/.assemblyzero/config.json`
 **Result:** PASS
 
 ```python
-from agentos_config import config
-print(config.agentos_root())
-# Output: C:\Users\mcwiz\Projects\AgentOS
+from assemblyzero_config import config
+print(config.assemblyzero_root())
+# Output: C:\Users\mcwiz\Projects\AssemblyZero
 ```
 
 ### 2. Custom Config File
@@ -37,9 +37,9 @@ print(config.agentos_root())
 {
   "version": "1.0",
   "paths": {
-    "agentos_root": {
-      "windows": "D:\\Custom\\AgentOS",
-      "unix": "/d/Custom/AgentOS"
+    "assemblyzero_root": {
+      "windows": "D:\\Custom\\AssemblyZero",
+      "unix": "/d/Custom/AssemblyZero"
     }
   }
 }
@@ -51,9 +51,9 @@ print(config.agentos_root())
 **Result:** PASS
 
 ```python
-print(config.agentos_root())        # C:\Users\mcwiz\Projects\AgentOS
-print(config.agentos_root_unix())   # /c/Users/mcwiz/Projects/AgentOS
-print(config.agentos_root('auto'))  # Detects OS, returns appropriate
+print(config.assemblyzero_root())        # C:\Users\mcwiz\Projects\AssemblyZero
+print(config.assemblyzero_root_unix())   # /c/Users/mcwiz/Projects/AssemblyZero
+print(config.assemblyzero_root('auto'))  # Detects OS, returns appropriate
 ```
 
 ### 4. Path Traversal Protection
@@ -88,7 +88,7 @@ Logs: "Config file contains invalid JSON, using defaults"
 {
   "version": "1.0",
   "paths": {
-    "agentos_root": "missing format dict"
+    "assemblyzero_root": "missing format dict"
   }
 }
 ```
@@ -98,22 +98,22 @@ Logs: "Config validation failed (N errors), using defaults"
 ### 7. CLI Mode
 
 **Test:** Run as script
-**Command:** `python tools/agentos_config.py`
+**Command:** `python tools/assemblyzero_config.py`
 **Result:** PASS
 
 ```
-AgentOS Configuration
+AssemblyZero Configuration
 ==================================================
-Config file: C:\Users\mcwiz\.agentos\config.json
+Config file: C:\Users\mcwiz\.assemblyzero\config.json
 Config exists: True
 
 Current Paths (Windows format):
-  agentos_root:    C:\Users\mcwiz\Projects\AgentOS
+  assemblyzero_root:    C:\Users\mcwiz\Projects\AssemblyZero
   projects_root:   C:\Users\mcwiz\Projects
   user_claude_dir: C:\Users\mcwiz\.claude
 
 Current Paths (Unix format):
-  agentos_root:    /c/Users/mcwiz/Projects/AgentOS
+  assemblyzero_root:    /c/Users/mcwiz/Projects/AssemblyZero
   projects_root:   /c/Users/mcwiz/Projects
   user_claude_dir: /c/Users/mcwiz/.claude
 ```

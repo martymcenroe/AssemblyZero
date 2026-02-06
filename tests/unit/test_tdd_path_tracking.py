@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.core.state import TDDState
-from agentos.core.tdd_path_tracking import (
+from assemblyzero.core.state import TDDState
+from assemblyzero.core.tdd_path_tracking import (
     cleanup_stale_scaffold,
     get_test_file_path,
     log_test_file_path,
@@ -178,7 +178,7 @@ def test_track_test_file_move_rejects_path_traversal(temp_project_dir, base_stat
     base_state["test_file_path"] = old_path
 
     # Mock os.path.exists to return True (skip existence check, test path traversal)
-    with patch("agentos.core.tdd_path_tracking.os.path.exists", return_value=True):
+    with patch("assemblyzero.core.tdd_path_tracking.os.path.exists", return_value=True):
         # Act & Assert
         with pytest.raises(ValueError, match="must be within project directory"):
             track_test_file_move(base_state, old_path, malicious_path)

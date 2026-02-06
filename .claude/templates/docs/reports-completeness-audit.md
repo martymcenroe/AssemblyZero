@@ -84,4 +84,4 @@ gh issue view {ID} --repo {{GITHUB_REPO}} --json labels,title,body
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/reports-completeness-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/reports-completeness-audit.md*

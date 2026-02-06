@@ -21,7 +21,7 @@ These directories may be empty (with `.gitkeep`) without triggering audit warnin
 - `tests/*` - Empty test category scaffolding is intentional; tests are added as features mature
 - `docs/templates/` - May not have project-specific templates initially
 - `docs/adrs/` - New projects may not have ADRs yet
-- `docs/standards/` - New projects typically inherit from AgentOS
+- `docs/standards/` - New projects typically inherit from AssemblyZero
 - `docs/runbooks/` - Operational procedures added as needed
 - `docs/session-logs/` - Populated during agent sessions
 - `docs/audit-results/` - Populated when audits run
@@ -42,7 +42,7 @@ These directories are optional and may be entirely absent:
 
 - `extensions/` - Only required for browser extension projects
 - `wiki/` - Only if GitHub wiki integration is used
-- `ideas/` - Optional encrypted ideation folder (see AgentOS CLAUDE.md for setup)
+- `ideas/` - Optional encrypted ideation folder (see AssemblyZero CLAUDE.md for setup)
 - `.claude/gemini-prompts/` - Only if project uses Gemini reviews
 - `.claude/commands/` - Only if project has custom slash commands
 - `.claude/hooks/` - Only if project uses pre/post tool hooks
@@ -56,7 +56,7 @@ These directories are optional and may be entirely absent:
 These items are ALWAYS required and cannot be exempted:
 
 ### Files
-- `CLAUDE.md` - Agent instructions (required for AgentOS governance)
+- `CLAUDE.md` - Agent instructions (required for AssemblyZero governance)
 - `GEMINI.md` - Gemini agent instructions
 - `README.md` - Project overview
 - `.gitignore` - Git ignore rules
@@ -96,4 +96,4 @@ When an audit fails:
 ## Related Standards
 
 - `0009-canonical-project-structure.md` - Defines the required structure
-- `AgentOS/CLAUDE.md` - Ideas folder setup with git-crypt
+- `AssemblyZero/CLAUDE.md` - Ideas folder setup with git-crypt

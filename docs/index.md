@@ -1,4 +1,4 @@
-# AgentOS Documentation Index
+# AssemblyZero Documentation Index
 
 **Version:** 3.0
 **Last Updated:** 2026-01-21
@@ -7,21 +7,21 @@
 
 ## Primary Documentation: GitHub Wiki
 
-📖 **[AgentOS Wiki](https://github.com/martymcenroe/AgentOS/wiki)** - Main documentation portal for enterprise users
+📖 **[AssemblyZero Wiki](https://github.com/martymcenroe/AssemblyZero/wiki)** - Main documentation portal for enterprise users
 
 ### Key Wiki Pages
 
 | Page | Audience | Description |
 |------|----------|-------------|
-| [Home](https://github.com/martymcenroe/AgentOS/wiki) | Everyone | Overview and architecture diagram |
-| [Multi-Agent Orchestration](https://github.com/martymcenroe/AgentOS/wiki/Multi-Agent-Orchestration) | Architects | Core architecture - 12+ concurrent agents |
-| [LangGraph Evolution](https://github.com/martymcenroe/AgentOS/wiki/LangGraph-Evolution) | Tech Leaders | Roadmap to enterprise state machines |
-| [Measuring Productivity](https://github.com/martymcenroe/AgentOS/wiki/Measuring-Productivity) | VPs/Leadership | KPIs, metrics, dashboards |
-| [Gemini Verification](https://github.com/martymcenroe/AgentOS/wiki/Gemini-Verification) | Architects | Multi-model review architecture |
-| [Governance Gates](https://github.com/martymcenroe/AgentOS/wiki/Governance-Gates) | Security Teams | LLD, implementation, report gates |
-| [Permission Friction](https://github.com/martymcenroe/AgentOS/wiki/Permission-Friction) | Developers | Adoption optimization |
-| [Security & Compliance](https://github.com/martymcenroe/AgentOS/wiki/Security-Compliance) | Security Teams | OWASP, GDPR, AI Safety |
-| [Quick Start](https://github.com/martymcenroe/AgentOS/wiki/Quick-Start) | Developers | 5-minute setup guide |
+| [Home](https://github.com/martymcenroe/AssemblyZero/wiki) | Everyone | Overview and architecture diagram |
+| [Multi-Agent Orchestration](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration) | Architects | Core architecture - 12+ concurrent agents |
+| [LangGraph Evolution](https://github.com/martymcenroe/AssemblyZero/wiki/LangGraph-Evolution) | Tech Leaders | Roadmap to enterprise state machines |
+| [Measuring Productivity](https://github.com/martymcenroe/AssemblyZero/wiki/Measuring-Productivity) | VPs/Leadership | KPIs, metrics, dashboards |
+| [Gemini Verification](https://github.com/martymcenroe/AssemblyZero/wiki/Gemini-Verification) | Architects | Multi-model review architecture |
+| [Governance Gates](https://github.com/martymcenroe/AssemblyZero/wiki/Governance-Gates) | Security Teams | LLD, implementation, report gates |
+| [Permission Friction](https://github.com/martymcenroe/AssemblyZero/wiki/Permission-Friction) | Developers | Adoption optimization |
+| [Security & Compliance](https://github.com/martymcenroe/AssemblyZero/wiki/Security-Compliance) | Security Teams | OWASP, GDPR, AI Safety |
+| [Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start) | Developers | 5-minute setup guide |
 
 ---
 
@@ -40,7 +40,7 @@
 ## Directory Structure
 
 ```
-AgentOS/
+AssemblyZero/
 ├── CLAUDE.md                    # Core rules (inherited by all projects)
 ├── docs/
 │   ├── index.md                 # This file
@@ -48,8 +48,8 @@ AgentOS/
 │   ├── runbooks/                # 09xx - Operational procedures
 │   └── templates/               # 01xx - Document templates
 ├── tools/                       # Python utilities
-│   ├── agentos-generate.py      # Config generator
-│   ├── agentos-permissions.py   # Permission manager
+│   ├── assemblyzero-generate.py      # Config generator
+│   ├── assemblyzero-permissions.py   # Permission manager
 │   └── ...
 ├── .claude/
 │   ├── commands/                # Canonical skill implementations
@@ -62,26 +62,26 @@ AgentOS/
 
 ## Numbering Convention
 
-### Parent-Child Scheme (AgentOS ↔ Projects)
+### Parent-Child Scheme (AssemblyZero ↔ Projects)
 
-AgentOS uses **4-digit numbers** for generic/shared frameworks.
-Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementations.
+AssemblyZero uses **4-digit numbers** for generic/shared frameworks.
+Projects use **5-digit numbers** (prefix `1` + AssemblyZero number) for implementations.
 
 | Scope | Digits | Range | Example |
 |-------|--------|-------|---------|
-| **AgentOS (Generic)** | 4 | 0000-9999 | `0809-agentic-ai-governance.md` |
+| **AssemblyZero (Generic)** | 4 | 0000-9999 | `0809-agentic-ai-governance.md` |
 | **Projects (Specific)** | 5 | 10000-19999 | `10809-agentic-ai-governance.md` |
 
 **The `1` prefix means "project-specific implementation of":**
-- AgentOS `0809` = Generic audit framework for agentic AI governance
+- AssemblyZero `0809` = Generic audit framework for agentic AI governance
 - Aletheia `10809` = Aletheia's implementation of that audit
 - Talos `10809` = Talos's implementation of that audit
 
 **Future commands enabled:**
 - `compare 0809 10809` - Compare generic to project-specific
-- `promote 10809` - Extract common patterns from all projects' 10809, move to AgentOS 0809
+- `promote 10809` - Extract common patterns from all projects' 10809, move to AssemblyZero 0809
 
-### AgentOS Categories (4-digit)
+### AssemblyZero Categories (4-digit)
 
 | Range | Category | Directory | Description |
 |-------|----------|-----------|-------------|
@@ -155,7 +155,7 @@ Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementatio
 
 | Number | Title | Description |
 |--------|-------|-------------|
-| [0600](skills/0600-command-reference.md) | Command Reference | All 8 AgentOS commands |
+| [0600](skills/0600-command-reference.md) | Command Reference | All 8 AssemblyZero commands |
 | [0601](skills/0601-gemini-dual-review.md) | Gemini Dual Review | AI-to-AI review |
 | [0602](skills/0602-gemini-lld-review.md) | Gemini LLD Review | Design review |
 | [0604](skills/0604-gemini-retry.md) | Gemini Retry | Exponential backoff for Gemini |
@@ -182,7 +182,7 @@ Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementatio
 | [0814](audits/0814-horizon-scanning-protocol.md) | Horizon Scanning | Threat monitoring |
 | [0815](audits/0815-permission-friction.md) | Permission Friction | Approval overhead |
 | [0816](audits/0816-permission-permissiveness.md) | Permission Permissiveness | Access control |
-| [0817](audits/0817-agentos-audit.md) | AgentOS Audit | Self-audit framework |
+| [0817](audits/0817-assemblyzero-audit.md) | AssemblyZero Audit | Self-audit framework |
 | [0832](audits/0832-audit-cost-optimization.md) | Cost Optimization | Skill/tool token efficiency |
 | [0899](audits/0899-meta-audit.md) | Meta Audit | Audit the audits |
 
@@ -191,8 +191,8 @@ Projects use **5-digit numbers** (prefix `1` + AgentOS number) for implementatio
 | Number | Title | Description |
 |--------|-------|-------------|
 | [0900](runbooks/0900-runbook-index.md) | Runbook Index | All runbooks listed |
-| [0901](runbooks/0901-new-project-setup.md) | New Project Setup | Initialize with AgentOS |
-| [0902](runbooks/0902-nightly-agentos-audit.md) | Nightly AgentOS Audit | Scheduled audit run |
+| [0901](runbooks/0901-new-project-setup.md) | New Project Setup | Initialize with AssemblyZero |
+| [0902](runbooks/0902-nightly-assemblyzero-audit.md) | Nightly AssemblyZero Audit | Scheduled audit run |
 
 ---
 
@@ -219,8 +219,8 @@ See [0600-command-reference.md](skills/0600-command-reference.md) for full detai
 |------|---------|
 | CLAUDE.md | Core rules inherited by all projects |
 | .claude/project.json.example | Template for project configuration |
-| tools/agentos-generate.py | Generate configs from templates |
-| tools/agentos-permissions.py | Manage permission settings |
+| tools/assemblyzero-generate.py | Generate configs from templates |
+| tools/assemblyzero-permissions.py | Manage permission settings |
 | tools/gemini-retry.py | Gemini CLI wrapper with exponential backoff |
 | tools/claude-usage-scraper.py | Usage quota extraction via TUI automation |
 
@@ -229,13 +229,13 @@ See [0600-command-reference.md](skills/0600-command-reference.md) for full detai
 ## Inheritance Model
 
 ```
-AgentOS/CLAUDE.md           -> Core rules (bash safety, gates, worktree)
+AssemblyZero/CLAUDE.md           -> Core rules (bash safety, gates, worktree)
     | inherited by
 ~/.claude/commands/         -> User-level skills (available everywhere)
     | available to
 Project/CLAUDE.md           -> Project-specific rules
     | with
-Project/.claude/            -> Generated from AgentOS templates
+Project/.claude/            -> Generated from AssemblyZero templates
 ```
 
 ---
@@ -246,7 +246,7 @@ See [ADR 0206](adrs/0206-bidirectional-sync-architecture.md) for full details.
 
 ```
                     ┌─────────────┐
-                    │   AgentOS   │
+                    │   AssemblyZero   │
                     │  (Generic)  │
                     └──────┬──────┘
                            │
@@ -269,9 +269,9 @@ See [ADR 0206](adrs/0206-bidirectional-sync-architecture.md) for full details.
 
 | Direction | Trigger | Tool |
 |-----------|---------|------|
-| **AgentOS → Projects** | Manual, post-commit | `agentos-generate.py` |
-| **Project → AgentOS** | Agent explicit call | `/promote` command |
-| **All Projects → AgentOS** | `/cleanup --full` | `agentos-harvest.py` |
+| **AssemblyZero → Projects** | Manual, post-commit | `assemblyzero-generate.py` |
+| **Project → AssemblyZero** | Agent explicit call | `/promote` command |
+| **All Projects → AssemblyZero** | `/cleanup --full` | `assemblyzero-harvest.py` |
 
 ### Registered Projects
 
@@ -285,7 +285,7 @@ See `.claude/project-registry.json` for current list.
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial structure with skills, runbooks, templates |
 | 2.0 | 2026-01-13 | Full document catalog after numbering audit (47 docs) |
-| 2.1 | 2026-01-13 | Added parent-child numbering scheme (4-digit AgentOS, 5-digit projects) |
+| 2.1 | 2026-01-13 | Added parent-child numbering scheme (4-digit AssemblyZero, 5-digit projects) |
 | 2.2 | 2026-01-13 | ADR 0206: Bidirectional sync architecture, project registry created |
 | 2.3 | 2026-01-14 | Added 0008 Documentation Convention (c/p pattern) |
 | 2.4 | 2026-01-14 | Added 0603 Unleashed, 0604 Gemini Retry, updated Key Files |

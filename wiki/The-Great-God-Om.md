@@ -18,7 +18,7 @@ The god at first cared for Brutha only because Om's own survival depended on Bru
 
 ---
 
-## In AgentOS
+## In AssemblyZero
 
 The Great God Om is the human orchestrator — the source of Intent that drives all workflows. Like Om in the book, The Great God Om:
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the canonical structure for all Gemini review prompts in the AgentOS governance stack. This standard ensures parallel structure across Issue Review (0701c), LLD Review (0702c), Implementation Review (0703c), and Ops Health Review (0704c).
+Define the canonical structure for all Gemini review prompts in the AssemblyZero governance stack. This standard ensures parallel structure across Issue Review (0701c), LLD Review (0702c), Implementation Review (0703c), and Ops Health Review (0704c).
 
 ---
 

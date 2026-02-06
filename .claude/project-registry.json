@@ -1,6 +1,6 @@
 {
   "$schema": "project-registry-schema.json",
-  "$comment": "Registry of child projects that inherit from AgentOS. Used by bidirectional sync (ADR 0206).",
+  "$comment": "Registry of child projects that inherit from AssemblyZero. Used by bidirectional sync (ADR 0206).",
 
   "children": [
     {
@@ -22,7 +22,7 @@
       "lastSync": "2026-01-13T00:00:00Z",
       "lastHarvest": null,
       "status": "active",
-      "notes": "Has Gemini review protocol that should be promoted to AgentOS"
+      "notes": "Has Gemini review protocol that should be promoted to AssemblyZero"
     },
     {
       "name": "maintenance",

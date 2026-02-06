@@ -2,12 +2,12 @@
 
 **Issue:** #95
 **Date:** 2026-01-29
-**Worktree:** AgentOS-86
+**Worktree:** AssemblyZero-86
 
 ## Test Command
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-86 pytest /c/Users/mcwiz/Projects/AgentOS-86/tests/test_lld_workflow.py -v --tb=short
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-86 pytest /c/Users/mcwiz/Projects/AssemblyZero-86/tests/test_lld_workflow.py -v --tb=short
 ```
 
 ## Test Results
@@ -15,7 +15,7 @@ poetry run --directory /c/Users/mcwiz/Projects/AgentOS-86 pytest /c/Users/mcwiz/
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\Users\mcwiz\Projects\AgentOS-86
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-86
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 collecting ... collected 41 items
@@ -69,7 +69,7 @@ tests/test_lld_workflow.py::TestSharedAuditHelpers::test_save_verdict_to_audit_c
 
 ### Test 1: --audit flag
 ```bash
-$ PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS-86 poetry run python tools/run_lld_workflow.py --audit
+$ PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero-86 poetry run python tools/run_lld_workflow.py --audit
 
 ============================================================
 LLD Status Audit
@@ -83,13 +83,13 @@ LLD Status Cache Rebuilt:
   Draft: 0
   Blocked: 0
 
-Saved to: C:\Users\mcwiz\Projects\AgentOS-86\docs\lld\lld-status.json
+Saved to: C:\Users\mcwiz\Projects\AssemblyZero-86\docs\lld\lld-status.json
 ```
 **Result:** PASSED
 
 ### Test 2: --help shows new flags
 ```bash
-$ PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS-86 poetry run python tools/run_lld_workflow.py --help
+$ PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero-86 poetry run python tools/run_lld_workflow.py --help
 
 usage: run_lld_workflow.py [-h] [--issue ISSUE] [--select] [--audit]
                            [--context CONTEXT] [--auto] [--mock] [--resume]
@@ -102,7 +102,7 @@ usage: run_lld_workflow.py [-h] [--issue ISSUE] [--select] [--audit]
 
 ### Test 3: Full workflow with --mock --auto (includes review embedding)
 ```bash
-$ PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS-86 AGENTOS_TEST_MODE=1 poetry run python tools/run_lld_workflow.py --issue 99 --mock --auto
+$ PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero-86 AGENTOS_TEST_MODE=1 poetry run python tools/run_lld_workflow.py --issue 99 --mock --auto
 
 ============================================================
 LLD Governance Workflow - Issue #99
@@ -111,7 +111,7 @@ Mode: MOCK (using fixtures)
 ...
 [N4] Finalizing approved LLD...
     Embedded review evidence (Gemini #1, 2026-01-29)
-    Saved to: C:\Users\mcwiz\Projects\AgentOS-86\docs\lld\active\LLD-099.md
+    Saved to: C:\Users\mcwiz\Projects\AssemblyZero-86\docs\lld\active\LLD-099.md
     Updated lld-status.json tracking
     Metadata saved: 005-approved.json
 
@@ -144,8 +144,8 @@ Mode: MOCK (using fixtures)
 ## Coverage
 
 No formal coverage metrics collected, but all new code paths in:
-- `agentos/workflows/lld/audit.py` (detection, tracking functions)
-- `agentos/workflows/lld/nodes.py` (embed_review_evidence call)
+- `assemblyzero/workflows/lld/audit.py` (detection, tracking functions)
+- `assemblyzero/workflows/lld/nodes.py` (embed_review_evidence call)
 - `tools/run_lld_workflow.py` (--select, --audit handling)
 
 were exercised through manual testing.

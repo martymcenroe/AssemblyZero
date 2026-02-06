@@ -2,7 +2,7 @@
 
 ## The Accidental Adventure
 
-AgentOS was built on Windows not by grand design, but by circumstance. The development machine is a Dell Alienware with a capable GPU - originally acquired for playing the latest Civilization. Using Claude Code on it became its own adventure game, one that quickly took over.
+AssemblyZero was built on Windows not by grand design, but by circumstance. The development machine is a Dell Alienware with a capable GPU - originally acquired for playing the latest Civilization. Using Claude Code on it became its own adventure game, one that quickly took over.
 
 ## The Deliberate Choice
 
@@ -13,7 +13,7 @@ For years, the pattern was:
 - Linux (RedHat) for work servers
 - Windows as "that other thing"
 
-Building AgentOS on Windows with Git Bash revealed friction that macOS developers never see. This friction became valuable - it forced documentation of edge cases, path format rules, and permission patterns that would otherwise remain invisible.
+Building AssemblyZero on Windows with Git Bash revealed friction that macOS developers never see. This friction became valuable - it forced documentation of edge cases, path format rules, and permission patterns that would otherwise remain invisible.
 
 ## The Current Setup
 
@@ -31,7 +31,7 @@ Building AgentOS on Windows with Git Bash revealed friction that macOS developer
 
 ## Future Plans
 
-1. **macOS compatibility:** When the right opportunity arises (perhaps a top-end Mac Mini for work), ensure AgentOS works seamlessly on macOS. The permission friction documentation will inform what needs adjustment.
+1. **macOS compatibility:** When the right opportunity arises (perhaps a top-end Mac Mini for work), ensure AssemblyZero works seamlessly on macOS. The permission friction documentation will inform what needs adjustment.
 
 2. **Linux exploration:** The TPM-blocked Dell will likely become a Linux machine eventually. Not urgent, but good to have options.
 
@@ -42,7 +42,7 @@ The Windows/Git Bash environment exposed assumptions in Claude Code's design:
 - Pattern matching breaks on Git Bash's hybrid paths
 - Most AI coding tools are macOS-first
 
-AgentOS adapted with:
+AssemblyZero adapted with:
 - Visible self-check protocol (document the friction)
 - Dual path format rules in CLAUDE.md
 - Platform-specific dependency markers

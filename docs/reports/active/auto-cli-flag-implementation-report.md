@@ -15,9 +15,9 @@ Added `--auto` CLI flag to `run_issue_workflow.py` that enables unattended workf
 | File | Change |
 |------|--------|
 | `tools/run_issue_workflow.py` | Added `--auto` argument, sets `AGENTOS_AUTO_MODE=1` env var |
-| `agentos/workflows/issue/nodes/human_edit_draft.py` | Check `AGENTOS_AUTO_MODE` to skip VS Code (line 209) and auto-send to Gemini (line 144) |
-| `agentos/workflows/issue/nodes/human_edit_verdict.py` | Check `AGENTOS_AUTO_MODE` to skip VS Code preview (line 253) |
-| `agentos/workflows/issue/nodes/file_issue.py` | Check `AGENTOS_AUTO_MODE` to open done/ folder at end (line 375) |
+| `assemblyzero/workflows/issue/nodes/human_edit_draft.py` | Check `AGENTOS_AUTO_MODE` to skip VS Code (line 209) and auto-send to Gemini (line 144) |
+| `assemblyzero/workflows/issue/nodes/human_edit_verdict.py` | Check `AGENTOS_AUTO_MODE` to skip VS Code preview (line 253) |
+| `assemblyzero/workflows/issue/nodes/file_issue.py` | Check `AGENTOS_AUTO_MODE` to open done/ folder at end (line 375) |
 
 ## Design Decisions
 

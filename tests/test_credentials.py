@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for agentos_credentials.py - Secure credential management.
+Tests for assemblyzero_credentials.py - Secure credential management.
 
 Issue: #25
 """
@@ -17,7 +17,7 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
-from agentos_credentials import (
+from assemblyzero_credentials import (
     Credential,
     CredentialManager,
     EnvBackend,

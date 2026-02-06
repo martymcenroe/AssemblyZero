@@ -19,7 +19,7 @@ class TestLoadFixtureMissingFile:
 
     def test_raises_error_when_fixture_missing(self, tmp_path):
         """Test that load_fixture raises FileNotFoundError for missing fixtures."""
-        from agentos.workflows.scout.nodes import load_fixture
+        from assemblyzero.workflows.scout.nodes import load_fixture
 
         # Point to a non-existent fixture
         with patch.object(
@@ -35,14 +35,14 @@ class TestLoadFixtureMissingFile:
 
     def test_raises_error_with_helpful_message(self, tmp_path):
         """Test that error message includes fixture name and path."""
-        from agentos.workflows.scout.nodes import load_fixture
+        from assemblyzero.workflows.scout.nodes import load_fixture
 
         # Mock the fixture directory to be empty
         fixture_dir = tmp_path / "tests" / "fixtures" / "scout"
         fixture_dir.mkdir(parents=True)
 
         # Temporarily modify the module to use our temp dir
-        import agentos.workflows.scout.nodes as nodes_module
+        import assemblyzero.workflows.scout.nodes as nodes_module
         original_file = nodes_module.__file__
 
         with patch.object(nodes_module, '__file__', str(tmp_path / "fake" / "nodes.py")):
@@ -54,7 +54,7 @@ class TestLoadFixtureMissingFile:
 
     def test_loads_existing_fixture_successfully(self, tmp_path):
         """Test that existing fixtures still load correctly."""
-        from agentos.workflows.scout.nodes import load_fixture
+        from assemblyzero.workflows.scout.nodes import load_fixture
         import json
 
         # Create a fixture file
@@ -64,9 +64,9 @@ class TestLoadFixtureMissingFile:
         test_data = [{"name": "test-repo", "stars": 100}]
         fixture_file.write_text(json.dumps(test_data))
 
-        import agentos.workflows.scout.nodes as nodes_module
+        import assemblyzero.workflows.scout.nodes as nodes_module
 
-        with patch.object(nodes_module, '__file__', str(tmp_path / "agentos" / "workflows" / "scout" / "nodes.py")):
+        with patch.object(nodes_module, '__file__', str(tmp_path / "assemblyzero" / "workflows" / "scout" / "nodes.py")):
             result = load_fixture("test_fixture.json")
 
         assert result == test_data
@@ -77,8 +77,8 @@ class TestExplorerNodeWithMissingFixture:
 
     def test_explorer_fails_clearly_when_fixture_missing(self, tmp_path):
         """Test explorer_node raises error when fixture missing in offline mode."""
-        from agentos.workflows.scout.nodes import explorer_node
-        import agentos.workflows.scout.nodes as nodes_module
+        from assemblyzero.workflows.scout.nodes import explorer_node
+        import assemblyzero.workflows.scout.nodes as nodes_module
 
         # Create empty fixture directory
         fixture_dir = tmp_path / "tests" / "fixtures" / "scout"
@@ -91,7 +91,7 @@ class TestExplorerNodeWithMissingFixture:
             "repo_limit": 3,
         }
 
-        with patch.object(nodes_module, '__file__', str(tmp_path / "agentos" / "workflows" / "scout" / "nodes.py")):
+        with patch.object(nodes_module, '__file__', str(tmp_path / "assemblyzero" / "workflows" / "scout" / "nodes.py")):
             # Should raise FileNotFoundError, not silently return empty repos
             with pytest.raises(FileNotFoundError) as exc_info:
                 explorer_node(state)
@@ -104,8 +104,8 @@ class TestExtractorNodeWithMissingFixture:
 
     def test_extractor_fails_clearly_when_fixture_missing(self, tmp_path):
         """Test extractor_node raises error when fixture missing in offline mode."""
-        from agentos.workflows.scout.nodes import extractor_node
-        import agentos.workflows.scout.nodes as nodes_module
+        from assemblyzero.workflows.scout.nodes import extractor_node
+        import assemblyzero.workflows.scout.nodes as nodes_module
 
         # Create empty fixture directory
         fixture_dir = tmp_path / "tests" / "fixtures" / "scout"
@@ -118,7 +118,7 @@ class TestExtractorNodeWithMissingFixture:
             "offline_mode": True,
         }
 
-        with patch.object(nodes_module, '__file__', str(tmp_path / "agentos" / "workflows" / "scout" / "nodes.py")):
+        with patch.object(nodes_module, '__file__', str(tmp_path / "assemblyzero" / "workflows" / "scout" / "nodes.py")):
             # Should raise FileNotFoundError, not silently proceed with empty content
             with pytest.raises(FileNotFoundError) as exc_info:
                 extractor_node(state)

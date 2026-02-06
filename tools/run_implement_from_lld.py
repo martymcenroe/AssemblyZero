@@ -30,7 +30,7 @@ Usage:
     python tools/run_implement_from_lld.py --issue 42 --gates draft
 
     # With sandbox repo for E2E
-    python tools/run_implement_from_lld.py --issue 42 --sandbox-repo mcwiz/agentos-e2e-sandbox
+    python tools/run_implement_from_lld.py --issue 42 --sandbox-repo mcwiz/assemblyzero-e2e-sandbox
 
     # Cross-repo (test another project)
     python tools/run_implement_from_lld.py --issue 42 --repo /path/to/other/repo
@@ -298,8 +298,8 @@ def main():
     # Import after setting up path
     from langgraph.checkpoint.sqlite import SqliteSaver
 
-    from agentos.workflows.testing import TestingWorkflowState, build_testing_workflow
-    from agentos.workflows.testing.audit import get_repo_root
+    from assemblyzero.workflows.testing import TestingWorkflowState, build_testing_workflow
+    from assemblyzero.workflows.testing.audit import get_repo_root
 
     # Determine repo root
     if args.repo:
@@ -350,7 +350,7 @@ def main():
             sys.exit(1)
 
     print()
-    print(f"AgentOS TDD Testing Workflow")
+    print(f"AssemblyZero TDD Testing Workflow")
     print(f"============================")
     print(f"Issue: #{args.issue}")
     print(f"Repository: {repo_root}")
@@ -389,7 +389,7 @@ def main():
         initial_state["sandbox_repo"] = args.sandbox_repo
 
     # Set up checkpoint database
-    db_path = Path.home() / ".agentos" / "testing_workflow.db"
+    db_path = Path.home() / ".assemblyzero" / "testing_workflow.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build workflow

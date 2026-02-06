@@ -8,7 +8,7 @@
 
 ## Verdict: APPROVED
 
-The implementation in `agentos_config.py` is solid, production-ready code that meets all specified requirements with a strong emphasis on reliability and security.
+The implementation in `assemblyzero_config.py` is solid, production-ready code that meets all specified requirements with a strong emphasis on reliability and security.
 
 ---
 
@@ -23,10 +23,10 @@ The `_load_config` method follows the "fail-safe" principle. By catching `json.J
 
 ### 3. Clean API Design
 - **Type Hinting:** Extensive use of `typing` (e.g., `Literal`, `Optional`) makes the code self-documenting and IDE-friendly.
-- **Flexibility:** The `fmt='auto'` option in getters (`agentos_root`) is a smart addition, allowing the tool to adapt to the host OS dynamically while still allowing explicit overrides (Windows/Unix) for cross-platform operations (e.g., generating WSL paths on Windows).
+- **Flexibility:** The `fmt='auto'` option in getters (`assemblyzero_root`) is a smart addition, allowing the tool to adapt to the host OS dynamically while still allowing explicit overrides (Windows/Unix) for cross-platform operations (e.g., generating WSL paths on Windows).
 
 ### 4. Pythonic Patterns
-Using a module-level instance (`config = AgentOSConfig()`) is the idiomatic way to implement the Singleton pattern in Python, avoiding unnecessary boilerplate in `__new__`.
+Using a module-level instance (`config = AssemblyZeroConfig()`) is the idiomatic way to implement the Singleton pattern in Python, avoiding unnecessary boilerplate in `__new__`.
 
 ---
 

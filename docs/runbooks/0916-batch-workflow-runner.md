@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Run AgentOS workflows on multiple issues sequentially without manual intervention. Designed for unattended operation - start it and walk away.
+Run AssemblyZero workflows on multiple issues sequentially without manual intervention. Designed for unattended operation - start it and walk away.
 
 ## Quick Reference
 
@@ -76,7 +76,7 @@ batch-workflow --type lld --all needs-lld
 By default, `--repo` is auto-detected from the git remote. To run workflows for a different repository:
 
 ```bash
-# Run LLD workflow for Aletheia issues (from AgentOS directory)
+# Run LLD workflow for Aletheia issues (from AssemblyZero directory)
 batch-workflow --type lld --gates none --yes --repo martymcenroe/Aletheia --all needs-lld
 
 # Run implementation for specific Talos issues
@@ -194,7 +194,7 @@ For large batches, consider:
 The script is at `tools/batch-workflow.sh`. The alias is in `~/.bash_profile`:
 
 ```bash
-alias batch-workflow='/c/Users/mcwiz/Projects/AgentOS/tools/batch-workflow.sh'
+alias batch-workflow='/c/Users/mcwiz/Projects/AssemblyZero/tools/batch-workflow.sh'
 ```
 
 After editing `.bash_profile`, reload:

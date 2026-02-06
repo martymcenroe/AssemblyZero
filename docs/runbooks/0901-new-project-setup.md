@@ -8,10 +8,10 @@
 
 ## Purpose
 
-Initialize a new project with the canonical AgentOS structure, enabling:
+Initialize a new project with the canonical AssemblyZero structure, enabling:
 - Full directory scaffold (31 directories)
 - GitHub repository creation and configuration
-- Inherited CLAUDE.md rules from AgentOS
+- Inherited CLAUDE.md rules from AssemblyZero
 - Session logging and agent coordination
 
 ---
@@ -22,7 +22,7 @@ Initialize a new project with the canonical AgentOS structure, enabling:
 |-------------|-------|
 | Git installed | `git --version` |
 | Poetry installed | `poetry --version` |
-| AgentOS cloned | `ls /c/Users/mcwiz/Projects/AgentOS` |
+| AssemblyZero cloned | `ls /c/Users/mcwiz/Projects/AssemblyZero` |
 | GitHub CLI | `gh auth status` |
 
 ---
@@ -32,25 +32,25 @@ Initialize a new project with the canonical AgentOS structure, enabling:
 ### Create a New Private Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py MyNewProject
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject
 ```
 
 ### Create a Public Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py MyNewProject --public
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --public
 ```
 
 ### Create Local Only (No GitHub)
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py MyNewProject --no-github
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --no-github
 ```
 
 ### Audit Existing Project
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py ExistingProject --audit
 ```
 
 ---
@@ -101,7 +101,7 @@ MyNewProject/
 
 | File | Purpose |
 |------|---------|
-| `.claude/project.json` | Project variables for AgentOS |
+| `.claude/project.json` | Project variables for AssemblyZero |
 | `.claude/settings.json` | Hook configuration (empty by default) |
 | `CLAUDE.md` | Claude agent instructions |
 | `GEMINI.md` | Gemini agent instructions |
@@ -141,13 +141,13 @@ options:
 The script creates a minimal `settings.json` without hooks. For worktree protection and security linting:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py --project MyNewProject
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject
 ```
 
 ### 2. Set Up Encrypted Ideas Folder (Optional)
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-generate.py --project MyNewProject --ideas
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject --ideas
 ```
 
 ### 3. Customize CLAUDE.md
@@ -161,7 +161,7 @@ Edit `MyNewProject/CLAUDE.md` to add project-specific:
 ### 4. Create First Issue
 
 ```bash
-gh issue create --repo your-username/MyNewProject --title "Initial setup" --body "Project scaffolded with AgentOS"
+gh issue create --repo your-username/MyNewProject --title "Initial setup" --body "Project scaffolded with AssemblyZero"
 ```
 
 ---
@@ -171,7 +171,7 @@ gh issue create --repo your-username/MyNewProject --title "Initial setup" --body
 ### Check Structure
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py MyNewProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --audit
 ```
 
 Expected output:
@@ -197,7 +197,7 @@ gh repo view your-username/MyNewProject
 The script won't overwrite existing projects. Use `--audit` to check an existing project:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/new-repo-setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py ExistingProject --audit
 ```
 
 ### "Could not get GitHub username"
@@ -227,7 +227,7 @@ If you need fine-grained control, see the manual process:
 
 1. Create directory and `git init`
 2. Create `.claude/project.json` with variables
-3. Run `agentos-generate.py` for configs
+3. Run `assemblyzero-generate.py` for configs
 4. Create CLAUDE.md, GEMINI.md, README.md
 5. Create directory structure manually
 6. `git add . && git commit`
@@ -241,7 +241,7 @@ The script automates all of this in one command.
 
 - [0009-canonical-project-structure.md](../standards/0009-canonical-project-structure.md) - Directory structure standard
 - [0011-audit-decisions.md](../standards/0011-audit-decisions.md) - Audit exceptions
-- [AgentOS CLAUDE.md](../../CLAUDE.md) - Core rules inherited by all projects
+- [AssemblyZero CLAUDE.md](../../CLAUDE.md) - Core rules inherited by all projects
 
 ---
 

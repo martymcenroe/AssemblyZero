@@ -104,7 +104,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 **Full mode adds (10 parallel calls total):**
 - git -C {{PROJECT_ROOT}} branch -vv
 - git -C {{PROJECT_ROOT}} branch -r
-- poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-permissions.py --quick-check --project {{PROJECT_NAME}}
+- poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-permissions.py --quick-check --project {{PROJECT_NAME}}
 
 ## Phase 2: Conditional Fixes
 
@@ -139,7 +139,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 
 5. **Permission Check** (Full mode only) - If the permission quick-check returned exit code 1:
    - Report: "Stale permissions detected in settings.local.json"
-   - Suggest: "Run `poetry run python tools/agentos-permissions.py --clean --project {{PROJECT_NAME}}` to clean"
+   - Suggest: "Run `poetry run python tools/assemblyzero-permissions.py --clean --project {{PROJECT_NAME}}` to clean"
 
 ## Phase 3: Session Log
 

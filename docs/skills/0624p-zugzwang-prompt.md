@@ -141,6 +141,6 @@ Complementary. Use both for comprehensive friction tracking.
 
 ## Source of Truth
 
-**Tool:** `AgentOS/tools/zugzwang.py`
-**Log:** `AgentOS/logs/zugzwang.log`
+**Tool:** `AssemblyZero/tools/zugzwang.py`
+**Log:** `AssemblyZero/logs/zugzwang.log`
 **Skill definition:** `~/.claude/commands/zugzwang.md`

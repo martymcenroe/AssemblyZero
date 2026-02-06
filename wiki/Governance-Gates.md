@@ -6,7 +6,7 @@
 
 ## Overview
 
-AgentOS implements three mandatory governance gates:
+AssemblyZero implements three mandatory governance gates:
 
 | Gate | When | What | Why |
 |------|------|------|-----|

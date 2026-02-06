@@ -1,4 +1,4 @@
-# Draft Issue: AgentOS v2 Foundation - Dependencies & State Definition
+# Draft Issue: AssemblyZero v2 Foundation - Dependencies & State Definition
 
 **For Gemini Review via 0701c (Issue Review Prompt)**
 
@@ -6,13 +6,13 @@
 
 ## User Story
 
-As an **AgentOS developer**, I want to establish the foundational dependencies and state definition for LangGraph-based orchestration, so that subsequent issues can build governance nodes on a stable, typed foundation.
+As an **AssemblyZero developer**, I want to establish the foundational dependencies and state definition for LangGraph-based orchestration, so that subsequent issues can build governance nodes on a stable, typed foundation.
 
 ---
 
 ## Context
 
-AgentOS is being refactored from a prompt-based orchestration system to a **LangGraph-based system** that enforces governance programmatically. This is Issue 1 of the v2 roadmap.
+AssemblyZero is being refactored from a prompt-based orchestration system to a **LangGraph-based system** that enforces governance programmatically. This is Issue 1 of the v2 roadmap.
 
 **Current State:** Prompt-based gates in CLAUDE.md (can be bypassed)
 **Target State:** LangGraph state machines with enforced transitions (cannot be bypassed)
@@ -39,7 +39,7 @@ langchain-anthropic >= 0.3.0
 ### 2. Directory Structure
 
 ```
-agentos/
+assemblyzero/
 ├── __init__.py
 ├── core/
 │   ├── __init__.py
@@ -50,7 +50,7 @@ agentos/
     └── __init__.py       # Future: Compiled LangGraph workflows
 ```
 
-### 3. State Definition (agentos/core/state.py)
+### 3. State Definition (assemblyzero/core/state.py)
 
 ```python
 from typing import TypedDict, Annotated, Literal
@@ -59,7 +59,7 @@ from langchain_core.messages import BaseMessage
 
 class AgentState(TypedDict):
     """
-    Core state shared across all AgentOS LangGraph nodes.
+    Core state shared across all AssemblyZero LangGraph nodes.
 
     This state travels through the governance pipeline:
     Issue -> LLD Review -> Implementation -> Code Review -> Merge
@@ -87,8 +87,8 @@ class AgentState(TypedDict):
 ## Acceptance Criteria
 
 - [ ] `poetry install` runs cleanly with no dependency conflicts
-- [ ] `agentos/` directory structure exists with `__init__.py` files
-- [ ] `AgentState` is defined in `agentos/core/state.py`
+- [ ] `assemblyzero/` directory structure exists with `__init__.py` files
+- [ ] `AgentState` is defined in `assemblyzero/core/state.py`
 - [ ] `AgentState` uses proper typing (`TypedDict`, `Annotated`, `Literal`)
 - [ ] `messages` field uses LangGraph's `add_messages` annotation
 - [ ] `lld_status` is constrained to valid enum values
@@ -102,8 +102,8 @@ class AgentState(TypedDict):
 
 - [ ] All acceptance criteria met
 - [ ] `poetry install` succeeds on clean environment
-- [ ] `python -c "from agentos.core.state import AgentState"` succeeds
-- [ ] `mypy agentos/` passes with no errors
+- [ ] `python -c "from assemblyzero.core.state import AgentState"` succeeds
+- [ ] `mypy assemblyzero/` passes with no errors
 - [ ] PR created and approved
 - [ ] Merged to main
 

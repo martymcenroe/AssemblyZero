@@ -233,15 +233,15 @@ If tests keep failing after max iterations:
 poetry run python tools/run_implement_from_lld.py --issue 104 --resume
 
 # Or reset and try again
-rm ~/.agentos/testing_workflow.db
+rm ~/.assemblyzero/testing_workflow.db
 poetry run python tools/run_implement_from_lld.py --issue 104
 ```
 
 ### 3. Cross-Repo Implementation
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_implement_from_lld.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_implement_from_lld.py \
   --issue 42 --repo /c/Users/mcwiz/Projects/OtherProject
 ```
 
@@ -283,7 +283,7 @@ The implementation couldn't make all tests pass. Options:
 Another workflow is running:
 ```bash
 # Wait or force remove
-rm ~/.agentos/testing_workflow.db
+rm ~/.assemblyzero/testing_workflow.db
 ```
 
 ---
@@ -306,8 +306,8 @@ Brief → Issue (0907) → LLD (0907) → Code (0909) → PR → Merge
 ## Related Documents
 
 - [0907-unified-governance-workflow](0907-unified-governance-workflow.md) - Creates the LLD
-- [Issue #101](https://github.com/martymcenroe/AgentOS/issues/101) - Unified Governance Workflow
-- [Issue #102](https://github.com/martymcenroe/AgentOS/issues/102) - TDD Initialization
+- [Issue #101](https://github.com/martymcenroe/AssemblyZero/issues/101) - Unified Governance Workflow
+- [Issue #102](https://github.com/martymcenroe/AssemblyZero/issues/102) - TDD Initialization
 
 ---
 

@@ -8,14 +8,14 @@ I need to scrape this data by automating the terminal UI.
 
 ## Task Overview
 
-1. Create a GitHub issue in my AgentOS repo documenting this problem and solution
+1. Create a GitHub issue in my AssemblyZero repo documenting this problem and solution
 2. Implement a Python script that automates Claude Code's TUI to extract usage data
 3. Integrate it with my existing hourly heartbeat system
 4. Test it on my Windows system
 
 ## Part 1: Create GitHub Issue
 
-Create an issue in `mcwiz/AgentOS` (private repo) with:
+Create an issue in `mcwiz/AssemblyZero` (private repo) with:
 
 **Title:** `feat: Implement Claude Code usage quota scraper via terminal automation`
 
@@ -278,7 +278,7 @@ python -c "import pexpect; print('pexpect OK')"
 
 ## Deliverables
 
-1. GitHub issue created in mcwiz/AgentOS
+1. GitHub issue created in mcwiz/AssemblyZero
 2. `claude-usage-scraper.py` working and tested
 3. Updated `claude-heartbeat.ps1` with integration
 4. Demonstration of successful log entry with usage data

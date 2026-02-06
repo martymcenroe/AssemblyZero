@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agentos.utils.lld_verification import (
+from assemblyzero.utils.lld_verification import (
     LLDVerificationError,
     LLDVerificationResult,
     detect_false_approval,

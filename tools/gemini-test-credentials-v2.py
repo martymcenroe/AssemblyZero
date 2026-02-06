@@ -25,7 +25,7 @@ except ImportError:
     sys.exit(1)
 
 # Configuration
-CREDENTIALS_FILE = Path.home() / ".agentos" / "gemini-credentials.json"
+CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
 TEST_PROMPT = "Say hello in exactly 3 words."
 TEST_MODEL = "gemini-2.0-flash"  # Fast model for testing
 TIMEOUT_MS = 60000  # Explicit timeout in MILLISECONDS

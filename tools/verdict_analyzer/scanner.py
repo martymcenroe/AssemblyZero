@@ -93,7 +93,7 @@ def discover_verdicts(repo_path: Path) -> Iterator[Path]:
     """
     # Look in common verdict locations
     verdict_dirs = [
-        repo_path / "docs" / "lineage" / "active",  # AgentOS governance workflow
+        repo_path / "docs" / "lineage" / "active",  # AssemblyZero governance workflow
         repo_path / "docs" / "lineage",  # Broader lineage search
         repo_path / "docs" / "verdicts",
         repo_path / "verdicts",

@@ -28,7 +28,7 @@ Use [BLOCK] only if there are critical issues that would cause implementation fa
 
 # LLD: Gemini Submission Gate (#30)
 
-**Issue:** https://github.com/mcwiz/AgentOS/issues/30
+**Issue:** https://github.com/mcwiz/AssemblyZero/issues/30
 **Author:** Claude Agent
 **Date:** 2026-01-16
 **Status:** Draft - Pending Gemini Review
@@ -82,7 +82,7 @@ Why: Direct CLI calls fail permanently on quota exhaustion. The retry tool:
 
 **Required command pattern:**
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-retry.py --model gemini-3-pro-preview --prompt-file /path/to/prompt.txt
 ```
 
 **If all credentials exhausted (exit code 1):**

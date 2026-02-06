@@ -99,7 +99,7 @@ Comprehensive cleanup for longer breaks.
 ```
 User: /cleanup
 
-Claude: Running normal cleanup for AgentOS...
+Claude: Running normal cleanup for AssemblyZero...
 
 [Spawns Sonnet agent to execute cleanup]
 
@@ -107,7 +107,7 @@ Claude: Running normal cleanup for AgentOS...
 
 | Check | Status |
 |-------|--------|
-| Project | AgentOS |
+| Project | AssemblyZero |
 | Git Status | Clean |
 | Open PRs | 2 open |
 | Open Issues | 5 |
@@ -188,5 +188,5 @@ Check:
 
 ## Source of Truth
 
-**Skill definition:** `AgentOS/.claude/commands/cleanup.md`
+**Skill definition:** `AssemblyZero/.claude/commands/cleanup.md`
 **User stub:** `~/.claude/commands/cleanup.md`

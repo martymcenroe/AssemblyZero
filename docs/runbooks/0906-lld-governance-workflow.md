@@ -103,15 +103,15 @@ poetry run python tools/run_lld_workflow.py --issue 42
 
 **Option C: Cross-repo usage**
 
-Run the workflow from AgentOS against a different repository:
+Run the workflow from AssemblyZero against a different repository:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_lld_workflow.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_lld_workflow.py \
   --repo /c/Users/mcwiz/Projects/YourProject --select
 ```
 
-The `--repo` flag specifies the target repository. This is required when running from a different working directory because `poetry run --directory` changes the working directory to AgentOS.
+The `--repo` flag specifies the target repository. This is required when running from a different working directory because `poetry run --directory` changes the working directory to AssemblyZero.
 
 ### Step 2: Add Context (Optional)
 
@@ -212,8 +212,8 @@ poetry run python tools/run_lld_workflow.py --audit
 For cross-repo audit:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python \
-  /c/Users/mcwiz/Projects/AgentOS/tools/run_lld_workflow.py \
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
+  /c/Users/mcwiz/Projects/AssemblyZero/tools/run_lld_workflow.py \
   --repo /c/Users/mcwiz/Projects/YourProject --audit
 ```
 
@@ -329,8 +329,8 @@ All `--context` paths must be within the repository root. Use relative paths:
 
 ## Related Documents
 
-- [Issue #86](https://github.com/martymcenroe/AgentOS/issues/86) - LLD Governance Workflow
-- [Issue #95](https://github.com/martymcenroe/AgentOS/issues/95) - --select and status tracking
+- [Issue #86](https://github.com/martymcenroe/AssemblyZero/issues/86) - LLD Governance Workflow
+- [Issue #95](https://github.com/martymcenroe/AssemblyZero/issues/95) - --select and status tracking
 - [LLD-086](../lld/done/LLD-086-lld-governance-workflow.md) - Design document
 - [0702c-LLD-Review-Prompt](../.claude/templates/gemini-prompts/lld-review.txt) - Gemini's review prompt
 - [0904-issue-governance-workflow](0904-issue-governance-workflow.md) - Related issue workflow

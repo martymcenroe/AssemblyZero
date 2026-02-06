@@ -16,7 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from agentos.core.config import DEFAULT_AUDIT_LOG_PATH
+from assemblyzero.core.config import DEFAULT_AUDIT_LOG_PATH
 
 
 def read_jsonl(path: Path) -> list[dict]:

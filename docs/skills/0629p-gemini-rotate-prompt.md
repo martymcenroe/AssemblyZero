@@ -19,7 +19,7 @@ Note: Most users should use `gemini-retry.py` instead, which calls this tool int
 
 Agent will run:
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/gemini-rotate.py --status
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
 ```
 
 Output:
@@ -36,12 +36,12 @@ Credential Status (2 total)
 
 Agent will delete the state file:
 ```bash
-rm ~/.agentos/gemini-rotation-state.json
+rm ~/.assemblyzero/gemini-rotation-state.json
 ```
 
 ## Adding New Credentials
 
-1. Edit `~/.agentos/gemini-credentials.json`
+1. Edit `~/.assemblyzero/gemini-credentials.json`
 2. Add API key or OAuth credential entry
 3. Run `--status` to verify
 

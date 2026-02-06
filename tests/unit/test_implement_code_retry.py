@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
-from agentos.workflows.testing.nodes.implement_code import (
+from assemblyzero.workflows.testing.nodes.implement_code import (
     MAX_FILE_RETRIES,
     build_retry_prompt,
     generate_file_with_retry,
@@ -81,7 +81,7 @@ class TestSuccessFirstAttempt:
         mock_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.return_value = (mock_response, "")
 
@@ -114,7 +114,7 @@ class TestRetryOnValidationError:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             # First call returns invalid, second returns valid
             mock_call.side_effect = [
@@ -148,7 +148,7 @@ class TestRetryOnApiError:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             # First call fails, second succeeds
             mock_call.side_effect = [
@@ -181,7 +181,7 @@ class TestExhaustRetriesValidation:
         invalid_response = f"```python\n{invalid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             # All calls return invalid code
             mock_call.return_value = (invalid_response, "")
@@ -209,7 +209,7 @@ class TestExhaustRetriesApi:
     def test_exhaust_retries_api(self, base_prompt):
         """T050: Raises ImplementationError after 3 API failures."""
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             # All calls fail with API error
             mock_call.return_value = ("", "Service unavailable")
@@ -278,7 +278,7 @@ class TestRetryLogging:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.side_effect = [
                 (invalid_response, ""),
@@ -317,7 +317,7 @@ class TestEdgeCases:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.side_effect = [
                 (no_code_response, ""),
@@ -340,7 +340,7 @@ class TestEdgeCases:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.side_effect = [
                 (summary_response, ""),
@@ -362,7 +362,7 @@ class TestEdgeCases:
         valid_response = f"```python\n{valid_python_code}\n```"
 
         with patch(
-            "agentos.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
         ) as mock_call:
             mock_call.return_value = (valid_response, "")
 

@@ -13,7 +13,7 @@
 - **Teams can't improve** - "Are we getting better at this?"
 - **Skeptics aren't convinced** - "Prove it works"
 
-AgentOS treats measurement as a first-class concern, not an afterthought.
+AssemblyZero treats measurement as a first-class concern, not an afterthought.
 
 ---
 
@@ -182,7 +182,7 @@ Feature: Add Export Functionality (#47)
 ### Monthly Cost Dashboard
 
 ```
-AgentOS Costs - January 2026
+AssemblyZero Costs - January 2026
 ├── Claude API: $847.00
 ├── Gemini API: $123.00
 ├── Total API: $970.00
@@ -269,7 +269,7 @@ AgentOS Costs - January 2026
 
 ## Audit Metrics
 
-AgentOS includes 34 governance audits:
+AssemblyZero includes 34 governance audits:
 
 ### Audit Coverage
 
@@ -319,7 +319,7 @@ def calculate_friction_rate(session_log: Path) -> float:
 ```python
 # Automatic tracing
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = "agentos-production"
+os.environ["LANGCHAIN_PROJECT"] = "assemblyzero-production"
 
 # Every metric is automatic:
 # - Token counts
@@ -334,7 +334,7 @@ client = Client()
 
 # Get friction rate for last week
 runs = client.list_runs(
-    project_name="agentos-production",
+    project_name="assemblyzero-production",
     start_time=last_week,
     filter="tags.type = 'permission_prompt'"
 )

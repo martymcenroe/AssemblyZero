@@ -108,4 +108,4 @@ gh issue list --repo {{GITHUB_REPO}} --state open --json number,title,updatedAt 
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/open-issues-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/open-issues-audit.md*

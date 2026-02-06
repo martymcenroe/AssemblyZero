@@ -28,16 +28,16 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agentos.workflows.scout.graph import create_initial_state
-from agentos.workflows.scout.nodes import (
+from assemblyzero.workflows.scout.graph import create_initial_state
+from assemblyzero.workflows.scout.nodes import (
     confirmation_node,
     explorer_node,
     extractor_node,
     gap_analyst_node,
     scribe_node,
 )
-from agentos.workflows.scout.security import get_safe_write_path, validate_read_path
-from agentos.workflows.scout.templates import generate_innovation_brief, generate_json_output
+from assemblyzero.workflows.scout.security import get_safe_write_path, validate_read_path
+from assemblyzero.workflows.scout.templates import generate_innovation_brief, generate_json_output
 
 
 def main():

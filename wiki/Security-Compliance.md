@@ -13,7 +13,7 @@ Security teams block AI coding assistant adoption because:
 3. **Security blind spots** - AI may introduce vulnerabilities
 4. **Compliance gaps** - No evidence of controls
 
-AgentOS addresses each concern with concrete mechanisms.
+AssemblyZero addresses each concern with concrete mechanisms.
 
 ---
 
@@ -56,7 +56,7 @@ Gates cannot be skipped (prompt-based now, state machine in roadmap).
 
 ### OWASP Top 10 Coverage
 
-AgentOS includes security audits for OWASP vulnerabilities:
+AssemblyZero includes security audits for OWASP vulnerabilities:
 
 | OWASP Category | Audit | Status |
 |----------------|-------|--------|
@@ -101,7 +101,7 @@ Audits are designed to find problems, not confirm compliance.
 
 ### GDPR Considerations
 
-| Requirement | AgentOS Control |
+| Requirement | AssemblyZero Control |
 |-------------|-----------------|
 | Data minimization | Agents access only necessary files |
 | Purpose limitation | Session scoped to specific task |
@@ -121,7 +121,7 @@ Audits are designed to find problems, not confirm compliance.
 
 ### Key Principles
 
-| NIST Category | AgentOS Implementation |
+| NIST Category | AssemblyZero Implementation |
 |---------------|----------------------|
 | **Validity** | Gemini verification of outputs |
 | **Safety** | Destructive command blocks |
@@ -189,7 +189,7 @@ Session: 2026-01-21-001
 ### Retention
 
 Default retention: 90 days
-Configurable in: `~/.agentos/config.json`
+Configurable in: `~/.assemblyzero/config.json`
 
 ---
 
@@ -297,7 +297,7 @@ Before approving AI coding assistant adoption:
 
 ### Residual Risk
 
-With AgentOS controls:
+With AssemblyZero controls:
 - **Reduced** but not eliminated risk of AI-introduced bugs
 - **Mitigated** risk of security vulnerabilities
 - **Maintained** audit trail for incident response

@@ -184,10 +184,10 @@ class TestCleanEphemeral:
 
         assert not pytest_cache.exists()
 
-    def test_removes_agentos_audit(self, tmp_path):
-        """Should remove .agentos/audit directory."""
+    def test_removes_assemblyzero_audit(self, tmp_path):
+        """Should remove .assemblyzero/audit directory."""
         worktree = tmp_path / "worktree"
-        audit_dir = worktree / ".agentos" / "audit"
+        audit_dir = worktree / ".assemblyzero" / "audit"
         audit_dir.mkdir(parents=True)
         (audit_dir / "trace.log").write_text("execution trace")
 

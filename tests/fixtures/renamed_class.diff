@@ -1,7 +1,7 @@
-diff --git a/agentos/types.py b/agentos/types.py
+diff --git a/assemblyzero/types.py b/assemblyzero/types.py
 index 1234567..abcdef0 100644
---- a/agentos/types.py
-+++ b/agentos/types.py
+--- a/assemblyzero/types.py
++++ b/assemblyzero/types.py
 @@ -10,9 +10,6 @@ from typing import Any, TypedDict
  
  logger = logging.getLogger(__name__)

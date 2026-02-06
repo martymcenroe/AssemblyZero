@@ -101,4 +101,4 @@ grep -oP '\[.*?\]\(.*?\)' /tmp/wiki/Page.md
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/wiki-alignment-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/wiki-alignment-audit.md*

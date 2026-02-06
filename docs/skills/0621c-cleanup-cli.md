@@ -106,7 +106,7 @@ git branch -D orphan-branch-name
 | Project | GitHub Repo |
 |---------|-------------|
 | Aletheia | martymcenroe/Aletheia |
-| AgentOS | martymcenroe/AgentOS |
+| AssemblyZero | martymcenroe/AssemblyZero |
 | Talos | martymcenroe/Talos |
 | claude-code | anthropics/claude-code |
 | maintenance | (none - skip gh commands) |
@@ -128,4 +128,4 @@ git branch -D orphan-branch-name
 ## Related Files
 
 - Session logs: `PROJECT/docs/session-logs/YYYY-MM-DD.md`
-- Skill definition: `AgentOS/.claude/commands/cleanup.md`
+- Skill definition: `AssemblyZero/.claude/commands/cleanup.md`

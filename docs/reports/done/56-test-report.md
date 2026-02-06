@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Issue** | [#56 - Implement Designer Node with Human Edit Loop](https://github.com/martymcenroe/AgentOS/issues/56) |
+| **Issue** | [#56 - Implement Designer Node with Human Edit Loop](https://github.com/martymcenroe/AssemblyZero/issues/56) |
 | **Test File** | `tests/test_designer.py` |
 | **Total Tests** | 17 |
 | **Passed** | 17 |
@@ -73,7 +73,7 @@ tests/test_designer.py::TestGovernanceReadsFromDisk::test_090_governance_reads_f
 ## Type Checking
 
 ```bash
-poetry run mypy agentos/
+poetry run mypy assemblyzero/
 Success: no issues found in 10 source files
 ```
 

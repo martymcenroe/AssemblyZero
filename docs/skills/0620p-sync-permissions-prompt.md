@@ -40,7 +40,7 @@
 
 Claude will:
 1. Detect the current project from working directory
-2. Run `agentos-permissions.py --audit --project PROJECT`
+2. Run `assemblyzero-permissions.py --audit --project PROJECT`
 3. Explain the findings (session vends, reusable patterns, unclear)
 4. Recommend whether cleaning is needed
 
@@ -83,7 +83,7 @@ Claude will:
 
 The skill invokes:
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS python /c/Users/mcwiz/Projects/AgentOS/tools/agentos-permissions.py [OPTIONS]
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-permissions.py [OPTIONS]
 ```
 
 ### Detection Logic
@@ -115,7 +115,7 @@ Claude: I'll clean accumulated one-time permissions. Let me run a dry-run first.
 [Runs dry-run]
 
 Found 3 permissions to remove:
-- AgentOS: 1 giant permission (6230 chars)
+- AssemblyZero: 1 giant permission (6230 chars)
 - Talos: 1 giant permission (1975 chars)
 - Projects: 1 embedded content permission
 
@@ -126,7 +126,7 @@ User: y
 Claude: [Runs actual clean]
 
 Done. Cleaned 3 permissions:
-- AgentOS: Removed 1, kept 50
+- AssemblyZero: Removed 1, kept 50
 - Talos: Removed 1, kept 63
 - Projects: Removed 1, kept 215
 
@@ -187,7 +187,7 @@ Specify the project name explicitly.
 
 ## Source of Truth
 
-**Tool:** `AgentOS/tools/agentos-permissions.py`
+**Tool:** `AssemblyZero/tools/assemblyzero-permissions.py`
 **Skill definition:** `~/.claude/commands/sync-permissions.md`
 
-If the tool needs fixing, fix it in AgentOS - not locally.
+If the tool needs fixing, fix it in AssemblyZero - not locally.

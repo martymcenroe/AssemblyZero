@@ -37,8 +37,8 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from agentos.core.gemini_client import CredentialPoolExhaustedException
-from agentos.workflows.issue.audit import (
+from assemblyzero.core.gemini_client import CredentialPoolExhaustedException
+from assemblyzero.workflows.issue.audit import (
     AUDIT_ACTIVE_DIR,
     count_encrypted_ideas,
     ensure_audit_directories,
@@ -47,9 +47,9 @@ from agentos.workflows.issue.audit import (
     list_ideas,
     slug_exists,
 )
-from agentos.workflows.issue.graph import build_issue_workflow
-from agentos.workflows.issue.nodes.load_brief import handle_slug_collision
-from agentos.workflows.issue.state import IssueWorkflowState, SlugCollisionChoice
+from assemblyzero.workflows.issue.graph import build_issue_workflow
+from assemblyzero.workflows.issue.nodes.load_brief import handle_slug_collision
+from assemblyzero.workflows.issue.state import IssueWorkflowState, SlugCollisionChoice
 
 
 def extract_idea_title(idea_file: Path) -> str:
@@ -142,7 +142,7 @@ def get_checkpoint_db_path() -> Path:
 
     Returns:
         Path to checkpoint database. Uses AGENTOS_WORKFLOW_DB if set,
-        otherwise falls back to ~/.agentos/issue_workflow.db
+        otherwise falls back to ~/.assemblyzero/issue_workflow.db
     """
     # Support environment variable for worktree isolation
     if db_path_env := os.environ.get("AGENTOS_WORKFLOW_DB"):
@@ -150,8 +150,8 @@ def get_checkpoint_db_path() -> Path:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return db_path
 
-    # Default: ~/.agentos/issue_workflow.db
-    db_dir = Path.home() / ".agentos"
+    # Default: ~/.assemblyzero/issue_workflow.db
+    db_dir = Path.home() / ".assemblyzero"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / "issue_workflow.db"
 
@@ -461,8 +461,8 @@ def run_new_workflow(
             else:
                 print(f"  poetry run python tools/run_issue_workflow.py --resume {brief_file}")
             print("\nTo check credential status:")
-            print("  cat ~/.agentos/gemini-rotation-state.json")
-            print("  cat ~/.agentos/gemini-api.jsonl | tail -10")
+            print("  cat ~/.assemblyzero/gemini-rotation-state.json")
+            print("  cat ~/.assemblyzero/gemini-api.jsonl | tail -10")
             return 75  # EX_TEMPFAIL - temporary failure, retry later
 
     return 0
@@ -619,8 +619,8 @@ def run_resume_workflow(brief_file: str, repo_root: Path | None = None) -> int:
             print("\nThe workflow has been checkpointed. You can resume later with:")
             print(f"  poetry run python tools/run_issue_workflow.py --resume {brief_file}")
             print("\nTo check credential status:")
-            print("  cat ~/.agentos/gemini-rotation-state.json")
-            print("  cat ~/.agentos/gemini-api.jsonl | tail -10")
+            print("  cat ~/.assemblyzero/gemini-rotation-state.json")
+            print("  cat ~/.assemblyzero/gemini-api.jsonl | tail -10")
             return 75  # EX_TEMPFAIL - temporary failure, retry later
 
     return 0

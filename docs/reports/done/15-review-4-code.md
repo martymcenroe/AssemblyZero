@@ -7,7 +7,7 @@
 ---
 
 ## Summary
-This code introduces a centralized configuration system for AgentOS, allowing paths to be parameterized and loaded from a JSON file. The implementation includes security features like path sanitization and schema validation, and provides a fallback to default values if the configuration file is missing or invalid.
+This code introduces a centralized configuration system for AssemblyZero, allowing paths to be parameterized and loaded from a JSON file. The implementation includes security features like path sanitization and schema validation, and provides a fallback to default values if the configuration file is missing or invalid.
 
 ## Issues Found
 

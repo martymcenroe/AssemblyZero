@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /c/Users/mcwiz/Projects/AgentOS/.claude/hooks/bash-gate.sh",
+            "command": "bash /c/Users/mcwiz/Projects/AssemblyZero/.claude/hooks/bash-gate.sh",
             "timeout": 5,
             "description": "Bash Command Gate (blocks &&, |, ;)"
           }

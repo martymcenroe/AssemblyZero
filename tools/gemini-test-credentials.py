@@ -2,7 +2,7 @@
 """
 gemini-test-credentials.py - Test all Gemini credentials.
 
-Tests each credential in ~/.agentos/gemini-credentials.json
+Tests each credential in ~/.assemblyzero/gemini-credentials.json
 (including disabled ones) to verify they work.
 
 Usage:
@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CREDENTIALS_FILE = Path.home() / ".agentos" / "gemini-credentials.json"
+CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
 OAUTH_CREDS_FILE = Path.home() / ".gemini" / "oauth_creds.json"
 TEST_PROMPT = "Say hello in exactly 3 words."
 TEST_MODEL = "gemini-2.0-flash"  # Fast model for testing
@@ -194,7 +194,7 @@ def main():
         sys.exit(1)
     elif not enabled_working:
         print("WARNING: Working credentials exist but are disabled!")
-        print("Consider enabling them in ~/.agentos/gemini-credentials.json")
+        print("Consider enabling them in ~/.assemblyzero/gemini-credentials.json")
     else:
         print("All good! You have working enabled credentials.")
 

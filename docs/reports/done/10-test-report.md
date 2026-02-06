@@ -1,6 +1,6 @@
 # Test Report: Issue #10 - Unleashed PTY Wrapper
 
-**Issue:** [#10](https://github.com/martymcenroe/AgentOS/issues/10)
+**Issue:** [#10](https://github.com/martymcenroe/AssemblyZero/issues/10)
 **Date:** 2026-01-14
 **Status:** Pre-Merge Testing
 

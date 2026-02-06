@@ -78,7 +78,7 @@ graph TB
     subgraph "Filesystem"
         IDEAS[ideas/active/]
         LINEAGE[docs/lineage/]
-        DB[(~/.agentos/issue_workflow.db)]
+        DB[(~/.assemblyzero/issue_workflow.db)]
     end
 
     CLI --> GRAPH
@@ -101,7 +101,7 @@ graph TB
 ### File Structure
 
 ```
-agentos/workflows/issue/
+assemblyzero/workflows/issue/
 ├── __init__.py
 ├── graph.py              # StateGraph definition with routing
 ├── state.py              # IssueWorkflowState TypedDict
@@ -623,8 +623,8 @@ claude -p \
 ### Gemini API
 
 ```python
-from agentos.core.gemini_client import GeminiClient
-from agentos.core.config import GOVERNANCE_MODEL
+from assemblyzero.core.gemini_client import GeminiClient
+from assemblyzero.core.config import GOVERNANCE_MODEL
 
 client = GeminiClient(model=GOVERNANCE_MODEL)
 result = client.invoke(
@@ -760,7 +760,7 @@ verdict_history = verdict_history + [verdict_content]  # Append, don't replace
 ### Minimal Changes Needed
 
 ```
-agentos/workflows/lld/
+assemblyzero/workflows/lld/
 ├── __init__.py
 ├── graph.py              # SAME structure as issue
 ├── state.py              # LLDWorkflowState (minor changes)

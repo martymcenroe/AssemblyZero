@@ -48,8 +48,8 @@ result = subprocess.run(
 ```
 
 **Files Affected:**
-- `agentos/workflows/issue/nodes/human_edit_draft.py:28`
-- `agentos/workflows/issue/nodes/human_edit_verdict.py:32`
+- `assemblyzero/workflows/issue/nodes/human_edit_draft.py:28`
+- `assemblyzero/workflows/issue/nodes/human_edit_verdict.py:32`
 
 **Tests That Should Have Caught This:**
 - None. All tests mock subprocess.run, so the Windows .CMD issue never surfaced.
@@ -71,7 +71,7 @@ result = subprocess.run(
 **Tests That Lied:**
 ```python
 # tests/test_issue_workflow.py
-@patch("agentos.workflows.issue.nodes.draft.find_claude_cli")
+@patch("assemblyzero.workflows.issue.nodes.draft.find_claude_cli")
 @patch("subprocess.run")
 def test_call_claude_headless_success(self, mock_run, mock_find):
     # This passes but tells us nothing about real subprocess behavior
@@ -208,10 +208,10 @@ def test_call_claude_headless_success(self, mock_run, mock_find):
 
 ## Files Modified Today
 
-1. `agentos/workflows/issue/nodes/human_edit_draft.py` - Added error handling, 24h timeout
-2. `agentos/workflows/issue/nodes/human_edit_verdict.py` - Added error handling, 24h timeout
-3. `agentos/workflows/issue/nodes/draft.py` - Added UTF-8 encoding for subprocess stdin
-4. `agentos/workflows/issue/state.py` - Added CLEAN option to SlugCollisionChoice
+1. `assemblyzero/workflows/issue/nodes/human_edit_draft.py` - Added error handling, 24h timeout
+2. `assemblyzero/workflows/issue/nodes/human_edit_verdict.py` - Added error handling, 24h timeout
+3. `assemblyzero/workflows/issue/nodes/draft.py` - Added UTF-8 encoding for subprocess stdin
+4. `assemblyzero/workflows/issue/state.py` - Added CLEAN option to SlugCollisionChoice
 5. `tools/run_issue_workflow.py` - Implemented Clean option logic
 6. `tests/test_integration_workflow.py` - Created 8 integration tests (NEW FILE)
 

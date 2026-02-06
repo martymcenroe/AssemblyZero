@@ -12,7 +12,7 @@ Tests for:
 
 import pytest
 
-from agentos.workflows.requirements.state import (
+from assemblyzero.workflows.requirements.state import (
     RequirementsWorkflowState,
     HumanDecision,
     WorkflowType,
@@ -87,13 +87,13 @@ class TestCreateInitialState:
         """Test creating initial state for issue workflow."""
         state = create_initial_state(
             workflow_type="issue",
-            agentos_root="/path/to/agentos",
+            assemblyzero_root="/path/to/assemblyzero",
             target_repo="/path/to/repo",
             brief_file="/path/to/brief.md",
         )
 
         assert state["workflow_type"] == "issue"
-        assert state["agentos_root"] == "/path/to/agentos"
+        assert state["assemblyzero_root"] == "/path/to/assemblyzero"
         assert state["target_repo"] == "/path/to/repo"
         assert state["brief_file"] == "/path/to/brief.md"
         assert state["brief_content"] == ""
@@ -104,14 +104,14 @@ class TestCreateInitialState:
         """Test creating initial state for LLD workflow."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/path/to/agentos",
+            assemblyzero_root="/path/to/assemblyzero",
             target_repo="/path/to/repo",
             issue_number=42,
             context_files=["src/main.py", "docs/spec.md"],
         )
 
         assert state["workflow_type"] == "lld"
-        assert state["agentos_root"] == "/path/to/agentos"
+        assert state["assemblyzero_root"] == "/path/to/assemblyzero"
         assert state["target_repo"] == "/path/to/repo"
         assert state["issue_number"] == 42
         assert state["context_files"] == ["src/main.py", "docs/spec.md"]
@@ -121,7 +121,7 @@ class TestCreateInitialState:
         """Test default configuration values."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )
@@ -137,7 +137,7 @@ class TestCreateInitialState:
         """Test custom configuration values."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
             drafter="gemini:flash",
@@ -159,7 +159,7 @@ class TestCreateInitialState:
         """Test workflow tracking defaults."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )
@@ -175,7 +175,7 @@ class TestCreateInitialState:
         """Test artifact defaults."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )
@@ -187,24 +187,24 @@ class TestCreateInitialState:
         assert state["verdict_history"] == []
         assert state["user_feedback"] == ""
 
-    def test_error_on_empty_agentos_root(self):
-        """Test that empty agentos_root raises ValueError."""
+    def test_error_on_empty_assemblyzero_root(self):
+        """Test that empty assemblyzero_root raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             create_initial_state(
                 workflow_type="lld",
-                agentos_root="",
+                assemblyzero_root="",
                 target_repo="/repo",
                 issue_number=1,
             )
 
-        assert "agentos_root" in str(exc_info.value)
+        assert "assemblyzero_root" in str(exc_info.value)
 
     def test_error_on_empty_target_repo(self):
         """Test that empty target_repo raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             create_initial_state(
                 workflow_type="lld",
-                agentos_root="/agentos",
+                assemblyzero_root="/assemblyzero",
                 target_repo="",
                 issue_number=1,
             )
@@ -216,7 +216,7 @@ class TestCreateInitialState:
         with pytest.raises(ValueError):
             create_initial_state(
                 workflow_type="lld",
-                agentos_root="   ",
+                assemblyzero_root="   ",
                 target_repo="/repo",
                 issue_number=1,
             )
@@ -225,7 +225,7 @@ class TestCreateInitialState:
         """Test that context_files defaults to empty list."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )
@@ -240,7 +240,7 @@ class TestValidateState:
         """Test validation passes for valid LLD state."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=42,
         )
@@ -252,7 +252,7 @@ class TestValidateState:
         """Test validation passes for valid issue state."""
         state = create_initial_state(
             workflow_type="issue",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             brief_file="/path/to/brief.md",
         )
@@ -260,23 +260,23 @@ class TestValidateState:
         errors = validate_state(state)
         assert len(errors) == 0
 
-    def test_missing_agentos_root(self):
-        """Test validation catches missing agentos_root."""
+    def test_missing_assemblyzero_root(self):
+        """Test validation catches missing assemblyzero_root."""
         state: RequirementsWorkflowState = {
             "workflow_type": "lld",
-            "agentos_root": "",
+            "assemblyzero_root": "",
             "target_repo": "/repo",
             "issue_number": 42,
         }
 
         errors = validate_state(state)
-        assert any("agentos_root" in e for e in errors)
+        assert any("assemblyzero_root" in e for e in errors)
 
     def test_missing_target_repo(self):
         """Test validation catches missing target_repo."""
         state: RequirementsWorkflowState = {
             "workflow_type": "lld",
-            "agentos_root": "/agentos",
+            "assemblyzero_root": "/assemblyzero",
             "target_repo": "",
             "issue_number": 42,
         }
@@ -288,7 +288,7 @@ class TestValidateState:
         """Test validation catches invalid workflow_type."""
         state: RequirementsWorkflowState = {
             "workflow_type": "invalid",  # type: ignore
-            "agentos_root": "/agentos",
+            "assemblyzero_root": "/assemblyzero",
             "target_repo": "/repo",
         }
 
@@ -299,7 +299,7 @@ class TestValidateState:
         """Test validation catches missing brief_file for issue workflow."""
         state: RequirementsWorkflowState = {
             "workflow_type": "issue",
-            "agentos_root": "/agentos",
+            "assemblyzero_root": "/assemblyzero",
             "target_repo": "/repo",
             "brief_file": "",
         }
@@ -311,7 +311,7 @@ class TestValidateState:
         """Test validation catches missing issue_number for LLD workflow."""
         state: RequirementsWorkflowState = {
             "workflow_type": "lld",
-            "agentos_root": "/agentos",
+            "assemblyzero_root": "/assemblyzero",
             "target_repo": "/repo",
             "issue_number": 0,
         }
@@ -327,7 +327,7 @@ class TestRequirementsWorkflowStateTypedDict:
         """Test that state is a regular dict."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )
@@ -338,7 +338,7 @@ class TestRequirementsWorkflowStateTypedDict:
         """Test that fields can be accessed by key."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=42,
         )
@@ -350,7 +350,7 @@ class TestRequirementsWorkflowStateTypedDict:
         """Test that fields can be updated."""
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root="/agentos",
+            assemblyzero_root="/assemblyzero",
             target_repo="/repo",
             issue_number=1,
         )

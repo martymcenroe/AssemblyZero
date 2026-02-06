@@ -5,8 +5,8 @@ Issue #235: Mechanical LLD validation gates to catch structural issues.
 
 import pytest
 
-from agentos.workflows.requirements.nodes.finalize import validate_lld_final
-from agentos.workflows.requirements.nodes.generate_draft import validate_draft_structure
+from assemblyzero.workflows.requirements.nodes.finalize import validate_lld_final
+from assemblyzero.workflows.requirements.nodes.generate_draft import validate_draft_structure
 
 
 class TestValidateDraftStructure:

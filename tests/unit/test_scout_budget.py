@@ -1,6 +1,6 @@
 """Tests for scout workflow budget module.
 
-Tests for: agentos/workflows/scout/budget.py
+Tests for: assemblyzero/workflows/scout/budget.py
 Target coverage: >95%
 """
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agentos.workflows.scout.budget import (
+from assemblyzero.workflows.scout.budget import (
     SAFETY_BUFFER,
     adaptive_truncate,
     check_and_update_budget,
@@ -47,7 +47,7 @@ class TestEstimateTokens:
     def test_fallback_on_encoding_error(self):
         """Test fallback estimation when tiktoken fails."""
         # Mock tiktoken to raise an exception
-        with patch("agentos.workflows.scout.budget.tiktoken.get_encoding") as mock_enc:
+        with patch("assemblyzero.workflows.scout.budget.tiktoken.get_encoding") as mock_enc:
             mock_enc.side_effect = Exception("Encoding error")
             text = "x" * 100
             result = estimate_tokens(text)

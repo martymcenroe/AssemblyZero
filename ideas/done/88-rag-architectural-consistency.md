@@ -24,7 +24,7 @@ Implement an **Automated Retrieval Node ("The Librarian")** at the start of the 
 
 We will use **ChromaDB** (local, file-based) or **FAISS** to avoid external dependencies/infrastructure costs.
 
-* **Storage Location:** `.agentos/vector_store/`
+* **Storage Location:** `.assemblyzero/vector_store/`
 * **Ingestion Tool:** `tools/rebuild_knowledge_base.py`
 * Scans `docs/` for markdown files.
 * Splits by header (H1/H2).
@@ -32,7 +32,7 @@ We will use **ChromaDB** (local, file-based) or **FAISS** to avoid external depe
 
 
 
-### 2. The Librarian Node (`agentos/nodes/librarian.py`)
+### 2. The Librarian Node (`assemblyzero/nodes/librarian.py`)
 
 A new node for the `lld_workflow` graph.
 
@@ -47,7 +47,7 @@ A new node for the `lld_workflow` graph.
 
 ### 3. Workflow Integration
 
-Modify `agentos/workflows/lld/graph.py`:
+Modify `assemblyzero/workflows/lld/graph.py`:
 
 **Current:**
 `Load Brief -> [Manual Context] -> Designer -> ...`
@@ -61,11 +61,11 @@ Modify `agentos/workflows/lld/graph.py`:
 
 1. **Dependencies:** Add `chromadb` and `sentence-transformers` to `pyproject.toml`.
 2. **Ingestion Script:** Create `tools/rebuild_knowledge_base.py`.
-3. **Node Logic:** Implement `agentos/nodes/librarian.py`.
+3. **Node Logic:** Implement `assemblyzero/nodes/librarian.py`.
 4. **Graph Update:** Wire the node into `run_lld_workflow.py`.
 
 ## Success Criteria
 
 * [ ] `tools/rebuild_knowledge_base.py` runs in < 10 seconds for current docset.
-* [ ] Querying "How do I log errors?" retrieves `docs/standards/0002-coding-standards.md` or `agentos/core/audit.py`.
+* [ ] Querying "How do I log errors?" retrieves `docs/standards/0002-coding-standards.md` or `assemblyzero/core/audit.py`.
 * [ ] The generated LLD references the retrieved ADRs in its "Constraints" section without human prompting.

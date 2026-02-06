@@ -90,9 +90,9 @@ These audits are excluded from standard runs because:
 
 ---
 
-## Core Audit Sequence (AgentOS Generic)
+## Core Audit Sequence (AssemblyZero Generic)
 
-These audits apply to ALL projects using AgentOS:
+These audits apply to ALL projects using AssemblyZero:
 
 ### 0801 - Open Issues Currency
 **Purpose:** Identify issues that are actually complete, deprecated, or stale.
@@ -121,7 +121,7 @@ These audits apply to ALL projects using AgentOS:
 **Purpose:** Detect drift between architecture docs and actual codebase.
 **Check:** Verify components exist, verify code is documented, check ADRs are accurate.
 
-### 0807 - AgentOS Health Check
+### 0807 - AssemblyZero Health Check
 **Purpose:** Verify the documentation system itself is healthy.
 **Check:** Doc formatting, cross-references, templates match practice.
 
@@ -222,8 +222,8 @@ These audits apply to ALL projects using AgentOS:
 4. Review response time SLAs
 
 ### 0832 - Cross-Project Harvest
-**Purpose:** Discover patterns in child projects worth promoting to AgentOS.
-**Tool:** `poetry run python tools/agentos-harvest.py`
+**Purpose:** Discover patterns in child projects worth promoting to AssemblyZero.
+**Tool:** `poetry run python tools/assemblyzero-harvest.py`
 **Check:** Commands, tools, templates, permissions that appeared in multiple projects.
 
 ### 0833 - Gitignore Encryption Review (Ultimate Tier)

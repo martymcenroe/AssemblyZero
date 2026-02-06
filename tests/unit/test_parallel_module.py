@@ -14,14 +14,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.workflows.parallel.coordinator import (
+from assemblyzero.workflows.parallel.coordinator import (
     ParallelCoordinator,
     ProgressStats,
     WorkflowResult,
 )
-from agentos.workflows.parallel.credential_coordinator import CredentialCoordinator
-from agentos.workflows.parallel.input_sanitizer import sanitize_identifier
-from agentos.workflows.parallel.output_prefixer import OutputPrefixer
+from assemblyzero.workflows.parallel.credential_coordinator import CredentialCoordinator
+from assemblyzero.workflows.parallel.input_sanitizer import sanitize_identifier
+from assemblyzero.workflows.parallel.output_prefixer import OutputPrefixer
 
 
 # =============================================================================

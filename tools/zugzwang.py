@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 
-# Log file in AgentOS/logs/
+# Log file in AssemblyZero/logs/
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 LOG_FILE = PROJECT_ROOT / "logs" / "zugzwang.log"

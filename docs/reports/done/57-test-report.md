@@ -2,7 +2,7 @@
 
 ## Issue Reference
 
-[Issue #57: Distributed Session-Sharded Logging Architecture](https://github.com/cxbxmxcx/AgentOS/issues/57)
+[Issue #57: Distributed Session-Sharded Logging Architecture](https://github.com/cxbxmxcx/AssemblyZero/issues/57)
 
 ## Test Command
 
@@ -15,7 +15,7 @@ poetry run pytest tests/test_audit_sharding.py -v
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\Users\mcwiz\Projects\AgentOS-57
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-57
 configfile: pyproject.toml
 
 tests/test_audit_sharding.py::TestShardFilenameFormat::test_filename_matches_pattern PASSED [  4%]
@@ -57,7 +57,7 @@ All existing tests continue to pass. The 9 warnings are pre-existing deprecation
 ## Type Checking
 
 ```bash
-poetry run mypy agentos/ tools/consolidate_logs.py --show-error-codes
+poetry run mypy assemblyzero/ tools/consolidate_logs.py --show-error-codes
 ```
 
 **Result:** `Success: no issues found in 11 source files`

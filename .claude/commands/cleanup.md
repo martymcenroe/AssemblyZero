@@ -58,7 +58,7 @@ Detect the current project from working directory:
 | Project | GitHub Repo |
 |---------|-------------|
 | Aletheia | martymcenroe/Aletheia |
-| AgentOS | martymcenroe/AgentOS |
+| AssemblyZero | martymcenroe/AssemblyZero |
 | Talos | martymcenroe/Talos |
 | claude-code | anthropics/claude-code |
 | maintenance | (none) |

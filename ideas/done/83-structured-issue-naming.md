@@ -16,26 +16,26 @@ Current naming: `docs/audit/active/{brief-filename}/NNN-{type}.md`
 **New format:** `{REPO}-{WORD}-{NUM}-{TYPE}.md`
 
 **Components:**
-- **REPO**: 7-char repo identifier (e.g., "AgentOS")
+- **REPO**: 7-char repo identifier (e.g., "AssemblyZero")
 - **WORD**: Unique 4-6 letter English word (vocabulary-expanding, deterministic from brief hash)
 - **NUM**: 4-digit zero-padded number (GitHub issue number once filed, or sequential before)
 - **TYPE**: File type (brief, draft, verdict, feedback, filed)
 
 **Examples:**
 ```
-AgentOS-quasar-0042-draft.md
-AgentOS-quasar-0042-verdict.md
+AssemblyZero-quasar-0042-draft.md
+AssemblyZero-quasar-0042-verdict.md
 MyRepo-zenith-0001-brief.md
 ```
 
 **Directory structure:**
 ```
-docs/audit/active/AgentOS-quasar-0042/
-  AgentOS-quasar-0042-brief.md
-  AgentOS-quasar-0042-draft.md
-  AgentOS-quasar-0042-verdict.md
-  AgentOS-quasar-0042-draft2.md  (if revised)
-  AgentOS-quasar-0042-verdict2.md
+docs/audit/active/AssemblyZero-quasar-0042/
+  AssemblyZero-quasar-0042-brief.md
+  AssemblyZero-quasar-0042-draft.md
+  AssemblyZero-quasar-0042-verdict.md
+  AssemblyZero-quasar-0042-draft2.md  (if revised)
+  AssemblyZero-quasar-0042-verdict2.md
 ```
 
 ## Implementation Details
@@ -61,7 +61,7 @@ ISSUE_WORDS = [
 ### Repo ID
 
 **Sources** (in priority order):
-1. Git remote URL: `git@github.com:owner/AgentOS.git` → `AgentOS`
+1. Git remote URL: `git@github.com:owner/AssemblyZero.git` → `AssemblyZero`
 2. Fallback: Current directory name → truncate to 7 chars
 
 **Rules:**
@@ -77,7 +77,7 @@ ISSUE_WORDS = [
 
 **After filing:**
 - Replace with GitHub issue number
-- Rename audit directory: `AgentOS-quasar-0042/` → keep same
+- Rename audit directory: `AssemblyZero-quasar-0042/` → keep same
 - File naming remains consistent
 
 ### Migration Path

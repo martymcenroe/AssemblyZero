@@ -1,6 +1,6 @@
 # Implementation Report: Issue #3 - Claude Code Usage Quota Scraper
 
-**Issue:** [#3](https://github.com/martymcenroe/AgentOS/issues/3)
+**Issue:** [#3](https://github.com/martymcenroe/AssemblyZero/issues/3)
 **Commit:** `f075f88`
 **Date:** 2026-01-11
 **Status:** Complete
@@ -135,9 +135,9 @@ Three patterns extract percentage and reset times:
 
 ### Script Location
 - **Original:** `C:\Users\mcwiz\Projects\claude-usage-scraper.py`
-- **Actual:** `tools/claude-usage-scraper.py` (in AgentOS tools directory)
+- **Actual:** `tools/claude-usage-scraper.py` (in AssemblyZero tools directory)
 
-This follows AgentOS conventions for tool placement.
+This follows AssemblyZero conventions for tool placement.
 
 ### Log Integration
 The `--log` flag appends NDJSON (newline-delimited JSON) entries to a log file. Each line is a complete JSON object identical to the stdout output, enabling easy ingestion by log aggregators (Splunk, Datadog) and parsing with tools like `jq`.

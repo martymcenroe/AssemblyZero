@@ -12,7 +12,7 @@ Tests for:
 import pytest
 from pathlib import Path
 
-from agentos.workflows.requirements.config import (
+from assemblyzero.workflows.requirements.config import (
     GateConfig,
     WorkflowConfig,
     create_issue_config,

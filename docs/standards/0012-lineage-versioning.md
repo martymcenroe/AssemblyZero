@@ -100,7 +100,7 @@ Database uses `filepath` as primary key, so all versions coexist:
 
 The pre-generation check should be implemented in:
 - `tools/run_requirements_workflow.py` (CLI entry point)
-- Or `agentos/workflows/requirements/nodes/load_input.py` (workflow node)
+- Or `assemblyzero/workflows/requirements/nodes/load_input.py` (workflow node)
 
 This is a **manual check** until automated (see Issue #XXX if created).
 

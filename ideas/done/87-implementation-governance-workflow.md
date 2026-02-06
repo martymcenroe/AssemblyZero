@@ -6,7 +6,7 @@
 
 1. **The "Trust Me" Trap:** Claude/LLMs often claim "I ran the tests and they passed," when they simply imagined a passing result.
 2. **Infinite Loops:** Without a strict "Arbiter," an agent can get stuck in a loop of writing broken code, seeing an error, and rewriting the same broken code until the token limit is hit.
-3. **Context Amnesia:** The coder doesn't know about `agentos/core/audit.py` or our logging standards unless manually told, leading to duplicate utility functions.
+3. **Context Amnesia:** The coder doesn't know about `assemblyzero/core/audit.py` or our logging standards unless manually told, leading to duplicate utility functions.
 4. **Dangerous Cleanup:** Agents executing `git worktree remove` or `rm -rf` as tool calls are unsafe; these must be privileged **Nodes** in the graph.
 
 ## Goal
@@ -17,7 +17,7 @@ Create `tools/run_implementation_workflow.py` that enforces a **Test-Driven Deve
 
 ## Proposed Architecture
 
-### 1. The State Graph (`agentos/workflows/implementation/graph.py`)
+### 1. The State Graph (`assemblyzero/workflows/implementation/graph.py`)
 
 * **Input:** `issue_id`, `lld_path` (Approved Design), `context_files` (List[str]).
 * **Nodes:**
@@ -36,7 +36,7 @@ Create `tools/run_implementation_workflow.py` that enforces a **Test-Driven Deve
 
 
 
-### 2. State Management (`agentos/workflows/implementation/state.py`)
+### 2. State Management (`assemblyzero/workflows/implementation/state.py`)
 
 ```python
 class ImplementationState(TypedDict):
@@ -74,7 +74,7 @@ def route_after_test(state):
 python tools/run_implementation_workflow.py \
   --issue 42 \
   --lld docs/LLDs/active/42-feature.md \
-  --context docs/standards/0002-coding.md agentos/core/audit.py
+  --context docs/standards/0002-coding.md assemblyzero/core/audit.py
 
 ```
 
@@ -88,6 +88,6 @@ python tools/run_implementation_workflow.py \
 ## Success Criteria
 
 * [ ] **Test-First Enforcement:** The workflow *requires* a failing test before implementation code is accepted.
-* [ ] **Context Awareness:** The agent uses existing utilities (e.g., `GovernanceAuditLog`) because `agentos/core/audit.py` was passed via `--context`.
+* [ ] **Context Awareness:** The agent uses existing utilities (e.g., `GovernanceAuditLog`) because `assemblyzero/core/audit.py` was passed via `--context`.
 * [ ] **Reality Check:** The workflow loops back automatically when real `pytest` execution fails.
 * [ ] **Safety:** Cleanup (worktree removal) happens only after successful merge/commit.

@@ -6,7 +6,7 @@ The `backfill_issue_audit.py` tool creates standardized audit directories for ex
 
 ## When to Run
 
-- **New repository setup**: After adopting AgentOS governance workflow
+- **New repository setup**: After adopting AssemblyZero governance workflow
 - **Periodic maintenance**: To capture issues created outside the workflow
 - **Migration**: When transitioning from another issue tracking system
 
@@ -44,19 +44,19 @@ poetry run python tools/backfill_issue_audit.py --repo owner/name --verbose
 
 ```bash
 # Process with verbose output
-poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --verbose
+poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --verbose
 
 # Skip existing directories (safe for re-runs)
-poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --skip-existing
+poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --skip-existing
 
 # Force update managed files only
-poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --force
+poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --force
 
 # Test with limited issues
-poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --limit 5 --dry-run
+poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --limit 5 --dry-run
 
 # Slow down for rate limits
-poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --delay 2.0
+poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --delay 2.0
 ```
 
 ## Output Structure
@@ -135,9 +135,9 @@ gh auth login
 ## Example Output
 
 ```
-$ poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AgentOS --verbose --limit 3
+$ poetry run python tools/backfill_issue_audit.py --repo martymcenroe/AssemblyZero --verbose --limit 3
 
-Fetching issues from martymcenroe/AgentOS...
+Fetching issues from martymcenroe/AssemblyZero...
 Found 3 issues
 DRY RUN: No files will be written
 

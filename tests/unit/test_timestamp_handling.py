@@ -55,8 +55,8 @@ class TestReviewDateFromSystem:
 
     def test_save_lld_uses_current_date(self, tmp_path):
         """Review date in finalize should be current system date, not hallucinated."""
-        from agentos.workflows.requirements.nodes.finalize import _save_lld_file
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.nodes.finalize import _save_lld_file
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
@@ -65,7 +65,7 @@ class TestReviewDateFromSystem:
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path / "agentos"),
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
             target_repo=str(target_repo),
             issue_number=42,
         )
@@ -76,7 +76,7 @@ class TestReviewDateFromSystem:
 
         # Capture the date that gets used
         with patch(
-            "agentos.workflows.requirements.nodes.finalize.datetime"
+            "assemblyzero.workflows.requirements.nodes.finalize.datetime"
         ) as mock_datetime:
             # Set a known "now" time
             fixed_now = datetime(2026, 2, 3, 14, 30, 0)
@@ -100,8 +100,8 @@ class TestReviewDateFromSystem:
 
     def test_review_date_is_within_tolerance(self, tmp_path):
         """Review date should be within a few seconds of actual system time."""
-        from agentos.workflows.requirements.nodes.finalize import _save_lld_file
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.nodes.finalize import _save_lld_file
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
@@ -110,7 +110,7 @@ class TestReviewDateFromSystem:
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path / "agentos"),
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
             target_repo=str(target_repo),
             issue_number=42,
         )
@@ -144,7 +144,7 @@ class TestEmbedReviewEvidenceUsesProvidedDate:
 
     def test_uses_provided_review_date(self):
         """embed_review_evidence should use exactly the date passed to it."""
-        from agentos.workflows.requirements.audit import embed_review_evidence
+        from assemblyzero.workflows.requirements.audit import embed_review_evidence
 
         lld_content = "# Test LLD\n\n* **Status:** Draft"
         specific_date = "2026-02-15"  # A specific date
@@ -163,7 +163,7 @@ class TestEmbedReviewEvidenceUsesProvidedDate:
 
     def test_does_not_use_hardcoded_date(self):
         """Verify the function doesn't ignore the provided date."""
-        from agentos.workflows.requirements.audit import embed_review_evidence
+        from assemblyzero.workflows.requirements.audit import embed_review_evidence
 
         lld_content = "# Test LLD\n\n* **Status:** Draft"
         provided_date = "1999-12-31"  # Obviously wrong if hardcoded
@@ -185,8 +185,8 @@ class TestNoFutureDates:
 
     def test_finalize_never_produces_future_date(self, tmp_path):
         """The finalize step should never produce a date in the future."""
-        from agentos.workflows.requirements.nodes.finalize import _save_lld_file
-        from agentos.workflows.requirements.state import create_initial_state
+        from assemblyzero.workflows.requirements.nodes.finalize import _save_lld_file
+        from assemblyzero.workflows.requirements.state import create_initial_state
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
@@ -195,7 +195,7 @@ class TestNoFutureDates:
 
         state = create_initial_state(
             workflow_type="lld",
-            agentos_root=str(tmp_path / "agentos"),
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
             target_repo=str(target_repo),
             issue_number=42,
         )

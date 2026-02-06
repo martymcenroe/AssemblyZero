@@ -103,4 +103,4 @@ For CLI steps (manual execution) and prompt details, see:
 |---------|-----------|
 | [0904 Issue Governance](0904-issue-governance-workflow.md) | Uses `/commit-push-pr` |
 | [0906 LLD Governance](0906-lld-governance-workflow.md) | Uses `/code-review` |
-| [0902 Nightly Audit](0902-nightly-agentos-audit.md) | Uses `/audit` |
+| [0902 Nightly Audit](0902-nightly-assemblyzero-audit.md) | Uses `/audit` |

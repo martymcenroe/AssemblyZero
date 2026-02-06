@@ -4,7 +4,7 @@
 >
 > *The Great A'Tuin swims through space, carrying the Disc on the backs of four elephants. It sees everything. It forgets nothing.*
 
-This page records the darker lessons—the failures, fabrications, and hard truths discovered during AgentOS development. Not all wisdom comes wrapped in wit.
+This page records the darker lessons—the failures, fabrications, and hard truths discovered during AssemblyZero development. Not all wisdom comes wrapped in wit.
 
 ---
 

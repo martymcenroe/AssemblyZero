@@ -42,7 +42,7 @@ This convention ensures users can always choose between token efficiency (CLI) a
 
 | Category | Range | Example |
 |----------|-------|---------|
-| AgentOS skills | 062x-069x | `0622c-onboard-cli.md`, `0622p-onboard-prompt.md` |
+| AssemblyZero skills | 062x-069x | `0622c-onboard-cli.md`, `0622p-onboard-prompt.md` |
 | Project runbooks | 109xx | `10901c-file-inventory-cli.md`, `10901p-file-inventory-prompt.md` |
 | Python tools | varies | `{num}c-toolname-cli.md`, `{num}p-toolname-prompt.md` |
 
@@ -201,7 +201,7 @@ When creating a new skill, tool, or runbook:
 ## Enforcement
 
 This standard applies to:
-- **AgentOS** - All skills in `docs/skills/`
+- **AssemblyZero** - All skills in `docs/skills/`
 - **All child projects** - Runbooks, tools, procedures
 
 Agents should:

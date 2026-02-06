@@ -1,6 +1,6 @@
 # Issue #19: Audit Reorganization Plan
 
-**Issue:** [#19 - chore: Review and rearrange audit classes/tiers](https://github.com/martymcenroe/AgentOS/issues/19)
+**Issue:** [#19 - chore: Review and rearrange audit classes/tiers](https://github.com/martymcenroe/AssemblyZero/issues/19)
 **Created:** 2026-02-05
 **Status:** COMPLETED - 2026-02-05
 
@@ -42,7 +42,7 @@ This plan proposes a coherent reorganization with clear category definitions.
 | 0814 | Horizon Scanning | Threat monitoring |
 | 0815 | Permission Friction | Approval overhead |
 | 0816 | Permission Permissiveness | Access control |
-| 0817 | AgentOS Self-Audit | Framework health |
+| 0817 | AssemblyZero Self-Audit | Framework health |
 
 **Extended Range (0832-0840): 10 files** *(includes collision)*
 | Number | Name | Focus |
@@ -130,7 +130,7 @@ Reorganize by *what the audit verifies*, not by number range:
 | **Security & Privacy** | 0801, 0802, 0805, 0833 | External threats, compliance, legal |
 | **Code Quality** | 0803, 0804, 0847 | Code correctness, standards |
 | **AI Governance** | 0806-0812 | AI-specific risks and compliance |
-| **AgentOS Operations** | 0813-0817, 0832, 0834 | This framework's health |
+| **AssemblyZero Operations** | 0813-0817, 0832, 0834 | This framework's health |
 | **Documentation Health** | 0835-0846 (minus stubs) | Docs/code alignment |
 | **Meta** | 0899 | Audit system governance |
 
@@ -282,7 +282,7 @@ Total unique: 34 (after resolving collision)
 
 ## References
 
-- [Issue #19](https://github.com/martymcenroe/AgentOS/issues/19) - This task
-- [Issue #18](https://github.com/martymcenroe/AgentOS/issues/18) - Ultimate tier origin (git-crypt ideas)
+- [Issue #19](https://github.com/martymcenroe/AssemblyZero/issues/19) - This task
+- [Issue #18](https://github.com/martymcenroe/AssemblyZero/issues/18) - Ultimate tier origin (git-crypt ideas)
 - [0800-audit-index.md](../audits/0800-audit-index.md) - Current index
-- [Commit 708a5b7](https://github.com/martymcenroe/AgentOS/commit/708a5b7) - Unleashed migration (removed 0820)
+- [Commit 708a5b7](https://github.com/martymcenroe/AssemblyZero/commit/708a5b7) - Unleashed migration (removed 0820)

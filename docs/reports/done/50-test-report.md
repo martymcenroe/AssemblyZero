@@ -1,7 +1,7 @@
 # Test Report: Issue #50 - Governance Node & Audit Logger
 
 ## Issue Reference
-- **Issue:** [#50 - Implement Governance Node & Audit Logger](https://github.com/martymcenroe/AgentOS/issues/50)
+- **Issue:** [#50 - Implement Governance Node & Audit Logger](https://github.com/martymcenroe/AssemblyZero/issues/50)
 - **Branch:** `50-governance-node`
 
 ## Test Command
@@ -26,7 +26,7 @@ poetry run pytest tests/test_audit.py tests/test_gemini_client.py tests/test_gov
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
 cachedir: .pytest_cache
-rootdir: C:\Users\mcwiz\Projects\AgentOS-50
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-50
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4
 collected 35 items
@@ -101,7 +101,7 @@ tests/test_governance.py::TestReviewLldNode::test_120_model_verification_failure
 ## Type Checking
 
 ```bash
-poetry run mypy agentos/ --ignore-missing-imports
+poetry run mypy assemblyzero/ --ignore-missing-imports
 ```
 
 ```

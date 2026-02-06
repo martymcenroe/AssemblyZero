@@ -124,8 +124,8 @@ Next reset: 2026-02-03 00:00 UTC (in 5h 23m)
 ## Related
 
 - Issue #53 migrated to new `google.genai` SDK
-- `~/.agentos/gemini-rotation-state.json` tracks exhaustion times
-- `~/.agentos/gemini-api.jsonl` tracks all API events
+- `~/.assemblyzero/gemini-rotation-state.json` tracks exhaustion times
+- `~/.assemblyzero/gemini-api.jsonl` tracks all API events
 
 ## Next Steps
 

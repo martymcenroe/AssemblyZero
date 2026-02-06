@@ -2,7 +2,7 @@
 """
 New Repository Setup Script
 
-Scaffolds a complete new repository with the canonical AgentOS structure,
+Scaffolds a complete new repository with the canonical AssemblyZero structure,
 creates it on GitHub, and configures it for agent-driven development.
 
 Usage:
@@ -29,13 +29,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Import AgentOS config for path resolution
+# Import AssemblyZero config for path resolution
 try:
-    from agentos_config import config
+    from assemblyzero_config import config
 except ImportError:
     # Fallback if running from a different directory
     sys.path.insert(0, str(Path(__file__).parent))
-    from agentos_config import config
+    from assemblyzero_config import config
 
 
 # Directory structure per 0009 standard
@@ -166,7 +166,7 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
     """
     # Get path formats from config
     projects_root_unix = config.projects_root_unix()
-    agentos_root_windows = config.agentos_root()
+    assemblyzero_root_windows = config.assemblyzero_root()
 
     project_json = {
         "variables": {
@@ -177,7 +177,7 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
             "TOOLS_DIR": f"{projects_root_unix}/{name}/tools",
             "WORKTREE_PATTERN": f"{name}-{{ID}}"
         },
-        "inherit_from": agentos_root_windows
+        "inherit_from": assemblyzero_root_windows
     }
 
     project_json_path = project_path / ".claude" / "project.json"
@@ -193,17 +193,17 @@ def create_claude_md(project_path: Path, name: str, github_user: str) -> None:
         name: Project name
         github_user: GitHub username
     """
-    agentos_root_windows = config.agentos_root()
+    assemblyzero_root_windows = config.assemblyzero_root()
     projects_root_unix = config.projects_root_unix()
 
     content = f"""# CLAUDE.md - {name} Project
 
 You are a team member on the {name} project, not a tool.
 
-## FIRST: Read AgentOS Core Rules
+## FIRST: Read AssemblyZero Core Rules
 
-**Before doing any work, read the AgentOS core rules:**
-`{agentos_root_windows}\\CLAUDE.md`
+**Before doing any work, read the AssemblyZero core rules:**
+`{assemblyzero_root_windows}\\CLAUDE.md`
 
 That file contains core rules that apply to ALL projects:
 - Bash command rules (no &&, |, ;)
@@ -286,15 +286,15 @@ def create_gemini_md(project_path: Path, name: str, github_user: str) -> None:
         name: Project name
         github_user: GitHub username
     """
-    agentos_root_windows = config.agentos_root()
+    assemblyzero_root_windows = config.assemblyzero_root()
     projects_root_unix = config.projects_root_unix()
 
     content = f"""# Gemini Operational Protocols
 
 ## FIRST: Read Core Rules
 
-**Before doing any work, read the AgentOS core rules:**
-`{agentos_root_windows}\\CLAUDE.md`
+**Before doing any work, read the AssemblyZero core rules:**
+`{assemblyzero_root_windows}\\CLAUDE.md`
 
 That file contains core rules that apply to ALL projects and ALL agents:
 - Bash command rules (no &&, |, ;)
@@ -317,7 +317,7 @@ That file contains core rules that apply to ALL projects and ALL agents:
 
 ## 2. Execution Rules
 
-- **Authority:** `AgentOS:standards/0002-coding-standards` is the law for Git workflows.
+- **Authority:** `AssemblyZero:standards/0002-coding-standards` is the law for Git workflows.
 - **One Step Per Turn:** Provide one distinct step, then wait for confirmation.
 - **Check First:** Verify paths/content before changing them.
 - **Copy-Paste Ready:** No placeholders. Use heredocs for new files.
@@ -401,7 +401,7 @@ poetry run python src/main.py  # or npm start
 
 ## Development
 
-This project follows [AgentOS](https://github.com/martymcenroe/AgentOS) conventions:
+This project follows [AssemblyZero](https://github.com/martymcenroe/AssemblyZero) conventions:
 - Worktree isolation for all code changes
 - Pre-merge gates (implementation + test reports)
 - Session logging for agent continuity
@@ -412,7 +412,7 @@ MIT License - See LICENSE file.
 
 ---
 
-*Managed under [AgentOS](https://github.com/martymcenroe/AgentOS) governance.*
+*Managed under [AssemblyZero](https://github.com/martymcenroe/AssemblyZero) governance.*
 """
     readme_path = project_path / "README.md"
     readme_path.write_text(content, encoding='utf-8')
@@ -595,13 +595,13 @@ This document provides a complete inventory of files in the {name} project, orga
 | `CLAUDE.md` | Instructions for Claude agents working on this project |
 | `GEMINI.md` | Instructions for Gemini agents working on this project |
 | `README.md` | Project overview and quick start guide |
-| `.claude/project.json` | Project variables for AgentOS template generation |
+| `.claude/project.json` | Project variables for AssemblyZero template generation |
 
 ---
 
 ## Documentation Numbering
 
-This project uses the AgentOS numbering scheme:
+This project uses the AssemblyZero numbering scheme:
 
 | Range | Category | Location |
 |-------|----------|----------|
@@ -619,7 +619,7 @@ This inventory should be updated when:
 - Significant new files are created
 - Project structure changes
 
-Use `/audit` to verify structure compliance with AgentOS standards.
+Use `/audit` to verify structure compliance with AssemblyZero standards.
 """
     inventory_path = project_path / "docs" / "00003-file-inventory.md"
     inventory_path.write_text(content, encoding='utf-8')
@@ -630,13 +630,13 @@ def create_settings_json(project_path: Path) -> None:
     Create a minimal .claude/settings.json file.
 
     Creates a basic settings file without hooks. For advanced hooks
-    (worktree protection, security linting), run agentos-generate.py later.
+    (worktree protection, security linting), run assemblyzero-generate.py later.
 
     Args:
         project_path: Path to the project root
     """
     # Minimal settings - no hooks by default
-    # Users can run agentos-generate.py later for advanced hooks
+    # Users can run assemblyzero-generate.py later for advanced hooks
     settings = {
         "hooks": {
             "PreToolUse": [],
@@ -666,8 +666,8 @@ def audit_structure(project_path: Path, name: str) -> int:
     extra = []
 
     # Load audit decisions (allowed exceptions)
-    agentos_root = Path(config.agentos_root())
-    decisions_file = agentos_root / "docs" / "standards" / "0011-audit-decisions.md"
+    assemblyzero_root = Path(config.assemblyzero_root())
+    decisions_file = assemblyzero_root / "docs" / "standards" / "0011-audit-decisions.md"
     allowed_empty = set()
     allowed_missing = set()
 
@@ -746,7 +746,7 @@ def audit_structure(project_path: Path, name: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Scaffold a new repository with AgentOS structure",
+        description="Scaffold a new repository with AssemblyZero structure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -884,7 +884,7 @@ Examples:
     print("\n12. Creating initial commit...")
     run_command(["git", "add", "."], cwd=project_path)
     run_command(
-        ["git", "commit", "-m", "chore: initialize project with AgentOS\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"],
+        ["git", "commit", "-m", "chore: initialize project with AssemblyZero\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"],
         cwd=project_path
     )
     print("  Created initial commit")

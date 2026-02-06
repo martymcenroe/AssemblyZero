@@ -7,8 +7,8 @@
 **The "Hallucinating Junior Engineer" Failure Mode:**
 When the Coder Node (`N3_Coder`) implements a feature, it often:
 
-1. **Reinvents Wheels:** Writes a new `log_to_file` function because it doesn't know `agentos.core.audit` exists.
-2. **Hallucinates Imports:** Guesses `from agentos.utils import logger` (which doesn't exist) instead of the correct path.
+1. **Reinvents Wheels:** Writes a new `log_to_file` function because it doesn't know `assemblyzero.core.audit` exists.
+2. **Hallucinates Imports:** Guesses `from assemblyzero.utils import logger` (which doesn't exist) instead of the correct path.
 3. **Ignores Patterns:** Uses `requests` directly instead of your `GeminiClient` wrapper, bypassing rotation and logging logic.
 
 **Result:** The code fails "Lint/Audit" gates or requires heavy human refactoring.
@@ -27,9 +27,9 @@ Implement a **Codebase Retrieval System** that gives the Coder Node access to th
 
 Enhance `tools/rebuild_knowledge_base.py`.
 
-* **Target:** Scan `agentos/**/*.py` and `tools/**/*.py`.
+* **Target:** Scan `assemblyzero/**/*.py` and `tools/**/*.py`.
 * **Strategy:** Don't just chunk by lines. Use Python's `ast` module to chunk by **Class** and **Top-Level Function**.
-* **Metadata:** Tag chunks with `type: code` and `module: agentos.core.audit` (for example).
+* **Metadata:** Tag chunks with `type: code` and `module: assemblyzero.core.audit` (for example).
 
 ### 2. The "Tech Lead" Logic (in `run_implementation_workflow.py`)
 
@@ -51,7 +51,7 @@ Modify the prompt construction for `N3_Coder`.
 ## Reference Codebase
 Use these existing utilities. DO NOT reinvent them.
 
-[Source: agentos/core/audit.py]
+[Source: assemblyzero/core/audit.py]
 class GovernanceAuditLog:
     def log(self, entry: dict): ...
 
@@ -67,7 +67,7 @@ This sits inside the **N3_Coder** node of the `Implementation Workflow` (from th
 
 ## Success Criteria
 
-* [ ] The Vector Store contains chunks for `agentos/core/audit.py` and `agentos/core/gemini_client.py`.
+* [ ] The Vector Store contains chunks for `assemblyzero/core/audit.py` and `assemblyzero/core/gemini_client.py`.
 * [ ] When an LLD mentions "logging", the Coder context automatically receives the `GovernanceAuditLog` class definition.
-* [ ] The generated implementation uses `from agentos.core.audit import GovernanceAuditLog` correctly on the first try.
+* [ ] The generated implementation uses `from assemblyzero.core.audit import GovernanceAuditLog` correctly on the first try.
 * [ ] Zero `ImportError` failures caused by hallucinated module paths.

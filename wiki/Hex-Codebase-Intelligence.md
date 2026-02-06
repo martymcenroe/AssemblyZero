@@ -16,7 +16,7 @@ No one is quite sure how Hex works. Parts appear overnight that no one added. Th
 
 ## The Function: Codebase Intelligence Layer
 
-In AgentOS, Hex handles **codebase intelligence**—understanding the structure and semantics of code beyond simple text search.
+In AssemblyZero, Hex handles **codebase intelligence**—understanding the structure and semantics of code beyond simple text search.
 
 ```mermaid
 graph TD
@@ -161,7 +161,7 @@ Instead of inventing new patterns, agents follow existing conventions.
 
 | Component | Status |
 |-----------|--------|
-| Issue | [#92](https://github.com/martymcenroe/AgentOS/issues/92) |
+| Issue | [#92](https://github.com/martymcenroe/AssemblyZero/issues/92) |
 | AST indexing | In design |
 | Signature extraction | Planned |
 | Code embeddings | Planned |
@@ -194,7 +194,7 @@ hex/
 
 In the books, Hex requested a teddy bear for unexplained reasons. It improved performance.
 
-In AgentOS Hex, "Wuffles" is the **comfort component**—small affordances that make the system work better for humans:
+In AssemblyZero Hex, "Wuffles" is the **comfort component**—small affordances that make the system work better for humans:
 
 | Wuffles Feature | Purpose |
 |-----------------|---------|

@@ -321,7 +321,7 @@ echo ""
 # ==========================================
 echo "--- Category 8: --repo Flag ---"
 
-# Test 8.1: Default repo is auto-detected or uses AgentOS
+# Test 8.1: Default repo is auto-detected or uses AssemblyZero
 output=$("$BATCH_SCRIPT" --type lld --dry-run 123 2>&1) || true
 cmd=$(get_command "$output")
 # Should work without --repo specified

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-AgentOS Documentation Reference Updater
+AssemblyZero Documentation Reference Updater
 
 Finds and updates references to old Aletheia 0xxx-numbered docs
-with new AgentOS semantic paths.
+with new AssemblyZero semantic paths.
 
 Usage:
     python tools/update-doc-refs.py --project /path/to/project [--verbose]
@@ -21,88 +21,88 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# Mapping from old Aletheia numbers to new AgentOS paths
+# Mapping from old Aletheia numbers to new AssemblyZero paths
 # Format: "old_pattern" -> "new_path"
 # IMPORTANT: Keys must be the FULL filename (before .md) to avoid partial matching
 REFERENCE_MAP: Dict[str, str] = {
     # Standards (00xx) - full filenames
-    "0002-coding-standards": "AgentOS:standards/0002-coding-standards",
-    "0004-orchestration-protocol": "AgentOS:standards/0001-orchestration-protocol",
-    "0005-testing-strategy-and-protocols": "AgentOS:standards/0007-testing-strategy",
-    "0005-testing-strategy": "AgentOS:standards/0007-testing-strategy",
-    "0006-mermaid-diagrams": "AgentOS:standards/0004-mermaid-diagrams",
-    "0009-session-closeout-protocol": "AgentOS:standards/0005-session-closeout-protocol",
-    "0009-session-closeout": "AgentOS:standards/0005-session-closeout-protocol",
-    "0010-standard-labels": "AgentOS:standards/0006-standard-labels",
-    "0015-agent-prohibited-actions": "AgentOS:standards/0003-agent-prohibited-actions",
-    "0015-agent-prohibited": "AgentOS:standards/0003-agent-prohibited-actions",
+    "0002-coding-standards": "AssemblyZero:standards/0002-coding-standards",
+    "0004-orchestration-protocol": "AssemblyZero:standards/0001-orchestration-protocol",
+    "0005-testing-strategy-and-protocols": "AssemblyZero:standards/0007-testing-strategy",
+    "0005-testing-strategy": "AssemblyZero:standards/0007-testing-strategy",
+    "0006-mermaid-diagrams": "AssemblyZero:standards/0004-mermaid-diagrams",
+    "0009-session-closeout-protocol": "AssemblyZero:standards/0005-session-closeout-protocol",
+    "0009-session-closeout": "AssemblyZero:standards/0005-session-closeout-protocol",
+    "0010-standard-labels": "AssemblyZero:standards/0006-standard-labels",
+    "0015-agent-prohibited-actions": "AssemblyZero:standards/0003-agent-prohibited-actions",
+    "0015-agent-prohibited": "AssemblyZero:standards/0003-agent-prohibited-actions",
 
     # Templates (01xx) - full filenames
-    "0100-TEMPLATE-GUIDE": "AgentOS:templates/0100-template-index",
-    "0100-template-guide": "AgentOS:templates/0100-template-index",
-    "0101-TEMPLATE-issue": "AgentOS:templates/0101-issue-template",
-    "0102-TEMPLATE-feature-lld": "AgentOS:templates/0102-lld-template",
-    "0103-TEMPLATE-implementation-report": "AgentOS:templates/0103-implementation-report-template",
-    "0104-TEMPLATE-adr": "AgentOS:templates/0104-adr-template",
-    "0105-TEMPLATE-implementation-plan": "AgentOS:templates/0105-implementation-plan-template",
-    "0108-lld-pre-implementation-review": "AgentOS:templates/0108-lld-pre-impl-review",
-    "0108-lld-pre-implementation": "AgentOS:templates/0108-lld-pre-impl-review",
-    "0111-TEMPLATE-test-script": "AgentOS:templates/0106-test-script-template",
-    "0113-TEMPLATE-test-report": "AgentOS:templates/0107-test-report-template",
+    "0100-TEMPLATE-GUIDE": "AssemblyZero:templates/0100-template-index",
+    "0100-template-guide": "AssemblyZero:templates/0100-template-index",
+    "0101-TEMPLATE-issue": "AssemblyZero:templates/0101-issue-template",
+    "0102-TEMPLATE-feature-lld": "AssemblyZero:templates/0102-lld-template",
+    "0103-TEMPLATE-implementation-report": "AssemblyZero:templates/0103-implementation-report-template",
+    "0104-TEMPLATE-adr": "AssemblyZero:templates/0104-adr-template",
+    "0105-TEMPLATE-implementation-plan": "AssemblyZero:templates/0105-implementation-plan-template",
+    "0108-lld-pre-implementation-review": "AssemblyZero:templates/0108-lld-pre-impl-review",
+    "0108-lld-pre-implementation": "AssemblyZero:templates/0108-lld-pre-impl-review",
+    "0111-TEMPLATE-test-script": "AssemblyZero:templates/0106-test-script-template",
+    "0113-TEMPLATE-test-report": "AssemblyZero:templates/0107-test-report-template",
 
-    # ADRs (02xx) - Generic ones moved to AgentOS
-    "0207-ADR-single-identity-orchestration": "AgentOS:adrs/0201-single-identity-orchestration",
-    "0207-ADR-single-identity": "AgentOS:adrs/0201-single-identity-orchestration",
-    "0210-ADR-git-worktree-isolation": "AgentOS:adrs/0202-git-worktree-isolation",
-    "0210-ADR-git-worktree": "AgentOS:adrs/0202-git-worktree-isolation",
-    "0213-ADR-adversarial-audit-philosophy": "AgentOS:adrs/0203-adversarial-audit-philosophy",
-    "0213-ADR-adversarial-audit": "AgentOS:adrs/0203-adversarial-audit-philosophy",
-    "0214-ADR-claude-staging-pattern": "AgentOS:adrs/0204-claude-staging-pattern",
-    "0214-ADR-claude-staging": "AgentOS:adrs/0204-claude-staging-pattern",
-    "0215-ADR-test-first-philosophy": "AgentOS:adrs/0205-test-first-philosophy",
-    "0215-ADR-test-first": "AgentOS:adrs/0205-test-first-philosophy",
+    # ADRs (02xx) - Generic ones moved to AssemblyZero
+    "0207-ADR-single-identity-orchestration": "AssemblyZero:adrs/0201-single-identity-orchestration",
+    "0207-ADR-single-identity": "AssemblyZero:adrs/0201-single-identity-orchestration",
+    "0210-ADR-git-worktree-isolation": "AssemblyZero:adrs/0202-git-worktree-isolation",
+    "0210-ADR-git-worktree": "AssemblyZero:adrs/0202-git-worktree-isolation",
+    "0213-ADR-adversarial-audit-philosophy": "AssemblyZero:adrs/0203-adversarial-audit-philosophy",
+    "0213-ADR-adversarial-audit": "AssemblyZero:adrs/0203-adversarial-audit-philosophy",
+    "0214-ADR-claude-staging-pattern": "AssemblyZero:adrs/0204-claude-staging-pattern",
+    "0214-ADR-claude-staging": "AssemblyZero:adrs/0204-claude-staging-pattern",
+    "0215-ADR-test-first-philosophy": "AssemblyZero:adrs/0205-test-first-philosophy",
+    "0215-ADR-test-first": "AssemblyZero:adrs/0205-test-first-philosophy",
 
     # Skills (06xx) - full filenames
-    "0600-skill-instructions-index": "AgentOS:skills/0600-skill-index",
-    "0601-skill-gemini-lld-review": "AgentOS:skills/0601-gemini-lld-review",
-    "0601-skill-gemini-lld": "AgentOS:skills/0601-gemini-lld-review",
-    "0602-skill-gemini-dual-review": "AgentOS:skills/0602-gemini-dual-review",
-    "0602-skill-gemini-dual": "AgentOS:skills/0602-gemini-dual-review",
+    "0600-skill-instructions-index": "AssemblyZero:skills/0600-skill-index",
+    "0601-skill-gemini-lld-review": "AssemblyZero:skills/0601-gemini-lld-review",
+    "0601-skill-gemini-lld": "AssemblyZero:skills/0601-gemini-lld-review",
+    "0602-skill-gemini-dual-review": "AssemblyZero:skills/0602-gemini-dual-review",
+    "0602-skill-gemini-dual": "AssemblyZero:skills/0602-gemini-dual-review",
 
-    # Audits (08xx) - Generic ones moved to AgentOS
-    "0800-common-audits": "AgentOS:audits/0800-audit-index",
-    "0800-audit-index": "AgentOS:audits/0800-audit-index",
-    "0807-agentos-audit": "AgentOS:audits/0807-agentos-health-audit",
-    "0808-audit-permission-permissiveness": "AgentOS:audits/0816-permission-permissiveness",
-    "0809-audit-security": "AgentOS:audits/0801-security-audit",
-    "0810-audit-privacy": "AgentOS:audits/0802-privacy-audit",
-    "0811-audit-accessibility": "AgentOS:audits/0804-accessibility-audit",
-    "0813-audit-code-quality": "AgentOS:audits/0803-code-quality-audit",
-    "0814-audit-license-compliance": "AgentOS:audits/0805-license-compliance",
-    "0814-audit-license": "AgentOS:audits/0805-license-compliance",
-    "0815-audit-claude-capabilities": "AgentOS:audits/0806-claude-capabilities",
-    "0815-audit-claude": "AgentOS:audits/0806-claude-capabilities",
-    "0818-audit-ai-management-system": "AgentOS:audits/0809-ai-management-system",
-    "0818-audit-ai-management": "AgentOS:audits/0809-ai-management-system",
-    "0819-audit-ai-supply-chain": "AgentOS:audits/0810-ai-supply-chain",
-    "0819-audit-ai-supply": "AgentOS:audits/0810-ai-supply-chain",
-    "0820-audit-explainability": "AgentOS:audits/0811-explainability",
-    "0821-audit-agentic-ai-governance": "AgentOS:audits/0812-agentic-ai-governance",
-    "0821-audit-agentic": "AgentOS:audits/0812-agentic-ai-governance",
-    "0822-audit-bias-fairness": "AgentOS:audits/0813-bias-fairness",
-    "0822-audit-bias": "AgentOS:audits/0813-bias-fairness",
-    "0823-audit-ai-incident-post-mortem": "AgentOS:audits/0814-ai-incident-post-mortem",
-    "0823-audit-ai-incident": "AgentOS:audits/0814-ai-incident-post-mortem",
-    "0824-audit-permission-friction": "AgentOS:audits/0817-permission-friction",
-    "0825-audit-ai-safety": "AgentOS:audits/0808-ai-safety-audit",
-    "0898-horizon-scanning-protocol": "AgentOS:audits/0815-horizon-scanning",
-    "0898-horizon-scanning": "AgentOS:audits/0815-horizon-scanning",
-    "0899-meta-audit": "AgentOS:audits/0899-meta-audit",
+    # Audits (08xx) - Generic ones moved to AssemblyZero
+    "0800-common-audits": "AssemblyZero:audits/0800-audit-index",
+    "0800-audit-index": "AssemblyZero:audits/0800-audit-index",
+    "0807-assemblyzero-audit": "AssemblyZero:audits/0807-assemblyzero-health-audit",
+    "0808-audit-permission-permissiveness": "AssemblyZero:audits/0816-permission-permissiveness",
+    "0809-audit-security": "AssemblyZero:audits/0801-security-audit",
+    "0810-audit-privacy": "AssemblyZero:audits/0802-privacy-audit",
+    "0811-audit-accessibility": "AssemblyZero:audits/0804-accessibility-audit",
+    "0813-audit-code-quality": "AssemblyZero:audits/0803-code-quality-audit",
+    "0814-audit-license-compliance": "AssemblyZero:audits/0805-license-compliance",
+    "0814-audit-license": "AssemblyZero:audits/0805-license-compliance",
+    "0815-audit-claude-capabilities": "AssemblyZero:audits/0806-claude-capabilities",
+    "0815-audit-claude": "AssemblyZero:audits/0806-claude-capabilities",
+    "0818-audit-ai-management-system": "AssemblyZero:audits/0809-ai-management-system",
+    "0818-audit-ai-management": "AssemblyZero:audits/0809-ai-management-system",
+    "0819-audit-ai-supply-chain": "AssemblyZero:audits/0810-ai-supply-chain",
+    "0819-audit-ai-supply": "AssemblyZero:audits/0810-ai-supply-chain",
+    "0820-audit-explainability": "AssemblyZero:audits/0811-explainability",
+    "0821-audit-agentic-ai-governance": "AssemblyZero:audits/0812-agentic-ai-governance",
+    "0821-audit-agentic": "AssemblyZero:audits/0812-agentic-ai-governance",
+    "0822-audit-bias-fairness": "AssemblyZero:audits/0813-bias-fairness",
+    "0822-audit-bias": "AssemblyZero:audits/0813-bias-fairness",
+    "0823-audit-ai-incident-post-mortem": "AssemblyZero:audits/0814-ai-incident-post-mortem",
+    "0823-audit-ai-incident": "AssemblyZero:audits/0814-ai-incident-post-mortem",
+    "0824-audit-permission-friction": "AssemblyZero:audits/0817-permission-friction",
+    "0825-audit-ai-safety": "AssemblyZero:audits/0808-ai-safety-audit",
+    "0898-horizon-scanning-protocol": "AssemblyZero:audits/0815-horizon-scanning",
+    "0898-horizon-scanning": "AssemblyZero:audits/0815-horizon-scanning",
+    "0899-meta-audit": "AssemblyZero:audits/0899-meta-audit",
 
     # Runbooks (09xx)
-    "0900-runbook-index": "AgentOS:runbooks/0900-runbook-index",
-    "0901-runbook-nightly-agentos-audit": "AgentOS:runbooks/0901-nightly-agentos-audit",
-    "0901-nightly-agentos": "AgentOS:runbooks/0901-nightly-agentos-audit",
+    "0900-runbook-index": "AssemblyZero:runbooks/0900-runbook-index",
+    "0901-runbook-nightly-assemblyzero-audit": "AssemblyZero:runbooks/0901-nightly-assemblyzero-audit",
+    "0901-nightly-assemblyzero": "AssemblyZero:runbooks/0901-nightly-assemblyzero-audit",
 }
 
 

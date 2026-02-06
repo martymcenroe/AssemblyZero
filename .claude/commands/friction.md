@@ -49,7 +49,7 @@ Detect the current project from working directory:
 
 Analyze Claude Code session transcripts to find commands that caused friction.
 
-**Ref:** `AgentOS:audits/permission-friction`
+**Ref:** `AssemblyZero:audits/permission-friction`
 
 ---
 

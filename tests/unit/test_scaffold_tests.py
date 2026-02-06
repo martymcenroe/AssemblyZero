@@ -18,7 +18,7 @@ class TestParseLLDTestSection:
 
     def test_parse_basic_test_table(self):
         """Extract scenarios from valid Section 10.0 table."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             parse_lld_test_section,
         )
 
@@ -42,7 +42,7 @@ class TestParseLLDTestSection:
 
     def test_parse_missing_section_10(self):
         """Returns empty list for LLD without Section 10.0."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             parse_lld_test_section,
         )
 
@@ -62,7 +62,7 @@ More content.
 
     def test_parse_extracts_input_output(self):
         """Extracts input/output patterns from description."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             parse_lld_test_section,
         )
 
@@ -91,7 +91,7 @@ class TestInferModulePath:
 
     def test_infer_from_section_2_1(self):
         """Extracts module from Section 2.1 Files Changed."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             infer_module_path,
         )
 
@@ -100,18 +100,18 @@ class TestInferModulePath:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/testing/nodes/scaffold_tests.py` | Modify | Fix scaffold |
+| `assemblyzero/workflows/testing/nodes/scaffold_tests.py` | Modify | Fix scaffold |
 | `tests/unit/test_scaffold.py` | Add | Unit tests |
 """
 
         result = infer_module_path(lld_content)
 
         # Should return the non-test Python module
-        assert result == "agentos.workflows.testing.nodes.scaffold_tests"
+        assert result == "assemblyzero.workflows.testing.nodes.scaffold_tests"
 
     def test_infer_skips_test_files(self):
         """Skips test files when inferring module."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             infer_module_path,
         )
 
@@ -121,14 +121,14 @@ class TestInferModulePath:
 | File | Change Type | Description |
 |------|-------------|-------------|
 | `tests/test_foo.py` | Add | Tests |
-| `agentos/foo.py` | Add | Implementation |
+| `assemblyzero/foo.py` | Add | Implementation |
 """
 
         result = infer_module_path(lld_content)
 
         # Should return foo.py, not test_foo.py
         assert "test" not in result.lower()
-        assert "agentos.foo" == result
+        assert "assemblyzero.foo" == result
 
 
 # =============================================================================
@@ -141,12 +141,12 @@ class TestGenerateTestCode:
 
     def test_generates_real_assertion(self):
         """Generated test has real assertion, not assert False."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             generate_test_code,
         )
 
         scenarios = {
-            "module_path": "agentos.mymodule",
+            "module_path": "assemblyzero.mymodule",
             "scenarios": [
                 {
                     "test_id": "T010",
@@ -169,12 +169,12 @@ class TestGenerateTestCode:
 
     def test_includes_proper_imports(self):
         """Generated test imports target module."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             generate_test_code,
         )
 
         scenarios = {
-            "module_path": "agentos.workflows.testing.nodes.scaffold_tests",
+            "module_path": "assemblyzero.workflows.testing.nodes.scaffold_tests",
             "scenarios": [
                 {
                     "test_id": "T010",
@@ -188,11 +188,11 @@ class TestGenerateTestCode:
 
         code = generate_test_code(scenarios)
 
-        assert "from agentos.workflows.testing.nodes.scaffold_tests import" in code
+        assert "from assemblyzero.workflows.testing.nodes.scaffold_tests import" in code
 
     def test_includes_requirement_docstring(self):
         """Generated test has requirement ID in docstring."""
-        from agentos.workflows.testing.nodes.scaffold_tests import (
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import (
             generate_test_code,
         )
 
@@ -224,7 +224,7 @@ class TestDetectStubPatterns:
 
     def test_detects_assert_false(self):
         """Detects `assert False` pattern."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
         )
 
@@ -240,7 +240,7 @@ def test_example():
 
     def test_detects_tdd_red_message(self):
         """Detects 'TDD RED' in assertion message."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
         )
 
@@ -255,7 +255,7 @@ def test_example():
 
     def test_no_error_for_real_assertion(self):
         """No error for tests with real assertions."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             detect_stub_patterns,
         )
 
@@ -280,7 +280,7 @@ class TestValidateTestStructure:
 
     def test_rejects_missing_imports(self):
         """Rejects tests without proper imports."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_test_structure,
         )
 
@@ -299,7 +299,7 @@ def test_example():
 
     def test_rejects_no_real_assertion(self):
         """Rejects tests with only pass statement."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_test_structure,
         )
 
@@ -318,7 +318,7 @@ def test_example():
 
     def test_accepts_valid_test(self):
         """Accepts test with import and real assertion."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_test_structure,
         )
 
@@ -347,7 +347,7 @@ class TestValidateScenarioCoverage:
 
     def test_all_scenarios_covered(self):
         """Passes when all scenarios have tests."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_scenario_coverage,
         )
 
@@ -369,7 +369,7 @@ def test_subtract():
 
     def test_missing_scenario(self):
         """Fails when scenario is missing test function."""
-        from agentos.workflows.testing.nodes.validate_tests_mechanical import (
+        from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
             validate_scenario_coverage,
         )
 
@@ -398,7 +398,7 @@ class TestScaffoldIntegration:
 
     def test_scaffold_produces_runnable_tests(self, tmp_path):
         """Full scaffold produces syntactically valid Python."""
-        from agentos.workflows.testing.nodes.scaffold_tests import scaffold_tests
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
         import ast
 
         # Create minimal state with test scenarios

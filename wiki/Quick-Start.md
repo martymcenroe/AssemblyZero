@@ -1,6 +1,6 @@
 # Quick Start
 
-> Get AgentOS running in 5 minutes
+> Get AssemblyZero running in 5 minutes
 
 ---
 
@@ -13,11 +13,11 @@
 
 ---
 
-## Step 1: Clone AgentOS
+## Step 1: Clone AssemblyZero
 
 ```bash
-git clone https://github.com/martymcenroe/AgentOS.git
-cd AgentOS
+git clone https://github.com/martymcenroe/AssemblyZero.git
+cd AssemblyZero
 ```
 
 ---
@@ -36,7 +36,7 @@ poetry install
 
 ```bash
 mkdir -p YourProject/.claude
-cp AgentOS/.claude/project.json.example YourProject/.claude/project.json
+cp AssemblyZero/.claude/project.json.example YourProject/.claude/project.json
 ```
 
 ### Edit variables
@@ -50,15 +50,15 @@ cp AgentOS/.claude/project.json.example YourProject/.claude/project.json
     "TOOLS_DIR": "/c/Users/you/Projects/YourProject/tools",
     "WORKTREE_PATTERN": "YourProject-{ID}"
   },
-  "inherit_from": "C:\\Users\\you\\Projects\\AgentOS"
+  "inherit_from": "C:\\Users\\you\\Projects\\AssemblyZero"
 }
 ```
 
 ### Generate configs
 
 ```bash
-poetry run --directory /path/to/AgentOS \
-  python /path/to/AgentOS/tools/agentos-generate.py \
+poetry run --directory /path/to/AssemblyZero \
+  python /path/to/AssemblyZero/tools/assemblyzero-generate.py \
   --project YourProject
 ```
 
@@ -71,7 +71,7 @@ This generates:
 
 ## Step 4: Create Project CLAUDE.md (Optional)
 
-If your project needs specific rules beyond AgentOS core:
+If your project needs specific rules beyond AssemblyZero core:
 
 ```markdown
 # CLAUDE.md - YourProject
@@ -98,7 +98,7 @@ cd YourProject
 claude
 ```
 
-The agent now operates under AgentOS governance:
+The agent now operates under AssemblyZero governance:
 - Bash safety rules enforced
 - Worktree isolation for code changes
 - Gemini verification gates (when configured)
@@ -131,7 +131,7 @@ Permission prompts should be minimal (< 5% of tool calls).
 For full governance gates, configure Gemini:
 
 1. Get Gemini API credentials
-2. Add to `~/.agentos/credentials.json`
+2. Add to `~/.assemblyzero/credentials.json`
 3. Configure gates in project CLAUDE.md
 
 ### Customize permissions
@@ -139,7 +139,7 @@ For full governance gates, configure Gemini:
 Reduce friction by adding project-specific patterns:
 
 ```bash
-poetry run python tools/agentos-permissions.py \
+poetry run python tools/assemblyzero-permissions.py \
   --audit --project YourProject
 ```
 

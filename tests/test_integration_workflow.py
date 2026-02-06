@@ -72,7 +72,7 @@ class TestClaudeHeadlessIntegration:
         claude_path = shutil.which("claude")
         if claude_path is None:
             # Check common npm locations
-            from agentos.workflows.issue.nodes.draft import find_claude_cli
+            from assemblyzero.workflows.issue.nodes.draft import find_claude_cli
             try:
                 claude_path = find_claude_cli()
             except RuntimeError:
@@ -84,7 +84,7 @@ class TestCleanOption:
 
     def test_clean_deletes_checkpoint_and_audit(self):
         """Verify Clean option actually deletes checkpoint and audit dir."""
-        from agentos.workflows.issue.audit import create_audit_dir, get_repo_root
+        from assemblyzero.workflows.issue.audit import create_audit_dir, get_repo_root
         from langgraph.checkpoint.sqlite import SqliteSaver
         from pathlib import Path
 
@@ -98,7 +98,7 @@ class TestCleanOption:
         test_file.write_text("test content")
 
         # Create a checkpoint
-        db_path = Path.home() / ".agentos" / "issue_workflow.db"
+        db_path = Path.home() / ".assemblyzero" / "issue_workflow.db"
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
             config = {"configurable": {"thread_id": test_slug}}
             # Simulate having a checkpoint
@@ -124,7 +124,7 @@ class TestWorkflowFailureModes:
 
     def test_workflow_fails_without_vscode(self, monkeypatch):
         """Verify workflow fails gracefully if VS Code missing."""
-        from agentos.workflows.issue.nodes.sandbox import check_vscode_available
+        from assemblyzero.workflows.issue.nodes.sandbox import check_vscode_available
 
         # Mock shutil.which to return None
         original_which = shutil.which
@@ -141,7 +141,7 @@ class TestWorkflowFailureModes:
 
     def test_workflow_fails_without_gh(self, monkeypatch):
         """Verify workflow fails gracefully if gh CLI missing."""
-        from agentos.workflows.issue.nodes.sandbox import check_gh_authenticated
+        from assemblyzero.workflows.issue.nodes.sandbox import check_gh_authenticated
 
         # Mock shutil.which to return None for gh
         original_which = shutil.which

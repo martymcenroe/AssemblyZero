@@ -17,7 +17,7 @@ Archives valuable artifacts from a worktree before deletion. Prevents loss of it
 
 ```bash
 # From main repo directory
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-42 --issue 42
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-42 --issue 42
 ```
 
 ---
@@ -56,7 +56,7 @@ Removes from worktree (NOT archived):
 - `.coverage` - pytest coverage data
 - `__pycache__/` - Python bytecode
 - `.pytest_cache/` - pytest cache
-- `.agentos/audit/` - execution traces
+- `.assemblyzero/audit/` - execution traces
 
 ### 3. Commits to Main (unless --no-commit)
 
@@ -89,17 +89,17 @@ Post-Merge Cleanup:
 
 ```bash
 # Archive lineage, clean ephemeral, commit
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-155 --issue 155
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-155 --issue 155
 
 # Then remove worktree
-git worktree remove ../AgentOS-155
+git worktree remove ../AssemblyZero-155
 ```
 
 ### Review Before Commit
 
 ```bash
 # Archive without commit
-python tools/archive_worktree_lineage.py --worktree ../AgentOS-155 --issue 155 --no-commit
+python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-155 --issue 155 --no-commit
 
 # Review what was archived
 ls docs/lineage/archived/
@@ -113,9 +113,9 @@ git commit -m "chore: archive workflow lineage for #155"
 
 ```bash
 python tools/archive_worktree_lineage.py \
-  --worktree /c/Users/mcwiz/Projects/AgentOS-42 \
+  --worktree /c/Users/mcwiz/Projects/AssemblyZero-42 \
   --issue 42 \
-  --main-repo /c/Users/mcwiz/Projects/AgentOS
+  --main-repo /c/Users/mcwiz/Projects/AssemblyZero
 ```
 
 ---
@@ -128,7 +128,7 @@ python tools/archive_worktree_lineage.py \
 | `.coverage` | Cleaned | Binary, regeneratable |
 | `__pycache__/` | Cleaned | Bytecode, regeneratable |
 | `.pytest_cache/` | Cleaned | Cache, regeneratable |
-| `.agentos/audit/` | Cleaned | Execution traces, large |
+| `.assemblyzero/audit/` | Cleaned | Execution traces, large |
 
 ---
 

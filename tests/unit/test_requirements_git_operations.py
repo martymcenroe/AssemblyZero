@@ -19,7 +19,7 @@ class TestGitOperationError:
 
     def test_error_can_be_raised(self):
         """Test that GitOperationError can be raised."""
-        from agentos.workflows.requirements.git_operations import GitOperationError
+        from assemblyzero.workflows.requirements.git_operations import GitOperationError
 
         with pytest.raises(GitOperationError) as exc_info:
             raise GitOperationError("test error")
@@ -36,7 +36,7 @@ class TestFormatCommitMessage:
         Note: LLD commits use "Ref #N" not "Closes #N" because the LLD
         is just the design doc, not the implementation (see #238).
         """
-        from agentos.workflows.requirements.git_operations import format_commit_message
+        from assemblyzero.workflows.requirements.git_operations import format_commit_message
 
         msg = format_commit_message("lld", issue_number=42)
 
@@ -45,7 +45,7 @@ class TestFormatCommitMessage:
 
     def test_issue_workflow_message(self):
         """Test commit message for issue workflow."""
-        from agentos.workflows.requirements.git_operations import format_commit_message
+        from assemblyzero.workflows.requirements.git_operations import format_commit_message
 
         msg = format_commit_message("issue", slug="my-feature")
 
@@ -58,7 +58,7 @@ class TestCommitAndPush:
 
     def test_returns_empty_string_for_empty_files(self, tmp_path):
         """Test returns empty string when no files to commit."""
-        from agentos.workflows.requirements.git_operations import commit_and_push
+        from assemblyzero.workflows.requirements.git_operations import commit_and_push
 
         result = commit_and_push(
             created_files=[],
@@ -72,7 +72,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_stages_each_file(self, mock_run, tmp_path):
         """Test that each file is staged individually."""
-        from agentos.workflows.requirements.git_operations import commit_and_push
+        from assemblyzero.workflows.requirements.git_operations import commit_and_push
 
         mock_run.return_value = Mock(
             returncode=0,
@@ -93,7 +93,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_raises_on_stage_failure(self, mock_run, tmp_path):
         """Test raises GitOperationError on git add failure."""
-        from agentos.workflows.requirements.git_operations import (
+        from assemblyzero.workflows.requirements.git_operations import (
             commit_and_push,
             GitOperationError,
         )
@@ -117,7 +117,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_raises_on_commit_failure(self, mock_run, tmp_path):
         """Test raises GitOperationError on git commit failure."""
-        from agentos.workflows.requirements.git_operations import (
+        from assemblyzero.workflows.requirements.git_operations import (
             commit_and_push,
             GitOperationError,
         )
@@ -141,7 +141,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_raises_on_push_failure(self, mock_run, tmp_path):
         """Test raises GitOperationError on git push failure."""
-        from agentos.workflows.requirements.git_operations import (
+        from assemblyzero.workflows.requirements.git_operations import (
             commit_and_push,
             GitOperationError,
         )
@@ -166,7 +166,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_extracts_commit_sha(self, mock_run, tmp_path):
         """Test that commit SHA is extracted from output."""
-        from agentos.workflows.requirements.git_operations import commit_and_push
+        from assemblyzero.workflows.requirements.git_operations import commit_and_push
 
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
@@ -186,7 +186,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_handles_commit_output_without_sha(self, mock_run, tmp_path):
         """Test handles commit output that doesn't match expected format."""
-        from agentos.workflows.requirements.git_operations import commit_and_push
+        from assemblyzero.workflows.requirements.git_operations import commit_and_push
 
         mock_run.side_effect = [
             Mock(returncode=0, stdout="", stderr=""),  # git add
@@ -206,7 +206,7 @@ class TestCommitAndPush:
     @patch("subprocess.run")
     def test_uses_path_as_cwd(self, mock_run, tmp_path):
         """Test that target_repo is used as cwd for git commands."""
-        from agentos.workflows.requirements.git_operations import commit_and_push
+        from assemblyzero.workflows.requirements.git_operations import commit_and_push
 
         mock_run.return_value = Mock(
             returncode=0,

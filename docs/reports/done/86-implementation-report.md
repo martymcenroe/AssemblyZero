@@ -17,11 +17,11 @@ Implemented a LangGraph-based workflow that orchestrates LLD creation from GitHu
 
 | File | Change Type | Lines | Description |
 |------|-------------|-------|-------------|
-| `agentos/workflows/lld/__init__.py` | Add | 24 | Package exports |
-| `agentos/workflows/lld/state.py` | Add | 97 | LLDWorkflowState TypedDict and HumanDecision enum |
-| `agentos/workflows/lld/audit.py` | Add | 265 | Audit trail utilities, context assembly, path validation |
-| `agentos/workflows/lld/nodes.py` | Add | 543 | N0-N4 node implementations with mock mode |
-| `agentos/workflows/lld/graph.py` | Add | 195 | StateGraph with conditional routing |
+| `assemblyzero/workflows/lld/__init__.py` | Add | 24 | Package exports |
+| `assemblyzero/workflows/lld/state.py` | Add | 97 | LLDWorkflowState TypedDict and HumanDecision enum |
+| `assemblyzero/workflows/lld/audit.py` | Add | 265 | Audit trail utilities, context assembly, path validation |
+| `assemblyzero/workflows/lld/nodes.py` | Add | 543 | N0-N4 node implementations with mock mode |
+| `assemblyzero/workflows/lld/graph.py` | Add | 195 | StateGraph with conditional routing |
 | `tools/run_lld_workflow.py` | Add | 261 | CLI runner with --auto, --mock, --context, --resume |
 | `tests/test_lld_workflow.py` | Add | 413 | 30 unit tests |
 

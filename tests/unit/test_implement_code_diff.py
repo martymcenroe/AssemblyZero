@@ -118,7 +118,7 @@ class TestAddFileBypasses:
 
     def test_add_file_bypasses_diff(self, large_file_content):
         """Add operations should never use diff mode, even for large content."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             select_generation_strategy,
         )
 
@@ -127,7 +127,7 @@ class TestAddFileBypasses:
 
     def test_add_file_with_none_content(self):
         """Add with no existing content uses standard mode."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             select_generation_strategy,
         )
 
@@ -145,13 +145,13 @@ class TestIsLargeFile:
 
     def test_is_large_file_by_lines(self, large_file_content):
         """T010: Returns True for 501+ line file."""
-        from agentos.workflows.testing.nodes.implement_code import is_large_file
+        from assemblyzero.workflows.testing.nodes.implement_code import is_large_file
 
         assert is_large_file(large_file_content) is True
 
     def test_is_large_file_by_bytes(self, large_file_by_bytes):
         """T020: Returns True for 15001+ byte file."""
-        from agentos.workflows.testing.nodes.implement_code import is_large_file
+        from assemblyzero.workflows.testing.nodes.implement_code import is_large_file
 
         # Verify fixture is actually large by bytes but not lines
         assert len(large_file_by_bytes.split("\n")) < 500
@@ -160,13 +160,13 @@ class TestIsLargeFile:
 
     def test_is_large_file_small(self, small_file_content):
         """T030: Returns False for small file (below both thresholds)."""
-        from agentos.workflows.testing.nodes.implement_code import is_large_file
+        from assemblyzero.workflows.testing.nodes.implement_code import is_large_file
 
         assert is_large_file(small_file_content) is False
 
     def test_is_large_file_exactly_at_threshold(self):
         """Edge case: exactly at threshold should not trigger."""
-        from agentos.workflows.testing.nodes.implement_code import is_large_file
+        from assemblyzero.workflows.testing.nodes.implement_code import is_large_file
 
         # 500 lines exactly - should NOT be large
         content = "\n".join([f"line {i}" for i in range(500)])
@@ -187,7 +187,7 @@ class TestSmallFileFlow:
 
     def test_small_file_uses_standard_prompt(self, small_file_content):
         """Small modify file uses standard generation flow."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             select_generation_strategy,
         )
 
@@ -196,7 +196,7 @@ class TestSmallFileFlow:
 
     def test_large_file_uses_diff_strategy(self, large_file_content):
         """Large modify file uses diff generation strategy."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             select_generation_strategy,
         )
 
@@ -214,7 +214,7 @@ class TestParseDiffResponse:
 
     def test_parse_diff_valid(self, valid_diff_response):
         """T040: Parses valid FIND/REPLACE blocks correctly."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             parse_diff_response,
         )
 
@@ -232,7 +232,7 @@ class TestParseDiffResponse:
 
     def test_parse_diff_multiple(self, valid_diff_response):
         """T050: Parses multiple changes and preserves order."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             parse_diff_response,
         )
 
@@ -247,7 +247,7 @@ class TestParseDiffResponse:
 
     def test_parse_diff_malformed(self, malformed_diff_response):
         """T060: Returns error for malformed diff (missing REPLACE)."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             parse_diff_response,
         )
 
@@ -268,7 +268,7 @@ class TestApplyDiffChanges:
 
     def test_apply_single_change(self, original_content_for_apply):
         """T070: Applies one change correctly."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -289,7 +289,7 @@ class TestApplyDiffChanges:
 
     def test_apply_multiple_changes(self, original_content_for_apply):
         """T080: Applies multiple changes in order."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -315,7 +315,7 @@ class TestApplyDiffChanges:
 
     def test_apply_ambiguous_find(self):
         """T090: Errors when FIND matches multiple locations."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -342,7 +342,7 @@ def bar():
 
     def test_apply_no_match(self, original_content_for_apply):
         """T100: Errors when FIND block not found in file."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -370,7 +370,7 @@ class TestTruncationDetection:
 
     def test_detect_truncation_max_tokens(self):
         """T110: Detects max_tokens stop reason as truncation."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             detect_truncation,
         )
 
@@ -382,7 +382,7 @@ class TestTruncationDetection:
 
     def test_detect_truncation_normal_end(self):
         """Normal end_turn stop reason is not truncation."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             detect_truncation,
         )
 
@@ -393,7 +393,7 @@ class TestTruncationDetection:
 
     def test_truncation_triggers_retry(self):
         """T115: Truncation detection triggers retry loop."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             detect_truncation,
         )
 
@@ -419,7 +419,7 @@ class TestBuildDiffPrompt:
 
     def test_build_diff_prompt(self, large_file_content):
         """Diff prompt includes required FIND/REPLACE format instructions."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             build_diff_prompt,
         )
 
@@ -444,7 +444,7 @@ class TestBuildDiffPrompt:
 
     def test_build_diff_prompt_includes_existing_content(self, large_file_content):
         """Diff prompt includes the existing file content for reference."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             build_diff_prompt,
         )
 
@@ -469,7 +469,7 @@ class TestWhitespaceNormalization:
 
     def test_whitespace_normalization(self):
         """Matches with different indentation via normalization."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -499,7 +499,7 @@ class TestWhitespaceNormalization:
 
     def test_exact_match_preferred(self, original_content_for_apply):
         """Exact match is used when available, before normalization."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             apply_diff_changes,
         )
 
@@ -527,7 +527,7 @@ class TestDiffIntegration:
 
     def test_full_diff_workflow(self, large_file_content, valid_diff_response):
         """End-to-end: parse diff response and apply to large file."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             parse_diff_response,
             apply_diff_changes,
             is_large_file,
@@ -544,7 +544,7 @@ class TestDiffIntegration:
 
     def test_strategy_selection_matrix(self, small_file_content, large_file_content):
         """Verify strategy selection for all change type + size combinations."""
-        from agentos.workflows.testing.nodes.implement_code import (
+        from assemblyzero.workflows.testing.nodes.implement_code import (
             select_generation_strategy,
         )
 

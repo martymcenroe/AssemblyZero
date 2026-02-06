@@ -1,6 +1,6 @@
 """Tests for scout workflow security module.
 
-Tests for: agentos/workflows/scout/security.py
+Tests for: assemblyzero/workflows/scout/security.py
 Target coverage: >95%
 """
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agentos.workflows.scout.security import (
+from assemblyzero.workflows.scout.security import (
     get_safe_write_path,
     sanitize_external_content,
     validate_read_path,

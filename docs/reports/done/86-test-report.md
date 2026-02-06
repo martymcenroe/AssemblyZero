@@ -50,7 +50,7 @@ Full test output below. All 30 tests pass.
 ### Test Command
 
 ```bash
-PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS-86 poetry run pytest tests/test_lld_workflow.py -v
+PYTHONPATH=/c/Users/mcwiz/Projects/AssemblyZero-86 poetry run pytest tests/test_lld_workflow.py -v
 ```
 
 ### Output
@@ -58,7 +58,7 @@ PYTHONPATH=/c/Users/mcwiz/Projects/AgentOS-86 poetry run pytest tests/test_lld_w
 ```
 ============================= test session starts =============================
 platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0
-rootdir: C:\Users\mcwiz\Projects\AgentOS-86
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-86
 configfile: pyproject.toml
 plugins: anyio-4.12.1, langsmith-0.6.4, cov-4.1.0
 collected 41 items
@@ -135,7 +135,7 @@ tests/test_lld_workflow.py::TestSharedAuditHelpers::test_save_verdict_to_audit_c
 | Count | Type | Source | Message |
 |-------|------|--------|---------|
 | 1 | `UserWarning` | `langchain_core._api.deprecation` | "Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater" |
-| 1 | `FutureWarning` | `agentos.core.gemini_client` | "All support for google.generativeai package has ended. Switch to google.genai" |
+| 1 | `FutureWarning` | `assemblyzero.core.gemini_client` | "All support for google.generativeai package has ended. Switch to google.genai" |
 | 7 | `DeprecationWarning` | `pydantic.v1.typing` | "ForwardRef._evaluate is a private API and is retained for compatibility, but will be removed in Python 3.16" |
 | 36 | `DeprecationWarning` | `langgraph.utils.runnable` | "'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead" (18 occurrences x2) |
 

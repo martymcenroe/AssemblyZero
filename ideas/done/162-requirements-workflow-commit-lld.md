@@ -22,7 +22,7 @@ Add a commit step to the requirements workflow's finalize node (N5) that:
 
 ### Implementation Location
 
-`agentos/workflows/requirements/nodes/finalize.py` (or wherever N5 lives)
+`assemblyzero/workflows/requirements/nodes/finalize.py` (or wherever N5 lives)
 
 ### Commit Message Format
 

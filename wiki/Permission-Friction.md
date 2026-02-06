@@ -1,6 +1,6 @@
 # Permission Friction
 
-> The #1 adoption blocker for AI coding assistants - and how AgentOS solves it
+> The #1 adoption blocker for AI coding assistants - and how AssemblyZero solves it
 
 ---
 
@@ -72,13 +72,13 @@ Result:  PROMPT (every command is new)
 
 ---
 
-## AgentOS Solutions
+## AssemblyZero Solutions
 
 ### 1. Dedicated Tools Instead of Bash
 
-The most friction comes from Bash command variations. AgentOS substitutes dedicated tools:
+The most friction comes from Bash command variations. AssemblyZero substitutes dedicated tools:
 
-| Bash Command | Friction Risk | AgentOS Alternative |
+| Bash Command | Friction Risk | AssemblyZero Alternative |
 |--------------|--------------|---------------------|
 | `cat file.py` | HIGH | Read tool (always auto-approved) |
 | `head -n 50 file.py` | HIGH | Read tool with `limit` |
@@ -113,7 +113,7 @@ Project C: Inherits pattern
 Auto-promote threshold: 3 projects
 ```
 
-Tool: `agentos-permissions.py --sync --all-projects`
+Tool: `assemblyzero-permissions.py --sync --all-projects`
 
 ### 4. Spawned Agent Instructions
 
@@ -193,22 +193,22 @@ Steady:   2% friction (edge cases only)
 
 ## Tools
 
-### agentos-permissions.py
+### assemblyzero-permissions.py
 
 Permission management utility:
 
 ```bash
 # Audit current permission patterns
-poetry run python tools/agentos-permissions.py --audit --project MyProject
+poetry run python tools/assemblyzero-permissions.py --audit --project MyProject
 
 # Clean redundant patterns (dry-run)
-poetry run python tools/agentos-permissions.py --clean --project MyProject --dry-run
+poetry run python tools/assemblyzero-permissions.py --clean --project MyProject --dry-run
 
 # Sync patterns across all projects
-poetry run python tools/agentos-permissions.py --sync --all-projects
+poetry run python tools/assemblyzero-permissions.py --sync --all-projects
 
 # Quick check for cleanup integration
-poetry run python tools/agentos-permissions.py --quick-check --project MyProject
+poetry run python tools/assemblyzero-permissions.py --quick-check --project MyProject
 ```
 
 ### /sync-permissions Skill
@@ -228,7 +228,7 @@ Removes:
 
 ## Impact
 
-### Before AgentOS
+### Before AssemblyZero
 
 ```
 Typical developer day:
@@ -239,7 +239,7 @@ Typical developer day:
 - Plus context-switch cost: ~2 hours of degraded focus
 ```
 
-### After AgentOS
+### After AssemblyZero
 
 ```
 With friction optimization:
@@ -260,7 +260,7 @@ At $75/hour fully-loaded cost: **$150/developer/day** in recovered productivity.
 
 ### For New Projects
 
-1. [ ] Generate configs with `agentos-generate.py`
+1. [ ] Generate configs with `assemblyzero-generate.py`
 2. [ ] Run initial session to discover patterns
 3. [ ] Run `--audit` to see friction points
 4. [ ] Add common patterns to settings

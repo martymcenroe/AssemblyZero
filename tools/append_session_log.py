@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Append Session Log Entry (AgentOS - Parent Level)
+Append Session Log Entry (AssemblyZero - Parent Level)
 
 Appends a new session log entry to the correct daily file at the Projects level.
 Day boundary: 3:00 AM CT to following day 2:59 AM CT.
@@ -77,14 +77,14 @@ def format_entry(
 [One paragraph describing the session's main accomplishment]
 
 ### Projects Touched
-[List of projects modified: Aletheia, Talos, AgentOS, etc.]
+[List of projects modified: Aletheia, Talos, AssemblyZero, etc.]
 
 ### Next
 [What the next session should pick up]
 """
     else:
         # Return filled-in entry
-        projects_touched = projects or "AgentOS"
+        projects_touched = projects or "AssemblyZero"
         next_step = next_action or "Per user direction"
 
         return f"""
@@ -109,7 +109,7 @@ def ensure_session_file_exists(filepath: Path) -> None:
         session_date = get_session_date()
         next_day = session_date + timedelta(days=1)
 
-        header = f"""# AgentOS Session Log: {session_date.strftime('%Y-%m-%d')}
+        header = f"""# AssemblyZero Session Log: {session_date.strftime('%Y-%m-%d')}
 
 **Period:** {session_date.strftime('%Y-%m-%d')} 3:00 AM CT -> {next_day.strftime('%Y-%m-%d')} 2:59 AM CT
 
@@ -152,7 +152,7 @@ def main():
     )
     parser.add_argument(
         "--projects",
-        help="Projects touched (e.g., 'Aletheia, AgentOS')",
+        help="Projects touched (e.g., 'Aletheia, AssemblyZero')",
     )
     parser.add_argument(
         "--next",

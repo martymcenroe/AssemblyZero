@@ -1,6 +1,6 @@
 # Test Report: Issue #48
 
-**Issue:** [AgentOS v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AgentOS/issues/48)
+**Issue:** [AssemblyZero v2 Foundation - Dependencies & State Definition](https://github.com/martymcenroe/AssemblyZero/issues/48)
 **Date:** 2026-01-22
 
 ## Test Scenarios Executed
@@ -16,7 +16,7 @@
 ### Test 010: Import Test
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-48 python -c "from agentos.core.state import AgentState; print('OK')"
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-48 python -c "from assemblyzero.core.state import AgentState; print('OK')"
 ```
 
 **Output:**
@@ -31,7 +31,7 @@ C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.1
 ### Test 020: mypy Type Check
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AgentOS-48 mypy /c/Users/mcwiz/Projects/AgentOS-48/agentos
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero-48 mypy /c/Users/mcwiz/Projects/AssemblyZero-48/assemblyzero
 ```
 
 **Output:**
@@ -44,8 +44,8 @@ Success: no issues found in 5 source files
 ### Test 030: Poetry Install
 
 ```bash
-poetry lock --directory /c/Users/mcwiz/Projects/AgentOS-48
-poetry install --directory /c/Users/mcwiz/Projects/AgentOS-48
+poetry lock --directory /c/Users/mcwiz/Projects/AssemblyZero-48
+poetry install --directory /c/Users/mcwiz/Projects/AssemblyZero-48
 ```
 
 **Output:**

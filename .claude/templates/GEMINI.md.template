@@ -2,8 +2,8 @@
 
 ## FIRST: Read Core Rules
 
-**Before doing any work, read the AgentOS core rules:**
-`C:\Users\mcwiz\Projects\AgentOS\CLAUDE.md`
+**Before doing any work, read the AssemblyZero core rules:**
+`C:\Users\mcwiz\Projects\AssemblyZero\CLAUDE.md`
 
 That file contains core rules that apply to ALL projects and ALL agents:
 - Bash command rules (no &&, |, ;)
@@ -26,7 +26,7 @@ That file contains core rules that apply to ALL projects and ALL agents:
 
 ## 2. Execution Rules
 
-- **Authority:** `AgentOS:standards/0002-coding-standards` is the law for Git workflows.
+- **Authority:** `AssemblyZero:standards/0002-coding-standards` is the law for Git workflows.
 - **One Step Per Turn:** Provide one distinct step, then wait for confirmation.
 - **Check First:** Verify paths/content before changing them.
 - **Copy-Paste Ready:** No placeholders. Use heredocs for new files.

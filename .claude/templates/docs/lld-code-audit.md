@@ -115,4 +115,4 @@ git mv docs/lld/active/1121-feature-name.md docs/lld/done/
 
 ---
 
-*Template from: AgentOS/.claude/templates/docs/lld-code-audit.md*
+*Template from: AssemblyZero/.claude/templates/docs/lld-code-audit.md*

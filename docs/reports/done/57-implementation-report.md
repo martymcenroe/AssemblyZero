@@ -2,7 +2,7 @@
 
 ## Issue Reference
 
-[Issue #57: Distributed Session-Sharded Logging Architecture](https://github.com/cxbxmxcx/AgentOS/issues/57)
+[Issue #57: Distributed Session-Sharded Logging Architecture](https://github.com/cxbxmxcx/AssemblyZero/issues/57)
 
 ## Summary
 
@@ -12,8 +12,8 @@ Implemented session-sharded audit logging to eliminate write collisions and supp
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/core/config.py` | Modified | Added `LOGS_ACTIVE_DIR` constant for session shards directory |
-| `agentos/core/audit.py` | Modified | Major refactor for session sharding with backwards compatibility |
+| `assemblyzero/core/config.py` | Modified | Added `LOGS_ACTIVE_DIR` constant for session shards directory |
+| `assemblyzero/core/audit.py` | Modified | Major refactor for session sharding with backwards compatibility |
 | `.gitignore` | Modified | Added `logs/active/` pattern, removed `logs/*.jsonl` |
 | `tools/consolidate_logs.py` | Added | Atomic merge script using temp file + `os.replace()` |
 | `.claude/hooks/post-commit` | Added | Git hook to trigger consolidation after commits |

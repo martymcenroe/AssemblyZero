@@ -1,6 +1,6 @@
-# AgentOS
+# AssemblyZero
 
-[![CI](https://github.com/martymcenroe/AgentOS/actions/workflows/ci.yml/badge.svg)](https://github.com/martymcenroe/AgentOS/actions/workflows/ci.yml)
+[![CI](https://github.com/martymcenroe/AssemblyZero/actions/workflows/ci.yml/badge.svg)](https://github.com/martymcenroe/AssemblyZero/actions/workflows/ci.yml)
 
 ## Multi-Agent Orchestration Platform for Enterprise AI Development
 
@@ -10,7 +10,7 @@
 
 ## Production Evidence: 207 Issues in 27 Days
 
-This isn't theoretical. AgentOS has processed **207 issues** (159 closed) in 27 days:
+This isn't theoretical. AssemblyZero has processed **207 issues** (159 closed) in 27 days:
 
 ```
 Issues closed per day (Central Time):
@@ -20,7 +20,7 @@ Issues closed per day (Central Time):
 2026-02-04:  31 ###############################
 ```
 
-**Average velocity:** 5.9 issues/day | **Peak:** 55 issues in one day | **[Full Metrics →](https://github.com/martymcenroe/AgentOS/wiki/Metrics)**
+**Average velocity:** 5.9 issues/day | **Peak:** 55 issues in one day | **[Full Metrics →](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)**
 
 ---
 
@@ -49,7 +49,7 @@ graph TD
     Gemini --> Gov
 ```
 
-**What makes AgentOS different:**
+**What makes AssemblyZero different:**
 
 | Capability | What It Means |
 |------------|---------------|
@@ -74,7 +74,7 @@ AI coding assistants like Claude Code and GitHub Copilot are transforming develo
 
 Organizations run pilots. Developers love the tools. Then adoption plateaus at 10-20% because **the infrastructure layer is missing**.
 
-**AgentOS is that infrastructure layer.**
+**AssemblyZero is that infrastructure layer.**
 
 ---
 
@@ -103,7 +103,7 @@ The headline feature: **run 12+ AI agents concurrently under single-user identit
 
 **Result:** One engineer orchestrating 12+ agents can accomplish what previously required a team.
 
-**[Full Architecture Documentation](https://github.com/martymcenroe/AgentOS/wiki/Multi-Agent-Orchestration)**
+**[Full Architecture Documentation](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration)**
 
 ---
 
@@ -124,7 +124,7 @@ This isn't just "two models" - it's **adversarial verification** where one AI ch
 
 ### Why Multi-Model Matters
 
-| Single Model | Multi-Model (AgentOS) |
+| Single Model | Multi-Model (AssemblyZero) |
 |--------------|----------------------|
 | Claude reviews Claude's work | Gemini reviews Claude's work |
 | Same blind spots | Different model catches different mistakes |
@@ -133,12 +133,12 @@ This isn't just "two models" - it's **adversarial verification** where one AI ch
 
 ### Model Verification
 
-AgentOS detects **silent model downgrades**:
+AssemblyZero detects **silent model downgrades**:
 - Gemini CLI sometimes returns Flash when you request Pro
 - Our tools verify the actual model used in the response
 - If downgraded, the review is flagged as invalid
 
-**[Gemini Architecture Details](https://github.com/martymcenroe/AgentOS/wiki/Gemini-Verification)**
+**[Gemini Architecture Details](https://github.com/martymcenroe/AssemblyZero/wiki/Gemini-Verification)**
 
 ---
 
@@ -178,7 +178,7 @@ Before merge, auto-generate:
 - `implementation-report.md` - What changed and why
 - `test-report.md` - Full test output, coverage metrics
 
-**[Gate Implementation Details](https://github.com/martymcenroe/AgentOS/wiki/Governance-Gates)**
+**[Gate Implementation Details](https://github.com/martymcenroe/AssemblyZero/wiki/Governance-Gates)**
 
 ---
 
@@ -201,7 +201,7 @@ poetry run python tools/zugzwang.py
 
 ### Pattern Detection
 
-AgentOS identifies:
+AssemblyZero identifies:
 - Commands that always get approved → Add to allow list
 - Commands that always get denied → Add to deny list
 - Novel patterns → Flag for review
@@ -214,7 +214,7 @@ AgentOS identifies:
 | Time lost to prompts | 10+ min | < 1 min |
 | Developer frustration | High | Low |
 
-**[Permission Friction Deep Dive](https://github.com/martymcenroe/AgentOS/wiki/Permission-Friction)**
+**[Permission Friction Deep Dive](https://github.com/martymcenroe/AssemblyZero/wiki/Permission-Friction)**
 
 ---
 
@@ -243,7 +243,7 @@ Audits designed with an **adversarial philosophy**: they exist to find violation
 | **0810** | ISO/IEC 42001 | AI management system |
 | **0815** | Internal | Permission friction patterns |
 
-**[Full Audit Catalog](https://github.com/martymcenroe/AgentOS/wiki/Audits-Catalog)**
+**[Full Audit Catalog](https://github.com/martymcenroe/AssemblyZero/wiki/Audits-Catalog)**
 
 ---
 
@@ -283,13 +283,13 @@ Audits designed with an **adversarial philosophy**: they exist to find violation
 | Cost per agent-hour | API spend / Active agent hours |
 | ROI | (Time saved × Engineer cost) / Platform cost |
 
-**[Full KPI Framework](https://github.com/martymcenroe/AgentOS/wiki/Measuring-Productivity)**
+**[Full KPI Framework](https://github.com/martymcenroe/AssemblyZero/wiki/Measuring-Productivity)**
 
 ---
 
 ## Roadmap: LangGraph Evolution
 
-AgentOS is **production-ready today** with prompt-based orchestration. The roadmap transforms it into enterprise-grade state machines:
+AssemblyZero is **production-ready today** with prompt-based orchestration. The roadmap transforms it into enterprise-grade state machines:
 
 | Phase | Timeline | Capability | Impact |
 |-------|----------|------------|--------|
@@ -308,7 +308,7 @@ AgentOS is **production-ready today** with prompt-based orchestration. The roadm
 | Human routes tasks to agents | Supervisor auto-routes |
 | Log parsing for metrics | LangSmith dashboards |
 
-**[Full Roadmap and Vision](https://github.com/martymcenroe/AgentOS/wiki/LangGraph-Evolution)**
+**[Full Roadmap and Vision](https://github.com/martymcenroe/AssemblyZero/wiki/LangGraph-Evolution)**
 
 ---
 
@@ -317,8 +317,8 @@ AgentOS is **production-ready today** with prompt-based orchestration. The roadm
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/martymcenroe/AgentOS.git
-cd AgentOS
+git clone https://github.com/martymcenroe/AssemblyZero.git
+cd AssemblyZero
 poetry install
 ```
 
@@ -326,14 +326,14 @@ poetry install
 
 ```bash
 mkdir -p YourProject/.claude
-cp AgentOS/.claude/project.json.example YourProject/.claude/project.json
+cp AssemblyZero/.claude/project.json.example YourProject/.claude/project.json
 # Edit project.json with your project details
 ```
 
 ### 3. Generate Configs
 
 ```bash
-poetry run python tools/agentos-generate.py --project YourProject
+poetry run python tools/assemblyzero-generate.py --project YourProject
 ```
 
 ### 4. Start Working
@@ -343,7 +343,7 @@ The generated configs include:
 - Slash commands for common operations
 - Hooks for pre/post tool execution
 
-**[Detailed Setup Guide](https://github.com/martymcenroe/AgentOS/wiki/Quick-Start)**
+**[Detailed Setup Guide](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start)**
 
 ---
 
@@ -351,35 +351,35 @@ The generated configs include:
 
 ### Wiki
 
-Full documentation at **[AgentOS Wiki](https://github.com/martymcenroe/AgentOS/wiki)** (32 pages):
+Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/AssemblyZero/wiki)** (32 pages):
 
 | Page | Description |
 |------|-------------|
-| **[Metrics Dashboard](https://github.com/martymcenroe/AgentOS/wiki/Metrics)** | Velocity charts, Vetinari Index, production numbers |
-| **[Multi-Agent Orchestration](https://github.com/martymcenroe/AgentOS/wiki/Multi-Agent-Orchestration)** | The headline feature - 12+ concurrent agents |
-| **[Requirements Workflow](https://github.com/martymcenroe/AgentOS/wiki/Requirements-Workflow)** | LLD → Gemini → Approval flow |
-| **[Implementation Workflow](https://github.com/martymcenroe/AgentOS/wiki/Implementation-Workflow)** | Worktree → Code → Reports → PR |
-| **[Governance Gates](https://github.com/martymcenroe/AgentOS/wiki/Governance-Gates)** | LLD, implementation, report gates |
-| **[How AgentOS Learns](https://github.com/martymcenroe/AgentOS/wiki/How-the-AgentOS-Learns)** | Self-improving governance from verdicts |
-| **[Dramatis Personae](https://github.com/martymcenroe/AgentOS/wiki/Dramatis-Personae)** | The Discworld cast of workflows |
-| **[LangGraph Evolution](https://github.com/martymcenroe/AgentOS/wiki/LangGraph-Evolution)** | Roadmap to enterprise state machines |
-| **[Gemini Verification](https://github.com/martymcenroe/AgentOS/wiki/Gemini-Verification)** | Multi-model review architecture |
-| **[Quick Start](https://github.com/martymcenroe/AgentOS/wiki/Quick-Start)** | 5-minute setup guide |
+| **[Metrics Dashboard](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** | Velocity charts, Vetinari Index, production numbers |
+| **[Multi-Agent Orchestration](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration)** | The headline feature - 12+ concurrent agents |
+| **[Requirements Workflow](https://github.com/martymcenroe/AssemblyZero/wiki/Requirements-Workflow)** | LLD → Gemini → Approval flow |
+| **[Implementation Workflow](https://github.com/martymcenroe/AssemblyZero/wiki/Implementation-Workflow)** | Worktree → Code → Reports → PR |
+| **[Governance Gates](https://github.com/martymcenroe/AssemblyZero/wiki/Governance-Gates)** | LLD, implementation, report gates |
+| **[How AssemblyZero Learns](https://github.com/martymcenroe/AssemblyZero/wiki/How-the-AssemblyZero-Learns)** | Self-improving governance from verdicts |
+| **[Dramatis Personae](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)** | The Discworld cast of workflows |
+| **[LangGraph Evolution](https://github.com/martymcenroe/AssemblyZero/wiki/LangGraph-Evolution)** | Roadmap to enterprise state machines |
+| **[Gemini Verification](https://github.com/martymcenroe/AssemblyZero/wiki/Gemini-Verification)** | Multi-model review architecture |
+| **[Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start)** | 5-minute setup guide |
 
 ### For Different Audiences
 
 | Audience | Start Here |
 |----------|------------|
-| **Engineering Leaders** | [Why AgentOS?](https://github.com/martymcenroe/AgentOS/wiki/For-Enterprise-Leaders-Why-AgentOS) |
-| **Architects** | [Multi-Agent Orchestration](https://github.com/martymcenroe/AgentOS/wiki/Multi-Agent-Orchestration) |
-| **Security Teams** | [Security & Compliance](https://github.com/martymcenroe/AgentOS/wiki/Security-Compliance) |
-| **Developers** | [Quick Start](https://github.com/martymcenroe/AgentOS/wiki/Quick-Start) |
+| **Engineering Leaders** | [Why AssemblyZero?](https://github.com/martymcenroe/AssemblyZero/wiki/For-Enterprise-Leaders-Why-AssemblyZero) |
+| **Architects** | [Multi-Agent Orchestration](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration) |
+| **Security Teams** | [Security & Compliance](https://github.com/martymcenroe/AssemblyZero/wiki/Security-Compliance) |
+| **Developers** | [Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start) |
 
 ---
 
 ## About
 
-AgentOS was built by **Martin McEnroe**, applying 29 years of enterprise technology leadership to the emerging challenge of **scaling AI coding assistants across engineering organizations**.
+AssemblyZero was built by **Martin McEnroe**, applying 29 years of enterprise technology leadership to the emerging challenge of **scaling AI coding assistants across engineering organizations**.
 
 ### Relevant Experience
 
@@ -393,7 +393,7 @@ AgentOS was built by **Martin McEnroe**, applying 29 years of enterprise technol
 
 Having led enterprise AI adoption, I know the blockers:
 
-| Blocker | AgentOS Solution |
+| Blocker | AssemblyZero Solution |
 |---------|------------------|
 | "Security won't approve ungoverned AI" | 34 audits, Gemini gates, enforced checkpoints |
 | "We can't measure productivity" | KPI framework, friction tracking, cost attribution |
@@ -424,7 +424,7 @@ The code in this repo is the same code that:
 
 ## Dramatis Personae
 
-AgentOS workflows are named after **Terry Pratchett's Discworld** characters. This isn't whimsy—it's intuitive system design:
+AssemblyZero workflows are named after **Terry Pratchett's Discworld** characters. This isn't whimsy—it's intuitive system design:
 
 | Persona | Function | Philosophy |
 |---------|----------|------------|
@@ -437,7 +437,7 @@ AgentOS workflows are named after **Terry Pratchett's Discworld** characters. Th
 | **Lu-Tze** | Maintenance | Constant sweeping prevents disasters |
 | **DEATH** | Documentation Reconciliation | INEVITABLE. THOROUGH. PATIENT. |
 
-**[Full Cast →](https://github.com/martymcenroe/AgentOS/wiki/Dramatis-Personae)**
+**[Full Cast →](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)**
 
 *"A man is not dead while his name is still spoken."*
 **GNU Terry Pratchett**

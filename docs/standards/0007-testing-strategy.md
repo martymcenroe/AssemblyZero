@@ -110,5 +110,5 @@ Some tests require human verification:
 
 ---
 
-*Source: AgentOS/docs/standards/testing-strategy.md*
+*Source: AssemblyZero/docs/standards/testing-strategy.md*
 *Project-specific test configurations live in project documentation.*

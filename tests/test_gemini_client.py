@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.core.gemini_client import (
+from assemblyzero.core.gemini_client import (
     Credential,
     GeminiCallResult,
     GeminiClient,
@@ -209,7 +209,7 @@ class TestRotationLogic:
             )
             return mock_client
 
-        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
             mock_client_class.side_effect = mock_client_init
 
             result = client.invoke("system", "content")
@@ -249,7 +249,7 @@ class TestRotationLogic:
             mock_client.models.generate_content.side_effect = mock_generate
             return mock_client
 
-        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
             mock_client_class.side_effect = mock_client_init
 
             with patch("time.sleep"):  # Skip actual delay
@@ -276,7 +276,7 @@ class TestRotationLogic:
             )
             return mock_client
 
-        with patch("agentos.core.gemini_client.genai.Client") as mock_client_class:
+        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
             mock_client_class.side_effect = mock_client_init
 
             result = client.invoke("system", "content")

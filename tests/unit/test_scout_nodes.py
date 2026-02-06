@@ -1,9 +1,9 @@
 """Tests for scout workflow nodes, graph, and instrumentation modules.
 
 Tests for:
-- agentos/workflows/scout/nodes.py
-- agentos/workflows/scout/graph.py
-- agentos/workflows/scout/instrumentation.py
+- assemblyzero/workflows/scout/nodes.py
+- assemblyzero/workflows/scout/graph.py
+- assemblyzero/workflows/scout/instrumentation.py
 Target coverage: >95%
 """
 
@@ -15,17 +15,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentos.workflows.scout.graph import (
+from assemblyzero.workflows.scout.graph import (
     ExternalRepo,
     ScoutState,
     create_initial_state,
 )
-from agentos.workflows.scout.instrumentation import (
+from assemblyzero.workflows.scout.instrumentation import (
     log_api_call,
     log_node_execution,
     setup_tracing,
 )
-from agentos.workflows.scout.nodes import (
+from assemblyzero.workflows.scout.nodes import (
     _get_github_client,
     confirmation_node,
     explorer_node,
@@ -138,7 +138,7 @@ def cleanup_scout_logger():
     """Clean up scout logger handlers after each test."""
     yield
     # Remove any handlers added during tests
-    logger = logging.getLogger("agentos.workflows.scout")
+    logger = logging.getLogger("assemblyzero.workflows.scout")
     logger.handlers.clear()
 
 
@@ -314,7 +314,7 @@ class TestGetGithubClient:
         mock_result.stdout = "ghp_test_token_here\n"
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch("agentos.workflows.scout.nodes.Github") as MockGithub:
+            with patch("assemblyzero.workflows.scout.nodes.Github") as MockGithub:
                 client = _get_github_client()
                 MockGithub.assert_called_with("ghp_test_token_here")
 
@@ -324,7 +324,7 @@ class TestGetGithubClient:
         mock_result.returncode = 1
 
         with patch("subprocess.run", return_value=mock_result):
-            with patch("agentos.workflows.scout.nodes.Github") as MockGithub:
+            with patch("assemblyzero.workflows.scout.nodes.Github") as MockGithub:
                 client = _get_github_client()
                 MockGithub.assert_called_with()  # No token
 
@@ -333,14 +333,14 @@ class TestGetGithubClient:
         import subprocess
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("gh", 10)):
-            with patch("agentos.workflows.scout.nodes.Github") as MockGithub:
+            with patch("assemblyzero.workflows.scout.nodes.Github") as MockGithub:
                 client = _get_github_client()
                 MockGithub.assert_called_with()
 
     def test_returns_anonymous_when_gh_not_found(self):
         """Test returns anonymous client when gh not found."""
         with patch("subprocess.run", side_effect=FileNotFoundError()):
-            with patch("agentos.workflows.scout.nodes.Github") as MockGithub:
+            with patch("assemblyzero.workflows.scout.nodes.Github") as MockGithub:
                 client = _get_github_client()
                 MockGithub.assert_called_with()
 
@@ -358,7 +358,7 @@ class TestLoadFixture:
 
         with patch.object(Path, "parent", new_callable=lambda: property(lambda self: tmp_path)):
             # Mock the path resolution
-            with patch("agentos.workflows.scout.nodes.Path") as MockPath:
+            with patch("assemblyzero.workflows.scout.nodes.Path") as MockPath:
                 mock_path = MagicMock()
                 mock_path.exists.return_value = True
                 mock_path.__truediv__ = MagicMock(return_value=mock_path)
@@ -396,7 +396,7 @@ class TestExplorerNode:
         mock_client = MagicMock()
         mock_client.search_repositories.return_value = iter([mock_repo])
 
-        with patch("agentos.workflows.scout.nodes._get_github_client", return_value=mock_client):
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client", return_value=mock_client):
             result = explorer_node(state)
 
         assert len(result["found_repos"]) == 1
@@ -417,7 +417,7 @@ class TestExplorerNode:
         mock_client = MagicMock()
         mock_client.search_repositories.return_value = iter([mock_repo])
 
-        with patch("agentos.workflows.scout.nodes._get_github_client", return_value=mock_client):
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client", return_value=mock_client):
             result = explorer_node(state)
 
         assert result["found_repos"][0]["license_type"] == "Unknown"
@@ -433,7 +433,7 @@ class TestExplorerNode:
 
         state = create_initial_state("topic", offline_mode=True, repo_limit=3)
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_data):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_data):
             result = explorer_node(state)
 
         assert "found_repos" in result
@@ -448,7 +448,7 @@ class TestExplorerNode:
 
         state = create_initial_state("topic", offline_mode=True, repo_limit=3)
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_data):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_data):
             result = explorer_node(state)
 
         assert len(result["found_repos"]) == 3
@@ -463,7 +463,7 @@ class TestExplorerNode:
 
         state = create_initial_state("topic", offline_mode=True, repo_limit=3)
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_data):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_data):
             result = explorer_node(state)
 
         repos = result["found_repos"]
@@ -475,7 +475,7 @@ class TestExplorerNode:
         """Test that API errors return empty list."""
         state = create_initial_state("topic", offline_mode=False)
 
-        with patch("agentos.workflows.scout.nodes._get_github_client") as mock_client:
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client") as mock_client:
             mock_client.return_value.search_repositories.side_effect = Exception("API Error")
             result = explorer_node(state)
 
@@ -507,7 +507,7 @@ class TestExtractorNode:
         mock_client = MagicMock()
         mock_client.get_repo.return_value = mock_gh_repo
 
-        with patch("agentos.workflows.scout.nodes._get_github_client", return_value=mock_client):
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client", return_value=mock_client):
             result = extractor_node(state)
 
         assert len(result["found_repos"]) == 1
@@ -529,7 +529,7 @@ class TestExtractorNode:
         mock_client = MagicMock()
         mock_client.get_repo.return_value = mock_gh_repo
 
-        with patch("agentos.workflows.scout.nodes._get_github_client", return_value=mock_client):
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client", return_value=mock_client):
             result = extractor_node(state)
 
         # Should still process repo but with empty readme
@@ -547,7 +547,7 @@ class TestExtractorNode:
         mock_client = MagicMock()
         mock_client.get_repo.side_effect = Exception("API Error")
 
-        with patch("agentos.workflows.scout.nodes._get_github_client", return_value=mock_client):
+        with patch("assemblyzero.workflows.scout.nodes._get_github_client", return_value=mock_client):
             result = extractor_node(state)
 
         # Should handle error gracefully
@@ -566,7 +566,7 @@ class TestExtractorNode:
 
         fixture_content = {"readme": "content", "license": "MIT"}
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_content):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_content):
             result = extractor_node(state)
 
         # Should not process any repos
@@ -582,7 +582,7 @@ class TestExtractorNode:
 
         fixture_content = {"readme": "# Test README", "license": "MIT"}
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_content):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_content):
             result = extractor_node(state)
 
         assert len(result["found_repos"]) == 1
@@ -603,7 +603,7 @@ class TestExtractorNode:
         # 10000 chars / 4 = 2500 tokens * 1.2 buffer = 3000 tokens > 100 max
         fixture_content = {"readme": "x" * 10000, "license": "MIT"}
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_content):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_content):
             result = extractor_node(state)
 
         # First repo's content exceeds budget, so it breaks without adding
@@ -622,7 +622,7 @@ class TestExtractorNode:
         # Content with injection attempt
         fixture_content = {"readme": "<script>alert()</script> Normal content", "license": "MIT"}
 
-        with patch("agentos.workflows.scout.nodes.load_fixture", return_value=fixture_content):
+        with patch("assemblyzero.workflows.scout.nodes.load_fixture", return_value=fixture_content):
             result = extractor_node(state)
 
         # Script tag should be removed
@@ -645,7 +645,7 @@ class TestGapAnalystNode:
         mock_result.success = True
         mock_result.response = "Analysis from Gemini"
 
-        with patch("agentos.core.gemini_client.GeminiClient") as MockClient:
+        with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
             mock_instance = MagicMock()
             mock_instance.invoke.return_value = mock_result
             MockClient.return_value = mock_instance
@@ -666,7 +666,7 @@ class TestGapAnalystNode:
         mock_result.success = False
         mock_result.error = "API quota exceeded"
 
-        with patch("agentos.core.gemini_client.GeminiClient") as MockClient:
+        with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
             mock_instance = MagicMock()
             mock_instance.invoke.return_value = mock_result
             MockClient.return_value = mock_instance
@@ -681,7 +681,7 @@ class TestGapAnalystNode:
         state["found_repos"] = []
 
         # Simulate ImportError for GeminiClient
-        with patch.dict("sys.modules", {"agentos.core.gemini_client": None}):
+        with patch.dict("sys.modules", {"assemblyzero.core.gemini_client": None}):
             with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
                 with patch("google.genai.Client") as MockClient:
                     mock_response = MagicMock()
@@ -719,8 +719,8 @@ class TestGapAnalystNode:
         ]
 
         # Mock the import inside the function
-        with patch.dict("sys.modules", {"agentos.core.gemini_client": MagicMock()}):
-            with patch("agentos.core.gemini_client.GeminiClient") as MockClient:
+        with patch.dict("sys.modules", {"assemblyzero.core.gemini_client": MagicMock()}):
+            with patch("assemblyzero.core.gemini_client.GeminiClient") as MockClient:
                 mock_instance = MagicMock()
                 mock_instance.invoke.side_effect = Exception("API Error")
                 MockClient.return_value = mock_instance

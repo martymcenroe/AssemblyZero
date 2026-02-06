@@ -17,8 +17,8 @@ The `/onboard` skill is Claude-orchestrated. For manual onboarding, read these f
 For post-compact or resumed sessions - just reload rules:
 
 ```bash
-# 1. AgentOS core rules
-cat /c/Users/mcwiz/Projects/AgentOS/CLAUDE.md
+# 1. AssemblyZero core rules
+cat /c/Users/mcwiz/Projects/AssemblyZero/CLAUDE.md
 
 # 2. Projects root rules
 cat /c/Users/mcwiz/Projects/CLAUDE.md
@@ -99,4 +99,4 @@ cat PROJECT/docs/0000b-ONBOARD-DIGEST.md
 
 - Project rules: `PROJECT/CLAUDE.md`
 - Session logs: `PROJECT/docs/session-logs/`
-- Skill definition: `AgentOS/.claude/commands/onboard.md`
+- Skill definition: `AssemblyZero/.claude/commands/onboard.md`
