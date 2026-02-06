@@ -473,17 +473,18 @@ files = [
 
 [[package]]
 name = "google-auth"
-version = "2.47.0"
+version = "2.48.0"
 description = "Google Authentication Library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "google_auth-2.47.0-py3-none-any.whl", hash = "sha256:c516d68336bfde7cf0da26aab674a36fedcf04b37ac4edd59c597178760c3498"},
-    {file = "google_auth-2.47.0.tar.gz", hash = "sha256:833229070a9dfee1a353ae9877dcd2dec069a8281a4e72e72f77d4a70ff945da"},
+    {file = "google_auth-2.48.0-py3-none-any.whl", hash = "sha256:2e2a537873d449434252a9632c28bfc268b0adb1e53f9fb62afc5333a975903f"},
+    {file = "google_auth-2.48.0.tar.gz", hash = "sha256:4f7e706b0cd3208a3d940a19a822c37a476ddba5450156c3e6624a71f7c841ce"},
 ]
 
 [package.dependencies]
+cryptography = ">=38.0.3"
 pyasn1-modules = ">=0.2.1"
 requests = {version = ">=2.20.0,<3.0.0", optional = true, markers = "extra == \"requests\""}
 rsa = ">=3.1.4,<5"
@@ -491,12 +492,12 @@ rsa = ">=3.1.4,<5"
 [package.extras]
 aiohttp = ["aiohttp (>=3.6.2,<4.0.0)", "requests (>=2.20.0,<3.0.0)"]
 cryptography = ["cryptography (>=38.0.3)"]
-enterprise-cert = ["cryptography", "pyopenssl"]
-pyjwt = ["cryptography (>=38.0.3)", "pyjwt (>=2.0)"]
-pyopenssl = ["cryptography (>=38.0.3)", "pyopenssl (>=20.0.0)"]
+enterprise-cert = ["pyopenssl"]
+pyjwt = ["pyjwt (>=2.0)"]
+pyopenssl = ["pyopenssl (>=20.0.0)"]
 reauth = ["pyu2f (>=0.1.5)"]
 requests = ["requests (>=2.20.0,<3.0.0)"]
-testing = ["aiohttp (<3.10.0)", "aiohttp (>=3.6.2,<4.0.0)", "aioresponses", "cryptography (>=38.0.3)", "cryptography (>=38.0.3)", "flask", "freezegun", "grpcio", "oauth2client", "packaging", "pyjwt (>=2.0)", "pyopenssl (<24.3.0)", "pyopenssl (>=20.0.0)", "pytest", "pytest-asyncio", "pytest-cov", "pytest-localserver", "pyu2f (>=0.1.5)", "requests (>=2.20.0,<3.0.0)", "responses", "urllib3"]
+testing = ["aiohttp (<3.10.0)", "aiohttp (>=3.6.2,<4.0.0)", "aioresponses", "flask", "freezegun", "grpcio", "oauth2client", "packaging", "pyjwt (>=2.0)", "pyopenssl (<24.3.0)", "pyopenssl (>=20.0.0)", "pytest", "pytest-asyncio", "pytest-cov", "pytest-localserver", "pyu2f (>=0.1.5)", "requests (>=2.20.0,<3.0.0)", "responses", "urllib3"]
 urllib3 = ["packaging", "urllib3"]
 
 [[package]]
@@ -1068,14 +1069,14 @@ orjson = ">=3.10.1"
 
 [[package]]
 name = "langsmith"
-version = "0.6.4"
+version = "0.6.9"
 description = "Client library to connect to the LangSmith Observability and Evaluation Platform."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "langsmith-0.6.4-py3-none-any.whl", hash = "sha256:ac4835860160be371042c7adbba3cb267bcf8d96a5ea976c33a8a4acad6c5486"},
-    {file = "langsmith-0.6.4.tar.gz", hash = "sha256:36f7223a01c218079fbb17da5e536ebbaf5c1468c028abe070aa3ae59bc99ec8"},
+    {file = "langsmith-0.6.9-py3-none-any.whl", hash = "sha256:86ba521e042397f6fbb79d63991df9d5f7b6a6dd6a6323d4f92131291478dcff"},
+    {file = "langsmith-0.6.9.tar.gz", hash = "sha256:aae04cec6e6d8e133f63ba71c332ce0fbd2cda95260db7746ff4c3b6a3c41db1"},
 ]
 
 [package.dependencies]
@@ -1086,6 +1087,7 @@ pydantic = ">=2,<3"
 requests = ">=2.0.0"
 requests-toolbelt = ">=1.0.0"
 uuid-utils = ">=0.12.0,<1.0"
+xxhash = ">=3.0.0"
 zstandard = ">=0.23.0"
 
 [package.extras]
@@ -1487,15 +1489,14 @@ pyasn1 = ">=0.6.1,<0.7.0"
 
 [[package]]
 name = "pycparser"
-version = "2.23"
+version = "3.0"
 description = "C parser in Python"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""
 files = [
-    {file = "pycparser-2.23-py3-none-any.whl", hash = "sha256:e5c6e8d3fbad53479cab09ac03729e0a9faf2bee3db8208a550daf5af81a5934"},
-    {file = "pycparser-2.23.tar.gz", hash = "sha256:78816d4f24add8f10a06d6f05b4d424ad9e96cfebf68a4ddc99c65c0720d00c2"},
+    {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
+    {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
 ]
 
 [[package]]
@@ -2741,4 +2742,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "ba1718d2428661f9d39ae5a98f17da2df9a3581818c17801c5c4470af4e12c9e"
+content-hash = "2419c33a91b7caf43dbf00bfdd83fa30625b8839b0d9a366db03ca6e2048e4a2"

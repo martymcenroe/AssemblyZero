@@ -25,7 +25,10 @@ dependencies = [
     "pathspec (>=1.0.4,<2.0.0)",
     "aiosqlite (>=0.22.1,<0.23.0)",
     "jiter (>=0.13.0,<0.14.0)",
-    "orjson (>=3.11.7,<4.0.0)"
+    "orjson (>=3.11.7,<4.0.0)",
+    "langsmith (>=0.6.9,<0.7.0)",
+    "google-auth (>=2.48.0,<3.0.0)",
+    "pycparser (>=3.0,<4.0)"
 ]
 
 [tool.poetry]
