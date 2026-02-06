@@ -85,7 +85,8 @@ def extract_code_block(response: str) -> str | None:
     Does NOT trust any file path Claude puts in the response.
     """
     # Pattern: ```language\n...content...```
-    pattern = re.compile(r"```\w*\s*\n(.*?)```", re.DOTALL)
+        # Issue #310: Use greedy line-anchored pattern to handle nested code blocks correctly.
+    pattern = re.compile(r"^```\w*\s*\n(.*)^```", re.DOTALL | re.MULTILINE)
 
     for match in pattern.finditer(response):
         content = match.group(1).strip()
