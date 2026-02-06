@@ -42,21 +42,22 @@ poetry run pytest; echo "EXIT_CODE=$?"
 
 ## Procedure
 
-### Phase 1: Baseline
+### Phase 1: Setup & Baseline
 
 ```bash
-# 1.1 Ensure clean state
-git checkout main
-git pull origin main
-git status  # Must be clean
+# 1.1 Create Audit Worktree
+# Use a timestamped branch for uniqueness
+AUDIT_ID=$(date +%Y%m%d-%H%M)
+git worktree add ../AssemblyZero-dependabot-audit-$AUDIT_ID -b dependabot-audit-$AUDIT_ID
+git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID push -u origin HEAD
 
-# 1.2 Run baseline tests - CAPTURE EXIT CODE
-poetry run pytest --tb=short -q
+# 1.2 Run baseline tests in worktree - CAPTURE EXIT CODE
+poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
 BASELINE_EXIT=$?
 echo "BASELINE_EXIT=$BASELINE_EXIT"
 
-# 1.3 Capture test count
-poetry run pytest --collect-only -q 2>/dev/null | tail -1
+# 1.3 Capture baseline test count
+poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --collect-only -q 2>/dev/null | tail -1
 ```
 
 **STOP if baseline fails (exit code != 0).** Fix existing issues first.
@@ -76,30 +77,36 @@ DEPENDABOT_PRS=$(gh pr list --author "app/dependabot" --json number --jq '.[].nu
 echo "PRs to process: $DEPENDABOT_PRS"
 ```
 
-**PASS immediately if no PRs exist.**
+**If no PRs exist, proceed to Phase 5 (Cleanup).**
 
-### Phase 3: Merge and Test
+### Phase 3: Merge and Test (In Worktree)
 
 ```bash
-# 3.1 For each PR, merge and test
+# 3.1 For each PR, merge and test within the worktree
 for PR in $DEPENDABOT_PRS; do
     echo "=== Processing PR #$PR ==="
 
-    # Approve (for GitHub contribution credit) then merge
-    gh pr review $PR --approve --body "Automated review: baseline tests pass, proceeding with merge."
-    gh pr merge $PR --merge
-    git pull origin main
+    # Merge PR into worktree branch
+    # Note: Using 'gh pr merge' with --merge flag handles the remote update
+    gh pr merge $PR --merge --repo martymcenroe/AssemblyZero
+    git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID pull origin main
 
     # Test - CAPTURE EXIT CODE
-    poetry run pytest --tb=short -q
+    poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
     POST_MERGE_EXIT=$?
     echo "POST_MERGE_EXIT=$POST_MERGE_EXIT"
 
-    # If failed, revert immediately
+    # If failed, revert in main immediately (to keep main clean)
     if [ $POST_MERGE_EXIT -ne 0 ]; then
         echo "REGRESSION DETECTED - Reverting PR #$PR"
+        # We must revert on a fresh branch or main since main was modified by the merge
+        git checkout main
+        git pull origin main
         git revert HEAD --no-edit
         git push origin main
+        
+        # Sync worktree back to main
+        git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID pull origin main
 
         # Comment on PR
         gh pr comment $PR --body "❌ Automated regression detected. Merge reverted. Manual investigation required."
@@ -118,17 +125,26 @@ done
 ### Phase 4: Verify Final State
 
 ```bash
-# 4.1 Final test run
-poetry run pytest --tb=short -q
+# 4.1 Final test run in worktree
+poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
 FINAL_EXIT=$?
 
 # 4.2 Compare with baseline
 echo "Baseline exit: $BASELINE_EXIT"
 echo "Final exit: $FINAL_EXIT"
+```
 
-# 4.3 Check remaining alerts
-gh api repos/OWNER/REPO/dependabot/alerts \
-  --jq '[.[] | select(.state=="open")] | length'
+### Phase 5: Cleanup
+
+```bash
+# 5.1 Remove Worktree
+git worktree remove ../AssemblyZero-dependabot-audit-$AUDIT_ID
+
+# 5.2 Delete local audit branch
+git branch -D dependabot-audit-$AUDIT_ID
+
+# 5.3 Sync main repo
+git pull origin main
 ```
 
 ---
