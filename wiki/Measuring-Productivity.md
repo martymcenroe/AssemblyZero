@@ -201,7 +201,7 @@ AssemblyZero Costs - January 2026
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│           AGENTOS ADOPTION - TEAM ALPHA                     │
+│           ASSEMBLYZERO ADOPTION - TEAM ALPHA                │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ADOPTION RATE          FRICTION RATE          CYCLE TIME  │
@@ -233,7 +233,7 @@ AssemblyZero Costs - January 2026
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│           AGENTOS ADOPTION - ORGANIZATION                   │
+│           ASSEMBLYZERO ADOPTION - ORGANIZATION              │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  TEAM            ADOPTION    FRICTION    CYCLE TIME        │
