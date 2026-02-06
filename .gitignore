@@ -1,4 +1,4 @@
-# AgentOS-specific gitignore
+# AssemblyZero-specific gitignore
 # Note: Parent Projects/.gitignore covers common patterns
 
 # Claude Code local settings (machine-specific, prevent merge overwrites)
@@ -31,8 +31,8 @@ harvest-*.xlsx
 docs/blog/
 
 # Verdict analyzer database (generated locally)
-.agentos/verdicts.db
+.assemblyzero/verdicts.db
 verdicts.db
 
 # Per-repo workflow database (Issue #78)
-.agentos/issue_workflow.db
+.assemblyzero/issue_workflow.db

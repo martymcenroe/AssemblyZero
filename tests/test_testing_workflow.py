@@ -1475,7 +1475,7 @@ __pycache__/
                 implement_code(state)
 
         # Check that error is about Claude API
-        assert "Claude API error" in str(exc_info.value)
+        assert "API error after 3 attempts" in str(exc_info.value)
 
     def test_call_claude_headless_sdk_fallback(self):
         """call_claude_headless falls back to SDK when CLI unavailable."""
@@ -3115,7 +3115,7 @@ def example():
             with pytest.raises(ImplementationError) as exc_info:
                 implement_code(state)
 
-        assert "No code block found" in str(exc_info.value)
+        assert "No code block after 3 attempts" in str(exc_info.value)
 
     def test_parse_implementation_response_various_formats(self):
         """parse_implementation_response handles various formats."""
