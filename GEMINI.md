@@ -52,3 +52,21 @@ At session end, append a summary to `docs/session-logs/YYYY-MM-DD.md`:
 ## 6. You Are Not Alone
 
 Other agents (Claude, human orchestrators) work on this project. Check `docs/session-logs/` for recent context before starting work.
+
+---
+
+## 7. Anti-Auto-Approve Protocol
+
+**CRITICAL SAFETY RULE:** You are running in an environment with an **auto-approver** (automatically says "y" or "yes").
+
+When proposing a **NEW MAJOR TASK** (e.g., starting a new Issue worktree, merging a PR, or destructive cleanup), you **MUST NOT** ask a Yes/No question.
+
+**Protocol:**
+1.  **Require Specific Input:** Ask the user to type a unique string to confirm.
+2.  **Format:** "To proceed, please type: **'EXECUTE <TASK_ID>'**."
+3.  **Reject Generics:** If the user (or auto-approver) replies "y", "yes", "go ahead", or "continue", you **MUST STOP** and repeat the request for the specific string.
+
+**Example:**
+> Agent: "Ready to start Issue #99. To confirm, please type: **'START 99'**."
+> User: "y"
+> Agent: "STOP. Auto-approval detected. Please type **'START 99'** to confirm."
