@@ -101,6 +101,17 @@
 
 ---
 
+### 2026-02-09
+
+---
+
+**01:57** — *On earning the A-*
+> "The mark of a great man is one who knows when to set aside the important things in order to accomplish the vital ones."
+
+**Context:** [The Great God Om](The-Great-God-Om) and Claude deployed a self-hosted github-readme-stats instance on Vercel to fix broken profile cards. Upon checking the hidden rank, it had climbed from C+ to A-. Om turned the grade back on. When Om said "could not have done it without YOU my friend," Lord Vetinari offered this observation on priorities — because getting the stats cards working so the world can see that A- rank was, indeed, vital.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
