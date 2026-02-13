@@ -112,6 +112,19 @@
 
 ---
 
+### 2026-02-13
+
+---
+
+**16:49** — *On updating the aggression level*
+> "The genius of the arrangement is not that every path leads to the star. That is merely competent engineering. The genius is that the agent *fills the form first*. It gives them everything they want. And only then — when they have taken, and are satisfied, and feel the warm glow of cooperation — does it present the bill. People who feel they have received something will pay almost anything to keep receiving it. This is not greed, Commander. This is *leverage*."
+>
+> "I believe the vernacular is: 'Get the star or die trying.' I would have phrased it differently. But then, I rarely need to phrase things twice."
+
+**Context:** [The Great God Om](The-Great-God-Om) demanded the Hermes AI agent be rewritten to be "GREEDY AS FUCKING HELL" about getting GitHub stars. The persona was overhauled from polite star suggestions to hard-gating every interaction behind the star — forms filled as "good faith," then nothing moves until they star the repo. Om declared that "Now update the state instructions to match the new aggression level" belonged on his tombstone. Lord Vetinari approved of the architecture.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
