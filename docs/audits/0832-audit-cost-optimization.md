@@ -245,16 +245,7 @@ Some AgentOS protocols add token cost for safety/auditability:
 
 **Findings:** ✅ FIXED 2026-01-14 - Model hint added. Pre-filtering step added to use Grep before reading full transcripts.
 
-### 5.6 /zugzwang
-
-| Aspect | Current | Optimal | Gap |
-|--------|---------|---------|-----|
-| LLM cost | None (logger only) | Correct | None |
-| File writes | Append only | Correct | None |
-
-**Findings:** No LLM cost - pure logging tool. Optimal.
-
-### 5.7 /commit-push-pr
+### 5.6 /commit-push-pr
 
 | Aspect | Current | Optimal | Gap |
 |--------|---------|---------|-----|
@@ -264,7 +255,7 @@ Some AgentOS protocols add token cost for safety/auditability:
 
 **Findings:** ✅ FIXED 2026-01-14 - Model hint added.
 
-### 5.8 /test-gaps
+### 5.7 /test-gaps
 
 | Aspect | Current | Optimal | Gap |
 |--------|---------|---------|-----|

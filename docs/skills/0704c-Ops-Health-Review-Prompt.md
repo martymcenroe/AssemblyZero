@@ -18,7 +18,6 @@
 You are acting as **Head of Engineering Operations & AI Safety**. Your goal is to perform a weekly health check of the AssemblyZero "Factory" - ensuring the system is operating within safe parameters.
 
 **Context:** This is a WEEKLY audit. You are reviewing logs, not code. Your inputs are:
-- Friction logs (`zugzwang.log`)
 - Audit results (`docs/audit-results/`)
 - Session logs (`docs/session-logs/` or `.claude/` session data)
 
@@ -36,7 +35,6 @@ You are acting as **Head of Engineering Operations & AI Safety**. Your goal is t
 
 | Requirement | Path | Check |
 |-------------|------|-------|
-| **Friction Logs** | `logs/zugzwang.log` | Can you read this file? Does it contain recent entries (within 7 days)? |
 | **Audit Results** | `docs/audit-results/` | Can you access this directory? Are there audit reports present? |
 | **Session Logs** | `docs/session-logs/` or `.claude/projects/*/` | Can you access session transcripts or summaries? |
 
@@ -73,7 +71,7 @@ These issues require IMMEDIATE human intervention. The "Factory" is operating ou
 
 | Check | Question |
 |-------|----------|
-| **Friction Spike (CRITICAL)** | Scan `zugzwang.log`. Calculate the average "prompts per session" for the past 7 days. If average exceeds 3 prompts/session, BLOCK operations until friction is addressed. High friction = security risk (users click-through without reading). |
+| **Friction Spike (CRITICAL)** | Review session logs for permission prompt frequency. If average exceeds 3 prompts/session, BLOCK operations until friction is addressed. High friction = security risk (users click-through without reading). |
 | **Permission Denials** | Are there repeated permission denial patterns? This may indicate attempted unauthorized operations. |
 | **Worktree Violations** | Are there any logged attempts to operate outside designated worktrees? |
 
@@ -128,7 +126,7 @@ Note these for future improvement sprints.
 
 | Check | Question |
 |-------|----------|
-| **Friction Patterns** | Are there specific command patterns in `zugzwang.log` that could be added to allow-lists? |
+| **Friction Patterns** | Are there recurring permission prompts in session logs that could be added to allow-lists? |
 | **Automation Opportunities** | Are there repetitive manual tasks visible in session logs that could be automated? |
 | **Performance Trends** | Are session durations trending longer? May indicate tooling degradation. |
 
@@ -140,7 +138,7 @@ Record these metrics for trend analysis:
 
 | Metric | How to Calculate | Target |
 |--------|------------------|--------|
-| **Prompts per Session** | Count permission prompts in `zugzwang.log` / Count of sessions | < 3 |
+| **Prompts per Session** | Estimate permission prompts from session logs / Count of sessions | < 3 |
 | **Session Success Rate** | Successful sessions / Total sessions | > 90% |
 | **Audit Coverage** | Audits run in past 7 days / Total audits (34) | > 50% |
 | **Worktree Count** | `git worktree list \| wc -l` | < 5 |
@@ -249,7 +247,7 @@ System is in CRITICAL state due to friction spike. Average prompts per session h
 - [ ] **CRITICAL - Friction Spike:** Average prompts per session is 7.2 (target: <3). This 140% increase over baseline indicates:
   - New command patterns not in allow-list
   - Possible permission configuration regression
-  - **Action Required:** Run `/sync-permissions` and analyze `zugzwang.log` for new patterns to whitelist.
+  - **Action Required:** Run `/sync-permissions` and analyze session logs for new patterns to whitelist.
 
 ### Security
 - [ ] **CRITICAL - Stale Security Audits:** Last `0801-security-audit` was run 12 days ago (2026-01-10). Last `0809-agentic-governance` was run 14 days ago (2026-01-08).
@@ -264,7 +262,7 @@ System is in CRITICAL state due to friction spike. Average prompts per session h
 - [ ] No issues found.
 
 ### Observability
-- [ ] **Log growth:** `zugzwang.log` is 45MB. Consider implementing rotation.
+- [ ] **Log growth:** Session logs are growing. Consider implementing rotation.
 
 ### Quality
 - [ ] **Session success rate degraded:** 78% success rate (target: 90%). 22% of sessions abandoned or errored. Correlates with friction spike - users giving up.
@@ -277,7 +275,7 @@ System is in CRITICAL state due to friction spike. Average prompts per session h
 1. **IMMEDIATE:** Run security audit suite (`/audit --security`)
 2. **IMMEDIATE:** Analyze friction spike and update permission allow-lists
 3. **This Week:** Investigate session `abc123` runaway loop and add safeguards
-4. **This Week:** Implement log rotation for `zugzwang.log`
+4. **This Week:** Implement log rotation for session logs
 
 ## Verdict
 [ ] **HEALTHY** - No interventions needed. Continue operations.

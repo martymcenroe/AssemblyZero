@@ -190,15 +190,6 @@ Every "Allow this command?" prompt breaks flow state. Developers either:
 - Click "Allow" without reading (security risk)
 - Get frustrated and stop using the tool (adoption failure)
 
-### The Zugzwang Protocol
-
-Real-time friction logging that captures every permission prompt:
-
-```bash
-# Run in separate terminal during development
-poetry run python tools/zugzwang.py
-```
-
 ### Pattern Detection
 
 AssemblyZero identifies:
@@ -398,7 +389,7 @@ Having led enterprise AI adoption, I know the blockers:
 | "Security won't approve ungoverned AI" | 34 audits, Gemini gates, enforced checkpoints |
 | "We can't measure productivity" | KPI framework, friction tracking, cost attribution |
 | "Agents conflict with each other" | Worktree isolation, single-user identity model |
-| "Developers hate the permission prompts" | Zugzwang protocol, pattern detection, auto-remediation |
+| "Developers hate the permission prompts" | Pattern detection, friction analysis, auto-remediation |
 | "It's just pilots, not real adoption" | Infrastructure that scales to organization-wide |
 
 ### Technical Foundation

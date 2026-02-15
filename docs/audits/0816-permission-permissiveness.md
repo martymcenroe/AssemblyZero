@@ -3,7 +3,7 @@
 ## 1. Purpose
 
 Actively mine session data to find permission problems. This audit:
-1. Searches verbatim logs for "zugzwang violation:" markers
+1. Searches verbatim logs for permission denial patterns
 2. Searches for permission denial patterns
 3. Proposes remediations for recurring patterns
 4. Maintains a checkpoint to avoid re-processing old logs
@@ -25,17 +25,7 @@ Actively mine session data to find permission problems. This audit:
 C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-Aletheia\
 ```
 
-### 2.2 Zugzwang Violation Marker
-
-When user rejects an unfair permission prompt, they type:
-```
-no
-zugzwang violation: [pasted prompt content]
-```
-
-This creates a searchable marker in the transcript identifying permission patterns needing remediation.
-
-### 2.3 Permission Denial Patterns
+### 2.2 Permission Denial Patterns
 
 In JSONL, look for:
 - Tool calls with `rejected` or `denied` status
@@ -57,7 +47,7 @@ In JSONL, look for:
     "847f4555-c72c-476c-8bd1-ee661ef59a1a.jsonl",
     "8dd661da-eba1-405d-acc4-9e03d802f20f.jsonl"
   ],
-  "zugzwang_violations": [
+  "findings": [
     {
       "date": "2026-01-10",
       "log_id": "847f4555",
@@ -95,20 +85,7 @@ Read: docs/audit-state/0808-checkpoint.json
 
 **Step 3:** Compare lists, identify unprocessed transcripts
 
-### 4.2 Search for Zugzwang Violations
-
-For each new transcript, use Grep:
-```
-Grep pattern: zugzwang violation
-Path: C:\Users\mcwiz\.claude\projects\C--Users-mcwiz-Projects-Aletheia\{transcript}.jsonl
-```
-
-Extract:
-- The violation pattern (command that triggered unfair prompt)
-- Surrounding context (what was being attempted)
-- Timestamp if available
-
-### 4.3 Search for Permission Denials
+### 4.2 Search for Permission Denials
 
 Search for error patterns:
 ```
@@ -117,7 +94,7 @@ Grep pattern: "requires approval"
 Grep pattern: "Permission denied"
 ```
 
-### 4.4 Categorize Findings
+### 4.3 Categorize Findings
 
 | Category | Pattern | Remediation |
 |----------|---------|-------------|
@@ -126,11 +103,11 @@ Grep pattern: "Permission denied"
 | Structural issue | `cd && cmd` attempted | Reinforce CLAUDE.md rules |
 | Model behavior | Agent ignores friction rules | Update spawning instructions |
 
-### 4.5 Update Checkpoint
+### 4.4 Update Checkpoint
 
 After processing:
 1. Add processed transcript filenames to `logs_processed`
-2. Add new violations with status "open"
+2. Add new findings with status "open"
 3. Update `last_run` timestamp
 4. Write updated checkpoint to file
 
@@ -301,7 +278,7 @@ The script:
 
 ### 9.4 Mining Archives
 
-When searching for zugzwang violations:
+When searching for permission violations:
 - **Default:** Only search active transcripts (last 7 days)
 - **--include-archives:** Also search archived transcripts
 

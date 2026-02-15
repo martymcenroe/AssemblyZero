@@ -181,7 +181,6 @@ Specify the project name explicitly.
 |-------|--------------|
 | `/cleanup` | Often run together at session end |
 | `/friction` | Analyzes permission prompts (different purpose) |
-| `/zugzwang` | Logs permission events in real-time |
 
 ---
 

@@ -94,43 +94,6 @@ poetry run python tools/gemini-test-credentials.py
 
 ## Permission Tools
 
-### zugzwang.py
-
-**Purpose:** Real-time permission friction logger. Track every permission prompt to identify patterns and reduction opportunities.
-
-**Why "Zugzwang":** In chess, zugzwang is when any move worsens your position. Permission prompts are similar - you must respond, but responding interrupts your flow.
-
-**Usage:**
-```bash
-# Interactive mode - run in separate terminal
-poetry run python tools/zugzwang.py
-
-# One-shot log
-poetry run python tools/zugzwang.py --log "Bash(git push) - approved"
-
-# View last 10 entries
-poetry run python tools/zugzwang.py --tail 10
-
-# Clear log
-poetry run python tools/zugzwang.py --clear
-```
-
-**Interactive Shortcuts:**
-| Shortcut | Action |
-|----------|--------|
-| `.b <text>` | Log as BASH category |
-| `.s <text>` | Log as SPAWNED category |
-| `.d <text>` | Log as DENIED category |
-| `.a <text>` | Log as APPROVED category |
-| `.m` | Multi-line mode |
-| `.t [n]` | Show last n entries |
-| `.c` | Clear log |
-| `.q` | Quit |
-
-**Output:** `logs/zugzwang.log`
-
----
-
 ### assemblyzero-permissions.py
 
 **Purpose:** Manage permissions across master (user-level) and project-level settings files.

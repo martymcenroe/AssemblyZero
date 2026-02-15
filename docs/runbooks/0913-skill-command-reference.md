@@ -18,7 +18,6 @@ Quick reference for the orchestrator (Marty) on all available `/skill` commands.
 | `/code-review` | Multi-agent PR review | Before merge |
 | `/sync-permissions` | Clean permission clutter | Weekly maintenance |
 | `/friction` | Analyze permission patterns | Weekly analysis |
-| `/zugzwang` | Real-time permission logger | During active work |
 | `/test-gaps` | Find testing debt | Weekly or post-implementation |
 | `/audit` | Run 08xx audit suite | Scheduled or ad-hoc |
 | `/quote` | Memorialize Discworld quote | After significant milestone |
@@ -32,7 +31,6 @@ Start Session:
   /onboard              → Load project context
 
 During Work:
-  /zugzwang             → Log permission friction (optional)
   /quote                → Memorialize a Discworld quote (optional)
 
 Ready to Submit:
@@ -85,7 +83,6 @@ Auto-detects the most recent Discworld quote from conversation and memorializes 
 |-------|-------------|
 | `/closeout` | `/cleanup` |
 | `/goodbye` | `/cleanup --quick` |
-| `/zz` | `/zugzwang` |
 
 ---
 

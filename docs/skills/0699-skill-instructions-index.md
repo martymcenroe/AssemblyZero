@@ -33,7 +33,6 @@ This document indexes all skill documentation in the `06xx` namespace.
 | `/cleanup` | [0621c](0621c-cleanup-cli.md) | [0621p](0621p-cleanup-prompt.md) | Active |
 | `/onboard` | [0622c](0622c-onboard-cli.md) | [0622p](0622p-onboard-prompt.md) | Active |
 | `/friction` | [0623c](0623c-friction-cli.md) | [0623p](0623p-friction-prompt.md) | Active |
-| `/zugzwang` | [0624c](0624c-zugzwang-cli.md) | [0624p](0624p-zugzwang-prompt.md) | Active |
 | `/code-review` | [0625c](0625c-code-review-cli.md) | [0625p](0625p-code-review-prompt.md) | Active |
 | `/commit-push-pr` | [0626c](0626c-commit-push-pr-cli.md) | [0626p](0626p-commit-push-pr-prompt.md) | Active |
 | `/test-gaps` | [0627c](0627c-test-gaps-cli.md) | [0627p](0627p-test-gaps-prompt.md) | Active |

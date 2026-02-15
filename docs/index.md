@@ -55,7 +55,7 @@ AssemblyZero/
 │   ├── commands/                # Canonical skill implementations
 │   ├── templates/               # Config templates (with {{VAR}})
 │   └── project.json.example     # Example project config
-└── logs/                        # Runtime logs (zugzwang, etc.)
+└── logs/                        # Runtime logs
 ```
 
 ---
@@ -207,7 +207,6 @@ Projects use **5-digit numbers** (prefix `1` + AssemblyZero number) for implemen
 | /onboard | | Agent project onboarding |
 | /sync-permissions | | Permission cleanup |
 | /test-gaps | | Test coverage analysis |
-| /zugzwang | /zz | Real-time friction logging |
 
 See [0600-command-reference.md](skills/0600-command-reference.md) for full details.
 

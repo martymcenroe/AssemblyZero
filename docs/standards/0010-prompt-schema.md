@@ -112,7 +112,7 @@ Structural completeness checks that MUST pass before substantive review begins.
 | **0701c (Issue)** | User Story, Acceptance Criteria, Definition of Done |
 | **0702c (LLD)** | GitHub Issue link, Context section, Proposed Changes section |
 | **0703c (Implementation)** | implementation-report.md, test-report.md, Approved LLD |
-| **0704c (Ops)** | zugzwang.log access, audit reports, session logs |
+| **0704c (Ops)** | Audit reports, session logs |
 
 **Failure Behavior:** If ANY requirement is missing, output rejection template and STOP.
 
@@ -279,7 +279,7 @@ I am Gemini 3 Pro, acting as {Role}.
 | **0701c** | Issue Review | Senior TPM & Governance Lead | User Story, AC, DoD |
 | **0702c** | LLD Review | Senior Architect & AI Governance Lead | Issue link, Context, Proposed Changes |
 | **0703c** | Implementation Review | Senior Software Architect | impl-report.md, test-report.md |
-| **0704c** | Operational Health Review | Head of Eng Ops & AI Safety | zugzwang.log, audits, sessions |
+| **0704c** | Operational Health Review | Head of Eng Ops & AI Safety | Audit reports, session logs |
 
 ---
 

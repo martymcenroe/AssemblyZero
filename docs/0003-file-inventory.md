@@ -58,7 +58,7 @@
 | `0205-test-first-philosophy.md` | Stable | Quality approach |
 | `0206-bidirectional-sync-architecture.md` | Stable | Cross-project propagation |
 
-### Skills (06xx) - 30 files
+### Skills (06xx) - 28 files
 
 Skill documentation uses the c/p convention (CLI + Prompt pairs).
 
@@ -77,8 +77,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0622p-onboard-prompt.md` | Stable | Prompt: Agent onboarding |
 | `0623c-friction-cli.md` | Stable | CLI: Permission friction |
 | `0623p-friction-prompt.md` | Stable | Prompt: Permission friction |
-| `0624c-zugzwang-cli.md` | Stable | CLI: Friction logger |
-| `0624p-zugzwang-prompt.md` | Stable | Prompt: Friction logger |
 | `0625c-code-review-cli.md` | Stable | CLI: Code review |
 | `0625p-code-review-prompt.md` | Stable | Prompt: Code review |
 | `0625c-gemini-retry-cli.md` | Stable | CLI: Gemini retry |
@@ -140,7 +138,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 
 ---
 
-## 3. Tools Inventory (12 files)
+## 3. Tools Inventory (11 files)
 
 ### Core Tools
 
@@ -164,7 +162,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 
 | File | Status | Description |
 |------|--------|-------------|
-| `tools/zugzwang.py` | Stable | Permission friction logger |
 | `tools/append_session_log.py` | Stable | Session tracking |
 | `tools/update-doc-refs.py` | Beta | Documentation reference updater |
 | `tools/claude-usage-scraper.py` | Stable | Quota visibility via TUI scraping |
@@ -177,10 +174,10 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 |------|--------|-------------|
 | `CLAUDE.md` | Stable | Core agent rules |
 | `.claude/project.json.example` | Stable | Project config template |
-| `.claude/commands/*.md` | Stable | 9 skill definitions (see below) |
+| `.claude/commands/*.md` | Stable | 8 skill definitions (see below) |
 | `.claude/templates/*.template` | Stable | Config templates |
 
-### Skills/Commands (9 files)
+### Skills/Commands (8 files)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -192,7 +189,6 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `.claude/commands/onboard.md` | Stable | Agent onboarding |
 | `.claude/commands/promote.md` | Stable | Pattern promotion to AssemblyZero |
 | `.claude/commands/test-gaps.md` | Stable | Test gap mining |
-| `.claude/commands/zugzwang.md` | Stable | Real-time friction logger |
 
 ---
 
@@ -203,13 +199,13 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | Standards | 9 | All stable |
 | Templates | 10 | All stable |
 | ADRs | 6 | All stable |
-| Skills | 30 | All stable |
+| Skills | 28 | All stable |
 | Audits | 34 | 28 stable, 6 stubs |
 | Runbooks | 5 | All stable |
-| Tools | 12 | 10 stable, 2 beta |
-| Commands | 9 | All stable |
-| **Total Docs** | **94** | |
-| **Total Tools** | **12** | |
+| Tools | 11 | 9 stable, 2 beta |
+| Commands | 8 | All stable |
+| **Total Docs** | **91** | |
+| **Total Tools** | **11** | |
 
 ---
 

@@ -132,17 +132,6 @@ This skill uses ONLY these tools (no permission prompts):
 
 ---
 
-## Relationship to /zugzwang
-
-| Skill | Purpose |
-|-------|---------|
-| `/zugzwang` | Live capture during work |
-| `/friction` | Forensic analysis after sessions |
-
-They are complementary. Use `/zugzwang` while working, `/friction` periodically.
-
----
-
 ## Source of Truth
 
 **Skill definition:** `~/.claude/commands/friction.md`
