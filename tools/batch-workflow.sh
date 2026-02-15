@@ -367,8 +367,15 @@ if ! $gates_valid; then
     exit 1
 fi
 
-# Create log directory
+# Create log directory and rotate old logs (keep last 10 runs)
 mkdir -p "$LOG_DIR"
+if [[ -d "$LOG_DIR" ]]; then
+    # Find unique run timestamps, keep only the 10 most recent
+    existing_runs=$(ls "$LOG_DIR" 2>/dev/null | grep -oP '^\d{8}_\d{6}' | sort -u | head -n -10)
+    for old_ts in $existing_runs; do
+        rm -f "$LOG_DIR"/${old_ts}_*
+    done
+fi
 
 # Print header
 TOTAL=${#ISSUES[@]}

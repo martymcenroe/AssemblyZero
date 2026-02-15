@@ -1,4 +1,0 @@
-2026-01-12T09:33:31 | /c/Users/mcwiz/Projects/Talos/.claude/tools/gemini-model-check.sh "$(cat /c/Users/mcwiz/AppData/Local/Temp/claude/ | C--Users-mcwiz-Projects-Talos/97b5fdbd-a0a0-4997-adaa-08ca7dc06915/scratchpad/gemini-review-prompt-v2.txt)" | Re-run Gemini LLD review on updated heuristic engine doc
-2026-01-12T09:35:40 | powershell.exe -Command "Get-WinEvent -LogName 'Microsoft-Windows-PrintService/Operational' -MaxEvents 10 2>$null | | Select-Object TimeCreated, Id, Message | Format-List"
-2026-01-12T11:54:58 | Bash command | ls -la /c/Users/mcwiz/Projects/ | grep -i house | Check if house-maintenance repo exists locally | Do you want to proceed? | ❯ 1. Yes | 2. Yes, allow reading from Projects\ from this project | 3. No
-2026-01-12T12:09:00 | mkdir /c/Users/mcwiz/Projects/maintenance/.claude | Create .claude directory
