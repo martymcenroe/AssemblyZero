@@ -5,6 +5,7 @@ Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
 Issue #335: Scaffold validation fields
 Issue #147: Completeness gate fields (completeness_verdict, completeness_issues, review_materials)
+Issue #292: pytest_exit_code for exit code routing
 
 This TypedDict travels through nodes N0-N8, tracking the testing workflow
 from LLD loading through test generation, implementation, E2E validation,
@@ -200,3 +201,6 @@ class TestingWorkflowState(TypedDict, total=False):
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]
     completeness_issues: list[dict]  # List of CompletenessIssue dicts
     review_materials: dict | None  # ReviewMaterials for Gemini Layer 2
+
+    # Issue #292: Pytest exit code routing
+    pytest_exit_code: int  # Last pytest return code (0-5, -1 for timeout)

@@ -2,6 +2,10 @@
 
 N3 (verify_red_phase): Verify all tests fail before implementation
 N5 (verify_green_phase): Verify all tests pass with coverage target
+
+Issue #292: Added pytest exit code routing. Exit codes 4/5 (syntax/collection
+errors) route back to N2_scaffold_tests instead of endlessly looping through
+N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 """
 
 import subprocess
@@ -14,6 +18,14 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     parse_pytest_output,
     save_audit_file,
+)
+from assemblyzero.workflows.testing.exit_code_router import (
+    EXIT_INTERRUPTED,
+    EXIT_INTERNALERROR,
+    EXIT_USAGEERROR,
+    EXIT_NOTESTSCOLLECTED,
+    describe_exit_code,
+    route_by_exit_code,
 )
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
@@ -126,10 +138,12 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Run pytest
     result = run_pytest(test_files, repo_root=repo_root)
+    exit_code = result["returncode"]
     output = result["stdout"] + "\n" + result["stderr"]
     parsed = result["parsed"]
 
     print(f"    Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed")
+    print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
 
     # Save output to audit trail
     audit_dir = Path(state.get("audit_dir", ""))
@@ -139,7 +153,43 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     else:
         file_num = state.get("file_counter", 0)
 
-    # Analyze results
+    # Issue #292: Check exit code FIRST for routing decisions
+    # Exit codes 4 (syntax/collection error) and 5 (no tests collected) mean
+    # the scaffold itself is broken — route back to N2 to regenerate.
+    # Exit codes 2 (interrupted) and 3 (internal error) stop the workflow.
+    if exit_code in (EXIT_USAGEERROR, EXIT_NOTESTSCOLLECTED):
+        reason = describe_exit_code(exit_code)
+        print(f"    [EXIT CODE {exit_code}] {reason} — routing to re-scaffold")
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="red_phase_scaffold_error",
+            details={"exit_code": exit_code, "reason": reason},
+        )
+
+        return {
+            "red_phase_output": output,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "next_node": "N2_scaffold_tests",
+            "error_message": "",
+        }
+
+    if exit_code in (EXIT_INTERRUPTED, EXIT_INTERNALERROR):
+        reason = describe_exit_code(exit_code)
+        print(f"    [EXIT CODE {exit_code}] {reason} — stopping workflow")
+
+        return {
+            "red_phase_output": output,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "next_node": "end",
+            "error_message": f"Red phase stopped: pytest {reason} (exit code {exit_code})",
+        }
+
+    # Analyze pass/fail counts (exit codes 0 and 1)
     passed_count = parsed.get("passed", 0)
     failed_count = parsed.get("failed", 0)
     error_count = parsed.get("errors", 0)
@@ -165,6 +215,7 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return {
             "red_phase_output": output,
             "file_counter": file_num,
+            "pytest_exit_code": exit_code,
             "error_message": f"Red phase failed: {passed_count} tests passed unexpectedly. "
                            "Tests should fail before implementation.",
             "next_node": "END",
@@ -176,6 +227,7 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return {
             "red_phase_output": output,
             "file_counter": file_num,
+            "pytest_exit_code": exit_code,
             "error_message": "Red phase failed: No tests were collected/run",
             "next_node": "END",
         }
@@ -192,12 +244,13 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         issue_number=state.get("issue_number", 0),
         workflow_type="testing",
         event="red_phase_complete",
-        details={"failed": failed_count, "errors": error_count},
+        details={"failed": failed_count, "errors": error_count, "exit_code": exit_code},
     )
 
     return {
         "red_phase_output": output,
         "file_counter": file_num,
+        "pytest_exit_code": exit_code,
         "next_node": "N4_implement_code",
         "error_message": "",
     }
@@ -276,11 +329,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         coverage_target=coverage_target,
         repo_root=repo_root,
     )
+    exit_code = result["returncode"]
     output = result["stdout"] + "\n" + result["stderr"]
     parsed = result["parsed"]
 
     print(f"    Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed")
     print(f"    Coverage: {parsed.get('coverage', 0):.1f}%")
+    print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
 
     # Save output to audit trail
     audit_dir = Path(state.get("audit_dir", ""))
@@ -290,7 +345,46 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     else:
         file_num = state.get("file_counter", 0)
 
-    # Analyze results
+    # Issue #292: Check exit code FIRST for routing decisions
+    # Exit codes 4/5 mean scaffold is broken — not an implementation problem.
+    # Route back to N2 to regenerate tests instead of looping through N4.
+    if exit_code in (EXIT_USAGEERROR, EXIT_NOTESTSCOLLECTED):
+        reason = describe_exit_code(exit_code)
+        print(f"    [EXIT CODE {exit_code}] {reason} — routing to re-scaffold")
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="green_phase_scaffold_error",
+            details={"exit_code": exit_code, "reason": reason, "iteration": iteration_count},
+        )
+
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": 0,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "iteration_count": iteration_count + 1,
+            "next_node": "N2_scaffold_tests",
+            "error_message": "",
+        }
+
+    if exit_code in (EXIT_INTERRUPTED, EXIT_INTERNALERROR):
+        reason = describe_exit_code(exit_code)
+        print(f"    [EXIT CODE {exit_code}] {reason} — stopping workflow")
+
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": 0,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "iteration_count": iteration_count,
+            "next_node": "end",
+            "error_message": f"Green phase stopped: pytest {reason} (exit code {exit_code})",
+        }
+
+    # Analyze results (exit codes 0 and 1)
     passed_count = parsed.get("passed", 0)
     failed_count = parsed.get("failed", 0)
     error_count = parsed.get("errors", 0)
@@ -310,6 +404,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "file_counter": file_num,
+                "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
                 "next_node": "end",
                 "error_message": error_msg,
@@ -335,6 +430,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "file_counter": file_num,
+            "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
             "next_node": "N4_implement_code",
             "error_message": "",
@@ -350,6 +446,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "file_counter": file_num,
+                "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
                 "next_node": "end",
                 "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
@@ -374,6 +471,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "file_counter": file_num,
+            "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
             "next_node": "N4_implement_code",
             "error_message": "",
@@ -401,6 +499,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "file_counter": file_num,
+            "pytest_exit_code": exit_code,
             "next_node": "N7_finalize",  # Skip E2E
             "error_message": "",
         }
@@ -409,6 +508,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
         "file_counter": file_num,
+        "pytest_exit_code": exit_code,
         "next_node": "N6_e2e_validation",
         "error_message": "",
     }

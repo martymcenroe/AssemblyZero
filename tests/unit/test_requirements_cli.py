@@ -53,41 +53,41 @@ class TestArgumentParsing:
         assert args.drafter == "gemini:2.5-flash"
         assert args.reviewer == "claude:sonnet"
 
-    def test_parse_gates_both(self):
-        """Test parsing gates with both enabled."""
+    def test_parse_review_all(self):
+        """Test parsing --review all."""
         from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
             "--issue", "42",
-            "--gates", "draft,verdict",
+            "--review", "all",
         ])
 
-        assert args.gates == "draft,verdict"
+        assert args.review == "all"
 
-    def test_parse_gates_draft_only(self):
-        """Test parsing gates with draft only."""
+    def test_parse_review_draft_only(self):
+        """Test parsing --review draft."""
         from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
             "--issue", "42",
-            "--gates", "draft",
+            "--review", "draft",
         ])
 
-        assert args.gates == "draft"
+        assert args.review == "draft"
 
-    def test_parse_gates_none(self):
-        """Test parsing gates with none."""
+    def test_parse_review_none(self):
+        """Test parsing --review none."""
         from tools.run_requirements_workflow import parse_args
 
         args = parse_args([
             "--type", "lld",
             "--issue", "42",
-            "--gates", "none",
+            "--review", "none",
         ])
 
-        assert args.gates == "none"
+        assert args.review == "none"
 
     def test_parse_mock_mode(self):
         """Test parsing mock mode flag."""
@@ -149,7 +149,7 @@ class TestArgumentParsing:
 
         assert args.drafter == "claude:opus-4.5"
         assert args.reviewer == "gemini:3-pro-preview"
-        assert args.gates == "draft,verdict"
+        assert args.review == "none"
         assert args.mock is False
         assert args.max_iterations == 20
 
@@ -202,7 +202,7 @@ class TestBuildInitialState:
         args.brief = "ideas/active/feature.md"
         args.drafter = "claude:opus-4.5"
         args.reviewer = "gemini:3-pro-preview"
-        args.gates = "draft,verdict"
+        args.review = "all"
         args.mock = False
         args.max_iterations = 20
         args.context = None
@@ -228,7 +228,7 @@ class TestBuildInitialState:
         args.issue = 42
         args.drafter = "gemini:2.5-flash"
         args.reviewer = "claude:sonnet"
-        args.gates = "none"
+        args.review = "none"
         args.mock = True
         args.max_iterations = 10
         args.context = ["src/auth.py"]

@@ -1689,7 +1689,10 @@ class TestVerifyPhasesModule:
         assert result.get("next_node") == "N4_implement_code"
 
     def test_verify_red_phase_no_tests_ran(self, tmp_path):
-        """verify_red_phase blocks when no tests collected."""
+        """verify_red_phase routes to re-scaffold when no tests collected (exit code 5).
+
+        Issue #292: Changed from blocking to re-scaffold routing.
+        """
         from assemblyzero.workflows.testing.nodes.verify_phases import verify_red_phase
 
         audit_dir = tmp_path / "audit"
@@ -1716,7 +1719,10 @@ class TestVerifyPhasesModule:
 
             result = verify_red_phase(state)
 
-        assert "No tests" in result.get("error_message", "")
+        # Issue #292: Exit code 5 now routes to re-scaffold instead of blocking
+        assert result["next_node"] == "N2_scaffold_tests"
+        assert result["pytest_exit_code"] == 5
+        assert result["error_message"] == ""
 
     def test_verify_red_phase_success(self, tmp_path):
         """verify_red_phase succeeds when all tests fail."""

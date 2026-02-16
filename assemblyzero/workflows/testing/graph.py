@@ -5,6 +5,7 @@ Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
 Issue #335: Add mechanical test validation node (N2.5)
 Issue #147: Add completeness gate node (N4b) between N4 and N5
+Issue #292: Exit code routing — N3/N5 can route to N2 on syntax/collection errors
 
 Defines the compiled graph with:
 - N0-N8 nodes (plus N2.5 for test validation, N4b for completeness gate)
@@ -181,8 +182,10 @@ def route_after_validate(
 
 def route_after_red(
     state: TestingWorkflowState,
-) -> Literal["N4_implement_code", "end"]:
+) -> Literal["N4_implement_code", "N2_scaffold_tests", "end"]:
     """Route after N3 (verify_red_phase).
+
+    Issue #292: Added N2_scaffold_tests route for exit codes 4/5.
 
     Args:
         state: Current workflow state.
@@ -198,6 +201,10 @@ def route_after_red(
 
     if next_node == "N4_implement_code":
         return "N4_implement_code"
+
+    # Issue #292: Exit code 4/5 routes back to scaffold
+    if next_node == "N2_scaffold_tests":
+        return "N2_scaffold_tests"
 
     return "end"
 
@@ -223,8 +230,10 @@ def route_after_implement(
 
 def route_after_green(
     state: TestingWorkflowState,
-) -> Literal["N6_e2e_validation", "N7_finalize", "N4_implement_code", "end"]:
+) -> Literal["N6_e2e_validation", "N7_finalize", "N4_implement_code", "N2_scaffold_tests", "end"]:
     """Route after N5 (verify_green_phase).
+
+    Issue #292: Added N2_scaffold_tests route for exit codes 4/5.
 
     Args:
         state: Current workflow state.
@@ -237,6 +246,10 @@ def route_after_green(
 
     if error:
         return "end"
+
+    # Issue #292: Exit code 4/5 routes back to scaffold
+    if next_node == "N2_scaffold_tests":
+        return "N2_scaffold_tests"
 
     # Check for iteration loop back to implement
     if next_node == "N4_implement_code":
@@ -376,12 +389,13 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N3 -> N4 (with error check)
+    # N3 -> N4 or N2 (exit code routing) - Issue #292
     workflow.add_conditional_edges(
         "N3_verify_red",
         route_after_red,
         {
             "N4_implement_code": "N4_implement_code",
+            "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
         },
     )
@@ -407,7 +421,7 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N5 -> N6 or N7 (skip E2E) or N4 (iteration loop)
+    # N5 -> N6 or N7 (skip E2E) or N4 (iteration loop) or N2 (exit code routing) - Issue #292
     workflow.add_conditional_edges(
         "N5_verify_green",
         route_after_green,
@@ -415,6 +429,7 @@ def build_testing_workflow() -> StateGraph:
             "N6_e2e_validation": "N6_e2e_validation",
             "N7_finalize": "N7_finalize",
             "N4_implement_code": "N4_implement_code",
+            "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
         },
     )
