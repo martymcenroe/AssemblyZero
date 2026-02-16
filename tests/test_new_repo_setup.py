@@ -7,29 +7,24 @@ auditing, security validation, and structure creation.
 Issue: #99
 """
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-# The tool file uses hyphens (new-repo-setup.py) which can't be imported
-# directly. Use importlib to load it as a module.
-_tool_path = Path(__file__).parent.parent / "tools" / "new-repo-setup.py"
-_spec = importlib.util.spec_from_file_location("new_repo_setup", _tool_path)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["new_repo_setup"] = _mod
-_spec.loader.exec_module(_mod)
+sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
-SchemaValidationError = _mod.SchemaValidationError
-audit_project_structure = _mod.audit_project_structure
-create_structure = _mod.create_structure
-flatten_directories = _mod.flatten_directories
-flatten_files = _mod.flatten_files
-load_structure_schema = _mod.load_structure_schema
-validate_paths_no_traversal = _mod.validate_paths_no_traversal
-validate_template_files_exist = _mod.validate_template_files_exist
+from new_repo_setup import (
+    SchemaValidationError,
+    audit_project_structure,
+    create_structure,
+    flatten_directories,
+    flatten_files,
+    load_structure_schema,
+    validate_paths_no_traversal,
+    validate_template_files_exist,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

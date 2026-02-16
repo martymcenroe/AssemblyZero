@@ -7,16 +7,16 @@ creates it on GitHub, and configures it for agent-driven development.
 
 Usage:
     # Basic usage (private repo)
-    python tools/new-repo-setup.py MyNewProject
+    python tools/new_repo_setup.py MyNewProject
 
     # Public repo
-    python tools/new-repo-setup.py MyNewProject --public
+    python tools/new_repo_setup.py MyNewProject --public
 
     # Audit existing structure (no creation)
-    python tools/new-repo-setup.py MyNewProject --audit
+    python tools/new_repo_setup.py MyNewProject --audit
 
     # Local only (skip GitHub creation)
-    python tools/new-repo-setup.py MyNewProject --no-github
+    python tools/new_repo_setup.py MyNewProject --no-github
 
 See: docs/standards/0009-canonical-project-structure.md
 """
@@ -1048,16 +1048,16 @@ def main():
         epilog="""
 Examples:
     # Create a new private repository
-    python tools/new-repo-setup.py MyNewProject
+    python tools/new_repo_setup.py MyNewProject
 
     # Create a public repository
-    python tools/new-repo-setup.py MyNewProject --public
+    python tools/new_repo_setup.py MyNewProject --public
 
     # Audit an existing project
-    python tools/new-repo-setup.py MyExistingProject --audit
+    python tools/new_repo_setup.py MyExistingProject --audit
 
     # Create local only (no GitHub)
-    python tools/new-repo-setup.py MyNewProject --no-github
+    python tools/new_repo_setup.py MyNewProject --no-github
         """
     )
     parser.add_argument(

@@ -9,14 +9,14 @@
 
 ## Summary
 
-Replaced hardcoded directory lists in `tools/new-repo-setup.py` with a JSON schema (`docs/standards/0009-structure-schema.json`) as the single source of truth for canonical project structure.
+Replaced hardcoded directory lists in `tools/new_repo_setup.py` with a JSON schema (`docs/standards/0009-structure-schema.json`) as the single source of truth for canonical project structure.
 
 ## Changes Made
 
 | File | Change |
 |------|--------|
 | `docs/standards/0009-structure-schema.json` | New — canonical schema (version 1.0) |
-| `tools/new-repo-setup.py` | Refactored — removed hardcoded constants, added 7 schema functions + SchemaValidationError + --force flag |
+| `tools/new_repo_setup.py` | Refactored — removed hardcoded constants, added 7 schema functions + SchemaValidationError + --force flag |
 | `tests/test_new_repo_setup.py` | New — 19 test scenarios (T010-T190) |
 | `docs/standards/0009-canonical-project-structure.md` | Updated — added "Authoritative Schema" section |
 
@@ -42,7 +42,7 @@ Replaced hardcoded directory lists in `tools/new-repo-setup.py` with a JSON sche
 
 ## Key Decisions
 
-- Used `importlib.util` in tests to handle hyphenated filename (`new-repo-setup.py`)
+- Used `importlib.util` in tests to handle hyphenated filename (`new_repo_setup.py`)
 - `validate_paths_no_traversal` is called automatically during `load_structure_schema` (fail-fast)
 - `create_structure()` creates empty placeholder files; the main workflow still writes actual content (CLAUDE.md, README, etc.)
 - `audit_structure()` still reads 0011 allowed-missing exemptions to supplement schema-based audit

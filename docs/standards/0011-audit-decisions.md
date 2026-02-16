@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Created:** 2026-01-29
-**Applies to:** Structure audits via `new-repo-setup.py --audit`
+**Applies to:** Structure audits via `new_repo_setup.py --audit`
 
 ---
 

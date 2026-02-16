@@ -32,25 +32,25 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 ### Create a New Private Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject
 ```
 
 ### Create a Public Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --public
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --public
 ```
 
 ### Create Local Only (No GitHub)
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --no-github
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --no-github
 ```
 
 ### Audit Existing Project
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py ExistingProject --audit
 ```
 
 ---
@@ -121,7 +121,7 @@ MyNewProject/
 ## Command Reference
 
 ```
-usage: new-repo-setup.py [-h] [--public] [--audit] [--no-github] name
+usage: new_repo_setup.py [-h] [--public] [--audit] [--no-github] name
 
 positional arguments:
   name         Repository name
@@ -171,7 +171,7 @@ gh issue create --repo your-username/MyNewProject --title "Initial setup" --body
 ### Check Structure
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py MyNewProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --audit
 ```
 
 Expected output:
@@ -197,7 +197,7 @@ gh repo view your-username/MyNewProject
 The script won't overwrite existing projects. Use `--audit` to check an existing project:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new-repo-setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py ExistingProject --audit
 ```
 
 ### "Could not get GitHub username"
@@ -250,4 +250,4 @@ The script automates all of this in one command.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial version (manual process) |
-| 2.0 | 2026-01-29 | Automated with new-repo-setup.py, added 4 new dirs |
+| 2.0 | 2026-01-29 | Automated with new_repo_setup.py, added 4 new dirs |
