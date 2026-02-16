@@ -38,8 +38,9 @@ LARGE_FILE_LINE_THRESHOLD = 500  # Lines
 LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
 
 # Issue #321: Timeout constants
-CLI_TIMEOUT = 300  # 5 minutes for CLI subprocess
-SDK_TIMEOUT = 300  # 5 minutes for SDK API call
+# Issue #373: Increased from 300s — large test file prompts need more time
+CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
+SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
 
 
 class ImplementationError(Exception):
@@ -172,6 +173,121 @@ def estimate_context_tokens(lld_content: str, completed_files: list[tuple[str, s
         total_chars += len(filepath) + len(content) + 50  # 50 for formatting
 
     return total_chars // 4
+
+
+def summarize_file_for_context(content: str) -> str:
+    """Extract imports and signatures from a Python file for compact context.
+
+    Issue #373: Instead of embedding full file bodies (~20KB+) in accumulated
+    context, extract only what subsequent files need: imports, class/function
+    signatures, and their docstrings. Reduces context from ~20KB to ~2-3KB.
+
+    Args:
+        content: Full Python file content.
+
+    Returns:
+        Compact summary with imports and signatures.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        # If we can't parse it, return first 50 lines as fallback
+        lines = content.split("\n")
+        return "\n".join(lines[:50]) + "\n# ... (truncated, syntax error in original)\n"
+
+    parts: list[str] = []
+
+    # Extract module docstring
+    if (tree.body and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+            and isinstance(tree.body[0].value.value, str)):
+        docstring = tree.body[0].value.value
+        parts.append(f'"""{docstring}"""')
+
+    # Extract all imports
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            # Get the source lines for this import
+            start = node.lineno - 1
+            end = node.end_lineno if node.end_lineno else start + 1
+            source_lines = content.split("\n")[start:end]
+            parts.append("\n".join(source_lines))
+
+    # Extract class and function signatures
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ClassDef):
+            parts.append(_summarize_class(node, content))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parts.append(_summarize_function(node, content))
+
+    # Extract module-level constants/type aliases (simple assignments)
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            start = node.lineno - 1
+            end = node.end_lineno if node.end_lineno else start + 1
+            source_lines = content.split("\n")[start:end]
+            line_text = "\n".join(source_lines)
+            # Only include short assignments (constants, not large data structures)
+            if len(line_text) < 200:
+                parts.append(line_text)
+
+    return "\n\n".join(parts)
+
+
+def _summarize_function(node: ast.FunctionDef | ast.AsyncFunctionDef, source: str) -> str:
+    """Extract function signature and docstring."""
+    # Get the def line from source
+    start = node.lineno - 1
+    source_lines = source.split("\n")
+
+    # Find the end of the signature (the line with the colon)
+    sig_lines = []
+    for i in range(start, min(start + 10, len(source_lines))):
+        sig_lines.append(source_lines[i])
+        if source_lines[i].rstrip().endswith(":"):
+            break
+
+    sig = "\n".join(sig_lines)
+
+    # Get docstring if present
+    docstring = ast.get_docstring(node)
+    if docstring:
+        # Use only first 3 lines of docstring
+        doc_lines = docstring.split("\n")[:3]
+        indent = "    "
+        sig += f'\n{indent}"""{chr(10).join(doc_lines)}"""'
+
+    sig += "\n    ..."
+    return sig
+
+
+def _summarize_class(node: ast.ClassDef, source: str) -> str:
+    """Extract class signature, docstring, and method signatures."""
+    source_lines = source.split("\n")
+    start = node.lineno - 1
+
+    # Get class def line
+    class_lines = []
+    for i in range(start, min(start + 5, len(source_lines))):
+        class_lines.append(source_lines[i])
+        if source_lines[i].rstrip().endswith(":"):
+            break
+
+    parts = ["\n".join(class_lines)]
+
+    # Get class docstring
+    docstring = ast.get_docstring(node)
+    if docstring:
+        doc_lines = docstring.split("\n")[:3]
+        parts.append(f'    """{chr(10).join(doc_lines)}"""')
+
+    # Get method signatures
+    for item in node.body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            method_sig = _summarize_function(item, source)
+            parts.append(method_sig)
+
+    return "\n\n".join(parts)
 
 
 # =============================================================================
@@ -545,15 +661,30 @@ Modify this file according to the LLD specification.
 
 """
 
-    # Include previously completed files (accumulated context)
+    # Issue #373: Include previously completed files with trimmed context.
+    # Only the most recent file (N-1) gets full content for continuity.
+    # All earlier files get signature-only summaries to reduce prompt size.
     if completed_files:
         prompt += "## Previously Implemented Files\n\n"
         prompt += "These files have already been implemented. Use them for imports and references:\n\n"
-        for prev_path, prev_content in completed_files:
-            prompt += f"""### {prev_path}
+        for idx, (prev_path, prev_content) in enumerate(completed_files):
+            is_most_recent = (idx == len(completed_files) - 1)
+            if is_most_recent:
+                # Most recent file: full content for continuity
+                prompt += f"""### {prev_path} (full)
 
 ```python
 {prev_content}
+```
+
+"""
+            else:
+                # Earlier files: signatures only to save context
+                summary = summarize_file_for_context(prev_content)
+                prompt += f"""### {prev_path} (signatures)
+
+```python
+{summary}
 ```
 
 """
@@ -595,6 +726,24 @@ IMPORTANT:
 # Claude API Call
 # =============================================================================
 
+def compute_dynamic_timeout(prompt: str) -> int:
+    """Compute timeout based on prompt size.
+
+    Issue #373: Larger prompts need more time for Claude to generate
+    correspondingly large responses. Scale linearly with a floor and cap.
+
+    Args:
+        prompt: The prompt string.
+
+    Returns:
+        Timeout in seconds (300-600 range).
+    """
+    base = 300
+    # Add 1 second per 1000 characters of prompt
+    scaled = base + len(prompt) // 1000
+    return min(scaled, CLI_TIMEOUT)
+
+
 def call_claude_for_file(prompt: str) -> tuple[str, str]:
     """Call Claude for a single file implementation.
 
@@ -602,6 +751,8 @@ def call_claude_for_file(prompt: str) -> tuple[str, str]:
     NO RETRIES - if it fails, it fails.
     """
     claude_cli = _find_claude_cli()
+    # Issue #373: Dynamic timeout based on prompt size
+    timeout = compute_dynamic_timeout(prompt)
 
     if claude_cli:
         try:
@@ -631,7 +782,7 @@ If you output anything other than a code block, the build will fail."""
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=CLI_TIMEOUT,  # Issue #321: Use constant
+                timeout=timeout,  # Issue #373: Dynamic timeout
             )
 
             if result.returncode == 0 and result.stdout.strip():
@@ -642,7 +793,7 @@ If you output anything other than a code block, the build will fail."""
                 print(f"    [WARN] CLI failed (exit {result.returncode}): {stderr}")
 
         except subprocess.TimeoutExpired:
-            return "", f"CLI timeout after {CLI_TIMEOUT}s waiting for response"
+            return "", f"CLI timeout after {timeout}s waiting for response"
         except Exception as e:
             print(f"    [WARN] CLI error: {e}")
 
@@ -651,9 +802,9 @@ If you output anything other than a code block, the build will fail."""
         import anthropic
         import httpx
 
-        # Issue #321: Add timeout to SDK client
+        # Issue #373: Dynamic timeout for SDK too
         client = anthropic.Anthropic(
-            timeout=httpx.Timeout(SDK_TIMEOUT, connect=30.0)
+            timeout=httpx.Timeout(timeout, connect=30.0)
         )
 
         message = client.messages.create(
@@ -672,9 +823,9 @@ If you output anything other than a code block, the build will fail."""
     except ImportError:
         return "", "Neither Claude CLI nor Anthropic SDK available"
     except httpx.TimeoutException:
-        return "", f"SDK timeout after {SDK_TIMEOUT}s waiting for response"
+        return "", f"SDK timeout after {timeout}s waiting for response"
     except TimeoutError:
-        return "", f"SDK timeout after {SDK_TIMEOUT}s waiting for response"
+        return "", f"SDK timeout after {timeout}s waiting for response"
     except Exception as e:
         return "", f"SDK error: {e}"
 
