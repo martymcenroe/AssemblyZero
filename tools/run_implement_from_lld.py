@@ -14,7 +14,7 @@ Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
 
 Usage:
-    # Full TDD workflow (all gates enabled)
+    # Full TDD workflow (auto, no human review)
     python tools/run_implement_from_lld.py --issue 42
 
     # Fast mode (skip E2E)
@@ -23,11 +23,11 @@ Usage:
     # Just scaffold tests
     python tools/run_implement_from_lld.py --issue 42 --scaffold-only
 
-    # Fully automated (no human gates)
-    python tools/run_implement_from_lld.py --issue 42 --gates none
+    # With human review at all stages
+    python tools/run_implement_from_lld.py --issue 42 --review all
 
-    # Only draft gate (skip verdict)
-    python tools/run_implement_from_lld.py --issue 42 --gates draft
+    # With human review at draft stage only
+    python tools/run_implement_from_lld.py --issue 42 --review draft
 
     # With sandbox repo for E2E
     python tools/run_implement_from_lld.py --issue 42 --sandbox-repo mcwiz/assemblyzero-e2e-sandbox
@@ -178,15 +178,22 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Path to LLD file (default: auto-detect from issue number)",
     )
     parser.add_argument(
-        "--gates",
+        "--review",
         choices=["none", "draft", "verdict", "all"],
         default=None,
-        help="Which gates to enable: none, draft, verdict, all (default: all)",
+        dest="review",
+        help="Human review stages: none (default) | draft | verdict | all",
+    )
+    parser.add_argument(
+        "--gates",
+        default=None,
+        dest="gates_deprecated",
+        help=argparse.SUPPRESS,  # Hidden deprecated alias for --review
     )
     parser.add_argument(
         "--auto",
         action="store_true",
-        help="DEPRECATED: Use --gates none instead",
+        help=argparse.SUPPRESS,  # Hidden deprecated alias
     )
     parser.add_argument(
         "--mock",
@@ -233,43 +240,47 @@ def create_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def apply_gates_config(args: argparse.Namespace) -> None:
-    """Apply gates configuration to args, handling deprecation.
+def apply_review_config(args: argparse.Namespace) -> None:
+    """Apply review configuration to args, handling deprecated flags.
 
     Args:
         args: Parsed arguments namespace. Modified in place.
     """
+    # Handle deprecated --gates flag
+    if args.gates_deprecated is not None:
+        print(
+            "WARNING: --gates is deprecated. Use --review instead.",
+            file=sys.stderr,
+        )
+        gates_val = args.gates_deprecated.lower().strip()
+        if gates_val in ("draft,verdict", "verdict,draft", "both"):
+            args.review = "all"
+        else:
+            args.review = gates_val
+
     # Handle deprecated --auto flag
     if args.auto:
-        if args.gates is not None:
-            # Both flags specified - warn and prefer --gates
-            print(
-                "WARNING: --auto is deprecated and conflicts with --gates. "
-                "Ignoring --auto, using --gates.",
-                file=sys.stderr,
-            )
-        else:
-            # Only --auto specified - map to --gates none
-            print(
-                "WARNING: --auto is deprecated. Use --gates none instead.",
-                file=sys.stderr,
-            )
-            args.gates = "none"
+        print(
+            "WARNING: --auto is deprecated. Use --review none instead.",
+            file=sys.stderr,
+        )
+        if args.review is None:
+            args.review = "none"
 
-    # Apply default if --gates not specified
-    if args.gates is None:
-        args.gates = "all"
+    # Apply default if --review not specified
+    if args.review is None:
+        args.review = "none"
 
-    # Set individual gate flags based on --gates value
-    if args.gates == "none":
+    # Set individual gate flags based on --review value
+    if args.review == "none":
         args.gates_draft = False
         args.gates_verdict = False
         args.auto_mode = True
-    elif args.gates == "draft":
+    elif args.review == "draft":
         args.gates_draft = True
         args.gates_verdict = False
         args.auto_mode = False
-    elif args.gates == "verdict":
+    elif args.review == "verdict":
         args.gates_draft = False
         args.gates_verdict = True
         args.auto_mode = False
@@ -283,8 +294,8 @@ def main():
     parser = create_argument_parser()
     args = parser.parse_args()
 
-    # Apply gates configuration
-    apply_gates_config(args)
+    # Apply review configuration
+    apply_review_config(args)
 
     # Validate issue number
     if args.issue <= 0:

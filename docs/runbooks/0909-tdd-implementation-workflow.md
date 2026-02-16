@@ -77,16 +77,16 @@ stateDiagram-v2
 
 ## Quick Start
 
-### Standard Implementation
+### Standard Implementation (Auto)
 
 ```bash
 poetry run python tools/run_implement_from_lld.py --issue 104
 ```
 
-### Fully Automated (No Human Gates)
+### With Human Review
 
 ```bash
-poetry run python tools/run_implement_from_lld.py --issue 104 --gates none
+poetry run python tools/run_implement_from_lld.py --issue 104 --review all
 ```
 
 ### Fast Mode (Skip E2E)
@@ -115,14 +115,14 @@ poetry run python tools/run_implement_from_lld.py --issue 104 --scaffold-only
 
 | Argument | Description |
 |----------|-------------|
-| `--gates LEVEL` | Which gates to enable: `none`, `draft`, `verdict`, `all` (default: `all`) |
+| `--review LEVEL` | Human review stages: `none` (default), `draft`, `verdict`, `all` |
 | `--mock` | Use fixtures instead of real APIs |
 | `--skip-e2e` | Skip E2E validation phase |
 | `--scaffold-only` | Stop after scaffolding tests (red phase) |
 | `--resume` | Resume from checkpoint |
 | `--no-worktree` | Skip worktree creation (use current directory) |
 
-**Note:** `--auto` is deprecated. Use `--gates none` instead.
+**Note:** `--auto` and `--gates` are deprecated. Use `--review` instead.
 
 ### Configuration
 

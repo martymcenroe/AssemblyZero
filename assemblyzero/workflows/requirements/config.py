@@ -22,19 +22,20 @@ class GateConfig:
         verdict_gate: If True, pause after Gemini verdict for human review.
     """
 
-    draft_gate: bool = True
-    verdict_gate: bool = True
+    draft_gate: bool = False
+    verdict_gate: bool = False
 
     @classmethod
     def from_string(cls, gates_str: str) -> "GateConfig":
-        """Create GateConfig from CLI --gates string.
+        """Create GateConfig from CLI --review string.
 
         Args:
-            gates_str: Gate specification string.
-                - "draft,verdict" (default): Both gates enabled
-                - "draft": Only draft gate
-                - "verdict": Only verdict gate
-                - "none": No human gates (fully automated)
+            gates_str: Review specification string.
+                - "none" (default): No human review (fully automated)
+                - "draft": Pause after draft for human review
+                - "verdict": Pause after verdict for human review
+                - "all": Pause at both draft and verdict stages
+                - "draft,verdict": Alias for "all" (deprecated form)
 
         Returns:
             Configured GateConfig instance.
@@ -50,12 +51,12 @@ class GateConfig:
             return cls(draft_gate=True, verdict_gate=False)
         elif gates_lower == "verdict":
             return cls(draft_gate=False, verdict_gate=True)
-        elif gates_lower in ("draft,verdict", "verdict,draft", "both"):
+        elif gates_lower in ("all", "draft,verdict", "verdict,draft", "both"):
             return cls(draft_gate=True, verdict_gate=True)
         else:
             raise ValueError(
-                f"Invalid gates specification '{gates_str}'. "
-                f"Valid options: draft,verdict | draft | verdict | none"
+                f"Invalid review specification '{gates_str}'. "
+                f"Valid options: none | draft | verdict | all"
             )
 
     def __str__(self) -> str:
@@ -159,7 +160,7 @@ class WorkflowConfig:
 def create_issue_config(
     drafter: str = "claude:opus-4.5",
     reviewer: str = "gemini:3-pro-preview",
-    gates: str = "draft,verdict",
+    gates: str = "none",
     max_iterations: int = 20,
     auto_mode: bool = False,
     mock_mode: bool = False,
@@ -171,7 +172,7 @@ def create_issue_config(
     Args:
         drafter: LLM provider spec for drafting.
         reviewer: LLM provider spec for reviewing.
-        gates: Human gate specification.
+        gates: Review specification (none, draft, verdict, all).
         max_iterations: Maximum revision cycles.
         auto_mode: Skip VS Code, auto-progress.
         mock_mode: Use mock providers.
@@ -199,7 +200,7 @@ def create_issue_config(
 def create_lld_config(
     drafter: str = "claude:opus-4.5",
     reviewer: str = "gemini:3-pro-preview",
-    gates: str = "draft,verdict",
+    gates: str = "none",
     max_iterations: int = 20,
     auto_mode: bool = False,
     mock_mode: bool = False,
@@ -211,7 +212,7 @@ def create_lld_config(
     Args:
         drafter: LLM provider spec for drafting.
         reviewer: LLM provider spec for reviewing.
-        gates: Human gate specification.
+        gates: Review specification (none, draft, verdict, all).
         max_iterations: Maximum revision cycles.
         auto_mode: Skip VS Code, auto-progress.
         mock_mode: Use mock providers.
@@ -238,15 +239,19 @@ def create_lld_config(
 
 # Preset configurations for common use cases
 WORKFLOW_PRESETS = {
-    # Standard issue workflow with full human oversight
+    # Standard issue workflow (auto, no human review)
     "issue-standard": create_issue_config(),
-    # Automated issue workflow (for CI/batch processing)
+    # Issue workflow with full human review
+    "issue-reviewed": create_issue_config(gates="all"),
+    # Automated issue workflow (explicit auto_mode for CI/batch)
     "issue-auto": create_issue_config(gates="none", auto_mode=True),
-    # Standard LLD workflow with full human oversight
+    # Standard LLD workflow (auto, no human review)
     "lld-standard": create_lld_config(),
-    # LLD workflow with only draft gate (auto-approve clean verdicts)
+    # LLD workflow with full human review
+    "lld-reviewed": create_lld_config(gates="all"),
+    # LLD workflow with only draft review (auto-approve clean verdicts)
     "lld-draft-only": create_lld_config(gates="draft"),
-    # Automated LLD workflow
+    # Automated LLD workflow (explicit auto_mode for CI/batch)
     "lld-auto": create_lld_config(gates="none", auto_mode=True),
     # Testing preset with mock providers
     "test-mock": WorkflowConfig(

@@ -8,7 +8,7 @@
 
 ## Purpose
 
-Create GitHub Issues or LLDs through a single unified workflow with pluggable LLM providers and configurable human gates. This replaces the need to use separate `run_issue_workflow.py` and `run_lld_workflow.py` tools.
+Create GitHub Issues or LLDs through a single unified workflow with pluggable LLM providers and optional human review stages. This replaces the need to use separate `run_issue_workflow.py` and `run_lld_workflow.py` tools.
 
 **Use this when:** You want a single tool for both Issue and LLD creation, or need to swap between different LLM providers (Claude, Gemini, future: OpenAI, Ollama).
 
@@ -97,7 +97,7 @@ If you're already in the target repo's directory, just point poetry at AssemblyZ
 # From /c/Users/mcwiz/Projects/OtherProject
 poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python \
   /c/Users/mcwiz/Projects/AssemblyZero/tools/run_requirements_workflow.py \
-  --type lld --select --gates none
+  --type lld --select
 ```
 
 The workflow auto-detects `OtherProject` as the target because that's your current working directory.
@@ -143,17 +143,17 @@ Without `--repo`, it would target AssemblyZero itself.
 - `claude:opus-4.5`, `claude:sonnet`, `claude:haiku`
 - `gemini:3-pro-preview`, `gemini:2.5-flash`, `gemini:2.5-pro`
 
-### Gate Configuration
+### Review Configuration
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--gates GATES` | `draft,verdict` | Human gates to enable |
+| `--review LEVEL` | `none` | Human review stages to enable |
 
-**Gate values:**
-- `draft,verdict` - Both gates enabled (default)
-- `draft` - Only draft gate (auto-accept verdicts)
-- `verdict` - Only verdict gate (auto-send drafts)
-- `none` - Fully automated
+**Review values:**
+- `none` - Fully automated (default)
+- `draft` - Pause after draft for human review
+- `verdict` - Pause after verdict for human review
+- `all` - Pause at both draft and verdict stages
 
 ### Mode Flags
 
@@ -191,13 +191,12 @@ Flow:
 4. You review verdict
 5. Issue filed to GitHub
 
-### 2. Fully Automated LLD Creation
+### 2. Standard LLD Creation (Auto)
 
 ```bash
 poetry run python tools/run_requirements_workflow.py \
   --type lld \
-  --issue 42 \
-  --gates none
+  --issue 42
 ```
 
 Flow:
@@ -205,6 +204,17 @@ Flow:
 2. Claude drafts LLD
 3. Gemini reviews (auto-revise if BLOCKED)
 4. LLD saved when APPROVED
+
+### 2b. LLD with Human Review
+
+```bash
+poetry run python tools/run_requirements_workflow.py \
+  --type lld \
+  --issue 42 \
+  --review all
+```
+
+Flow: Same as above but pauses for human review after draft and after verdict.
 
 ### 3. Custom LLM Providers
 
@@ -260,9 +270,11 @@ Uses fixtures instead of real LLM calls. First review returns BLOCKED, second re
 
 ---
 
-## Human Gate Interactions
+## Human Review Interactions
 
-### Draft Gate (N2)
+> These interactions only appear when running with `--review draft`, `--review verdict`, or `--review all`.
+
+### Draft Review (N2)
 
 VS Code opens with the draft. Review and edit, then:
 
@@ -276,7 +288,7 @@ Iteration 1/20 | Draft #1
 Choice: _
 ```
 
-### Verdict Gate (N4)
+### Verdict Review (N4)
 
 VS Code opens with draft and verdict. Review, then:
 

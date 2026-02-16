@@ -350,10 +350,10 @@ def _get_suggestion_for_error_type(error_type: str) -> str:
     """
     suggestions = {
         "forgery": "The LLD status was modified without a genuine review. "
-                   "Re-run the LLD workflow with `--gates verdict` to get a genuine approval.",
+                   "Re-run the LLD workflow with `--review verdict` to get a genuine approval.",
         "not_approved": "Submit the LLD for Gemini review using the LLD workflow.",
         "no_evidence": "The approval cannot be verified. "
-                       "Re-run the LLD workflow with `--gates verdict` to get a genuine approval.",
+                       "Re-run the LLD workflow with `--review verdict` to get a genuine approval.",
         "security": "Use a valid path within the project directory.",
         "not_found": "Ensure the LLD file exists at the specified path.",
         "read_error": "Check file permissions and try again.",

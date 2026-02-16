@@ -21,11 +21,11 @@ Usage:
     python tools/run_requirements_workflow.py --type lld --issue 42 \
         --drafter gemini:2.5-flash --reviewer claude:sonnet
 
-    # With specific gates
-    python tools/run_requirements_workflow.py --type lld --issue 42 --gates draft
+    # With human review at draft stage
+    python tools/run_requirements_workflow.py --type lld --issue 42 --review draft
 
-    # Fully automated (no human gates)
-    python tools/run_requirements_workflow.py --type lld --issue 42 --gates none
+    # With human review at all stages
+    python tools/run_requirements_workflow.py --type lld --issue 42 --review all
 
     # Mock mode for testing
     python tools/run_requirements_workflow.py --type lld --issue 42 --mock
@@ -313,8 +313,8 @@ Examples:
   python tools/run_requirements_workflow.py --type lld --issue 42 \\
       --drafter gemini:2.5-flash --reviewer claude:sonnet
 
-  # Fully automated
-  python tools/run_requirements_workflow.py --type lld --issue 42 --gates none
+  # With human review at draft and verdict stages
+  python tools/run_requirements_workflow.py --type lld --issue 42 --review all
         """,
     )
 
@@ -365,11 +365,18 @@ Examples:
         help="Reviewer LLM spec (default: gemini:3-pro-preview)",
     )
 
-    # Gate configuration
+    # Review configuration (human gates)
+    parser.add_argument(
+        "--review",
+        default="none",
+        dest="review",
+        help="Human review stages: none (default) | draft | verdict | all",
+    )
     parser.add_argument(
         "--gates",
-        default="draft,verdict",
-        help="Human gates: draft,verdict | draft | verdict | none (default: draft,verdict)",
+        default=None,
+        dest="gates_deprecated",
+        help=argparse.SUPPRESS,  # Hidden deprecated alias for --review
     )
 
     # Modes
@@ -528,7 +535,7 @@ def build_initial_state(
         Initialized RequirementsWorkflowState.
     """
     # Parse gate configuration
-    gate_config = GateConfig.from_string(args.gates)
+    gate_config = GateConfig.from_string(args.review)
 
     # Build state based on workflow type
     if args.type == "issue":
@@ -548,7 +555,7 @@ def build_initial_state(
             reviewer=args.reviewer,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
-            auto_mode=args.gates == "none",
+            auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
             brief_file=args.brief or "",
@@ -563,7 +570,7 @@ def build_initial_state(
             reviewer=args.reviewer,
             gates_draft=gate_config.draft_gate,
             gates_verdict=gate_config.verdict_gate,
-            auto_mode=args.gates == "none",
+            auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
             issue_number=args.issue or 0,
@@ -891,7 +898,7 @@ def print_header(args: argparse.Namespace) -> None:
         print(f"Issue:    #{args.issue}")
     print(f"Drafter:  {args.drafter}")
     print(f"Reviewer: {args.reviewer}")
-    print(f"Gates:    {args.gates}")
+    print(f"Review:   {args.review}")
     if args.mock:
         print("Mode:     MOCK (no API calls)")
     print("=" * 60)
@@ -941,6 +948,19 @@ def main() -> int:
         Exit code (0 for success, non-zero for error).
     """
     args = parse_args()
+
+    # Handle deprecated --gates flag (bridge to --review)
+    if args.gates_deprecated is not None:
+        print(
+            "WARNING: --gates is deprecated. Use --review instead.",
+            file=sys.stderr,
+        )
+        # Map old values to new: "draft,verdict" -> "all", others pass through
+        gates_val = args.gates_deprecated.lower().strip()
+        if gates_val in ("draft,verdict", "verdict,draft", "both"):
+            args.review = "all"
+        else:
+            args.review = gates_val
 
     # Validate --all and --resume are only for issue workflow
     if args.all and args.type != "issue":

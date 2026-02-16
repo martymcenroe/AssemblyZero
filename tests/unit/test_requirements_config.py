@@ -24,11 +24,11 @@ from assemblyzero.workflows.requirements.config import (
 class TestGateConfig:
     """Tests for GateConfig dataclass."""
 
-    def test_default_both_gates_enabled(self):
-        """Test default has both gates enabled."""
+    def test_default_no_gates(self):
+        """Test default has no gates (auto mode)."""
         config = GateConfig()
-        assert config.draft_gate is True
-        assert config.verdict_gate is True
+        assert config.draft_gate is False
+        assert config.verdict_gate is False
 
     def test_from_string_both(self):
         """Test parsing 'draft,verdict' enables both gates."""
@@ -66,11 +66,17 @@ class TestGateConfig:
         assert config.draft_gate is True
         assert config.verdict_gate is False
 
+    def test_from_string_all(self):
+        """Test parsing 'all' enables both gates."""
+        config = GateConfig.from_string("all")
+        assert config.draft_gate is True
+        assert config.verdict_gate is True
+
     def test_from_string_invalid(self):
         """Test parsing invalid string raises ValueError."""
         with pytest.raises(ValueError) as exc_info:
             GateConfig.from_string("invalid")
-        assert "Invalid gates specification" in str(exc_info.value)
+        assert "Invalid review specification" in str(exc_info.value)
 
     def test_str_both(self):
         """Test string representation with both gates."""
@@ -196,16 +202,16 @@ class TestCreateIssueConfig:
     """Tests for create_issue_config factory."""
 
     def test_default_config(self):
-        """Test default issue config."""
+        """Test default issue config (auto, no review)."""
         config = create_issue_config()
         assert config.workflow_type == "issue"
         assert config.drafter == "claude:opus-4.5"
         assert config.reviewer == "gemini:3-pro-preview"
-        assert config.gates.draft_gate is True
-        assert config.gates.verdict_gate is True
+        assert config.gates.draft_gate is False
+        assert config.gates.verdict_gate is False
 
-    def test_custom_gates(self):
-        """Test custom gates string."""
+    def test_custom_review(self):
+        """Test custom review string."""
         config = create_issue_config(gates="draft")
         assert config.gates.draft_gate is True
         assert config.gates.verdict_gate is False
@@ -257,21 +263,30 @@ class TestWorkflowPresets:
     def test_presets_exist(self):
         """Test expected presets exist."""
         assert "issue-standard" in WORKFLOW_PRESETS
+        assert "issue-reviewed" in WORKFLOW_PRESETS
         assert "issue-auto" in WORKFLOW_PRESETS
         assert "lld-standard" in WORKFLOW_PRESETS
+        assert "lld-reviewed" in WORKFLOW_PRESETS
         assert "lld-draft-only" in WORKFLOW_PRESETS
         assert "lld-auto" in WORKFLOW_PRESETS
         assert "test-mock" in WORKFLOW_PRESETS
 
     def test_issue_standard_preset(self):
-        """Test issue-standard preset."""
+        """Test issue-standard preset (auto, no review)."""
         preset = WORKFLOW_PRESETS["issue-standard"]
+        assert preset.workflow_type == "issue"
+        assert preset.gates.draft_gate is False
+        assert preset.gates.verdict_gate is False
+
+    def test_issue_reviewed_preset(self):
+        """Test issue-reviewed preset has all review gates."""
+        preset = WORKFLOW_PRESETS["issue-reviewed"]
         assert preset.workflow_type == "issue"
         assert preset.gates.draft_gate is True
         assert preset.gates.verdict_gate is True
 
     def test_issue_auto_preset(self):
-        """Test issue-auto preset has no gates."""
+        """Test issue-auto preset has no gates and explicit auto_mode."""
         preset = WORKFLOW_PRESETS["issue-auto"]
         assert preset.workflow_type == "issue"
         assert preset.gates.draft_gate is False
