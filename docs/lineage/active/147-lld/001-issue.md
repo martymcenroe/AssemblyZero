@@ -1,34 +1,37 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 147
-url: https://github.com/martymcenroe/AgentOS/issues/147
-fetched: 2026-02-04T01:37:27.668474Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/147
+fetched: 2026-02-16T07:05:14.516987Z
 ---
 
 # Issue #147: feat: Implementation Completeness Gate (anti-stub detection)
 
-# Implementation Completeness Gate - Anti-Laziness System
+# Implementation Completeness Gate (Redesigned)
 
 ## Problem Statement
 
-Claude produces stub implementations that pass tests because the tests themselves are stubs. The current pipeline has no gate that catches:
-- `pass`, `...`, `NotImplementedError` in function bodies
-- `assert True`, `assert x is not None` weak tests
-- CLI flags defined in argparse but never used
-- Mock-everything tests that verify mocks, not behavior
+Claude produces implementations that pass tests because neither the tests nor the implementation are scrutinized for *semantic completeness*. The current pipeline has:
+- **N2.5** (mechanical test validation) — catches stub *tests* (assert False, NotImplementedError, missing assertions)
+- **N4** (implement_code) — validates *syntax* and minimum size
+- **N5** (verify_green) — confirms tests pass + coverage target
 
-## Solution: Two-Layer Completeness Gate
+**The gap:** Nothing verifies that the *implementation actually fulfills the LLD requirements*. A syntactically valid, test-passing implementation can still be incomplete.
 
-A new **N4b_completeness_gate** node inserted between N4 (implement_code) and N5 (verify_green) that performs:
+### Actual Problems (from codebase scan, issues #149-#156, all now closed)
 
-1. **Static Analysis** (fast, local, deterministic) - Catches obvious patterns
-2. **Gemini Semantic Review** (if static passes) - Catches subtle incompleteness
+The original issue targeted `pass`/`...`/`assert True` — these turned out to be mostly false positives. The **real** problems found in production were:
 
-If BLOCKED, loops back to N4_implement_code with feedback.
+| Problem | Example | Detection Method |
+|---------|---------|-----------------|
+| Argparse flags defined but never wired | `--select` parsed but never used | AST: trace `add_argument` to usage |
+| Docstrings promising nonexistent behavior | "Retries with backoff" but no retry loop | Gemini semantic review |
+| Mock-mode branches that silently fail | `if mock_mode: return None` | AST: empty/trivial conditional branches |
+| Tests verifying existence, not behavior | `assert result is not None` as only check | AST: assertion quality analysis |
 
----
+## Solution: Two-Layer Completeness Gate (N4b)
 
-## Architecture
+### Architecture
 
 ```
 Current:  N4_implement_code → N5_verify_green
@@ -37,103 +40,80 @@ Proposed: N4_implement_code → N4b_completeness_gate → N5_verify_green
                               N4_implement_code (loop)
 ```
 
----
+### Layer 1: AST-Based Analysis (fast, deterministic)
+
+Targets the **real** problems, not false-positive patterns:
+
+| Check | What It Catches | Method |
+|-------|----------------|--------|
+| Dead CLI flags | `add_argument` with no corresponding usage | AST: trace argument names to function calls |
+| Empty conditional branches | `if condition: pass` or `if condition: return None` | AST: branch body analysis |
+| Docstring-only functions | Functions with docstring + `pass`/`return None` only | AST: function body depth |
+| Trivial assertions | `assert x is not None` as the *sole* assertion in a test | AST: assertion quality scoring |
+| Unused imports from implementation | Import statements with no usage in function bodies | AST: import-to-usage mapping |
+
+**Deliberately excluded** (high false-positive rate):
+- Bare `pass` statements (legitimate in exception handlers, abstract methods)
+- `...` (used in prompt templates, type stubs)
+- `assert True` (not actually found in codebase)
+
+### Layer 2: Gemini Semantic Review (if Layer 1 passes)
+
+**Orchestrator-controlled** per WORKFLOW.md — Claude prepares materials, orchestrator submits to Gemini.
+
+Review prompt focus:
+1. **LLD Requirement Mapping** — For each Section 3 requirement, does corresponding code exist? (Carried forward from #181)
+2. **Behavioral Completeness** — Do functions do what their docstrings/names promise?
+3. **Integration Completeness** — Are new functions actually called from the workflow/CLI entry points?
+
+### Output: Verification Report (carried forward from #181)
+
+The gate produces `docs/reports/active/{issue}-implementation-report.md` as a side effect:
+
+```markdown
+# Implementation Report: Issue #{issue}
+
+## LLD Requirement Verification
+
+| # | Requirement | Status | Evidence |
+|---|-------------|--------|----------|
+| 1 | Rate-limit backoff | ✅ Implemented | `coordinator.py:142` — exponential_backoff() |
+| 2 | Retry on 429 | ✅ Implemented | `coordinator.py:158` — retry loop with 429 check |
+
+## Completeness Analysis
+
+| Check | Result | Details |
+|-------|--------|---------|
+| Dead CLI flags | ✅ PASS | 0 unused arguments |
+| Empty branches | ✅ PASS | 0 trivial branches |
+| Assertion quality | ⚠️ WARN | test_init.py:45 — sole assertion is `is not None` |
+
+## Stub/TODO Detection
+
+| File | Line | Pattern |
+|------|------|---------|
+| (none found) | | |
+```
+
+This populates the `implementation_report_path` state field (#181's gap).
 
 ## Files to Create
 
-### 1. Static Analyzer Module
-**Path:** `agentos/workflows/testing/completeness/__init__.py`
-**Path:** `agentos/workflows/testing/completeness/static_analyzer.py`
-
-Detects patterns via regex and AST:
-
-| Category | Pattern | Severity |
-|----------|---------|----------|
-| Stub body | `pass` alone | BLOCK |
-| Stub body | `...` alone | BLOCK |
-| Stub body | `raise NotImplementedError` | BLOCK |
-| Weak test | `assert True` | BLOCK |
-| Weak test | `assert x is not None` (alone) | BLOCK |
-| Skip abuse | `pytest.skip()` without reason | BLOCK |
-| Mock abuse | Function returns only `Mock()` | WARN |
-
-### 2. Completeness Gate Node
-**Path:** `agentos/workflows/testing/nodes/completeness_gate.py`
-
-```python
-def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
-    """N4b: Verify implementation is complete and real."""
-    # Layer 1: Static analysis
-    static_result = analyze_implementation(impl_files, test_files)
-    if static_result["verdict"] == "BLOCK":
-        return {"completeness_verdict": "BLOCK", ...}
-
-    # Layer 2: Gemini semantic review
-    gemini_verdict = call_gemini_review(state, static_result)
-    return {"completeness_verdict": gemini_verdict, ...}
-```
-
-### 3. Gemini Prompt
-**Path:** `docs/skills/0707c-Completeness-Review-Prompt.md`
-
-Tier 1 BLOCKING checks:
-- Empty function bodies (stub detection)
-- Tautological assertions (assert True)
-- Skip abuse (pytest.skip without reason)
-- Mock-everything tests
-- Feature completeness vs LLD
-
----
+| File | Purpose |
+|------|---------|
+| `assemblyzero/workflows/testing/completeness/__init__.py` | Package |
+| `assemblyzero/workflows/testing/completeness/ast_analyzer.py` | Layer 1 AST analysis |
+| `assemblyzero/workflows/testing/completeness/report_generator.py` | Verification report output (from #181) |
+| `assemblyzero/workflows/testing/nodes/completeness_gate.py` | N4b workflow node |
+| `tests/test_completeness_gate.py` | Real tests (no mocks) |
 
 ## Files to Modify
 
-### 1. Workflow Graph
-**Path:** `agentos/workflows/testing/graph.py`
-
-Add node and routing:
-```python
-workflow.add_node("N4b_completeness_gate", completeness_gate)
-
-workflow.add_conditional_edges(
-    "N4_implement_code",
-    route_after_implement,
-    {"N4b_completeness_gate": "N4b_completeness_gate", "end": END}
-)
-
-workflow.add_conditional_edges(
-    "N4b_completeness_gate",
-    route_after_completeness_gate,
-    {"N5_verify_green": "N5_verify_green", "N4_implement_code": "N4_implement_code", "end": END}
-)
-```
-
-### 2. Workflow State
-**Path:** `agentos/workflows/testing/state.py`
-
-Add fields:
-```python
-completeness_check_passed: bool
-completeness_static_issues: list[dict]
-completeness_verdict: Literal["PASS", "WARN", "BLOCK"]
-```
-
-### 3. Node Exports
-**Path:** `agentos/workflows/testing/nodes/__init__.py`
-
-Add export:
-```python
-from agentos.workflows.testing.nodes.completeness_gate import completeness_gate
-```
-
-### 4. Enhance Existing Prompt
-**Path:** `docs/skills/0703c-Implementation-Review-Prompt.md`
-
-Promote Test Integrity from Tier 2 to Tier 1 BLOCKING:
-- Test Reality: Tests must exercise real code, not just mocks
-- Stub Detection: Reject implementations with only pass/...
-- Weak Assertions: Reject assert True patterns
-
----
+| File | Change |
+|------|--------|
+| `assemblyzero/workflows/testing/graph.py` | Insert N4b between N4 and N5, add routing |
+| `assemblyzero/workflows/testing/state.py` | Add `completeness_verdict`, `completeness_issues` fields |
+| `assemblyzero/workflows/testing/nodes/__init__.py` | Export completeness_gate |
 
 ## Routing Logic
 
@@ -146,52 +126,25 @@ def route_after_completeness_gate(state) -> Literal["N5_verify_green", "N4_imple
     if verdict == "BLOCK":
         if iteration >= max_iter:
             return "end"  # Give up
-        return "N4_implement_code"  # Try again
+        return "N4_implement_code"  # Try again with feedback
 
     return "N5_verify_green"  # Proceed
 ```
 
----
-
 ## Verification Plan
 
-1. **Unit tests for static analyzer:**
-   - Test each pattern detection
-   - Test AST-based empty function detection
-   - Test combined analysis
+1. **Unit tests for AST analyzer** — feed it known-bad code samples, verify detection
+2. **Integration test for completeness gate node** — run through workflow state machine
+3. **Regression tests** — use the actual patterns from closed issues #149-#156 as test fixtures
+4. **Manual E2E** — run workflow with intentionally incomplete implementation, verify block
 
-2. **Integration test for completeness gate:**
-   - Mock mode should pass
-   - File with `pass` should BLOCK
-   - File with `assert True` should BLOCK
-   - Clean file should PASS
+## Subsumes
 
-3. **E2E test:**
-   - Run workflow with intentionally stubbed implementation
-   - Verify it loops back and eventually fails or fixes
-
-4. **Manual verification:**
-   ```bash
-   poetry run python tools/run_requirements_workflow.py \
-     --type lld --issue 142 --gates none --mock
-   ```
-
----
+- **#181** (Implementation Report with LLD Requirement Verification) — closed as duplicate, report generation carried forward here
 
 ## Related Issues
 
-- #142, #143, #144, #145, #146
-
----
-
-## Summary
-
-| Component | Purpose |
-|-----------|---------|
-| `static_analyzer.py` | Fast pattern detection (regex + AST) |
-| `completeness_gate.py` | N4b node combining static + Gemini |
-| `0707c-*.md` | Gemini prompt for semantic review |
-| `graph.py` changes | Insert N4b between N4 and N5 |
-| `0703c-*.md` changes | Promote Test Integrity to Tier 1 |
-
-This creates a bulletproof gate that catches lazy implementations before they can pass fake tests.
+- #335 — N2.5 mechanical test validation (architectural precedent for this gate)
+- #225 — Skipped test enforcement (partial detection overlap on pytest.skip)
+- #354 — Mutation testing (deep-frozen, Layer 3 verification for after this is proven)
+- #149-#156 — Codebase scan findings (all closed, inform detection targets)

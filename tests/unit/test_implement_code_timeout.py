@@ -66,7 +66,7 @@ class TestSDKTimeout:
             "SDK_TIMEOUT",
         )
         assert SDK_TIMEOUT > 0
-        assert SDK_TIMEOUT <= 600  # Max 10 minutes
+        assert SDK_TIMEOUT <= 900  # Reasonable upper bound
 
 
 # =============================================================================
@@ -104,9 +104,12 @@ class TestErrorPropagation:
         """Timeout errors should include how long we waited."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
-            SDK_TIMEOUT,
+            compute_dynamic_timeout,
         )
         import httpx
+
+        prompt = "test"
+        expected_timeout = compute_dynamic_timeout(prompt)
 
         with patch(
             "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
@@ -121,11 +124,11 @@ class TestErrorPropagation:
                 "sys.modules",
                 {"anthropic": mock_anthropic, "httpx": httpx},
             ):
-                response, error = call_claude_for_file("test")
+                response, error = call_claude_for_file(prompt)
 
                 # Error should mention timeout duration
                 assert "timeout" in error.lower()
-                assert str(SDK_TIMEOUT) in error
+                assert str(expected_timeout) in error
 
 
 # =============================================================================
@@ -160,12 +163,12 @@ class TestCLITimeout:
                 assert "timeout" in error.lower() or "timed out" in error.lower()
 
     def test_cli_timeout_value(self):
-        """CLI timeout should be 5 minutes (300 seconds)."""
+        """CLI timeout should be 10 minutes (600 seconds). Issue #373."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             CLI_TIMEOUT,
         )
 
-        assert CLI_TIMEOUT == 300
+        assert CLI_TIMEOUT == 600
 
 
 # =============================================================================

@@ -7,10 +7,10 @@
 * **Related Issues:** #181 (subsumed - Implementation Report), #335 (N2.5 precedent), #225 (skipped test enforcement), #354 (mutation testing - future), #149-#156 (codebase scan findings - closed)
 
 ### Open Questions
-*Questions that need clarification before or during implementation. Remove when resolved.*
+*All questions resolved per Gemini review.*
 
-- [ ] Should the Gemini semantic review have a configurable timeout for budget control?
-- [ ] What is the maximum number of N4→N4b→N4 iterations before escalating to human review vs hard stop?
+- [x] ~~Should the Gemini semantic review have a configurable timeout for budget control?~~ **RESOLVED: Yes. Implement a default timeout (30s) in the Gemini client configuration to prevent hanging processes and budget drain.**
+- [x] ~~What is the maximum number of N4→N4b→N4 iterations before escalating to human review vs hard stop?~~ **RESOLVED: Set a hard limit of 3 iterations. If the loop persists, route to `end` (Fail) to force manual intervention rather than spiraling costs.**
 
 ## 2. Proposed Changes
 
@@ -20,11 +20,12 @@
 
 | File | Change Type | Description |
 |------|-------------|-------------|
+| `assemblyzero/workflows/testing/completeness/` | Add (Directory) | Package directory for completeness analysis |
 | `assemblyzero/workflows/testing/completeness/__init__.py` | Add | Package init with exports |
 | `assemblyzero/workflows/testing/completeness/ast_analyzer.py` | Add | Layer 1 AST-based analysis functions |
 | `assemblyzero/workflows/testing/completeness/report_generator.py` | Add | Generate implementation verification reports |
 | `assemblyzero/workflows/testing/nodes/completeness_gate.py` | Add | N4b workflow node implementation |
-| `tests/test_completeness_gate.py` | Add | Unit and integration tests for completeness gate |
+| `tests/unit/test_completeness_gate.py` | Add | Unit and integration tests for completeness gate |
 | `assemblyzero/workflows/testing/graph.py` | Modify | Insert N4b node between N4 and N5, add routing |
 | `assemblyzero/workflows/testing/state.py` | Modify | Add completeness_verdict and completeness_issues fields |
 | `assemblyzero/workflows/testing/nodes/__init__.py` | Modify | Export completeness_gate node |
@@ -54,9 +55,19 @@ Mechanical validation automatically checks:
 
 ```python
 # Pseudocode - NOT implementation
+from enum import Enum
+
+class CompletenessCategory(Enum):
+    """Categories of completeness issues for type safety."""
+    DEAD_CLI_FLAG = "dead_cli_flag"
+    EMPTY_BRANCH = "empty_branch"
+    DOCSTRING_ONLY = "docstring_only"
+    TRIVIAL_ASSERTION = "trivial_assertion"
+    UNUSED_IMPORT = "unused_import"
+
 class CompletenessIssue(TypedDict):
     """Single completeness issue detected by analysis."""
-    category: Literal["dead_cli_flag", "empty_branch", "docstring_only", "trivial_assertion", "unused_import"]
+    category: CompletenessCategory
     file_path: str
     line_number: int
     description: str
@@ -83,12 +94,19 @@ class ImplementationReport(TypedDict):
     completeness_result: CompletenessResult
     generated_at: str  # ISO timestamp
 
+class ReviewMaterials(TypedDict):
+    """Materials prepared for Gemini semantic review."""
+    lld_requirements: list[tuple[int, str]]  # (id, text) pairs
+    code_snippets: dict[str, str]  # file_path -> relevant code
+    issue_number: int
+
 # State additions
 class TestingState(TypedDict):
     # ... existing fields ...
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]
     completeness_issues: list[CompletenessIssue]
     implementation_report_path: str  # From #181
+    review_materials: ReviewMaterials | None  # For Gemini Layer 2
 ```
 
 ### 2.4 Function Signatures
@@ -116,8 +134,8 @@ def analyze_unused_imports(source_code: str, file_path: str) -> list[Completenes
     """Detect imports with no usage in function bodies."""
     ...
 
-def run_ast_analysis(files: list[Path]) -> CompletenessResult:
-    """Run all AST checks on provided files."""
+def run_ast_analysis(files: list[Path], max_file_size_bytes: int = 1_000_000) -> CompletenessResult:
+    """Run all AST checks on provided files. Skip files exceeding max_file_size_bytes."""
     ...
 
 
@@ -134,6 +152,14 @@ def generate_implementation_report(
 
 def extract_lld_requirements(lld_path: Path) -> list[tuple[int, str]]:
     """Parse Section 3 requirements from LLD markdown."""
+    ...
+
+def prepare_review_materials(
+    issue_number: int,
+    lld_path: Path,
+    implementation_files: list[Path],
+) -> ReviewMaterials:
+    """Prepare materials for Gemini semantic review submission by orchestrator."""
     ...
 
 
@@ -157,6 +183,7 @@ N4b_completeness_gate:
 
 3. LAYER 1: AST Analysis
    FOR each file in implementation files:
+     - Skip if file exceeds max_file_size_bytes (1MB default)
      - Run analyze_dead_cli_flags()
      - Run analyze_empty_branches()
      - Run analyze_docstring_only_functions()
@@ -173,9 +200,10 @@ N4b_completeness_gate:
    
 5. LAYER 2: Gemini Semantic Review (orchestrator-controlled)
    - Extract requirements from LLD Section 3
-   - Prepare review materials (code snippets, LLD excerpt)
+   - Prepare review materials via prepare_review_materials()
+   - Set state.review_materials with prepared materials
    - Return state with review_materials for orchestrator
-   - Orchestrator submits to Gemini
+   - Orchestrator submits to Gemini (with 30s timeout)
    - Receive Gemini verdict
 
 6. Generate implementation report
@@ -190,7 +218,7 @@ N4b_completeness_gate:
 
 route_after_completeness_gate:
 1. IF verdict == "BLOCK":
-   - IF iteration_count >= max_iterations: return "end"
+   - IF iteration_count >= 3: return "end"  # Hard limit
    - ELSE: return "N4_implement_code"
 2. ELSE:
    - return "N5_verify_green"
@@ -205,6 +233,7 @@ route_after_completeness_gate:
   - Gemini review only triggers if AST passes (cost control)
   - Orchestrator controls Gemini submission per WORKFLOW.md
   - Report generation is a side effect, not blocking
+  - File size limit (1MB) prevents memory spikes on large generated files
 
 ### 2.7 Architecture Decisions
 
@@ -213,7 +242,9 @@ route_after_completeness_gate:
 | Analysis ordering | Parallel layers, Sequential layers | Sequential (AST then Gemini) | AST is fast/free; skip expensive Gemini if AST fails |
 | AST implementation | Tree-sitter, Python ast, LibCST | Python ast | Zero dependencies, sufficient for our patterns |
 | Report storage | Database, S3, Local markdown | Local markdown | Consistent with existing report patterns |
-| Loop limit | Hardcoded, Configurable, Unlimited | Configurable via state | Different issues may need different patience |
+| Loop limit | Hardcoded, Configurable, Unlimited | Hardcoded at 3 | Prevents cost spiral; simple to understand |
+| Issue categories | String literals, Enum | Enum (CompletenessCategory) | Type safety, IDE support, refactoring ease |
+| File size limit | None, Configurable, Hardcoded | Configurable with 1MB default | Prevents memory spikes while allowing override |
 
 **Architectural Constraints:**
 - Must integrate with existing LangGraph workflow structure
@@ -235,8 +266,8 @@ route_after_completeness_gate:
 9. Implementation report generated at docs/reports/active/{issue}-implementation-report.md
 10. Report includes LLD requirement verification table
 11. Report includes completeness analysis summary
-12. Max iteration limit prevents infinite loops
-13. Layer 2 Gemini review prepared for orchestrator submission (not direct call)
+12. Max iteration limit (3) prevents infinite loops
+13. Layer 2 Gemini review materials prepared correctly for orchestrator submission (not direct call)
 
 ## 4. Alternatives Considered
 
@@ -270,6 +301,7 @@ route_after_completeness_gate:
 Implementation Files ──ast.parse──► AST Trees ──analyze──► CompletenessIssues
 LLD Markdown ──parse──► Requirements ──compare──► RequirementVerification
 CompletenessIssues + RequirementVerification ──format──► Implementation Report (Markdown)
+LLD + Code ──prepare_review_materials──► ReviewMaterials (for Orchestrator)
 ```
 
 ### 5.3 Test Fixtures
@@ -282,6 +314,7 @@ CompletenessIssues + RequirementVerification ──format──► Implementatio
 | Trivial assertion test | Generated | Test with only `assert x is not None` |
 | Valid implementation | Generated | Code with no issues (negative test) |
 | Patterns from #149-#156 | Extracted | Real issues from codebase scan |
+| Sample LLD with requirements | Generated | Markdown with Section 3 requirements |
 
 ### 5.4 Deployment Pipeline
 
@@ -342,8 +375,8 @@ flowchart TB
     L2 --> RPT
     RPT --> ROUTE{"Route"}
     
-    ROUTE -->|"verdict=BLOCK & iter<max"| N4
-    ROUTE -->|"verdict=BLOCK & iter>=max"| END
+    ROUTE -->|"verdict=BLOCK & iter<3"| N4
+    ROUTE -->|"verdict=BLOCK & iter>=3"| END
     ROUTE -->|"verdict=PASS/WARN"| N5
 ```
 
@@ -361,10 +394,12 @@ flowchart TB
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Infinite loop in N4↔N4b cycle | max_iterations state field with hard limit | Addressed |
+| Infinite loop in N4↔N4b cycle | Hard limit of 3 iterations | Addressed |
 | False positive blocks valid code | WARN severity for uncertain detections, only ERROR blocks | Addressed |
 | Report overwrite data loss | Reports use unique issue number in filename | Addressed |
 | AST parse failure on syntax errors | Catch SyntaxError, report as separate issue | Addressed |
+| Memory spike on large files | Skip files exceeding 1MB size limit | Addressed |
+| Gemini timeout causing budget drain | 30s timeout configured in Gemini client | Addressed |
 
 **Fail Mode:** Fail Open - If AST analysis fails unexpectedly, proceed to N5 with warning rather than blocking indefinitely.
 
@@ -376,9 +411,9 @@ flowchart TB
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| AST analysis latency | < 500ms for 50 files | Python ast is fast, no I/O |
-| Gemini review latency | < 30s | Only runs if AST passes |
-| Memory | < 50MB | AST trees are small, process sequentially |
+| AST analysis latency | < 500ms for 50 files | Python ast is fast, no I/O; skip files >1MB |
+| Gemini review latency | < 30s | Only runs if AST passes; timeout enforced |
+| Memory | < 50MB | AST trees are small, process sequentially; skip large files |
 
 **Bottlenecks:** Gemini API call is the slowest component; mitigated by Layer 1 filtering.
 
@@ -392,9 +427,10 @@ flowchart TB
 **Cost Controls:**
 - [x] Layer 1 AST analysis gates expensive Gemini calls
 - [x] Gemini only called when AST analysis passes
-- [ ] Budget alerts configured at {$X threshold} - N/A for this cost level
+- [x] Hard iteration limit (3) prevents cost spiral
+- [x] 30s timeout prevents hanging/runaway Gemini calls
 
-**Worst-Case Scenario:** If Layer 1 has bugs allowing all implementations through, Gemini costs increase proportionally. At $0.01/call, even 10x usage is $10/month.
+**Worst-Case Scenario:** If Layer 1 has bugs allowing all implementations through, Gemini costs increase proportionally. At $0.01/call, even 10x usage is $10/month. Hard iteration limit caps max calls per issue to 3.
 
 ## 9. Legal & Compliance
 
@@ -435,9 +471,10 @@ flowchart TB
 | T070 | test_valid_code_no_issues | Returns empty issues list for clean code | RED |
 | T080 | test_completeness_gate_block_routing | BLOCK verdict routes to N4 | RED |
 | T090 | test_completeness_gate_pass_routing | PASS verdict routes to N5 | RED |
-| T100 | test_max_iterations_ends | BLOCK at max iterations routes to end | RED |
+| T100 | test_max_iterations_ends | BLOCK at max iterations (3) routes to end | RED |
 | T110 | test_report_generation | Report file created with correct structure | RED |
 | T120 | test_lld_requirement_extraction | Requirements parsed from Section 3 | RED |
+| T130 | test_prepare_review_materials | ReviewMaterials correctly populated with LLD requirements and code snippets | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -445,36 +482,37 @@ flowchart TB
 - [ ] All tests written before implementation
 - [ ] Tests currently RED (failing)
 - [ ] Test IDs match scenario IDs in 10.1
-- [ ] Test file created at: `tests/test_completeness_gate.py`
+- [ ] Test file created at: `tests/unit/test_completeness_gate.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Dead CLI flag detection | Auto | Code with `add_argument('--foo')` unused | CompletenessIssue with category='dead_cli_flag' | Issue returned with correct file/line |
-| 020 | Empty branch (pass) detection | Auto | Code with `if x: pass` | CompletenessIssue with category='empty_branch' | Issue identifies branch location |
-| 030 | Empty branch (return None) detection | Auto | Code with `if mock: return None` | CompletenessIssue with category='empty_branch' | Issue identifies branch location |
-| 040 | Docstring-only function detection | Auto | `def foo(): """Doc.""" pass` | CompletenessIssue with category='docstring_only' | Issue identifies function |
-| 050 | Trivial assertion detection | Auto | Test with only `assert result is not None` | CompletenessIssue with category='trivial_assertion' | Issue warns about assertion quality |
-| 060 | Unused import detection | Auto | `import os` with no usage | CompletenessIssue with category='unused_import' | Issue identifies import |
+| 010 | Dead CLI flag detection | Auto | Code with `add_argument('--foo')` unused | CompletenessIssue with category=DEAD_CLI_FLAG | Issue returned with correct file/line |
+| 020 | Empty branch (pass) detection | Auto | Code with `if x: pass` | CompletenessIssue with category=EMPTY_BRANCH | Issue identifies branch location |
+| 030 | Empty branch (return None) detection | Auto | Code with `if mock: return None` | CompletenessIssue with category=EMPTY_BRANCH | Issue identifies branch location |
+| 040 | Docstring-only function detection | Auto | `def foo(): """Doc.""" pass` | CompletenessIssue with category=DOCSTRING_ONLY | Issue identifies function |
+| 050 | Trivial assertion detection | Auto | Test with only `assert result is not None` | CompletenessIssue with category=TRIVIAL_ASSERTION | Issue warns about assertion quality |
+| 060 | Unused import detection | Auto | `import os` with no usage | CompletenessIssue with category=UNUSED_IMPORT | Issue identifies import |
 | 070 | Valid implementation (negative) | Auto | Complete implementation code | Empty issues list | No false positives |
-| 080 | BLOCK routes to N4 | Auto | State with verdict='BLOCK', iter<max | Route returns 'N4_implement_code' | Correct routing |
+| 080 | BLOCK routes to N4 | Auto | State with verdict='BLOCK', iter<3 | Route returns 'N4_implement_code' | Correct routing |
 | 090 | PASS routes to N5 | Auto | State with verdict='PASS' | Route returns 'N5_verify_green' | Correct routing |
-| 100 | Max iterations ends workflow | Auto | State with verdict='BLOCK', iter>=max | Route returns 'end' | Prevents infinite loop |
+| 100 | Max iterations ends workflow | Auto | State with verdict='BLOCK', iter>=3 | Route returns 'end' | Prevents infinite loop |
 | 110 | Report file generation | Auto | Issue #999, results | File at docs/reports/active/999-implementation-report.md | File exists with correct structure |
 | 120 | LLD requirement parsing | Auto | LLD with Section 3 requirements | List of (id, text) tuples | All requirements extracted |
+| 130 | Review materials preparation | Auto | LLD path + implementation files | ReviewMaterials with requirements and code snippets | Materials correctly formatted for orchestrator |
 
 ### 10.2 Test Commands
 
 ```bash
 # Run all automated tests
-poetry run pytest tests/test_completeness_gate.py -v
+poetry run pytest tests/unit/test_completeness_gate.py -v
 
 # Run only fast/mocked tests (exclude live)
-poetry run pytest tests/test_completeness_gate.py -v -m "not live"
+poetry run pytest tests/unit/test_completeness_gate.py -v -m "not live"
 
 # Run with coverage
-poetry run pytest tests/test_completeness_gate.py -v --cov=assemblyzero/workflows/testing/completeness --cov-report=term-missing
+poetry run pytest tests/unit/test_completeness_gate.py -v --cov=assemblyzero/workflows/testing/completeness --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -490,6 +528,7 @@ N/A - All scenarios automated.
 | Gemini semantic review gives inconsistent results | Med | Low | Layer 1 catches most issues; Layer 2 is enhancement |
 | Integration breaks existing workflow | High | Low | Comprehensive integration tests; feature flag for rollout |
 | Report generation fails silently | Low | Low | Log errors; proceed with verdict regardless of report |
+| Memory spike on large files | Med | Low | File size limit (1MB) in run_ast_analysis |
 
 ## 12. Definition of Done
 
@@ -528,10 +567,26 @@ Mechanical validation automatically checks:
 
 <!-- Note: Timestamps are auto-generated by the workflow. Do not fill in manually. -->
 
+### Gemini Review #1 (REVISE)
+
+**Reviewer:** Gemini 3 Pro
+**Verdict:** REVISE
+
+#### Comments
+
+| ID | Comment | Implemented? |
+|----|---------|--------------|
+| G1.1 | "Coverage is 92.3%. You must add a test case for Requirement 13 (Gemini material preparation) to reach >95%." | YES - Added T130 test scenario for prepare_review_materials |
+| G1.2 | "Requirement 13 involves parsing LLDs and formatting code for a prompt. This is error-prone string manipulation that requires a dedicated unit test." | YES - Added prepare_review_materials function signature and T130 test |
+| G1.3 | "Consider implementing a size limit on the files sent to ast.parse to prevent memory spikes" | YES - Added max_file_size_bytes parameter to run_ast_analysis (1MB default) |
+| G1.4 | "Ensure CompletenessIssue categories are defined as an Enum for better type safety" | YES - Added CompletenessCategory Enum in Section 2.3 |
+| G1.5 | "Open question: Gemini timeout" | YES - Resolved: 30s default timeout documented |
+| G1.6 | "Open question: Max iterations" | YES - Resolved: Hard limit of 3, routes to end |
+
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | - |
+| Gemini #1 | 2026-02-16 | REVISE | Test coverage 92.3% - missing REQ-13 test |
 
 **Final Status:** PENDING
