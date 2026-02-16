@@ -472,25 +472,100 @@ class TestMapTestsToRequirements:
     """Test the mapping function directly."""
 
     def test_explicit_ref_mapping(self):
-        """Explicit requirement_ref maps correctly."""
+        """Explicit requirement_refs maps correctly."""
         reqs = [{"id": "REQ-1", "text": "Do something"}]
-        tests = [{"id": "T010", "description": "Test X", "test_type": "auto", "requirement_ref": "REQ-1"}]
+        tests = [{"id": "T010", "description": "Test X", "test_type": "auto", "requirement_refs": ["REQ-1"]}]
         mapping = map_tests_to_requirements(reqs, tests)
         assert "T010" in mapping["REQ-1"]
+
+    def test_multi_ref_mapping(self):
+        """Multiple requirement_refs map a single test to multiple requirements."""
+        reqs = [{"id": "REQ-1", "text": "Do X"}, {"id": "REQ-2", "text": "Do Y"}]
+        tests = [{"id": "T010", "description": "Test both", "test_type": "auto", "requirement_refs": ["REQ-1", "REQ-2"]}]
+        mapping = map_tests_to_requirements(reqs, tests)
+        assert "T010" in mapping["REQ-1"]
+        assert "T010" in mapping["REQ-2"]
 
     def test_keyword_mapping(self):
         """Keyword matching maps test to requirement."""
         reqs = [{"id": "REQ-1", "text": "validate input data ensuring correctness"}]
-        tests = [{"id": "T010", "description": "validate input data test ensuring correctness check", "test_type": "auto", "requirement_ref": ""}]
+        tests = [{"id": "T010", "description": "validate input data test ensuring correctness check", "test_type": "auto", "requirement_refs": []}]
         mapping = map_tests_to_requirements(reqs, tests)
         assert "T010" in mapping["REQ-1"]
 
     def test_no_match_returns_empty(self):
         """Completely different text produces no mapping."""
         reqs = [{"id": "REQ-1", "text": "authenticate users via LDAP"}]
-        tests = [{"id": "T010", "description": "database migration script", "test_type": "auto", "requirement_ref": ""}]
+        tests = [{"id": "T010", "description": "database migration script", "test_type": "auto", "requirement_refs": []}]
         mapping = map_tests_to_requirements(reqs, tests)
         assert mapping["REQ-1"] == []
+
+
+class TestExtractRequirementRefs:
+    """Test requirement reference extraction from table rows."""
+
+    def test_req_in_scenario_column(self):
+        """(Req 1) in Scenario column is found."""
+        lld = """\
+# 999
+
+## 3. Requirements
+
+1. Must validate
+
+## 10. Verification & Testing
+
+### 10.1 Test Scenarios
+
+| ID | Scenario | Type | Input | Expected Output | Pass Criteria |
+|----|----------|------|-------|-----------------|---------------|
+| 010 | Validate input (Req 1) | Auto | Data | Result | Pass |
+"""
+        scenarios = extract_test_scenarios(lld)
+        assert len(scenarios) == 1
+        assert "REQ-1" in scenarios[0]["requirement_refs"]
+
+    def test_req_in_other_column(self):
+        """Requirement reference in Pass Criteria column is still found."""
+        lld = """\
+# 999
+
+## 3. Requirements
+
+1. Must validate
+
+## 10. Verification & Testing
+
+### 10.1 Test Scenarios
+
+| ID | Scenario | Type | Input | Expected Output | Pass Criteria |
+|----|----------|------|-------|-----------------|---------------|
+| 010 | Validate input | Auto | Data | Result | Req 1 coverage |
+"""
+        scenarios = extract_test_scenarios(lld)
+        assert "REQ-1" in scenarios[0]["requirement_refs"]
+
+    def test_multi_ref_in_single_row(self):
+        """(Req 5, Req 6) captures both refs."""
+        lld = """\
+# 999
+
+## 3. Requirements
+
+1. Req A
+2. Req B
+
+## 10. Verification & Testing
+
+### 10.1 Test Scenarios
+
+| ID | Scenario | Type | Input | Expected Output | Pass Criteria |
+|----|----------|------|-------|-----------------|---------------|
+| 010 | Test both (Req 1, Req 2) | Auto | Data | Result | Pass |
+"""
+        scenarios = extract_test_scenarios(lld)
+        assert "REQ-1" in scenarios[0]["requirement_refs"]
+        assert "REQ-2" in scenarios[0]["requirement_refs"]
 
 
 class TestCheckRequirementCoverageEdges:

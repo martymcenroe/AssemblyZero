@@ -30,7 +30,7 @@ class LLDTestScenario(TypedDict):
     id: str
     description: str
     test_type: str
-    requirement_ref: str
+    requirement_refs: list[str]
 
 
 class ValidationViolation(TypedDict):
@@ -219,38 +219,40 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
         else:
             scenario_id = scenario_id.upper()
 
-        # Extract requirement reference from description
-        requirement_ref = _extract_requirement_ref(description)
+        # Extract requirement references from ALL columns (not just description)
+        full_row_text = " ".join(cells)
+        requirement_refs = _extract_requirement_refs(full_row_text)
 
         scenarios.append({
             "id": scenario_id,
             "description": description,
             "test_type": test_type,
-            "requirement_ref": requirement_ref,
+            "requirement_refs": requirement_refs,
         })
 
     return scenarios
 
 
-def _extract_requirement_ref(description: str) -> str:
-    """Extract requirement reference from a test scenario description.
+def _extract_requirement_refs(text: str) -> list[str]:
+    """Extract ALL requirement references from text.
 
-    Looks for patterns like:
+    Searches the entire row text (all columns) for patterns like:
     - "Req 1", "REQ-1", "requirement 1"
-    - "Requirement 3 coverage"
-    - Implicit numbering from scenario description
+    - "(Req 5, Req 6)" — finds both
+    - "Requirement 3"
 
     Args:
-        description: Test scenario description text.
+        text: Full row text (all columns concatenated).
 
     Returns:
-        Normalized requirement reference (e.g., "REQ-1") or "".
+        List of normalized requirement references (e.g., ["REQ-1", "REQ-3"]).
     """
-    # Look for explicit REQ-X references
-    match = re.search(r"\b(?:req(?:uirement)?)\s*[-.]?\s*(\d+)\b", description, re.IGNORECASE)
-    if match:
-        return f"REQ-{match.group(1)}"
-    return ""
+    refs = []
+    for match in re.finditer(r"\b(?:req(?:uirement)?)\s*[-.]?\s*(\d+)\b", text, re.IGNORECASE):
+        ref = f"REQ-{match.group(1)}"
+        if ref not in refs:
+            refs.append(ref)
+    return refs
 
 
 # =============================================================================
@@ -278,11 +280,16 @@ def map_tests_to_requirements(
     mapping: dict[str, list[str]] = {r["id"]: [] for r in requirements}
 
     for test in tests:
-        # Strategy 1: Explicit requirement reference
-        if test["requirement_ref"]:
-            ref = test["requirement_ref"].upper()
-            if ref in mapping:
-                mapping[ref].append(test["id"])
+        # Strategy 1: Explicit requirement references
+        if test["requirement_refs"]:
+            matched = False
+            for ref in test["requirement_refs"]:
+                ref_upper = ref.upper()
+                if ref_upper in mapping:
+                    if test["id"] not in mapping[ref_upper]:
+                        mapping[ref_upper].append(test["id"])
+                    matched = True
+            if matched:
                 continue
 
         # Strategy 2: Keyword matching
