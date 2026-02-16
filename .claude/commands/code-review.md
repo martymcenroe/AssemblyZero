@@ -1,18 +1,16 @@
 ---
-description: Parallel multi-agent code review (PR or staged changes)
+description: Single-agent code review (PR or staged changes)
 argument-hint: "[PR#] [--files path1 path2...] [--focus security|quality|all]"
 ---
 
-# Multi-Agent Code Review
+# Code Review
 
-**Based on:** `anthropics/claude-code` code-review plugin
-**Architecture:** 5 parallel agents with confidence-based filtering
+**Model hint:** Use **Sonnet** for the review agent — sufficient for all checklist areas.
 
-**Model hints:**
-- Security Reviewer: **Opus** (complex security reasoning)
-- All other agents: **Sonnet** (pattern matching, sufficient capability)
+**Cost:** ~$0.05-0.15 per review (single agent, diff passed inline).
 
-**Cost optimization:** Context is gathered ONCE in Step 1, then PASSED to agents. Agents should NOT read files independently - this wastes tokens on duplicate reads.
+**Previous design:** 5 parallel agents (1 Opus + 4 Sonnet) at ~$0.30-1.00/review.
+Replaced with single structured-checklist agent — ~80% cheaper, ~90% as effective.
 
 ---
 
@@ -32,25 +30,27 @@ Usage: `/code-review [PR#] [--files path1 path2...] [--focus security|quality|al
 |----------|-------------|
 | `PR#` | Review a specific pull request (e.g., `123`) |
 | `--files` | Review specific files instead of PR |
-| `--focus security` | Run only security-focused agents |
-| `--focus quality` | Run only code quality agents |
-| `--focus all` | Run all agents (default) |
+| `--focus security` | Weight security checks heavily |
+| `--focus quality` | Weight code quality and test checks heavily |
+| `--focus all` | Equal weight across all areas (default) |
 
 **Examples:**
-- `/code-review 123` - review PR #123 with all agents
+- `/code-review 123` - review PR #123
 - `/code-review --files src/main.py` - review specific file
-- `/code-review 123 --focus security` - security-only review of PR
+- `/code-review 123 --focus security` - security-weighted review of PR
 
 ---
 
 ## Execution
 
-### Step 1: Gather Context
+### Step 1: Gather Context (parent agent)
 
 **If PR number provided:**
 ```bash
-gh pr view $PR --json title,body,files,commits
-gh pr diff $PR
+gh pr view $PR --json title,body,files,commits --repo {GITHUB_REPO}
+```
+```bash
+gh pr diff $PR --repo {GITHUB_REPO}
 ```
 
 **If --files provided:**
@@ -59,224 +59,102 @@ Read the specified files directly.
 **If neither provided:**
 ```bash
 git diff --staged
+```
+```bash
 git diff HEAD
 ```
 
-### Step 2: Spawn Parallel Review Agents
+### Step 2: Spawn Single Review Agent
 
-Launch 5 agents in parallel using the Task tool. Each agent operates independently and returns findings with confidence scores.
+Launch ONE Task agent with `subagent_type: general-purpose` and `model: sonnet`.
 
-**CRITICAL:** Use a single message with 5 Task tool calls to run in parallel.
+**COST OPTIMIZATION:** Pass the diff content directly in the agent prompt. The agent should NOT use Read/Grep tools to re-fetch files — all context is inline.
 
-**COST OPTIMIZATION (SHARED CONTEXT):**
-- You (the parent agent) already gathered the PR diff in Step 1
-- PASS the diff content directly in each agent's spawn prompt
-- Agents should NOT use Read/Grep tools to re-fetch the same content
-- This avoids 5x duplicate file reads
-
-**Template:** In each agent prompt below, replace `[PR diff or file contents]` with the ACTUAL diff content you gathered in Step 1. Do not use placeholders.
-
-**Agent Prompt Header (include in ALL agent prompts):**
-```
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools to fetch files - this wastes tokens. Analyze only the provided content.
-```
-
-#### Agent 1: Security Reviewer (Opus)
+**Agent Prompt:**
 
 ```
-Review code for security vulnerabilities.
+You are a code reviewer. Analyze the provided diff using the structured checklist below.
 
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools.
+IMPORTANT: All context is provided below. Do NOT use Read/Grep/Bash tools to fetch files — this wastes tokens. Analyze only the provided content. The ONE exception: you may Read CLAUDE.md for compliance rules if the project has one.
 
-Context: [PR diff or file contents - REPLACE WITH ACTUAL DIFF]
+Project: {PROJECT_NAME}
+Focus: {FOCUS: security|quality|all}
 
-Execute security checklist:
-1. Input validation and sanitization
-2. Authentication/authorization flaws
-3. Injection vulnerabilities (SQL, XSS, command)
-4. Sensitive data exposure
-5. Security misconfiguration
+## Diff to Review
 
-Return findings in format:
-{
-  "agent": "security",
-  "confidence": 0.0-1.0,
-  "critical": [...],
-  "warnings": [...],
-  "suggestions": [...]
-}
+{ACTUAL DIFF CONTENT — replace this placeholder with the real diff}
+
+## Review Checklist
+
+Work through ALL sections. For each finding, rate confidence 0.0-1.0.
+Skip sections with no findings rather than padding with "looks good."
+
+### 1. Security
+- Input validation and sanitization
+- Authentication/authorization flaws
+- Injection vulnerabilities (SQL, XSS, command)
+- Sensitive data exposure (secrets, tokens, PII in logs)
+- Security misconfiguration
+
+### 2. Bugs & Logic Errors
+- Null/undefined handling
+- Race conditions
+- Error handling gaps (uncaught exceptions, missing error paths)
+- Edge cases not covered
+- Type mismatches
+- Resource leaks (file handles, connections, event listeners)
+
+### 3. Code Quality
+- SOLID principles adherence
+- DRY violations (copy-paste code)
+- Function/method length (>50 lines is a flag)
+- Naming clarity
+- Cyclomatic complexity
+
+### 4. CLAUDE.md Compliance (if applicable)
+- Bash commands using && or pipes (should use git -C instead)
+- Path format violations (Bash=Unix, Read/Write=Windows)
+- Forbidden commands (git reset --hard, pip install, etc.)
+
+### 5. Test Coverage
+- New code has corresponding tests
+- Edge cases covered
+- Error paths tested
+- Mocks appropriate and not excessive
+
+## Output Format
+
+Return a structured review:
+
+SUMMARY: [1-2 sentence overall assessment]
+
+CRITICAL FINDINGS (must fix):
+- [Finding] (confidence: X.X) — [file:line if applicable]
+
+WARNINGS (should fix):
+- [Finding] (confidence: X.X) — [file:line if applicable]
+
+SUGGESTIONS (nice to have):
+- [Finding] (confidence: X.X)
+
+VERDICT: [APPROVE / REQUEST_CHANGES / COMMENT_ONLY]
+
+If focus is "security", weight section 1 heavily and be thorough.
+If focus is "quality", weight sections 3 and 5 heavily.
+If focus is "all", give equal weight to all sections.
+
+Only include findings with confidence >= 0.5. Skip low-confidence noise.
 ```
 
-#### Agent 2: CLAUDE.md Compliance (Sonnet)
+### Step 3: Display Results
 
-```
-Review code changes for AssemblyZero compliance.
-
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools except for CLAUDE.md reference.
-
-Context: [PR diff - REPLACE WITH ACTUAL DIFF]
-Reference: Read CLAUDE.md (this is the ONE exception - read it for rules)
-
-Check for violations:
-1. Bash commands using && or pipes
-2. Code edits on main branch without worktree
-3. Missing reports for closed issues
-4. Forbidden commands (git reset, pip install, etc.)
-5. Path format violations (Bash vs Read/Write)
-
-Return findings in format:
-{
-  "agent": "claude-md-compliance",
-  "confidence": 0.0-1.0,
-  "violations": [...],
-  "warnings": [...]
-}
-```
-
-#### Agent 3: Bug Detector (Sonnet)
-
-```
-Analyze code for potential bugs and logic errors.
-
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools.
-
-Context: [PR diff or file contents - REPLACE WITH ACTUAL DIFF]
-
-Check for:
-1. Null/undefined handling
-2. Race conditions
-3. Error handling gaps
-4. Edge cases not covered
-5. Type mismatches
-6. Resource leaks
-
-Return findings in format:
-{
-  "agent": "bug-detector",
-  "confidence": 0.0-1.0,
-  "bugs": [...],
-  "potential_issues": [...]
-}
-```
-
-#### Agent 4: Code Quality (Sonnet)
-
-```
-Review code for quality, maintainability, and best practices.
-
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools.
-
-Context: [PR diff or file contents - REPLACE WITH ACTUAL DIFF]
-
-Check for:
-1. SOLID principles adherence
-2. DRY violations
-3. Function/method length
-4. Naming clarity
-5. Comment quality (not quantity)
-6. Cyclomatic complexity
-
-Return findings in format:
-{
-  "agent": "code-quality",
-  "confidence": 0.0-1.0,
-  "issues": [...],
-  "suggestions": [...]
-}
-```
-
-#### Agent 5: Test Coverage Analyzer (Sonnet)
-
-```
-Analyze test coverage for the changed code.
-
-IMPORTANT: All context is provided below. Do NOT use Read/Grep tools.
-
-Context: [PR diff or file contents - REPLACE WITH ACTUAL DIFF]
-
-Check for:
-1. New code has corresponding tests
-2. Edge cases covered
-3. Error paths tested
-4. Mocks appropriate and not excessive
-5. Integration vs unit test balance
-
-Return findings in format:
-{
-  "agent": "test-coverage",
-  "confidence": 0.0-1.0,
-  "missing_tests": [...],
-  "suggestions": [...]
-}
-```
-
-### Step 3: Confidence-Based Filtering
-
-After all agents return, filter results by confidence:
-
-| Confidence | Action |
-|------------|--------|
-| >= 0.8 | Include in report (high confidence) |
-| 0.5 - 0.8 | Include with caveat "Verify manually" |
-| < 0.5 | Exclude from report (too uncertain) |
-
-### Step 4: Synthesize Report
-
-Produce a consolidated report:
-
-```markdown
-# Code Review: [PR Title or Files]
-
-## Summary
-[1-2 sentence overall assessment]
-
-## Security Findings (Agent: security-reviewer)
-### CRITICAL
-- [ ] Finding (confidence: X.X)
-
-### WARNING
-- [ ] Finding (confidence: X.X)
-
-## CLAUDE.md Compliance (Agent: claude-md-compliance)
-- [ ] Violation: ...
-
-## Potential Bugs (Agent: bug-detector)
-- [ ] Bug: ... (confidence: X.X)
-
-## Code Quality (Agent: code-quality)
-- [ ] Issue: ...
-
-## Test Coverage (Agent: test-coverage)
-- [ ] Missing: ...
-
-## Recommendations
-1. [Prioritized action items]
-
----
-*Review generated by 5 parallel agents. Findings with confidence < 0.5 excluded.*
-```
-
----
-
-## Focus Modes
-
-### --focus security
-Run only:
-- Agent 1: Security Reviewer
-
-### --focus quality
-Run only:
-- Agent 4: Code Quality
-- Agent 5: Test Coverage
-
-### --focus all (default)
-Run all 5 agents in parallel.
+Present the agent's review directly. No post-processing needed — the structured format is the final output.
 
 ---
 
 ## Notes
 
-- Security reviewer uses Opus (more thorough for security)
-- Other agents use Sonnet (faster, sufficient for patterns)
-- Parallel execution reduces total time from ~5min to ~1min
-- Confidence filtering reduces false positive noise
+- Single Sonnet agent covers all 5 review areas in one pass
+- Confidence threshold (0.5) filters low-quality findings
+- Focus modes weight checklist sections, not spawn different agents
+- Diff is passed inline — zero duplicate file reads

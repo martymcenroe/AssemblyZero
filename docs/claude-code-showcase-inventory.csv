@@ -1,0 +1,102 @@
+Category,Feature,File/Location,Description,Perceived Benefit,Complexity,Aletheia Relevance
+CORE CONFIG,CLAUDE.md Project Memory,./CLAUDE.md,"Persistent context that loads at session start. Contains stack overview, key commands, code style, directory structure.",Claude starts every session with full project context. No re-explaining.,Low,HIGH - already have this
+CORE CONFIG,settings.json Hooks,".claude/settings.json","Central configuration for hooks, environment variables, permissions.",Single source of truth for all automation behaviors.,Medium,HIGH - need to expand
+CORE CONFIG,settings.local.json,".claude/settings.local.json","Personal overrides, gitignored. Individual preferences without affecting team.",Team members can customize without conflicts.,Low,MEDIUM - solo project but good practice
+CORE CONFIG,settings.md,".claude/settings.md","Human-readable documentation of what each hook does.",Maintainability - understand hooks without reading JSON/scripts.,Low,LOW - nice to have
+CORE CONFIG,.mcp.json,"./.mcp.json","MCP server configuration for external integrations (JIRA, GitHub, Slack, etc.).",Connect Claude to external tools and services.,Medium,LOW - you noted MCP falling out of favor
+CORE CONFIG,.gitignore for .claude,".claude/.gitignore","Ignore local/personal files in .claude directory.",Keep personal settings out of version control.,Low,HIGH - should add
+HOOKS,PreToolUse - Branch Protection,settings.json,"Block edits when on main/master branch.",Prevent accidental commits to protected branches.,Low,HIGH - safety guardrail
+HOOKS,PreToolUse - Command Validation,settings.json,"Validate bash commands before execution.",Catch dangerous commands before they run.,Medium,HIGH - could address && friction
+HOOKS,PostToolUse - Auto Format,settings.json,"Run formatter after file edits.",Consistent code style without manual intervention.,Low,HIGH - already have pre-commit
+HOOKS,PostToolUse - Run Tests,settings.json,"Run tests when test files change.",Immediate feedback on test changes.,Low,MEDIUM - useful for TDD
+HOOKS,PostToolUse - Type Check,settings.json,"Run TypeScript type checker after edits.",Catch type errors immediately.,Low,HIGH - have pyright
+HOOKS,PostToolUse - Regenerate Types,settings.json,"Regenerate GraphQL/API types when schemas change.",Keep generated types in sync automatically.,Medium,LOW - no codegen currently
+HOOKS,UserPromptSubmit - Skill Eval,settings.json + hooks/,"Analyze prompt and suggest relevant skills.",Right context activated automatically without user thinking.,High,HIGH - transformative for audit selection
+HOOKS,Stop - Continue Decision,settings.json,"Decide if Claude should continue after task completion.",Enable multi-step autonomous workflows.,Medium,MEDIUM - useful for long audits
+HOOKS,Exit Code 0,Hook response,"Success - action proceeds.",Standard success flow.,Low,N/A - infrastructure
+HOOKS,Exit Code 2,Hook response,"Blocking error - action prevented (PreToolUse only).",Stop dangerous actions before they happen.,Low,N/A - infrastructure
+HOOKS,Hook Response - block,Hook JSON response,"Block the action with message.",Prevent unwanted operations with explanation.,Low,N/A - infrastructure
+HOOKS,Hook Response - feedback,Hook JSON response,"Non-blocking informational message.",Provide context without interrupting flow.,Low,N/A - infrastructure
+HOOKS,Hook Response - suppressOutput,Hook JSON response,"Hide command output from display.",Clean up noisy command output.,Low,LOW - cosmetic
+HOOKS,Hook Response - continue,Hook JSON response,"Whether Claude should continue working.",Control autonomous execution flow.,Medium,MEDIUM - for batch operations
+SKILL EVAL,skill-eval.sh,".claude/hooks/skill-eval.sh","Shell wrapper that invokes the Node.js skill matcher.",Entry point for skill evaluation system.,Low,HIGH - need this wrapper
+SKILL EVAL,skill-eval.js,".claude/hooks/skill-eval.js","Node.js engine that analyzes prompts and matches skills.",Core intelligence for automatic skill activation.,High,HIGH - port to Python or use as-is
+SKILL EVAL,skill-rules.json,".claude/hooks/skill-rules.json","Pattern matching configuration for skills.",Declarative rules for when skills activate.,Medium,HIGH - map to 08xx audits
+SKILL EVAL,Keyword Matching,skill-rules.json,"Simple word matching (test, form, graphql).",Catch obvious skill triggers.,Low,HIGH - audit keywords
+SKILL EVAL,Keyword Patterns,skill-rules.json,"Regex matching for variations (test|testing|tests).",Catch word variations.,Medium,HIGH - audit variations
+SKILL EVAL,Path Patterns,skill-rules.json,"Glob patterns for file paths (**/*.test.ts).",Activate skills based on files being edited.,Medium,HIGH - guardrails/ triggers security
+SKILL EVAL,Directory Mapping,skill-rules.json,"Map directories to skills (src/components → react-ui).",Location-aware skill activation.,Medium,MEDIUM - simpler repo structure
+SKILL EVAL,Intent Patterns,skill-rules.json,"Regex for intent detection (write.*test, fix.*bug).",Understand what user is trying to do.,High,HIGH - audit intent detection
+SKILL EVAL,Confidence Scoring,skill-eval.js,"Point values for different trigger types.",Rank skills by relevance.,Medium,HIGH - prioritize audit suggestions
+SKILL EVAL,Exclude Patterns,skill-rules.json,"Patterns that prevent skill activation.",Avoid false positives.,Medium,MEDIUM - edge cases
+SKILLS,SKILL.md Format,".claude/skills/*/SKILL.md","Markdown with YAML frontmatter for skill definition.",Standardized skill document format.,Low,HIGH - already use similar
+SKILLS,name Field,SKILL.md frontmatter,"Lowercase skill identifier, max 64 chars.",Consistent naming convention.,Low,HIGH - already follow
+SKILLS,description Field,SKILL.md frontmatter,"What skill does and when to use, max 1024 chars. Claude uses for semantic matching.",Critical for automatic activation.,Low,HIGH - need rich descriptions
+SKILLS,allowed-tools Field,SKILL.md frontmatter,"Comma-separated tools the skill can use.",Scope tool access per skill.,Medium,MEDIUM - security control
+SKILLS,model Field,SKILL.md frontmatter,"Specific model for this skill (sonnet, opus).",Use cheaper model for simple skills.,Medium,HIGH - cost optimization
+SKILLS,testing-patterns Skill,".claude/skills/testing-patterns/SKILL.md","Jest patterns, TDD workflow, factory functions, mocking.",Consistent test code generation.,Medium,HIGH - need pytest equivalent
+SKILLS,systematic-debugging Skill,".claude/skills/systematic-debugging/SKILL.md","Four-phase debugging methodology.",Structured approach to bug fixing.,Medium,HIGH - useful methodology
+SKILLS,react-ui-patterns Skill,".claude/skills/react-ui-patterns/SKILL.md","Loading states, error handling, empty states.",Consistent UI patterns.,Medium,LOW - extension is simple UI
+SKILLS,graphql-schema Skill,".claude/skills/graphql-schema/SKILL.md","Queries, mutations, codegen patterns.",GraphQL best practices.,Medium,LOW - no GraphQL
+SKILLS,core-components Skill,".claude/skills/core-components/SKILL.md","Design system, tokens, component library usage.",Consistent component usage.,Medium,LOW - no design system
+SKILLS,formik-patterns Skill,".claude/skills/formik-patterns/SKILL.md","Form handling, validation patterns.",Form code generation.,Medium,LOW - minimal forms
+SKILLS,Skill Cross-References,SKILL.md content,"Reference related skills within skill docs.",Show skill relationships.,Low,MEDIUM - audit relationships
+SKILLS,Anti-Patterns Section,SKILL.md content,"Document what NOT to do.",Prevent common mistakes.,Low,HIGH - valuable for audits
+AGENTS,Agent Format,".claude/agents/*.md","Markdown with YAML frontmatter for agent definition.",Standardized agent document format.,Low,HIGH - formalize agents
+AGENTS,name Field,Agent frontmatter,"Lowercase agent identifier.",Consistent naming.,Low,HIGH - already follow
+AGENTS,description Field,Agent frontmatter,"When/why to use agent, max 1024 chars.",Help Claude/user know when to invoke.,Low,HIGH - need clear triggers
+AGENTS,model Field,Agent frontmatter,"sonnet, opus, or haiku for this agent.",Cost/quality tradeoff per agent.,Medium,HIGH - opus for deep audit
+AGENTS,tools Field,Agent frontmatter,"Comma-separated tool restrictions.",Scope agent capabilities.,Medium,MEDIUM - security
+AGENTS,code-reviewer Agent,".claude/agents/code-reviewer.md","Comprehensive code review with detailed checklist.",Consistent thorough reviews.,High,HIGH - adapt for Aletheia
+AGENTS,github-workflow Agent,".claude/agents/github-workflow.md","Git commits, branches, PRs workflow.",Standardized git operations.,Medium,MEDIUM - already have workflow
+AGENTS,Agent System Prompt,Agent content,"The actual instructions for the agent persona.",Define agent behavior completely.,Medium,HIGH - critical for audit agents
+AGENTS,Agent Process Steps,Agent content,"Numbered steps the agent follows.",Reproducible agent workflow.,Medium,HIGH - audit procedures
+AGENTS,Agent Checklist,Agent content,"Checkboxes for agent to verify.",Ensure completeness.,Medium,HIGH - audit checklists
+COMMANDS,Command Format,".claude/commands/*.md","Markdown with YAML frontmatter for slash commands.",Standardized command format.,Low,HIGH - formalize /audit
+COMMANDS,description Field,Command frontmatter,"Brief description shown in command list.",Help user find right command.,Low,HIGH - command discoverability
+COMMANDS,allowed-tools Field,Command frontmatter,"Tools this command can use.",Scope command capabilities.,Medium,MEDIUM - security
+COMMANDS,$ARGUMENTS Variable,Command content,"All arguments as single string.",Pass user input to command.,Low,HIGH - audit arguments
+COMMANDS,$1 $2 $3 Variables,Command content,"Individual positional arguments.",Parse structured input.,Low,MEDIUM - specific args
+COMMANDS,Inline Bash,Command content,"!`command` syntax for dynamic content.",Inject runtime info into prompts.,Medium,HIGH - git info, dates
+COMMANDS,/onboard Command,".claude/commands/onboard.md","Deep task exploration for new work.",Thorough context gathering before coding.,Medium,HIGH - already have
+COMMANDS,/pr-review Command,".claude/commands/pr-review.md","PR review workflow.",Structured PR review process.,Medium,MEDIUM - useful
+COMMANDS,/pr-summary Command,".claude/commands/pr-summary.md","Generate PR description from diff.",Consistent PR descriptions.,Low,HIGH - quick win
+COMMANDS,/code-quality Command,".claude/commands/code-quality.md","Run quality checks.",One command for all quality gates.,Medium,HIGH - /audit:quick
+COMMANDS,/docs-sync Command,".claude/commands/docs-sync.md","Ensure docs align with code.",Documentation maintenance.,Medium,MEDIUM - wiki sync
+COMMANDS,/ticket Command,".claude/commands/ticket.md","JIRA/Linear: read ticket → implement → update status → create PR.",End-to-end issue workflow automation.,High,HIGH - GitHub issue integration
+GITHUB ACTIONS,PR Code Review Action,".github/workflows/pr-claude-code-review.yml","Auto-review PRs and respond to @claude mentions.",Every PR gets AI review automatically.,Medium,HIGH - CI/CD quality gate
+GITHUB ACTIONS,@claude Mention Trigger,PR review workflow,"Respond when someone mentions @claude in PR comments.",Interactive PR assistance.,Medium,MEDIUM - team feature
+GITHUB ACTIONS,Scheduled Docs Sync,".github/workflows/scheduled-claude-code-docs-sync.yml","Monthly: read commits, ensure docs aligned.",Docs never drift from code.,Medium,MEDIUM - wiki alignment
+GITHUB ACTIONS,Scheduled Code Quality,".github/workflows/scheduled-claude-code-quality.yml","Weekly: review random directories, auto-fix issues.",Continuous quality improvement.,Medium,HIGH - like your daily audit
+GITHUB ACTIONS,Scheduled Dependency Audit,".github/workflows/scheduled-claude-code-dependency-audit.yml","Biweekly: safe dependency updates with test verification.",Automated dependency maintenance.,Medium,HIGH - 0816 equivalent
+GITHUB ACTIONS,anthropics/claude-code-action,GitHub Action,"Official Claude Code action for CI/CD.",Run Claude in GitHub Actions.,Medium,HIGH - platform-independent scheduling
+GITHUB ACTIONS,ANTHROPIC_API_KEY Secret,Repository settings,"API key stored as GitHub secret.",Secure credential management.,Low,HIGH - required for actions
+GITHUB ACTIONS,fetch-depth: 0,Checkout config,"Full git history for diff operations.",Enable comprehensive code analysis.,Low,HIGH - needed for audits
+MCP SERVERS,JIRA Integration,.mcp.json,"Connect to JIRA for ticket management.",Read/update tickets from Claude.,High,LOW - MCP declining
+MCP SERVERS,Linear Integration,.mcp.json,"Connect to Linear for issue tracking.",Alternative to JIRA.,High,LOW - MCP declining
+MCP SERVERS,GitHub Integration,.mcp.json,"Connect to GitHub for repo operations.",Enhanced GitHub capabilities.,Medium,LOW - gh CLI works fine
+MCP SERVERS,Slack Integration,.mcp.json,"Connect to Slack for messaging.",Team notifications from Claude.,Medium,LOW - not needed solo
+MCP SERVERS,Postgres Integration,.mcp.json,"Connect to PostgreSQL database.",Database operations from Claude.,High,LOW - DynamoDB via AWS CLI
+MCP SERVERS,Sentry Integration,.mcp.json,"Connect to Sentry for error tracking.",Error investigation from Claude.,Medium,LOW - no Sentry
+MCP SERVERS,Environment Variable Expansion,.mcp.json,"${VAR} and ${VAR:-default} syntax.",Secure credential injection.,Low,N/A - if using MCP
+MCP SERVERS,enableAllProjectMcpServers,settings.json,"Auto-approve all MCP servers in project.",Reduce approval friction.,Low,N/A - if using MCP
+LSP SERVERS,TypeScript LSP,settings.json plugins,"Real-time TypeScript intelligence.",Type errors caught immediately.,Medium,LOW - Python project
+LSP SERVERS,Pyright LSP,settings.json plugins,"Real-time Python type checking.",Type errors caught immediately.,Medium,HIGH - already use pyright
+LSP SERVERS,Rust LSP,settings.json plugins,"Real-time Rust intelligence.",Rust type checking.,Medium,LOW - no Rust
+LSP SERVERS,Diagnostics,LSP feature,"Real-time errors and warnings.",Immediate feedback on edits.,Medium,HIGH - pyright integration
+LSP SERVERS,Type Information,LSP feature,"Hover info, function signatures.",Better code understanding.,Medium,HIGH - useful
+LSP SERVERS,Code Navigation,LSP feature,"Go to definition, find references.",Navigate codebase efficiently.,Medium,MEDIUM - useful
+LSP SERVERS,.lsp.json,"./.lsp.json","Custom LSP configuration.",Fine-tune LSP behavior.,High,LOW - defaults work
+BEST PRACTICES,Start with CLAUDE.md,Documentation,"Foundation document first.",Establish project context early.,Low,HIGH - already done
+BEST PRACTICES,Build Skills Incrementally,Documentation,"Add skills as pain points emerge.",Avoid over-engineering upfront.,Low,HIGH - good advice
+BEST PRACTICES,Use Hooks for Automation,Documentation,"Let hooks handle repetitive tasks.",Reduce manual work.,Medium,HIGH - main opportunity
+BEST PRACTICES,Create Agents for Complex Workflows,Documentation,"Agents for multi-step processes.",Encapsulate complex procedures.,Medium,HIGH - audit agents
+BEST PRACTICES,Leverage GitHub Actions,Documentation,"Automate maintenance in CI/CD.",Platform-independent automation.,Medium,HIGH - complement Task Scheduler
+BEST PRACTICES,Version Control Config,Documentation,"Commit everything except local/personal files.",Team sharing and history.,Low,HIGH - already do
+DIRECTORY STRUCTURE,.claude/ Root,Directory,"Container for all Claude configuration.",Organized config location.,Low,HIGH - already have
+DIRECTORY STRUCTURE,.claude/agents/,Directory,"Agent definition files.",Dedicated agent location.,Low,HIGH - formalize
+DIRECTORY STRUCTURE,.claude/commands/,Directory,"Slash command files.",Dedicated command location.,Low,HIGH - already have
+DIRECTORY STRUCTURE,.claude/hooks/,Directory,"Hook script files.",Dedicated hook location.,Low,HIGH - need to add
+DIRECTORY STRUCTURE,.claude/skills/,Directory,"Skill directories with SKILL.md.",Dedicated skill location.,Low,MEDIUM - map to docs/
+DIRECTORY STRUCTURE,.claude/rules/,Directory,"Modular instruction files (optional).",Split large CLAUDE.md into modules.,Low,LOW - CLAUDE.md is manageable
+DIRECTORY STRUCTURE,.github/workflows/,Directory,"GitHub Actions workflow files.",CI/CD automation.,Low,HIGH - need to add

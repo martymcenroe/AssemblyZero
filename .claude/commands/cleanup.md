@@ -76,7 +76,65 @@ Detect the current project from working directory:
 
 ---
 
-**IMPORTANT:** Use the **Task tool** with `model: sonnet` to execute the cleanup.
+## Quick Mode — Execute Inline (no subagent)
+
+**Quick mode runs directly in the parent agent.** No Task tool, no subagent spawn.
+This saves ~$0.05-0.10 per invocation since quick mode is just a few git commands + session log.
+
+### Step 1: Information Gathering (3 parallel Bash calls)
+
+```bash
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} status
+```
+```bash
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch --list
+```
+```bash
+gh pr list --state open --repo {GITHUB_REPO}
+```
+
+(Skip `gh` call if no GitHub repo.)
+
+### Step 2: Purge tmpclaude Files
+
+```bash
+find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete
+```
+
+### Step 3: Session Log
+
+1. `mkdir -p /c/Users/mcwiz/Projects/{PROJECT_NAME}/docs/session-logs`
+2. Get date: `powershell.exe -Command "Get-Date -Format 'yyyy-MM-dd'"`
+3. Read existing log file if it exists, then use Write/Edit tool to append:
+
+```
+## Session: {SESSION_NAME}
+- **Mode:** quick cleanup
+- **Summary:** [brief description of what happened this session]
+- **Next:** Per user direction
+```
+
+### Step 4: Report
+
+Display a brief summary:
+
+```
+Quick cleanup: {PROJECT_NAME}
+• Git: {clean/N uncommitted}
+• Branches: {list}
+• Open PRs: {count}
+• tmpclaude purged: {count}
+• Session log: appended
+(No commit — use /cleanup --normal to commit)
+```
+
+**DONE. Do not proceed to normal/full phases.**
+
+---
+
+## Normal & Full Modes — Delegate to Subagent
+
+**For `--normal` and `--full`:** Use the **Task tool** with `model: sonnet` to execute the cleanup.
 
 Spawn a Task with `subagent_type: general-purpose` and `model: sonnet` with this prompt:
 
@@ -89,7 +147,7 @@ You are executing a cleanup procedure.
 Project: {PROJECT_NAME}
 GitHub Repo: {GITHUB_REPO} (if known, skip gh commands if none)
 Project Root: /c/Users/mcwiz/Projects/{PROJECT_NAME}
-Mode: {MODE: quick|normal|full}
+Mode: {MODE: normal|full}
 Session: {SESSION_NAME}
 
 ## Rules
@@ -107,15 +165,13 @@ Session: {SESSION_NAME}
 
 ## Phase 1: Information Gathering (ALL PARALLEL)
 
-**Quick mode (3 parallel calls):**
+**Normal mode (7 parallel calls):**
 - git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} status
 - git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch --list
-- gh pr list --state open --repo {GITHUB_REPO} (skip if no repo)
-
-**Normal mode adds (7 parallel calls total):**
 - git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} stash list
 - git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} fetch --prune
 - git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} worktree list
+- gh pr list --state open --repo {GITHUB_REPO} (skip if no repo)
 - gh issue list --state open --repo {GITHUB_REPO} (skip if no repo)
 
 **Full mode adds (9 parallel calls total):**
@@ -128,11 +184,11 @@ Session: {SESSION_NAME}
    - Branch HAS worktree: OK (active work)
    - Branch has NO worktree + remote gone: Orphan candidate
 
-2. **Auto-Delete Orphaned LOCAL Branches** (Normal and Full, unless --no-auto-delete):
+2. **Auto-Delete Orphaned LOCAL Branches** (unless --no-auto-delete):
    - Safety: Not main, remote shows `gone`, no worktree
    - Action: `git -C ... branch -D {branch-name}`
 
-3. **CRITICAL: Delete Stale REMOTE Branches for Merged PRs** (Normal and Full):
+3. **CRITICAL: Delete Stale REMOTE Branches for Merged PRs:**
    - Get merged PRs: `gh pr list --repo {GITHUB_REPO} --state merged --limit 50 --json headRefName`
    - Get remote branches: `git -C ... branch -r` (exclude origin/main, origin/HEAD)
    - For each remote branch (e.g., `origin/57-foo`):
@@ -140,7 +196,7 @@ Session: {SESSION_NAME}
      - Action: `git -C ... push origin --delete {branch-name}`
    - This is NON-NEGOTIABLE. Merged PR branches MUST be deleted.
 
-4. **Verify No Orphaned Worktrees** (Normal and Full):
+4. **Verify No Orphaned Worktrees:**
    - List worktrees: `git -C ... worktree list`
    - For each worktree (not main):
      - Check if corresponding branch has an OPEN PR
@@ -151,9 +207,8 @@ Session: {SESSION_NAME}
 
 6. **Stashes** - Document any found
 
-7. **Purge tmpclaude Files** (ALL modes):
-   - Claude Code leaves orphaned `tmpclaude-*-cwd` files (temp CWD markers)
-   - Delete them: `find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete`
+7. **Purge tmpclaude Files:**
+   - `find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete`
    - Report count in results
 
 ## Phase 3: Session Log
@@ -169,14 +224,11 @@ Content:
 ```
 ## Session: {SESSION_NAME}
 - **Mode:** {MODE} cleanup
-- **Model:** Claude Sonnet 4
 - **Summary:** [brief description]
 - **Next:** Per user direction
 ```
 
-## Phase 4: Single Commit & Push (SKIP FOR QUICK MODE)
-
-**If mode is `quick`: SKIP this phase entirely.**
+## Phase 4: Single Commit & Push
 
 Stage ALL pending doc changes:
 ```bash
@@ -219,7 +271,7 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -r
 | **Orphan Worktrees** | None / **ERROR: {list}** |
 | Stashes | None / {count} |
 | tmpclaude Purged | {count} files / 0 |
-| Commit | Pushed / Skipped (quick) |
+| Commit | Pushed |
 
 **BLOCKING CONDITIONS (must be resolved):**
 - Orphan worktrees (worktree exists but PR merged/closed)

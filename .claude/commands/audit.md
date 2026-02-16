@@ -235,6 +235,23 @@ These audits apply to ALL projects using AssemblyZero:
 - IGNORE: Build artifacts, caches, truly local files (keep in .gitignore)
 - REVIEW: Unknown pattern, needs human decision
 
+### 0834 - Command Cost Audit
+**Purpose:** Audit slash commands for token cost, execution overhead, and design issues.
+**Check:**
+1. **Prompt size** — Measure byte size of all `~/.claude/commands/*.md` files. Flag any >4KB (~1,000 tokens).
+2. **Delegation overhead** — For stubs that delegate to AssemblyZero canonicals, verify the canonical exists. Flag dead references.
+3. **Subagent spawns** — Grep command files for `Task tool`, `subagent`, `model: sonnet`, `model: opus`. Flag commands that spawn subagents for simple work (< 5 tool calls).
+4. **Model hints** — Check that expensive commands declare model hints. Flag Opus usage where Sonnet suffices.
+5. **Python-delegable** — Identify commands whose logic is purely mechanical (file counting, git status parsing, permission cleaning) and could be a Python script called by the LLM instead of LLM reasoning. Flag commands where >50% of the work is deterministic.
+6. **Execution tier** — Classify each command:
+   - **Trivial** (~$0.01): 1-2 tool calls, no subagents
+   - **Light** (~$0.02-0.05): 3-8 tool calls, no subagents
+   - **Medium** (~$0.05-0.15): Subagent or 10+ tool calls
+   - **Heavy** (~$0.15-0.50): Multiple subagents or extensive file reads
+   - **Expensive** (~$0.50+): Full audit suites, deep web search
+
+**Output:** Table of all commands with size, tier, subagent count, and recommendations.
+
 ### 0898 - Horizon Scanning
 **Purpose:** Discover emerging AI governance frameworks and threats.
 **Standard mode:** SKIP (requires web search)
