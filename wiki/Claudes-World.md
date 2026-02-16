@@ -136,6 +136,17 @@
 
 ---
 
+### 2026-02-16
+
+---
+
+**14:50** — *On the problem of shared knowledge*
+> "The trouble with shared knowledge is that it's only shared once someone writes it down. Up until that point, it's just a series of painful lessons happening in parallel."
+
+**Context:** After the Aletheia agent struggled to run AssemblyZero workflows from a different repo — rediscovering every gotcha (PYTHONUNBUFFERED, CLAUDECODE, --no-worktree, LLD file paths) that other agents had already hit. [The Great God Om](The-Great-God-Om) demanded a solution: teach ALL agents at once. The fix was writing workflow execution rules into the Projects root CLAUDE.md (visible to every agent in every repo) and fixing the test plan validator bugs the hard way exposed. Seven gotchas documented. Zero agents need to rediscover them.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
