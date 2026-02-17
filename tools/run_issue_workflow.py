@@ -30,9 +30,9 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Disable LangSmith telemetry to avoid authentication errors
-os.environ["LANGCHAIN_TRACING_V2"] = "false"
-os.environ["LANGCHAIN_API_KEY"] = ""
+# Issue #120: Configure LangSmith tracing (enabled when LANGSMITH_API_KEY is set)
+from assemblyzero.tracing import configure_langsmith
+configure_langsmith()
 
 # Suppress deprecation warnings
 warnings.filterwarnings("ignore", category=FutureWarning)

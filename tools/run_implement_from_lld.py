@@ -45,6 +45,10 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Issue #120: Configure LangSmith tracing (enabled when LANGSMITH_API_KEY is set)
+from assemblyzero.tracing import configure_langsmith
+configure_langsmith()
+
 
 def get_current_branch(repo_path: Path) -> str:
     """Get the current git branch name."""
