@@ -1,5 +1,5 @@
-# CI Workflow - Run unit tests on every push and PR
-# Issue #325
+# CI Workflow - Unit tests on every push/PR, integration tests on main
+# Issues #325, #116
 
 name: CI
 
@@ -38,7 +38,22 @@ jobs:
       - name: Install dependencies
         run: poetry install --no-interaction --with dev
 
-      - name: Run unit tests
-        run: poetry run pytest tests/unit/ -v --tb=short
+      - name: Run unit tests with coverage
+        run: poetry run pytest tests/unit/ -v --tb=short --cov=assemblyzero --cov-report=term-missing --cov-report=xml:coverage.xml
         env:
           LANGSMITH_TRACING: "false"
+
+      - name: Run integration tests
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: poetry run pytest tests/integration/ -v --tb=short -m integration
+        env:
+          LANGSMITH_TRACING: "false"
+          ASSEMBLYZERO_MOCK_MODE: "1"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 30
