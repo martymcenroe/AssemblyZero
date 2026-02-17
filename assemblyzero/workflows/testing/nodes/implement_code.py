@@ -19,6 +19,8 @@ import re
 import random
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,48 @@ LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
 # Issue #373: Increased from 300s — large test file prompts need more time
 CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
 SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+
+
+class ProgressReporter:
+    """Print elapsed time periodically during long operations.
+
+    Issue #267: Prevents the workflow from appearing frozen during
+    long Claude API calls. Prints every `interval` seconds.
+
+    Usage:
+        with ProgressReporter("Calling Claude", interval=15):
+            response = call_claude_for_file(prompt)
+    """
+
+    def __init__(self, label: str = "Waiting", interval: int = 15):
+        self.label = label
+        self.interval = interval
+        self._start: float = 0
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self):
+        self._start = time.monotonic()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+        elapsed = int(time.monotonic() - self._start)
+        status = "done" if not exc[0] else "error"
+        print(f"        {self.label}... {status} ({elapsed}s)")
+        return False
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            self._stop_event.wait(self.interval)
+            if not self._stop_event.is_set():
+                elapsed = int(time.monotonic() - self._start)
+                print(f"        {self.label}... ({elapsed}s)", flush=True)
 
 
 class ImplementationError(Exception):
@@ -1138,13 +1182,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         )
 
         # Call Claude with retry logic (Issue #309)
-        print(f"        Calling Claude...")
-        code, success = generate_file_with_retry(
-            filepath=filepath,
-            base_prompt=prompt,
-            audit_dir=audit_dir if audit_dir.exists() else None,
-            max_retries=MAX_FILE_RETRIES,
-        )
+        # Issue #267: Progress feedback during long API calls
+        with ProgressReporter("Calling Claude", interval=15):
+            code, success = generate_file_with_retry(
+                filepath=filepath,
+                base_prompt=prompt,
+                audit_dir=audit_dir if audit_dir.exists() else None,
+                max_retries=MAX_FILE_RETRIES,
+            )
         # Note: generate_file_with_retry raises ImplementationError on failure,
         # so if we get here, code is valid
 
