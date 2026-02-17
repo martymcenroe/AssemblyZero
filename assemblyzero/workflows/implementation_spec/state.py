@@ -110,6 +110,16 @@ class ImplementationSpecState(TypedDict, total=False):
     issue_number: int
     lld_path: str
 
+    # Issue #392: Paths that must survive between nodes
+    repo_root: str
+    assemblyzero_root: str
+    audit_dir: str
+
+    # Configuration (set by CLI runner)
+    config_mock_mode: bool
+    config_drafter: str
+    config_reviewer: str
+
     # Loaded content (N0)
     lld_content: str
     files_to_modify: list[FileToModify]

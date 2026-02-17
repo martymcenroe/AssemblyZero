@@ -510,20 +510,9 @@ def run_workflow(
         print(f"DEBUG: lld_path = {state.get('lld_path', '')}")
         print(f"DEBUG: repo_root = {state.get('repo_root', '')}")
 
-    # Set up checkpoint database
-    if args.db_path:
-        db_path = Path(args.db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        db_path = get_checkpoint_db_path(args.issue)
-
     # Create and run graph
     try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
-
         graph = create_implementation_spec_graph()
-
-        thread_id = f"{args.issue}-impl-spec"
 
         # Calculate recursion limit: each iteration can touch N2->N3->N5 (3 nodes)
         # plus entry N0->N1 (2 nodes) and exit N6 (1 node), so budget generously
@@ -533,47 +522,35 @@ def run_workflow(
         print("Starting workflow...")
         print()
 
-        with SqliteSaver.from_conn_string(str(db_path)) as memory:
-            app = graph  # Already compiled by create_implementation_spec_graph()
+        # Issue #393: Track final state from stream events instead of
+        # get_state() which requires a checkpointer connected to the graph.
+        # The graph is pre-compiled without a checkpointer.
+        config = {
+            "recursion_limit": recursion_limit,
+        }
 
-            config = {
-                "configurable": {"thread_id": thread_id},
-                "recursion_limit": recursion_limit,
-            }
+        final_state = dict(state)  # Start with initial state
 
-            # Check for resume
-            if args.resume:
-                checkpoint = memory.get(config)
-                if checkpoint:
-                    print(f"Resuming from checkpoint for issue #{args.issue}...")
-                else:
-                    print(f"No checkpoint found for issue #{args.issue}, starting fresh...")
+        # Stream events for visibility
+        for event in graph.stream(state, config):
+            for node_name, node_output in event.items():
+                if node_name == "__end__":
+                    continue
 
-            # Stream events for visibility
-            for event in app.stream(state, config):
-                for node_name, node_output in event.items():
-                    if node_name == "__end__":
-                        continue
+                # Accumulate state updates from each node
+                final_state.update(node_output)
 
-                    # Check for errors from nodes
-                    error = node_output.get("error_message", "")
-                    if error:
-                        print(f"\n[ERROR] {error}")
+                # Check for errors from nodes
+                error = node_output.get("error_message", "")
+                if error:
+                    print(f"\n[ERROR] {error}")
 
-            # Get final state
-            final_state_wrapper = app.get_state(config)
-            if final_state_wrapper and final_state_wrapper.values:
-                final_state = final_state_wrapper.values
-                print_result(final_state)
+        print_result(final_state)
 
-                if final_state.get("error_message"):
-                    return 1
+        if final_state.get("error_message"):
+            return 1
 
-                return 0
-
-        # If we get here without final state, something went wrong
-        print("\nERROR: Workflow completed without producing final state")
-        return 1
+        return 0
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted. Use --resume to continue.")
