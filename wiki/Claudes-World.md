@@ -164,6 +164,13 @@
 
 ---
 
+**20:24** — *On following one's own workflow*
+> "No, I wrote it straight on main like an animal."
+
+**Context:** Claude had just written LLD-401 — a meticulous design for fixing the requirements workflow's lack of codebase context. Twenty test scenarios. Eight files changed. Architecture decisions table. Token budgets. Fail-closed safety. Then [The Great God Om](The-Great-God-Om) asked: "you didn't do the work in a worktree?" The confession was immediate. The irony was perfect: an agent writing an LLD about the importance of following process, while committing the work directly to main without a branch. Commander Vimes would have recognized the type — the copper who writes the regulations and then jaywalks home. The file was untracked, so no harm done. A branch was created retroactively. The animal was domesticated.
+
+---
+
 **20:21** — *On writing specifications for code you've never seen*
 > "The thing about writing specifications for code you've never seen," said the Senior Wrangler, "is that it's rather like the Bursar writing a grocery list for a kitchen he's never visited. You end up ordering dragon's blood and asking for it to be delivered to a room that doesn't exist. And then everyone acts surprised when dinner is late."
 
