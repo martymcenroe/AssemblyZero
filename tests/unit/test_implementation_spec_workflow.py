@@ -1463,27 +1463,16 @@ class TestFinalizeSpec:
     """Tests for N6: finalize_spec node."""
 
     def _run_finalize(self, state):
-        """Run finalize_spec with Windows file-locking workaround.
+        """Run finalize_spec directly.
 
-        The implementation uses tempfile.mkstemp which holds an open fd on
-        Windows, causing write_text to fail with WinError 32. We patch
-        mkstemp to close the fd immediately after creation so write_text
-        can proceed.
+        The production code already closes the mkstemp fd before writing
+        (Windows file-lock fix), so no patching is needed.
         """
-        import tempfile as _tempfile
         from assemblyzero.workflows.implementation_spec.nodes.finalize_spec import (
             finalize_spec,
         )
 
-        original_mkstemp = _tempfile.mkstemp
-
-        def patched_mkstemp(*args, **kwargs):
-            fd, path = original_mkstemp(*args, **kwargs)
-            os.close(fd)
-            return -1, path  # fd=-1 so os.close in finally raises OSError (caught)
-
-        with patch("tempfile.mkstemp", side_effect=patched_mkstemp):
-            return finalize_spec(state)
+        return finalize_spec(state)
 
     def test_t090_writes_spec_file(self, tmp_path, base_state):
         """T090: Finalize writes spec file at expected path."""
