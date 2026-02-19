@@ -203,11 +203,24 @@ Session: {SESSION_NAME}
      - If PR is MERGED or CLOSED: worktree is orphaned → REPORT AS ERROR
    - Worktrees for merged work MUST be removed manually (safety)
 
-5. **Open PRs** - Flag if any exist
+5. **Delete Empty Orphaned Worktree Directories:**
+   - After `git -C ... worktree prune`, scan for leftover empty directories:
+     ```bash
+     ls -d /c/Users/mcwiz/Projects/{PROJECT_NAME}-*/ 2>/dev/null
+     ```
+   - For each matching directory:
+     - Skip if it appears in `git worktree list` (still active)
+     - Check if empty: `ls -A /c/Users/mcwiz/Projects/{DIR_NAME}/`
+     - If empty: `rmdir /c/Users/mcwiz/Projects/{DIR_NAME}` (safe — fails if not empty)
+     - If contains only `.git` file: remove it first, then rmdir
+     - If not empty: report as warning (do NOT rm -rf)
+   - Report count of deleted directories
 
-6. **Stashes** - Document any found
+6. **Open PRs** - Flag if any exist
 
-7. **Purge tmpclaude Files:**
+7. **Stashes** - Document any found
+
+8. **Purge tmpclaude Files:**
    - `find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete`
    - Report count in results
 
@@ -269,6 +282,7 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -r
 | Local Orphans Deleted | {count} branches / 0 |
 | **Remote Stale Deleted** | {count} branches / 0 |
 | **Orphan Worktrees** | None / **ERROR: {list}** |
+| Empty Worktree Dirs Deleted | {count} / 0 |
 | Stashes | None / {count} |
 | tmpclaude Purged | {count} files / 0 |
 | Commit | Pushed |
