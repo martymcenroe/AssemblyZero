@@ -44,6 +44,7 @@ def test_api_key(name: str, key: str, account: str) -> tuple[bool, str]:
             [GEMINI_CLI, "--prompt", TEST_PROMPT, "--model", TEST_MODEL],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             env=env
         )
@@ -91,6 +92,7 @@ def test_oauth() -> tuple[bool, str]:
             [GEMINI_CLI, "--prompt", TEST_PROMPT, "--model", TEST_MODEL],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             env=env
         )

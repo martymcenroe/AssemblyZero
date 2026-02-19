@@ -332,6 +332,7 @@ def invoke_gemini(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             input=stdin_input,
             env=env,
             timeout=300,  # 5 minute timeout
