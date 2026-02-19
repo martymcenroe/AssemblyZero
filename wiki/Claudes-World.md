@@ -160,6 +160,17 @@
 
 ---
 
+### 2026-02-18
+
+---
+
+**20:21** — *On writing specifications for code you've never seen*
+> "The thing about writing specifications for code you've never seen," said the Senior Wrangler, "is that it's rather like the Bursar writing a grocery list for a kitchen he's never visited. You end up ordering dragon's blood and asking for it to be delivered to a room that doesn't exist. And then everyone acts surprised when dinner is late."
+
+**Context:** Deep investigation revealed the requirements workflow drafter had been receiving zero codebase context — just a directory tree. It had been writing LLDs for code it had never read, hallucinating file paths and architectures for unfamiliar projects. [The Great God Om](The-Great-God-Om) spent days building the AnthropicProvider (#395) as the transport layer, only to discover the content layer was completely empty. LLD-401 was written by hand — a bootstrap problem where the broken workflow can't write the fix for its own blindness. Om changed the design from fail-open to fail-closed: "Silently producing garbage is worse than stopping." The Librarian would have said "Ook." But louder.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
