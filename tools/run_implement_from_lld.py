@@ -14,6 +14,9 @@ Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
 
 Usage:
+    # Select from approved LLDs interactively
+    python tools/run_implement_from_lld.py --select
+
     # Full TDD workflow (auto, no human review)
     python tools/run_implement_from_lld.py --issue 42
 
@@ -37,7 +40,9 @@ Usage:
 """
 
 import argparse
+import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -181,6 +186,119 @@ def get_checkpoint_db_path(issue_number: int = 0) -> Path:
     return db_dir / "testing_workflow.db"
 
 
+def select_approved_lld(repo_root: Path) -> int | None:
+    """Interactively select from approved LLDs in docs/lld/active/.
+
+    Scans for LLD-NNN.md files, extracts issue number, title, and
+    approval status from each file.
+
+    Args:
+        repo_root: Path to repository root.
+
+    Returns:
+        Selected issue number, or None if cancelled/no LLDs found.
+    """
+    lld_dir = repo_root / "docs" / "lld" / "active"
+    if not lld_dir.exists():
+        print(f"No LLD directory found: {lld_dir}")
+        return None
+
+    # Scan for LLD files
+    lld_files = sorted(lld_dir.glob("LLD-*.md"))
+    if not lld_files:
+        print("No LLD files found in docs/lld/active/")
+        return None
+
+    entries = []
+    for lld_path in lld_files:
+        # Extract issue number from filename (LLD-NNN.md)
+        match = re.match(r"LLD-(\d+)\.md", lld_path.name)
+        if not match:
+            continue
+        issue_num = int(match.group(1))
+
+        # Read first line for title, scan for approval status
+        content = lld_path.read_text(encoding="utf-8", errors="replace")
+        lines = content.splitlines()
+
+        title = ""
+        approved = False
+        approval_date = ""
+
+        # Title from first heading
+        for line in lines[:5]:
+            if line.startswith("# "):
+                title = line.lstrip("# ").strip()
+                # Strip issue number prefix if present (e.g., "305 - Feature: ...")
+                title = re.sub(r"^\d+\s*[-–—]\s*", "", title)
+                break
+
+        # Check for APPROVED in review log
+        for line in lines:
+            if "APPROVED" in line and "|" in line:
+                approved = True
+                # Try to extract date from table row
+                cells = [c.strip() for c in line.split("|")]
+                for cell in cells:
+                    if re.match(r"\d{4}-\d{2}-\d{2}", cell):
+                        approval_date = cell
+                        break
+                break
+
+        entries.append({
+            "issue": issue_num,
+            "title": title[:60],
+            "approved": approved,
+            "date": approval_date,
+            "path": lld_path,
+        })
+
+    if not entries:
+        print("No valid LLD files found.")
+        return None
+
+    # Display menu
+    print()
+    print("=" * 70)
+    print("Approved LLDs ready for implementation")
+    print("=" * 70)
+
+    for i, entry in enumerate(entries, 1):
+        status = "APPROVED" if entry["approved"] else "pending"
+        date_str = f" ({entry['date']})" if entry["date"] else ""
+        print(f"  [{i:2d}] #{entry['issue']:>4d}: {entry['title']}")
+        print(f"        Status: {status}{date_str}")
+
+    print()
+    print(f"  [ 0] Cancel")
+    print()
+
+    # Prompt for selection
+    try:
+        choice = input(f"Select LLD [0-{len(entries)}]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return None
+
+    try:
+        idx = int(choice)
+    except ValueError:
+        print("Invalid selection.")
+        return None
+
+    if idx == 0:
+        print("Cancelled.")
+        return None
+
+    if idx < 1 or idx > len(entries):
+        print(f"Invalid selection. Choose 1-{len(entries)} or 0 to cancel.")
+        return None
+
+    selected = entries[idx - 1]
+    print(f"\nSelected: #{selected['issue']} - {selected['title']}")
+    return selected["issue"]
+
+
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create and return the argument parser for the CLI.
 
@@ -192,12 +310,17 @@ def create_argument_parser() -> argparse.ArgumentParser:
         epilog=__doc__,
     )
 
-    # Required arguments
-    parser.add_argument(
+    # Issue selection (mutually exclusive)
+    issue_group = parser.add_mutually_exclusive_group(required=True)
+    issue_group.add_argument(
         "--issue",
         type=int,
-        required=True,
         help="GitHub issue number (must have approved LLD)",
+    )
+    issue_group.add_argument(
+        "--select",
+        action="store_true",
+        help="Interactively select from approved LLDs in docs/lld/active/",
     )
 
     # Optional arguments
@@ -377,11 +500,6 @@ def main():
     # Apply review configuration
     apply_review_config(args)
 
-    # Validate issue number
-    if args.issue <= 0:
-        print("Error: --issue must be a positive integer")
-        sys.exit(1)
-
     # Set environment variables for mode flags
     if args.auto_mode:
         os.environ["ASSEMBLYZERO_AUTO_MODE"] = "1"
@@ -392,7 +510,7 @@ def main():
     from assemblyzero.workflows.testing import TestingWorkflowState, build_testing_workflow
     from assemblyzero.workflows.testing.audit import get_repo_root
 
-    # Determine repo root
+    # Determine repo root (needed before --select)
     if args.repo:
         repo_root = Path(args.repo).resolve()
         if not repo_root.exists():
@@ -404,6 +522,18 @@ def main():
         except RuntimeError as e:
             print(f"Error: {e}")
             sys.exit(1)
+
+    # Handle --select: interactive LLD selection
+    if args.select:
+        selected = select_approved_lld(repo_root)
+        if selected is None:
+            sys.exit(0)
+        args.issue = selected
+
+    # Validate issue number
+    if args.issue is None or args.issue <= 0:
+        print("Error: --issue must be a positive integer")
+        sys.exit(1)
 
     # Track original repo for worktree cleanup later
     original_repo_root = repo_root
