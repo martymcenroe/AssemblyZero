@@ -147,8 +147,9 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
 
     # Save output to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
-    if audit_dir.exists():
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "red-phase.txt", output)
     else:
@@ -343,8 +344,9 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
 
     # Save output to audit trail
-    audit_dir = Path(state.get("audit_dir", ""))
-    if audit_dir.exists():
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "green-phase.txt", output)
     else:
@@ -521,7 +523,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
 def _mock_verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """Mock implementation for testing."""
-    audit_dir = Path(state.get("audit_dir", ""))
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
 
     mock_output = """============================= test session starts ==============================
 collected 3 items
@@ -537,7 +540,7 @@ FAILED tests/test_issue_42.py::test_input_validation - AssertionError: TDD: Impl
 ============================== 3 failed in 0.12s ===============================
 """
 
-    if audit_dir.exists():
+    if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "red-phase.txt", mock_output)
     else:
@@ -555,7 +558,8 @@ FAILED tests/test_issue_42.py::test_input_validation - AssertionError: TDD: Impl
 
 def _mock_verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """Mock implementation for testing."""
-    audit_dir = Path(state.get("audit_dir", ""))
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
     iteration_count = state.get("iteration_count", 0)
     coverage_target = state.get("coverage_target", 90)
 
@@ -595,7 +599,7 @@ TOTAL                        60      5    92%
         coverage_achieved = 92.0
         next_node = "N7_finalize" if state.get("skip_e2e") else "N6_e2e_validation"
 
-    if audit_dir.exists():
+    if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "green-phase.txt", mock_output)
     else:
