@@ -153,15 +153,9 @@ Session: {SESSION_NAME}
 ## Rules
 - Use absolute paths with git -C /c/Users/mcwiz/Projects/{PROJECT_NAME}
 - Use --repo {GITHUB_REPO} for all gh commands (skip if no repo)
-- NO pipes (|) or chain operators (&&) - one command per Bash call
 - Run independent commands in PARALLEL (multiple Bash calls in one message)
 - ONE commit at the end - stage files as you go, commit once
-
-## CRITICAL: Contribution Budget & Worktree Safety
-
-**PARSIMONIOUS COMMITS:** Batch ALL pending changes into ONE commit. Never make multiple small commits.
-
-**WORKTREE ISOLATION:** NEVER touch files in worktree directories (e.g., `../Project-123/`). Only operate on the main worktree.
+- NEVER touch files in worktree directories (e.g., `../Project-123/`)
 
 ## Phase 1: Information Gathering (ALL PARALLEL)
 

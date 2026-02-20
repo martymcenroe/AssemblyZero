@@ -144,44 +144,6 @@ Output a prioritized list:
 
 ---
 
-## Example Output
-
-```markdown
-# Test Gap Analysis
-
-**Scan type:** Quick
-**Reports analyzed:** 5
-**Date:** 2026-01-09
-
----
-
-## Critical Gaps (No tests exist)
-
-| File | Gap Description | Source | Effort |
-|------|-----------------|--------|--------|
-| `src/popup.js` | 484 lines, 0 unit tests | Report #207 | High |
-| `src/auth.js` | OAuth flow untested | Report #116 | Medium |
-
-## Automation Opportunities (Manual → Automated)
-
-| File | Current Testing | Automation Benefit | Source |
-|------|-----------------|-------------------|--------|
-| `src/popup.js` | Manual allowlist testing | 10 min → 5 sec | Report #194 |
-
-## Recommended Actions
-
-1. **[CRITICAL]** Add unit tests for popup.js (Issue #207 in progress)
-2. **[HIGH]** Add integration tests for OAuth flow
-3. **[MEDIUM]** Create E2E test for age gate flow
-
-## Issues to Create
-
-- [ ] `test(unit): Add tests for auth.js OAuth flow`
-- [ ] `test(e2e): Add age gate verification test`
-```
-
----
-
 ## Notes
 
 - This skill is READ-ONLY - it analyzes but does not modify files

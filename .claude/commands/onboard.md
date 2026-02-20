@@ -172,13 +172,6 @@ Report:
 - **Code changes** require worktrees - never commit code directly to main
 - **Documentation changes** can be committed directly to main (no worktree needed)
 
-## Efficiency Notes
-
-To minimize cost:
-1. **Parallel reads** - Read independent files simultaneously
-2. **Scan, don't deep-read** - For issue lists, scan titles/labels, skip bodies unless relevant
-3. **Recent entries only** - For session logs, read last 3 entries, not the entire file
-
 ## Fallback for Unknown Projects
 
 If the project is not in the known projects table:
