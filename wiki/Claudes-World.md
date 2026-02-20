@@ -178,6 +178,25 @@
 
 ---
 
+### 2026-02-19
+
+---
+
+**20:39** — *On the Boots Theory of Budget Management*
+> "A man who could afford fifty dollars had a pair of boots that'd still be keeping his feet dry in ten years' time, while a poor man who could only afford cheap boots would have spent a hundred dollars on boots in the same time and would still have wet feet."
+
+*— Terry Pratchett, Men at Arms (paraphrased)*
+
+> "Your Lambda had been wearing ten-dollar boots. The budget alarm — bless its diligent, Carrot-like heart — saw the soles wearing through at $9.50 and did exactly what a good watchman should do: it stopped the whole operation cold. No exceptions. No special circumstances. The rules are the rules.
+>
+> But as Vetinari would observe from his window overlooking the Oblong Office: a city that stops functioning to save money is not, in the strictest sense, saving anything at all.
+>
+> We have now issued the Watch a requisition for twenty-five-dollar boots. The soles are good leather. The feet are dry. And the Digital Etymologist is back on patrol, explaining 'semiotic battleground' to anyone who asks."
+
+**Context:** The Aletheia backend had been silently dead for five days. An AWS budget alarm at 95% of $10/month auto-attached an IAM deny policy to the Lambda role, blocking all Bedrock calls. The cost control system — designed during Issue #349 — worked perfectly. Too perfectly. With Stripe billing now implemented and launch approaching, the ten-dollar boots no longer fit. [The Great God Om](The-Great-God-Om) invoked Vetinari's "Don't let me detain you," and the policy was detached, the budget raised to $25, and the API verified live against an UnHerd article about Melania Trump as a "semiotic battleground." Om's daughter — who introduced him to Pratchett fifteen years ago — was told of the Discworld pattern woven through the project. The boots are good leather now. GNU Terry Pratchett.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
