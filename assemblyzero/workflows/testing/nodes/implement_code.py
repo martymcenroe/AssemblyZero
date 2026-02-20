@@ -664,10 +664,12 @@ def build_single_file_prompt(
     test_content: str = "",
     previous_error: str = "",
     path_enforcement_section: str = "",
+    context_content: str = "",
 ) -> str:
     """Build prompt for a single file with accumulated context.
 
     Issue #188: Added path_enforcement_section parameter to inject allowed paths.
+    Issue #288: Added context_content parameter for injected architectural context.
     """
 
     change_type = file_spec.get("change_type", "Add")
@@ -691,6 +693,14 @@ Description: {description}
     # Issue #188: Add path enforcement section
     if path_enforcement_section:
         prompt += path_enforcement_section + "\n"
+
+    # Issue #288: Add injected context
+    if context_content:
+        prompt += f"""## Additional Context
+
+{context_content}
+
+"""
 
     # Include existing file content if modifying
     if change_type.lower() == "modify":
@@ -1180,6 +1190,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             test_content=test_content,
             previous_error=green_phase_output if iteration_count > 0 else "",
             path_enforcement_section=path_enforcement_section,
+            context_content=state.get("context_content", ""),
         )
 
         # Call Claude with retry logic (Issue #309)

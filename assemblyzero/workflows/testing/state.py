@@ -88,6 +88,10 @@ class TestingWorkflowState(TypedDict, total=False):
         # Error handling
         error_message: Last error message if any.
 
+        # Context injection (Issue #288)
+        context_files: List of context file paths from --context flag.
+        context_content: Concatenated content from validated context files.
+
         # Mode flags (from CLI)
         auto_mode: If True, skip human gates and auto-approve.
         mock_mode: If True, use fixtures instead of real APIs.
@@ -167,6 +171,10 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Error handling
     error_message: str
+
+    # Context injection (Issue #288)
+    context_files: list[str]
+    context_content: str
 
     # Mode flags
     auto_mode: bool

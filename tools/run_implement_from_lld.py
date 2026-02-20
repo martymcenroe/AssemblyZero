@@ -403,6 +403,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview execution plan without API calls or file modifications",
     )
+    parser.add_argument(
+        "--context",
+        action="append",
+        default=[],
+        help="Additional context files to inject into prompts (can be repeated)",
+    )
 
     return parser
 
@@ -612,6 +618,21 @@ def main():
         print("[DRY RUN] No API calls made, no files modified.")
         return 0
 
+    # Issue #288/#289: Load and validate context files
+    context_content = ""
+    if args.context:
+        from assemblyzero.workflows.testing.path_validator import load_context_files
+
+        print(f"[implement] Loading {len(args.context)} context file(s)...")
+        context_content, context_errors = load_context_files(args.context, repo_root)
+        for err in context_errors:
+            print(f"[implement] {err}")
+        if context_errors and not context_content:
+            print("[implement] ERROR: All context files failed validation")
+            sys.exit(1)
+        if context_content:
+            print(f"[implement] Context loaded: {len(context_content):,} chars")
+
     # Build initial state
     initial_state: TestingWorkflowState = {
         "issue_number": args.issue,
@@ -621,6 +642,8 @@ def main():
         "skip_e2e": args.skip_e2e,
         "scaffold_only": args.scaffold_only,
         "max_iterations": args.max_iterations,
+        "context_files": args.context or [],
+        "context_content": context_content,
     }
 
     # Track worktree for later reference (cleanup, PR creation)
