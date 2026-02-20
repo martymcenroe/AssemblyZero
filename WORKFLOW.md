@@ -245,6 +245,30 @@ The documentation system exists so you don't need persistent memory. USE IT.
 
 ---
 
+## Post-Session Transcript Cleanup
+
+**After any PTY-recorded session, clean the raw transcript:**
+
+```bash
+# Clean a raw transcript (removes TUI garbage, preserves conversation)
+poetry run python tools/clean_transcript.py transcripts/session.raw
+
+# Optional: fix word-merged text (requires: poetry add wordninja)
+poetry run python tools/clean_transcript.py --fix-spaces transcripts/session.raw
+```
+
+**Outputs:**
+- `session.clean` — Garbage removed, content preserved
+- `session.user` — Extracted user input only
+
+**Tools:**
+- `tools/transcript_filters.py` — 95-pattern regex filter for PTY artifacts (spinners, status bars, permission UI)
+- `tools/clean_transcript.py` — Multi-pass cleaner (garbage removal → dedup → block dedup → optional space fix)
+
+**The original `.raw` file is NEVER modified.**
+
+---
+
 ## You Are Not Alone
 
 Other agents may work on this project. Check session logs for recent context. Coordinate via the project's issue tracker.

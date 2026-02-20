@@ -44,5 +44,6 @@ docs/blog/
 *.db
 *.sqlite
 
-# Unleashed session transcripts (auto-generated, untracked)
+# Session transcripts (auto-generated, untracked)
 data/unleashed/
+transcripts/
