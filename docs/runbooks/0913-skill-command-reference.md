@@ -6,6 +6,21 @@ Quick reference for the orchestrator (Marty) on all available `/skill` commands.
 
 ---
 
+## If Your Goal Is...
+
+| Goal | Run | Notes |
+|------|-----|-------|
+| **Squeaky clean repo** (safe for handoff) | `/cleanup --full` | Prunes orphan branches, deletes stale remotes for merged PRs, verifies worktrees. Never touches another agent's active WIP. |
+| **End-of-session wrap-up** | `/cleanup` | Default `--normal`. Session log + commit + push + branch cleanup. The everyday closer. |
+| **Just log what happened** (no commit) | `/cleanup --quick` or `/goodbye` | Appends session log, purges temp files. Changes accumulate until a normal/full run commits them. |
+| **Ship code** | `/commit-push-pr` | Commit, push, open PR in one shot. |
+| **Review before merge** | `/code-review` | Multi-agent review of a PR or staged changes. |
+| **Start a session** | `/onboard` | Loads project context. Use `--refresh` after context compaction. |
+| **Weekly hygiene** | `/sync-permissions`, `/friction`, `/test-gaps` | Permission cleanup, friction analysis, testing debt. Run any/all. |
+| **Compliance check** | `/audit` | Full 08xx audit suite. |
+
+---
+
 ## Command Quick Reference
 
 | Command | Description | When to Use |
