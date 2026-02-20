@@ -28,8 +28,12 @@ Issues closed per day (Central Time):
 
 ```mermaid
 graph TD
-    subgraph Intent["THE GREAT GOD OM"]
+    subgraph Intent["HUMAN ORCHESTRATOR"]
         O["Human Intent<br/>& Oversight"]
+    end
+
+    subgraph LG["LANGGRAPH WORKFLOWS"]
+        W["5 State Machines<br/>SQLite Checkpointing"]
     end
 
     subgraph Agents["CLAUDE AGENTS (12+)"]
@@ -44,7 +48,8 @@ graph TD
         M["Requirements | Implementation<br/>Reports | Audit Trail"]
     end
 
-    O --> Agents
+    O --> LG
+    LG --> Agents
     Agents --> Gemini
     Gemini --> Gov
 ```
@@ -142,14 +147,51 @@ AssemblyZero detects **silent model downgrades**:
 
 ---
 
+## Technical Architecture
+
+### LLM Invocation Patterns
+
+| Provider | Class | Use Case | Cost Model |
+|----------|-------|----------|------------|
+| **Claude CLI** (`claude -p`) | `ClaudeCLIProvider` | Drafting, implementation | Free (Max subscription) |
+| **Anthropic API** | `AnthropicProvider` | Automatic fallback | Per-token |
+| **Fallback** | `FallbackProvider` | CLI (180s) → API (300s) | Free first, paid if needed |
+| **Gemini** | `GeminiProvider` | Adversarial review only | Free (API quota) |
+
+Claude is invoked via `claude -p` with `--tools ""` and `--strict-mcp-config` — no tools, no MCP, deterministic side-effect-free calls. The Anthropic API exists only as a paid fallback for resilience.
+
+### LangGraph State Machines
+
+All workflows are LangGraph `StateGraph` instances with typed state and SQLite checkpointing:
+
+| Workflow | Nodes | Purpose |
+|----------|-------|---------|
+| **Issue** | 7 | Idea → structured GitHub issue |
+| **Requirements** | 10 | Issue → approved LLD (design) |
+| **Implementation Spec** | 7 | LLD → concrete implementation instructions |
+| **TDD Implementation** | 13 | Spec → code + tests + PR |
+| **Scout** | Variable | External intelligence gathering |
+
+### Codebase Intelligence (RAG-Like)
+
+AssemblyZero uses deterministic RAG-like techniques — **not vector embeddings** — for codebase understanding:
+- **AST summarization** extracts function signatures and class hierarchies
+- **Pattern scanning** finds similar implementations by structure
+- **Token budget management** trims context to ~60KB
+- **Section-aware truncation** preserves important sections
+
+**[Full Technical Architecture →](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture)**
+
+---
+
 ## Governance Gates
 
 Three mandatory checkpoints that **cannot be bypassed**:
 
 ```
-Issue → LLD Review → Coding → Implementation Review → PR → Report Generation → Merge
-         ↑                      ↑                           ↑
-    Gemini Gate            Gemini Gate                 Auto-Generated
+Idea → Issue → LLD Review → Coding → Implementation Review → PR → Report Generation → Merge
+                ↑                      ↑                           ↑
+           Gemini Gate            Gemini Gate                 Auto-Generated
 ```
 
 ### LLD Review Gate
@@ -278,26 +320,17 @@ Audits designed with an **adversarial philosophy**: they exist to find violation
 
 ---
 
-## Roadmap: LangGraph Evolution
+## Architecture: LangGraph State Machines
 
-AssemblyZero is **production-ready today** with prompt-based orchestration. The roadmap transforms it into enterprise-grade state machines:
+AssemblyZero workflows run as LangGraph state machines with SQLite checkpointing:
 
-| Phase | Timeline | Capability | Impact |
-|-------|----------|------------|--------|
-| **1** | Q1 2026 | LangGraph state machines | Gates structurally enforced |
-| **2** | Q1 2026 | Checkpointing | Long tasks survive interruptions |
+| Phase | Status | Capability | Impact |
+|-------|--------|------------|--------|
+| **1** | **COMPLETE** | LangGraph state machines (5 workflows) | Gates structurally enforced |
+| **2** | **COMPLETE** | SQLite checkpointing (SqliteSaver) | Long tasks survive interruptions |
 | **3** | Q2 2026 | Supervisor pattern | Autonomous task decomposition |
 | **4** | Q2 2026 | LangSmith observability | Full dashboards, traces, cost attribution |
 | **5** | Q3 2026 | Dynamic tool graphs | Context-aware tool selection |
-
-### Why LangGraph?
-
-| Current (Prompt-Based) | Future (LangGraph) |
-|------------------------|-------------------|
-| Gates enforced by instructions | Gates enforced by state machine |
-| Context lost on compaction | Context checkpointed to database |
-| Human routes tasks to agents | Supervisor auto-routes |
-| Log parsing for metrics | LangSmith dashboards |
 
 **[Full Roadmap and Vision](https://github.com/martymcenroe/AssemblyZero/wiki/LangGraph-Evolution)**
 
@@ -346,13 +379,13 @@ Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/Asse
 
 | Page | Description |
 |------|-------------|
-| **[Metrics Dashboard](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** | Velocity charts, Vetinari Index, production numbers |
+| **[Technical Architecture](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture)** | LLM invocation, LangGraph workflows, codebase intelligence |
+| **[Metrics Dashboard](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** | Velocity charts, production numbers |
 | **[Multi-Agent Orchestration](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration)** | The headline feature - 12+ concurrent agents |
 | **[Requirements Workflow](https://github.com/martymcenroe/AssemblyZero/wiki/Requirements-Workflow)** | LLD → Gemini → Approval flow |
 | **[Implementation Workflow](https://github.com/martymcenroe/AssemblyZero/wiki/Implementation-Workflow)** | Worktree → Code → Reports → PR |
 | **[Governance Gates](https://github.com/martymcenroe/AssemblyZero/wiki/Governance-Gates)** | LLD, implementation, report gates |
-| **[How AssemblyZero Learns](https://github.com/martymcenroe/AssemblyZero/wiki/How-the-AssemblyZero-Learns)** | Self-improving governance from verdicts |
-| **[Dramatis Personae](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)** | The Discworld cast of workflows |
+| **[How AssemblyZero Learns](https://github.com/martymcenroe/AssemblyZero/wiki/How-AssemblyZero-Learns)** | Self-improving governance from verdicts |
 | **[LangGraph Evolution](https://github.com/martymcenroe/AssemblyZero/wiki/LangGraph-Evolution)** | Roadmap to enterprise state machines |
 | **[Gemini Verification](https://github.com/martymcenroe/AssemblyZero/wiki/Gemini-Verification)** | Multi-model review architecture |
 | **[Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start)** | 5-minute setup guide |
@@ -362,7 +395,7 @@ Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/Asse
 | Audience | Start Here |
 |----------|------------|
 | **Engineering Leaders** | [Why AssemblyZero?](https://github.com/martymcenroe/AssemblyZero/wiki/For-Enterprise-Leaders-Why-AssemblyZero) |
-| **Architects** | [Multi-Agent Orchestration](https://github.com/martymcenroe/AssemblyZero/wiki/Multi-Agent-Orchestration) |
+| **Architects** | [Technical Architecture](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture) |
 | **Security Teams** | [Security & Compliance](https://github.com/martymcenroe/AssemblyZero/wiki/Security-Compliance) |
 | **Developers** | [Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start) |
 
@@ -413,20 +446,17 @@ The code in this repo is the same code that:
 
 ---
 
-## Dramatis Personae
+## The Discworld Personas
 
-AssemblyZero workflows are named after **Terry Pratchett's Discworld** characters. This isn't whimsy—it's intuitive system design:
+Workflows are named after **Terry Pratchett's Discworld** characters — intuitive metaphors that make system behavior memorable:
 
-| Persona | Function | Philosophy |
-|---------|----------|------------|
-| **The Great God Om** | Human Orchestrator | Pure Intent—the agents serve the Will |
-| **Moist von Lipwig** | Pipeline Orchestration | Keep the messages moving |
-| **Lord Vetinari** | Work Visibility | Information is power |
-| **Commander Vimes** | Regression Tests | Deep suspicion of everything |
-| **Captain Angua** | External Intelligence | Track down solutions others miss |
-| **Brutha** | RAG Memory | Perfect recall, never hallucinates |
-| **Lu-Tze** | Maintenance | Constant sweeping prevents disasters |
-| **DEATH** | Documentation Reconciliation | INEVITABLE. THOROUGH. PATIENT. |
+| Persona | Function |
+|---------|----------|
+| **Vimes** | Regression guard — deep suspicion of everything |
+| **Hex** | Codebase intelligence — AST parsing, pattern matching |
+| **Ponder** | Mechanical validation — auto-fix before review |
+| **Lu-Tze** | Maintenance — constant sweeping prevents disasters |
+| **DEATH** | Documentation reconciliation — INEVITABLE. THOROUGH. |
 
 **[Full Cast →](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)**
 

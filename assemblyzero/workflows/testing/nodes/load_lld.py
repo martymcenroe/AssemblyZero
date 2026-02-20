@@ -6,8 +6,8 @@ exits with a specific command to generate one.
 
 Reads the spec from docs/lld/drafts/spec-{N}.md and extracts:
 - Full spec content (used as LLD content downstream)
-- Section 10 (Test Plan)
-- Test scenarios with metadata
+- Test plan from Section 10 (LLD format) or Section 9 (impl spec format)
+- Test scenarios with metadata (from tables, headings, bold, or code blocks)
 - Requirements for coverage tracking
 """
 
@@ -122,22 +122,29 @@ def build_spec_command(issue_number: int, repo_root: Path) -> str:
 
 
 def extract_test_plan_section(lld_content: str) -> str:
-    """Extract Section 10 (Test Plan/Verification) from LLD content.
+    """Extract test plan section from LLD or Implementation Spec content.
+
+    Supports two document formats:
+    - LLD: Section 10 (Test Plan / Verification & Testing)
+    - Implementation Spec: Section 9 (Test Mapping)
 
     Args:
-        lld_content: Full LLD markdown content.
+        lld_content: Full LLD or Implementation Spec markdown content.
 
     Returns:
         Test plan section content, or empty string if not found.
     """
-    # Pattern variations for Section 10:
+    # Pattern variations for Section 10 (LLD format):
     # - ## 10. Test Plan
     # - ## 10. Verification & Testing
     # - ## 10. Testing
+    # Pattern variations for Section 9 (Implementation Spec format):
+    # - ## 9. Test Mapping
     # Capture until next ## heading or end of document
     patterns = [
         r"##\s*10\.?\s*(?:Test\s*Plan|Verification\s*(?:&|and)?\s*Testing|Testing)\s*\n(.*?)(?=\n##\s*\d|\Z)",
-        r"##\s*Test\s*Plan\s*\n(.*?)(?=\n##|\Z)",
+        r"##\s*9\.?\s*Test\s*Mapping\s*\n(.*?)(?=\n##\s*\d|\Z)",
+        r"##\s*Test\s*(?:Plan|Mapping)\s*\n(.*?)(?=\n##|\Z)",
         r"##\s*(?:Verification|Testing)\s*\n(.*?)(?=\n##|\Z)",
     ]
 
@@ -146,7 +153,74 @@ def extract_test_plan_section(lld_content: str) -> str:
         if match:
             return match.group(1).strip()
 
+    # Fallback: extract test scenarios from Python test code blocks in
+    # Implementation Spec sections (e.g., ### 6.9 `tests/unit/test_*.py`)
+    # This handles specs where tests are defined as complete file contents
+    # rather than in a summary table.
+    fallback = _extract_test_scenarios_from_code_blocks(lld_content)
+    if fallback:
+        return fallback
+
     return ""
+
+
+def _extract_test_scenarios_from_code_blocks(content: str) -> str:
+    """Extract test scenario information from Python test code blocks.
+
+    Implementation specs include complete test file contents in code blocks
+    under headings like `### 6.9 tests/unit/test_orchestrator_config.py`.
+    This function extracts test class and method names to build a synthetic
+    test plan section that parse_test_scenarios() can process.
+
+    Args:
+        content: Full spec content with code blocks.
+
+    Returns:
+        Synthetic test plan text with table rows, or empty string.
+    """
+    # Find test file code blocks: ### N.N `tests/...test_*.py`
+    # followed by ```python ... ```
+    test_block_pattern = re.compile(
+        r"###\s*\d+\.\d+\s*`(tests/[^`]*test_[^`]*\.py)`.*?\n"
+        r".*?```python\s*\n(.*?)```",
+        re.DOTALL,
+    )
+
+    rows = []
+    for match in test_block_pattern.finditer(content):
+        file_path = match.group(1)
+        code = match.group(2)
+
+        # Extract test method names: def test_xxx(self, ...) or def test_xxx(...)
+        method_pattern = re.compile(r"^\s*def\s+(test_\w+)\s*\(", re.MULTILINE)
+        for method_match in method_pattern.finditer(code):
+            method_name = method_match.group(1)
+
+            # Try to extract docstring or inline comment for description
+            desc = ""
+            after_def = code[method_match.end():]
+            doc_match = re.search(r'"""(.+?)"""', after_def[:200], re.DOTALL)
+            if doc_match:
+                desc = doc_match.group(1).strip().split("\n")[0]
+            else:
+                # Use method name as description
+                desc = method_name.replace("_", " ").replace("test ", "")
+
+            # Infer test type from file path
+            if "integration" in file_path:
+                test_type = "integration"
+            elif "e2e" in file_path:
+                test_type = "e2e"
+            else:
+                test_type = "unit"
+
+            rows.append(f"| {method_name} | {desc} | {test_type} | {file_path} |")
+
+    if not rows:
+        return ""
+
+    header = "| Test ID | Scenario | Type | Source |\n|---------|----------|------|--------|\n"
+    return header + "\n".join(rows)
 
 
 def extract_requirements(lld_content: str) -> list[str]:

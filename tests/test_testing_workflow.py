@@ -26,6 +26,7 @@ from assemblyzero.workflows.testing.knowledge.patterns import (
     get_required_tools,
 )
 from assemblyzero.workflows.testing.nodes.load_lld import (
+    _extract_test_scenarios_from_code_blocks,
     extract_coverage_target,
     extract_requirements,
     extract_test_plan_section,
@@ -2226,15 +2227,15 @@ class TestLoadLLDModule:
         assert result == []
 
     def test_load_lld_non_mock(self, tmp_path):
-        """load_lld loads actual LLD file."""
+        """load_lld loads actual implementation spec file."""
         from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
-        # Create LLD file
-        lld_dir = tmp_path / "docs" / "lld" / "active"
-        lld_dir.mkdir(parents=True)
-        (lld_dir / "LLD-042.md").write_text("""# LLD-042: Test Feature
+        # Issue #384: load_lld now requires an impl spec, not a raw LLD
+        spec_dir = tmp_path / "docs" / "lld" / "drafts"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "spec-0042.md").write_text("""# Implementation Spec
 
-## 1. Context
+## 1. Overview
 * **Status:** Approved (Gemini Review, 2026-01-30)
 
 ## 3. Requirements
@@ -2262,16 +2263,16 @@ Requirement: REQ-1
         result = load_lld(state)
 
         assert result.get("error_message") == ""
-        assert "LLD-042" in result.get("lld_path", "")
+        assert "spec-0042" in result.get("lld_path", "")
         assert len(result.get("test_scenarios", [])) >= 1
 
     def test_load_lld_not_found(self, tmp_path):
-        """load_lld returns error when LLD not found."""
+        """load_lld returns error when spec not found."""
         from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
-        # Create empty LLD directory
-        lld_dir = tmp_path / "docs" / "lld" / "active"
-        lld_dir.mkdir(parents=True)
+        # Create empty spec directory — no spec files
+        spec_dir = tmp_path / "docs" / "lld" / "drafts"
+        spec_dir.mkdir(parents=True)
 
         state: TestingWorkflowState = {
             "issue_number": 999,
@@ -2281,15 +2282,16 @@ Requirement: REQ-1
 
         result = load_lld(state)
 
-        assert "not found" in result.get("error_message", "")
+        assert "spec found" in result.get("error_message", "").lower()
 
     def test_load_lld_short_content(self, tmp_path):
-        """load_lld blocks when LLD content too short."""
+        """load_lld blocks when spec content too short."""
         from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
-        lld_dir = tmp_path / "docs" / "lld" / "active"
-        lld_dir.mkdir(parents=True)
-        (lld_dir / "LLD-042.md").write_text("# Short")
+        # Issue #384: load_lld now requires an impl spec
+        spec_dir = tmp_path / "docs" / "lld" / "drafts"
+        spec_dir.mkdir(parents=True)
+        (spec_dir / "spec-0042.md").write_text("# Short")
 
         state: TestingWorkflowState = {
             "issue_number": 42,
@@ -5564,6 +5566,253 @@ class TestValidateCommitMessage:
         result = validate_commit_message(state)
 
         assert result.get("error_message", "") == ""
+
+
+class TestImplSpecTestPlanExtraction:
+    """Tests for Issue #412: extract_test_plan_section supports impl spec formats.
+
+    Implementation specs use '## 9. Test Mapping' instead of '## 10. Test Plan'.
+    Some specs embed complete test files in code blocks under '### 6.x' sections.
+    """
+
+    def test_extract_section_9_test_mapping(self):
+        """extract_test_plan_section matches '## 9. Test Mapping'."""
+        spec = """# Implementation Spec
+
+## 8. Implementation Notes
+
+Some notes.
+
+## 9. Test Mapping
+
+| Test ID | Scenario | Req | File |
+|---------|----------|-----|------|
+| test_config_defaults | Verify defaults | REQ-1 | tests/unit/test_config.py |
+| test_state_transitions | Verify state flow | REQ-2 | tests/unit/test_state.py |
+
+## 10. Appendix
+"""
+        result = extract_test_plan_section(spec)
+
+        assert "test_config_defaults" in result
+        assert "test_state_transitions" in result
+        assert "Appendix" not in result
+
+    def test_extract_section_9_parses_into_scenarios(self):
+        """Section 9 table content is parseable by parse_test_scenarios."""
+        spec = """# Spec
+
+## 9. Test Mapping
+
+| Test ID | Scenario | Type | File |
+|---------|----------|------|------|
+| test_load_config | Load config from file | unit | tests/unit/test_config.py |
+| test_integration_flow | Full pipeline test | integration | tests/integration/test_flow.py |
+
+## 10. Notes
+"""
+        section = extract_test_plan_section(spec)
+        scenarios = parse_test_scenarios(section)
+
+        assert len(scenarios) >= 2
+        names = [s["name"] for s in scenarios]
+        assert any("load_config" in n for n in names)
+        assert any("integration_flow" in n for n in names)
+
+    def test_extract_generic_test_mapping_heading(self):
+        """extract_test_plan_section matches '## Test Mapping' (no number)."""
+        spec = """# Spec
+
+## Implementation
+
+Code details.
+
+## Test Mapping
+
+| Test | Desc |
+|------|------|
+| test_foo | Tests foo |
+
+## Appendix
+"""
+        result = extract_test_plan_section(spec)
+
+        assert "test_foo" in result
+        assert "Appendix" not in result
+
+    def test_code_block_fallback_extracts_test_methods(self):
+        """_extract_test_scenarios_from_code_blocks extracts def test_* from code blocks."""
+        spec = '''# Implementation Spec
+
+### 6.9 `tests/unit/test_config.py`
+
+```python
+import pytest
+
+class TestConfig:
+    def test_defaults_loaded(self):
+        """Verify default config values."""
+        config = get_default_config()
+        assert config["retries"] == 3
+
+    def test_override_values(self):
+        """Override merges correctly."""
+        config = load_config({"retries": 5})
+        assert config["retries"] == 5
+```
+
+### 6.10 `tests/integration/test_pipeline.py`
+
+```python
+class TestPipeline:
+    def test_full_run(self):
+        """End-to-end pipeline execution."""
+        result = run_pipeline(issue=999)
+        assert result.success
+```
+'''
+        result = _extract_test_scenarios_from_code_blocks(spec)
+
+        assert "test_defaults_loaded" in result
+        assert "test_override_values" in result
+        assert "test_full_run" in result
+        # Should contain table format
+        assert "|" in result
+        assert "unit" in result
+        assert "integration" in result
+
+    def test_code_block_fallback_extracts_docstrings(self):
+        """_extract_test_scenarios_from_code_blocks uses docstrings for descriptions."""
+        spec = '''# Spec
+
+### 6.5 `tests/unit/test_state.py`
+
+```python
+class TestState:
+    def test_initial_state(self):
+        """Creates initial state with defaults."""
+        state = create_initial_state(42)
+        assert state["issue_number"] == 42
+```
+'''
+        result = _extract_test_scenarios_from_code_blocks(spec)
+
+        assert "test_initial_state" in result
+        assert "Creates initial state with defaults" in result
+
+    def test_code_block_fallback_no_test_files(self):
+        """_extract_test_scenarios_from_code_blocks returns empty for non-test code."""
+        spec = '''# Spec
+
+### 6.1 `src/module.py`
+
+```python
+def helper():
+    return 42
+```
+'''
+        result = _extract_test_scenarios_from_code_blocks(spec)
+
+        assert result == ""
+
+    def test_code_block_fallback_infers_type_from_path(self):
+        """_extract_test_scenarios_from_code_blocks infers test type from file path."""
+        spec = '''# Spec
+
+### 6.8 `tests/unit/test_foo.py`
+
+```python
+def test_unit_thing(self):
+    pass
+```
+
+### 6.9 `tests/integration/test_bar.py`
+
+```python
+def test_integration_thing(self):
+    pass
+```
+
+### 6.10 `tests/e2e/test_baz.py`
+
+```python
+def test_e2e_thing(self):
+    pass
+```
+'''
+        result = _extract_test_scenarios_from_code_blocks(spec)
+
+        lines = result.strip().split("\n")
+        unit_line = [line for line in lines if "test_unit_thing" in line][0]
+        integ_line = [line for line in lines if "test_integration_thing" in line][0]
+        e2e_line = [line for line in lines if "test_e2e_thing" in line][0]
+
+        assert "unit" in unit_line
+        assert "integration" in integ_line
+        assert "e2e" in e2e_line
+
+    def test_full_pipeline_spec_with_code_blocks(self):
+        """End-to-end: spec with only code blocks (no Section 9/10) still extracts scenarios."""
+        spec = '''# Implementation Spec
+
+## 1. Overview
+
+This spec implements feature X.
+
+APPROVED
+
+### 6.9 `tests/unit/test_feature.py`
+
+```python
+class TestFeature:
+    def test_create(self):
+        """Create a new feature instance."""
+        f = Feature()
+        assert f is not None
+
+    def test_validate(self):
+        """Validate feature properties."""
+        f = Feature()
+        assert f.is_valid()
+```
+
+## 7. Dependencies
+'''
+        # extract_test_plan_section should fall through to code block fallback
+        section = extract_test_plan_section(spec)
+        assert section != ""
+
+        # parse_test_scenarios should parse the synthetic table
+        scenarios = parse_test_scenarios(section)
+        assert len(scenarios) >= 2
+        names = [s["name"] for s in scenarios]
+        assert any("create" in n for n in names)
+        assert any("validate" in n for n in names)
+
+    def test_section_10_still_works(self):
+        """Existing Section 10 extraction is not broken by new patterns."""
+        lld = """# LLD
+
+## 9. Something Else
+
+Not test mapping.
+
+## 10. Test Plan
+
+### test_auth
+Verify authentication works.
+
+### test_logout
+Verify logout clears session.
+
+## 11. Appendix
+"""
+        result = extract_test_plan_section(lld)
+
+        assert "test_auth" in result
+        assert "test_logout" in result
+        assert "Something Else" not in result
+        assert "Appendix" not in result
 
 
 if __name__ == "__main__":
