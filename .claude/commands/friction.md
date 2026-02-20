@@ -202,39 +202,9 @@ Output format:
 
 ---
 
-## JSONL Structure Reference
-
-Session transcripts are JSONL (one JSON object per line):
-
-```jsonl
-{"type":"user","message":{"content":"..."}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"..."}}]}}
-{"type":"tool_result","result":"..."}  // <-- Look for errors here
-```
-
-**Key fields to examine:**
-- `type: "tool_result"` - Contains command outcomes
-- `message.content[].type: "tool_use"` - Contains the command attempted
-- `error` or `Exit code 1` in results - Indicates friction
-
----
-
 ## Rules
 
 - **Use allowed tools only** - See "Permission-Safe Execution" above
 - **Evidence-based** - Only report friction actually found in transcripts
 - **Actionable output** - Every finding must have a specific remediation
 - **Ask before applying** - Do NOT modify settings.local.json without user approval
-- **One command per Bash call** - No pipes or chains
-
----
-
-## Quick Reference: Common Remediations
-
-| Friction Type | Fix |
-|--------------|-----|
-| AWS path mangling | Prefix with `MSYS_NO_PATHCONV=1` |
-| `cd /path && git` | Use `git -C /path` instead |
-| Tool not allowed | Add `Bash(tool-name:*)` to allow |
-| Env prefix blocked | Add `Bash(VAR=value cmd:*)` |
-| Python blocked | Use `poetry run python` instead |

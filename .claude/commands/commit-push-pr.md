@@ -54,7 +54,7 @@ type: brief description
 
 Longer explanation if needed.
 
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
 )"
 ```
@@ -96,18 +96,7 @@ URL: https://github.com/owner/repo/pull/XXX
 
 ---
 
-## Rules
-
-- One command per Bash call (no `&&` or `|`)
-- Use `git -C /path` if not in repo root
-- Respect .gitignore
-- Don't commit secrets or credentials
-- Ask before force-pushing
-
----
-
 ## Notes
 
-- This skill works in any git repository
 - Detects the GitHub repo automatically via `gh repo view`
 - If not a GitHub repo, stops after push

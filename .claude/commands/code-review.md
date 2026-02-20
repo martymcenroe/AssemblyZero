@@ -9,9 +9,6 @@ argument-hint: "[PR#] [--files path1 path2...] [--focus security|quality|all]"
 
 **Cost:** ~$0.05-0.15 per review (single agent, diff passed inline).
 
-**Previous design:** 5 parallel agents (1 Opus + 4 Sonnet) at ~$0.30-1.00/review.
-Replaced with single structured-checklist agent — ~80% cheaper, ~90% as effective.
-
 ---
 
 ## Project Detection
