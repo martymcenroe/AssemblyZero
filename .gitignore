@@ -4,6 +4,9 @@
 # Claude Code local settings (machine-specific, prevent merge overwrites)
 .claude/settings.local.json
 
+# Claude Code checkpoint (ephemeral, session-scoped)
+.claude/checkpoint.json
+
 # Claude Code temporary files
 tmpclaude-*
 
