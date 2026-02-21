@@ -409,6 +409,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=[],
         help="Additional context files to inject into prompts (can be repeated)",
     )
+    parser.add_argument(
+        "--issue-only",
+        action="store_true",
+        help="Use issue body as spec (skip LLD/spec file search). For small changes.",
+    )
 
     return parser
 
@@ -597,6 +602,8 @@ def main():
         print(f"[implement] E2E: skipped")
     if args.scaffold_only:
         print(f"[implement] Mode: scaffold-only")
+    if args.issue_only:
+        print(f"[implement] Mode: issue-only (no LLD)")
     if args.dry_run:
         print(f"[implement] Mode: DRY RUN")
     print()
@@ -644,6 +651,7 @@ def main():
         "max_iterations": args.max_iterations,
         "context_files": args.context or [],
         "context_content": context_content,
+        "issue_only": args.issue_only,
     }
 
     # Track worktree for later reference (cleanup, PR creation)

@@ -1,6 +1,6 @@
-"""Tests for TDD context injection (Issue #288).
+"""Tests for TDD context injection (Issue #288) and --issue-only flag (Issue #287).
 
-Tests the --context CLI flag, state propagation, and prompt injection.
+Tests the --context CLI flag, --issue-only flag, state propagation, and prompt injection.
 """
 
 import pytest
@@ -58,6 +58,34 @@ class TestContextInPrompt:
             context_content="",
         )
         assert "Additional Context" not in prompt
+
+
+class TestIssueOnlyCLIFlag:
+    """Test --issue-only flag parsing in the CLI argument parser (Issue #287)."""
+
+    def test_issue_only_flag_accepted(self):
+        from tools.run_implement_from_lld import create_argument_parser
+
+        parser = create_argument_parser()
+        args = parser.parse_args(["--issue", "42", "--issue-only"])
+        assert args.issue_only is True
+
+    def test_issue_only_defaults_to_false(self):
+        from tools.run_implement_from_lld import create_argument_parser
+
+        parser = create_argument_parser()
+        args = parser.parse_args(["--issue", "42"])
+        assert args.issue_only is False
+
+
+class TestIssueOnlyStateField:
+    """Test issue_only field in TestingWorkflowState (Issue #287)."""
+
+    def test_state_accepts_issue_only_field(self):
+        from assemblyzero.workflows.testing.state import TestingWorkflowState
+
+        annotations = TestingWorkflowState.__annotations__
+        assert "issue_only" in annotations
 
 
 class TestStateContextField:

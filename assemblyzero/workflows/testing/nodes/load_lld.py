@@ -11,7 +11,9 @@ Reads the spec from docs/lld/drafts/spec-{N}.md and extracts:
 - Requirements for coverage tracking
 """
 
+import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -532,6 +534,107 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:
     return files
 
 
+def _load_from_issue(
+    state: TestingWorkflowState,
+    issue_number: int,
+    repo_root: Path,
+) -> dict[str, Any]:
+    """Load issue body via gh CLI and construct synthetic LLD content.
+
+    Issue #287: --issue-only mode for lightweight workflows.
+
+    Args:
+        state: Current workflow state.
+        issue_number: GitHub issue number.
+        repo_root: Target repository root path.
+
+    Returns:
+        State updates with synthetic LLD content from issue body.
+    """
+    gate_log(f"[N0] Issue-only mode: fetching issue #{issue_number} body...")
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            cwd=str(repo_root),
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return {"error_message": f"Failed to fetch issue #{issue_number}: {e}"}
+
+    if result.returncode != 0:
+        return {"error_message": f"Issue #{issue_number} not found: {result.stderr.strip()}"}
+
+    try:
+        issue_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"error_message": f"Invalid JSON from gh issue view: {result.stdout[:200]}"}
+
+    title = issue_data.get("title", f"Issue #{issue_number}")
+    body = issue_data.get("body", "")
+
+    if not body:
+        return {"error_message": f"Issue #{issue_number} has no body content"}
+
+    # Construct synthetic LLD content from issue title + body
+    lld_content = (
+        f"# {issue_number} - {title}\n\n"
+        f"**Status:** APPROVED (issue-only mode)\n\n"
+        f"## Description\n\n{body}\n"
+    )
+
+    gate_log(f"    Issue title: {title}")
+    gate_log(f"    Body length: {len(body)} chars")
+
+    # Extract what we can from the issue body
+    test_plan_section = extract_test_plan_section(lld_content)
+    test_scenarios = parse_test_scenarios(test_plan_section) if test_plan_section else []
+    detected_types = detect_test_types(lld_content)
+    requirements = extract_requirements(lld_content)
+    coverage_target = extract_coverage_target(lld_content) or 80
+    files_to_modify = extract_files_to_modify(lld_content)
+
+    gate_log(f"    Found {len(test_scenarios)} test scenarios")
+    gate_log(f"    Detected test types: {detected_types}")
+
+    # Create audit directory
+    audit_dir = create_testing_audit_dir(issue_number, repo_root)
+
+    # Save synthetic LLD to audit trail
+    file_num = next_file_number(audit_dir)
+    save_audit_file(audit_dir, file_num, "issue-only-spec.md", lld_content)
+
+    # Log workflow start
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=issue_number,
+        workflow_type="testing",
+        event="start",
+        details={
+            "mode": "issue-only",
+            "title": title,
+            "body_length": len(body),
+            "scenario_count": len(test_scenarios),
+        },
+    )
+
+    return {
+        "lld_content": lld_content,
+        "lld_path": f"issue-only:#{issue_number}",
+        "test_plan_section": test_plan_section or "",
+        "test_scenarios": test_scenarios,
+        "detected_test_types": detected_types or ["unit"],
+        "coverage_target": state.get("coverage_target", coverage_target),
+        "requirements": requirements,
+        "files_to_modify": files_to_modify,
+        "audit_dir": str(audit_dir),
+        "file_counter": next_file_number(audit_dir),
+    }
+
+
 def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """N0: Load LLD and extract test plan.
 
@@ -555,6 +658,10 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     # Get repo root
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+
+    # Issue #287: --issue-only mode — fetch issue body, skip spec/LLD search
+    if state.get("issue_only"):
+        return _load_from_issue(state, issue_number, repo_root)
 
     # Issue #384: Find Implementation Spec (NOT raw LLD)
     lld_path = state.get("lld_path", "")

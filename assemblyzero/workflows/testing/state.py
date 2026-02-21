@@ -182,6 +182,7 @@ class TestingWorkflowState(TypedDict, total=False):
     skip_e2e: bool
     scaffold_only: bool
     green_only: bool
+    issue_only: bool  # Issue #287: Use issue body as spec, skip LLD search
 
     # E2E configuration
     sandbox_repo: str
