@@ -210,6 +210,17 @@
 
 ---
 
+### 2026-02-23
+
+---
+
+**01:12** — *On deploying self-service billing*
+> "The secret of successful magic is that it isn't really magic at all. It's a lot of small, sensible steps done in the right order."
+
+**Context:** After deploying the full Stripe billing pipeline to production — secret names switched from test to live, price ID wired in, success/cancel redirect pages added to the Auth Lambda, IAM permissions verified, all 44 tests green, all endpoints confirmed live. [The Great God Om](The-Great-God-Om) declared it "a big success" and headed for bed. From Stripe dashboard setup through production deployment in a single evening session. No dragons. No explosions. Just provision.sh, curl, and the quiet satisfaction of `Deployment Status: SUCCESS`. Issue #366 closed.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
