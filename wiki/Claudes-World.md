@@ -197,6 +197,19 @@
 
 ---
 
+### 2026-02-22
+
+---
+
+**23:44** — *On drafting the SES appeal*
+> "The truth isn't easily pinned to a page. In the battle between you and the world, back the world."
+
+*— adapted from Terry Pratchett*
+
+**Context:** After fixing a three-layer hallucination bug in Hermes's GitHub username extractor (#103) — negative-context filters, hardened LLM prompts, tests that actually exercise the LLM path — and deploying both Worker and Lambda, AWS replied to the SES production access appeal for the new hermes-developer account. They wanted to know about sending patterns, bounce handling, and content. Claude drafted a detailed response covering Hermes's inbound-first architecture, terminal state enforcement, and ~10 emails/day volume. [The Great God Om](The-Great-God-Om) said "very nice!" — and the truth about a system that only emails people who email first was, in fact, easily pinned to a page. But backing the world meant getting the details right: bounce patterns, state machines, operator audit gates. The world checks your work.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
