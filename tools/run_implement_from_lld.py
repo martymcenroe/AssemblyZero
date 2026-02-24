@@ -40,6 +40,7 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -53,6 +54,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Issue #120: Configure LangSmith tracing (enabled when LANGSMITH_API_KEY is set)
 from assemblyzero.tracing import configure_langsmith
 configure_langsmith()
+
+# Issue #424: Telemetry instrumentation
+from assemblyzero.telemetry import flush, track_tool
+atexit.register(flush)
 
 
 def get_current_branch(repo_path: Path) -> str:
@@ -772,4 +777,5 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with track_tool("run_implement_from_lld", repo="AssemblyZero"):
+        sys.exit(main())
