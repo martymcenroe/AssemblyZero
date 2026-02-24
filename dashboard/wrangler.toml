@@ -1,0 +1,7 @@
+name = "assemblyzero-telemetry-api"
+main = "src/index.ts"
+compatibility_date = "2025-12-01"
+
+[vars]
+TABLE_NAME = "assemblyzero-telemetry"
+AWS_REGION = "us-east-1"

@@ -1,0 +1,26 @@
+{
+  "name": "assemblyzero-telemetry-dashboard",
+  "version": "0.1.0",
+  "description": "AssemblyZero telemetry API and dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.996.0",
+    "@aws-sdk/lib-dynamodb": "^3.996.0",
+    "@tanstack/react-query": "^5.90.21",
+    "hono": "^4.12.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.68.0"
+  }
+}
