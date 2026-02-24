@@ -130,6 +130,19 @@ software under these terms.
 **Use** means anything you do with the software requiring one
 of your licenses.
 
+## Telemetry Integrity
+
+The software includes optional telemetry functionality that records
+structured events about tool usage, workflow execution, and session
+lifecycle. Telemetry data is stored in the licensor's infrastructure
+with a 90-day retention policy. Users may disable telemetry by
+setting the environment variable `ASSEMBLYZERO_TELEMETRY=0`.
+
+You must not tamper with, falsify, or selectively suppress telemetry
+data in any derivative work that retains telemetry functionality.
+If you modify telemetry behavior, you must clearly document the
+changes. See `TELEMETRY.md` for full details on data collection.
+
 ---
 
 Required Notice: Copyright (c) 2026 Marty McEnroe (https://github.com/martymcenroe)
