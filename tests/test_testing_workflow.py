@@ -2217,6 +2217,29 @@ class TestLoadLLDModule:
         assert result[0]["change_type"] == "Modify"
         assert result[1]["change_type"] == "Add"
 
+    def test_extract_files_to_modify_spec_format(self):
+        """extract_files_to_modify parses spec '## 2. Files to Implement' table."""
+        from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify
+
+        spec_content = """# Implementation Spec
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `tools/test_gate/__init__.py` | Add | Package init |
+| 2 | `tools/test_gate/parser.py` | Add | Pytest output parsing |
+| 3 | `.github/workflows/ci.yml` | Modify | Update CI config |
+"""
+        result = extract_files_to_modify(spec_content)
+
+        assert len(result) == 3
+        assert result[0]["path"] == "tools/test_gate/__init__.py"
+        assert result[0]["change_type"] == "Add"
+        assert result[1]["path"] == "tools/test_gate/parser.py"
+        assert result[2]["path"] == ".github/workflows/ci.yml"
+        assert result[2]["change_type"] == "Modify"
+
     def test_extract_files_to_modify_no_table(self):
         """extract_files_to_modify returns empty when no table."""
         from assemblyzero.workflows.testing.nodes.load_lld import extract_files_to_modify

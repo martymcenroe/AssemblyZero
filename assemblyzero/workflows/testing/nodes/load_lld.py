@@ -269,6 +269,24 @@ def extract_requirements(lld_content: str) -> list[str]:
     # Don't extract checkboxes from the entire document (Quality Gate, Compliance, etc.)
     # The numbered requirements in Section 3 are already captured by Pattern 2
 
+    # Pattern 4: Spec format — extract Test IDs from Section 9 Test Mapping
+    # | T010 | `run_pytest()` | `test_parser.py` | ... |
+    if not requirements:
+        test_mapping_pattern = re.compile(
+            r"##\s*9\.\s*Test Mapping[^\n]*\n(.*?)(?=\n##|\Z)",
+            re.DOTALL | re.IGNORECASE,
+        )
+        mapping_match = test_mapping_pattern.search(lld_content)
+        if mapping_match:
+            section = mapping_match.group(1)
+            row_pattern = re.compile(
+                r"\|\s*(T\d+)\s*\|\s*`?([^`|]+)`?\s*\|"
+            )
+            for row_match in row_pattern.finditer(section):
+                test_id = row_match.group(1)
+                func_name = row_match.group(2).strip()
+                requirements.append(f"REQ-{test_id}: {func_name}")
+
     return requirements
 
 
@@ -481,52 +499,78 @@ def extract_coverage_target(lld_content: str) -> int:
 
 
 def extract_files_to_modify(lld_content: str) -> list[dict]:
-    """Extract files to modify from LLD Section 2.1.
+    """Extract files to modify from LLD or Implementation Spec.
 
-    Parses the "Files Changed" table to extract file paths and change types.
+    Supports two table formats:
+    - LLD: ### 2.1 Files Changed — | File | Change Type | Description |
+    - Spec: ## 2. Files to Implement — | Order | File | Change Type | Description |
 
     Args:
-        lld_content: Full LLD markdown content.
+        lld_content: Full LLD or spec markdown content.
 
     Returns:
         List of dicts with 'path', 'change_type', and 'description'.
     """
     files = []
 
-    # Find Section 2.1 Files Changed table
-    # Pattern: | File | Change Type | Description |
-    # Rows: | `path/to/file.py` | Modify | Description text |
-    table_pattern = re.compile(
-        r"###?\s*2\.1[^\n]*Files Changed[^\n]*\n"  # Section header
-        r"\n*"  # Optional blank lines
-        r"\|[^\n]+\n"  # Table header row (starts with |)
-        r"\|[-|\s]+\n"  # Separator row (|---|---|---|)
-        r"((?:\|[^\n]+\n)+)",  # Table rows (start with |)
+    # Pattern 1: LLD format — ### 2.1 Files Changed
+    lld_pattern = re.compile(
+        r"###?\s*2\.1[^\n]*Files Changed[^\n]*\n"
+        r"\n*"
+        r"\|[^\n]+\n"
+        r"\|[-|\s]+\n"
+        r"((?:\|[^\n]+\n)+)",
         re.IGNORECASE,
     )
 
-    match = table_pattern.search(lld_content)
+    # Pattern 2: Spec format — ## 2. Files to Implement
+    spec_pattern = re.compile(
+        r"##\s*2\.\s*Files to Implement[^\n]*\n"
+        r"\n*"
+        r"\|[^\n]+\n"
+        r"\|[-|\s]+\n"
+        r"((?:\|[^\n]+\n)+)",
+        re.IGNORECASE,
+    )
+
+    match = lld_pattern.search(lld_content)
+    table_format = "lld"
+    if not match:
+        match = spec_pattern.search(lld_content)
+        table_format = "spec"
     if not match:
         return files
 
     table_rows = match.group(1)
 
-    # Parse each row: | `path` | ChangeType | Description |
-    row_pattern = re.compile(
-        r"\|\s*`?([^`|]+)`?\s*\|\s*(\w+)\s*\|\s*([^|]*)\|"
-    )
+    # Detect column count from first data row to handle both formats
+    # LLD: | File | Change Type | Description |  (3 data columns)
+    # Spec: | Order | File | Change Type | Description |  (4 data columns)
+    for line in table_rows.strip().split("\n"):
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
 
-    for row_match in row_pattern.finditer(table_rows):
-        path = row_match.group(1).strip()
-        change_type = row_match.group(2).strip()
-        description = row_match.group(3).strip()
+        if len(cols) >= 4 and table_format == "spec":
+            # Spec format: Order | File | Change Type | Description
+            path_raw = cols[1].strip().strip("`")
+            change_type = cols[2].strip()
+            description = cols[3].strip()
+        elif len(cols) >= 3:
+            # LLD format: File | Change Type | Description
+            path_raw = cols[0].strip().strip("`")
+            change_type = cols[1].strip()
+            description = cols[2].strip()
+        else:
+            continue
 
         # Skip header-like rows
-        if path.lower() in ("file", "path", "filename"):
+        if path_raw.lower() in ("file", "path", "filename", "order"):
+            continue
+        # Skip rows where path looks like a number (order column leaked)
+        if path_raw.isdigit():
             continue
 
         files.append({
-            "path": path,
+            "path": path_raw,
             "change_type": change_type,
             "description": description,
         })
