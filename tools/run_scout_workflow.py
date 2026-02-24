@@ -21,12 +21,17 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import sys
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Issue #424: Telemetry instrumentation
+from assemblyzero.telemetry import flush, track_tool
+atexit.register(flush)
 
 from assemblyzero.workflows.scout.graph import create_initial_state
 from assemblyzero.workflows.scout.nodes import (
@@ -236,4 +241,5 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with track_tool("run_scout_workflow", repo="AssemblyZero"):
+        sys.exit(main())

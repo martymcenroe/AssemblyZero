@@ -32,6 +32,7 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import os
 import subprocess
@@ -45,6 +46,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Issue #120: Configure LangSmith tracing (enabled when LANGSMITH_API_KEY is set)
 from assemblyzero.tracing import configure_langsmith
 configure_langsmith()
+
+# Issue #424: Telemetry instrumentation
+from assemblyzero.telemetry import flush, track_tool
+atexit.register(flush)
 
 from assemblyzero.workflows.requirements.audit import (
     AUDIT_ACTIVE_DIR,
@@ -1024,4 +1029,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with track_tool("run_requirements_workflow", repo="AssemblyZero"):
+        sys.exit(main())

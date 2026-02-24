@@ -18,12 +18,20 @@ Usage:
 """
 
 import argparse
+import atexit
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Issue #424: Telemetry instrumentation
+from assemblyzero.telemetry import flush, track_tool
+atexit.register(flush)
 
 
 # ---------------------------------------------------------------------------
@@ -828,4 +836,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    with track_tool("run_audit", repo="AssemblyZero"):
+        sys.exit(main())
