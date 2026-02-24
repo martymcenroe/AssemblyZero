@@ -150,6 +150,9 @@ Projects use **5-digit numbers** (prefix `1` + AssemblyZero number) for implemen
 | [0204](adrs/0204-single-identity-orchestration.md) | Single Identity Orchestration | Agent identity |
 | [0205](adrs/0205-test-first-philosophy.md) | Test-First Philosophy | Quality approach |
 | [0206](adrs/0206-bidirectional-sync-architecture.md) | Bidirectional Sync Architecture | Cross-project propagation |
+| [0207](adrs/0207-llm-team-coverage-targets.md) | LLM Team Coverage Targets | Test coverage goals |
+| [0208](adrs/0208-llm-invocation-strategy.md) | LLM Invocation Strategy | Multi-provider architecture |
+| [0209](adrs/0209-playwright-persistent-context-for-extensions.md) | Playwright Persistent Context | Extension E2E testing |
 
 ### Skills (06xx)
 
