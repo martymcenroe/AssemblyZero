@@ -10,12 +10,16 @@
  *   GET /api/summary/weekly
  *   GET /api/errors
  *   GET /api/dashboard/overview
+ *   GET /api/repos/:repo/summary
+ *
+ * Static assets (React SPA) served by Wrangler [assets] config.
  */
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { getCookie } from "hono/cookie";
+import { verify } from "hono/jwt";
 import type { Env } from "./dynamo";
-import { DASHBOARD_HTML } from "./frontend";
 import {
   queryByRepo,
   queryByActor,
@@ -23,22 +27,41 @@ import {
   queryByDate,
   queryErrors,
 } from "./dynamo";
+import { auth } from "./auth";
 
 const app = new Hono<{ Bindings: Env }>();
 
 // CORS for dashboard frontend
 app.use("/api/*", cors());
 
-// API key auth middleware
-app.use("/api/*", async (c, next) => {
-  // Health endpoint is public
-  if (c.req.path === "/api/health") return next();
+// Mount OAuth routes before auth middleware
+app.route("/api/auth", auth);
 
-  const key = c.req.header("X-API-Key") ?? c.req.query("key");
-  if (!key || key !== c.env.API_KEY) {
-    return c.json({ error: "Unauthorized" }, 401);
+// Dual-auth middleware: JWT cookie OR API key
+app.use("/api/*", async (c, next) => {
+  // Public endpoints
+  if (c.req.path === "/api/health") return next();
+  // Auth routes are handled by their own sub-app
+  if (c.req.path.startsWith("/api/auth/")) return next();
+
+  // Try JWT cookie first
+  const token = getCookie(c, "session");
+  if (token) {
+    try {
+      await verify(token, c.env.JWT_SECRET, "HS256");
+      return next();
+    } catch {
+      // Invalid cookie — fall through to API key check
+    }
   }
-  return next();
+
+  // Try API key (header or query param)
+  const key = c.req.header("X-API-Key") ?? c.req.query("key");
+  if (key && key === c.env.API_KEY) {
+    return next();
+  }
+
+  return c.json({ error: "Unauthorized" }, 401);
 });
 
 // Health check
@@ -165,9 +188,47 @@ app.get("/api/dashboard/overview", async (c) => {
   });
 });
 
-// Dashboard frontend — serve HTML at root
-app.get("/", (c) => {
-  return c.html(DASHBOARD_HTML);
+// Repo detail summary
+app.get("/api/repos/:repo/summary", async (c) => {
+  const repo = c.req.param("repo");
+  const result = await queryByRepo(c.env, repo, 500);
+
+  const byActor = { human: 0, claude: 0 };
+  const byEventType: Record<string, number> = {};
+  const dailyCounts: Record<string, number> = {};
+
+  for (const item of result.items) {
+    if (item.actor === "human") byActor.human++;
+    else if (item.actor === "claude") byActor.claude++;
+
+    const et = (item.event_type as string) ?? "unknown";
+    byEventType[et] = (byEventType[et] ?? 0) + 1;
+
+    if (item.timestamp) {
+      const day = (item.timestamp as string).slice(0, 10);
+      dailyCounts[day] = (dailyCounts[day] ?? 0) + 1;
+    }
+  }
+
+  // Sort daily activity by date
+  const dailyActivity = Object.entries(dailyCounts)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, count]) => ({ date, count }));
+
+  return c.json({
+    repo,
+    total_events: result.items.length,
+    by_actor: byActor,
+    by_event_type: byEventType,
+    daily_activity: dailyActivity,
+    recent_events: result.items.slice(0, 20),
+  });
+});
+
+// SPA fallback — serve index.html for non-API routes
+app.get("*", async (c) => {
+  const url = new URL("/index.html", c.req.url);
+  return c.env.ASSETS.fetch(new Request(url));
 });
 
 export default app;

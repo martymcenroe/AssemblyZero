@@ -2,6 +2,16 @@ name = "assemblyzero-telemetry-api"
 main = "src/index.ts"
 compatibility_date = "2025-12-01"
 
+[[routes]]
+pattern = "telemetry.aletheia.study"
+custom_domain = true
+
+[assets]
+directory = "./dist/client"
+binding = "ASSETS"
+not_found_handling = "none"
+
 [vars]
 TABLE_NAME = "assemblyzero-telemetry"
 AWS_REGION = "us-east-1"
+ALLOWED_GITHUB_USERNAME = "martymcenroe"

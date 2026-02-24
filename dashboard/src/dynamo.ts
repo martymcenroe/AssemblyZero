@@ -13,6 +13,11 @@ export type Env = {
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;
   API_KEY: string;
+  GITHUB_CLIENT_ID: string;
+  GITHUB_CLIENT_SECRET: string;
+  JWT_SECRET: string;
+  ALLOWED_GITHUB_USERNAME: string;
+  ASSETS: Fetcher;
 };
 
 let cachedClient: DynamoDBDocumentClient | null = null;
