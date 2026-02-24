@@ -1146,6 +1146,17 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 print(f"        Deleted")
             continue
 
+        # Handle empty placeholder files (e.g. .gitkeep) without calling Claude
+        placeholder_names = {".gitkeep", ".gitignore_placeholder", ".keep"}
+        if Path(filepath).name in placeholder_names:
+            target_path = repo_root / filepath
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("", encoding="utf-8")
+            print(f"        Written (placeholder): {target_path}")
+            completed_files.append((filepath, ""))
+            written_paths.append(str(target_path))
+            continue
+
         # Validate change type
         target_path = repo_root / filepath
         if change_type.lower() == "modify" and not target_path.exists():

@@ -1,0 +1,156 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 18 items
+
+tests/test_issue_225.py::test_id FAILED                                  [  5%]
+tests/test_issue_225.py::test_t010 FAILED                                [ 11%]
+tests/test_issue_225.py::test_t020 FAILED                                [ 16%]
+tests/test_issue_225.py::test_t025 FAILED                                [ 22%]
+tests/test_issue_225.py::test_t030 FAILED                                [ 27%]
+tests/test_issue_225.py::test_t040 FAILED                                [ 33%]
+tests/test_issue_225.py::test_t050 FAILED                                [ 38%]
+tests/test_issue_225.py::test_t060 FAILED                                [ 44%]
+tests/test_issue_225.py::test_t070 FAILED                                [ 50%]
+tests/test_issue_225.py::test_t080 FAILED                                [ 55%]
+tests/test_issue_225.py::test_t090 FAILED                                [ 61%]
+tests/test_issue_225.py::test_t100 FAILED                                [ 66%]
+tests/test_issue_225.py::test_t110 FAILED                                [ 72%]
+tests/test_issue_225.py::test_t120 FAILED                                [ 77%]
+tests/test_issue_225.py::test_t130 FAILED                                [ 83%]
+tests/test_issue_225.py::test_t140 FAILED                                [ 88%]
+tests/test_issue_225.py::test_t150 FAILED                                [ 94%]
+tests/test_issue_225.py::test_t160 FAILED                                [100%]
+WARNING: Failed to generate report: No data to report.
+
+
+ERROR: Coverage failure: total of 0 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+___________________________________ test_id ___________________________________
+tests\test_issue_225.py:25: in test_id
+    assert False, 'TDD RED: test_id not implemented'
+E   AssertionError: TDD RED: test_id not implemented
+E   assert False
+__________________________________ test_t010 __________________________________
+tests\test_issue_225.py:41: in test_t010
+    assert False, 'TDD RED: test_t010 not implemented'
+E   AssertionError: TDD RED: test_t010 not implemented
+E   assert False
+__________________________________ test_t020 __________________________________
+tests\test_issue_225.py:57: in test_t020
+    assert False, 'TDD RED: test_t020 not implemented'
+E   AssertionError: TDD RED: test_t020 not implemented
+E   assert False
+__________________________________ test_t025 __________________________________
+tests\test_issue_225.py:73: in test_t025
+    assert False, 'TDD RED: test_t025 not implemented'
+E   AssertionError: TDD RED: test_t025 not implemented
+E   assert False
+__________________________________ test_t030 __________________________________
+tests\test_issue_225.py:89: in test_t030
+    assert False, 'TDD RED: test_t030 not implemented'
+E   AssertionError: TDD RED: test_t030 not implemented
+E   assert False
+__________________________________ test_t040 __________________________________
+tests\test_issue_225.py:105: in test_t040
+    assert False, 'TDD RED: test_t040 not implemented'
+E   AssertionError: TDD RED: test_t040 not implemented
+E   assert False
+__________________________________ test_t050 __________________________________
+tests\test_issue_225.py:121: in test_t050
+    assert False, 'TDD RED: test_t050 not implemented'
+E   AssertionError: TDD RED: test_t050 not implemented
+E   assert False
+__________________________________ test_t060 __________________________________
+tests\test_issue_225.py:137: in test_t060
+    assert False, 'TDD RED: test_t060 not implemented'
+E   AssertionError: TDD RED: test_t060 not implemented
+E   assert False
+__________________________________ test_t070 __________________________________
+tests\test_issue_225.py:153: in test_t070
+    assert False, 'TDD RED: test_t070 not implemented'
+E   AssertionError: TDD RED: test_t070 not implemented
+E   assert False
+__________________________________ test_t080 __________________________________
+tests\test_issue_225.py:169: in test_t080
+    assert False, 'TDD RED: test_t080 not implemented'
+E   AssertionError: TDD RED: test_t080 not implemented
+E   assert False
+__________________________________ test_t090 __________________________________
+tests\test_issue_225.py:185: in test_t090
+    assert False, 'TDD RED: test_t090 not implemented'
+E   AssertionError: TDD RED: test_t090 not implemented
+E   assert False
+__________________________________ test_t100 __________________________________
+tests\test_issue_225.py:200: in test_t100
+    assert False, 'TDD RED: test_t100 not implemented'
+E   AssertionError: TDD RED: test_t100 not implemented
+E   assert False
+__________________________________ test_t110 __________________________________
+tests\test_issue_225.py:217: in test_t110
+    assert False, 'TDD RED: test_t110 not implemented'
+E   AssertionError: TDD RED: test_t110 not implemented
+E   assert False
+__________________________________ test_t120 __________________________________
+tests\test_issue_225.py:234: in test_t120
+    assert False, 'TDD RED: test_t120 not implemented'
+E   AssertionError: TDD RED: test_t120 not implemented
+E   assert False
+__________________________________ test_t130 __________________________________
+tests\test_issue_225.py:250: in test_t130
+    assert False, 'TDD RED: test_t130 not implemented'
+E   AssertionError: TDD RED: test_t130 not implemented
+E   assert False
+__________________________________ test_t140 __________________________________
+tests\test_issue_225.py:265: in test_t140
+    assert False, 'TDD RED: test_t140 not implemented'
+E   AssertionError: TDD RED: test_t140 not implemented
+E   assert False
+__________________________________ test_t150 __________________________________
+tests\test_issue_225.py:281: in test_t150
+    assert False, 'TDD RED: test_t150 not implemented'
+E   AssertionError: TDD RED: test_t150 not implemented
+E   assert False
+__________________________________ test_t160 __________________________________
+tests\test_issue_225.py:296: in test_t160
+    assert False, 'TDD RED: test_t160 not implemented'
+E   AssertionError: TDD RED: test_t160 not implemented
+E   assert False
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+FAIL Required test coverage of 95% not reached. Total coverage: 0.00%
+=========================== short test summary info ===========================
+FAILED tests/test_issue_225.py::test_id - AssertionError: TDD RED: test_id no...
+FAILED tests/test_issue_225.py::test_t010 - AssertionError: TDD RED: test_t01...
+FAILED tests/test_issue_225.py::test_t020 - AssertionError: TDD RED: test_t02...
+FAILED tests/test_issue_225.py::test_t025 - AssertionError: TDD RED: test_t02...
+FAILED tests/test_issue_225.py::test_t030 - AssertionError: TDD RED: test_t03...
+FAILED tests/test_issue_225.py::test_t040 - AssertionError: TDD RED: test_t04...
+FAILED tests/test_issue_225.py::test_t050 - AssertionError: TDD RED: test_t05...
+FAILED tests/test_issue_225.py::test_t060 - AssertionError: TDD RED: test_t06...
+FAILED tests/test_issue_225.py::test_t070 - AssertionError: TDD RED: test_t07...
+FAILED tests/test_issue_225.py::test_t080 - AssertionError: TDD RED: test_t08...
+FAILED tests/test_issue_225.py::test_t090 - AssertionError: TDD RED: test_t09...
+FAILED tests/test_issue_225.py::test_t100 - AssertionError: TDD RED: test_t10...
+FAILED tests/test_issue_225.py::test_t110 - AssertionError: TDD RED: test_t11...
+FAILED tests/test_issue_225.py::test_t120 - AssertionError: TDD RED: test_t12...
+FAILED tests/test_issue_225.py::test_t130 - AssertionError: TDD RED: test_t13...
+FAILED tests/test_issue_225.py::test_t140 - AssertionError: TDD RED: test_t14...
+FAILED tests/test_issue_225.py::test_t150 - AssertionError: TDD RED: test_t15...
+FAILED tests/test_issue_225.py::test_t160 - AssertionError: TDD RED: test_t16...
+============================= 18 failed in 0.08s ==============================
+
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\inorout.py:497: CoverageWarning: Module tools.test_gate.models was never imported. (module-not-imported); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-module-not-imported
+  self.warn(f"Module {pkg} was never imported.", slug="module-not-imported")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pytest_cov\plugin.py:363: CovReportWarning: Failed to generate report: No data to report.
+
+  warnings.warn(CovReportWarning(message), stacklevel=1)

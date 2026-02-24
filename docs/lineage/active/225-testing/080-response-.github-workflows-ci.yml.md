@@ -1,3 +1,4 @@
+```yaml
 # CI Workflow - Unit tests on every push/PR, integration tests on main
 # Issues #325, #116, #225
 
@@ -57,3 +58,4 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 30
+```
