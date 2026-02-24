@@ -291,25 +291,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     impl_files = state.get("implementation_files", [])
     coverage_module = None
 
-    # Debug: Show what implementation files were received
-    print(f"    DEBUG: implementation_files = {impl_files}")
-
     if impl_files:
-        # Find first non-test, non-init implementation file for coverage
+        # Find first non-test, non-init, Python implementation file for coverage
         for impl_path in impl_files:
-            print(f"    DEBUG: Checking impl_path = {impl_path}")
             # Skip test files (in tests/ directory)
             path_parts = Path(impl_path).parts
-            print(f"    DEBUG: path_parts = {path_parts}")
             if any(part.lower() in ("tests", "test") for part in path_parts):
-                print(f"    DEBUG: Skipping (test path)")
                 continue
             # Issue #265: Skip __init__.py - pytest-cov doesn't work with it
             if impl_path.endswith("__init__.py"):
-                print(f"    DEBUG: Skipping __init__.py")
+                continue
+            # Skip non-Python files (.gitkeep, .json, .yml, etc.)
+            if not impl_path.endswith(".py"):
+                print(f"    [N5] Skipping non-Python file for coverage: {impl_path}")
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
-            print(f"    DEBUG: rel_path = {rel_path}")
             # Convert file path to module format for pytest-cov
             # e.g., assemblyzero/workflows/testing/nodes/finalize.py -> assemblyzero.workflows.testing.nodes.finalize
             rel_path_str = str(rel_path)
@@ -320,7 +316,6 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             # src/ is a namespace directory, not a Python package
             if coverage_module.startswith("src."):
                 coverage_module = coverage_module[4:]
-            print(f"    DEBUG: coverage_module (after conversion) = {coverage_module}")
             break
 
     # Default to assemblyzero if no implementation files
@@ -339,9 +334,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     output = result["stdout"] + "\n" + result["stderr"]
     parsed = result["parsed"]
 
-    print(f"    Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed")
-    print(f"    Coverage: {parsed.get('coverage', 0):.1f}%")
-    print(f"    Exit code: {exit_code} ({describe_exit_code(exit_code)})")
+    print(f"    [N5] Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed | "
+          f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} ({describe_exit_code(exit_code)})")
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")
@@ -397,19 +391,20 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     error_count = parsed.get("errors", 0)
     coverage_achieved = parsed.get("coverage", 0)
 
+    # Stagnation detection: coverage must improve by >=1% each iteration
+    previous_coverage = state.get("previous_coverage", -1.0)
+    max_iterations = state.get("max_iterations", 5)
+
     # Check for failures
-    print(f"    DEBUG: failed_count={failed_count}, error_count={error_count}, iteration_count={iteration_count}")
     if failed_count > 0 or error_count > 0:
         # Check if we've exhausted iterations
-        max_iterations = state.get("max_iterations", 10)
-        print(f"    DEBUG: max_iterations={max_iterations}, check={iteration_count + 1} >= {max_iterations}")
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {failed_count} failures")
             error_msg = f"Green phase failed after {max_iterations} iterations: {failed_count} tests still failing"
-            print(f"    DEBUG: Returning error_message='{error_msg}'")
             return {
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -417,7 +412,28 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": error_msg,
             }
 
-        print(f"    [ITERATE] {failed_count} failures, {error_count} errors - needs revision")
+        # Stagnation check: if coverage didn't improve by at least 1%, halt
+        if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+            stagnant_msg = (
+                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
+                f"(< 1% improvement). Halting to prevent token waste."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
+        print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "
+              f"Tests: {passed_count}/{passed_count + failed_count} passed | "
+              f"Coverage: {coverage_achieved:.1f}% (was {previous_coverage:.1f}%) | "
+              f"Target: {coverage_target}%")
 
         log_workflow_execution(
             target_repo=repo_root,
@@ -436,6 +452,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -446,12 +463,12 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Check coverage
     if coverage_achieved < coverage_target:
         # Check if we've exhausted iterations
-        max_iterations = state.get("max_iterations", 10)
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {coverage_achieved:.1f}% coverage")
             return {
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -459,7 +476,28 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
             }
 
-        print(f"    [ITERATE] Coverage {coverage_achieved:.1f}% < target {coverage_target}%")
+        # Stagnation check: if coverage didn't improve by at least 1%, halt
+        if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+            stagnant_msg = (
+                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
+                f"(< 1% improvement). Halting to prevent token waste."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
+        print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "
+              f"Tests: {passed_count}/{passed_count + failed_count} passed | "
+              f"Coverage: {coverage_achieved:.1f}% (was {previous_coverage:.1f}%) | "
+              f"Target: {coverage_target}%")
 
         log_workflow_execution(
             target_repo=repo_root,
@@ -477,6 +515,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -485,8 +524,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         }
 
     # Success: all tests pass and coverage meets target
-    print(f"    DEBUG: SUCCESS PATH - failed_count={failed_count}, coverage_achieved={coverage_achieved}, coverage_target={coverage_target}")
-    print(f"    Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
+    print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
 
     log_workflow_execution(
         target_repo=repo_root,
@@ -505,6 +543,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         return {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "next_node": "N7_finalize",  # Skip E2E
@@ -514,6 +553,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     return {
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
+        "previous_coverage": coverage_achieved,
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
         "next_node": "N6_e2e_validation",

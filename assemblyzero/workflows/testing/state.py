@@ -153,6 +153,7 @@ class TestingWorkflowState(TypedDict, total=False):
     red_phase_output: str
     green_phase_output: str
     coverage_achieved: float
+    previous_coverage: float  # Previous iteration coverage for stagnation detection
     e2e_output: str
 
     # Review artifacts
