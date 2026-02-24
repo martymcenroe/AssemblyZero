@@ -152,8 +152,13 @@ app.get("/api/summary/weekly", async (c) => {
 
 // Error events
 app.get("/api/errors", async (c) => {
-  const result = await queryErrors(c.env);
-  return c.json(result);
+  try {
+    const result = await queryErrors(c.env);
+    return c.json(result);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    return c.json({ items: [], error: message });
+  }
 });
 
 // Dashboard overview

@@ -682,12 +682,12 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
         cmd = build_spec_command(issue_number, repo_root)
         error_msg = (
             f"\n"
-            f"    ╔══════════════════════════════════════════════════════════════╗\n"
-            f"    ║  No Implementation Spec found for issue #{issue_number:<20}║\n"
-            f"    ║                                                              ║\n"
-            f"    ║  The TDD workflow requires an implementation spec.           ║\n"
-            f"    ║  Generate one first by running:                              ║\n"
-            f"    ╚══════════════════════════════════════════════════════════════╝\n"
+            f"    +==============================================================+\n"
+            f"    |  No Implementation Spec found for issue #{issue_number:<20}|\n"
+            f"    |                                                              |\n"
+            f"    |  The TDD workflow requires an implementation spec.           |\n"
+            f"    |  Generate one first by running:                              |\n"
+            f"    +==============================================================+\n"
             f"\n"
             f"    {cmd}\n"
         )

@@ -5,7 +5,7 @@
  */
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
 
 export type Env = {
   TABLE_NAME: string;
@@ -127,16 +127,35 @@ export async function queryByDate(
   return { items: result.Items ?? [], lastKey: result.LastEvaluatedKey };
 }
 
-/** Scan for error events (filtered scan — use sparingly). */
+/** Query error events from the last 7 days via GSI3 (date index). */
 export async function queryErrors(env: Env, limit = 50) {
   const client = getClient(env);
-  const result = await client.send(
-    new ScanCommand({
-      TableName: env.TABLE_NAME,
-      FilterExpression: "begins_with(event_type, :prefix)",
-      ExpressionAttributeValues: { ":prefix": "error." },
-      Limit: limit,
-    }),
-  );
-  return { items: result.Items ?? [] };
+  const errors: Record<string, unknown>[] = [];
+
+  for (let i = 0; i < 7 && errors.length < limit; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+
+    const result = await client.send(
+      new QueryCommand({
+        TableName: env.TABLE_NAME,
+        IndexName: "gsi3-date-index",
+        KeyConditionExpression: "gsi3pk = :pk",
+        ExpressionAttributeValues: { ":pk": `DATE#${dateStr}` },
+        ScanIndexForward: false,
+        Limit: 500,
+      }),
+    );
+
+    for (const item of result.Items ?? []) {
+      const et = item.event_type as string;
+      if (et?.startsWith("error.") || et?.endsWith(".error")) {
+        errors.push(item);
+        if (errors.length >= limit) break;
+      }
+    }
+  }
+
+  return { items: errors };
 }
