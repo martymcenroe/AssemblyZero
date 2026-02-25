@@ -21,6 +21,7 @@ Implement a cascade detection system that prevents AI models from auto-approving
 |-------|------|-------------|-------------|
 | 1 | `tests/fixtures/cascade_samples.json` | Add | Test fixture data — cascade and non-cascade sample outputs |
 | 2 | `assemblyzero/hooks/cascade_patterns.py` | Add | Pattern definitions — regex and semantic patterns |
+| 2b | `assemblyzero/hooks/types.py` | Add | Shared type definitions — CascadeRiskLevel, CascadeDetectionResult |
 | 3 | `assemblyzero/hooks/cascade_detector.py` | Add | Core pattern detection engine |
 | 4 | `assemblyzero/hooks/cascade_action.py` | Add | Action handlers — block, log, alert |
 | 5 | `assemblyzero/telemetry/cascade_events.py` | Add | Structured JSONL logging for cascade events |
@@ -1463,34 +1464,23 @@ def merge_patterns(
     return merged
 ```
 
-### 6.3 `assemblyzero/hooks/cascade_detector.py` (Add)
+### 6.2b `assemblyzero/hooks/types.py` (Add)
 
 **Complete file contents:**
 
 ```python
-"""Core cascade detection engine.
+"""Shared type definitions for cascade detection.
 
 Issue #358: Auto-Approve Safety — Prevent Cascading Task Execution
 
-Analyzes model output text for cascade-risk patterns using multi-category
-weighted regex scoring.
+Contains CascadeRiskLevel and CascadeDetectionResult so that hooks and
+telemetry modules can import them without circular dependencies.
 """
 
 from __future__ import annotations
 
-import re
 from enum import Enum
-from typing import Any, Literal, TypedDict
-
-from assemblyzero.hooks.cascade_patterns import (
-    CascadePattern,
-    load_default_patterns,
-    load_user_patterns,
-    merge_patterns,
-)
-
-# Maximum input length to prevent performance issues
-MAX_INPUT_LENGTH = 10_000
+from typing import Literal, TypedDict
 
 
 class CascadeRiskLevel(Enum):
@@ -1512,6 +1502,36 @@ class CascadeDetectionResult(TypedDict):
     matched_text: str
     recommended_action: Literal["allow", "block_and_prompt", "block_and_alert"]
     confidence: float
+```
+
+### 6.3 `assemblyzero/hooks/cascade_detector.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Core cascade detection engine.
+
+Issue #358: Auto-Approve Safety — Prevent Cascading Task Execution
+
+Analyzes model output text for cascade-risk patterns using multi-category
+weighted regex scoring.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from assemblyzero.hooks.cascade_patterns import (
+    CascadePattern,
+    load_default_patterns,
+    load_user_patterns,
+    merge_patterns,
+)
+from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
+
+# Maximum input length to prevent performance issues
+MAX_INPUT_LENGTH = 10_000
 
 
 # Pre-compiled permission prompt patterns
@@ -1710,7 +1730,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from assemblyzero.hooks.cascade_detector import CascadeDetectionResult, CascadeRiskLevel
+from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
 from assemblyzero.telemetry.cascade_events import create_cascade_event, log_cascade_event
 
 if TYPE_CHECKING:
@@ -1836,7 +1856,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
-from assemblyzero.hooks.cascade_detector import CascadeDetectionResult, CascadeRiskLevel
+from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
 
 logger = logging.getLogger(__name__)
 
@@ -1996,9 +2016,8 @@ def get_cascade_stats(
 +    format_block_message,
 +    handle_cascade_detection,
 +)
++from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
 +from assemblyzero.hooks.cascade_detector import (
-+    CascadeDetectionResult,
-+    CascadeRiskLevel,
 +    compute_risk_score,
 +    detect_cascade_risk,
 +    is_permission_prompt,
@@ -2938,7 +2957,7 @@ from pathlib import Path
 
 import pytest
 
-from assemblyzero.hooks.cascade_detector import CascadeRiskLevel
+from assemblyzero.hooks.types import CascadeRiskLevel
 from assemblyzero.telemetry.cascade_events import (
     CascadeEvent,
     create_cascade_event,
@@ -3478,14 +3497,15 @@ __all__ = ["emit", "flush", "track_tool"]
 | `import os` | stdlib | `post_output_cascade_check.py` |
 | `import time` | stdlib | `test_cascade_detector.py` (performance tests) |
 | `import subprocess` | stdlib | `test_cascade_hook_integration.py` |
-| `from enum import Enum` | stdlib | `cascade_detector.py` |
+| `from enum import Enum` | stdlib | `types.py` |
 | `from pathlib import Path` | stdlib | `cascade_patterns.py`, `cascade_events.py` |
 | `from datetime import datetime, timedelta, timezone` | stdlib | `cascade_events.py` |
 | `from typing import Literal, TypedDict` | stdlib | All new modules |
 | `import pytest` | dev dependency (existing) | All test files |
 | `from unittest.mock import patch` | stdlib | `test_cascade_action.py` |
 | `from assemblyzero.hooks.cascade_patterns import ...` | internal | `cascade_detector.py` |
-| `from assemblyzero.hooks.cascade_detector import ...` | internal | `cascade_action.py`, `cascade_events.py` |
+| `from assemblyzero.hooks.types import ...` | internal | `cascade_detector.py`, `cascade_action.py`, `cascade_events.py` |
+| `from assemblyzero.hooks.cascade_detector import ...` | internal | `hooks/__init__.py` |
 | `from assemblyzero.telemetry.cascade_events import ...` | internal | `cascade_action.py` |
 
 **New Dependencies:** None. All stdlib + existing dev dependencies (pytest).
