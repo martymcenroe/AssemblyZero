@@ -484,6 +484,7 @@ def _write_status_file(
     issue_number: int,
     status: str,
     error: str = "",
+    state: dict | None = None,
 ) -> None:
     """Write a discoverable status file to the repo root.
 
@@ -495,6 +496,7 @@ def _write_status_file(
         issue_number: GitHub issue number.
         status: "SUCCESS" or "FAILED".
         error: Error message if failed.
+        state: Final workflow state dict for enrichment.
     """
     import json
     from datetime import datetime, timezone
@@ -509,6 +511,39 @@ def _write_status_file(
         }
         if error:
             status_data["error"] = error
+
+        if state:
+            status_data["iterations"] = state.get("iteration_count", 0)
+            status_data["max_iterations"] = state.get("max_iterations", 5)
+            status_data["coverage_achieved"] = state.get("coverage_achieved", 0)
+            status_data["coverage_target"] = state.get("coverage_target", 90)
+            status_data["previous_coverage"] = state.get("previous_coverage", 0)
+            status_data["test_files"] = state.get("test_files", [])
+            status_data["implementation_files"] = state.get("implementation_files", [])
+
+            if state.get("estimated_tokens_used"):
+                status_data["tokens_used"] = state["estimated_tokens_used"]
+                status_data["token_budget"] = state.get("token_budget", 0)
+
+            # Event timeline from audit trail
+            audit_file = Path(repo_root) / "docs/lineage/workflow-audit.jsonl"
+            if audit_file.exists():
+                events = []
+                for line in audit_file.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if entry.get("issue_number") == issue_number:
+                        events.append({
+                            "time": entry["timestamp"],
+                            "event": entry["event"],
+                            "details": entry.get("details", {}),
+                        })
+                status_data["events"] = events
+
         status_file.write_text(json.dumps(status_data, indent=2), encoding="utf-8")
         print(f"[implement] Status file: {status_file}")
     except OSError:
@@ -742,11 +777,11 @@ def main():
 
                 if values.get("error_message"):
                     print(f"Status: {values['error_message']}")
-                    _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""))
+                    _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""), state=values)
                     return 1
                 else:
                     print("Status: SUCCESS")
-                    _write_status_file(repo_root, args.issue, "SUCCESS")
+                    _write_status_file(repo_root, args.issue, "SUCCESS", state=values)
 
                     # Show next steps for worktree workflow
                     if worktree_path:
