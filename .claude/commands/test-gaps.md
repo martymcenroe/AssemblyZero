@@ -1,33 +1,75 @@
 ---
 description: Mine reports for testing gaps and automation opportunities
-argument-hint: "[--full] [--file path/to/report.md]"
+argument-hint: "[--full] [--file path] [--layer reports|infra|heuristics|all] [--project-type auto|extension|api|webapp|cli]"
 ---
 
-# Test Gap Mining Skill
+# Test Gap Analysis Skill
 
 **Model hint:** Use **Sonnet** - requires pattern recognition across reports and code correlation.
 
-**Purpose:** Analyze implementation reports, test reports, and code to identify testing gaps and automation opportunities.
+**Purpose:** Analyze implementation reports, test reports, CI infrastructure, and code to identify testing gaps, infrastructure blind spots, and automation opportunities.
 
 **Per AssemblyZero:adrs/test-first-philosophy:** Continuous test improvement requires systematic mining of existing documentation for test debt.
+
+**Ref:** AssemblyZero#444
 
 ---
 
 ## Help
 
-Usage: `/test-gaps [--full] [--file path/to/report.md]`
+Usage: `/test-gaps [--full] [--file path] [--layer reports|infra|heuristics|all] [--project-type auto|extension|api|webapp|cli]`
 
-| Argument | Description |
-|----------|-------------|
-| (none) | Quick scan - recent reports only |
-| `--full` | Comprehensive scan - all reports |
-| `--file` | Analyze specific report file |
+| Argument | Description | Default |
+|----------|-------------|---------|
+| (none) | Layer 1 quick scan (identical to legacy behavior) | Layer 1 |
+| `--full` | All 3 layers, all reports | All layers |
+| `--file` | Analyze specific report file (Layer 1 only) | Layer 1 |
+| `--layer reports` | Layer 1: report mining only | -- |
+| `--layer infra` | Layer 2: CI/config infrastructure audit | -- |
+| `--layer heuristics` | Layer 3: project-aware checks | -- |
+| `--layer all` | All 3 layers | -- |
+| `--project-type` | Override auto-detected project type | `auto` |
 
 ---
 
 ## Execution
 
-### Step 1: Pre-Filter Reports (COST OPTIMIZATION)
+### Step 0: Parse Arguments and Detect Project Type
+
+**Parse the argument string** to extract flags. Set these variables:
+
+- `SCAN_MODE`: `quick` (default), `full` (if `--full`), or `single` (if `--file`)
+- `LAYER`: `reports` (default / no flags / `--file`), `infra`, `heuristics`, or `all` (if `--full` or `--layer all`)
+- `PROJECT_TYPE`: `auto` (default) or user-specified value
+
+**If `--full` is specified:** Set `LAYER=all` and `SCAN_MODE=full`.
+
+**Project Type Detection** (when `PROJECT_TYPE=auto`):
+
+Use Glob to check for marker files. First match wins:
+
+| Type | Marker Files |
+|------|-------------|
+| `browser-extension` | `extensions/*/manifest.json` OR root `manifest.json` containing `manifest_version` |
+| `webapp` | `vite.config.*` OR `next.config.*` OR `src/**/App.{tsx,jsx}` |
+| `api` | `**/lambda_function.py` OR `serverless.yml` OR `src/**/*handler*.py` |
+| `cli` | `pyproject.toml` containing `argparse` or `click` or `typer` |
+| `generic` | fallback if nothing matches |
+
+Report the detected type in output header. If `--project-type` was specified, use that instead and note "(override)" in the header.
+
+**Routing:**
+- If `LAYER=reports` or `LAYER=all` → run Layer 1
+- If `LAYER=infra` or `LAYER=all` → run Layer 2
+- If `LAYER=heuristics` or `LAYER=all` → run Layer 3
+
+---
+
+### Layer 1: Report Mining
+
+This is the original `/test-gaps` behavior, preserved verbatim.
+
+#### Step 1.1: Pre-Filter Reports (COST OPTIMIZATION)
 
 **Before reading full reports, use Grep to identify which reports have test gaps.**
 
@@ -46,9 +88,9 @@ This produces a list of files that contain gap indicators. Only proceed with fil
 
 **Why:** Report files can be large. Pre-filtering with Grep (fast, no token cost) eliminates reports with no gaps before expensive file reads.
 
-**If no reports have gap indicators:** Report "No test gaps found in reports" and exit early.
+**If no reports have gap indicators and LAYER=reports:** Report "No test gaps found in reports" and exit early.
 
-### Step 2: Gather Matched Reports
+#### Step 1.2: Gather Matched Reports
 
 **Quick scan (default):**
 ```
@@ -68,7 +110,7 @@ Read docs/9000-lessons-learned.md (if exists)
 Read the specified file only (no pre-filter)
 ```
 
-### Step 3: Pattern Matching
+#### Step 1.3: Pattern Matching
 
 Scan each report for these gap indicators:
 
@@ -83,7 +125,7 @@ Scan each report for these gap indicators:
 | "hard to test" / "difficult to mock" | Architecture issue | LOW |
 | "TODO" / "FIXME" in test code | Incomplete test | HIGH |
 
-### Step 4: Cross-Reference Code
+#### Step 1.4: Cross-Reference Code
 
 For each gap found:
 1. Identify the affected code file
@@ -91,62 +133,228 @@ For each gap found:
 3. Check current test coverage (if available)
 4. Estimate complexity to add tests
 
-### Step 5: Generate Report
+---
 
-Output a prioritized list:
+### Layer 2: Infrastructure Audit
+
+**This layer examines CI workflows, test configuration, and skip patterns — things that never appear in reports but silently degrade test coverage.**
+
+#### Step 2.1: CI Workflow Analysis
+
+Read all `.github/workflows/*.yml` files. Check for these patterns:
+
+| Check | What to Find | Severity |
+|-------|-------------|----------|
+| CI-001 | `continue-on-error: true` on any job or step that runs tests | HIGH |
+| CI-002 | Test commands that don't validate discovery (absence of `collected.*item` assertion or equivalent) | HIGH |
+| CI-003 | `fail_ci_if_error: false` on coverage upload steps | MEDIUM |
+| CI-004 | Coverage upload steps without a threshold enforcement step | MEDIUM |
+| CI-005 | Playwright config has more browser `projects` than CI installs browsers for | HIGH |
+| CI-006 | `continue-on-error` without a comment containing an issue reference (e.g., `# ref #NNN`) | HIGH |
+
+**For CI-005:** Read the Playwright config file (Glob for `playwright.config.*`) and extract the `projects` array browser names. Then check each workflow for `npx playwright install` commands and compare browser lists. If CI installs fewer browsers than the config defines, flag the missing ones.
+
+#### Step 2.2: Skip/Xfail Audit
+
+Grep test files for skip patterns:
+
+```
+JS/TS:  test\.skip|describe\.skip|it\.skip|xit\(|xdescribe\(
+Python: pytest\.mark\.skip|pytest\.skip|@pytest\.mark\.xfail|unittest\.skip
+```
+
+For each match, read the surrounding 5 lines of context and classify:
+
+| Classification | Criteria | Severity |
+|----------------|----------|----------|
+| **Tracked** | Has issue reference (e.g., `#448`, `GH-123`), issue is still open | MEDIUM |
+| **Stale** | Has issue reference, but issue is closed | HIGH — skip should be removed |
+| **Untracked** | No issue reference at all | HIGH |
+| **Conditional** | Uses `skipIf` / `skipUnless` / platform/env check | LOW |
+
+**To check if referenced issues are open or closed:** Use `gh issue view NUMBER --repo OWNER/REPO --json state` for each referenced issue. If the gh call fails or the repo can't be determined, classify as "Unknown" (MEDIUM).
+
+#### Step 2.3: Test Pyramid Count
+
+Count test cases across directory tiers. Use Grep with `output_mode: "count"`:
+
+```
+Pattern: "test\(|it\(|it\.only\(|describe\("  in tests/unit/ or test/unit/
+Pattern: "test\(|it\(|def test_"               in tests/integration/ or test/integration/
+Pattern: "test\(|it\(|def test_"               in tests/e2e/ or test/e2e/
+```
+
+Also check for `tests/` vs `test/` directory naming (Glob both).
+
+Display as:
+```
+Unit:         NN (XX%)  ████████████████
+Integration:  NN (XX%)  ████████
+E2E:          NN (XX%)  ████████████
+```
+
+Use block character █ repeated proportionally (max 20 chars wide).
+
+**Flag:** If E2E count > Unit count → "INVERTED TEST PYRAMID" warning (HIGH severity).
+**Flag:** If any tier is 0 → "MISSING TEST TIER" warning (HIGH severity).
+
+#### Step 2.4: Test Config vs CI Parity
+
+1. Glob for test config files: `playwright.config.*`, `vitest.config.*`, `jest.config.*`, `pytest.ini`, `pyproject.toml` (look for `[tool.pytest]`), `setup.cfg` (look for `[tool:pytest]`)
+2. For Playwright configs: extract `projects[].name` and compare against CI workflow browser install commands
+3. For pytest/vitest/jest: check if CI runs the same test commands with the same flags as local config suggests
+
+---
+
+### Layer 3: Project-Aware Heuristics
+
+**Only checks matching the detected (or overridden) project type run.** Skip this entire layer for `generic` project type with a note: "Project type is generic — no heuristic checks available. Use `--project-type` to override."
+
+#### Browser Extension Checks (`browser-extension`)
+
+| Check | Procedure | Severity |
+|-------|-----------|----------|
+| EXT-001 | Glob `extensions/**/*.js` (exclude `node_modules`, `lib/`, `vendor/`). For each source file, check if a corresponding test file exists in `tests/unit/` (matching by filename pattern). Flag files with no test. | HIGH |
+| EXT-002 | Glob `tests/**/mock*` or `tests/**/__mocks__/**`. For each mock, compare its last-modified date against the source file it mocks. Flag if mock is >30 days older than source (use `git log -1 --format=%ci` on each file). | MEDIUM |
+| EXT-003 | Count unit test files under Chrome-specific and Firefox-specific test directories. Flag if counts differ significantly (>20% gap). | HIGH |
+| EXT-004 | Read Playwright config `projects` array. For each browser project, verify a CI workflow job exists that targets it. Flag projects with no CI job. | HIGH |
+| EXT-005 | Read mock files. Check for API references that don't exist on the target platform. Known bad patterns: `browser.identity` in Firefox mocks (Firefox MV3 has no identity API), `chrome.identity.getAuthToken` in Firefox mocks. Flag as CRITICAL. | CRITICAL |
+| EXT-006 | Glob for visual regression baseline directories (e.g., `tests/**/*-snapshots/`). Check if baselines exist for all CI platforms (look for platform-specific subdirectories like `linux/`, `darwin/`, `win32/`). Flag platforms missing baselines. | MEDIUM |
+
+#### API/Lambda Checks (`api`)
+
+| Check | Procedure | Severity |
+|-------|-----------|----------|
+| API-001 | Glob for handler files (`*handler*.py`, `lambda_function.py`, `**/routes/*.py`). Check if corresponding integration test files exist. Flag handlers with no integration test. | HIGH |
+| API-002 | Check if a `tests/contract/` or `tests/contracts/` directory exists. If not, flag as missing contract test layer. | MEDIUM |
+| API-003 | Read CI workflows for post-deploy smoke test steps (Grep for `curl.*health` or `smoke` in workflow files). Flag if absent. | MEDIUM |
+
+#### Web App Checks (`webapp`)
+
+| Check | Procedure | Severity |
+|-------|-----------|----------|
+| WEB-001 | Glob `src/components/**/*.{tsx,jsx,vue,svelte}`. For each component, check if a test file exists (`.test.`, `.spec.`, or in `__tests__/`). Flag components with no test. | HIGH |
+| WEB-002 | Check for visual regression snapshot directories. Flag if no snapshots exist anywhere in the test tree. | MEDIUM |
+| WEB-003 | Grep test files and CI workflows for accessibility testing tools (`pa11y`, `axe`, `@axe-core`, `toHaveNoViolations`). Flag if no accessibility tests found. | HIGH |
+
+#### Test Report Quality Grading (all project types)
+
+Read the 5 most recent `docs/reports/*/test-report.md` files. Grade each against these criteria:
+
+| Criteria | How to Detect | Points |
+|----------|--------------|--------|
+| "What was tested" section | Heading containing "tested" or "coverage" or "scope" | +1 |
+| "How tested" method specified | Contains "automated", "manual", "unit test", "e2e", or similar | +1 |
+| "What was NOT tested" section | Heading containing "not tested" or "limitations" or "out of scope" | +1 |
+| Evidence provided | Contains log excerpts, screenshot references, or test output | +1 |
+
+Score 0–4 per report. Flag reports scoring ≤1 as LOW quality (HIGH severity).
+
+---
+
+### Generate Output
+
+Combine all layers that were run into a single output:
 
 ```markdown
 # Test Gap Analysis
 
-**Scan type:** [Quick/Full/Single file]
-**Reports analyzed:** [count]
-**Date:** [YYYY-MM-DD]
+**Scan type:** Quick/Full | **Project type:** [type] ([auto/override]) | **Date:** YYYY-MM-DD
 
----
+## Layer 1: Report Mining
 
-## Critical Gaps (No tests exist)
+### Critical Gaps (No tests exist)
 
 | File | Gap Description | Source | Effort |
 |------|-----------------|--------|--------|
 | `path/to/file.js` | [description] | Report #XXX | [Low/Med/High] |
 
-## Automation Opportunities (Manual → Automated)
+### Automation Opportunities (Manual → Automated)
 
 | File | Current Testing | Automation Benefit | Source |
 |------|-----------------|-------------------|--------|
 | `path/to/file.js` | Manual login flow | Reduce regression time | Report #XXX |
 
-## Edge Cases Missing
+### Edge Cases Missing
 
 | File | Edge Case | Why Not Tested | Priority |
 |------|-----------|----------------|----------|
 | `path/to/file.js` | Empty allowlist | "Deferred" | HIGH |
 
-## Architecture Issues (Hard to test)
+### Architecture Issues (Hard to test)
 
 | File | Issue | Suggested Refactor |
 |------|-------|-------------------|
 | `path/to/file.js` | Tight coupling to DOM | Extract pure functions |
 
----
+## Layer 2: Infrastructure Audit
+
+### CI Workflow Findings
+| Check | File | Finding | Severity | Issue Ref |
+|-------|------|---------|----------|-----------|
+
+### Skip/Xfail Audit
+| File:Line | Type | Reason | Issue | Status |
+|-----------|------|--------|-------|--------|
+
+### Test Pyramid
+Unit:         NN (XX%)  ████████████████
+Integration:  NN (XX%)  ████████
+E2E:          NN (XX%)  ████████████
+
+### Config Parity
+| Config | Setting | CI | Status |
+|--------|---------|-----|--------|
+
+## Layer 3: Project-Aware Heuristics ([type])
+
+### Extension Code Coverage
+| Extension File | Lines | Unit Test | Status |
+|----------------|-------|-----------|--------|
+
+### Mock Fidelity
+| Mock File | Source Age Gap | Known Bad APIs |
+|-----------|---------------|----------------|
+
+### Cross-Browser Parity
+| Aspect | Chrome | Firefox | Status |
+|--------|--------|---------|--------|
+
+### Test Report Quality
+| Report | Score | Missing Sections |
+|--------|-------|------------------|
 
 ## Recommended Actions
 
-1. **[CRITICAL]** [First priority action]
-2. **[HIGH]** [Second priority action]
-3. ...
+1. **[CRITICAL]** ... — Check ID
+2. **[HIGH]** ... — Check ID
+3. **[MEDIUM]** ... — Check ID
 
 ## Issues to Create
 
-- [ ] `test(unit): Add tests for [file]` - [brief description]
-- [ ] `refactor: Extract [function] for testability`
+- [ ] `test: ...` — Check ID
+- [ ] `test: ...` — Check ID
 ```
+
+**Omit any section that has no findings.** Don't show empty tables.
+
+**Omit layers that weren't run.** If only `--layer infra` was specified, don't show Layer 1 or Layer 3 headings.
 
 ---
 
 ## Notes
 
-- This skill is READ-ONLY - it analyzes but does not modify files
+- This skill is READ-ONLY — it analyzes but does not modify files
 - Creates issues only when user confirms
 - Helps maintain test-first philosophy compliance
 - Run periodically (weekly recommended) to prevent test debt accumulation
+- Layer 2 and 3 checks use IDs (CI-001, EXT-001, etc.) for traceability in issues
+
+### Cost Efficiency
+
+| Mode | Layers | Est. Tool Calls | Est. Cost |
+|------|--------|-----------------|-----------|
+| Quick (default) | 1 | 8–15 | ~$0.03 |
+| `--layer infra` | 2 | 8–13 | ~$0.05 |
+| `--layer heuristics` | 3 | 10–20 | ~$0.08 |
+| `--full` | 1, 2, 3 | 30–50 | ~$0.15 |
