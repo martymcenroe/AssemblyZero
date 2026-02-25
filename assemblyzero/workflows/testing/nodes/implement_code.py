@@ -31,6 +31,9 @@ from assemblyzero.utils.lld_path_enforcer import (
     detect_scaffolded_test_files,
     extract_paths_from_lld,
 )
+from assemblyzero.workflows.requirements.audit import (
+    get_repo_structure,
+)
 from assemblyzero.workflows.testing.audit import (
     gate_log,
     get_repo_root,
@@ -666,11 +669,13 @@ def build_single_file_prompt(
     previous_error: str = "",
     path_enforcement_section: str = "",
     context_content: str = "",
+    repo_structure: str = "",
 ) -> str:
     """Build prompt for a single file with accumulated context.
 
     Issue #188: Added path_enforcement_section parameter to inject allowed paths.
     Issue #288: Added context_content parameter for injected architectural context.
+    Issue #445: Added repo_structure parameter to ground Claude in actual layout.
     """
 
     change_type = file_spec.get("change_type", "Add")
@@ -694,6 +699,20 @@ Description: {description}
     # Issue #188: Add path enforcement section
     if path_enforcement_section:
         prompt += path_enforcement_section + "\n"
+
+    # Issue #445: Add repo structure to ground Claude in actual layout
+    if repo_structure:
+        prompt += f"""## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+{repo_structure}
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+"""
 
     # Issue #288: Add injected context
     if context_content:
@@ -1068,6 +1087,52 @@ def generate_file_with_retry(
 
 
 # =============================================================================
+# Issue #445: Path Pre-Flight Validation
+# =============================================================================
+
+
+def validate_files_to_modify(
+    files_to_modify: list[dict], repo_root: Path
+) -> list[str]:
+    """Validate that LLD file paths match the real repository structure.
+
+    Issue #445: Pre-flight check before calling Claude — catches stale LLD
+    paths immediately so we don't waste tokens on invalid paths.
+
+    Rules:
+    - Modify/Delete: file must exist on disk (hard fail)
+    - Add: parent directory must exist (hard fail)
+
+    Args:
+        files_to_modify: List of file spec dicts with 'path' and 'change_type'.
+        repo_root: Path to the repository root.
+
+    Returns:
+        List of error strings. Empty list means all paths valid.
+    """
+    errors: list[str] = []
+
+    for file_spec in files_to_modify:
+        file_path = file_spec.get("path", "")
+        change_type = file_spec.get("change_type", "Add")
+        full_path = repo_root / file_path
+
+        if change_type.lower() in ("modify", "delete"):
+            if not full_path.exists():
+                errors.append(
+                    f"{change_type} target does not exist: {file_path}"
+                )
+        elif change_type.lower() == "add":
+            if not full_path.parent.exists():
+                errors.append(
+                    f"Parent directory missing for Add: {file_path} "
+                    f"(expected: {full_path.parent})"
+                )
+
+    return errors
+
+
+# =============================================================================
 # Main Implementation Loop
 # =============================================================================
 
@@ -1101,6 +1166,23 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             "implementation_files": [],
         }
 
+    # Issue #445: Pre-flight path validation — catch stale LLD paths before
+    # calling Claude. Zero tokens wasted on bad paths.
+    path_errors = validate_files_to_modify(files_to_modify, repo_root)
+    if path_errors:
+        for err in path_errors:
+            print(f"    [GUARD] {err}")
+        repo_tree = get_repo_structure(repo_root, max_depth=3)
+        print(f"\n    Actual repository structure:\n{repo_tree}")
+        return {
+            "error_message": (
+                f"GUARD: {len(path_errors)} file path(s) in LLD do not match "
+                f"the repository structure. Errors:\n"
+                + "\n".join(f"  - {e}" for e in path_errors)
+            ),
+            "implementation_files": [],
+        }
+
     # Read test content for context
     test_content = ""
     for tf in test_files:
@@ -1131,6 +1213,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     path_enforcement_section = build_implementation_prompt_section(path_spec)
     if path_enforcement_section:
         print(f"    Path enforcement: {len(path_spec['all_allowed_paths'])} allowed paths")
+
+    # Issue #445: Get repo structure once for prompt grounding
+    repo_structure = get_repo_structure(repo_root, max_depth=3)
 
     # Accumulated context
     completed_files: list[tuple[str, str]] = []
@@ -1206,6 +1291,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             previous_error=green_phase_output if iteration_count > 0 else "",
             path_enforcement_section=path_enforcement_section,
             context_content=state.get("context_content", ""),
+            repo_structure=repo_structure,
         )
 
         # Call Claude with retry logic (Issue #309)
