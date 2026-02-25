@@ -66,6 +66,7 @@
 - [Tools Reference](Tools-Reference)
 
 ---
+- [Implementation Spec Cross Project Metrics Aggregation for AssemblyZero Usage Tracking](Implementation-Spec-Cross-Project-Metrics-Aggregation-for-AssemblyZero-Usage-Tracking)
 
 ### Reflections
 

@@ -1,0 +1,32 @@
+{
+  "issue_number": 333,
+  "lld_path": "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\docs\\lld\\drafts\\spec-0333-implementation-readiness.md",
+  "completed_at": "2026-02-24T18:37:47.490437",
+  "test_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\test_issue_333.py"
+  ],
+  "implementation_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\docs\\metrics\\.gitkeep",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\metrics\\tracked_repos.json",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\metrics\\mock_issues_assemblyzero.json",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\metrics\\mock_issues_rca_pdf.json",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\metrics\\expected_aggregated_output.json",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\utils\\metrics_models.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\utils\\metrics_config.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\utils\\github_metrics_client.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\utils\\metrics_aggregator.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tools\\collect_cross_project_metrics.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_metrics_config.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_github_metrics_client.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_metrics_aggregator.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_collect_cross_project_metrics.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\integration\\test_github_metrics_integration.py"
+  ],
+  "coverage_achieved": 100.0,
+  "coverage_target": 95,
+  "total_iterations": 1,
+  "test_count": 35,
+  "passed_count": 35,
+  "failed_count": 0,
+  "e2e_passed": false
+}

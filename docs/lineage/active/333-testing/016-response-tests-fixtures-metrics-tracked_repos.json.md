@@ -1,0 +1,20 @@
+
+
+```json
+{
+    "repos": [
+        "martymcenroe/AssemblyZero",
+        "martymcenroe/RCA-PDF",
+        {
+            "owner": "martymcenroe",
+            "name": "archived-project",
+            "full_name": "martymcenroe/archived-project",
+            "enabled": false
+        }
+    ],
+    "lookback_days": 30,
+    "output_dir": "docs/metrics",
+    "cache_ttl_seconds": 300,
+    "github_token_env": "GITHUB_TOKEN"
+}
+```
