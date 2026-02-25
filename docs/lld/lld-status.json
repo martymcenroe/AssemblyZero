@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-02-25T08:52:39.230225+00:00",
+  "last_updated": "2026-02-25T20:20:54.229022+00:00",
   "issues": {
     "15": {
       "lld_path": "docs\\lld\\done\\15-path-parameterization.md",
@@ -800,6 +800,14 @@
       "has_gemini_review": true,
       "final_verdict": "APPROVED",
       "last_review_date": "2026-02-25T08:52:39.229834+00:00",
+      "review_count": 1
+    },
+    "443": {
+      "lld_path": "docs\\lld\\active\\LLD-443.md",
+      "status": "approved",
+      "has_gemini_review": true,
+      "final_verdict": "APPROVED",
+      "last_review_date": "2026-02-25T20:20:54.228381+00:00",
       "review_count": 1
     }
   }
