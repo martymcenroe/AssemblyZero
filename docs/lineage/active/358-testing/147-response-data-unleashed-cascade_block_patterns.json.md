@@ -1,0 +1,13 @@
+
+
+```json
+{
+    "version": "1.0",
+    "enabled": true,
+    "patterns": [],
+    "risk_threshold": 0.6,
+    "alert_on_block": true,
+    "log_all_checks": false,
+    "_comment": "Add custom cascade detection patterns here. User patterns with the same ID as a default pattern will override the default. See docs/lld/active/358-cascade-prevention.md for pattern format."
+}
+```
