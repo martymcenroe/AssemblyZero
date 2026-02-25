@@ -1372,6 +1372,23 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"\n    Implementation complete: {len(written_paths)} files written")
 
+    # Issue #460: Update test_files to point to real test files written by N4,
+    # replacing the scaffold stubs that N2 created.
+    issue_number = state.get("issue_number", 0)
+    real_test_files = [
+        p for p in written_paths
+        if "/tests/" in p.replace("\\", "/")
+        and Path(p).name.startswith("test_")
+        and p.endswith(".py")
+    ]
+
+    if real_test_files:
+        # Delete the scaffold file — it only has `assert False` stubs
+        scaffold_path = repo_root / "tests" / f"test_issue_{issue_number}.py"
+        if scaffold_path.exists():
+            scaffold_path.unlink()
+            print(f"    Deleted scaffold: {scaffold_path}")
+
     # Log to audit
     log_workflow_execution(
         target_repo=repo_root,
@@ -1390,6 +1407,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         "completed_files": completed_files,
         "estimated_tokens_used": estimated_tokens_used,
         "error_message": "",
+        "test_files": real_test_files if real_test_files else state.get("test_files", []),
     }
 
 
@@ -1416,6 +1434,7 @@ def example_function():
         "implementation_files": [str(impl_path)],
         "completed_files": [("assemblyzero/issue_{issue_number}_impl.py", mock_content)],
         "error_message": "",
+        "test_files": state.get("test_files", []),
     }
 
 
