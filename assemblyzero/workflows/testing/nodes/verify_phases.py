@@ -412,8 +412,10 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": error_msg,
             }
 
-        # Stagnation check: if coverage didn't improve by at least 1%, halt
-        if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+        # Stagnation check: if coverage didn't improve by at least 1%, halt.
+        # Skip when passed_count == 0: coverage is vacuously 100% with no passing
+        # tests, so the metric is meaningless. Let max_iterations cap the loop.
+        if passed_count > 0 and previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
             stagnant_msg = (
                 f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
                 f"(< 1% improvement). Halting to prevent token waste."
