@@ -1,0 +1,190 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 25 items
+
+tests/unit/test_circuit_breaker.py::TestEstimateIterationCost::test_estimate_iteration_cost_empty_state PASSED [  4%]
+tests/unit/test_circuit_breaker.py::TestEstimateIterationCost::test_estimate_iteration_cost_mid_budget PASSED [  8%]
+tests/unit/test_circuit_breaker.py::TestEstimateIterationCost::test_estimate_iteration_cost_returns_numeric PASSED [ 12%]
+tests/unit/test_circuit_breaker.py::TestEstimateIterationCost::test_estimate_iteration_cost_scales_with_activity PASSED [ 16%]
+tests/unit/test_circuit_breaker.py::TestCheckCircuitBreaker::test_check_circuit_breaker_no_trip_fresh_state PASSED [ 20%]
+tests/unit/test_circuit_breaker.py::TestCheckCircuitBreaker::test_check_circuit_breaker_no_trip_within_budget PASSED [ 24%]
+tests/unit/test_circuit_breaker.py::TestCheckCircuitBreaker::test_check_circuit_breaker_trips_over_budget PASSED [ 28%]
+tests/unit/test_circuit_breaker.py::TestCheckCircuitBreaker::test_check_circuit_breaker_trips_at_exact_boundary PASSED [ 32%]
+tests/unit/test_circuit_breaker.py::TestCheckCircuitBreaker::test_check_circuit_breaker_return_structure PASSED [ 36%]
+tests/unit/test_circuit_breaker.py::TestRecordIterationCost::test_record_iteration_cost_accumulates PASSED [ 40%]
+tests/unit/test_circuit_breaker.py::TestRecordIterationCost::test_record_iteration_cost_multiple_calls PASSED [ 44%]
+tests/unit/test_circuit_breaker.py::TestRecordIterationCost::test_record_iteration_cost_zero_content_state PASSED [ 48%]
+tests/unit/test_circuit_breaker.py::TestRecordIterationCost::test_record_iteration_cost_preserves_state PASSED [ 52%]
+tests/unit/test_circuit_breaker.py::TestBudgetSummary::test_budget_summary_returns_string PASSED [ 56%]
+tests/unit/test_circuit_breaker.py::TestBudgetSummary::test_budget_summary_contains_budget_info PASSED [ 60%]
+tests/unit/test_circuit_breaker.py::TestBudgetSummary::test_budget_summary_zero_budget_zero_used PASSED [ 64%]
+tests/unit/test_circuit_breaker.py::TestBudgetSummary::test_budget_summary_huge_budget PASSED [ 68%]
+tests/unit/test_circuit_breaker.py::TestEdgeCases::test_zero_budget_means_no_enforcement PASSED [ 72%]
+tests/unit/test_circuit_breaker.py::TestEdgeCases::test_huge_budget_no_trip PASSED [ 76%]
+tests/unit/test_circuit_breaker.py::TestEdgeCases::test_negative_tokens_used_does_not_crash PASSED [ 80%]
+tests/unit/test_circuit_breaker.py::TestEdgeCases::test_empty_dict_state_handling PASSED [ 84%]
+tests/unit/test_circuit_breaker.py::TestCICompatibility::test_no_external_imports_required PASSED [ 88%]
+tests/unit/test_circuit_breaker.py::TestCICompatibility::test_all_tests_run_offline PASSED [ 92%]
+tests/unit/test_circuit_breaker.py::TestCoverageVerification::test_all_public_functions_exercised PASSED [ 96%]
+tests/unit/test_circuit_breaker.py::TestRegressionGuard::test_existing_unit_suite_unaffected PASSED [100%]
+ERROR: Coverage failure: total of 9 is less than fail-under=95
+
+
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                                                        Stmts   Miss  Cover   Missing
+---------------------------------------------------------------------------------------------------------
+assemblyzero\__init__.py                                                        1      0   100%
+assemblyzero\core\__init__.py                                                   5      0   100%
+assemblyzero\core\audit.py                                                    102     82    20%   80-106, 117-136, 144-145, 157-165, 182-208, 222-242, 253-272, 281-282, 290, 328
+assemblyzero\core\claude_client.py                                             36     36     0%   11-123
+assemblyzero\core\config.py                                                    16      0   100%
+assemblyzero\core\gemini_client.py                                            281    226    20%   114-116, 120-122, 173-192, 208-251, 283-299, 303-313, 335-392, 421-639, 663-704, 708-726, 730-732, 744-758, 764-767, 771-788, 792, 796-804
+assemblyzero\core\llm_provider.py                                             322    246    24%   76-96, 108-132, 145, 151, 170, 202-214, 218, 222, 233-257, 278-403, 440-449, 453, 457, 465-475, 489-500, 518-613, 636-638, 642, 646, 665-676, 714-721, 725, 729, 733-737, 755-802, 834-841, 845, 849, 867-885, 909-919, 941-957
+assemblyzero\core\state.py                                                      6      0   100%
+assemblyzero\core\tdd_path_tracking.py                                         61     61     0%   9-190
+assemblyzero\core\validation\__init__.py                                        2      0   100%
+assemblyzero\core\validation\test_plan_validator.py                           168    147    12%   114-164, 180-233, 250-255, 280-306, 320-326, 349-377, 392-408, 423-444, 462-483, 507-551
+assemblyzero\graphs\__init__.py                                                 0      0   100%
+assemblyzero\hooks\__init__.py                                                  5      0   100%
+assemblyzero\hooks\cascade_action.py                                           34     28    18%   41-78, 95-118
+assemblyzero\hooks\cascade_detector.py                                         72     61    15%   57-110, 135-164, 180-190, 195
+assemblyzero\hooks\cascade_patterns.py                                         70     52    26%   49, 209-260, 276-292
+assemblyzero\hooks\file_write_validator.py                                     40     31    22%   37-71, 91-106, 111-116, 121, 126
+assemblyzero\hooks\types.py                                                    16      0   100%
+assemblyzero\nodes\__init__.py                                                  5      5     0%   3-11
+assemblyzero\nodes\check_type_renames.py                                      125    125     0%   9-314
+assemblyzero\nodes\designer.py                                                134    134     0%   15-501
+assemblyzero\nodes\lld_reviewer.py                                             90     90     0%   7-335
+assemblyzero\nodes\smoke_test_node.py                                          58     58     0%   9-204
+assemblyzero\telemetry\__init__.py                                              3      3     0%   19-27
+assemblyzero\telemetry\__main__.py                                              2      2     0%   3-5
+assemblyzero\telemetry\actor.py                                                30     30     0%   7-62
+assemblyzero\telemetry\cascade_events.py                                       71     71     0%   9-163
+assemblyzero\telemetry\emitter.py                                             119    119     0%   10-243
+assemblyzero\telemetry\sync.py                                                  9      9     0%   7-22
+assemblyzero\tracing.py                                                        10     10     0%   13-39
+assemblyzero\utils\__init__.py                                                  4      0   100%
+assemblyzero\utils\codebase_reader.py                                         153    133    13%   21-22, 62, 79-103, 131-203, 227-260, 277-372
+assemblyzero\utils\file_type.py                                                12      4    67%   42-43, 51, 59
+assemblyzero\utils\github_metrics_client.py                                    83     83     0%   9-243
+assemblyzero\utils\lld_path_enforcer.py                                        79     68    14%   37-67, 82-123, 138-143, 157-188, 202-209, 214-215, 220-221
+assemblyzero\utils\lld_verification.py                                         98     85    13%   55-58, 75-76, 93-146, 164-178, 196-247, 269-284, 307-339, 351-361
+assemblyzero\utils\metrics_aggregator.py                                      161    161     0%   9-447
+assemblyzero\utils\metrics_config.py                                           78     78     0%   6-207
+assemblyzero\utils\metrics_models.py                                           59     59     0%   6-97
+assemblyzero\utils\pattern_scanner.py                                         185    163    12%   128-154, 166-216, 228-253, 265-281, 293-322, 334-360, 381-404, 421-493
+assemblyzero\workflow\__init__.py                                               2      2     0%   6-8
+assemblyzero\workflow\checkpoint.py                                            27     27     0%   7-77
+assemblyzero\workflows\__init__.py                                              0      0   100%
+assemblyzero\workflows\implementation_spec\__init__.py                          3      3     0%   24-36
+assemblyzero\workflows\implementation_spec\graph.py                            85     85     0%   27-324
+assemblyzero\workflows\implementation_spec\nodes\__init__.py                    8      8     0%   15-46
+assemblyzero\workflows\implementation_spec\nodes\analyze_codebase.py          382    382     0%   18-971
+assemblyzero\workflows\implementation_spec\nodes\finalize_spec.py              80     80     0%   22-311
+assemblyzero\workflows\implementation_spec\nodes\generate_spec.py             206    206     0%   20-764
+assemblyzero\workflows\implementation_spec\nodes\human_gate.py                 62     62     0%   21-204
+assemblyzero\workflows\implementation_spec\nodes\load_lld.py                   92     92     0%   16-299
+assemblyzero\workflows\implementation_spec\nodes\review_spec.py               132    132     0%   22-521
+assemblyzero\workflows\implementation_spec\nodes\validate_completeness.py     189    189     0%   21-654
+assemblyzero\workflows\implementation_spec\state.py                            43     43     0%   12-150
+assemblyzero\workflows\issue\__init__.py                                        3      3     0%   10-13
+assemblyzero\workflows\issue\audit.py                                         186    186     0%   12-570
+assemblyzero\workflows\issue\graph.py                                          59     59     0%   11-249
+assemblyzero\workflows\issue\nodes\__init__.py                                  8      8     0%   15-23
+assemblyzero\workflows\issue\nodes\draft.py                                    94     94     0%   10-294
+assemblyzero\workflows\issue\nodes\file_issue.py                              185    185     0%   9-472
+assemblyzero\workflows\issue\nodes\human_edit_draft.py                        131    131     0%   9-252
+assemblyzero\workflows\issue\nodes\human_edit_verdict.py                      140    140     0%   10-278
+assemblyzero\workflows\issue\nodes\load_brief.py                               49     49     0%   9-184
+assemblyzero\workflows\issue\nodes\review.py                                   77     77     0%   9-193
+assemblyzero\workflows\issue\nodes\sandbox.py                                  30     30     0%   11-104
+assemblyzero\workflows\issue\state.py                                          18     18     0%   9-40
+assemblyzero\workflows\orchestrator\__init__.py                                 4      4     0%   6-26
+assemblyzero\workflows\orchestrator\artifacts.py                               58     58     0%   6-125
+assemblyzero\workflows\orchestrator\config.py                                  57     57     0%   6-143
+assemblyzero\workflows\orchestrator\graph.py                                  142    142     0%   6-322
+assemblyzero\workflows\orchestrator\resume.py                                  68     68     0%   6-154
+assemblyzero\workflows\orchestrator\stages.py                                 143    143     0%   11-432
+assemblyzero\workflows\orchestrator\state.py                                   66     66     0%   6-150
+assemblyzero\workflows\parallel\__init__.py                                     5      5     0%   3-8
+assemblyzero\workflows\parallel\coordinator.py                                 85     85     0%   3-184
+assemblyzero\workflows\parallel\credential_coordinator.py                      59     59     0%   3-127
+assemblyzero\workflows\parallel\input_sanitizer.py                             13     13     0%   3-39
+assemblyzero\workflows\parallel\output_prefixer.py                             19     19     0%   3-45
+assemblyzero\workflows\requirements\__init__.py                                 4      0   100%
+assemblyzero\workflows\requirements\audit.py                                  229    193    16%   98-171, 195-200, 220-223, 248-256, 275-286, 306-309, 336-344, 365-373, 393-411, 427-456, 492-506, 520-529, 550-580, 593-606, 631-636, 657-664, 700-703, 728-768, 800-855
+assemblyzero\workflows\requirements\config.py                                  68     22    68%   53, 57, 64-71, 110, 117, 127-149, 157
+assemblyzero\workflows\requirements\git_operations.py                          30     23    23%   27-30, 55-101
+assemblyzero\workflows\requirements\graph.py                                  119     96    19%   106-111, 136-147, 171-187, 209-228, 247-254, 277-314, 333-340, 356, 384-494
+assemblyzero\workflows\requirements\nodes\__init__.py                           9      0   100%
+assemblyzero\workflows\requirements\nodes\analyze_codebase.py                 229    209     9%   72, 103-236, 255-301, 324-391, 404-428, 444-466, 478-501, 517-538, 550-567
+assemblyzero\workflows\requirements\nodes\finalize.py                         163    146    10%   39-40, 57-75, 87-133, 149-174, 199-221, 236-332, 343-369, 384-402
+assemblyzero\workflows\requirements\nodes\generate_draft.py                   156    146     6%   46-141, 168-292, 307-348, 370-390
+assemblyzero\workflows\requirements\nodes\human_gate.py                        88     81     8%   26-40, 52-67, 84-138, 159-233
+assemblyzero\workflows\requirements\nodes\load_input.py                       114     96    16%   61-66, 78-111, 129-221, 240-272, 291-307, 320-321
+assemblyzero\workflows\requirements\nodes\review.py                           117    104    11%   44-141, 168-184, 196-214, 237-250, 262-276, 289-300, 316-332
+assemblyzero\workflows\requirements\nodes\validate_mechanical.py              429    384    10%   137-160, 182-217, 234-265, 281-300, 319-331, 348-367, 389-395, 411-417, 445-469, 482, 507-515, 528-565, 582-596, 610-697, 713-748, 767-864, 880-900, 915-935, 951-974, 986-1015, 1027-1048, 1060-1069, 1087-1124, 1158-1345
+assemblyzero\workflows\requirements\nodes\validate_test_plan.py                58     53     9%   35-80, 99-142
+assemblyzero\workflows\requirements\parsers\__init__.py                         3      3     0%   6-14
+assemblyzero\workflows\requirements\parsers\draft_updater.py                  130    130     0%   8-315
+assemblyzero\workflows\requirements\parsers\verdict_parser.py                  94     94     0%   8-295
+assemblyzero\workflows\requirements\state.py                                   44     24    45%   282-358, 370-391
+assemblyzero\workflows\scout\__init__.py                                        3      3     0%   7-18
+assemblyzero\workflows\scout\budget.py                                         21     21     0%   7-76
+assemblyzero\workflows\scout\graph.py                                           5      5     0%   6-62
+assemblyzero\workflows\scout\instrumentation.py                                40     40     0%   6-126
+assemblyzero\workflows\scout\nodes.py                                         151    151     0%   6-345
+assemblyzero\workflows\scout\prompts.py                                        11     11     0%   7-76
+assemblyzero\workflows\scout\security.py                                       44     44     0%   6-132
+assemblyzero\workflows\scout\templates.py                                      33     33     0%   6-124
+assemblyzero\workflows\testing\__init__.py                                      3      0   100%
+assemblyzero\workflows\testing\audit.py                                        88     65    26%   33-35, 71-79, 92-96, 110-121, 141-144, 162-165, 185-229, 251-272, 284-321
+assemblyzero\workflows\testing\circuit_breaker.py                              46      1    98%   137
+assemblyzero\workflows\testing\completeness\__init__.py                         3      0   100%
+assemblyzero\workflows\testing\completeness\ast_analyzer.py                   280    243    13%   83-106, 118-121, 137-148, 165-176, 199-268, 286-333, 351-390, 414-472, 490-510, 530-605, 634-695, 718-725
+assemblyzero\workflows\testing\completeness\report_generator.py               129     99    23%   86-128, 159-183, 204-209, 221-228, 240-259, 277-290, 320-396, 413-429
+assemblyzero\workflows\testing\exit_code_router.py                             27     17    37%   44-71, 83-92
+assemblyzero\workflows\testing\graph.py                                       121    105    13%   85-88, 102-118, 134-142, 164-180, 196-209, 225-228, 244-270, 284-298, 312-320, 332-461
+assemblyzero\workflows\testing\knowledge\__init__.py                            2      0   100%
+assemblyzero\workflows\testing\knowledge\patterns.py                           60     49    18%   21-32, 37, 97-116, 128-129, 141-149, 161-170, 184-193
+assemblyzero\workflows\testing\nodes\__init__.py                               11      0   100%
+assemblyzero\workflows\testing\nodes\completeness_gate.py                     115    102    11%   80-257, 281-303, 320-352
+assemblyzero\workflows\testing\nodes\document.py                              140    126    10%   42-62, 74-85, 97-104, 116-117, 129-142, 154-167, 180-215, 227-361
+assemblyzero\workflows\testing\nodes\e2e_validation.py                        109     92    16%   42-43, 62-106, 127, 148, 160-331, 341-359
+assemblyzero\workflows\testing\nodes\finalize.py                              110     98    11%   42-74, 87-123, 135-241, 257-261
+assemblyzero\workflows\testing\nodes\implement_code.py                        626    568     9%   74-78, 81-85, 88-94, 97-101, 110-113, 118-133, 157-186, 194-214, 222-241, 249-253, 269-312, 318-339, 344-368, 388-401, 417-424, 447-508, 525-582, 604-644, 653-661, 675-676, 702-840, 859-862, 870-879, 899-967, 988-1007, 1033-1128, 1159-1178, 1190-1405, 1416-1433, 1452-1544, 1554-1623, 1637-1660, 1677
+assemblyzero\workflows\testing\nodes\load_lld.py                              315    289     8%   49-70, 85-107, 120, 146-173, 192-232, 249-297, 314-416, 421-422, 427-439, 444-455, 460-476, 493-505, 521-585, 605-675, 698-827, 845-916
+assemblyzero\workflows\testing\nodes\review_test_plan.py                      168    151    10%   55-69, 81-89, 106-125, 143-149, 154, 215-263, 275-421, 443-483, 496-511, 519-566
+assemblyzero\workflows\testing\nodes\scaffold_tests.py                        317    298     6%   71-129, 147-203, 218-281, 297-327, 346-390, 411-511, 529-614, 619-637, 656-661, 673-732, 741-774
+assemblyzero\workflows\testing\nodes\validate_commit_message.py                12      9    25%   28-47
+assemblyzero\workflows\testing\nodes\validate_tests_mechanical.py             114    102    11%   48-61, 87-156, 175-205, 226-286, 311-324
+assemblyzero\workflows\testing\nodes\verify_phases.py                         204    191     6%   57-93, 115-253, 275-616, 630-655, 665-714
+assemblyzero\workflows\testing\path_validator.py                               70     70     0%   7-181
+assemblyzero\workflows\testing\state.py                                        13      0   100%
+assemblyzero\workflows\testing\templates\__init__.py                            5      0   100%
+assemblyzero\workflows\testing\templates\cp_docs.py                            73     65    11%   23-33, 45-60, 72-83, 105-189, 211-296
+assemblyzero\workflows\testing\templates\lessons.py                           115    107     7%   31-161, 174-199, 215-231, 243-257, 279-304
+assemblyzero\workflows\testing\templates\runbook.py                            94     86     9%   22-37, 49-59, 71-81, 93-103, 125-259
+assemblyzero\workflows\testing\templates\wiki_page.py                          74     67     9%   22-32, 44-48, 60-72, 92-152, 165-207
+---------------------------------------------------------------------------------------------------------
+TOTAL                                                                       11651  10582     9%
+FAIL Required test coverage of 95% not reached. Total coverage: 9.18%
+======================= 25 passed, 2 warnings in 2.02s ========================
+

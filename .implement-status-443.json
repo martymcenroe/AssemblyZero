@@ -1,0 +1,7 @@
+{
+  "issue": 443,
+  "status": "FAILED",
+  "timestamp": "2026-02-25T20:58:13.600913+00:00",
+  "repo": "C:\\Users\\mcwiz\\Projects\\AssemblyZero",
+  "error": "Coverage stagnant: 9.0% -> 9.0% (< 1% improvement). Halting to prevent token waste."
+}
