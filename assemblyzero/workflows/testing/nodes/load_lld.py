@@ -150,10 +150,17 @@ def extract_test_plan_section(lld_content: str) -> str:
         r"##\s*(?:Verification|Testing)\s*\n(.*?)(?=\n##|\Z)",
     ]
 
+    # Pre-compute code fence regions to skip false-positive matches
+    # inside ```...``` blocks (e.g., headings embedded in string literals).
+    fence_regions = [
+        (m.start(), m.end())
+        for m in re.finditer(r"```.*?```", lld_content, re.DOTALL)
+    ]
+
     for pattern in patterns:
-        match = re.search(pattern, lld_content, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(1).strip()
+        for match in re.finditer(pattern, lld_content, re.DOTALL | re.IGNORECASE):
+            if not any(s <= match.start() < e for s, e in fence_regions):
+                return match.group(1).strip()
 
     # Fallback: extract test scenarios from Python test code blocks in
     # Implementation Spec sections (e.g., ### 6.9 `tests/unit/test_*.py`)
