@@ -319,7 +319,53 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 coverage_module = coverage_module[4:]
             break
 
-    # Default to assemblyzero if no implementation files
+    # Issue #462: When all impl files are test files (test-only issues),
+    # fall back to files_to_modify from LLD to find the source module
+    if not coverage_module:
+        files_to_modify = state.get("files_to_modify", [])
+        for file_info in files_to_modify:
+            fpath = file_info.get("path", "")
+            if "test" in fpath.lower():
+                continue
+            if fpath.endswith("__init__.py"):
+                continue
+            if not fpath.endswith(".py"):
+                continue
+            rel_str = fpath
+            if rel_str.endswith(".py"):
+                rel_str = rel_str[:-3]
+            coverage_module = rel_str.replace("/", ".").replace("\\", ".")
+            if coverage_module.startswith("src."):
+                coverage_module = coverage_module[4:]
+            print(f"    [N5] Derived coverage module from LLD files_to_modify: {coverage_module}")
+            break
+
+    # Issue #462 fallback 2: reverse-map test file name to source module
+    # e.g., tests/unit/test_circuit_breaker.py → find circuit_breaker.py in repo
+    if not coverage_module and test_files:
+        for tf in test_files:
+            tf_name = Path(tf).name  # e.g., test_circuit_breaker.py
+            if tf_name.startswith("test_"):
+                src_name = tf_name[5:]  # e.g., circuit_breaker.py
+                # Search for matching source file in repo
+                matches = list(repo_root.rglob(src_name)) if repo_root else []
+                # Filter to .py files not in tests/ directories
+                for match in matches:
+                    match_parts = match.relative_to(repo_root).parts
+                    if any(p.lower() in ("tests", "test") for p in match_parts):
+                        continue
+                    rel_str = str(match.relative_to(repo_root))
+                    if rel_str.endswith(".py"):
+                        rel_str = rel_str[:-3]
+                    coverage_module = rel_str.replace("/", ".").replace("\\", ".")
+                    if coverage_module.startswith("src."):
+                        coverage_module = coverage_module[4:]
+                    print(f"    [N5] Derived coverage module from test filename: {coverage_module}")
+                    break
+                if coverage_module:
+                    break
+
+    # Last resort: default to top-level package
     if not coverage_module:
         coverage_module = "assemblyzero"
 
