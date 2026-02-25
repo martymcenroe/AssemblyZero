@@ -32,3 +32,14 @@ git checkout main && git pull
 ```
 
 Skipping post-merge cleanup leaves orphaned worktrees and stale branches.
+
+## Cascade Prevention (Task Completion Behavior)
+
+After completing a task, ask an **open-ended question** such as "What would you like to work on next?"
+
+**NEVER** offer numbered yes/no options for deciding next steps. For example, do NOT output:
+- "Should I continue with the next issue? 1. Yes 2. No"
+- "1. Proceed to issue #44  2. Stop here"
+
+The human orchestrator decides what to do next — not the AI. Present your completed work,
+then ask what the human wants. Do not suggest, enumerate, or auto-propose next tasks.

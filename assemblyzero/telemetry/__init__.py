@@ -17,5 +17,19 @@ Kill switch: set ASSEMBLYZERO_TELEMETRY=0 to disable all emission.
 """
 
 from assemblyzero.telemetry.emitter import emit, flush, track_tool
+from assemblyzero.telemetry.cascade_events import (
+    CascadeEvent,
+    create_cascade_event,
+    get_cascade_stats,
+    log_cascade_event,
+)
 
-__all__ = ["emit", "flush", "track_tool"]
+__all__ = [
+    "CascadeEvent",
+    "create_cascade_event",
+    "emit",
+    "flush",
+    "get_cascade_stats",
+    "log_cascade_event",
+    "track_tool",
+]
