@@ -419,6 +419,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use issue body as spec (skip LLD/spec file search). For small changes.",
     )
+    parser.add_argument(
+        "--token-budget",
+        type=int,
+        default=0,
+        help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
+    )
 
     return parser
 
@@ -611,6 +617,8 @@ def main():
         print(f"[implement] Mode: issue-only (no LLD)")
     if args.dry_run:
         print(f"[implement] Mode: DRY RUN")
+    if args.token_budget > 0:
+        print(f"[implement] Token budget: {args.token_budget:,}")
     print()
 
     # Issue #290: Dry-run — preview execution plan and exit
@@ -657,6 +665,8 @@ def main():
         "context_files": args.context or [],
         "context_content": context_content,
         "issue_only": args.issue_only,
+        "token_budget": args.token_budget,
+        "estimated_tokens_used": 0,
     }
 
     # Track worktree for later reference (cleanup, PR creation)

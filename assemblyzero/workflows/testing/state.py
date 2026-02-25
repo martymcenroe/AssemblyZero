@@ -155,6 +155,7 @@ class TestingWorkflowState(TypedDict, total=False):
     coverage_achieved: float
     previous_coverage: float  # Previous iteration coverage for stagnation detection
     e2e_output: str
+    previous_e2e_passed: int  # Previous E2E pass count for stagnation detection
 
     # Review artifacts
     test_plan_review_prompt: str
@@ -214,3 +215,7 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Issue #292: Pytest exit code routing
     pytest_exit_code: int  # Last pytest return code (0-5, -1 for timeout)
+
+    # Circuit breaker / token budget
+    token_budget: int  # Max estimated tokens (0 = unlimited)
+    estimated_tokens_used: int  # Running estimate of tokens consumed

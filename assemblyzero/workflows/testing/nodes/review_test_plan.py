@@ -322,21 +322,53 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         }
     # --------------------------------------------------------------------------
 
-    # Call Gemini for review
+    # Call Gemini for review (with retry)
     try:
+        import time
+
         from assemblyzero.core.config import REVIEWER_MODEL
         from assemblyzero.core.gemini_client import GeminiClient
 
         client = GeminiClient(model=REVIEWER_MODEL)
-        result = client.invoke(
-            system_instruction="You are a senior QA engineer reviewing a test plan for coverage and quality.",
-            content=full_prompt,
-        )
 
-        if not result.success:
-            print(f"    [ERROR] Gemini review failed: {result.error_message}")
+        # N1 Gemini Retry: 2 attempts with exponential backoff
+        max_attempts = 2
+        last_error = ""
+        result = None
+
+        for attempt in range(1, max_attempts + 1):
+            result = client.invoke(
+                system_instruction="You are a senior QA engineer reviewing a test plan for coverage and quality.",
+                content=full_prompt,
+            )
+
+            if result.success:
+                break
+
+            last_error = result.error_message or "Unknown error"
+            print(f"    [N1] Gemini attempt {attempt}/{max_attempts} failed: {last_error}")
+
+            if attempt < max_attempts:
+                backoff = 2 ** attempt  # 2s, 4s
+                print(f"    [N1] Retrying in {backoff}s...")
+                time.sleep(backoff)
+
+        if not result or not result.success:
+            error_msg = f"Gemini review failed after {max_attempts} attempts: {last_error}"
+            print(f"    [ERROR] {error_msg}")
+
+            # Save error to audit trail
+            if audit_dir.exists():
+                file_num = next_file_number(audit_dir)
+                save_audit_file(
+                    audit_dir,
+                    file_num,
+                    "gemini-error.md",
+                    f"# Gemini Review Error\n\nAttempts: {max_attempts}\nLast error: {last_error}\n",
+                )
+
             return {
-                "error_message": f"Gemini review failed: {result.error_message}",
+                "error_message": error_msg,
                 "test_plan_status": "BLOCKED",
             }
 

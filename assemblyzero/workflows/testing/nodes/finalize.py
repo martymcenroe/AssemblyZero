@@ -23,6 +23,7 @@ from assemblyzero.workflows.testing.audit import (
     save_audit_file,
     save_test_report_metadata,
 )
+from assemblyzero.workflows.testing.circuit_breaker import budget_summary
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,16 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
         file_num = next_file_number(audit_dir)
         summary = _generate_summary(metadata)
         save_audit_file(audit_dir, file_num, "summary.md", summary)
+
+    # Print token budget summary if applicable
+    token_summary = budget_summary(state)
+    if token_summary:
+        print(f"\n    {token_summary.replace(chr(10), chr(10) + '    ')}")
+
+        # Save budget summary to audit trail
+        if audit_dir.exists():
+            file_num = next_file_number(audit_dir)
+            save_audit_file(audit_dir, file_num, "token-budget.md", token_summary)
 
     # Archive workflow artifacts (LLD and reports)
     archival_result = _archive_workflow_artifacts(state)

@@ -290,7 +290,7 @@ def route_after_e2e(
     # E2E failure may loop back to implement
     if next_node == "N4_implement_code":
         iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 10)
+        max_iterations = state.get("max_iterations", 5)
         if iteration >= max_iterations:
             return "end"
         return "N4_implement_code"

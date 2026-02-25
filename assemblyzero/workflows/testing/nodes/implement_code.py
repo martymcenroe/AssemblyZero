@@ -38,6 +38,7 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.circuit_breaker import record_iteration_cost
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 
@@ -1081,6 +1082,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("mock_mode"):
         return _mock_implement_code(state)
 
+    # Track estimated token cost for this iteration
+    estimated_tokens_used = record_iteration_cost(state)
+
     # Get required state
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
@@ -1252,6 +1256,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     return {
         "implementation_files": written_paths,
         "completed_files": completed_files,
+        "estimated_tokens_used": estimated_tokens_used,
         "error_message": "",
     }
 

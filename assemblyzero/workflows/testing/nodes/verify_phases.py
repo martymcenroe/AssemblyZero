@@ -20,6 +20,7 @@ from assemblyzero.workflows.testing.audit import (
     parse_pytest_output,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_INTERRUPTED,
     EXIT_INTERNALERROR,
@@ -432,6 +433,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": stagnant_msg,
             }
 
+        # Circuit breaker check before looping
+        should_trip, trip_reason = check_circuit_breaker(state)
+        if should_trip:
+            print(f"    {trip_reason}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": trip_reason,
+            }
+
         print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "
               f"Tests: {passed_count}/{passed_count + failed_count} passed | "
               f"Coverage: {coverage_achieved:.1f}% (was {previous_coverage:.1f}%) | "
@@ -494,6 +510,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "iteration_count": iteration_count + 1,
                 "next_node": "end",
                 "error_message": stagnant_msg,
+            }
+
+        # Circuit breaker check before looping
+        should_trip, trip_reason = check_circuit_breaker(state)
+        if should_trip:
+            print(f"    {trip_reason}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": trip_reason,
             }
 
         print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "

@@ -6,6 +6,7 @@ Runs E2E tests in a sandbox environment:
 - Auto-cleanup after each E2E run
 """
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -17,13 +18,29 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 
 # Safety limits for E2E testing
 DEFAULT_E2E_MAX_ISSUES = 5
 DEFAULT_E2E_MAX_PRS = 3
+DEFAULT_E2E_MAX_ITERATIONS = 5
 E2E_TIMEOUT_SECONDS = 600  # 10 minutes
+
+
+def _parse_e2e_passed(output: str) -> int:
+    """Parse passed test count from pytest output.
+
+    Args:
+        output: Combined stdout + stderr from pytest.
+
+    Returns:
+        Number of passed tests, or 0 if not parseable.
+    """
+    # Match patterns like "3 passed", "1 passed, 2 failed"
+    match = re.search(r"(\d+)\s+passed", output)
+    return int(match.group(1)) if match else 0
 
 
 def run_e2e_tests(
@@ -243,22 +260,51 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": "",
             }
 
-        print(f"    E2E tests failed - iteration {iteration_count}")
+        e2e_passed = _parse_e2e_passed(output)
+        previous_e2e_passed = state.get("previous_e2e_passed", -1)
+
+        print(f"    E2E tests failed - iteration {iteration_count} | passed: {e2e_passed}")
 
         log_workflow_execution(
             target_repo=repo_root,
             issue_number=state.get("issue_number", 0),
             workflow_type="testing",
             event="e2e_failed",
-            details={"iteration": iteration_count},
+            details={"iteration": iteration_count, "passed": e2e_passed},
         )
 
+        # E2E stagnation detection: if pass count didn't improve, halt
+        if previous_e2e_passed >= 0 and e2e_passed <= previous_e2e_passed:
+            stagnant_msg = (
+                f"E2E stagnant: {previous_e2e_passed} -> {e2e_passed} passed "
+                f"(no improvement). Halting to prevent token waste."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "e2e_output": output,
+                "file_counter": file_num,
+                "previous_e2e_passed": e2e_passed,
+                "error_message": stagnant_msg,
+            }
+
+        # Circuit breaker check before looping
+        should_trip, trip_reason = check_circuit_breaker(state)
+        if should_trip:
+            print(f"    {trip_reason}")
+            return {
+                "e2e_output": output,
+                "file_counter": file_num,
+                "previous_e2e_passed": e2e_passed,
+                "error_message": trip_reason,
+            }
+
         # Loop back to implementation if within max iterations
-        max_iterations = state.get("max_iterations", 10)
+        max_iterations = state.get("max_iterations", DEFAULT_E2E_MAX_ITERATIONS)
         if iteration_count < max_iterations:
             return {
                 "e2e_output": output,
                 "file_counter": file_num,
+                "previous_e2e_passed": e2e_passed,
                 "iteration_count": iteration_count + 1,
                 "next_node": "N4_implement_code",
                 "error_message": "",
@@ -267,6 +313,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
             return {
                 "e2e_output": output,
                 "file_counter": file_num,
+                "previous_e2e_passed": e2e_passed,
                 "error_message": f"E2E failed after {max_iterations} iterations",
             }
 
