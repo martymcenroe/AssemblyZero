@@ -406,6 +406,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -413,9 +414,30 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": error_msg,
             }
 
+        # Stagnation check: if passed count unchanged from previous iteration, halt.
+        # Catches 0/N->0/N loops (e.g., circular imports, total import failures).
+        previous_passed = state.get("previous_passed", -1)
+        if previous_passed >= 0 and passed_count == previous_passed:
+            stagnant_msg = (
+                f"Test count stagnant: {passed_count}/{passed_count + failed_count} passed "
+                f"(unchanged from previous iteration). Halting to prevent token waste."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
         # Stagnation check: if coverage didn't improve by at least 1%, halt.
         # Skip when passed_count == 0: coverage is vacuously 100% with no passing
-        # tests, so the metric is meaningless. Let max_iterations cap the loop.
+        # tests, so the metric is meaningless. The test-count check above handles that case.
         if passed_count > 0 and previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
             stagnant_msg = (
                 f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
@@ -426,6 +448,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -441,6 +464,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -471,6 +495,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
+            "previous_passed": passed_count,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -487,6 +512,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -505,6 +531,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -520,6 +547,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "green_phase_output": output,
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -549,6 +577,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
+            "previous_passed": passed_count,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -577,6 +606,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
+            "previous_passed": passed_count,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "next_node": "N7_finalize",  # Skip E2E
@@ -587,6 +617,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "green_phase_output": output,
         "coverage_achieved": coverage_achieved,
         "previous_coverage": coverage_achieved,
+        "previous_passed": passed_count,
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
         "next_node": "N6_e2e_validation",
