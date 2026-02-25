@@ -1023,6 +1023,245 @@ class TestWorkflowResumeIntegration:
                 assert state.values.get("counter") == 111
 
 
+class TestWorkflowE2E:
+    """E2E test infrastructure for workflow nodes.
+
+    Issue #450: Automated resume E2E test.
+    Issue #452: E2E test infrastructure template.
+
+    Uses real SQLite checkpointer with interrupt_before to simulate
+    mid-workflow interruption and verify resume correctness.
+    """
+
+    def test_interrupt_and_resume_preserves_state(self):
+        """Interrupt workflow mid-execution and resume from checkpoint.
+
+        Simulates the manual E2E test from issue #70:
+        1. Start workflow → interrupt at node B
+        2. Verify checkpoint saved partial state
+        3. Resume with stream(None) → workflow completes
+        4. Verify final state includes all nodes
+        """
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from langgraph.graph import END, StateGraph
+        from typing import TypedDict
+
+        class WorkflowState(TypedDict, total=False):
+            counter: int
+            nodes_visited: list
+            draft: str
+
+        def node_a(state: WorkflowState) -> dict:
+            visited = state.get("nodes_visited", [])
+            return {
+                "counter": state.get("counter", 0) + 1,
+                "nodes_visited": visited + ["A"],
+                "draft": "draft-v1",
+            }
+
+        def node_b(state: WorkflowState) -> dict:
+            visited = state.get("nodes_visited", [])
+            return {
+                "counter": state.get("counter", 0) + 10,
+                "nodes_visited": visited + ["B"],
+                "draft": state.get("draft", "") + "-reviewed",
+            }
+
+        def node_c(state: WorkflowState) -> dict:
+            visited = state.get("nodes_visited", [])
+            return {
+                "counter": state.get("counter", 0) + 100,
+                "nodes_visited": visited + ["C"],
+            }
+
+        workflow = StateGraph(WorkflowState)
+        workflow.add_node("A", node_a)
+        workflow.add_node("B", node_b)
+        workflow.add_node("C", node_c)
+        workflow.set_entry_point("A")
+        workflow.add_edge("A", "B")
+        workflow.add_edge("B", "C")
+        workflow.add_edge("C", END)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "e2e.db"
+
+            # Phase 1: Run workflow, interrupt before node B
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(
+                    checkpointer=memory,
+                    interrupt_before=["B"],
+                )
+                config = {"configurable": {"thread_id": "e2e-resume"}}
+
+                events = list(app.stream(
+                    {"counter": 0, "nodes_visited": []}, config
+                ))
+
+                # Only node A should have run
+                state = app.get_state(config)
+                assert state.values["counter"] == 1
+                assert state.values["nodes_visited"] == ["A"]
+                assert state.values["draft"] == "draft-v1"
+                # Workflow is NOT complete — next step is pending
+                assert state.next == ("B",)
+
+            # Phase 2: Resume from checkpoint (simulates new session)
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(checkpointer=memory)
+                config = {"configurable": {"thread_id": "e2e-resume"}}
+
+                # Verify state persisted across DB close/reopen
+                state = app.get_state(config)
+                assert state.values["counter"] == 1
+                assert state.values["nodes_visited"] == ["A"]
+
+                # Resume — runs B and C
+                events = list(app.stream(None, config))
+                assert len(events) == 2  # B and C
+
+                # Verify final state
+                state = app.get_state(config)
+                assert state.values["counter"] == 111  # 1 + 10 + 100
+                assert state.values["nodes_visited"] == ["A", "B", "C"]
+                assert state.values["draft"] == "draft-v1-reviewed"
+
+    def test_resume_is_idempotent_after_completion(self):
+        """Resume on a completed workflow yields no events and preserves state."""
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from langgraph.graph import END, StateGraph
+        from typing import TypedDict
+
+        class SimpleState(TypedDict, total=False):
+            value: int
+
+        def increment(state: SimpleState) -> dict:
+            return {"value": state.get("value", 0) + 1}
+
+        workflow = StateGraph(SimpleState)
+        workflow.add_node("inc", increment)
+        workflow.set_entry_point("inc")
+        workflow.add_edge("inc", END)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "idem.db"
+
+            # Run to completion
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(checkpointer=memory)
+                config = {"configurable": {"thread_id": "idem-test"}}
+                list(app.stream({"value": 0}, config))
+
+            # Resume twice — both should be no-ops
+            for _ in range(2):
+                with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                    app = workflow.compile(checkpointer=memory)
+                    config = {"configurable": {"thread_id": "idem-test"}}
+                    events = list(app.stream(None, config))
+                    assert len(events) == 0
+                    state = app.get_state(config)
+                    assert state.values["value"] == 1
+
+    def test_multiple_interrupt_resume_cycles(self):
+        """Multiple interrupt/resume cycles accumulate state correctly.
+
+        Simulates a user who interrupts and resumes multiple times across
+        different nodes in the workflow.
+        """
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from langgraph.graph import END, StateGraph
+        from typing import TypedDict
+
+        class AccState(TypedDict, total=False):
+            log: list
+
+        def step_1(state: AccState) -> dict:
+            return {"log": state.get("log", []) + ["step1"]}
+
+        def step_2(state: AccState) -> dict:
+            return {"log": state.get("log", []) + ["step2"]}
+
+        def step_3(state: AccState) -> dict:
+            return {"log": state.get("log", []) + ["step3"]}
+
+        workflow = StateGraph(AccState)
+        workflow.add_node("s1", step_1)
+        workflow.add_node("s2", step_2)
+        workflow.add_node("s3", step_3)
+        workflow.set_entry_point("s1")
+        workflow.add_edge("s1", "s2")
+        workflow.add_edge("s2", "s3")
+        workflow.add_edge("s3", END)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "multi.db"
+
+            # Interrupt before s2
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(
+                    checkpointer=memory, interrupt_before=["s2"]
+                )
+                config = {"configurable": {"thread_id": "multi"}}
+                list(app.stream({"log": []}, config))
+                state = app.get_state(config)
+                assert state.values["log"] == ["step1"]
+
+            # Resume, interrupt before s3
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(
+                    checkpointer=memory, interrupt_before=["s3"]
+                )
+                config = {"configurable": {"thread_id": "multi"}}
+                list(app.stream(None, config))
+                state = app.get_state(config)
+                assert state.values["log"] == ["step1", "step2"]
+
+            # Resume to completion
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(checkpointer=memory)
+                config = {"configurable": {"thread_id": "multi"}}
+                list(app.stream(None, config))
+                state = app.get_state(config)
+                assert state.values["log"] == ["step1", "step2", "step3"]
+
+    def test_separate_threads_are_isolated(self):
+        """Different thread IDs maintain independent checkpoints."""
+        from langgraph.checkpoint.sqlite import SqliteSaver
+        from langgraph.graph import END, StateGraph
+        from typing import TypedDict
+
+        class TagState(TypedDict, total=False):
+            tag: str
+
+        def set_tag(state: TagState) -> dict:
+            return {"tag": state.get("tag", "") + "-done"}
+
+        workflow = StateGraph(TagState)
+        workflow.add_node("tag", set_tag)
+        workflow.set_entry_point("tag")
+        workflow.add_edge("tag", END)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "iso.db"
+
+            with SqliteSaver.from_conn_string(str(db_path)) as memory:
+                app = workflow.compile(checkpointer=memory)
+
+                # Run thread A
+                config_a = {"configurable": {"thread_id": "thread-a"}}
+                list(app.stream({"tag": "A"}, config_a))
+
+                # Run thread B
+                config_b = {"configurable": {"thread_id": "thread-b"}}
+                list(app.stream({"tag": "B"}, config_b))
+
+                # Verify isolation
+                state_a = app.get_state(config_a)
+                state_b = app.get_state(config_b)
+                assert state_a.values["tag"] == "A-done"
+                assert state_b.values["tag"] == "B-done"
+
+
 class TestBriefIdeaDetection:
     """Test that --brief auto-detects ideas/active/ files for cleanup."""
 

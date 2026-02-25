@@ -254,8 +254,8 @@ class TestScanDirectory:
             verdicts = list(_scan_directory(base, seen, base))
             # Test passes if we get here without hanging
         except OSError:
-            # Symlinks may not be supported on all systems
-            pytest.skip("Symlinks not supported")
+            # Symlinks may not be supported on all systems (see #453)
+            pytest.skip("Symlinks not supported on this platform (see #453)")
 
     def test_only_returns_md_files(self, tmp_path):
         """Should only return .md files."""

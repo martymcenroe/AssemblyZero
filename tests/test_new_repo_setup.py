@@ -8,6 +8,7 @@ Issue: #99
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -378,3 +379,148 @@ class TestIntegrity:
         """Standard 0009 markdown contains a reference to the schema file."""
         content = STANDARD_PATH.read_text(encoding="utf-8")
         assert "0009-structure-schema.json" in content
+
+
+# ===========================================================================
+# TestMain — Issue #451: main() workflow coverage
+# ===========================================================================
+
+from unittest.mock import patch, MagicMock
+
+from new_repo_setup import (
+    main,
+    validate_name,
+    get_github_username,
+    audit_structure,
+)
+
+
+class TestValidateName:
+    """T200-T210: Repository name validation."""
+
+    def test_T200_valid_names(self):
+        """Accept valid repository names."""
+        for name in ["MyProject", "hello-world", "foo_bar", "A123"]:
+            valid, error = validate_name(name)
+            assert valid, f"{name} should be valid but got: {error}"
+
+    def test_T210_reject_invalid_names(self):
+        """Reject names with invalid characters or format."""
+        invalid = [
+            ("", "empty"),
+            ("123start", "starts with digit"),
+            ("has spaces", "contains space"),
+            ("a" * 101, "too long"),
+        ]
+        for name, reason in invalid:
+            valid, error = validate_name(name)
+            assert not valid, f"'{name}' ({reason}) should be invalid"
+
+
+class TestMainAuditMode:
+    """T220: --audit flag triggers audit path."""
+
+    @patch("new_repo_setup.config")
+    def test_T220_audit_nonexistent_directory(self, mock_config, tmp_path):
+        """--audit on non-existent directory exits with error."""
+        mock_config.projects_root.return_value = str(tmp_path)
+        with patch("sys.argv", ["new_repo_setup.py", "NonExistent", "--audit"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.audit_structure")
+    def test_T221_audit_existing_directory(self, mock_audit, mock_config, tmp_path):
+        """--audit on existing directory calls audit_structure."""
+        mock_config.projects_root.return_value = str(tmp_path)
+        (tmp_path / "TestProject").mkdir()
+        mock_audit.return_value = 0
+        with patch("sys.argv", ["new_repo_setup.py", "TestProject", "--audit"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 0
+        mock_audit.assert_called_once()
+
+
+class TestMainDirectoryExists:
+    """T230: Error when target directory already exists."""
+
+    @patch("new_repo_setup.config")
+    def test_T230_directory_already_exists(self, mock_config, tmp_path):
+        """Exit with error if project directory already exists."""
+        mock_config.projects_root.return_value = str(tmp_path)
+        (tmp_path / "ExistingProject").mkdir()
+        with patch("sys.argv", ["new_repo_setup.py", "ExistingProject"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+
+class TestMainGitHubAuth:
+    """T240: GitHub username retrieval failure."""
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.get_github_username")
+    def test_T240_gh_not_authenticated(self, mock_gh, mock_config, tmp_path):
+        """Exit with error when gh CLI is not authenticated."""
+        mock_config.projects_root.return_value = str(tmp_path)
+        mock_gh.side_effect = subprocess.CalledProcessError(1, "gh")
+        with patch("sys.argv", ["new_repo_setup.py", "NewProject"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+
+def _setup_config_mock(mock_config, tmp_path):
+    """Configure the mock config object with all required attributes."""
+    mock_config.projects_root.return_value = str(tmp_path)
+    mock_config.projects_root_unix.return_value = "/tmp/projects"
+    mock_config.assemblyzero_root.return_value = str(tmp_path / "AssemblyZero")
+
+
+class TestMainLocalWorkflow:
+    """T250-T260: Full local-only workflow (--no-github)."""
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T250_no_github_skips_remote(self, mock_run, mock_config, tmp_path):
+        """--no-github skips GitHub repo creation and starring."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv", ["new_repo_setup.py", "LocalProject", "--no-github"]):
+            main()
+        # Should have called git init and git commit, but NOT gh repo create
+        commands = [call[0][0] for call in mock_run.call_args_list]
+        assert any(cmd[0] == "git" and cmd[1] == "init" for cmd in commands)
+        assert not any(cmd[0] == "gh" for cmd in commands)
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T260_local_creates_all_files(self, mock_run, mock_config, tmp_path):
+        """--no-github creates directory structure, config, and content files."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv", ["new_repo_setup.py", "FullLocal", "--no-github"]):
+            main()
+        project = tmp_path / "FullLocal"
+        assert project.exists()
+        assert (project / ".claude").is_dir()
+        assert (project / "CLAUDE.md").exists()
+        assert (project / "GEMINI.md").exists()
+        assert (project / "README.md").exists()
+        assert (project / "LICENSE").exists()
+        assert (project / ".gitignore").exists()
+        assert (project / "docs").is_dir()
+        assert (project / "src").is_dir()
+        assert (project / "tests" / "unit").is_dir()
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T270_force_flag_passed(self, mock_run, mock_config, tmp_path):
+        """--force flag is accepted without error."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv", ["new_repo_setup.py", "ForceProject", "--no-github", "--force"]):
+            main()
+        assert (tmp_path / "ForceProject").exists()
