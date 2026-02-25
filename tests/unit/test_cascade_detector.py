@@ -433,8 +433,8 @@ class TestGetCascadeStats:
 class TestHandleCascadeDetection:
     """T150/T160: handle_cascade_detection returns correct values (REQ-2)."""
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_allow_returns_true(self, mock_create: object, mock_log: object) -> None:
         result: CascadeDetectionResult = {
             "detected": False,
@@ -446,8 +446,8 @@ class TestHandleCascadeDetection:
         }
         assert handle_cascade_detection(result, "sess-123", "clean output") is True
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_block_and_prompt_returns_false(self, mock_create: object, mock_log: object) -> None:
         """T160: Auto-approve blocked on MEDIUM risk (REQ-2)."""
         mock_create.return_value = {  # type: ignore[union-attr]

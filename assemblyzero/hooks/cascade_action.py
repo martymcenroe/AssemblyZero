@@ -11,10 +11,9 @@ import sys
 from typing import TYPE_CHECKING
 
 from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
-from assemblyzero.telemetry.cascade_events import create_cascade_event, log_cascade_event
 
 if TYPE_CHECKING:
-    pass
+    from assemblyzero.telemetry.cascade_events import create_cascade_event, log_cascade_event
 
 
 def handle_cascade_detection(
@@ -48,8 +47,13 @@ def handle_cascade_detection(
     # For block_and_prompt and block_and_alert
     action_taken = "blocked" if action == "block_and_prompt" else "alerted"
 
-    # Log the cascade event
+    # Log the cascade event (lazy import to break circular dependency)
     try:
+        from assemblyzero.telemetry.cascade_events import (
+            create_cascade_event,
+            log_cascade_event,
+        )
+
         event = create_cascade_event(
             result=result,
             session_id=session_id,

@@ -72,8 +72,8 @@ class TestFormatBlockMessage:
 class TestHandleCascadeDetection:
     """T150/T160: handle_cascade_detection returns correct values (REQ-2)."""
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_allow_returns_true(self, mock_create: object, mock_log: object) -> None:
         result: CascadeDetectionResult = {
             "detected": False,
@@ -85,8 +85,8 @@ class TestHandleCascadeDetection:
         }
         assert handle_cascade_detection(result, "sess-123", "clean output") is True
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_block_and_prompt_returns_false(self, mock_create: object, mock_log: object) -> None:
         """T160: Auto-approve blocked on MEDIUM risk (REQ-2)."""
         mock_create.return_value = {  # type: ignore[union-attr]
@@ -109,8 +109,8 @@ class TestHandleCascadeDetection:
         }
         assert handle_cascade_detection(result, "sess-123", "model output") is False
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_block_and_alert_returns_false(self, mock_create: object, mock_log: object) -> None:
         mock_create.return_value = {  # type: ignore[union-attr]
             "timestamp": "2026-02-25T00:00:00+00:00",
@@ -132,8 +132,8 @@ class TestHandleCascadeDetection:
         }
         assert handle_cascade_detection(result, "sess-123", "model output") is False
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event", side_effect=Exception("disk full"))
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event", side_effect=Exception("disk full"))
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_telemetry_failure_still_blocks(self, mock_create: object, mock_log: object) -> None:
         """Telemetry failure must not prevent blocking."""
         mock_create.return_value = {  # type: ignore[union-attr]
@@ -157,8 +157,8 @@ class TestHandleCascadeDetection:
         # Should still return False even though logging failed
         assert handle_cascade_detection(result, "sess-123", "model output") is False
 
-    @patch("assemblyzero.hooks.cascade_action.log_cascade_event")
-    @patch("assemblyzero.hooks.cascade_action.create_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.log_cascade_event")
+    @patch("assemblyzero.telemetry.cascade_events.create_cascade_event")
     def test_block_and_alert_with_alert_disabled(self, mock_create: object, mock_log: object) -> None:
         """block_and_alert with alert_enabled=False still blocks."""
         mock_create.return_value = {  # type: ignore[union-attr]
