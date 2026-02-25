@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.hooks.file_write_validator import validate_file_write
+from assemblyzero.utils.file_type import get_file_type_info, get_language_tag
 from assemblyzero.utils.lld_path_enforcer import (
     build_implementation_prompt_section,
     detect_scaffolded_test_files,
@@ -136,18 +137,32 @@ def _find_claude_cli() -> str | None:
 # Mechanical Validation (no LLM judgment)
 # =============================================================================
 
-def extract_code_block(response: str) -> str | None:
+def extract_code_block(response: str, file_path: str = "") -> str | None:
     """Extract code block content from response.
 
-    Returns the content of the first code block, or None if no valid block found.
-    Does NOT trust any file path Claude puts in the response.
+    Issue #447: File-type-aware extraction. Prefers blocks matching the
+    expected language tag, falls back to any fenced block.
+
+    Args:
+        response: Claude's raw response text.
+        file_path: File path to determine expected language tag.
+            Empty string accepts any fenced block (backward compat).
+
+    Returns:
+        The content of the best-matching code block, or None if no valid block found.
+        Does NOT trust any file path Claude puts in the response.
     """
-    # Pattern: ```language\n...content...```
-        # Issue #310: Use greedy line-anchored pattern to handle nested code blocks correctly.
-    pattern = re.compile(r"^```\w*\s*\n(.*)^```", re.DOTALL | re.MULTILINE)
+    # Issue #310: Use greedy line-anchored pattern to handle nested code blocks correctly.
+    # Captures (language_tag, content) pairs.
+    pattern = re.compile(r"^```(\w*)\s*\n(.*)^```", re.DOTALL | re.MULTILINE)
+
+    expected_tag = get_language_tag(file_path) if file_path else ""
+    best_match: str | None = None
+    fallback_match: str | None = None
 
     for match in pattern.finditer(response):
-        content = match.group(1).strip()
+        tag = match.group(1).lower()
+        content = match.group(2).strip()
 
         # Skip empty blocks
         if not content:
@@ -159,10 +174,16 @@ def extract_code_block(response: str) -> str | None:
             content = "\n".join(lines[1:]).strip()
 
         # Must have actual content
-        if content and len(content) > 10:
-            return content
+        if not content or len(content) <= 10:
+            continue
 
-    return None
+        # Prefer block matching expected tag
+        if expected_tag and tag == expected_tag and best_match is None:
+            best_match = content
+        elif fallback_match is None:
+            fallback_match = content
+
+    return best_match or fallback_match
 
 
 def validate_code_response(code: str, filepath: str) -> tuple[bool, str]:
@@ -795,19 +816,25 @@ Fix the issue in your implementation.
 
 """
 
-    prompt += """## Output Format
+    # Issue #447: File-type-aware output format
+    info = get_file_type_info(filepath)
+    tag = info["language_tag"]
+    descriptor = info["content_descriptor"]
+    block_tag = tag if tag else ""
 
-Output ONLY the file contents. No explanations, no markdown headers, just the code.
+    prompt += f"""## Output Format
 
-```python
-# Your implementation here
+Output ONLY the file contents. No explanations, no markdown headers, just the {descriptor}.
+
+```{block_tag}
+# Your {descriptor} here
 ```
 
 IMPORTANT:
 - Output the COMPLETE file contents
 - Do NOT output a summary or description
 - Do NOT say "I've implemented..."
-- Just output the code in a single code block
+- Just output the {descriptor} in a single fenced code block
 """
 
     return prompt
@@ -835,8 +862,36 @@ def compute_dynamic_timeout(prompt: str) -> int:
     return min(scaled, CLI_TIMEOUT)
 
 
-def call_claude_for_file(prompt: str) -> tuple[str, str]:
+def build_system_prompt(file_path: str) -> str:
+    """Build a file-type-aware system prompt for Claude.
+
+    Issue #447: Adjusts the language tag and framing based on file type.
+    """
+    info = get_file_type_info(file_path)
+    tag = info["language_tag"]
+    descriptor = info["content_descriptor"]
+
+    if tag:
+        block_instruction = f"Just the {descriptor} in a ```{tag} block"
+    else:
+        block_instruction = f"Just the {descriptor} in a fenced code block"
+
+    return f"""You are a file generator. Output ONLY the complete file contents.
+
+RULES:
+1. Output a single fenced code block with the complete file contents
+2. No explanations before or after the content
+3. No summaries
+4. No "I've implemented..." statements
+5. {block_instruction}
+
+If you output anything other than a fenced code block, the build will fail."""
+
+
+def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
     """Call Claude for a single file implementation.
+
+    Issue #447: Added file_path parameter for file-type-aware system prompt.
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
@@ -847,16 +902,7 @@ def call_claude_for_file(prompt: str) -> tuple[str, str]:
 
     if claude_cli:
         try:
-            system_prompt = """You are a code generator. Output ONLY code.
-
-RULES:
-1. Output a single code block with the complete file contents
-2. No explanations before or after the code
-3. No summaries
-4. No "I've implemented..." statements
-5. Just the code in a ```python block
-
-If you output anything other than a code block, the build will fail."""
+            system_prompt = build_system_prompt(file_path)
 
             cmd = [
                 claude_cli,
@@ -1006,8 +1052,8 @@ def generate_file_with_retry(
                 prompt
             )
 
-        # Call Claude
-        response, api_error = call_claude_for_file(prompt)
+        # Call Claude (Issue #447: pass filepath for file-type-aware system prompt)
+        response, api_error = call_claude_for_file(prompt, file_path=filepath)
 
         # Check for API error
         if api_error:
@@ -1045,8 +1091,8 @@ def generate_file_with_retry(
                     response_preview=response[:500]
                 )
 
-        # Extract code block
-        code = extract_code_block(response)
+        # Extract code block (Issue #447: file-type-aware extraction)
+        code = extract_code_block(response, file_path=filepath)
 
         if code is None:
             last_error = "No code block found in response"
