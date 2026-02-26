@@ -2,7 +2,7 @@
 repo: martymcenroe/AgentOS
 issue: 180
 url: https://github.com/martymcenroe/AgentOS/issues/180
-fetched: 2026-02-04T02:13:04.108473Z
+fetched: 2026-02-04T06:29:57.329738Z
 ---
 
 # Issue #180: feat: N9 Cleanup Node - Worktree removal, lineage archival, and learning summary

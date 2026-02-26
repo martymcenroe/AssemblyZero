@@ -1,0 +1,14 @@
+
+
+```
+Green Phase - Iteration 1
+=========================
+
+All tests passing.
+
+Coverage: 96.5%
+Missing lines: src/cleanup.py:42, src/cleanup.py:55
+
+Test Results:
+  33 passed, 0 failed, 0 errors
+```

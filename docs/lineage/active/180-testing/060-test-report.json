@@ -1,0 +1,28 @@
+{
+  "issue_number": 180,
+  "lld_path": "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\docs\\lld\\drafts\\spec-0180-implementation-readiness.md",
+  "completed_at": "2026-02-25T18:48:54.436348",
+  "test_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_cleanup_helpers.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_cleanup.py"
+  ],
+  "implementation_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\workflows\\testing\\state.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\workflows\\testing\\nodes\\cleanup_helpers.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\workflows\\testing\\nodes\\cleanup.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\workflows\\testing\\nodes\\__init__.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\workflows\\testing\\graph.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\mock_lineage\\001-lld.md",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\mock_lineage\\005-test-scaffold.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\fixtures\\mock_lineage\\052-green-phase.txt",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_cleanup_helpers.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero\\tests\\unit\\test_cleanup.py"
+  ],
+  "coverage_achieved": 100.0,
+  "coverage_target": 95,
+  "total_iterations": 1,
+  "test_count": 40,
+  "passed_count": 40,
+  "failed_count": 0,
+  "e2e_passed": false
+}

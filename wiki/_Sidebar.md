@@ -67,6 +67,7 @@
 
 ---
 - [Implementation Spec Cross Project Metrics Aggregation for AssemblyZero Usage Tracking](Implementation-Spec-Cross-Project-Metrics-Aggregation-for-AssemblyZero-Usage-Tracking)
+- [Implementation Spec N9 Cleanup Node   Worktree Removal Lineage Archival and Learning Summary](Implementation-Spec-N9-Cleanup-Node---Worktree-Removal-Lineage-Archival-and-Learning-Summary)
 
 ### Reflections
 

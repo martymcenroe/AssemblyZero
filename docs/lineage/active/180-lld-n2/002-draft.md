@@ -1,22 +1,23 @@
-# 1180 - Feature: N9 Cleanup Node - Worktree Removal, Lineage Archival, and Learning Summary
+# 1180 - Feature: N9 Cleanup Node - Worktree removal, lineage archival, and learning summary
 
 <!-- Template Metadata
 Last Updated: 2025-01-XX
-Updated By: Initial LLD creation
-Update Reason: New feature for post-implementation cleanup
+Updated By: Issue #180 implementation
+Update Reason: Initial LLD creation for N9 cleanup node
 -->
 
 ## 1. Context & Goal
 * **Issue:** #180
-* **Objective:** Add N9_cleanup node to workflow for worktree removal, lineage archival, and learning summary generation after implementation completion.
+* **Objective:** Add N9_cleanup node to the testing workflow to remove worktrees after PR merge, archive lineage from active/ to done/, and generate learning summaries for future agent learning.
 * **Status:** Draft
-* **Related Issues:** #141 (LLD/report archival), #177 (coverage-driven test planning), #139 (workflow rename)
+* **Related Issues:** #141 (LLD/report archival), #177 (coverage-driven test planning), #139 (workflow rename), #94 (Lu-Tze hygiene)
 
 ### Open Questions
+*Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [x] ~~Should N9_cleanup be triggered automatically or require explicit invocation?~~ **RESOLVED: Automatic.** The proposed routing logic correctly integrates this as the final step.
-- [x] ~~What's the appropriate timeout for PR merge status polling?~~ **RESOLVED: 10 seconds.** Single API check, standard HTTP timeout.
-- [x] ~~Should learning summary generation use LLM or be purely template-based?~~ **RESOLVED: Template-based.** Ensures predictable output and $0 running costs.
+- [ ] What GitHub API method should be used for checking PR merge status? (GraphQL vs REST)
+- [ ] Should learning summary generation use LLM or be deterministic from artifacts?
+- [ ] What's the retention policy for lineage in done/ directory?
 
 ## 2. Proposed Changes
 
@@ -26,64 +27,159 @@ Update Reason: New feature for post-implementation cleanup
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `agentos/workflows/testing/nodes/cleanup.py` | Add | New N9_cleanup node implementation |
+| `agentos/workflows/testing/nodes/cleanup.py` | Add | New N9 cleanup node implementation |
 | `agentos/workflows/testing/nodes/__init__.py` | Modify | Export cleanup function |
-| `agentos/workflows/testing/graph.py` | Modify | Add N9 node and edges |
+| `agentos/workflows/testing/graph.py` | Modify | Add N9 node and edges to workflow graph |
 | `agentos/workflows/testing/state.py` | Modify | Add pr_url, pr_merged, learning_summary_path fields |
-| `agentos/workflows/testing/routers.py` | Modify | Add route_after_document function |
+| `tests/unit/test_cleanup_node.py` | Add | Unit tests for cleanup node |
 
 ### 2.2 Dependencies
 
-*No new packages required. Uses existing standard library and workflow dependencies.*
+*New packages, APIs, or services required.*
 
 ```toml
-# No pyproject.toml additions needed
+# No new dependencies - uses existing stdlib and GitHub integration
 ```
 
 ### 2.3 Data Structures
 
 ```python
-# Pseudocode - NOT implementation
+# Additions to TestingWorkflowState
 class TestingWorkflowState(TypedDict, total=False):
     # ... existing fields ...
-    pr_url: str  # GitHub PR URL for merge status check
-    pr_merged: bool  # True if PR has been merged
-    learning_summary_path: str  # Path to generated learning summary
-    cleanup_status: CleanupStatus  # Track cleanup progress
+    pr_url: str                    # GitHub PR URL for merge status check
+    pr_merged: bool                # Set by N9 after checking merge status
+    learning_summary_path: str     # Path to generated learning summary
 
-class CleanupStatus(TypedDict):
-    worktree_removed: bool
-    lineage_archived: bool
-    summary_generated: bool
-    skip_reason: str | None  # Why cleanup was skipped (if applicable)
+# Learning summary data structure (intermediate)
+class LearningSummaryData(TypedDict):
+    issue_number: int
+    outcome: Literal["SUCCESS", "FAILURE"]
+    coverage_final: float
+    coverage_target: float
+    iterations: int
+    stall_detected: bool
+    stall_iteration: int | None
+    what_worked: list[str]
+    what_didnt_work: list[str]
+    coverage_gaps: list[CoverageGapEntry]
+    key_artifacts: list[ArtifactEntry]
+    recommendations: list[str]
+
+class CoverageGapEntry(TypedDict):
+    iteration: int
+    coverage: float
+    missing_lines: str
+    root_cause: str
+
+class ArtifactEntry(TypedDict):
+    filename: str
+    description: str
 ```
 
 ### 2.4 Function Signatures
 
 ```python
-# Signatures only - implementation in source files
+# agentos/workflows/testing/nodes/cleanup.py
+
 def cleanup(state: TestingWorkflowState) -> dict[str, Any]:
-    """N9: Post-implementation cleanup - worktree, lineage archival, learning summary."""
+    """N9: Post-implementation cleanup.
+    
+    Performs three cleanup operations:
+    1. Check if PR is merged, remove worktree if so
+    2. Archive lineage from active/ to done/
+    3. Generate learning summary for future agents
+    
+    Returns:
+        State updates with pr_merged and learning_summary_path
+    """
     ...
 
 def check_pr_merged(pr_url: str) -> bool:
-    """Check if a GitHub PR has been merged."""
+    """Check if a GitHub PR has been merged.
+    
+    Args:
+        pr_url: Full GitHub PR URL (e.g., https://github.com/owner/repo/pull/123)
+        
+    Returns:
+        True if PR is merged, False otherwise
+    """
     ...
 
 def remove_worktree(worktree_path: Path, branch_name: str) -> bool:
-    """Remove git worktree and associated branch."""
+    """Remove git worktree and associated branch.
+    
+    Args:
+        worktree_path: Path to the worktree directory
+        branch_name: Name of the branch to delete
+        
+    Returns:
+        True if removal successful, False otherwise
+    """
     ...
 
 def archive_lineage(issue_number: int, repo_root: Path) -> Path | None:
-    """Move lineage from active/ to done/."""
+    """Move lineage from active/ to done/ directory.
+    
+    Args:
+        issue_number: GitHub issue number
+        repo_root: Repository root path
+        
+    Returns:
+        New path in done/ if moved, None if source didn't exist
+    """
     ...
 
-def generate_learning_summary(state: TestingWorkflowState, repo_root: Path) -> Path:
-    """Generate learning summary from lineage artifacts."""
+def generate_learning_summary(
+    issue_number: int,
+    lineage_dir: Path,
+    state: TestingWorkflowState
+) -> str:
+    """Generate a learning summary from lineage artifacts.
+    
+    Args:
+        issue_number: GitHub issue number
+        lineage_dir: Path to lineage directory (in done/)
+        state: Current workflow state
+        
+    Returns:
+        Markdown content for learning summary
+    """
     ...
+
+def extract_coverage_history(lineage_dir: Path) -> list[CoverageGapEntry]:
+    """Extract coverage progression from iteration artifacts.
+    
+    Args:
+        lineage_dir: Path to lineage directory
+        
+    Returns:
+        List of coverage gap entries per iteration
+    """
+    ...
+
+def identify_key_artifacts(lineage_dir: Path) -> list[ArtifactEntry]:
+    """Identify the most important artifacts for reference.
+    
+    Args:
+        lineage_dir: Path to lineage directory
+        
+    Returns:
+        List of key artifacts with descriptions
+    """
+    ...
+
+# agentos/workflows/testing/graph.py (additions)
 
 def route_after_document(state: TestingWorkflowState) -> str:
-    """Route from N8_document to N9_cleanup or END."""
+    """Route from N8_document to N9_cleanup or END.
+    
+    Args:
+        state: Current workflow state
+        
+    Returns:
+        "N9_cleanup" if cleanup should run, "end" otherwise
+    """
     ...
 ```
 
@@ -91,102 +187,91 @@ def route_after_document(state: TestingWorkflowState) -> str:
 
 ```
 N9_cleanup:
-1. Receive state from N8_document
-2. Initialize cleanup_status
-
-3. CHECK PR MERGE STATUS:
-   IF pr_url exists THEN
-     - Call GitHub API to check merge status
-     - Set pr_merged = True/False
-   ELSE
-     - Log warning: no PR URL available
-     - Set pr_merged = False
-
-4. WORKTREE REMOVAL:
-   IF pr_merged AND worktree_path exists THEN
-     - Run: git worktree remove {worktree_path}
-     - Run: git branch -d {branch_name}
-     - Set worktree_removed = True
+1. Check prerequisites
+   - IF no pr_url in state THEN log warning, skip worktree cleanup
+   
+2. Check PR merge status
+   - Call GitHub API to check if PR is merged
+   - SET pr_merged = result
+   
+3. Worktree cleanup (conditional)
+   - IF pr_merged AND worktree_path exists THEN
+     - Run `git worktree remove {path}`
+     - Run `git branch -d {branch}`
      - Log success
-   ELSE
-     - Set worktree_removed = False
-     - Set skip_reason = "PR not merged" or "No worktree path"
-     - Log skip reason
-
-5. LINEAGE ARCHIVAL:
-   IF issue_number exists THEN
-     - source = docs/lineage/active/{issue}-testing/
-     IF source exists THEN
-       - dest = docs/lineage/done/{issue}-testing/
-       - Create dest parent if not exists
-       - Move source to dest
-       - Set lineage_archived = True
-     ELSE
-       - Log: lineage directory not found
-       - Set lineage_archived = False
-   ELSE
-     - Log warning: no issue number
-     - Set lineage_archived = False
-
-6. LEARNING SUMMARY GENERATION:
-   IF lineage_archived THEN
-     - Read key artifacts from done/ directory
-     - Extract outcome (SUCCESS/FAILURE)
-     - Extract coverage metrics from iterations
-     - Identify stall points
-     - Generate recommendations
-     - Write {issue}-learning-summary.md
-     - Set learning_summary_path
-     - Set summary_generated = True
-   ELSE
-     - Set summary_generated = False
-
-7. RETURN updated state with cleanup_status
+   - ELSE
+     - Log "PR not merged, skipping worktree removal"
+     
+4. Lineage archival
+   - FIND active_dir = docs/lineage/active/{issue}-testing/
+   - IF active_dir exists THEN
+     - CREATE done_dir = docs/lineage/done/{issue}-testing/
+     - MOVE active_dir → done_dir
+     - Log archival
+   - ELSE
+     - Log warning "No active lineage found"
+     
+5. Learning summary generation
+   - IF lineage archived successfully THEN
+     - EXTRACT coverage history from iteration files
+     - IDENTIFY key artifacts
+     - ANALYZE what worked vs what didn't
+     - GENERATE markdown summary
+     - WRITE to {lineage_dir}/learning-summary.md
+     - SET learning_summary_path = path
+   - ELSE
+     - Log warning "Cannot generate summary without lineage"
+     
+6. Return state updates
+   - RETURN {pr_merged, learning_summary_path}
 ```
 
 ### 2.6 Technical Approach
 
 * **Module:** `agentos/workflows/testing/nodes/cleanup.py`
-* **Pattern:** Node function pattern consistent with N0-N8
+* **Pattern:** Workflow node following existing N0-N8 patterns
 * **Key Decisions:**
-  - Use GitHub API via existing gh CLI wrapper for merge status check
-  - Template-based summary generation (no LLM required for v1)
-  - Graceful degradation: each cleanup step independent, failures don't block others
+  - Use subprocess for git operations (consistent with existing codebase)
+  - Use GitHub REST API for merge status check (simpler than GraphQL for single query)
+  - Generate deterministic summaries from artifacts (no LLM needed for v1)
+  - Fail gracefully on any step - log and continue to next
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| PR status check | Poll API, Webhook, Manual trigger | Poll API once | Simple, no infrastructure needed |
-| Summary generation | LLM-based, Template-based, Hybrid | Template-based | Deterministic, fast, sufficient for v1 |
-| Cleanup failure handling | Fail fast, Continue on error | Continue on error | Each step is independent, partial cleanup is useful |
-| Worktree removal safety | Remove always, Remove if merged only | Remove if merged only | Prevents accidental data loss |
+| PR merge check | GitHub REST API, GraphQL, gh CLI | REST API | Simplest for single status check, well-documented |
+| Learning summary generation | LLM-powered, Deterministic extraction | Deterministic | More reliable, faster, no API costs; LLM can be added later |
+| Worktree removal timing | Immediate, Delayed with retry | Immediate | Simpler; if PR not merged, skip entirely |
+| Lineage archival location | done/, archive/, .archive/ | done/ | Consistent with existing pattern in #141 |
 
 **Architectural Constraints:**
-- Must integrate with existing LangGraph workflow structure
-- Cannot block workflow if GitHub API is unavailable
-- Must preserve all artifacts before archival
+- Must integrate with existing LangGraph workflow state machine
+- Cannot block if GitHub API is unavailable (fail gracefully)
+- Must preserve lineage artifacts intact (no deletion, only move)
 
 ## 3. Requirements
 
-1. N9_cleanup node added to workflow graph after N8_document
-2. Worktree removed ONLY if PR is confirmed merged
-3. Lineage moved from `active/` to `done/` on successful completion
-4. Learning summary generated with outcome, coverage gaps, and recommendations
-5. Summary format documented for future learning agent consumption
-6. Cleanup skipped gracefully if PR not yet merged (log, don't fail)
-7. Each cleanup step operates independently (partial success is valid)
+*What must be true when this is done. These become acceptance criteria.*
+
+1. N9_cleanup node is added to workflow graph after N8_document
+2. Worktree is removed only when PR is confirmed merged via GitHub API
+3. Lineage is moved from active/ to done/ on workflow success
+4. Learning summary is generated with outcome, coverage history, and recommendations
+5. Cleanup fails gracefully if any step cannot complete (logs, doesn't crash)
+6. If PR is not merged, workflow logs reason and completes successfully (no retry loops)
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Separate cleanup script (not in workflow) | Simpler, can run manually | Disconnected from workflow state, manual invocation | **Rejected** |
-| N9 as part of N8_document | Fewer nodes, simpler graph | Violates single responsibility, harder to test | **Rejected** |
-| N9 as standalone node | Clear separation, testable, uses workflow state | Additional node complexity | **Selected** |
-| LLM-based summary generation | Richer insights, adaptive | Expensive, non-deterministic, slower | **Rejected** (for v1) |
+| Run cleanup as separate script | Decoupled, can run independently | Extra coordination, may be forgotten | **Rejected** |
+| Add cleanup to N8_document | Fewer nodes | Violates single responsibility, N8 already complex | **Rejected** |
+| Create dedicated N9_cleanup node | Clear separation, explicit in workflow | One more node to maintain | **Selected** |
+| LLM-generated learning summaries | Richer insights, natural language | Expensive, non-deterministic, slower | **Rejected** for v1 |
+| Deterministic learning summaries | Fast, reliable, no cost | Less nuanced analysis | **Selected** for v1 |
 
-**Rationale:** Standalone N9 node maintains architectural consistency with existing nodes, enables isolated testing, and uses workflow state for context. Template-based summaries are sufficient for initial learning agent integration.
+**Rationale:** A dedicated N9 node maintains the workflow's clear node responsibilities. Deterministic summaries provide reliable baselines that a future learning agent can process; LLM enhancement can be added in a future iteration.
 
 ## 5. Data & Fixtures
 
@@ -194,31 +279,32 @@ N9_cleanup:
 
 | Attribute | Value |
 |-----------|-------|
-| Source | Local lineage artifacts in `docs/lineage/active/` |
-| Format | Markdown files, JSON metadata, plain text logs |
-| Size | ~64 files per implementation run, ~500KB-2MB total |
-| Refresh | Generated during workflow, read once at cleanup |
+| Source | Local filesystem (lineage artifacts), GitHub API (PR status) |
+| Format | Markdown files, JSON API responses |
+| Size | ~64 files per lineage run, ~500KB-2MB total |
+| Refresh | One-time read during cleanup |
 | Copyright/License | N/A (internal artifacts) |
 
 ### 5.2 Data Pipeline
 
 ```
-Lineage (active/) ──read──► Summary Generator ──write──► Summary (done/)
-                                    │
-Lineage (active/) ──────────move────────────────────────► Lineage (done/)
+Lineage Artifacts (active/) ──read──► Learning Summary Generator ──write──► Summary (done/)
+                                            ↑
+GitHub API ──check──► PR Merge Status ──decision──┘
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| Sample lineage directory | Generated | Complete artifact set for test issue |
-| Mock GitHub API response | Hardcoded | PR merged/not merged states |
-| Mock worktree state | Generated | Simulated worktree paths |
+| Mock lineage directory | Generated | Minimal set of 10 files representing typical artifacts |
+| Mock GitHub API response (merged) | Hardcoded | `{"merged": true, "merged_at": "..."}` |
+| Mock GitHub API response (open) | Hardcoded | `{"merged": false, "state": "open"}` |
+| Sample worktree structure | Generated | Empty directory structure for worktree tests |
 
 ### 5.4 Deployment Pipeline
 
-Data is local to the repository. No external deployment needed.
+*No deployment needed - this is a workflow node that runs in the development environment.*
 
 ## 6. Diagram
 
@@ -234,10 +320,10 @@ Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.l
 
 **Auto-Inspection Results:**
 ```
-- Touching elements: [ ] None / [ ] Found: ___
-- Hidden lines: [ ] None / [ ] Found: ___
-- Label readability: [ ] Pass / [ ] Issue: ___
-- Flow clarity: [ ] Clear / [ ] Issue: ___
+- Touching elements: [ ] None / [x] Found: ___
+- Hidden lines: [ ] None / [x] Found: ___
+- Label readability: [x] Pass / [ ] Issue: ___
+- Flow clarity: [x] Clear / [ ] Issue: ___
 ```
 
 *Reference: [0006-mermaid-diagrams.md](0006-mermaid-diagrams.md)*
@@ -245,52 +331,37 @@ Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.l
 ### 6.2 Diagram
 
 ```mermaid
-flowchart TD
-    N8[N8_document] --> R{route_after_document}
-    R -->|cleanup_enabled| N9[N9_cleanup]
-    R -->|skip_cleanup| END1[END]
-    
-    N9 --> C1{PR Merged?}
-    C1 -->|Yes| W[Remove Worktree]
-    C1 -->|No| S1[Skip Worktree]
-    
-    W --> A[Archive Lineage]
-    S1 --> A
-    
-    A --> G[Generate Summary]
-    G --> END2[END]
-```
-
-```mermaid
-sequenceDiagram
-    participant N8 as N8_document
-    participant N9 as N9_cleanup
-    participant GH as GitHub API
-    participant FS as File System
-    participant Git as Git CLI
-    
-    N8->>N9: state (pr_url, issue_number)
-    
-    N9->>GH: Check PR merge status
-    GH-->>N9: merged: true/false
-    
-    alt PR is merged
-        N9->>Git: worktree remove
-        Git-->>N9: success
-        N9->>Git: branch -d
-        Git-->>N9: success
+flowchart TB
+    subgraph Workflow["Testing Workflow"]
+        N8["N8_document"]
+        N9["N9_cleanup"]
+        END_NODE["END"]
     end
     
-    N9->>FS: Move active/ to done/
-    FS-->>N9: success
+    subgraph N9_Internal["N9 Cleanup Operations"]
+        CHECK["Check PR Merged?"]
+        WORKTREE["Remove Worktree"]
+        ARCHIVE["Archive Lineage"]
+        SUMMARY["Generate Learning Summary"]
+    end
     
-    N9->>FS: Read lineage artifacts
-    FS-->>N9: artifacts
+    N8 --> N9
+    N9 --> CHECK
+    CHECK -->|merged| WORKTREE
+    CHECK -->|not merged| ARCHIVE
+    WORKTREE --> ARCHIVE
+    ARCHIVE --> SUMMARY
+    SUMMARY --> END_NODE
     
-    N9->>FS: Write learning-summary.md
-    FS-->>N9: success
+    subgraph Filesystem["Filesystem Operations"]
+        ACTIVE["docs/lineage/active/{issue}/"]
+        DONE["docs/lineage/done/{issue}/"]
+        LEARN["learning-summary.md"]
+    end
     
-    N9-->>N8: cleanup_status
+    ARCHIVE -.->|move| ACTIVE
+    ACTIVE -.->|to| DONE
+    SUMMARY -.->|write| LEARN
 ```
 
 ## 7. Security & Safety Considerations
@@ -299,24 +370,25 @@ sequenceDiagram
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| GitHub token exposure | Use existing gh CLI auth, no token in state | Addressed |
-| Path traversal in lineage paths | Validate issue_number is numeric, use Path.resolve() | Addressed |
+| GitHub API token exposure | Use existing token from environment, never log | Addressed |
+| Arbitrary path traversal in lineage archive | Validate issue number is numeric, construct paths safely | Addressed |
+| Worktree removal of wrong directory | Verify path contains expected branch name before removal | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Worktree deleted before PR merge | Only remove if API confirms merged status | Addressed |
-| Lineage lost during move | Use atomic move operation, log source/dest | Addressed |
-| Partial cleanup state | Track each step independently in cleanup_status | Addressed |
-| Git operation failure | Wrap in try/except, log errors, continue | Addressed |
+| Premature worktree removal (PR not merged) | Explicit merge status check before removal | Addressed |
+| Data loss during lineage move | Use shutil.move (atomic on same filesystem), verify source exists | Addressed |
+| Incomplete summary on partial lineage | Gracefully handle missing files, note gaps in summary | Addressed |
+| Accidental deletion of worktree with uncommitted changes | git worktree remove fails if dirty - don't force | Addressed |
 
-**Fail Mode:** Fail Open - Cleanup failures should not block workflow completion. Log and continue.
+**Fail Mode:** Fail Open - If any cleanup step fails, log the error and continue. The workflow completes successfully even if cleanup is incomplete.
 
-**Recovery Strategy:** 
-- If worktree removal fails: Manual `git worktree remove` command logged
-- If lineage move fails: Directory locations logged for manual move
-- If summary fails: Can regenerate from archived lineage
+**Recovery Strategy:** Manual cleanup is possible via:
+- `git worktree remove <path> --force` for stubborn worktrees
+- Manual `mv` for lineage directories
+- Re-run workflow with `--cleanup-only` flag (future enhancement)
 
 ## 8. Performance & Cost Considerations
 
@@ -324,34 +396,35 @@ sequenceDiagram
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Latency | < 5s total | Local file operations, single API call |
-| Memory | < 50MB | Stream artifact reading, no full load |
-| API Calls | 1 per cleanup | Single PR status check |
+| Latency | < 30s total | Single API call, local file operations |
+| Memory | < 50MB | Stream file reads for summary generation |
+| API Calls | 1 per cleanup | Only check PR merge status once |
 
-**Bottlenecks:** GitHub API rate limiting could affect PR status check in high-volume scenarios.
+**Bottlenecks:** None expected - all operations are local filesystem or single API call.
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
 | GitHub API | Free (within limits) | ~30 calls/month | $0 |
-| Local disk | N/A | ~2MB per lineage | $0 |
+| Disk I/O | N/A | Local only | $0 |
 
 **Cost Controls:**
-- [x] No external paid services used
-- [x] GitHub API usage within free tier limits
+- [x] No LLM calls in v1 implementation
+- [x] Single GitHub API call per cleanup
+- [x] No cloud resources required
 
-**Worst-Case Scenario:** If GitHub API is down, worktree removal is skipped but lineage archival and summary generation proceed.
+**Worst-Case Scenario:** If GitHub API rate limit is hit, cleanup skips worktree removal but completes archival and summary generation.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Lineage contains only code artifacts |
-| Third-Party Licenses | No | Uses existing dependencies only |
-| Terms of Service | Yes | GitHub API usage within ToS limits |
-| Data Retention | N/A | Archival, not deletion |
-| Export Controls | No | No restricted data |
+| PII/Personal Data | No | Lineage contains only code artifacts and test outputs |
+| Third-Party Licenses | No | No new dependencies |
+| Terms of Service | Yes | GitHub API usage within authenticated rate limits |
+| Data Retention | N/A | done/ directory retained indefinitely (dev environment) |
+| Export Controls | No | No restricted algorithms |
 
 **Data Classification:** Internal
 
@@ -359,7 +432,7 @@ sequenceDiagram
 - [x] No PII stored without consent
 - [x] All third-party licenses compatible with project license
 - [x] External API usage compliant with provider ToS
-- [x] Data retention policy documented (archival to done/)
+- [x] Data retention policy documented (indefinite for learning)
 
 ## 10. Verification & Testing
 
@@ -369,16 +442,16 @@ sequenceDiagram
 
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
-| T010 | test_cleanup_pr_merged_removes_worktree | Worktree and branch removed when PR merged | RED |
-| T020 | test_cleanup_pr_not_merged_skips_worktree | Worktree preserved when PR not merged | RED |
-| T030 | test_cleanup_archives_lineage | Lineage moved from active/ to done/ | RED |
-| T040 | test_cleanup_generates_summary | Learning summary created with expected sections | RED |
-| T050 | test_cleanup_no_pr_url_skips_worktree | Graceful skip when no PR URL in state | RED |
-| T060 | test_cleanup_missing_lineage_logs_warning | Warning logged when lineage dir not found | RED |
-| T070 | test_route_after_document_to_cleanup | Router returns N9_cleanup when enabled | RED |
-| T080 | test_route_after_document_to_end | Router returns END when cleanup disabled | RED |
-| T090 | test_summary_extracts_coverage_gaps | Coverage gap table populated correctly | RED |
-| T100 | test_cleanup_partial_failure_continues | Other steps run even if one fails | RED |
+| T010 | test_cleanup_pr_merged_removes_worktree | Worktree removed when PR is merged | RED |
+| T020 | test_cleanup_pr_not_merged_skips_worktree | Worktree preserved when PR is open | RED |
+| T030 | test_cleanup_archives_lineage_to_done | Lineage moved from active/ to done/ | RED |
+| T040 | test_cleanup_lineage_not_found_logs_warning | Warning logged if no active lineage | RED |
+| T050 | test_cleanup_generates_learning_summary | Summary created with expected sections | RED |
+| T060 | test_cleanup_summary_contains_coverage_history | Coverage gap table populated | RED |
+| T070 | test_cleanup_graceful_on_github_api_failure | Continues if GitHub API fails | RED |
+| T080 | test_cleanup_node_added_to_graph | N9 in workflow after N8 | RED |
+| T090 | test_check_pr_merged_parses_url_correctly | Extracts owner/repo/number from URL | RED |
+| T100 | test_extract_coverage_history_from_artifacts | Parses iteration files correctly | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -386,37 +459,34 @@ sequenceDiagram
 - [ ] All tests written before implementation
 - [ ] Tests currently RED (failing)
 - [ ] Test IDs match scenario IDs in 10.1
-- [ ] Test file created at: `tests/unit/test_cleanup.py`
+- [ ] Test file created at: `tests/unit/test_cleanup_node.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | PR merged, cleanup all | Auto | state with merged PR | worktree removed, lineage archived, summary generated | All cleanup_status flags True |
-| 020 | PR not merged | Auto | state with unmerged PR | worktree preserved, lineage archived, summary generated | worktree_removed=False, skip_reason set |
-| 030 | No PR URL | Auto | state without pr_url | Skip worktree, proceed with archival | Graceful skip logged |
-| 040 | Missing lineage directory | Auto | state with nonexistent lineage | Log warning, skip archival | lineage_archived=False |
-| 050 | Worktree removal fails | Auto | state with invalid worktree | Log error, continue to archival | Error logged, other steps complete |
-| 060 | Summary generation with stall | Auto | lineage with stall iterations | Summary includes stall analysis | "Stall detected" in summary |
-| 070 | Full success workflow | Auto | complete valid state | All three cleanup tasks succeed | cleanup_status all True |
-| 080 | GitHub API unavailable | Auto | mocked API timeout | Skip worktree, continue archival | Timeout handled gracefully |
-| 090 | Lineage with 64 artifacts | Auto | full lineage directory | Summary references key artifacts | Artifact paths in summary |
-| 100 | Router enables cleanup | Auto | state with success outcome | Router returns "N9_cleanup" | Correct routing |
+| 010 | PR merged, worktree exists | Auto | pr_url with merged PR, valid worktree | Worktree removed, pr_merged=True | git worktree list shows removal |
+| 020 | PR not merged | Auto | pr_url with open PR | Worktree preserved, pr_merged=False | Worktree still exists |
+| 030 | Lineage archival success | Auto | Active lineage directory | Directory in done/, not in active/ | Path exists in done/ |
+| 040 | Lineage not found | Auto | No active lineage | Warning logged, continues | No exception, log contains warning |
+| 050 | Learning summary generation | Auto | Archived lineage with artifacts | Markdown file created | File exists with expected sections |
+| 060 | Coverage history extraction | Auto | Iteration files with coverage data | Table with iterations | 3+ gap entries in summary |
+| 070 | GitHub API failure | Auto | Mock API timeout | Logs error, skips worktree | Workflow continues, archival succeeds |
+| 080 | Graph integration | Auto | Compiled workflow | N9 follows N8 | Graph has N8→N9→END path |
+| 090 | PR URL parsing | Auto | Various GitHub URLs | Correct owner/repo/number | All formats parsed correctly |
+| 100 | Empty lineage directory | Auto | Empty active/ dir | Summary with "no artifacts" note | Summary generated, not empty |
 
 ### 10.2 Test Commands
 
 ```bash
 # Run all automated tests
-poetry run pytest tests/unit/test_cleanup.py -v
+poetry run pytest tests/unit/test_cleanup_node.py -v
 
 # Run only fast/mocked tests (exclude live)
-poetry run pytest tests/unit/test_cleanup.py -v -m "not live"
+poetry run pytest tests/unit/test_cleanup_node.py -v -m "not live"
 
-# Run live integration tests (requires GitHub auth)
-poetry run pytest tests/unit/test_cleanup.py -v -m live
-
-# Run with coverage
-poetry run pytest tests/unit/test_cleanup.py -v --cov=agentos/workflows/testing/nodes/cleanup --cov-report=term-missing
+# Run live integration tests (requires GitHub token)
+poetry run pytest tests/unit/test_cleanup_node.py -v -m live
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -427,26 +497,26 @@ poetry run pytest tests/unit/test_cleanup.py -v --cov=agentos/workflows/testing/
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| GitHub API changes | Med | Low | Abstract API call behind interface |
-| Worktree removal corrupts repo | High | Low | Only remove if PR confirmed merged |
-| Lineage move loses data | High | Low | Use shutil.move (atomic on same filesystem) |
-| Summary format doesn't serve learning agent | Med | Med | Design with future consumer in mind, iterate |
-| PR merge status stale | Low | Med | Single check at cleanup time, user can re-run |
+| Worktree removal fails due to dirty state | Low | Low | Let git fail, log message, continue |
+| GitHub API changes response format | Med | Low | Validate response structure, fail gracefully |
+| Lineage directory structure varies | Med | Med | Handle missing files, document expected structure |
+| Learning summary format doesn't serve learning agent | Med | Med | Design with future agent needs in mind, iterate |
+| Existing tests mock worktree operations poorly | Low | Med | Use real temp directories in tests |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] Implementation complete and linted
-- [ ] Code comments reference this LLD (#180)
+- [ ] Code comments reference this LLD
 
 ### Tests
-- [ ] All test scenarios pass (T010-T100)
-- [ ] Test coverage ≥95% for new code
+- [ ] All test scenarios pass
+- [ ] Test coverage meets threshold (≥95%)
 
 ### Documentation
 - [ ] LLD updated with any deviations
 - [ ] Implementation Report (0103) completed
-- [ ] Learning summary format documented for future learning agent
+- [ ] Test Report (0113) completed if applicable
 
 ### Review
 - [ ] Code review completed
