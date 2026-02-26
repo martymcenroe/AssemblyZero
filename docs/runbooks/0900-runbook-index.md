@@ -36,6 +36,12 @@ Quick reference for the orchestrator (Marty) on how to run tools, commands, agen
 | 0915 | [Backfill Audit Directories](0915-backfill-audit-directories.md) | Manual | One-time | - |
 | 0916 | [Batch Workflow Runner](0916-batch-workflow-runner.md) | Manual | Unattended batch | Claude |
 | 0917 | [Audit Skill Runbook](0917-audit-skill-runbook.md) | Manual | Per audit run | Varies |
+| 0918 | [Heartbeat Lite Install Guide](0918-heartbeat-lite-install-guide.md) | Manual | One-time | - |
+| 0919 | [No-LLD Workflow](0919-no-lld-workflow.md) | Manual | Per hotfix | - |
+| 0920 | [Test Gate (Skipped Test Enforcement)](0920-implementation-spec-hard-gate-wrapper-for-skipped-test-enforcement-test-gatepy.md) | Manual | Per impl spec | - |
+| 0921 | [Cross-Project Metrics Aggregation](0921-implementation-spec-cross-project-metrics-aggregation-for-assemblyzero-usage-tracking.md) | Manual | Weekly | - |
+| 0922 | [N9 Cleanup Node](0922-implementation-spec-n9-cleanup-node---worktree-removal-lineage-archival-and-learning-summary.md) | Manual | Post-merge | - |
+| 0923 | [Workflow Recovery and --resume](0923-workflow-recovery.md) | Manual | On interruption | - |
 
 ## Model Selection Guide
 
