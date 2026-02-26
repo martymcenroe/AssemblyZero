@@ -1,0 +1,57 @@
+
+
+```json
+{
+  "config": {
+    "rootDir": "/home/user/projects/dashboard"
+  },
+  "suites": [
+    {
+      "title": "Dashboard Tests",
+      "specs": [
+        {
+          "title": "loads dashboard correctly",
+          "tests": [
+            {
+              "results": [
+                {"status": "passed", "duration": 1523}
+              ]
+            }
+          ]
+        },
+        {
+          "title": "shows sidebar navigation",
+          "tests": [
+            {
+              "results": [
+                {"status": "passed", "duration": 892}
+              ]
+            }
+          ]
+        },
+        {
+          "title": "data table renders",
+          "tests": [
+            {
+              "results": [
+                {"status": "failed", "duration": 3001}
+              ]
+            }
+          ]
+        },
+        {
+          "title": "responsive layout works",
+          "tests": [
+            {
+              "results": [
+                {"status": "skipped", "duration": 0}
+              ]
+            }
+          ]
+        }
+      ],
+      "suites": []
+    }
+  ]
+}
+```
