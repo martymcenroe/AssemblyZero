@@ -3,7 +3,7 @@
 <!-- Template Metadata
 Last Updated: 2026-02-17
 Updated By: Issue #180 LLD creation
-Update Reason: Initial LLD for N9 cleanup node
+Update Reason: Revised to fix mechanical validation errors (REQ-1 and REQ-10 missing test coverage), enforce numbered list format in Section 3, and add (REQ-N) suffixes to all test scenarios in Section 10.1
 -->
 
 ## 1. Context & Goal
@@ -106,6 +106,15 @@ def cleanup(state: dict[str, Any]) -> dict[str, Any]:
 
     Returns updated state fields: pr_merged, learning_summary_path,
     cleanup_skipped_reason.
+    """
+    ...
+
+
+def route_after_document(state: dict[str, Any]) -> str:
+    """Conditional routing from N8 to N9 or END.
+
+    Returns "N9_cleanup" if state has valid issue_number,
+    otherwise returns "end".
     """
     ...
 
@@ -315,7 +324,9 @@ N9_cleanup(state):
        ELSE:
            LOG "No lineage directory available - skipping summary generation"
 
-    5. RETURN updated state fields
+    5. UPDATE state with pr_merged, learning_summary_path, cleanup_skipped_reason
+
+    6. RETURN updated state fields
 ```
 
 ```
@@ -348,6 +359,8 @@ route_after_document(state):
 | Lineage directory move | `shutil.move`, `shutil.copytree` + delete, `git mv` | `shutil.move` | Lineage is not tracked in git (it's in worktree output dirs); `shutil.move` is atomic on same FS |
 | Worktree branch deletion | `git branch -d` (safe), `git branch -D` (force) | `git branch -D` (force) | Per project standard 0001 §3: squash-merge creates new SHA so `-d` incorrectly reports "not merged" |
 | N9 failure behavior | Fail workflow, Log and continue | Log and continue (graceful skip) | Cleanup failure should not invalidate a successful implementation; cleanup is best-effort |
+| Graph wiring pattern | Direct edge N8→N9, Conditional edge N8→N9/END | Conditional edge via `route_after_document` | Allows skipping N9 when no issue_number is present (e.g., dry-run mode) |
+| State field updates | Mutate existing state, Return new state dict | Return new state dict with updated fields | Consistent with LangGraph node pattern; state merging handled by framework |
 
 **Architectural Constraints:**
 - Must not use `--force` on `git worktree remove` (per CLAUDE.md — clean ephemeral files first)
@@ -535,34 +548,36 @@ flowchart TD
 
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
-| T010 | test_cleanup_happy_path_pr_merged | Full cleanup: worktree removed, lineage archived, summary generated | RED |
-| T020 | test_cleanup_pr_not_merged_skips_worktree | Worktree preserved, skip reason set, lineage still archived | RED |
-| T030 | test_cleanup_no_pr_url_skips_worktree | No PR URL in state, worktree skipped gracefully | RED |
-| T040 | test_cleanup_no_lineage_dir_skips_archival | Missing active/ dir, summary skipped, no error | RED |
-| T050 | test_cleanup_worktree_dirty_skips_removal | Dirty worktree not force-removed, logged | RED |
-| T060 | test_check_pr_merged_returns_true | gh returns MERGED state | RED |
-| T070 | test_check_pr_merged_returns_false_open | gh returns OPEN state | RED |
-| T080 | test_check_pr_merged_invalid_url | ValueError raised for malformed URL | RED |
-| T090 | test_remove_worktree_success | git worktree remove succeeds, returns True | RED |
-| T100 | test_remove_worktree_nonexistent | Worktree path doesn't exist, returns False | RED |
-| T110 | test_get_worktree_branch_found | Extracts branch name from git worktree list | RED |
-| T120 | test_get_worktree_branch_not_found | Returns None for unknown path | RED |
-| T130 | test_delete_local_branch_success | git branch -D succeeds, returns True | RED |
-| T140 | test_delete_local_branch_not_found | Branch doesn't exist, returns False | RED |
-| T150 | test_archive_lineage_moves_directory | active/ moved to done/, returns done path | RED |
-| T160 | test_archive_lineage_active_not_found | Returns None, no error | RED |
-| T170 | test_archive_lineage_done_already_exists | Appends timestamp suffix to avoid collision | RED |
-| T180 | test_extract_iteration_data_parses_green_phase | Parses coverage from green-phase files | RED |
-| T190 | test_extract_iteration_data_empty_dir | Returns empty list for empty directory | RED |
-| T200 | test_detect_stall_found | Detects consecutive equal coverage | RED |
-| T210 | test_detect_stall_not_found | Returns (False, None) for monotonic increase | RED |
-| T220 | test_build_learning_summary_full | Builds complete LearningSummaryData from fixtures | RED |
-| T230 | test_render_learning_summary_markdown | Renders all sections to valid markdown | RED |
-| T240 | test_render_learning_summary_with_stall | Stall info included in rendered output | RED |
-| T250 | test_write_learning_summary_creates_file | File written to correct path | RED |
-| T260 | test_cleanup_all_errors_caught | Subprocess errors logged, not raised | RED |
-| T270 | test_route_after_document_has_issue | Returns "N9_cleanup" when issue_number present | RED |
-| T280 | test_route_after_document_no_issue | Returns "end" when no issue_number | RED |
+| T010 | test_cleanup_node_wired_in_graph | N9_cleanup node present in graph with N8→N9 and N9→END edges | RED |
+| T020 | test_cleanup_happy_path_pr_merged | Full cleanup: worktree removed, lineage archived, summary generated | RED |
+| T030 | test_cleanup_pr_not_merged_skips_worktree | Worktree preserved, skip reason set, lineage still archived | RED |
+| T040 | test_cleanup_no_pr_url_skips_worktree | No PR URL in state, worktree skipped gracefully | RED |
+| T050 | test_cleanup_no_lineage_dir_skips_archival | Missing active/ dir, summary skipped, no error | RED |
+| T060 | test_cleanup_worktree_dirty_skips_removal | Dirty worktree not force-removed, logged | RED |
+| T070 | test_check_pr_merged_returns_true | gh returns MERGED state | RED |
+| T080 | test_check_pr_merged_returns_false_open | gh returns OPEN state | RED |
+| T090 | test_check_pr_merged_invalid_url | ValueError raised for malformed URL | RED |
+| T100 | test_remove_worktree_success | git worktree remove succeeds, returns True | RED |
+| T110 | test_remove_worktree_nonexistent | Worktree path doesn't exist, returns False | RED |
+| T120 | test_get_worktree_branch_found | Extracts branch name from git worktree list | RED |
+| T130 | test_get_worktree_branch_not_found | Returns None for unknown path | RED |
+| T140 | test_delete_local_branch_success | git branch -D succeeds, returns True | RED |
+| T150 | test_delete_local_branch_not_found | Branch doesn't exist, returns False | RED |
+| T160 | test_archive_lineage_moves_directory | active/ moved to done/, returns done path | RED |
+| T170 | test_archive_lineage_active_not_found | Returns None, no error | RED |
+| T180 | test_archive_lineage_done_already_exists | Appends timestamp suffix to avoid collision | RED |
+| T190 | test_extract_iteration_data_parses_green_phase | Parses coverage from green-phase files | RED |
+| T200 | test_extract_iteration_data_empty_dir | Returns empty list for empty directory | RED |
+| T210 | test_detect_stall_found | Detects consecutive equal coverage | RED |
+| T220 | test_detect_stall_not_found | Returns (False, None) for monotonic increase | RED |
+| T230 | test_build_learning_summary_full | Builds complete LearningSummaryData from fixtures | RED |
+| T240 | test_render_learning_summary_markdown | Renders all sections to valid markdown | RED |
+| T250 | test_render_learning_summary_with_stall | Stall info included in rendered output | RED |
+| T260 | test_write_learning_summary_creates_file | File written to correct path | RED |
+| T270 | test_cleanup_all_errors_caught | Subprocess errors logged, not raised | RED |
+| T280 | test_route_after_document_has_issue | Returns "N9_cleanup" when issue_number present | RED |
+| T290 | test_route_after_document_no_issue | Returns "end" when no issue_number | RED |
+| T300 | test_cleanup_state_fields_updated | State contains pr_merged, learning_summary_path, cleanup_skipped_reason after execution | RED |
 
 **Coverage Target:** ≥95% for all new code in `cleanup.py` and `cleanup_helpers.py`
 
@@ -576,34 +591,36 @@ flowchart TD
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Happy path: PR merged, lineage exists | Auto | State with pr_url (merged), worktree_path, issue_number, active lineage dir | pr_merged=True, learning_summary_path set, worktree removed | All three cleanup tasks complete |
-| 020 | PR not merged — skip worktree | Auto | State with pr_url (open PR) | pr_merged=False, cleanup_skipped_reason="PR not yet merged", lineage still archived | Worktree preserved; lineage + summary still processed |
-| 030 | No pr_url in state | Auto | State without pr_url field | cleanup_skipped_reason="No PR URL in state" | Graceful skip, no error |
-| 040 | No lineage directory | Auto | State with issue_number but no active/ dir | learning_summary_path not set | Logged, no error |
-| 050 | Dirty worktree | Auto | Worktree with uncommitted changes | Worktree not removed, logged as skip | `git worktree remove` refuses without --force |
-| 060 | check_pr_merged: MERGED | Auto | `gh pr view` returns `{"state":"MERGED"}` | Returns True | Correct JSON parsing |
-| 070 | check_pr_merged: OPEN | Auto | `gh pr view` returns `{"state":"OPEN"}` | Returns False | Correct JSON parsing |
-| 080 | check_pr_merged: invalid URL | Auto | Empty string or malformed URL | Raises ValueError | Exception type and message correct |
-| 090 | remove_worktree: success | Auto | Valid worktree path, git succeeds | Returns True | subprocess called with correct args |
-| 100 | remove_worktree: nonexistent | Auto | Path that doesn't exist | Returns False | No subprocess call made |
-| 110 | get_worktree_branch: found | Auto | `git worktree list --porcelain` with matching entry | Returns branch name | Correct parsing of porcelain output |
-| 120 | get_worktree_branch: not found | Auto | `git worktree list --porcelain` without match | Returns None | No error |
-| 130 | delete_local_branch: success | Auto | Branch exists, -D succeeds | Returns True | subprocess called correctly |
-| 140 | delete_local_branch: not found | Auto | Branch doesn't exist, stderr contains "not found" | Returns False | Error caught, returns False |
-| 150 | archive_lineage: moves directory | Auto | active/ dir exists, done/ doesn't | done/ dir created, active/ removed | `shutil.move` called correctly |
-| 160 | archive_lineage: no active dir | Auto | active/ dir doesn't exist | Returns None | No error, no move attempt |
-| 170 | archive_lineage: done/ already exists | Auto | Both active/ and done/ exist | done/ path has timestamp suffix | Collision resolved |
-| 180 | extract_iteration_data: parses coverage | Auto | Mock lineage files with "Coverage: 98%" | IterationSnapshot with coverage=98.0 | Regex parsing correct |
-| 190 | extract_iteration_data: empty dir | Auto | Empty directory | Empty list | No error |
-| 200 | detect_stall: consecutive same coverage | Auto | [85.0, 85.0, 88.0] | (True, 2) | Stall at iteration 2 |
-| 210 | detect_stall: monotonic increase | Auto | [80.0, 85.0, 90.0, 95.0] | (False, None) | No stall |
-| 220 | build_learning_summary: full data | Auto | Mock lineage fixtures | LearningSummaryData with all fields populated | All fields correct |
-| 230 | render_learning_summary: markdown output | Auto | LearningSummaryData instance | Markdown string with all sections | Contains "# Learning Summary", "## Outcome", "## Coverage Gap Analysis" |
-| 240 | render_learning_summary: with stall | Auto | LearningSummaryData with stall_detected=True | Markdown includes stall info | "Stall detected: Yes" in output |
-| 250 | write_learning_summary: file creation | Auto | Markdown string + directory path | File at `{dir}/learning-summary.md` | File exists, content matches |
-| 260 | cleanup: all subprocess errors caught | Auto | Mocked subprocess raising CalledProcessError | State returned with skip reasons, no exception | try/except working correctly |
-| 270 | route_after_document: issue present | Auto | State with issue_number=180 | Returns "N9_cleanup" | Routing function correct |
-| 280 | route_after_document: no issue | Auto | State without issue_number | Returns "end" | Routing function correct |
+| 010 | N9 node wired in graph with correct edges (REQ-1) | Auto | Compiled workflow graph | N9_cleanup node exists; N8→N9 conditional edge exists; N9→END edge exists | Graph introspection confirms node and edges present |
+| 020 | Happy path: PR merged, lineage exists (REQ-1) | Auto | State with pr_url (merged), worktree_path, issue_number, active lineage dir | pr_merged=True, learning_summary_path set, worktree removed | All three cleanup tasks complete; N9 returns updated state |
+| 030 | PR not merged — skip worktree (REQ-6) | Auto | State with pr_url (open PR) | pr_merged=False, cleanup_skipped_reason="PR not yet merged", lineage still archived | Worktree preserved; lineage + summary still processed |
+| 040 | No pr_url in state (REQ-6) | Auto | State without pr_url field | cleanup_skipped_reason="No PR URL in state" | Graceful skip, no error |
+| 050 | No lineage directory (REQ-7) | Auto | State with issue_number but no active/ dir | learning_summary_path not set | Logged, no error |
+| 060 | Dirty worktree (REQ-2) | Auto | Worktree with uncommitted changes | Worktree not removed, logged as skip | `git worktree remove` refuses without --force |
+| 070 | check_pr_merged: MERGED (REQ-2) | Auto | `gh pr view` returns `{"state":"MERGED"}` | Returns True | Correct JSON parsing |
+| 080 | check_pr_merged: OPEN (REQ-2) | Auto | `gh pr view` returns `{"state":"OPEN"}` | Returns False | Correct JSON parsing |
+| 090 | check_pr_merged: invalid URL (REQ-2) | Auto | Empty string or malformed URL | Raises ValueError | Exception type and message correct |
+| 100 | remove_worktree: success (REQ-2) | Auto | Valid worktree path, git succeeds | Returns True | subprocess called with correct args |
+| 110 | remove_worktree: nonexistent (REQ-2) | Auto | Path that doesn't exist | Returns False | No subprocess call made |
+| 120 | get_worktree_branch: found (REQ-3) | Auto | `git worktree list --porcelain` with matching entry | Returns branch name | Correct parsing of porcelain output |
+| 130 | get_worktree_branch: not found (REQ-3) | Auto | `git worktree list --porcelain` without match | Returns None | No error |
+| 140 | delete_local_branch: success (REQ-3) | Auto | Branch exists, -D succeeds | Returns True | subprocess called correctly |
+| 150 | delete_local_branch: not found (REQ-3) | Auto | Branch doesn't exist, stderr contains "not found" | Returns False | Error caught, returns False |
+| 160 | archive_lineage: moves directory (REQ-4) | Auto | active/ dir exists, done/ doesn't | done/ dir created, active/ removed | `shutil.move` called correctly |
+| 170 | archive_lineage: no active dir (REQ-4) | Auto | active/ dir doesn't exist | Returns None | No error, no move attempt |
+| 180 | archive_lineage: done/ already exists (REQ-4) | Auto | Both active/ and done/ exist | done/ path has timestamp suffix | Collision resolved |
+| 190 | extract_iteration_data: parses coverage (REQ-5) | Auto | Mock lineage files with "Coverage: 98%" | IterationSnapshot with coverage=98.0 | Regex parsing correct |
+| 200 | extract_iteration_data: empty dir (REQ-5) | Auto | Empty directory | Empty list | No error |
+| 210 | detect_stall: consecutive same coverage (REQ-5) | Auto | [85.0, 85.0, 88.0] | (True, 2) | Stall at iteration 2 |
+| 220 | detect_stall: monotonic increase (REQ-5) | Auto | [80.0, 85.0, 90.0, 95.0] | (False, None) | No stall |
+| 230 | build_learning_summary: full data (REQ-5) | Auto | Mock lineage fixtures | LearningSummaryData with all fields populated | All fields correct |
+| 240 | render_learning_summary: markdown output (REQ-9) | Auto | LearningSummaryData instance | Markdown string with all sections | Contains "# Learning Summary", "## Outcome", "## Coverage Gap Analysis" |
+| 250 | render_learning_summary: with stall (REQ-9) | Auto | LearningSummaryData with stall_detected=True | Markdown includes stall info | "Stall detected: Yes" in output |
+| 260 | write_learning_summary: file creation (REQ-5) | Auto | Markdown string + directory path | File at `{dir}/learning-summary.md` | File exists, content matches |
+| 270 | cleanup: all subprocess errors caught (REQ-8) | Auto | Mocked subprocess raising CalledProcessError | State returned with skip reasons, no exception | try/except working correctly |
+| 280 | route_after_document: issue present (REQ-1) | Auto | State with issue_number=180 | Returns "N9_cleanup" | Routing function correct |
+| 290 | route_after_document: no issue (REQ-1) | Auto | State without issue_number | Returns "end" | Routing function correct |
+| 300 | cleanup: state fields updated correctly (REQ-10) | Auto | State with pr_url (merged), worktree_path, issue_number, active lineage dir | Returned state dict contains pr_merged (bool), learning_summary_path (str), cleanup_skipped_reason (str or absent) | All three state fields present with correct types and values |
 
 ### 10.2 Test Commands
 
@@ -638,12 +655,13 @@ N/A — All scenarios automated. Subprocess calls (`gh`, `git`) are mocked using
 ### Code
 - [ ] `cleanup.py` implements N9 node with all three cleanup tasks
 - [ ] `cleanup_helpers.py` implements all pure helper functions
+- [ ] `route_after_document` function implements conditional N8→N9/END routing
 - [ ] All functions have type hints and docstrings
 - [ ] Error handling wraps all subprocess calls; no unhandled exceptions
 - [ ] Code comments reference this LLD (#180)
 
 ### Tests
-- [ ] All 28 test scenarios pass (T010–T280)
+- [ ] All 30 test scenarios pass (T010–T300)
 - [ ] Test coverage ≥ 95% for `cleanup.py` and `cleanup_helpers.py`
 - [ ] Tests use `tmp_path` and mocking, no real git/gh operations
 
@@ -674,6 +692,18 @@ Risk mitigations traceability:
 - "Summary format changes" → `render_learning_summary()` with version header
 - "Dirty worktree" → `remove_worktree()` refuses without --force
 
+Requirements-to-test traceability:
+- REQ-1 → T010, T020, T280, T290 (graph wiring, node execution, routing)
+- REQ-2 → T060, T070, T080, T090, T100, T110 (PR merge check, worktree removal)
+- REQ-3 → T120, T130, T140, T150 (branch extraction, branch deletion)
+- REQ-4 → T160, T170, T180 (lineage archival)
+- REQ-5 → T190, T200, T210, T220, T230, T260 (summary generation)
+- REQ-6 → T030, T040 (graceful skip on no merge / no PR)
+- REQ-7 → T050 (graceful skip on missing lineage)
+- REQ-8 → T270 (error catching)
+- REQ-9 → T240, T250 (summary format stability)
+- REQ-10 → T300 (state field updates)
+
 ---
 
 ## Appendix: Review Log
@@ -682,6 +712,6 @@ Risk mitigations traceability:
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| — | — | — | Pending initial review |
+| Mechanical Validation | 2026-02-17 | FEEDBACK | REQ-1 and REQ-10 had no test coverage; Section 3 format non-compliant |
 
 **Final Status:** PENDING

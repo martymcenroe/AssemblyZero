@@ -1,8 +1,8 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 180
-url: https://github.com/martymcenroe/AgentOS/issues/180
-fetched: 2026-02-04T06:29:57.329738Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/180
+fetched: 2026-02-25T23:48:21.178189Z
 ---
 
 # Issue #180: feat: N9 Cleanup Node - Worktree removal, lineage archival, and learning summary
@@ -119,7 +119,7 @@ This connects to Issue #177 (coverage-driven test planning) - the learning agent
 
 ## Implementation
 
-### New Node: `agentos/workflows/testing/nodes/cleanup.py`
+### New Node: `assemblyzero/workflows/testing/nodes/cleanup.py`
 
 ```python
 def cleanup(state: TestingWorkflowState) -> dict[str, Any]:
@@ -133,7 +133,7 @@ def cleanup(state: TestingWorkflowState) -> dict[str, Any]:
     ...
 ```
 
-### Graph Update: `agentos/workflows/testing/graph.py`
+### Graph Update: `assemblyzero/workflows/testing/graph.py`
 
 ```python
 # Add N9
@@ -188,10 +188,10 @@ class TestingWorkflowState(TypedDict, total=False):
 
 | File | Change |
 |------|--------|
-| `agentos/workflows/testing/nodes/cleanup.py` | New - N9 implementation |
-| `agentos/workflows/testing/nodes/__init__.py` | Export cleanup |
-| `agentos/workflows/testing/graph.py` | Add N9 node and edges |
-| `agentos/workflows/testing/state.py` | Add pr_url, pr_merged, learning_summary_path |
+| `assemblyzero/workflows/testing/nodes/cleanup.py` | New - N9 implementation |
+| `assemblyzero/workflows/testing/nodes/__init__.py` | Export cleanup |
+| `assemblyzero/workflows/testing/graph.py` | Add N9 node and edges |
+| `assemblyzero/workflows/testing/state.py` | Add pr_url, pr_merged, learning_summary_path |
 
 ## Related Issues
 
