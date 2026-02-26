@@ -1,0 +1,108 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 71 items
+
+tests/tools/test_claude_usage_scraper.py::TestStripAnsiCodes::test_strip_ansi_basic_sgr PASSED [  1%]
+tests/tools/test_claude_usage_scraper.py::TestStripAnsiCodes::test_strip_ansi_nested PASSED [  2%]
+tests/tools/test_claude_usage_scraper.py::TestStripAnsiCodes::test_strip_ansi_no_codes PASSED [  4%]
+tests/tools/test_claude_usage_scraper.py::TestStripAnsiCodes::test_strip_ansi_empty_string PASSED [  5%]
+tests/tools/test_claude_usage_scraper.py::TestStripAnsiCodes::test_strip_ansi_cursor_movement PASSED [  7%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_simple PASSED [  8%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_commas PASSED [  9%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_whitespace PASSED [ 11%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_zero PASSED [ 12%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_invalid PASSED [ 14%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_parametrized[1234-1234] PASSED [ 15%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_parametrized[1,234,567-1234567] PASSED [ 16%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_parametrized[ 500 -500] PASSED [ 18%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_parametrized[0-0] PASSED [ 19%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_parametrized[100,000-100000] PASSED [ 21%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_error_cases[abc] PASSED [ 22%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_error_cases[] PASSED [ 23%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_error_cases[12.34] PASSED [ 25%]
+tests/tools/test_claude_usage_scraper.py::TestParseTokenCount::test_parse_token_count_error_cases[one thousand] PASSED [ 26%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_with_dollar PASSED [ 28%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_without_dollar PASSED [ 29%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_zero PASSED [ 30%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_whitespace PASSED [ 32%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_invalid PASSED [ 33%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[$0.0042-0.0042] PASSED [ 35%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[0.0042-0.0042] PASSED [ 36%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[$0.00-0.0] PASSED [ 38%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[ $1.23 -1.23] PASSED [ 39%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[$100.50-100.5] PASSED [ 40%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_parametrized[0.00-0.0] PASSED [ 42%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_error_cases[free] PASSED [ 43%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_error_cases[] PASSED [ 45%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_error_cases[abc] PASSED [ 46%]
+tests/tools/test_claude_usage_scraper.py::TestParseCostValue::test_parse_cost_error_cases[$$1.00] PASSED [ 47%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_valid PASSED [ 49%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_with_ansi PASSED [ 50%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_no_match PASSED [ 52%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_partial PASSED [ 53%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[Starting session...] PASSED [ 54%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[Error: connection refused] PASSED [ 56%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[] PASSED [ 57%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[   ] PASSED [ 59%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[Usage: 75%] PASSED [ 60%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[abc123  claude-sonnet] PASSED [ 61%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[total tokens: lots] PASSED [ 63%]
+tests/tools/test_claude_usage_scraper.py::TestExtractUsageLine::test_extract_usage_line_malformed[cost: free] PASSED [ 64%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_sonnet PASSED [ 66%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_opus PASSED [ 67%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_haiku PASSED [ 69%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_none PASSED [ 70%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_multiple PASSED [ 71%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_parametrized[model: claude-sonnet-4-20250514-claude-sonnet-4-20250514] PASSED [ 73%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_parametrized[model: claude-opus-4-20250514-claude-opus-4-20250514] PASSED [ 74%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_parametrized[model: claude-haiku-3-20250514-claude-haiku-3-20250514] PASSED [ 76%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_parametrized[no model info here-None] PASSED [ 77%]
+tests/tools/test_claude_usage_scraper.py::TestExtractModelName::test_extract_model_name_parametrized[claude-sonnet-4-20250514 and claude-opus-4-20250514-claude-sonnet-4-20250514] PASSED [ 78%]
+tests/tools/test_claude_usage_scraper.py::TestParseUsageBlock::test_parse_usage_block_full PASSED [ 80%]
+tests/tools/test_claude_usage_scraper.py::TestParseUsageBlock::test_parse_usage_block_mixed PASSED [ 81%]
+tests/tools/test_claude_usage_scraper.py::TestParseUsageBlock::test_parse_usage_block_empty PASSED [ 83%]
+tests/tools/test_claude_usage_scraper.py::TestParseUsageBlock::test_parse_usage_block_ansi_heavy PASSED [ 84%]
+tests/tools/test_claude_usage_scraper.py::TestParseUsageBlock::test_parse_usage_block_single_line PASSED [ 85%]
+tests/tools/test_claude_usage_scraper.py::TestRegression::test_scraper_regression_output_unchanged PASSED [ 87%]
+tests/tools/test_claude_usage_scraper.py::TestImportSafety::test_import_no_side_effects PASSED [ 88%]
+tests/tools/test_claude_usage_scraper.py::TestRealisticFixtures::test_strip_ansi_with_realistic_cli_output PASSED [ 90%]
+tests/tools/test_claude_usage_scraper.py::TestRealisticFixtures::test_parse_usage_block_realistic_fixture PASSED [ 91%]
+tests/tools/test_claude_usage_scraper.py::TestNoNetworkAccess::test_no_network_access PASSED [ 92%]
+tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_strip_ansi_long_string PASSED [ 94%]
+tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_strip_ansi_adversarial_ansi PASSED [ 95%]
+tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_parse_token_count_long_string PASSED [ 97%]
+tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_parse_cost_long_string PASSED [ 98%]
+tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_extract_usage_line_long_string FAILED [100%]
+WARNING: Failed to generate report: No data to report.
+
+
+ERROR: Coverage failure: total of 0 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+________ TestReDoSResilience.test_redos_extract_usage_line_long_string ________
+tests\tools\test_claude_usage_scraper.py:452: in test_redos_extract_usage_line_long_string
+    assert elapsed < self.TIMEOUT_SECONDS, (
+E   AssertionError: extract_usage_line took 1.088s on 15000 chars (budget: 0.1s)
+E   assert 1.0875003000255674 < 0.1
+E    +  where 0.1 = <tests.tools.test_claude_usage_scraper.TestReDoSResilience object at 0x000001A268204A70>.TIMEOUT_SECONDS
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+FAIL Required test coverage of 95% not reached. Total coverage: 0.00%
+=========================== short test summary info ===========================
+FAILED tests/tools/test_claude_usage_scraper.py::TestReDoSResilience::test_redos_extract_usage_line_long_string
+======================== 1 failed, 70 passed in 1.26s =========================
+
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\inorout.py:497: CoverageWarning: Module tools.claude-usage-scraper was never imported. (module-not-imported); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-module-not-imported
+  self.warn(f"Module {pkg} was never imported.", slug="module-not-imported")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pytest_cov\plugin.py:363: CovReportWarning: Failed to generate report: No data to report.
+
+  warnings.warn(CovReportWarning(message), stacklevel=1)

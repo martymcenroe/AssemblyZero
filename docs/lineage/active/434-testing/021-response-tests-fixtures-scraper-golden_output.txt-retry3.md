@@ -1,0 +1,16 @@
+```
+{
+  "session": {
+    "percent_used": null,
+    "resets_at": null
+  },
+  "weekly_all": {
+    "percent_used": null,
+    "resets_at": null
+  },
+  "weekly_sonnet": {
+    "percent_used": null,
+    "resets_at": null
+  }
+}
+```

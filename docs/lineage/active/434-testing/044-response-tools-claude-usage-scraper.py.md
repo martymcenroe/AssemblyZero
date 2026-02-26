@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 """
 Claude Code Usage Scraper
@@ -396,3 +397,4 @@ Examples:
 
 if __name__ == "__main__":
     main()
+```

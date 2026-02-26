@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 """
 Claude Code Usage Scraper
@@ -105,10 +106,6 @@ def extract_usage_line(line: str) -> dict | None:
     Strips ANSI codes before parsing.
     """
     cleaned = strip_ansi_codes(line)
-    # Fast pre-filter: usage lines must contain these keywords.
-    # Avoids expensive regex backtracking on long non-matching strings.
-    if 'input' not in cleaned or 'cache write' not in cleaned:
-        return None
     match = _USAGE_LINE_PATTERN.search(cleaned)
     if not match:
         return None
@@ -396,3 +393,4 @@ Examples:
 
 if __name__ == "__main__":
     main()
+```
