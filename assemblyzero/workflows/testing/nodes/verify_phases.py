@@ -36,6 +36,37 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 PYTEST_TIMEOUT_SECONDS = 300
 
 
+def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
+    """Convert a relative file path to the correct --cov target.
+
+    For Python packages (top-level dir has __init__.py), returns dotted
+    module format (e.g., ``assemblyzero.utils.file_type``).
+    For standalone scripts (no __init__.py, e.g., ``tools/``), returns
+    the file path so pytest-cov measures the right file.
+    """
+    rel = Path(rel_path)
+    top_level = rel.parts[0] if rel.parts else None
+    is_package = (
+        top_level
+        and repo_root
+        and (repo_root / top_level / "__init__.py").exists()
+    )
+
+    rel_str = str(rel)
+    if rel_str.endswith(".py"):
+        rel_str = rel_str[:-3]
+
+    if is_package:
+        module = rel_str.replace("/", ".").replace("\\", ".")
+        # Issue #387: Strip src. prefix for src-layout projects
+        if module.startswith("src."):
+            module = module[4:]
+        return module
+    else:
+        # Return as a file path — pytest-cov accepts paths for non-package code
+        return str(rel).replace("\\", "/")
+
+
 def run_pytest(
     test_files: list[str],
     coverage_module: str | None = None,
@@ -307,16 +338,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 print(f"    [N5] Skipping non-Python file for coverage: {impl_path}")
                 continue
             rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
-            # Convert file path to module format for pytest-cov
-            # e.g., assemblyzero/workflows/testing/nodes/finalize.py -> assemblyzero.workflows.testing.nodes.finalize
-            rel_path_str = str(rel_path)
-            if rel_path_str.endswith(".py"):
-                rel_path_str = rel_path_str[:-3]  # Remove .py extension
-            coverage_module = rel_path_str.replace("/", ".").replace("\\", ".")
-            # Issue #387: Strip src. prefix for src-layout projects
-            # src/ is a namespace directory, not a Python package
-            if coverage_module.startswith("src."):
-                coverage_module = coverage_module[4:]
+            # Issue #474: Use helper that handles both packages and standalone scripts
+            coverage_module = _path_to_cov_target(rel_path, repo_root)
             break
 
     # Issue #462: When all impl files are test files (test-only issues),
@@ -331,12 +354,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 continue
             if not fpath.endswith(".py"):
                 continue
-            rel_str = fpath
-            if rel_str.endswith(".py"):
-                rel_str = rel_str[:-3]
-            coverage_module = rel_str.replace("/", ".").replace("\\", ".")
-            if coverage_module.startswith("src."):
-                coverage_module = coverage_module[4:]
+            # Issue #474: Use helper that handles both packages and standalone scripts
+            coverage_module = _path_to_cov_target(fpath, repo_root)
             print(f"    [N5] Derived coverage module from LLD files_to_modify: {coverage_module}")
             break
 
@@ -354,20 +373,42 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                     match_parts = match.relative_to(repo_root).parts
                     if any(p.lower() in ("tests", "test") for p in match_parts):
                         continue
-                    rel_str = str(match.relative_to(repo_root))
-                    if rel_str.endswith(".py"):
-                        rel_str = rel_str[:-3]
-                    coverage_module = rel_str.replace("/", ".").replace("\\", ".")
-                    if coverage_module.startswith("src."):
-                        coverage_module = coverage_module[4:]
+                    # Issue #474: Use helper that handles both packages and standalone scripts
+                    rel_path = match.relative_to(repo_root)
+                    coverage_module = _path_to_cov_target(rel_path, repo_root)
                     print(f"    [N5] Derived coverage module from test filename: {coverage_module}")
                     break
                 if coverage_module:
                     break
 
-    # Last resort: default to top-level package
+    # Issue #474: Last resort — infer from any available file paths before
+    # falling back to a hardcoded default.  Previous versions always fell
+    # back to "assemblyzero", which measured 0% for tools/ targets.
     if not coverage_module:
-        coverage_module = "assemblyzero"
+        # Try ALL files (including non-.py) to at least get the right directory
+        all_candidate_paths = [
+            p for p in impl_files
+            if not any(part.lower() in ("tests", "test") for part in Path(p).parts)
+        ]
+        if not all_candidate_paths:
+            all_candidate_paths = [
+                fi.get("path", "")
+                for fi in state.get("files_to_modify", [])
+                if fi.get("path") and "test" not in fi["path"].lower()
+            ]
+        if all_candidate_paths:
+            rel = Path(all_candidate_paths[0])
+            if repo_root:
+                try:
+                    rel = rel.relative_to(repo_root)
+                except ValueError:
+                    pass
+            # Use the top-level directory as coverage scope
+            coverage_module = str(rel.parts[0]).replace("\\", "/") if rel.parts else "assemblyzero"
+            print(f"    [N5] Fallback: inferred coverage scope from file paths: {coverage_module}")
+        else:
+            coverage_module = "assemblyzero"
+            print(f"    [N5] Fallback: no file paths available, defaulting to: {coverage_module}")
 
     print(f"    Coverage module: {coverage_module}")
 
