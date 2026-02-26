@@ -1,9 +1,10 @@
 # 102 - Feature: TDD Test Initialization Gate
 
 <!-- Template Metadata
-Last Updated: 2025-01-15
-Updated By: Initial LLD Creation
-Update Reason: New feature implementation for TDD enforcement
+Last Updated: 2026-02-10
+Updated By: Issue #102 LLD creation
+Update Reason: Initial Low-Level Design for TDD enforcement tooling
+Previous: N/A
 -->
 
 ## 1. Context & Goal
@@ -13,320 +14,755 @@ Update Reason: New feature implementation for TDD enforcement
 * **Related Issues:** #62 (Governance Workflow StateGraph)
 
 ### Open Questions
-*Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [ ] Does the team use "Squash and Merge" for Pull Requests? (Current design supports it, but please confirm)
-- [ ] Does the team prefer strict blocking (CI failure) or soft blocking (warning/audit log) for the MVP?
-- [ ] Should the "Hotfix Override" require manager approval (via CODEOWNERS), or is developer self-attestation sufficient?
+- [ ] Does the team use "Squash and Merge" for Pull Requests? (Design supports it, but confirm preference)
+- [ ] Strict blocking (CI failure) vs soft blocking (warning/audit log) for MVP?
+- [ ] Should hotfix override require manager approval (CODEOWNERS) or is developer self-attestation sufficient?
 
 ## 2. Proposed Changes
 
-*This section is the **source of truth** for implementation. Describe exactly what will be built.*
+*This section is the **source of truth** for implementation. Describes exactly what will be built.*
 
 ### 2.1 Files Changed
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/tdd-gate.py` | Add | Main TDD enforcement CLI tool |
-| `tools/tdd-audit.py` | Add | Audit trail generation and reporting |
-| `tools/tdd-pending-issues.py` | Add | Async pending issue creation processor |
-| `hooks/pre-commit-tdd-gate.sh` | Add | Pre-commit hook for test existence check |
-| `hooks/prepare-commit-msg-tdd.sh` | Add | Prepare-commit-msg hook for TDD footer injection |
+| `tools/` | Existing Directory | Parent for new TDD tools |
+| `tools/tdd_gate.py` | Add | Main TDD enforcement CLI tool — red/green verification, override handling |
+| `tools/tdd_audit.py` | Add | Audit trail generation and TDD compliance reporting |
+| `tools/tdd_pending_issues.py` | Add | Async pending GitHub issue creation processor with `--flush` |
+| `hooks/` | Add (Directory) | Shell hook scripts directory |
+| `hooks/pre-commit-tdd-gate.sh` | Add | Pre-commit hook: test existence check, file exclusions |
+| `hooks/prepare-commit-msg-tdd.sh` | Add | Prepare-commit-msg hook: append TDD-Red-Phase footer |
+| `.tdd-config.json` | Add | Project-specific TDD configuration (patterns, exclusions, thresholds) |
+| `.gitignore` | Modify | Add `.tdd-state.json` to ignored files |
 | `.husky/pre-commit` | Add | Husky pre-commit hook configuration |
 | `.husky/prepare-commit-msg` | Add | Husky prepare-commit-msg hook configuration |
-| `.tdd-config.json` | Add | Project-specific TDD configuration |
-| `.gitignore` | Modify | Add `.tdd-state.json` to ignored files |
-| `package.json` | Modify | Add `prepare` script for husky installation |
+| `dashboard/package.json` | Modify | Add `prepare` script for automatic husky installation |
 | `docs/standards/0065-tdd-enforcement.md` | Add | Standard documenting TDD gate rules |
 | `CLAUDE.md` | Modify | Add TDD workflow section |
+| `docs/reports/102/` | Add (Directory) | Reports directory for this issue |
+| `docs/reports/102/tdd-audit.md` | Add | TDD audit trail for this issue |
+| `docs/reports/102/implementation-report.md` | Add | Implementation report |
+| `docs/reports/102/test-report.md` | Add | Test report |
+| `tests/unit/test_tdd_gate.py` | Add | Unit tests for tdd_gate.py |
+| `tests/unit/test_tdd_audit.py` | Add | Unit tests for tdd_audit.py |
+| `tests/unit/test_tdd_pending_issues.py` | Add | Unit tests for tdd_pending_issues.py |
+| `tests/fixtures/tdd_gate/` | Add (Directory) | Test fixtures for TDD gate tests |
+| `tests/fixtures/tdd_gate/sample_passing_test.py` | Add | Fixture: test that passes (exit code 0) |
+| `tests/fixtures/tdd_gate/sample_failing_test.py` | Add | Fixture: test that fails (exit code 1) |
+| `tests/fixtures/tdd_gate/sample_syntax_error_test.py` | Add | Fixture: test with collection error (exit code 2) |
+| `tests/fixtures/tdd_gate/sample_empty_test.py` | Add | Fixture: empty file, no tests (exit code 5) |
+| `tests/fixtures/tdd_gate/sample_tdd_config.json` | Add | Fixture: sample TDD configuration |
+| `tests/e2e/test_tdd_workflow.py` | Add | End-to-end TDD workflow integration tests |
+
+### 2.1.1 Path Validation (Mechanical - Auto-Checked)
+
+Mechanical validation:
+- `tools/` — exists ✅
+- `.gitignore` — exists ✅
+- `CLAUDE.md` — exists ✅
+- `dashboard/package.json` — exists ✅
+- `tests/unit/` — exists ✅
+- `tests/fixtures/` — exists ✅
+- `tests/e2e/` — exists ✅
+- `docs/standards/` — exists ✅
+- `docs/reports/` — parent exists, `102/` will be created ✅
+- `hooks/` — new directory, Add (Directory) declared ✅
+- `.husky/` — new directory at repo root, created by husky install ✅
+- `tests/fixtures/tdd_gate/` — new directory, Add (Directory) declared ✅
 
 ### 2.2 Dependencies
 
-*New packages, APIs, and services required.*
+```toml
+# No new pyproject.toml dependencies required.
+# tools/tdd_gate.py uses only Python stdlib: subprocess, json, pathlib, argparse, datetime, sys, os
+# dashboard/package.json additions:
+```
 
 ```json
-// package.json additions
 {
   "devDependencies": {
     "husky": "^9.0.0"
+  },
+  "scripts": {
+    "prepare": "husky"
   }
 }
 ```
 
-**External Dependencies:**
-- GitHub CLI (`gh`) - Required for issue auto-creation feature
-- `pytest` - For Python test execution (assumed installed)
-- `jest` - For JavaScript test execution (if applicable)
+External runtime dependencies (not Python packages):
+- **GitHub CLI (`gh`)** — required for async issue creation; must be installed and authenticated
+- **pytest** — already a dev dependency
+- **husky** — npm devDependency for git hook management
 
 ### 2.3 Data Structures
 
 ```python
-# Pseudocode - NOT implementation
-
+# === .tdd-config.json schema (project configuration) ===
 class TDDConfig(TypedDict):
-    """Configuration loaded from .tdd-config.json"""
-    test_patterns: dict[str, list[str]]  # Framework -> file patterns
-    excluded_extensions: list[str]  # File types exempt from TDD gate
-    min_test_count: int  # Minimum tests required (default: 1)
-    test_commands: dict[str, str]  # Framework -> test command template
+    """Project-level TDD gate configuration."""
+    test_framework: str  # "pytest" | "jest"
+    test_command: str  # e.g. "poetry run pytest" or "npx jest"
+    source_patterns: list[str]  # [".py", ".js", ".ts"]
+    test_patterns: dict[str, str]  # {"*.py": "test_*.py", "*.js": "*.test.js"}
+    test_directories: list[str]  # ["tests/"]
+    excluded_extensions: list[str]  # [".md", ".rst", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini"]
+    excluded_paths: list[str]  # ["docs/", "data/", ".github/"]
+    min_test_count: int  # default: 1
+    override_requires_reason: bool  # default: True
 
-class TDDState(TypedDict):
-    """Local state stored in .tdd-state.json (git-ignored)"""
-    red_phase_proofs: dict[str, RedPhaseProof]  # test_file -> proof
-    current_issue: str | None  # Active issue being worked on
 
-class RedPhaseProof(TypedDict):
-    """Proof that red phase was completed"""
-    commit_sha: str  # Commit where red phase verified
-    timestamp: str  # ISO 8601 timestamp
-    test_file: str  # Path to test file
-    exit_code: int  # Must be 1 for valid red phase
-    failure_output: str  # Captured test failure output
+# === .tdd-state.json schema (local, git-ignored) ===
+class TDDLocalState(TypedDict):
+    """Local developer state, NOT committed. Git-ignored."""
+    current_issue: str | None  # e.g. "102"
+    red_phase_completed: bool
+    red_phase_timestamp: str | None  # ISO 8601
+    red_phase_commit_sha: str | None
+    test_file: str | None  # path to test file
+    red_phase_exit_code: int | None
+    red_phase_failure_output: str | None  # captured stderr/stdout (truncated to 2KB)
 
-class PendingIssue(TypedDict):
-    """Pending technical debt issue for async creation"""
-    reason: str  # Override justification
-    timestamp: str  # When override was used
-    commit_sha: str  # Commit that used override
-    branch: str  # Branch name
-    retry_count: int  # Number of creation attempts
 
-class AuditEntry(TypedDict):
-    """Entry in tdd-audit.md"""
-    phase: Literal["red", "green", "refactor", "override"]
-    timestamp: str
+# === ~/.tdd-pending-issues.json schema (user-global pending debt) ===
+class PendingIssueEntry(TypedDict):
+    """Single pending technical debt issue for async creation."""
+    timestamp: str  # ISO 8601
+    repo: str  # e.g. "martymcenroe/AssemblyZero"
+    branch: str  # branch name at time of override
+    commit_sha: str  # commit that used override
+    reason: str  # developer-provided justification
+    files_changed: list[str]  # files in the commit
+    created: bool  # whether gh issue was created
+    issue_number: int | None  # set after creation
+    error: str | None  # last error if creation failed
+    retry_count: int  # number of creation attempts
+
+
+# === Red Phase Proof (commit footer format) ===
+# Format: TDD-Red-Phase: <commit-sha>:<ISO-8601-timestamp>
+# Example: TDD-Red-Phase: abc1234:2026-02-10T14:30:00Z
+# Stored in: git commit message footer (last line, after blank line separator)
+
+
+# === TDD Audit Entry (appended to docs/reports/{IssueID}/tdd-audit.md) ===
+class TDDAuditEntry(TypedDict):
+    """Single audit trail entry."""
+    phase: str  # "red" | "green" | "refactor" | "override"
+    timestamp: str  # ISO 8601
+    commit_sha: str
     test_file: str
     exit_code: int
-    details: str  # Failure messages or pass confirmation
+    test_names: list[str]  # names of tests discovered
+    output_summary: str  # truncated failure/pass output (max 2KB)
+    override_reason: str | None  # only for "override" phase
+
+
+# === Verify Red Result ===
+class VerifyRedResult(TypedDict):
+    """Return type for red phase verification."""
+    valid: bool
+    exit_code: int
+    message: str  # human-readable explanation
+    test_names: list[str]
+    failure_output: str  # raw captured output (truncated)
+    timestamp: str  # ISO 8601
+
+
+# === Verify Green Result ===
+class VerifyGreenResult(TypedDict):
+    """Return type for green phase verification."""
+    valid: bool
+    exit_code: int
+    message: str
+    test_names: list[str]
+    coverage_delta: float | None  # percentage points, if available
+    timestamp: str
 ```
 
 ### 2.4 Function Signatures
 
 ```python
-# tools/tdd-gate.py - Main CLI tool
+# ============================================================
+# tools/tdd_gate.py — Main TDD enforcement CLI tool
+# ============================================================
 
-def main() -> int:
-    """Entry point for tdd-gate CLI. Returns exit code."""
-    ...
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
-def verify_red(test_file: Path) -> tuple[bool, str]:
-    """
-    Verify test file fails with exit code 1 (valid red phase).
-    Returns (success, message).
-    """
-    ...
 
-def verify_green(test_file: Path) -> tuple[bool, str]:
-    """
-    Verify test file passes with exit code 0 (valid green phase).
-    Returns (success, message).
-    """
-    ...
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point. Parses args and dispatches to subcommands.
 
-def run_tests(test_file: Path, framework: str) -> tuple[int, str]:
-    """
-    Run tests for specific file only (not full suite).
-    Returns (exit_code, output).
+    Returns exit code: 0 = success, 1 = gate blocked, 2 = usage error.
     """
     ...
 
-def detect_framework(test_file: Path) -> str:
-    """Detect test framework from file extension and patterns."""
-    ...
 
-def check_test_exists(impl_file: Path) -> tuple[bool, Path | None]:
+def load_config(config_path: Path | None = None) -> dict[str, Any]:
+    """Load .tdd-config.json from project root. Returns defaults if not found.
+
+    Args:
+        config_path: Explicit path to config file. If None, searches cwd upward.
+
+    Returns:
+        Parsed configuration dictionary with defaults applied.
+
+    Raises:
+        json.JSONDecodeError: If config file contains invalid JSON.
     """
-    Check if corresponding test file exists for implementation file.
-    Returns (exists, test_file_path).
+    ...
+
+
+def resolve_test_file(source_file: Path, config: dict[str, Any]) -> Path | None:
+    """Map a source file to its expected test file path.
+
+    Args:
+        source_file: Path to implementation source file (e.g., assemblyzero/core/foo.py).
+        config: Loaded TDD configuration.
+
+    Returns:
+        Expected test file path, or None if source file is excluded from TDD gate.
+
+    Examples:
+        assemblyzero/core/foo.py -> tests/unit/test_foo.py
+        src/utils/bar.js -> src/utils/__tests__/bar.test.js
     """
     ...
 
-def record_red_phase(test_file: Path, exit_code: int, output: str) -> RedPhaseProof:
-    """Record red phase proof to local state and return proof."""
+
+def is_excluded_file(file_path: Path, config: dict[str, Any]) -> bool:
+    """Check if a file is excluded from TDD gate (docs, config, etc).
+
+    Args:
+        file_path: Path to check against exclusion rules.
+        config: Loaded TDD configuration.
+
+    Returns:
+        True if file should be excluded from TDD requirements.
+    """
     ...
 
-def generate_commit_footer(proof: RedPhaseProof) -> str:
-    """Generate TDD-Red-Phase footer for commit message."""
+
+def get_changed_source_files() -> list[Path]:
+    """Get list of staged source files from git index.
+
+    Returns:
+        List of Path objects for files staged in git (via `git diff --cached --name-only`).
+    """
     ...
 
-def handle_override(reason: str) -> None:
-    """Handle --skip-tdd-gate override with required justification."""
+
+def check_test_existence(source_files: list[Path], config: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Verify test files exist for all non-excluded source files.
+
+    Args:
+        source_files: List of staged source file paths.
+        config: Loaded TDD configuration.
+
+    Returns:
+        Tuple of (all_exist: bool, missing_messages: list[str]).
+        missing_messages contains human-readable errors for each missing test.
+    """
     ...
 
-def load_config() -> TDDConfig:
-    """Load configuration from .tdd-config.json with defaults."""
+
+def run_test_file(test_file: Path, config: dict[str, Any]) -> tuple[int, str, str]:
+    """Execute ONLY the specified test file via configured test runner.
+
+    CRITICAL: Runs only the single file, never the full suite.
+    Uses subprocess with list args (never shell=True).
+
+    Args:
+        test_file: Path to the specific test file to run.
+        config: Loaded TDD configuration (for test command).
+
+    Returns:
+        Tuple of (exit_code, stdout, stderr).
+        exit_code semantics:
+          pytest: 0=passed, 1=failed, 2=error, 5=no tests
+          jest: 0=passed, 1=failed
+    """
     ...
 
-def is_excluded_file(file_path: Path, config: TDDConfig) -> bool:
-    """Check if file is excluded from TDD gate (docs, config files)."""
-    ...
-```
 
-```python
-# tools/tdd-audit.py - Audit trail management
+def verify_red_phase(test_file: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Verify that the specified test file fails (exit code 1 = valid red phase).
 
-def append_audit_entry(issue_id: str, entry: AuditEntry) -> None:
-    """Append entry to docs/reports/{issue_id}/tdd-audit.md (strictly additive)."""
+    Args:
+        test_file: Path to the test file to verify.
+        config: Loaded TDD configuration.
+
+    Returns:
+        VerifyRedResult dict with validity, exit code, message, and captured output.
+    """
     ...
+
+
+def verify_green_phase(test_file: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Verify that the specified test file passes (exit code 0 = valid green phase).
+
+    Args:
+        test_file: Path to the test file to verify.
+        config: Loaded TDD configuration.
+
+    Returns:
+        VerifyGreenResult dict.
+    """
+    ...
+
+
+def format_exit_code_message(exit_code: int, framework: str) -> str:
+    """Generate specific human-readable message for each exit code.
+
+    Args:
+        exit_code: The test runner's exit code.
+        framework: "pytest" or "jest".
+
+    Returns:
+        Descriptive message explaining what the exit code means and what to do.
+
+    Examples:
+        (0, "pytest") -> "Invalid red phase: tests passed (exit code 0). Tests must fail first."
+        (2, "pytest") -> "Invalid red phase: collection error (exit code 2). Check for syntax errors."
+        (5, "pytest") -> "Invalid red phase: no tests found (exit code 5). Did you name your file test_*.py?"
+        (1, "pytest") -> "Red phase verified: tests failed as expected (exit code 1)."
+    """
+    ...
+
+
+def read_local_state(state_path: Path | None = None) -> dict[str, Any]:
+    """Read local .tdd-state.json (git-ignored). Returns empty state if not found."""
+    ...
+
+
+def write_local_state(state: dict[str, Any], state_path: Path | None = None) -> None:
+    """Write local .tdd-state.json (git-ignored). Creates parent dirs if needed."""
+    ...
+
+
+def generate_red_phase_footer(commit_sha: str, timestamp: str) -> str:
+    """Generate the TDD-Red-Phase commit footer line.
+
+    Args:
+        commit_sha: Short SHA of the commit (7 chars).
+        timestamp: ISO 8601 timestamp.
+
+    Returns:
+        Formatted footer string, e.g. "TDD-Red-Phase: abc1234:2026-02-10T14:30:00Z"
+    """
+    ...
+
+
+def handle_override(reason: str, config: dict[str, Any]) -> int:
+    """Handle --skip-tdd-gate override: log debt locally, allow commit.
+
+    1. Validates reason is non-empty.
+    2. Appends entry to ~/.tdd-pending-issues.json.
+    3. Attempts async issue creation via gh (non-blocking).
+    4. Returns 0 (always allows commit to proceed).
+
+    Args:
+        reason: Required justification string.
+        config: Loaded TDD configuration.
+
+    Returns:
+        0 always (override is non-blocking).
+    """
+    ...
+
+
+def extract_test_names(output: str, framework: str) -> list[str]:
+    """Parse test runner output to extract individual test names.
+
+    Args:
+        output: Combined stdout/stderr from test runner.
+        framework: "pytest" or "jest".
+
+    Returns:
+        List of discovered test names (e.g., ["test_feature_works", "test_edge_case"]).
+    """
+    ...
+
+
+# ============================================================
+# tools/tdd_audit.py — Audit trail generation and reporting
+# ============================================================
+
+def append_audit_entry(
+    issue_id: str,
+    phase: str,
+    commit_sha: str,
+    test_file: str,
+    exit_code: int,
+    test_names: list[str],
+    output_summary: str,
+    override_reason: str | None = None,
+) -> Path:
+    """Append a TDD audit entry to docs/reports/{issue_id}/tdd-audit.md.
+
+    Strictly additive — never modifies existing entries.
+
+    Args:
+        issue_id: GitHub issue number (e.g., "102").
+        phase: "red", "green", "refactor", or "override".
+        commit_sha: Git commit SHA.
+        test_file: Path to the test file.
+        exit_code: Test runner exit code.
+        test_names: List of test names.
+        output_summary: Truncated output (max 2KB).
+        override_reason: Justification if phase is "override".
+
+    Returns:
+        Path to the audit file.
+    """
+    ...
+
 
 def generate_compliance_report(issue_id: str) -> str:
-    """Generate TDD compliance report for issue."""
-    ...
+    """Generate TDD compliance report for a given issue.
 
-def extract_red_phase_from_commits(branch: str) -> list[RedPhaseProof]:
-    """Extract TDD-Red-Phase footers from all commits in branch."""
-    ...
-```
+    Reads tdd-audit.md and produces summary with:
+    - Red phase count and timestamps
+    - Green phase count and timestamps
+    - Override count (if any)
+    - Overall compliance status
 
-```python
-# tools/tdd-pending-issues.py - Async issue creation
+    Args:
+        issue_id: GitHub issue number.
 
-def queue_pending_issue(issue: PendingIssue) -> None:
-    """Add issue to ~/.tdd-pending-issues.json queue."""
-    ...
-
-def process_pending_issues() -> tuple[int, int]:
-    """
-    Process pending issues queue, create via gh CLI.
-    Returns (created_count, failed_count).
+    Returns:
+        Markdown-formatted compliance report string.
     """
     ...
 
-def flush_all() -> None:
-    """Force upload all pending issues (--flush command)."""
+
+def parse_audit_file(audit_path: Path) -> list[dict[str, Any]]:
+    """Parse an existing tdd-audit.md into structured entries.
+
+    Args:
+        audit_path: Path to the audit markdown file.
+
+    Returns:
+        List of parsed audit entry dictionaries.
+    """
     ...
 
-def create_github_issue(issue: PendingIssue) -> bool:
-    """Create GitHub issue via gh CLI. Returns success."""
+
+# ============================================================
+# tools/tdd_pending_issues.py — Async pending issue processor
+# ============================================================
+
+def load_pending_issues(queue_path: Path | None = None) -> list[dict[str, Any]]:
+    """Load pending issues from ~/.tdd-pending-issues.json.
+
+    Args:
+        queue_path: Override path for testing. Defaults to ~/.tdd-pending-issues.json.
+
+    Returns:
+        List of PendingIssueEntry dicts. Empty list if file doesn't exist.
+    """
+    ...
+
+
+def save_pending_issues(entries: list[dict[str, Any]], queue_path: Path | None = None) -> None:
+    """Save pending issues back to ~/.tdd-pending-issues.json.
+
+    Args:
+        entries: Updated list of pending entries.
+        queue_path: Override path for testing.
+    """
+    ...
+
+
+def add_pending_issue(
+    repo: str,
+    branch: str,
+    commit_sha: str,
+    reason: str,
+    files_changed: list[str],
+    queue_path: Path | None = None,
+) -> None:
+    """Add a new pending issue entry to the queue.
+
+    Args:
+        repo: GitHub repo in owner/name format.
+        branch: Git branch name.
+        commit_sha: The commit SHA that used override.
+        reason: Developer-provided justification.
+        files_changed: List of changed file paths.
+        queue_path: Override path for testing.
+    """
+    ...
+
+
+def create_github_issue(entry: dict[str, Any]) -> tuple[bool, int | None, str | None]:
+    """Attempt to create a GitHub issue via gh CLI for a pending entry.
+
+    Uses subprocess with list args (never shell=True).
+
+    Args:
+        entry: PendingIssueEntry dict.
+
+    Returns:
+        Tuple of (success: bool, issue_number: int | None, error: str | None).
+    """
+    ...
+
+
+def flush_pending_issues(queue_path: Path | None = None) -> tuple[int, int]:
+    """Process all pending issues: attempt creation, update queue.
+
+    Args:
+        queue_path: Override path for testing.
+
+    Returns:
+        Tuple of (created_count, failed_count).
+    """
+    ...
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for pending issue management.
+
+    Subcommands:
+        --flush: Attempt to create all pending issues.
+        --list: Show pending issues without creating.
+        --clear: Remove all pending issues (with confirmation).
+
+    Returns:
+        0 on success, 1 on partial failure, 2 on usage error.
+    """
     ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
-**Pre-commit Hook Flow:**
+#### Pre-commit Hook Flow (`hooks/pre-commit-tdd-gate.sh`)
+
 ```
-1. Get list of staged files
+1. Get list of staged files via `git diff --cached --name-only --diff-filter=ACM`
 2. FOR EACH staged file:
-   a. IF is_excluded_file(file) THEN skip
-   b. IF file is implementation code (not test):
-      i. Check if corresponding test file exists
-      ii. IF no test file: BLOCK commit with error message
-3. IF all checks pass: Allow commit to proceed
+   a. Check extension against excluded_extensions (.md, .json, .yaml, etc.)
+   b. Check path against excluded_paths (docs/, data/, etc.)
+   c. IF excluded → SKIP
+   d. IF source code file (.py, .js, .ts):
+      i. Resolve expected test file path
+      ii. IF test file does NOT exist:
+          - Print error: "TDD Gate: Missing test file for {source_file}"
+          - Print suggestion: "Expected: {expected_test_path}"
+          - Set BLOCKED = true
+3. IF BLOCKED:
+   - Print: "Commit blocked. Write tests first (TDD red phase)."
+   - Print: "Override: --skip-tdd-gate --reason '<justification>'"
+   - EXIT 1
+4. ELSE:
+   - EXIT 0 (allow commit)
 ```
 
-**Red Phase Verification Flow:**
+#### Prepare-commit-msg Hook Flow (`hooks/prepare-commit-msg-tdd.sh`)
+
 ```
-1. Receive test file path
-2. Detect test framework from file pattern
-3. Run ONLY the specified test file (not full suite)
-4. Capture exit code and output
-5. IF exit_code == 1:
-   a. Record red phase proof
-   b. Return success: "Red phase verified"
-6. ELSE IF exit_code == 0:
-   a. Return error: "Invalid red phase: tests passed (exit code 0)"
-7. ELSE IF exit_code == 2:
-   a. Return error: "Invalid red phase: collection error (exit code 2)"
-8. ELSE IF exit_code == 5:
-   a. Return error: "Invalid red phase: no tests found (exit code 5). Did you name your file test_*.py?"
-9. ELSE:
-   a. Return error: "Unexpected exit code: {exit_code}"
+1. Read commit message file path from $1
+2. Read commit source from $2 (message, merge, squash, template)
+3. IF commit source is "merge" or "squash" → EXIT 0 (skip)
+4. Load .tdd-state.json from project root
+5. IF state.red_phase_completed == true:
+   a. Get current HEAD sha (short)
+   b. Get current timestamp (ISO 8601 UTC)
+   c. Append blank line + "TDD-Red-Phase: {sha}:{timestamp}" to commit message
+   d. Clear red_phase_completed in local state
+6. EXIT 0 (never block commit at this stage)
 ```
 
-**Prepare-commit-msg Hook Flow:**
+#### Red Phase Verification Flow (`tdd-gate --verify-red <test-file>`)
+
 ```
-1. Check if this is a TDD-relevant commit
-2. IF red phase proof exists in local state:
-   a. Generate TDD-Red-Phase footer
-   b. Append footer to commit message
-   c. Clear proof from local state (it's now in commit)
-3. Hook completes BEFORE GPG signing
+1. Load config from .tdd-config.json
+2. Validate test_file exists on disk
+3. Determine framework from config or file extension
+4. Build command: [config.test_command, str(test_file)]
+   - pytest: ["poetry", "run", "pytest", test_file, "-v", "--tb=short", "--no-header"]
+   - jest: ["npx", "jest", "--verbose", test_file]
+5. Execute via subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+   - NEVER use shell=True
+6. Capture exit_code, stdout, stderr
+7. SWITCH exit_code:
+   CASE 1 (pytest/jest): → VALID red phase
+     - Extract test names from output
+     - Truncate failure output to 2KB
+     - Write local state: red_phase_completed=true, timestamp, sha
+     - Append audit entry (phase="red")
+     - Print: "✅ Red phase verified: {N} tests failed as expected"
+     - RETURN success
+   CASE 0:
+     - Print: "❌ Invalid red phase: tests passed (exit code 0). Tests must fail first."
+     - RETURN failure
+   CASE 2 (pytest):
+     - Print: "❌ Invalid red phase: collection error (exit code 2). Check for syntax errors."
+     - RETURN failure
+   CASE 5 (pytest):
+     - Print: "❌ Invalid red phase: no tests found (exit code 5). Did you name your file test_*.py?"
+     - RETURN failure
+   DEFAULT:
+     - Print: "❌ Unexpected exit code {exit_code}. Check test runner output."
+     - RETURN failure
 ```
 
-**Override Flow:**
+#### Green Phase Verification Flow (`tdd-gate --verify-green <test-file>`)
+
 ```
-1. Validate --reason argument is provided and non-empty
-2. Create PendingIssue with reason, timestamp, commit info
-3. Queue pending issue to ~/.tdd-pending-issues.json
-4. Log override to audit trail
-5. Allow commit to proceed immediately (non-blocking)
-6. Trigger async issue creation (best effort, non-blocking)
+1. Load config from .tdd-config.json
+2. Validate test_file exists
+3. Check local state: was red phase completed for this file?
+   - IF NOT: warn but continue (CI validates via commit footer)
+4. Build and execute test command (same as red phase, file-scoped)
+5. IF exit_code == 0:
+   - Extract test names
+   - Compare test count: warn if fewer tests than red phase (no deletions)
+   - Append audit entry (phase="green")
+   - Print: "✅ Green phase verified: {N} tests passed"
+   - RETURN success
+6. ELSE:
+   - Print: "❌ Green phase failed: tests did not pass (exit code {exit_code})"
+   - RETURN failure
 ```
 
-**CI Gate Flow:**
+#### Override Flow (`tdd-gate --skip-tdd-gate --reason "<justification>"`)
+
 ```
-1. Get all commits in PR branch (origin/main..HEAD)
-2. Extract TDD-Red-Phase footers from all commit messages
-3. IF footer found in any commit:
-   a. Validate footer format
-   b. Accept PR for TDD compliance
-4. ELSE IF coverage requirements met:
-   a. Accept PR (handles squash scenarios where footer lost)
-5. ELSE:
-   a. Block PR: "No TDD red phase proof found"
+1. Validate --reason is non-empty string
+2. Get current repo name (from git remote or config)
+3. Get current branch name
+4. Get current HEAD sha
+5. Get staged files list
+6. Create PendingIssueEntry:
+   - timestamp: now (ISO 8601)
+   - repo, branch, commit_sha, reason, files_changed
+   - created: false, issue_number: null, retry_count: 0
+7. Append to ~/.tdd-pending-issues.json
+8. Attempt async issue creation via gh (non-blocking):
+   TRY:
+     gh issue create --repo {repo} --title "TDD Debt: {branch}" \
+       --body "Override by {user} at {timestamp}\nReason: {reason}\nFiles: {files}" \
+       --label "tdd-debt,follow-up"
+     IF success: mark entry.created = true, store issue_number
+   CATCH (any error):
+     Log: "Issue creation deferred (offline or gh unavailable)"
+     entry.error = str(error)
+9. Print: "⚠️ TDD gate overridden. Debt logged. Reason: {reason}"
+10. RETURN 0 (always allow commit)
+```
+
+#### CI Footer Extraction Flow
+
+```
+1. Get all commits in PR branch: git log --format=%B origin/main..HEAD
+2. Search for "TDD-Red-Phase:" in any commit message
+3. IF found in ANY commit:
+   - Extract sha and timestamp
+   - Validate sha exists in branch history
+   - PASS CI gate
+4. IF NOT found:
+   - Check if ALL changed files are excluded types (docs/config)
+   - IF all excluded: PASS (no TDD required)
+   - ELSE: FAIL CI gate with message:
+     "No TDD-Red-Phase proof found in branch commits.
+      Write failing tests first, then run: tdd-gate --verify-red <test-file>"
+```
+
+#### Flush Pending Issues Flow (`tdd-pending-issues --flush`)
+
+```
+1. Load ~/.tdd-pending-issues.json
+2. Filter entries where created == false
+3. FOR EACH uncreated entry:
+   a. Attempt create_github_issue(entry)
+   b. IF success:
+      - Set entry.created = true
+      - Set entry.issue_number = result
+      - Increment created_count
+   c. IF failure:
+      - Set entry.error = error_message
+      - Increment entry.retry_count
+      - Increment failed_count
+4. Save updated entries back to file
+5. Remove entries where created == true AND retry_count == 0 (clean successful)
+6. Print summary: "{created_count} issues created, {failed_count} failed"
+7. RETURN 0 if all created, 1 if any failed
 ```
 
 ### 2.6 Technical Approach
 
-* **Module:** `tools/` directory for CLI tools, `hooks/` for git hooks
-* **Pattern:** Command pattern for CLI subcommands, Observer pattern for hook integration
+* **Module:** `tools/tdd_gate.py` (standalone CLI, no assemblyzero package dependency)
+* **Pattern:** Command-line tool with subcommand dispatch (argparse), stateless per invocation except for local state file
+* **Hook Integration:** Shell scripts in `hooks/` delegate to `tools/tdd_gate.py` for logic; Husky manages hook installation
+* **State Strategy:** Two-tier state — local `.tdd-state.json` for developer UX, commit message footers for CI verification. No state files are committed to the repository.
 * **Key Decisions:**
-  - File-scoped test execution prevents slow full-suite runs
-  - Commit message footers for state portability (no committed state files)
-  - Async issue creation prevents blocking during emergencies
-  - Husky ensures hooks are installed for all developers automatically
+  - Tools are standalone Python scripts (no dependency on `assemblyzero` package) for portability
+  - Shell hooks are thin wrappers calling Python tools
+  - `subprocess.run()` always uses list args, never `shell=True`
+  - Test runner timeout: 120 seconds (prevents hanging)
+  - Output truncation: 2KB max stored in audit/state (prevents bloat)
+  - Husky is required for automatic hook installation across all developers
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| State Storage | Committed JSON file, Database, Commit footers | Commit footers + local git-ignored JSON | Avoids merge conflicts, portable across branches, CI can extract |
-| Hook Technology | Raw git hooks, Husky, pre-commit framework | Husky | Auto-installs via npm, team already uses npm ecosystem |
-| Test Scoping | Full suite, File-scoped, Function-scoped | File-scoped | Balance between speed and meaningful verification |
-| Override Tracking | Immediate issue creation, Async queue, Log only | Async queue with retry | Non-blocking for emergencies, eventual consistency |
-| Exit Code Validation | Pass/fail binary, Granular codes | Granular exit codes | Better error messages, catch misconfigurations |
+| State storage for CI | Committed state file, commit footers, PR labels | Commit footers | Avoids merge conflicts; survives rebase; extractable by CI from any commit |
+| Hook framework | raw git hooks, husky, pre-commit (Python), lefthook | Husky | Already have dashboard/package.json; husky auto-installs via npm lifecycle; widely adopted |
+| CLI tool language | Python, Bash, Node.js | Python | Project is Python-first (poetry); subprocess handling is cleaner; type hints available |
+| Test runner invocation | shell=True with string, subprocess with list args | subprocess with list args | Security: prevents command injection via `--reason` or filenames |
+| Override issue creation | Synchronous (blocking), Async (non-blocking) | Async non-blocking | Emergency hotfixes must not be blocked by network/API issues |
+| Local state persistence | SQLite, JSON file, environment variables | JSON file (.tdd-state.json) | Simplest; human-readable; easy to debug; git-ignored |
+| Audit trail format | JSON log, SQLite, Markdown | Markdown (append-only) | Human-readable in GitHub; reviewable in PRs; matches existing report patterns |
 
 **Architectural Constraints:**
-- Must work with existing pytest/jest test infrastructure
-- Must not slow down normal commit workflow significantly
-- Must handle offline/disconnected scenarios gracefully
-- Must preserve audit trail across squash/rebase operations
+- Must not introduce new Python package dependencies (uses stdlib only)
+- Must not modify the `assemblyzero/` package source
+- Must work on Windows (PowerShell/Git Bash), macOS, and Linux
+- Must not block commits when `gh` CLI is unavailable (override path)
+- Hooks must be compatible with GPG commit signing
 
 ## 3. Requirements
 
-*What must be true when this is done. These become acceptance criteria.*
-
-1. Pre-commit hook blocks commits without corresponding test files for implementation code
-2. Pre-commit hook excludes documentation (`*.md`) and config files (`*.json`, `*.yaml`)
-3. `tdd-gate --verify-red <test-file>` runs only the specified test file, not full suite
-4. Red phase verification accepts only exit code `1` (tests failed)
-5. Red phase verification rejects exit codes `0`, `2`, `5` with specific error messages
-6. Red phase proof is stored in commit message footer: `TDD-Red-Phase: <sha>:<timestamp>`
-7. Prepare-commit-msg hook runs before GPG signing
-8. Green phase verification confirms exit code `0` (tests pass)
-9. `--skip-tdd-gate --reason "<justification>"` allows override with mandatory reason
-10. Override logs debt locally and creates GitHub issue asynchronously
-11. Audit trail is strictly append-only at `docs/reports/{IssueID}/tdd-audit.md`
-12. CI extracts red phase proof from any commit in PR branch
-13. Works with pytest (`test_*.py`) and Jest (`*.test.js`, `*.spec.js`)
-14. Configuration via `.tdd-config.json` for custom patterns and exclusions
-15. Husky auto-installs hooks on `npm install`
+1. Pre-commit hook blocks commits for source files without corresponding test files
+2. Pre-commit hook excludes documentation files (`.md`, `.rst`, `.txt`) and configuration files (`.json`, `.yaml`, `.yml`, `.toml`, `.ini`)
+3. `tdd-gate --verify-red <test-file>` runs ONLY the specified test file, not the full suite
+4. Red phase verification accepts only exit code `1` (tests failed); rejects `0`, `2`, `5` with specific messages
+5. Green phase verification confirms exit code `0` (tests passed)
+6. Red phase proof is stored in commit footer via prepare-commit-msg hook: `TDD-Red-Phase: <sha>:<timestamp>`
+7. Prepare-commit-msg hook runs before GPG signing (does not invalidate signatures)
+8. CI gate extracts `TDD-Red-Phase` footer from all commits in PR branch (supports squash/rebase)
+9. `--skip-tdd-gate --reason "<justification>"` override allows commit immediately; logs debt locally
+10. Async issue creation via `gh issue create` with local queue for offline/failure scenarios
+11. `--flush` command processes pending issue queue
+12. All `--reason` arguments sanitized via subprocess list args (no shell injection)
+13. Audit trail is append-only at `docs/reports/{IssueID}/tdd-audit.md`
+14. Works with pytest (`test_*.py` detection, exit code validation) and Jest (`*.test.js`/`*.spec.js`)
+15. Configuration via `.tdd-config.json` for custom patterns and exclusions
+16. `.tdd-state.json` is git-ignored
+17. Husky auto-installs hooks on `npm install`
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| Committed `.tdd-state.json` | Simple, always available | Merge conflicts, noise in history | **Rejected** |
-| Database for state | Scalable, queryable | Infrastructure overhead, offline issues | **Rejected** |
-| Commit message footers | Portable, no conflicts, CI-friendly | Limited size, requires parsing | **Selected** |
-| Full test suite on verify | Complete verification | Slow, discourages TDD | **Rejected** |
-| File-scoped test execution | Fast, targeted | Might miss integration issues | **Selected** |
-| pre-commit Python framework | Feature-rich | Another tool to install/maintain | **Rejected** |
-| Husky for hooks | Auto-install, npm native | Requires npm/node | **Selected** |
-| Synchronous issue creation | Immediate tracking | Blocks on API failures | **Rejected** |
-| Async queue for issues | Non-blocking, retry capable | Eventual consistency | **Selected** |
+| **Commit footer state (Selected)** | No merge conflicts; survives rebase/squash; CI-extractable from any commit; no committed files | Requires footer parsing; can be stripped by aggressive rebase | **Selected** |
+| **Committed .tdd-state.json** | Simple to read; explicit in repo | Merge conflicts on every branch; bloats repo; conflicts with parallel agents | Rejected |
+| **PR labels for state** | Easy to query in CI | Can be removed/modified; no audit trail; requires API calls | Rejected |
+| **Python pre-commit framework** | Rich ecosystem; many hooks available | Another dependency; overkill for our use case; doesn't handle prepare-commit-msg well | Rejected |
+| **Bash-only implementation** | No Python dependency for hooks | Complex logic in bash is error-prone; poor testability; cross-platform issues | Rejected |
+| **Blocking override (require approval)** | Stronger governance | Blocks emergency hotfixes; unacceptable for P0 incidents | Rejected |
 
-**Rationale:** The selected options prioritize developer experience (fast feedback, non-blocking emergencies), portability (commit footers work across branches/squash), and ease of adoption (Husky auto-installs).
+**Rationale:** Commit footers are the most robust state mechanism for CI integration. They travel with the code through rebase, cherry-pick, and squash (extractable from branch history before squash). Combined with Husky for hook management and Python for logic, this provides the best balance of reliability, testability, and developer experience.
 
 ## 5. Data & Fixtures
 
@@ -334,133 +770,134 @@ def create_github_issue(issue: PendingIssue) -> bool:
 
 | Attribute | Value |
 |-----------|-------|
-| Source | Local git repository, test execution output |
-| Format | Exit codes, stdout/stderr text, JSON config |
-| Size | Small (KB per proof/audit entry) |
-| Refresh | Real-time during commit workflow |
-| Copyright/License | N/A (generated data) |
+| Source | Git index (staged files), test runner output, local JSON state files |
+| Format | Git diff output (text), JSON (config/state), Markdown (audit) |
+| Size | Small: config < 1KB, state < 5KB, audit grows ~500 bytes per entry |
+| Refresh | Per-commit (hooks), per-invocation (CLI) |
+| Copyright/License | N/A — all generated data |
 
 ### 5.2 Data Pipeline
 
 ```
-Test Execution ──exit code──► Red Phase Proof ──footer──► Commit Message
-                                    │
-                                    └──append──► tdd-audit.md
-
-Override Request ──queue──► ~/.tdd-pending-issues.json ──async──► GitHub Issues API
+git staged files ──hook──► tdd_gate.py ──subprocess──► test runner (pytest/jest)
+                                          │
+                                          ├──► .tdd-state.json (local, git-ignored)
+                                          ├──► commit footer (TDD-Red-Phase)
+                                          ├──► docs/reports/{ID}/tdd-audit.md (committed)
+                                          └──► ~/.tdd-pending-issues.json (override debt)
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| Failing test file (`test_example_red.py`) | Generated | Contains `assert False` |
-| Passing test file (`test_example_green.py`) | Generated | Contains `assert True` |
-| Empty test file (`test_empty.py`) | Generated | No test functions (exit code 5) |
-| Syntax error test file (`test_broken.py`) | Generated | Invalid Python (exit code 2) |
-| Mock `.tdd-config.json` | Hardcoded | Standard configuration |
-| Mock commit with footer | Generated | For CI extraction tests |
+| `sample_passing_test.py` | Generated | Contains `def test_pass(): assert True` |
+| `sample_failing_test.py` | Generated | Contains `def test_fail(): assert False, "Not implemented"` |
+| `sample_syntax_error_test.py` | Generated | Contains `def test_broken(: pass` (invalid syntax) |
+| `sample_empty_test.py` | Generated | Contains `# empty file` (no test functions) |
+| `sample_tdd_config.json` | Generated | Complete config with all fields populated |
+| Mock subprocess results | Generated in tests | Mocked subprocess.run return values for each exit code |
 
 ### 5.4 Deployment Pipeline
 
-**Local Development:**
-1. `npm install` triggers Husky prepare script
-2. Hooks installed to `.husky/` directory
-3. Developer runs `tdd-gate` CLI manually or via hooks
-
-**CI Environment:**
-1. GitHub Actions workflow extracts footers from PR commits
-2. CI validates red phase proof exists
-3. Pending issues created from queue on successful run
+- Dev: Hooks installed automatically via `npm install` (husky) or manual `cp hooks/* .git/hooks/`
+- CI: GitHub Actions workflow extracts commit footers; no hook installation needed in CI
+- No external data services required
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.live) or GitHub preview:
-
-- [x] **Simplicity:** Similar components collapsed (per 0006 §8.1)
-- [x] **No touching:** All elements have visual separation (per 0006 §8.2)
-- [x] **No hidden lines:** All arrows fully visible (per 0006 §8.3)
-- [x] **Readable:** Labels not truncated, flow direction clear
-- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed (per 0006 §8.5)
+- [x] **Simplicity:** Components collapsed where appropriate
+- [x] **No touching:** All elements have visual separation
+- [x] **No hidden lines:** All arrows visible
+- [x] **Readable:** Labels not truncated
+- [ ] **Auto-inspected:** Agent to render and verify before commit
 
 **Auto-Inspection Results:**
 ```
-- Touching elements: [x] None / [ ] Found: ___
-- Hidden lines: [x] None / [ ] Found: ___
-- Label readability: [x] Pass / [ ] Issue: ___
-- Flow clarity: [x] Clear / [ ] Issue: ___
+- Touching elements: [ ] None / [ ] Found: ___
+- Hidden lines: [ ] None / [ ] Found: ___
+- Label readability: [ ] Pass / [ ] Issue: ___
+- Flow clarity: [ ] Clear / [ ] Issue: ___
 ```
+*To be completed during implementation.*
 
-*Reference: [0006-mermaid-diagrams.md](0006-mermaid-diagrams.md)*
-
-### 6.2 TDD Gate Workflow Diagram
+### 6.2 Diagram — TDD Gate Workflow
 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
     participant Hook as Pre-commit Hook
-    participant Gate as tdd-gate CLI
+    participant Gate as tdd_gate.py
     participant Runner as Test Runner
     participant Git as Git Commit
+    participant PMH as Prepare-commit-msg
     participant CI as CI Pipeline
-    participant GH as GitHub Issues
+    participant Audit as tdd-audit.md
 
-    Note over Dev,GH: Red Phase (Write Failing Tests)
-    Dev->>Dev: Write test file
-    Dev->>Gate: tdd-gate --verify-red test_feature.py
-    Gate->>Runner: pytest test_feature.py
-    Runner-->>Gate: Exit code 1 (failed)
-    Gate->>Gate: Record proof locally
-    Gate-->>Dev: ✓ Red phase verified
+    Note over Dev,Audit: RED PHASE
+    Dev->>Dev: Write failing test file
+    Dev->>Gate: tdd-gate --verify-red test_file.py
+    Gate->>Runner: pytest test_file.py (file-scoped)
+    Runner-->>Gate: exit code 1 (tests failed)
+    Gate->>Gate: Write .tdd-state.json (local)
+    Gate->>Audit: Append red phase entry
+    Gate-->>Dev: ✅ Red phase verified
 
-    Note over Dev,GH: Commit with Proof
-    Dev->>Git: git commit
-    Hook->>Hook: Check test exists
-    Hook->>Git: Append TDD-Red-Phase footer
-    Git-->>Dev: Commit created
+    Note over Dev,Audit: COMMIT WITH PROOF
+    Dev->>Git: git add & git commit
+    Git->>Hook: Pre-commit: check test existence
+    Hook-->>Git: ✅ Test file exists
+    Git->>PMH: Prepare-commit-msg
+    PMH->>PMH: Read .tdd-state.json
+    PMH->>Git: Append TDD-Red-Phase footer
+    Git-->>Dev: Commit created with footer
 
-    Note over Dev,GH: Green Phase (Implementation)
-    Dev->>Dev: Write implementation
-    Dev->>Gate: tdd-gate --verify-green test_feature.py
-    Gate->>Runner: pytest test_feature.py
-    Runner-->>Gate: Exit code 0 (passed)
-    Gate-->>Dev: ✓ Green phase verified
+    Note over Dev,Audit: GREEN PHASE
+    Dev->>Dev: Write implementation code
+    Dev->>Gate: tdd-gate --verify-green test_file.py
+    Gate->>Runner: pytest test_file.py (file-scoped)
+    Runner-->>Gate: exit code 0 (tests passed)
+    Gate->>Audit: Append green phase entry
+    Gate-->>Dev: ✅ Green phase verified
 
-    Note over Dev,GH: PR and CI Validation
-    Dev->>CI: Open Pull Request
-    CI->>CI: Extract footers from commits
-    CI-->>Dev: ✓ TDD compliance verified
-
-    Note over Dev,GH: Override Path (Emergency)
-    Dev->>Gate: tdd-gate --skip-tdd-gate --reason "P0"
-    Gate->>Gate: Queue pending issue
-    Gate-->>Dev: Override logged
-    Gate-->>GH: Async: Create debt issue
+    Note over Dev,Audit: PR & CI
+    Dev->>CI: Push & create PR
+    CI->>CI: Extract TDD-Red-Phase from branch commits
+    CI-->>Dev: ✅ TDD compliance verified
 ```
 
-### 6.3 Exit Code Decision Tree
+### 6.3 Diagram — Override Flow
 
 ```mermaid
-flowchart TD
-    A[Run Test File] --> B{Exit Code?}
-    B -->|0| C[❌ Tests Passed]
-    C --> D[Invalid Red Phase]
-    B -->|1| E[✓ Tests Failed]
-    E --> F[Valid Red Phase]
-    B -->|2| G[❌ Collection Error]
-    G --> H[Invalid - Fix Syntax]
-    B -->|5| I[❌ No Tests Found]
-    I --> J[Invalid - Check Naming]
-    B -->|Other| K[❌ Unexpected]
-    K --> L[Invalid - Investigate]
+sequenceDiagram
+    participant Dev as Developer
+    participant Gate as tdd_gate.py
+    participant Queue as ~/.tdd-pending-issues.json
+    participant GH as gh CLI
+    participant GitHub as GitHub Issues
 
-    style E fill:#90EE90
-    style C fill:#FFB6C1
-    style G fill:#FFB6C1
-    style I fill:#FFB6C1
-    style K fill:#FFB6C1
+    Dev->>Gate: --skip-tdd-gate --reason "P0 outage"
+    Gate->>Queue: Append PendingIssueEntry
+    Gate->>GH: gh issue create (async, non-blocking)
+    alt GH Available
+        GH->>GitHub: Create issue
+        GitHub-->>GH: Issue #NNN
+        GH-->>Gate: Success
+        Gate->>Queue: Mark created=true
+    else GH Unavailable (offline)
+        GH-->>Gate: Error
+        Gate->>Queue: Store error, retry_count++
+    end
+    Gate-->>Dev: ⚠️ Override logged. Commit allowed.
+
+    Note over Dev,GitHub: LATER (flush)
+    Dev->>Gate: tdd-pending-issues --flush
+    Gate->>Queue: Load uncreated entries
+    Gate->>GH: gh issue create (for each)
+    GH->>GitHub: Create issues
+    Gate->>Queue: Remove created entries
 ```
 
 ## 7. Security & Safety Considerations
@@ -469,28 +906,27 @@ flowchart TD
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Command injection via `--reason` | Use subprocess list args, never `shell=True` | Addressed |
-| GitHub token exposure | Use `gh` CLI which handles auth securely | Addressed |
-| Malicious test code execution | Tests run in isolated subprocess | Addressed |
-| Sensitive data in failure output | Audit logs exclude actual test data, only metadata | Addressed |
-| Local state file tampering | `.tdd-state.json` is convenience only, footers are authoritative | Addressed |
+| Command injection via `--reason` argument | `subprocess.run()` with list args; `--reason` value is a single list element, never interpolated into a shell string | Addressed |
+| Command injection via filenames | File paths passed as list elements to subprocess, never concatenated into shell commands | Addressed |
+| `GITHUB_TOKEN` exposure | Token read by `gh` CLI from environment or `gh auth`; never logged, printed, or stored in state files | Addressed |
+| Malicious test file execution | Test runner runs in subprocess with timeout (120s); no eval/exec of test content by our code | Addressed |
+| Local state file tampering | `.tdd-state.json` is convenience only; CI verification uses commit footers which are immutable in git history | Addressed |
+| Sensitive data in test output | Output truncated to 2KB; stored only in local state (git-ignored) and audit trail (committed but reviewed) | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Blocking emergency hotfixes | Override flag with async issue tracking | Addressed |
-| Accidental audit trail deletion | Append-only writes, no delete operations | Addressed |
-| Hook failure blocking commits | Hooks fail open with warning, not hard block | Addressed |
-| Runaway test execution | File-scoped execution with timeout | Addressed |
-| Lost override issues (offline) | Local queue with retry on connectivity | Addressed |
+| Test runner hangs indefinitely | `subprocess.run(timeout=120)` kills process after 120 seconds | Addressed |
+| Disk space from audit file growth | Audit entries are ~500 bytes each; would take >10K TDD cycles to reach 5MB; acceptable for project lifecycle | Addressed |
+| Hook breaks all commits | Pre-commit hook validates gracefully; errors in hook itself cause EXIT 0 (fail-open) to prevent blocking all development | Addressed |
+| GPG signature invalidation | Using prepare-commit-msg (before signing) not post-commit (after signing); footer injection occurs before GPG signs | Addressed |
+| Override abuse (skipping TDD without justification) | `--reason` is required (non-empty); override is logged and visible in PR; async issue creation creates accountability trail | Addressed |
+| Pending issues lost on disk failure | `~/.tdd-pending-issues.json` is best-effort; entries also logged in git commit messages; manual issue creation is always possible | Addressed |
 
-**Fail Mode:** Fail Open - Hooks warn but don't block if they encounter errors (system availability over strict enforcement)
+**Fail Mode:** Fail Open — If the TDD gate tool itself crashes, the hook exits 0 to prevent blocking all development. This is a conscious trade-off: we prefer occasional missed enforcement over blocking all commits due to tool bugs.
 
-**Recovery Strategy:** 
-- If local state corrupted: Regenerate from commit footers
-- If pending issues lost: Manual audit of override commits
-- If hooks fail: Manual `tdd-gate` CLI invocation
+**Recovery Strategy:** If hooks are broken, developers can bypass with `git commit --no-verify` (standard git). This is logged in the commit (no TDD footer) and caught by CI gate. Tool bugs should be fixed promptly.
 
 ## 8. Performance & Cost Considerations
 
@@ -498,205 +934,241 @@ flowchart TD
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Red phase verification | < 5s per file | File-scoped execution, not full suite |
-| Pre-commit hook | < 2s | Simple file existence check |
-| Prepare-commit-msg hook | < 1s | Read/write local JSON only |
-| CI footer extraction | < 10s | Single `git log` command |
+| Pre-commit hook latency | < 500ms | Only checks file existence (no test execution); uses `git diff --cached` which is fast |
+| Red/green phase verification | < 30s typical | Runs ONLY the specified test file, not full suite; 120s timeout as safety net |
+| Prepare-commit-msg hook | < 100ms | Reads small JSON file, appends one line to commit message |
+| `--flush` command | < 5s per issue | Each `gh issue create` takes ~1-2s; typically 0-2 pending issues |
 
-**Bottlenecks:** 
-- Large test files with slow setup fixtures (mitigated by file scope)
-- GitHub API rate limits for issue creation (mitigated by async queue)
+**Bottlenecks:** Test runner execution time depends entirely on the tests themselves. File-scoped execution mitigates this — running a single file with 5-10 tests should complete in seconds, not minutes.
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| GitHub API calls | Free (within limits) | ~100 issues/month | $0 |
-| CI compute (footer extraction) | Included in Actions | Minutes | $0 |
-| Developer time (TDD overhead) | N/A | ~5 min/feature | N/A |
+| gh CLI API calls | Free (within rate limits) | ~5-10 override issues/month | $0 |
+| pytest/jest execution | CPU time only | Per-commit (developer machine) | $0 |
+| CI footer extraction | CI minutes | ~30s per PR | Negligible |
 
 **Cost Controls:**
-- [x] No external paid services required
-- [x] Rate limiting on issue creation (1 per override)
-- [x] File-scoped execution minimizes CI time
+- [x] No paid API calls required
+- [x] File-scoped execution prevents runaway test suite execution
+- [x] 120s timeout prevents infinite loops in test runner
 
-**Worst-Case Scenario:** 100 overrides in a day = 100 issue creation attempts, well within GitHub API limits (5000/hour authenticated).
+**Worst-Case Scenario:** If usage spikes 100x (100 overrides/month), `~/.tdd-pending-issues.json` grows to ~50KB. GitHub issue creation is rate-limited by `gh` CLI. No cost concerns.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Test output is code-only, no user data |
-| Third-Party Licenses | Yes | Husky is MIT licensed, compatible |
-| Terms of Service | Yes | GitHub API usage within ToS limits |
-| Data Retention | No | Audit logs are project documentation |
-| Export Controls | No | No restricted algorithms |
+| PII/Personal Data | No | No personal data collected; only commit SHAs, timestamps, and test output |
+| Third-Party Licenses | No | Husky is MIT licensed; no other new dependencies |
+| Terms of Service | N/A | GitHub CLI used within normal GitHub ToS |
+| Data Retention | N/A | Audit trail is part of repo history; follows repo retention policy |
+| Export Controls | No | No restricted algorithms or data |
 
-**Data Classification:** Internal (development tooling, no sensitive data)
+**Data Classification:** Internal (audit trail and state files contain no sensitive information)
 
 **Compliance Checklist:**
-- [x] No PII stored without consent (N/A - no PII)
-- [x] All third-party licenses compatible with project license
-- [x] External API usage compliant with provider ToS
-- [x] Data retention policy documented (audit logs are permanent project record)
+- [x] No PII stored
+- [x] Husky (MIT) compatible with PolyForm-Noncommercial-1.0.0
+- [x] GitHub API usage within ToS
+- [x] No external data services
 
 ## 10. Verification & Testing
 
-*Ref: [0005-testing-strategy-and-protocols.md](0005-testing-strategy-and-protocols.md)*
+### 10.0 Test Plan (TDD - Complete Before Implementation)
 
-**Testing Philosophy:** Strive for 100% automated test coverage. Yes, we're TDD-ing the TDD tool.
+| Test ID | Test Description | Expected Behavior | Status |
+|---------|------------------|-------------------|--------|
+| T010 | `load_config` returns defaults when no config file | Returns dict with default values | RED |
+| T020 | `load_config` parses valid .tdd-config.json | Returns parsed config with all fields | RED |
+| T030 | `is_excluded_file` excludes .md files | Returns True for `README.md` | RED |
+| T040 | `is_excluded_file` excludes .json files | Returns True for `config.json` | RED |
+| T050 | `is_excluded_file` includes .py source files | Returns False for `foo.py` | RED |
+| T060 | `resolve_test_file` maps source to test path | `assemblyzero/foo.py` → `tests/unit/test_foo.py` | RED |
+| T070 | `resolve_test_file` returns None for excluded files | Returns None for `.md` files | RED |
+| T080 | `check_test_existence` passes when test exists | Returns `(True, [])` | RED |
+| T090 | `check_test_existence` fails when test missing | Returns `(False, [error_msg])` | RED |
+| T100 | `verify_red_phase` accepts exit code 1 | Returns `{valid: True, exit_code: 1}` | RED |
+| T110 | `verify_red_phase` rejects exit code 0 | Returns `{valid: False}` with "tests passed" msg | RED |
+| T120 | `verify_red_phase` rejects exit code 2 | Returns `{valid: False}` with "collection error" msg | RED |
+| T130 | `verify_red_phase` rejects exit code 5 | Returns `{valid: False}` with "no tests found" msg | RED |
+| T140 | `verify_green_phase` accepts exit code 0 | Returns `{valid: True, exit_code: 0}` | RED |
+| T150 | `verify_green_phase` rejects exit code 1 | Returns `{valid: False}` with "tests failed" msg | RED |
+| T160 | `format_exit_code_message` for each pytest code | Returns correct human-readable string | RED |
+| T170 | `format_exit_code_message` exit code 5 suggests naming | Contains "test_*.py" suggestion | RED |
+| T180 | `run_test_file` uses list args not shell=True | Verify subprocess called with list, shell=False | RED |
+| T190 | `run_test_file` enforces 120s timeout | subprocess.run called with timeout=120 | RED |
+| T200 | `generate_red_phase_footer` format | Returns "TDD-Red-Phase: {sha}:{ts}" | RED |
+| T210 | `handle_override` requires non-empty reason | Returns error/raises if reason is empty | RED |
+| T220 | `handle_override` writes to pending issues queue | Entry appended to ~/.tdd-pending-issues.json | RED |
+| T230 | `handle_override` always returns 0 (non-blocking) | Return value is 0 regardless of gh success | RED |
+| T240 | `extract_test_names` parses pytest output | Returns list of test function names | RED |
+| T250 | `append_audit_entry` creates file if not exists | Creates docs/reports/{ID}/tdd-audit.md | RED |
+| T260 | `append_audit_entry` is strictly additive | File grows, existing content unchanged | RED |
+| T270 | `add_pending_issue` appends to queue file | Queue file contains new entry | RED |
+| T280 | `create_github_issue` uses subprocess list args | Verify no shell=True in subprocess call | RED |
+| T290 | `flush_pending_issues` processes uncreated entries | Attempts creation for created=false entries | RED |
+| T300 | `flush_pending_issues` handles gh unavailable | Failed entries retain in queue with error | RED |
+| T310 | CLI `--verify-red` end-to-end with fixture | Correct exit code and output for failing test | RED |
+| T320 | CLI `--verify-red` rejects passing test fixture | Correct error message for passing test | RED |
+| T330 | CLI `--skip-tdd-gate` without `--reason` fails | Exit code 2 (usage error) | RED |
+| T340 | `read_local_state` returns empty state when file missing | Returns default empty TDDLocalState | RED |
+| T350 | `write_local_state` creates file and parent dirs | File exists with correct content after call | RED |
+
+**Coverage Target:** ≥95% for all new code in `tools/tdd_gate.py`, `tools/tdd_audit.py`, `tools/tdd_pending_issues.py`
+
+**TDD Checklist:**
+- [ ] All tests written before implementation
+- [ ] Tests currently RED (failing)
+- [ ] Test IDs match scenario IDs in 10.1
+- [ ] Test files created at: `tests/unit/test_tdd_gate.py`, `tests/unit/test_tdd_audit.py`, `tests/unit/test_tdd_pending_issues.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Red phase with failing test | Auto | `test_fails.py` with `assert False` | Exit 0, "Red phase verified" | Exit code 1 from pytest recorded |
-| 020 | Red phase with passing test | Auto | `test_passes.py` with `assert True` | Exit 1, error message | "tests passed (exit code 0)" |
-| 030 | Red phase with syntax error | Auto | `test_broken.py` with invalid syntax | Exit 1, error message | "collection error (exit code 2)" |
-| 040 | Red phase with no tests | Auto | `test_empty.py` with no functions | Exit 1, error message | "no tests found (exit code 5)" |
-| 050 | Green phase with passing test | Auto | `test_passes.py` | Exit 0, "Green phase verified" | Exit code 0 from pytest |
-| 060 | Green phase with failing test | Auto | `test_fails.py` | Exit 1, error message | "tests still failing" |
-| 070 | Pre-commit blocks missing test | Auto | Commit `feature.py` without `test_feature.py` | Commit blocked | Hook exits non-zero |
-| 080 | Pre-commit allows with test | Auto | Commit `feature.py` with `test_feature.py` | Commit allowed | Hook exits zero |
-| 090 | Pre-commit excludes markdown | Auto | Commit `README.md` only | Commit allowed | No test required |
-| 100 | Pre-commit excludes config | Auto | Commit `.tdd-config.json` only | Commit allowed | No test required |
-| 110 | Commit footer injection | Auto | Commit after red phase | Footer in message | `TDD-Red-Phase:` present |
-| 120 | Override with reason | Auto | `--skip-tdd-gate --reason "P0"` | Override allowed | Pending issue queued |
-| 130 | Override without reason | Auto | `--skip-tdd-gate` (no reason) | Override blocked | Error requiring reason |
-| 140 | CI footer extraction | Auto | PR with footer in commit | PR passes | Footer found and validated |
-| 150 | CI squash handling | Auto | Squashed PR, footer in history | PR passes | Coverage check fallback |
-| 160 | Pending issue creation | Auto-Live | Queued issue + gh auth | Issue created | GitHub issue exists |
-| 170 | Pending issue offline | Auto | Queued issue, no connectivity | Issue queued | Local file updated |
-| 180 | Flush command | Auto-Live | `--flush` with pending issues | Issues created | Queue emptied |
-| 190 | Audit trail append | Auto | Red phase completion | Entry added | tdd-audit.md updated |
-| 200 | Jest file detection | Auto | `feature.test.js` | Jest framework | Correct runner invoked |
-| 210 | Pytest file detection | Auto | `test_feature.py` | Pytest framework | Correct runner invoked |
-| 220 | Input sanitization | Auto | `--reason "; rm -rf /"` | Safe handling | No shell execution |
-| 230 | GPG signing compatibility | Auto | Signed commit with footer | Both present | Signature valid, footer intact |
+| 010 | Config load with defaults | Auto | No config file on disk | Default config dict | All default values present |
+| 020 | Config load from file | Auto | Valid `.tdd-config.json` fixture | Parsed config | All fields match fixture |
+| 030 | Exclude markdown files | Auto | Path `docs/README.md` | `is_excluded=True` | Returns True |
+| 040 | Exclude JSON config files | Auto | Path `config.json` | `is_excluded=True` | Returns True |
+| 050 | Include Python source files | Auto | Path `assemblyzero/core/engine.py` | `is_excluded=False` | Returns False |
+| 060 | Resolve test path for Python | Auto | `assemblyzero/core/engine.py` | `tests/unit/test_engine.py` | Correct path returned |
+| 070 | Resolve returns None for excluded | Auto | `README.md` | `None` | Returns None |
+| 080 | Test existence check passes | Auto | Source file + test file both exist | `(True, [])` | No missing messages |
+| 090 | Test existence check fails | Auto | Source file exists, test file missing | `(False, ["Missing..."])` | Error message lists expected path |
+| 100 | Red phase exit code 1 (valid) | Auto | Mock subprocess returning 1 | `{valid: True}` | valid=True, message contains "verified" |
+| 110 | Red phase exit code 0 (invalid) | Auto | Mock subprocess returning 0 | `{valid: False}` | valid=False, message contains "passed" |
+| 120 | Red phase exit code 2 (invalid) | Auto | Mock subprocess returning 2 | `{valid: False}` | valid=False, message contains "collection error" |
+| 130 | Red phase exit code 5 (invalid) | Auto | Mock subprocess returning 5 | `{valid: False}` | valid=False, message contains "test_*.py" |
+| 140 | Green phase exit code 0 (valid) | Auto | Mock subprocess returning 0 | `{valid: True}` | valid=True |
+| 150 | Green phase exit code 1 (invalid) | Auto | Mock subprocess returning 1 | `{valid: False}` | valid=False |
+| 160 | Exit code message formatting | Auto | Each exit code + framework | Correct string | Message matches expected text |
+| 170 | Exit code 5 naming suggestion | Auto | Exit code 5, framework "pytest" | String containing "test_*.py" | Suggestion present |
+| 180 | Subprocess uses list args | Auto | Any test file | subprocess.run call args | `shell` param is False, args is list |
+| 190 | Subprocess timeout enforcement | Auto | Any test file | subprocess.run call args | `timeout=120` in call |
+| 200 | Footer generation format | Auto | SHA "abc1234", timestamp | `"TDD-Red-Phase: abc1234:..."` | Exact format match |
+| 210 | Override rejects empty reason | Auto | `--reason ""` | Exit code 2 | Non-zero exit, error message |
+| 220 | Override writes pending issue | Auto | Valid reason + mock git info | Entry in queue file | File contains new entry with correct fields |
+| 230 | Override returns 0 always | Auto | Valid reason, gh fails | Exit code 0 | Return value is 0 |
+| 240 | Extract test names from pytest | Auto | Sample pytest verbose output | List of test names | Names match output |
+| 250 | Audit entry creates file | Auto | Non-existent audit path | File created with entry | File exists, content valid |
+| 260 | Audit entry is additive | Auto | Existing audit file + new entry | File contains both entries | Original content preserved, new entry appended |
+| 270 | Pending issue queue append | Auto | New entry data | Queue file has entry | Entry present with correct fields |
+| 280 | GH issue uses safe subprocess | Auto | Entry data | subprocess.run args | shell=False, args is list |
+| 290 | Flush processes uncreated | Auto | Queue with 2 uncreated entries | Both attempted | created_count matches |
+| 300 | Flush handles gh failure | Auto | Mock gh returning error | Entries remain in queue | error field set, retry_count incremented |
+| 310 | CLI verify-red with failing fixture | Auto | `sample_failing_test.py` path | Exit 0 (tool success) | Output contains "Red phase verified" |
+| 320 | CLI verify-red with passing fixture | Auto | `sample_passing_test.py` path | Exit 1 (gate blocked) | Output contains "tests passed" |
+| 330 | CLI skip without reason | Auto | `--skip-tdd-gate` (no --reason) | Exit 2 | Error message about required reason |
+| 340 | Local state read when missing | Auto | Non-existent .tdd-state.json | Default empty dict | No error, empty state returned |
+| 350 | Local state write creates dirs | Auto | Non-existent parent directory | File created | File exists with valid JSON |
 
 ### 10.2 Test Commands
 
 ```bash
-# Run all automated tests
-poetry run pytest tests/test_tdd_gate.py tests/test_tdd_audit.py tests/test_tdd_pending.py -v
+# Run all TDD gate unit tests
+poetry run pytest tests/unit/test_tdd_gate.py tests/unit/test_tdd_audit.py tests/unit/test_tdd_pending_issues.py -v
 
-# Run only fast/mocked tests (exclude live)
-poetry run pytest tests/ -v -m "not live"
+# Run only fast/mocked tests
+poetry run pytest tests/unit/test_tdd_gate.py -v -m "not integration"
 
-# Run live integration tests (requires gh auth)
-poetry run pytest tests/ -v -m live
+# Run e2e workflow tests (requires git repo setup)
+poetry run pytest tests/e2e/test_tdd_workflow.py -v -m e2e
 
-# Run specific scenario
-poetry run pytest tests/test_tdd_gate.py::test_red_phase_failing_test -v
+# Run with coverage
+poetry run pytest tests/unit/test_tdd_gate.py tests/unit/test_tdd_audit.py tests/unit/test_tdd_pending_issues.py -v --cov=tools --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
 
-**N/A - All scenarios automated.**
-
-All test scenarios including GPG signing, GitHub issue creation, and hook behavior can be verified through automated integration tests with appropriate mocking and live tests with real GitHub API.
+| ID | Scenario | Why Not Automated | Steps |
+|----|----------|-------------------|-------|
+| M010 | GPG signing compatibility | Requires GPG key configured on dev machine | 1. `git config commit.gpgsign true` 2. Write failing test 3. `tdd-gate --verify-red test_file.py` 4. `git commit` 5. `git log --show-signature -1` → verify signature AND footer present |
+| M020 | Husky auto-installation | Requires fresh clone + npm install | 1. Clone repo to temp dir 2. `npm install` 3. Verify `.husky/pre-commit` exists 4. Verify `.husky/prepare-commit-msg` exists |
+| M030 | Offline override flow | Requires network disconnection | 1. Disconnect network 2. `tdd-gate --skip-tdd-gate --reason "P0"` 3. Verify commit succeeds 4. Verify `~/.tdd-pending-issues.json` has entry 5. Reconnect, `tdd-pending-issues --flush` |
 
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Developers bypass hooks via `--no-verify` | Medium | Medium | CI gate catches missing footers, audit trail visible in PR |
-| Test framework detection fails | Low | Low | Configurable patterns in `.tdd-config.json`, fallback prompts |
-| GitHub API changes break issue creation | Low | Low | `gh` CLI handles API compatibility, queue retries |
-| Husky installation fails on some systems | Medium | Low | Fallback manual hook installation documented |
-| Large monorepo slows file checks | Medium | Medium | File-scoped execution, configurable exclusions |
-| Squash merges lose footers | Medium | High | CI extracts from full branch history, coverage fallback |
+| Hook crashes block all commits | High | Low | Fail-open: hook catches all exceptions and exits 0; `git commit --no-verify` as escape hatch |
+| Developers circumvent with `--no-verify` | Med | Med | CI gate catches missing footer; audit trail shows gaps; team culture enforcement |
+| Test runner timeout on slow tests | Med | Low | 120s timeout with clear error message; configurable in `.tdd-config.json` |
+| Squash merge loses footer from branch | Med | Med | CI extracts from all branch commits before squash; also accepts if coverage met |
+| Cross-platform shell compatibility | Med | Med | Shell hooks are minimal (delegate to Python); Python handles all complex logic |
+| Husky not installed (npm not available) | Low | Low | Manual hook installation documented; shell scripts work standalone |
+| `~/.tdd-pending-issues.json` grows unbounded | Low | Low | `--flush` command + successful entries auto-removed; max ~50 entries realistic |
+| Concurrent agents editing same audit file | Med | Low | Audit file is append-only markdown; git merge handles appends cleanly; worktree isolation prevents conflicts |
 
 ## 12. Definition of Done
 
 ### Code
-- [ ] `tools/tdd-gate.py` implementation complete and linted
-- [ ] `tools/tdd-audit.py` implementation complete and linted
-- [ ] `tools/tdd-pending-issues.py` implementation complete and linted
+- [ ] `tools/tdd_gate.py` implemented with all functions from Section 2.4
+- [ ] `tools/tdd_audit.py` implemented with all functions from Section 2.4
+- [ ] `tools/tdd_pending_issues.py` implemented with all functions from Section 2.4
 - [ ] `hooks/pre-commit-tdd-gate.sh` implemented
 - [ ] `hooks/prepare-commit-msg-tdd.sh` implemented
-- [ ] `.husky/pre-commit` configured
-- [ ] `.husky/prepare-commit-msg` configured
-- [ ] Code comments reference this LLD (Issue #102)
+- [ ] `.tdd-config.json` created with sensible defaults
+- [ ] `.husky/pre-commit` and `.husky/prepare-commit-msg` configured
+- [ ] `dashboard/package.json` updated with `prepare` script and husky devDependency
+- [ ] `.gitignore` updated to include `.tdd-state.json`
+- [ ] All code linted and type-hinted
 
 ### Tests
-- [ ] All 23 test scenarios pass
-- [ ] Test coverage ≥ 90% for new code
-- [ ] Live integration tests pass with real GitHub API
+- [ ] All 35 test scenarios from Section 10.0 pass (RED → GREEN)
+- [ ] Test coverage ≥ 95% for all new tools
+- [ ] E2E workflow test passes
 
 ### Documentation
 - [ ] `docs/standards/0065-tdd-enforcement.md` created
 - [ ] `CLAUDE.md` updated with TDD workflow section
-- [ ] README updated with TDD gate setup instructions
-- [ ] Files added to `docs/0003-file-inventory.md`
 - [ ] LLD updated with any implementation deviations
-
-### Reports (Pre-Merge Gate)
-- [ ] `docs/reports/102/implementation-report.md` created
-- [ ] `docs/reports/102/test-report.md` created
-- [ ] `docs/reports/102/tdd-audit.md` initialized (meta: TDD for TDD tool)
+- [ ] `docs/reports/102/implementation-report.md` completed
+- [ ] `docs/reports/102/test-report.md` completed
+- [ ] New files added to `docs/0003-file-inventory.md`
 
 ### Review
+- [ ] Run 0809 Security Audit — PASS
+- [ ] Run 0817 Wiki Alignment Audit — PASS
 - [ ] Code review completed
-- [ ] 0809 Security Audit - PASS
-- [ ] 0817 Wiki Alignment Audit - PASS
 - [ ] User approval before closing issue
 
----
+### 12.1 Traceability (Mechanical - Auto-Checked)
 
-## Appendix A: Configuration Reference
+Files in Definition of Done traced to Section 2.1:
 
-### `.tdd-config.json` Schema
+| DoD Item | Section 2.1 Entry |
+|----------|-------------------|
+| `tools/tdd_gate.py` | ✅ Add |
+| `tools/tdd_audit.py` | ✅ Add |
+| `tools/tdd_pending_issues.py` | ✅ Add |
+| `hooks/pre-commit-tdd-gate.sh` | ✅ Add |
+| `hooks/prepare-commit-msg-tdd.sh` | ✅ Add |
+| `.tdd-config.json` | ✅ Add |
+| `.husky/pre-commit` | ✅ Add |
+| `.husky/prepare-commit-msg` | ✅ Add |
+| `dashboard/package.json` | ✅ Modify |
+| `.gitignore` | ✅ Modify |
+| `docs/standards/0065-tdd-enforcement.md` | ✅ Add |
+| `CLAUDE.md` | ✅ Modify |
+| `docs/reports/102/implementation-report.md` | ✅ Add |
+| `docs/reports/102/test-report.md` | ✅ Add |
 
-```json
-{
-  "test_patterns": {
-    "pytest": ["test_*.py", "*_test.py"],
-    "jest": ["*.test.js", "*.spec.js", "*.test.ts", "*.spec.ts"]
-  },
-  "excluded_extensions": [".md", ".rst", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini"],
-  "min_test_count": 1,
-  "test_commands": {
-    "pytest": "pytest {file} -v",
-    "jest": "jest {file} --passWithNoTests=false"
-  },
-  "source_patterns": {
-    "python": ["*.py"],
-    "javascript": ["*.js", "*.ts"]
-  },
-  "test_directory": "tests",
-  "audit_directory": "docs/reports"
-}
-```
+Risk mitigations traced to functions:
 
-### Commit Footer Format
-
-```
-TDD-Red-Phase: <short-sha>:<ISO-8601-timestamp>
-
-Example:
-TDD-Red-Phase: abc1234:2025-01-15T10:30:00Z
-```
-
-### Pending Issue Queue Format (`~/.tdd-pending-issues.json`)
-
-```json
-{
-  "pending": [
-    {
-      "reason": "P0 production outage",
-      "timestamp": "2025-01-15T10:30:00Z",
-      "commit_sha": "abc1234def5678",
-      "branch": "hotfix/critical-bug",
-      "retry_count": 0
-    }
-  ]
-}
-```
+| Risk Mitigation | Function |
+|-----------------|----------|
+| Fail-open hook behavior | `hooks/pre-commit-tdd-gate.sh` (trap + exit 0) |
+| Subprocess list args (injection prevention) | `run_test_file()`, `create_github_issue()` |
+| 120s timeout | `run_test_file()` |
+| Non-blocking override | `handle_override()` |
+| Append-only audit | `append_audit_entry()` |
+| Pending issue retry | `flush_pending_issues()` |
 
 ---
 
-## Appendix B: Review Log
+## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
 
@@ -704,6 +1176,6 @@ TDD-Red-Phase: abc1234:2025-01-15T10:30:00Z
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | Pending initial review |
+| — | — | — | Awaiting review |
 
 **Final Status:** PENDING

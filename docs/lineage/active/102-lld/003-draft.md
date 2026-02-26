@@ -1,12 +1,10 @@
-
-
 # 102 - Feature: TDD Test Initialization Gate
 
 <!-- Template Metadata
 Last Updated: 2026-02-17
-Updated By: Issue #102 LLD creation
-Update Reason: Initial Low-Level Design for TDD enforcement tooling
-Previous: N/A
+Updated By: Issue #102 LLD revision
+Update Reason: Address mechanical validation failures — add test coverage for REQ-8, REQ-10, REQ-11, REQ-12, REQ-17, REQ-18; fix Section 3 format; fix Section 10.1 REQ references
+Previous: Initial Low-Level Design for TDD enforcement tooling
 -->
 
 ## 1. Context & Goal
@@ -419,6 +417,31 @@ def main() -> int:
     Returns exit code: 0 = success, 1 = some failures.
     """
     ...
+
+
+# ============================================================
+# hooks/prepare_commit_msg_tdd.sh — Footer injection hook
+# ============================================================
+# Shell function (not Python), documented here for completeness:
+#
+# inject_tdd_footer(commit_msg_file: str) -> void:
+#     """Read .tdd-state.json, append TDD-Red-Phase footer to commit message.
+#     
+#     Runs in prepare-commit-msg phase, BEFORE GPG signing.
+#     Never blocks commit (exit 0 always).
+#     """
+
+# ============================================================
+# hooks/pre_commit_tdd_gate.sh — Test existence hook
+# ============================================================
+# Shell function (not Python), documented here for completeness:
+#
+# check_staged_files() -> int:
+#     """Check staged source files have corresponding test files.
+#     
+#     Returns 0 if all tests exist or only excluded files staged.
+#     Returns 1 if any source file missing its test.
+#     """
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
@@ -568,6 +591,7 @@ def main() -> int:
   - Local `.tdd-state.json` is git-ignored convenience cache; footers are source of truth for CI
   - Audit trail is append-only markdown for human readability and git-friendly diffs
   - Husky manages hook installation to ensure consistent setup across developers
+  - Prepare-commit-msg hook phase chosen specifically because it runs before GPG signing
 
 ### 2.7 Architecture Decisions
 
@@ -580,6 +604,7 @@ def main() -> int:
 | Issue creation | Synchronous blocking, async non-blocking | Async non-blocking | Emergency hotfixes must not be blocked by network issues |
 | Audit format | JSON, SQLite, Markdown | Append-only Markdown | Human-readable, git-friendly diffs, no binary files |
 | Tool language | Shell only, Python only, Mixed | Mixed (shell hooks call Python tools) | Shell hooks are thin wrappers; Python provides testable logic |
+| Hook phase for footer | post-commit, commit-msg, prepare-commit-msg | prepare-commit-msg | Runs before GPG signing; does not invalidate signatures |
 
 **Architectural Constraints:**
 - Must integrate with existing poetry-based Python toolchain
@@ -883,6 +908,12 @@ sequenceDiagram
 | T410 | CLI `--verify-red` with failing test fixture | Exit code 0, success message | RED |
 | T420 | CLI `--verify-green` with passing test fixture | Exit code 0, success message | RED |
 | T430 | Config exclusions are customizable | Custom extensions/paths respected | RED |
+| T440 | Prepare-commit-msg hook runs in correct phase | Footer appended before GPG signing; hook never blocks | RED |
+| T450 | Override allows immediate commit | `--skip-tdd-gate --reason` returns exit 0 (non-blocking) | RED |
+| T460 | Override logs to pending issues file | `~/.tdd-pending-issues.json` contains new entry after override | RED |
+| T470 | Pending issue creation is async non-blocking | `handle_override` returns immediately; failed gh call does not raise | RED |
+| T480 | `.tdd-state.json` is in `.gitignore` | `.gitignore` file contains `.tdd-state.json` entry | RED |
+| T490 | Husky `prepare` script configured | `dashboard/package.json` contains `"prepare": "husky"` script | RED |
 
 **Coverage Target:** ≥95% for all new code in `tools/tdd_gate.py`, `tools/tdd_audit.py`, `tools/tdd_pending_issues.py`
 
@@ -896,49 +927,55 @@ sequenceDiagram
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Load valid config | Auto | Valid `.tdd-config.json` | Parsed TDDConfig | All fields match expected values |
-| 020 | Load missing config | Auto | No config file | Default TDDConfig | Defaults applied correctly |
-| 030 | Load malformed config | Auto | Invalid JSON | ValueError raised | Exception message mentions JSON parse error |
-| 040 | Exclude markdown files | Auto | `README.md` | `is_excluded=True` | File bypasses TDD gate |
-| 050 | Include Python source | Auto | `feature.py` | `is_excluded=False` | File requires test |
-| 060 | Exclude JSON config | Auto | `config.json` | `is_excluded=True` | File bypasses TDD gate |
-| 070 | Exclude by path prefix | Auto | `docs/guide.py` | `is_excluded=True` | Path prefix match works |
-| 080 | Find pytest test file | Auto | `assemblyzero/core/engine.py` | `tests/unit/test_engine.py` | Correct mapping |
-| 090 | Find jest test file | Auto | `src/utils.js`, jest config | `src/__tests__/utils.test.js` | Correct mapping |
-| 100 | Test file not found | Auto | `new_module.py` (no test) | `None` | Returns None, not error |
-| 110 | All tests exist | Auto | Files with matching tests | `(True, [])` | No errors |
-| 120 | Missing tests detected | Auto | Files without tests | `(False, [messages])` | Error messages list missing files |
-| 130 | Only excluded files changed | Auto | `[README.md, config.yaml]` | `(True, [])` | Gate passes |
-| 140 | Valid red phase (exit 1) | Auto | Failing test fixture | `(True, msg, 1)` | Red phase accepted |
-| 150 | Invalid red: tests pass (exit 0) | Auto | Passing test fixture | `(False, msg, 0)` | Red phase rejected |
-| 160 | Invalid red: collection error (exit 2) | Auto | Syntax error fixture | `(False, msg, 2)` | Red phase rejected with specific message |
-| 170 | Invalid red: no tests (exit 5) | Auto | Empty test fixture | `(False, "Did you name...", 5)` | Error mentions file naming |
-| 180 | Valid green phase (exit 0) | Auto | Passing test fixture | `(True, msg, 0)` | Green phase accepted |
-| 190 | Invalid green: still failing | Auto | Failing test fixture | `(False, msg, 1)` | Green phase rejected |
-| 200 | Subprocess uses list args | Auto | Any test file | subprocess.run called with list | Mock verifies `shell` param absent or False |
-| 210 | File-scoped execution | Auto | Specific test file | Only that file in args | No wildcard or directory in command |
-| 220 | Timeout enforcement | Auto | Slow test (mocked) | TimeoutExpired | Subprocess killed after timeout |
-| 230 | Record red phase state | Auto | Valid red result | JSON file written | State file contains expected fields |
-| 240 | Red phase footer format | Auto | Known SHA and timestamp | `TDD-Red-Phase: abc1234:2026-02-17T...` | Regex match |
-| 250 | Override without reason | Auto | `--skip-tdd-gate` (no --reason) | Exit code 2 (usage error) | Error message requires --reason |
-| 260 | Override with valid reason | Auto | `--reason "P0 outage"` | Entry in pending queue | Queue file contains entry |
-| 270 | Override injection attempt | Auto | `--reason '"; rm -rf / #'` | Reason stored literally | No shell execution; subprocess list args verified |
-| 280 | Audit new file creation | Auto | First entry for issue | File created with header + entry | File exists, contains header and entry |
-| 290 | Audit append to existing | Auto | Second entry for issue | Original preserved + new appended | File contains both entries |
-| 300 | CI extracts footer | Auto | Git log with footer | List of `{sha, timestamp}` | Parsed correctly |
-| 310 | CI no footer found | Auto | Git log without footer | Empty list | Returns `[]` |
-| 320 | Add to empty pending queue | Auto | First override | File created with entry | Valid JSON with one entry |
-| 330 | Add to existing queue | Auto | Subsequent override | Entry appended | Both entries present |
-| 340 | Flush with gh available | Auto | Pending entries, gh mocked success | Queue cleared | `create_github_issue` called for each |
-| 350 | Flush with gh unavailable | Auto | Pending entries, gh mocked failure | Queue retained with error | `retry_count` incremented |
-| 360 | Flush dry run | Auto | Pending entries | No API calls | Queue unchanged, output shows what would happen |
-| 370 | Compliance report | Auto | Audit file with red+green entries | Markdown report | Contains phase counts, verdict |
-| 380 | No test deletions | Auto | No deleted test files in diff | Empty list | No warnings |
-| 390 | Test deletions detected | Auto | Deleted test file in diff | List of paths | Warning includes deleted file names |
-| 400 | CLI --verify-red passing test | Auto | Passing fixture path | Exit 1, error message | Specific "tests passed" message |
-| 410 | CLI --verify-red failing test | Auto | Failing fixture path | Exit 0, success message | "Red phase verified" message |
-| 420 | CLI --verify-green passing test | Auto | Passing fixture path | Exit 0, success message | "Green phase verified" message |
-| 430 | Custom config exclusions | Auto | Custom config JSON | Custom patterns applied | Non-default extensions excluded |
+| 010 | Load valid config (REQ-16) | Auto | Valid `.tdd-config.json` | Parsed TDDConfig | All fields match expected values |
+| 020 | Load missing config (REQ-16) | Auto | No config file | Default TDDConfig | Defaults applied correctly |
+| 030 | Load malformed config (REQ-16) | Auto | Invalid JSON | ValueError raised | Exception message mentions JSON parse error |
+| 040 | Exclude markdown files (REQ-2) | Auto | `README.md` | `is_excluded=True` | File bypasses TDD gate |
+| 050 | Include Python source (REQ-1) | Auto | `feature.py` | `is_excluded=False` | File requires test |
+| 060 | Exclude JSON config (REQ-2) | Auto | `config.json` | `is_excluded=True` | File bypasses TDD gate |
+| 070 | Exclude by path prefix (REQ-2) | Auto | `docs/guide.py` | `is_excluded=True` | Path prefix match works |
+| 080 | Find pytest test file (REQ-19) | Auto | `assemblyzero/core/engine.py` | `tests/unit/test_engine.py` | Correct mapping |
+| 090 | Find jest test file (REQ-20) | Auto | `src/utils.js`, jest config | `src/__tests__/utils.test.js` | Correct mapping |
+| 100 | Test file not found (REQ-1) | Auto | `new_module.py` (no test) | `None` | Returns None, not error |
+| 110 | All tests exist (REQ-1) | Auto | Files with matching tests | `(True, [])` | No errors |
+| 120 | Missing tests detected (REQ-1) | Auto | Files without tests | `(False, [messages])` | Error messages list missing files |
+| 130 | Only excluded files changed (REQ-2) | Auto | `[README.md, config.yaml]` | `(True, [])` | Gate passes |
+| 140 | Valid red phase exit 1 (REQ-4) | Auto | Failing test fixture | `(True, msg, 1)` | Red phase accepted |
+| 150 | Invalid red: tests pass exit 0 (REQ-5) | Auto | Passing test fixture | `(False, msg, 0)` | Red phase rejected |
+| 160 | Invalid red: collection error exit 2 (REQ-5) | Auto | Syntax error fixture | `(False, msg, 2)` | Red phase rejected with specific message |
+| 170 | Invalid red: no tests exit 5 (REQ-6) | Auto | Empty test fixture | `(False, "Did you name...", 5)` | Error mentions file naming |
+| 180 | Valid green phase exit 0 (REQ-4) | Auto | Passing test fixture | `(True, msg, 0)` | Green phase accepted |
+| 190 | Invalid green: still failing (REQ-5) | Auto | Failing test fixture | `(False, msg, 1)` | Green phase rejected |
+| 200 | Subprocess uses list args (REQ-14) | Auto | Any test file | subprocess.run called with list | Mock verifies `shell` param absent or False |
+| 210 | File-scoped execution (REQ-3) | Auto | Specific test file | Only that file in args | No wildcard or directory in command |
+| 220 | Timeout enforcement (REQ-3) | Auto | Slow test (mocked) | TimeoutExpired | Subprocess killed after timeout |
+| 230 | Record red phase state (REQ-7) | Auto | Valid red result | JSON file written | State file contains expected fields |
+| 240 | Red phase footer format (REQ-7) | Auto | Known SHA and timestamp | `TDD-Red-Phase: abc1234:2026-02-17T...` | Regex match |
+| 250 | Override without reason (REQ-10) | Auto | `--skip-tdd-gate` (no --reason) | Exit code 2 (usage error) | Error message requires --reason |
+| 260 | Override with valid reason (REQ-10) | Auto | `--reason "P0 outage"` | Entry in pending queue | Queue file contains entry |
+| 270 | Override injection attempt (REQ-14) | Auto | `--reason '"; rm -rf / #'` | Reason stored literally | No shell execution; subprocess list args verified |
+| 280 | Audit new file creation (REQ-15) | Auto | First entry for issue | File created with header + entry | File exists, contains header and entry |
+| 290 | Audit append to existing (REQ-15) | Auto | Second entry for issue | Original preserved + new appended | File contains both entries |
+| 300 | CI extracts footer (REQ-9) | Auto | Git log with footer | List of `{sha, timestamp}` | Parsed correctly |
+| 310 | CI no footer found (REQ-9) | Auto | Git log without footer | Empty list | Returns `[]` |
+| 320 | Add to empty pending queue (REQ-11) | Auto | First override | File created with entry | Valid JSON with one entry |
+| 330 | Add to existing queue (REQ-11) | Auto | Subsequent override | Entry appended | Both entries present |
+| 340 | Flush with gh available (REQ-13) | Auto | Pending entries, gh mocked success | Queue cleared | `create_github_issue` called for each |
+| 350 | Flush with gh unavailable (REQ-12) | Auto | Pending entries, gh mocked failure | Queue retained with error | `retry_count` incremented |
+| 360 | Flush dry run (REQ-13) | Auto | Pending entries | No API calls | Queue unchanged, output shows what would happen |
+| 370 | Compliance report (REQ-15) | Auto | Audit file with red+green entries | Markdown report | Contains phase counts, verdict |
+| 380 | No test deletions (REQ-15) | Auto | No deleted test files in diff | Empty list | No warnings |
+| 390 | Test deletions detected (REQ-15) | Auto | Deleted test file in diff | List of paths | Warning includes deleted file names |
+| 400 | CLI --verify-red passing test (REQ-5) | Auto | Passing fixture path | Exit 1, error message | Specific "tests passed" message |
+| 410 | CLI --verify-red failing test (REQ-4) | Auto | Failing fixture path | Exit 0, success message | "Red phase verified" message |
+| 420 | CLI --verify-green passing test (REQ-4) | Auto | Passing fixture path | Exit 0, success message | "Green phase verified" message |
+| 430 | Custom config exclusions (REQ-16) | Auto | Custom config JSON | Custom patterns applied | Non-default extensions excluded |
+| 440 | Prepare-commit-msg hook phase before GPG (REQ-8) | Auto | Commit with GPG config enabled, `.tdd-state.json` with red phase | Footer appended to commit message file; hook exits 0 | Footer present in message file; hook script uses prepare-commit-msg phase (not commit-msg or post-commit); exit code always 0 |
+| 450 | Override allows immediate commit non-blocking (REQ-10) | Auto | `--skip-tdd-gate --reason "P0 outage"` | Exit code 0, commit not blocked | `handle_override` returns 0; no exception raised; warning printed to stderr |
+| 460 | Override logs to pending issues file (REQ-11) | Auto | `--skip-tdd-gate --reason "hotfix"` with mock git context | `~/.tdd-pending-issues.json` updated | File contains new PendingIssue with correct branch, SHA, reason, files_changed |
+| 470 | Pending issue creation async non-blocking (REQ-12) | Auto | `handle_override` with gh CLI returning error (mocked timeout/failure) | Override completes successfully; issue remains in queue | `handle_override` does not raise; pending issue stored; gh failure does not propagate |
+| 480 | `.tdd-state.json` in .gitignore (REQ-17) | Auto | Read `.gitignore` file content | `.tdd-state.json` entry present | Line containing `.tdd-state.json` found in `.gitignore` after setup |
+| 490 | Husky prepare script configured (REQ-18) | Auto | Read `dashboard/package.json` | `"prepare": "husky"` in scripts | JSON parse of `package.json` shows `scripts.prepare == "husky"` |
 
 ### 10.2 Test Commands
 
@@ -960,9 +997,9 @@ poetry run pytest tests/unit/test_tdd_gate.py tests/unit/test_tdd_audit.py tests
 
 | ID | Scenario | Why Not Automated | Steps |
 |----|----------|-------------------|-------|
-| M010 | GPG signing compatibility | Requires GPG key configured on developer machine | 1. `git config commit.gpgsign true` 2. Run red phase 3. `git commit` 4. Verify `git log --show-signature -1` shows valid signature AND footer |
-| M020 | Husky auto-installation | Requires clean `npm install` in fresh clone | 1. Clone repo fresh 2. `npm install` 3. Verify `.husky/pre-commit` and `.husky/prepare-commit-msg` exist |
-| M030 | Offline override flow | Requires network disconnection | 1. Disconnect network 2. `tdd-gate --skip-tdd-gate --reason "test"` 3. Verify commit succeeds 4. Verify `~/.tdd-pending-issues.json` updated 5. Reconnect 6. `tdd-pending-issues --flush` |
+| M010 | GPG signing compatibility (REQ-8) | Requires GPG key configured on developer machine | 1. `git config commit.gpgsign true` 2. Run red phase 3. `git commit` 4. Verify `git log --show-signature -1` shows valid signature AND footer |
+| M020 | Husky auto-installation (REQ-18) | Requires clean `npm install` in fresh clone | 1. Clone repo fresh 2. `npm install` 3. Verify `.husky/pre-commit` and `.husky/prepare-commit-msg` exist |
+| M030 | Offline override flow (REQ-12) | Requires network disconnection | 1. Disconnect network 2. `tdd-gate --skip-tdd-gate --reason "test"` 3. Verify commit succeeds 4. Verify `~/.tdd-pending-issues.json` updated 5. Reconnect 6. `tdd-pending-issues --flush` |
 
 ## 11. Risks & Mitigations
 
@@ -977,6 +1014,7 @@ poetry run pytest tests/unit/test_tdd_gate.py tests/unit/test_tdd_audit.py tests
 | Husky not installed (developer doesn't run npm install) | Med | Low | CI gate catches missing footers; setup instructions in README and standard 0065 |
 | Test file naming mismatch across frameworks | Med | Low | Configurable patterns in `.tdd-config.json`; exit code 5 message suggests naming conventions |
 | Commit footer format conflict with other tools | Low | Low | Footer uses unique prefix `TDD-Red-Phase:`; follows git trailer convention |
+| GPG signature invalidated by hook modifying message | High | Med | Footer injected via prepare-commit-msg phase which runs before signing |
 
 ## 12. Definition of Done
 
@@ -985,15 +1023,15 @@ poetry run pytest tests/unit/test_tdd_gate.py tests/unit/test_tdd_audit.py tests
 - [ ] `tools/tdd_audit.py` implemented with audit trail generation
 - [ ] `tools/tdd_pending_issues.py` implemented with `--flush` command
 - [ ] `hooks/pre_commit_tdd_gate.sh` implemented (thin shell wrapper)
-- [ ] `hooks/prepare_commit_msg_tdd.sh` implemented (footer injection)
+- [ ] `hooks/prepare_commit_msg_tdd.sh` implemented (footer injection, prepare-commit-msg phase)
 - [ ] `.tdd-config.json` created with default configuration
 - [ ] Husky configuration complete (`.husky/pre-commit`, `.husky/prepare-commit-msg`)
-- [ ] `dashboard/package.json` updated with `prepare` script
+- [ ] `dashboard/package.json` updated with `prepare` script for husky auto-install
 - [ ] `.gitignore` updated with `.tdd-state.json`
 - [ ] Code comments reference this LLD (#102)
 
 ### Tests
-- [ ] All 43 test scenarios pass (T010–T430)
+- [ ] All 49 test scenarios pass (T010–T490)
 - [ ] Test coverage ≥95% for `tools/tdd_gate.py`
 - [ ] Test coverage ≥95% for `tools/tdd_audit.py`
 - [ ] Test coverage ≥95% for `tools/tdd_pending_issues.py`
@@ -1041,6 +1079,7 @@ Risk mitigations mapped to functions:
 | Squash-merge footer loss | `extract_tdd_footer_from_commits()` (all commits scan) |
 | gh CLI unavailable | `check_gh_available()`, `add_pending_issue()` |
 | Injection via --reason | `handle_override()` (subprocess list args) |
+| GPG signature invalidation | `hooks/prepare_commit_msg_tdd.sh` (correct hook phase) |
 
 ---
 
@@ -1052,6 +1091,7 @@ Risk mitigations mapped to functions:
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| — | — | — | Awaiting first review |
+| Mechanical Validation #1 | 2026-02-17 | REJECTED | 6 requirements missing test coverage (REQ-8, REQ-10, REQ-11, REQ-12, REQ-17, REQ-18) |
+| Revision #1 | 2026-02-17 | PENDING | Added T440–T490 covering all 6 missing requirements; updated Section 10.1 with (REQ-N) suffixes; fixed Section 3 numbered list format |
 
 **Final Status:** PENDING

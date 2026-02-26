@@ -2,22 +2,22 @@
 
 <!-- Template Metadata
 Last Updated: 2025-01-XX
-Updated By: Gemini Review #2 revisions
-Update Reason: Address Safety violation - move pending issues storage to worktree
+Updated By: Initial LLD creation
+Update Reason: Initial design for TDD enforcement workflow
 -->
 
 ## 1. Context & Goal
 * **Issue:** #102
 * **Objective:** Enforce TDD discipline by gating implementation work behind verified failing tests, ensuring the red-green-refactor cycle is followed for every feature.
-* **Status:** Approved (gemini-3-pro-preview, 2026-02-04)
+* **Status:** Draft
 * **Related Issues:** #62 (Governance Workflow StateGraph)
 
 ### Open Questions
-*All questions resolved during Gemini Review #1.*
+*Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [x] ~~Does the team use "Squash and Merge" for Pull Requests?~~ **RESOLVED: Yes.** The design handles this correctly by scanning the entire commit range (`origin/main..HEAD`) in the CI pipeline.
-- [x] ~~Does the team prefer strict blocking (CI failure) or soft blocking (warning/audit log) for the MVP?~~ **RESOLVED: Strict blocking.**
-- [x] ~~Should the "Hotfix Override" require manager approval (via CODEOWNERS), or is developer self-attestation sufficient?~~ **RESOLVED: Developer self-attestation.**
+- [ ] Does the team use "Squash and Merge" for Pull Requests? (Current design supports it, but please confirm)
+- [ ] Does the team prefer strict blocking (CI failure) or soft blocking (warning/audit log) for the MVP?
+- [ ] Should the "Hotfix Override" require manager approval (via CODEOWNERS), or is developer self-attestation sufficient?
 
 ## 2. Proposed Changes
 
@@ -36,7 +36,7 @@ Update Reason: Address Safety violation - move pending issues storage to worktre
 | `.husky/pre-commit` | Add | Husky hook configuration |
 | `.husky/prepare-commit-msg` | Add | Husky hook configuration |
 | `package.json` | Modify | Add `prepare` script for automatic husky installation |
-| `.gitignore` | Modify | Add `.tdd-state.json` and `.tdd-pending-issues.json` to ignored files |
+| `.gitignore` | Modify | Add `.tdd-state.json` to ignored files |
 | `docs/standards/0065-tdd-enforcement.md` | Add | Standard documenting TDD gate rules |
 | `CLAUDE.md` | Modify | Add TDD workflow section |
 
@@ -85,7 +85,6 @@ class TDDConfig(TypedDict):
     excluded_extensions: List[str]        # Files excluded from TDD gate
     min_test_count: int                   # Minimum tests required (default: 1)
     test_commands: Dict[str, str]         # Language -> test command
-    source_to_test_mapping: Dict[str, str]  # Source pattern -> test pattern (e.g., "src/{name}.py" -> "tests/test_{name}.py")
 
 class PendingIssue(TypedDict):
     """Pending issue for async creation"""
@@ -113,24 +112,11 @@ class AuditEntry(TypedDict):
 @click.command()
 @click.option('--verify-red', type=click.Path(exists=True), help='Verify red phase for test file')
 @click.option('--verify-green', type=click.Path(exists=True), help='Verify green phase for test file')
-@click.option('--check-existence', type=click.Path(), help='Check if test file exists for source file')
 @click.option('--skip-tdd-gate', is_flag=True, help='Override TDD gate (requires --reason)')
 @click.option('--reason', type=str, help='Justification for skipping TDD gate')
 @click.option('--issue', type=str, help='Issue ID being worked on')
-def main(verify_red: str, verify_green: str, check_existence: str, skip_tdd_gate: bool, reason: str, issue: str) -> None:
+def main(verify_red: str, verify_green: str, skip_tdd_gate: bool, reason: str, issue: str) -> None:
     """Main TDD gate CLI entry point."""
-    ...
-
-def load_config(config_path: str = ".tdd-config.json") -> TDDConfig:
-    """Load TDD configuration from project config file."""
-    ...
-
-def map_source_to_test(source_file: str, config: TDDConfig) -> str:
-    """Map source file path to expected test file path using config patterns."""
-    ...
-
-def check_test_exists(source_file: str, config: TDDConfig) -> Tuple[bool, str]:
-    """Check if corresponding test file exists for source file, return (exists, expected_path)."""
     ...
 
 def run_tests_scoped(test_file: str, config: TDDConfig) -> Tuple[int, str]:
@@ -149,12 +135,8 @@ def generate_commit_footer(sha: str, timestamp: str) -> str:
     """Generate TDD-Red-Phase footer for commit message."""
     ...
 
-def get_pending_issues_path() -> str:
-    """Get path to pending issues file within worktree (.tdd-pending-issues.json in repo root)."""
-    ...
-
 def log_override(reason: str, commit_sha: str) -> None:
-    """Log override to .tdd-pending-issues.json in worktree root."""
+    """Log override to pending issues file."""
     ...
 ```
 
@@ -177,12 +159,8 @@ def extract_footers_from_branch(base_ref: str, head_ref: str) -> List[str]:
 ```python
 # tools/tdd-pending-issues.py
 
-def get_pending_issues_path() -> str:
-    """Get path to pending issues file (.tdd-pending-issues.json in worktree root)."""
-    ...
-
 def load_pending_issues() -> List[PendingIssue]:
-    """Load pending issues from .tdd-pending-issues.json in worktree."""
+    """Load pending issues from ~/.tdd-pending-issues.json."""
     ...
 
 def create_issue_async(issue: PendingIssue) -> bool:
@@ -202,32 +180,16 @@ def main(flush: bool, process: bool) -> None:
 #### Pre-commit Hook Flow
 ```
 1. Get list of staged files
-2. Load configuration from .tdd-config.json
-3. FOR each staged file:
+2. FOR each staged file:
    a. IF extension in excluded_extensions (md, json, yaml, etc.)
       - SKIP this file
    b. IF file is source code (py, js, ts, etc.)
-      - CALL tdd-gate.py --check-existence <file>
-      - Tool uses config to determine expected test file pattern
+      - Determine expected test file pattern
       - CHECK if corresponding test file exists
       - IF no test file exists
-        - PRINT expected test file path to console
         - BLOCK commit with error message
-4. IF all files pass
+3. IF all files pass
    - Allow commit to proceed
-```
-
-#### Check Existence Flow (NEW - addresses architecture gap)
-```
-1. Receive source file path
-2. Load TDD configuration
-3. Determine language from file extension
-4. Apply source_to_test_mapping pattern from config
-5. Construct expected test file path
-6. CHECK if test file exists on disk
-7. RETURN (exists: bool, expected_path: str)
-8. IF not exists:
-   - Print helpful message: "Expected test file: {path}"
 ```
 
 #### Red Phase Verification Flow
@@ -265,7 +227,7 @@ def main(flush: bool, process: bool) -> None:
 #### Override Flow
 ```
 1. Validate --reason is provided
-2. Log override to .tdd-pending-issues.json (in worktree root):
+2. Log override to ~/.tdd-pending-issues.json:
    - reason, commit_sha, timestamp, repo
 3. Allow commit to proceed (non-blocking)
 4. Attempt async issue creation:
@@ -300,8 +262,6 @@ def main(flush: bool, process: bool) -> None:
   - Commit message footers for state transport (not committed JSON files)
   - File-scoped test execution (not full suite)
   - Non-blocking override with async issue creation
-  - Shell hooks delegate all config/mapping logic to Python CLI via `--check-existence`
-  - **UPDATED:** Pending issues stored in worktree (`.tdd-pending-issues.json`) not user home
 
 ### 2.7 Architecture Decisions
 
@@ -312,16 +272,12 @@ def main(flush: bool, process: bool) -> None:
 | Override blocking | Blocking (require issue creation), Non-blocking (async) | Non-blocking | Emergency hotfixes must not be blocked by network/API issues |
 | Hook type for footer | post-commit, prepare-commit-msg | prepare-commit-msg | Runs before GPG signing, doesn't invalidate signatures |
 | Audit storage | Database, JSON file, Markdown | Markdown | Human-readable, version controlled, append-only pattern |
-| Source-to-test mapping logic | In shell script, In Python CLI | Python CLI | Centralizes config parsing, avoids duplication, enables testing |
-| Pending issues storage | User home (~/.tdd-pending-issues.json), Worktree root (.tdd-pending-issues.json), .git directory | Worktree root | Avoids cross-project contamination, stays within worktree scope, cleaned up when repo deleted |
 
 **Architectural Constraints:**
 - Must work offline (override flow)
 - Must not break GPG-signed commits
 - Must support squash/rebase PR workflows
 - Must be language-agnostic (pytest + Jest initially)
-- Shell hooks must delegate config-dependent logic to Python CLI
-- **All file operations must be scoped to the worktree (safety constraint)**
 
 ## 3. Requirements
 
@@ -350,12 +306,8 @@ def main(flush: bool, process: bool) -> None:
 | File-scoped test execution | Fast feedback (seconds), good DX | May miss integration issues | **Selected** |
 | Blocking override (require issue) | Ensures follow-up | Blocks P0 hotfixes if offline | **Rejected** |
 | Non-blocking override (async issue) | Never blocks emergencies | Requires queue management | **Selected** |
-| Source-to-test mapping in shell | Simpler hook | Duplicates config logic, harder to test | **Rejected** |
-| Source-to-test mapping in Python CLI | Testable, centralized | Extra CLI call | **Selected** |
-| Pending issues in user home (~/) | Persists across repos | Cross-project contamination, violates worktree scope | **Rejected** |
-| Pending issues in worktree root | Project-isolated, cleaned with repo | Lost if worktree deleted before flush | **Selected** |
 
-**Rationale:** Developer experience and emergency response are prioritized. State travels with commits to handle complex git workflows. File-scoped execution provides fast feedback. Config logic centralized in Python for testability. Pending issues stored in worktree to maintain project isolation and safety.
+**Rationale:** Developer experience and emergency response are prioritized. State travels with commits to handle complex git workflows. File-scoped execution provides fast feedback.
 
 ## 5. Data & Fixtures
 
@@ -372,7 +324,7 @@ def main(flush: bool, process: bool) -> None:
 ### 5.2 Data Pipeline
 
 ```
-Staged Files ──pre-commit──► tdd-gate --check-existence ──pass/fail──► Commit Allowed/Blocked
+Staged Files ──pre-commit──► Test Existence Check ──pass/fail──► Commit Allowed/Blocked
 
 Test File ──tdd-gate──► Test Runner ──exit code──► Phase Validation ──append──► Audit Trail
 
@@ -388,7 +340,6 @@ Commit ──prepare-commit-msg──► Footer Injection ──write──► F
 | Empty test file | Generated | `# no tests` |
 | Syntax error test | Generated | `def test_broken(: pass` |
 | Mock git repo | Generated | Temporary git init for integration tests |
-| Sample .tdd-config.json | Generated | Various config scenarios for testing |
 
 ### 5.4 Deployment Pipeline
 
@@ -448,9 +399,7 @@ sequenceDiagram
     Dev->>Dev: Write implementation code
     Dev->>Git: git add & commit
     Git->>PC: Pre-commit hook
-    PC->>TG: tdd-gate --check-existence <file>
-    TG->>TG: Load config, map source to test
-    TG-->>PC: Test exists (or expected path)
+    PC->>PC: Check test file exists
     PC-->>Git: ✓ Tests exist
     Git->>PM: Prepare-commit-msg hook
     PM->>PM: Inject TDD-Red-Phase footer
@@ -478,7 +427,7 @@ flowchart TD
     A[Emergency Hotfix Needed] --> B{Use Override?}
     B -->|No| C[Follow Normal TDD Flow]
     B -->|Yes| D[tdd-gate --skip-tdd-gate --reason]
-    D --> E[Log to .tdd-pending-issues.json]
+    D --> E[Log to ~/.tdd-pending-issues.json]
     E --> F[Commit Proceeds Immediately]
     F --> G{gh CLI Available?}
     G -->|Yes| H[Create GitHub Issue]
@@ -509,14 +458,12 @@ flowchart TD
 | Corrupted audit trail | Append-only writes, no modifications | Addressed |
 | Hook breaks all commits | Graceful degradation with clear error messages | Addressed |
 | GPG signature invalidation | Use prepare-commit-msg (before signing) not post-commit | Addressed |
-| Cross-project contamination | Pending issues stored in worktree root, not user home | Addressed |
-| State files outside worktree | All state files (.tdd-state.json, .tdd-pending-issues.json) in worktree root | Addressed |
 
 **Fail Mode:** Fail Open for overrides - Emergency commits always proceed, issue creation is async.
 
 **Recovery Strategy:** 
 - If hooks fail: Clear error message with manual bypass instructions
-- If issue creation fails: Queued locally in worktree, retried automatically or via `--flush`
+- If issue creation fails: Queued locally, retried automatically or via `--flush`
 - If audit file corrupted: Create new audit file, log discontinuity
 
 ## 8. Performance & Cost Considerations
@@ -526,15 +473,13 @@ flowchart TD
 | Metric | Budget | Approach |
 |--------|--------|----------|
 | Red phase verification | < 10s | File-scoped test execution |
-| Pre-commit hook | < 2s | Simple file existence check via CLI |
+| Pre-commit hook | < 2s | Simple file existence check |
 | Prepare-commit-msg | < 100ms | Read/write state file |
 | CI footer extraction | < 5s | Git log parsing |
-| tdd-gate.py startup | < 200ms | Minimal imports, lazy loading |
 
 **Bottlenecks:** 
 - Slow test files will impact red/green verification (user-controlled)
 - Large repos with many commits may slow CI extraction (mitigated by commit range)
-- Multiple staged files each invoke `--check-existence` - consider `--batch` mode for future optimization
 
 ### 8.2 Cost Analysis
 
@@ -589,14 +534,6 @@ flowchart TD
 | T100 | test_excluded_extensions_bypass | Markdown files bypass TDD gate | RED |
 | T110 | test_audit_trail_append_only | Audit entries are appended, never modified | RED |
 | T120 | test_ci_footer_extraction | Footers extracted from all branch commits | RED |
-| T130 | test_source_to_test_mapping | Source file correctly maps to test file path | RED |
-| T140 | test_check_existence_missing_test | Returns False and expected path when test missing | RED |
-| T150 | test_check_existence_test_exists | Returns True when corresponding test exists | RED |
-| T160 | test_config_loading | Config loaded and respected from .tdd-config.json | RED |
-| T170 | test_config_custom_patterns | Custom test patterns from config are applied | RED |
-| T180 | test_husky_auto_install | Husky hooks installed via npm install | RED |
-| T190 | test_pending_issue_flush | Pending issues created and queue cleared on flush | RED |
-| T200 | test_pending_issues_worktree_scoped | Pending issues file created in worktree root, not user home | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -622,15 +559,9 @@ flowchart TD
 | 100 | Excluded extensions | Auto | README.md change | Commit allowed | No test required |
 | 110 | Append-only audit | Auto | Multiple phase entries | All entries preserved | File only grows |
 | 120 | CI footer extraction | Auto | PR with multiple commits | Footer found | Extracted from any commit |
-| 130 | Source-to-test mapping | Auto | src/utils.py | tests/test_utils.py | Correct path returned |
-| 140 | Check existence - missing | Auto | Source file, no test | (False, expected_path) | Path printed to console |
-| 150 | Check existence - present | Auto | Source file with test | (True, path) | Commit proceeds |
-| 160 | Config loading | Auto | .tdd-config.json exists | Config values applied | min_test_count respected |
-| 170 | Custom patterns | Auto | Config with custom pattern | Custom pattern used | Mapping follows config |
-| 180 | Husky auto-install | Auto | Fresh npm install | Hooks installed | .husky/ populated |
-| 190 | Pending issue flush | Auto | Queued issue + --flush | Issue created | Queue cleared |
-| 200 | GPG signing compat | Auto | Signed commit | Signature valid | Footer present, sig valid |
-| 210 | Pending issues worktree scope | Auto | Override triggered | File at .tdd-pending-issues.json | Not in user home |
+| 130 | GPG signing compat | Auto | Signed commit | Signature valid | Footer present, sig valid |
+| 140 | Husky auto-install | Auto | Fresh npm install | Hooks installed | .husky/ populated |
+| 150 | Pending issue flush | Auto | Queued issue + --flush | Issue created | Queue cleared |
 
 ### 10.2 Test Commands
 
@@ -664,7 +595,6 @@ poetry run pytest tests/integration/test_tdd_integration.py -v -m live
 | Squash merge loses footers | High | Med | CI extracts from all branch commits |
 | gh CLI not installed | Med | Med | Graceful degradation; clear install instructions |
 | Test runner not detected | Med | Low | Configurable test commands; default patterns |
-| Pending issues lost on worktree delete | Low | Low | Flush reminder in override output; CI also creates issues |
 
 ## 12. Definition of Done
 
@@ -698,51 +628,14 @@ poetry run pytest tests/integration/test_tdd_integration.py -v -m live
 
 ---
 
-## Reviewer Suggestions
-
-*Non-blocking recommendations from the reviewer.*
-
-- **Shell Script Integration Test:** While T080/T190 test the Python tool logic for overrides, ensure a manual smoke test verifies the actual shell hook returns exit code 0 when `--skip-tdd-gate` is used.
-- **GitIgnore:** Verify that `.tdd-state.json` (local developer state) is also added to `.gitignore` to prevent accidental commit of local red/green status.
-
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
-
-### Gemini Review #1 (REVISE)
-
-**Reviewer:** Gemini 3 Pro
-**Verdict:** REVISE
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| G1.1 | "Req 1 (Source-to-Test Mapping): Need test verifying logic that maps source file to expected test file" | YES - Added T130, T140, T150 in Section 10.0/10.1 |
-| G1.2 | "Req 12 (Configuration): Need test verifying config loading from .tdd-config.json" | YES - Added T160, T170 in Section 10.0/10.1 |
-| G1.3 | "Interface Correctness: Add CLI command for check-existence so shell hook can delegate" | YES - Added `--check-existence` to Section 2.4 function signatures |
-| G1.4 | "T040 Ambiguity: Distinguish pre-commit (file exists) from verification (running pytest)" | YES - T040 remains for verification; T140/T150 added for existence check |
-| G1.5 | "Performance: Consider --batch mode for multiple files" | YES - Noted in Section 8.1 as future optimization |
-| G1.6 | "DX: Print expected test file path when blocked" | YES - Added to Check Existence Flow in Section 2.5 |
-
-### Gemini Review #2 (REVISE)
-
-**Reviewer:** Gemini 3 Pro
-**Verdict:** REVISE
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| G2.1 | "Worktree Scope Violation: Pending issues stored in ~/.tdd-pending-issues.json violates safety protocol" | YES - Changed to .tdd-pending-issues.json in worktree root |
-| G2.2 | "Recommendation: Store in .git/tdd-pending-issues.json or .tdd-pending-issues.json in root" | YES - Using .tdd-pending-issues.json in repo root, added to .gitignore |
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| 3 | 2026-02-04 | APPROVED | `gemini-3-pro-preview` |
-| Gemini #1 | - | REVISE | Requirement coverage 83% < 95%, missing source-to-test mapping tests |
-| Gemini #2 | - | REVISE | Worktree scope violation - pending issues stored in user home |
+| - | - | - | - |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING
