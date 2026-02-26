@@ -1,0 +1,27 @@
+{
+    "docs/lld/active": [
+        {"name": "333-cross-project-metrics", "type": "dir", "path": "docs/lld/active/333-cross-project-metrics"},
+        {"name": "334-auth-flow", "type": "dir", "path": "docs/lld/active/334-auth-flow"},
+        {"name": "335-requirements-analysis", "type": "dir", "path": "docs/lld/active/335-requirements-analysis"}
+    ],
+    "docs/lld/done": [
+        {"name": "300-initial-setup", "type": "dir", "path": "docs/lld/done/300-initial-setup"},
+        {"name": "301-ci-pipeline", "type": "dir", "path": "docs/lld/done/301-ci-pipeline"}
+    ],
+    "docs/reports": [
+        {"name": "333", "type": "dir", "path": "docs/reports/333"},
+        {"name": "334", "type": "dir", "path": "docs/reports/334"},
+        {"name": "335", "type": "dir", "path": "docs/reports/335"}
+    ],
+    "docs/reports/333": [
+        {"name": "gemini-review-333.md", "type": "file", "path": "docs/reports/333/gemini-review-333.md", "content": "Verdict: APPROVE\nAll checks passed."}
+    ],
+    "docs/reports/334": [
+        {"name": "gemini-review-334.md", "type": "file", "path": "docs/reports/334/gemini-review-334.md", "content": "Verdict: APPROVE\nLooks good."},
+        {"name": "gemini-review-334-2.md", "type": "file", "path": "docs/reports/334/gemini-review-334-2.md", "content": "Status: BLOCK\nIssues found in implementation."}
+    ],
+    "docs/reports/335": [
+        {"name": "gemini-review-335.md", "type": "file", "path": "docs/reports/335/gemini-review-335.md", "content": "Verdict: APPROVE\nApproved with minor notes."},
+        {"name": "implementation-report.md", "type": "file", "path": "docs/reports/335/implementation-report.md", "content": "Not a gemini review file."}
+    ]
+}

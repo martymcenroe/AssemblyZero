@@ -1,305 +1,162 @@
-"""Unit tests for metrics aggregation logic.
+"""Unit tests for assemblyzero.metrics.aggregator.
 
-Issue #333: Cross-Project Metrics Aggregation.
-Tests: T090, T100, T110, T120, T130, T140, T150, T160
+Issue #333: Tests for cross-repo aggregation.
+Tests: T120, T130, T140, T150
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from assemblyzero.utils.metrics_aggregator import MetricsAggregator
-from assemblyzero.utils.metrics_models import (
-    MetricsCollectionConfig,
-    PerRepoMetrics,
-    RepoGeminiMetrics,
-    RepoIssueMetrics,
-    RepoWorkflowMetrics,
-    TrackedRepoConfig,
-)
-
-FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "metrics"
+from assemblyzero.metrics.aggregator import aggregate_metrics, compute_approval_rate
+from assemblyzero.metrics.models import RepoMetrics
 
 
-def _make_config(lookback_days: int = 30) -> MetricsCollectionConfig:
-    """Create a test config."""
-    return MetricsCollectionConfig(
-        repos=[],
-        lookback_days=lookback_days,
-        output_dir="docs/metrics",
-        cache_ttl_seconds=300,
-        github_token_env="GITHUB_TOKEN",
+def _make_metrics(
+    repo: str,
+    created: int = 0,
+    closed: int = 0,
+    open_: int = 0,
+    llds: int = 0,
+    reviews: int = 0,
+    approvals: int = 0,
+    blocks: int = 0,
+    workflows: dict[str, int] | None = None,
+) -> RepoMetrics:
+    """Create test RepoMetrics with specified values."""
+    return RepoMetrics(
+        repo=repo,
+        period_start="2026-01-26T00:00:00+00:00",
+        period_end="2026-02-25T00:00:00+00:00",
+        issues_created=created,
+        issues_closed=closed,
+        issues_open=open_,
+        workflows_used=workflows or {},
+        llds_generated=llds,
+        gemini_reviews=reviews,
+        gemini_approvals=approvals,
+        gemini_blocks=blocks,
+        collection_timestamp="2026-02-25T14:30:00+00:00",
     )
 
 
-def _make_mock_client() -> MagicMock:
-    """Create a mock GitHubMetricsClient."""
-    return MagicMock()
+class TestAggregateMetrics:
+    """Tests for aggregate_metrics()."""
 
-
-class TestCollectIssueMetrics:
-    """Tests for collect_issue_metrics()."""
-
-    def test_t090_happy_path(self) -> None:
-        """T090: Issue metrics with mix of open/closed issues."""
-        mock_client = _make_mock_client()
-        mock_client.fetch_issues.return_value = [
-            {
-                "number": 1,
-                "state": "closed",
-                "created_at": "2026-02-10T08:00:00Z",
-                "closed_at": "2026-02-10T20:00:00Z",
-                "labels": ["bug", "tdd"],
-            },
-            {
-                "number": 2,
-                "state": "closed",
-                "created_at": "2026-02-11T10:00:00Z",
-                "closed_at": "2026-02-12T10:00:00Z",
-                "labels": ["feature", "implementation"],
-            },
-            {
-                "number": 3,
-                "state": "open",
-                "created_at": "2026-02-13T09:00:00Z",
-                "closed_at": None,
-                "labels": ["feature"],
-            },
+    def test_multi_repo_summation(self) -> None:
+        """T120: Sums totals correctly across 3 repos."""
+        repos = [
+            _make_metrics(
+                "a/x", created=42, closed=35, open_=12,
+                llds=20, reviews=18, approvals=15, blocks=3,
+                workflows={"req": 8, "tdd": 15},
+            ),
+            _make_metrics(
+                "a/y", created=25, closed=20, open_=8,
+                llds=12, reviews=10, approvals=8, blocks=2,
+                workflows={"req": 4, "tdd": 8, "impl": 5},
+            ),
+            _make_metrics(
+                "a/z", created=20, closed=17, open_=5,
+                llds=8, reviews=7, approvals=7, blocks=0,
+                workflows={"req": 3, "tdd": 5, "impl": 5},
+            ),
         ]
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_issue_metrics(
-            "owner/repo", "2026-02-01", "2026-02-24"
+        result = aggregate_metrics(
+            repos, "2026-01-26T00:00:00+00:00", "2026-02-25T00:00:00+00:00"
         )
+        assert result["total_issues_created"] == 87
+        assert result["total_issues_closed"] == 72
+        assert result["total_issues_open"] == 25
+        assert result["total_llds_generated"] == 40
+        assert result["total_gemini_reviews"] == 35
+        assert result["gemini_approval_rate"] == 0.857
+        assert result["workflows_by_type"]["req"] == 15
+        assert result["workflows_by_type"]["tdd"] == 28
+        assert result["workflows_by_type"]["impl"] == 10
+        assert result["repos_tracked"] == 3
+        assert result["repos_reachable"] == 3
+        assert len(result["per_repo"]) == 3
 
-        assert result["issues_opened"] == 3
-        assert result["issues_closed"] == 2
-        assert result["issues_open_current"] == 1
-        # Issue 1: 12 hours, Issue 2: 24 hours -> avg = 18.0
-        assert result["avg_close_time_hours"] == 18.0
-        assert result["issues_by_label"]["bug"] == 1
-        assert result["issues_by_label"]["feature"] == 2
-        assert result["issues_by_label"]["tdd"] == 1
-        assert result["issues_by_label"]["implementation"] == 1
-
-    def test_t100_zero_issues(self) -> None:
-        """T100: Issue metrics with zero issues returns zeroed values."""
-        mock_client = _make_mock_client()
-        mock_client.fetch_issues.return_value = []
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_issue_metrics(
-            "owner/repo", "2026-02-01", "2026-02-24"
+    def test_empty_input_zeroed(self) -> None:
+        """T130: Empty input produces zeroed output."""
+        result = aggregate_metrics(
+            [], "2026-01-26T00:00:00+00:00", "2026-02-25T00:00:00+00:00"
         )
+        assert result["repos_tracked"] == 0
+        assert result["repos_reachable"] == 0
+        assert result["total_issues_created"] == 0
+        assert result["total_issues_closed"] == 0
+        assert result["total_issues_open"] == 0
+        assert result["total_llds_generated"] == 0
+        assert result["total_gemini_reviews"] == 0
+        assert result["gemini_approval_rate"] == 0.0
+        assert result["workflows_by_type"] == {}
+        assert result["per_repo"] == []
 
-        assert result["issues_opened"] == 0
-        assert result["issues_closed"] == 0
-        assert result["issues_open_current"] == 0
-        assert result["avg_close_time_hours"] is None
-        assert result["issues_by_label"] == {}
+    def test_single_repo_identity(self) -> None:
+        """T140: Single repo aggregated equals that repo's values."""
+        single = _make_metrics(
+            "a/x", created=42, closed=35, open_=12,
+            llds=20, reviews=18, approvals=15, blocks=3,
+        )
+        result = aggregate_metrics(
+            [single], "2026-01-26T00:00:00+00:00", "2026-02-25T00:00:00+00:00"
+        )
+        assert result["total_issues_created"] == 42
+        assert result["total_issues_closed"] == 35
+        assert result["total_issues_open"] == 12
+        assert result["total_llds_generated"] == 20
+        assert result["total_gemini_reviews"] == 18
+        assert result["repos_tracked"] == 1
+        assert result["repos_reachable"] == 1
 
+    def test_period_timestamps_preserved(self) -> None:
+        """Period start/end are preserved in output."""
+        result = aggregate_metrics(
+            [], "2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"
+        )
+        assert result["period_start"] == "2026-01-01T00:00:00+00:00"
+        assert result["period_end"] == "2026-02-01T00:00:00+00:00"
 
-class TestWorkflowDetection:
-    """Tests for collect_workflow_metrics()."""
+    def test_generated_at_populated(self) -> None:
+        """generated_at field is a non-empty ISO timestamp."""
+        result = aggregate_metrics(
+            [], "2026-01-26T00:00:00+00:00", "2026-02-25T00:00:00+00:00"
+        )
+        assert result["generated_at"]
+        assert "T" in result["generated_at"]
 
-    def test_t110_from_labels(self) -> None:
-        """T110: Workflow detection from issue labels."""
-        mock_client = _make_mock_client()
-        # No content files
-        mock_client.fetch_repo_contents.return_value = []
-        # Issues with workflow labels
-        mock_client.fetch_issues.return_value = [
-            {"number": 1, "labels": ["requirements"], "state": "open"},
-            {"number": 2, "labels": ["lld"], "state": "closed"},
-            {"number": 3, "labels": ["implementation"], "state": "closed"},
-            {"number": 4, "labels": ["tdd"], "state": "open"},
-            {"number": 5, "labels": ["implementation", "requirements"], "state": "closed"},
+    def test_workflow_merging(self) -> None:
+        """Workflows from different repos merge by type correctly."""
+        repos = [
+            _make_metrics("a/x", workflows={"requirements": 3}),
+            _make_metrics("a/y", workflows={"requirements": 2, "tdd": 5}),
         ]
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_workflow_metrics("owner/repo")
-
-        assert result["requirements_workflows"] == 3  # issues 1, 2, 5
-        assert result["implementation_workflows"] == 2  # issues 3, 5
-        assert result["tdd_workflows"] == 1  # issue 4
-
-    def test_t120_from_content_listing(self) -> None:
-        """T120: Workflow detection from content listing (LLD files)."""
-        mock_client = _make_mock_client()
-
-        def mock_contents(repo: str, path: str) -> list[dict]:
-            if path == "docs/lld/active":
-                return [
-                    {"name": "001.md", "type": "file", "path": "docs/lld/active/001.md", "size": 100},
-                    {"name": "002.md", "type": "file", "path": "docs/lld/active/002.md", "size": 200},
-                    {"name": "003.md", "type": "file", "path": "docs/lld/active/003.md", "size": 150},
-                    {"name": "readme.txt", "type": "file", "path": "docs/lld/active/readme.txt", "size": 50},
-                    {"name": "004.md", "type": "file", "path": "docs/lld/active/004.md", "size": 300},
-                    {"name": "archive", "type": "dir", "path": "docs/lld/active/archive", "size": 0},
-                ]
-            if path == "docs/reports":
-                return [
-                    {"name": "333", "type": "dir", "path": "docs/reports/333", "size": 0},
-                    {"name": "320", "type": "dir", "path": "docs/reports/320", "size": 0},
-                ]
-            return []
-
-        mock_client.fetch_repo_contents.side_effect = mock_contents
-        mock_client.fetch_issues.return_value = []
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_workflow_metrics("owner/repo")
-
-        assert result["lld_count"] == 4  # 4 .md files (not .txt, not dir)
-        assert result["report_count"] == 2  # 2 dirs
-
-
-class TestGeminiMetrics:
-    """Tests for collect_gemini_metrics()."""
-
-    def test_t130_verdict_counting(self) -> None:
-        """T130: Gemini metrics correctly count APPROVE and BLOCK."""
-        mock_client = _make_mock_client()
-
-        def mock_contents(repo: str, path: str) -> list[dict]:
-            if path == "docs/reports":
-                return [
-                    {"name": "333", "type": "dir", "path": "docs/reports/333", "size": 0},
-                    {"name": "320", "type": "dir", "path": "docs/reports/320", "size": 0},
-                ]
-            if path == "docs/reports/333":
-                return [
-                    {"name": "gemini-verdict-approved.json", "type": "file", "path": "docs/reports/333/gemini-verdict-approved.json", "size": 50},
-                ]
-            if path == "docs/reports/320":
-                return [
-                    {"name": "gemini-verdict-blocked.json", "type": "file", "path": "docs/reports/320/gemini-verdict-blocked.json", "size": 50},
-                ]
-            if path == ".gemini-reviews":
-                return [
-                    {"name": "review-approved-1.json", "type": "file", "path": ".gemini-reviews/review-approved-1.json", "size": 30},
-                    {"name": "review-approved-2.json", "type": "file", "path": ".gemini-reviews/review-approved-2.json", "size": 30},
-                    {"name": "review-blocked-1.json", "type": "file", "path": ".gemini-reviews/review-blocked-1.json", "size": 30},
-                ]
-            return []
-
-        mock_client.fetch_repo_contents.side_effect = mock_contents
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_gemini_metrics("owner/repo")
-
-        assert result["approvals"] == 3  # 1 from reports/333 + 2 from .gemini-reviews
-        assert result["blocks"] == 2  # 1 from reports/320 + 1 from .gemini-reviews
-        assert result["total_reviews"] == 5
-        assert result["approval_rate"] == 0.6
-
-    def test_t140_no_verdicts(self) -> None:
-        """T140: Gemini metrics with no verdicts returns zeros."""
-        mock_client = _make_mock_client()
-        mock_client.fetch_repo_contents.return_value = []
-
-        agg = MetricsAggregator(client=mock_client, config=_make_config())
-        result = agg.collect_gemini_metrics("owner/repo")
-
-        assert result["total_reviews"] == 0
-        assert result["approvals"] == 0
-        assert result["blocks"] == 0
-        assert result["approval_rate"] is None
-
-
-class TestAggregation:
-    """Tests for aggregate()."""
-
-    def test_t150_cross_repo_aggregation(self) -> None:
-        """T150: Aggregation across multiple repos sums correctly."""
-        mock_client = _make_mock_client()
-        config = _make_config()
-        agg = MetricsAggregator(client=mock_client, config=config)
-
-        repo_a = PerRepoMetrics(
-            repo="owner/repo-a",
-            issues=RepoIssueMetrics(
-                repo="owner/repo-a", period_start="2026-01-25", period_end="2026-02-24",
-                issues_opened=10, issues_closed=8, issues_open_current=2,
-                avg_close_time_hours=12.0, issues_by_label={"bug": 3},
-            ),
-            workflows=RepoWorkflowMetrics(
-                repo="owner/repo-a", lld_count=5,
-                requirements_workflows=3, implementation_workflows=4,
-                tdd_workflows=2, report_count=6,
-            ),
-            gemini=RepoGeminiMetrics(
-                repo="owner/repo-a", total_reviews=10,
-                approvals=8, blocks=2, approval_rate=0.8,
-            ),
+        result = aggregate_metrics(
+            repos, "2026-01-26T00:00:00+00:00", "2026-02-25T00:00:00+00:00"
         )
-        repo_b = PerRepoMetrics(
-            repo="owner/repo-b",
-            issues=RepoIssueMetrics(
-                repo="owner/repo-b", period_start="2026-01-25", period_end="2026-02-24",
-                issues_opened=5, issues_closed=3, issues_open_current=4,
-                avg_close_time_hours=24.0, issues_by_label={"feature": 2},
-            ),
-            workflows=RepoWorkflowMetrics(
-                repo="owner/repo-b", lld_count=2,
-                requirements_workflows=1, implementation_workflows=1,
-                tdd_workflows=0, report_count=3,
-            ),
-            gemini=RepoGeminiMetrics(
-                repo="owner/repo-b", total_reviews=4,
-                approvals=3, blocks=1, approval_rate=0.75,
-            ),
-        )
+        assert result["workflows_by_type"]["requirements"] == 5
+        assert result["workflows_by_type"]["tdd"] == 5
 
-        result = agg.aggregate([repo_a, repo_b])
 
-        assert result["totals"]["issues_opened"] == 15
-        assert result["totals"]["issues_closed"] == 11
-        assert result["totals"]["issues_open_current"] == 6
-        assert result["totals"]["lld_count"] == 7
-        # total_workflows = (3+4+2) + (1+1+0) = 11
-        assert result["totals"]["total_workflows"] == 11
-        assert result["totals"]["gemini_reviews"] == 14
-        # gemini_approval_rate = (8+3) / (10+4) = 11/14 ≈ 0.786
-        assert result["totals"]["gemini_approval_rate"] == 0.786
-        assert result["totals"]["report_count"] == 9
-        # weighted avg close time = (12*8 + 24*3) / (8+3) = (96+72)/11 ≈ 15.27
-        assert result["totals"]["avg_close_time_hours"] == 15.27
-        assert result["repos_collected"] == 2
-        assert result["repos_failed"] == []
-        assert len(result["per_repo"]) == 2
+class TestComputeApprovalRate:
+    """Tests for compute_approval_rate()."""
 
-    def test_t160_aggregation_with_failed_repos(self) -> None:
-        """T160: Failed repos listed, successful ones aggregated."""
-        mock_client = _make_mock_client()
-        config = _make_config()
-        agg = MetricsAggregator(client=mock_client, config=config)
+    def test_zero_reviews_returns_zero(self) -> None:
+        """T150: Returns 0.0 when total is 0."""
+        assert compute_approval_rate(0, 0) == 0.0
 
-        repo_a = PerRepoMetrics(
-            repo="owner/repo-a",
-            issues=RepoIssueMetrics(
-                repo="owner/repo-a", period_start="2026-01-25", period_end="2026-02-24",
-                issues_opened=5, issues_closed=3, issues_open_current=2,
-                avg_close_time_hours=10.0, issues_by_label={},
-            ),
-            workflows=RepoWorkflowMetrics(
-                repo="owner/repo-a", lld_count=1,
-                requirements_workflows=1, implementation_workflows=1,
-                tdd_workflows=0, report_count=1,
-            ),
-            gemini=RepoGeminiMetrics(
-                repo="owner/repo-a", total_reviews=2,
-                approvals=2, blocks=0, approval_rate=1.0,
-            ),
-        )
+    def test_normal_rate(self) -> None:
+        """T150: Normal computation rounds to 3 decimal places."""
+        assert compute_approval_rate(30, 35) == 0.857
 
-        result = agg.aggregate([repo_a], repos_failed=["owner/failed-repo"])
+    def test_perfect_rate(self) -> None:
+        """T150: All approvals returns 1.0."""
+        assert compute_approval_rate(10, 10) == 1.0
 
-        assert result["repos_tracked"] == 2  # 1 success + 1 failed
-        assert result["repos_collected"] == 1
-        assert result["repos_failed"] == ["owner/failed-repo"]
-        assert result["totals"]["issues_opened"] == 5
+    def test_zero_approvals(self) -> None:
+        """T150: Zero approvals with some reviews returns 0.0."""
+        assert compute_approval_rate(0, 5) == 0.0
+
+    def test_two_thirds(self) -> None:
+        """Computation of 2/3 rounds correctly."""
+        assert compute_approval_rate(2, 3) == 0.667
