@@ -271,9 +271,17 @@ def _draft_has_open_questions(content: str) -> bool:
 
     open_questions_section = match.group(1)
 
-    # Check for unchecked boxes
-    unchecked = re.findall(r"^- \[ \]", open_questions_section, re.MULTILINE)
-    return len(unchecked) > 0
+    # Check for unchecked boxes, filtering out "None" placeholders
+    # Drafters write "- [ ] None" to mean "no open questions"
+    unchecked_lines = re.findall(
+        r"^- \[ \] ?(.*)", open_questions_section, re.MULTILINE
+    )
+    real_questions = [
+        q
+        for q in unchecked_lines
+        if not re.match(r"^none\b", q.strip(), re.IGNORECASE)
+    ]
+    return len(real_questions) > 0
 
 
 def _verdict_has_human_required(verdict_content: str) -> bool:

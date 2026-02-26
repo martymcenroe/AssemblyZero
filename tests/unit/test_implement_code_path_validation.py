@@ -1,7 +1,8 @@
-"""Tests for Issue #445: TDD workflow path pre-flight validation.
+"""Tests for Issue #445/#468: TDD workflow path pre-flight validation.
 
 Validates that validate_files_to_modify() catches stale LLD paths
-before wasting Claude tokens on implementation.
+before wasting Claude tokens on implementation. Issue #468 changed
+Add behavior to auto-create parent directories instead of erroring.
 """
 
 import pytest
@@ -55,15 +56,14 @@ def test_delete_file_missing_returns_error(tmp_repo):
     assert "Delete target does not exist" in errors[0]
 
 
-def test_add_parent_missing_returns_error(tmp_repo):
-    """No parent directory for Add -> error."""
+def test_add_parent_missing_auto_creates_dir(tmp_repo):
+    """Issue #468: Missing parent for Add -> auto-create, no error."""
     files = [
         {"path": "src/nonexistent_pkg/new_file.py", "change_type": "Add"},
     ]
     errors = validate_files_to_modify(files, tmp_repo)
-    assert len(errors) == 1
-    assert "Parent directory missing for Add" in errors[0]
-    assert "src/nonexistent_pkg/new_file.py" in errors[0]
+    assert errors == []
+    assert (tmp_repo / "src" / "nonexistent_pkg").is_dir()
 
 
 def test_add_parent_exists_returns_no_error(tmp_repo):
@@ -83,7 +83,9 @@ def test_multiple_errors_collected(tmp_repo):
         {"path": "src/no_parent/file3.py", "change_type": "Add"},
     ]
     errors = validate_files_to_modify(files, tmp_repo)
-    assert len(errors) == 3
+    # Modify + Delete both error; Add auto-creates parent (Issue #468)
+    assert len(errors) == 2
+    assert (tmp_repo / "src" / "no_parent").is_dir()
 
 
 def test_empty_files_list_returns_empty(tmp_repo):

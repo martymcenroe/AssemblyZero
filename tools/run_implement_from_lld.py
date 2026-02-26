@@ -724,6 +724,12 @@ def main():
     # Run with checkpointing
     thread_id = f"{args.issue}-testing"
 
+    # Clear stale checkpoint DB on fresh runs (Issue #470)
+    if not args.resume:
+        if db_path.exists():
+            db_path.unlink()
+            print(f"[implement] Cleared stale checkpoint DB: {db_path}")
+
     try:
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
             app = workflow.compile(checkpointer=memory)

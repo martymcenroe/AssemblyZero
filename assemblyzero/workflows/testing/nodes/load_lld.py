@@ -540,12 +540,29 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:
         re.IGNORECASE,
     )
 
+    # Pre-compute code fence regions to skip false-positive matches
+    # inside ```...``` blocks (Issue #471)
+    fence_regions = [
+        (m.start(), m.end())
+        for m in re.finditer(r"```.*?```", lld_content, re.DOTALL)
+    ]
+
     # Try spec pattern first (more specific header), fall back to LLD pattern
-    match = spec_pattern.search(lld_content)
+    # Skip matches inside code fences (Issue #471)
+    match = None
     table_format = "spec"
+    for m in spec_pattern.finditer(lld_content):
+        if not any(s <= m.start() < e for s, e in fence_regions):
+            match = m
+            break
+
     if not match:
-        match = lld_pattern.search(lld_content)
         table_format = "lld"
+        for m in lld_pattern.finditer(lld_content):
+            if not any(s <= m.start() < e for s, e in fence_regions):
+                match = m
+                break
+
     if not match:
         return files
 
@@ -575,6 +592,11 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:
             continue
         # Skip rows where path looks like a number (order column leaked)
         if path_raw.isdigit():
+            continue
+        # Issue #472: skip directory entries — these should be mkdir'd, not written
+        if change_type.lower().startswith("add") and "directory" in change_type.lower():
+            continue
+        if path_raw.endswith("/"):
             continue
 
         files.append({

@@ -200,8 +200,13 @@ def validate_code_response(code: str, filepath: str) -> tuple[bool, str]:
     # Minimum line threshold (5 lines for non-trivial files)
     lines = code.strip().split("\n")
     if len(lines) < 5:
-        # Allow short files for __init__.py or simple configs
-        if not filepath.endswith("__init__.py") and len(lines) < 2:
+        # Issue #473: allow short files for __init__.py, fixtures, configs, data
+        short_ok = (
+            filepath.endswith("__init__.py")
+            or "/fixtures/" in filepath.replace("\\", "/")
+            or filepath.endswith((".json", ".yaml", ".yml", ".toml", ".txt", ".csv"))
+        )
+        if not short_ok and len(lines) < 2:
             return False, f"Code too short ({len(lines)} lines)"
 
     # Python syntax validation
@@ -1147,7 +1152,7 @@ def validate_files_to_modify(
 
     Rules:
     - Modify/Delete: file must exist on disk (hard fail)
-    - Add: parent directory must exist (hard fail)
+    - Add: auto-create parent directory if missing (Issue #468)
 
     Args:
         files_to_modify: List of file spec dicts with 'path' and 'change_type'.
@@ -1169,11 +1174,9 @@ def validate_files_to_modify(
                     f"{change_type} target does not exist: {file_path}"
                 )
         elif change_type.lower() == "add":
+            # Issue #468: auto-create parent dirs for new files
             if not full_path.parent.exists():
-                errors.append(
-                    f"Parent directory missing for Add: {file_path} "
-                    f"(expected: {full_path.parent})"
-                )
+                full_path.parent.mkdir(parents=True, exist_ok=True)
 
     return errors
 
