@@ -2,7 +2,7 @@
 repo: martymcenroe/AssemblyZero
 issue: 333
 url: https://github.com/martymcenroe/AssemblyZero/issues/333
-fetched: 2026-02-24T19:33:27.733843Z
+fetched: 2026-02-26T04:12:22.356127Z
 ---
 
 # Issue #333: feat: Cross-project metrics aggregation for AssemblyZero usage tracking
