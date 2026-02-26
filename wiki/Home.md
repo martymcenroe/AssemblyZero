@@ -22,8 +22,8 @@ graph TD
         M["Requirements | Implementation<br/>Reports | Audit Trail"]
     end
 
-    subgraph Future["LANGGRAPH EVOLUTION"]
-        R["State Machines<br/>Checkpoints | Supervisors"]
+    subgraph Orch["END-TO-END ORCHESTRATION"]
+        R["LangGraph Pipeline<br/>Triage → LLD → Spec → TDD → PR"]
     end
 
     O --> A
@@ -35,9 +35,9 @@ graph TD
 
 ---
 
-## Production Evidence: 207 Issues, 159 Closed
+## Production Evidence: 310 Issues, 282 Closed
 
-AssemblyZero isn't theoretical. It's been battle-tested through **207 issues** (159 closed, 48 open) in 27 days:
+AssemblyZero isn't theoretical. It's been battle-tested through **310 issues** (282 closed, 28 open) across 48 days — with 712 commits since the last major update:
 
 **[View Full Metrics Dashboard →](Metrics)**
 
@@ -60,7 +60,24 @@ Issues closed per day (Central Time):
 | **Intelligence Layer** | Scout workflow, verdict analyzer, template learning |
 | **Infrastructure** | GitHub Actions, Poetry dependencies, cross-platform |
 
-**Current velocity:** 9.4 issues/day average (55 issues on peak day)
+**Current velocity:** 5.9 issues/day average | **Closure rate:** 90.9% | **Peak day:** 55 closes (Feb 3)
+
+---
+
+## What's New (Since Feb 2025)
+
+Major features shipped in the last 712 commits:
+
+| Feature | What It Does | Wiki Page |
+|---------|-------------|-----------|
+| **End-to-End Orchestration** | LangGraph pipeline: Triage → LLD → Spec → TDD → PR. Resumable, retryable, gated. | [End-to-End Pipeline](End-to-End-Orchestration) |
+| **Cost Management** | Per-call tracking, $5 budget guard, iteration circuit breaker, FallbackProvider economics | [Cost Management](Cost-Management) |
+| **Telemetry System** | DynamoDB + JSONL, fire-and-forget, 90-day TTL, kill switch | [Observability](Observability-and-Monitoring) |
+| **Cascade Prevention** | 15+ patterns, 4 categories, risk scoring, auto-approve blocking | [Safety & Guardrails](Safety-and-Guardrails) |
+| **Multi-Framework TDD** | Auto-detects pytest/Playwright/Jest/Vitest, unified TestRunResult | [Orchestration](End-to-End-Orchestration#multi-framework-test-support) |
+| **Circuit Breakers** | Token budget estimation, FallbackProvider failover, stagnation detection | [Cost Management](Cost-Management#layer-3-iteration-circuit-breaker) |
+| **Structured LLM Logging** | Every call: `[LLM] provider=X model=Y input=N output=M cost=$X.XX cumulative=$Y.YY` | [Observability](Observability-and-Monitoring#structured-llm-call-logging) |
+| **3,386 Tests** | 134 test files, 105 unit test files, full coverage of all subsystems | [Orchestration](End-to-End-Orchestration#test-suite) |
 
 ---
 
@@ -74,6 +91,7 @@ AI coding assistants like Claude Code and GitHub Copilot are transforming softwa
 | **No governance** | Security teams can't approve ungoverned AI |
 | **No verification** | AI-generated code goes unreviewed |
 | **No metrics** | Leadership can't prove ROI |
+| **No cost control** | Token costs spiral without budgets or circuit breakers |
 | **Permission friction** | Constant approval prompts destroy flow state |
 
 Organizations run pilots. Developers love the tools. Then adoption plateaus at 10-20% because **the infrastructure layer is missing**.
@@ -87,8 +105,12 @@ AssemblyZero provides that infrastructure layer:
 | Capability | What It Does | Enterprise Value |
 |------------|--------------|------------------|
 | **Multi-Agent Orchestration** | 12+ concurrent agents, one identity | Scale without chaos |
+| **End-to-End Pipeline** | Triage → LLD → Spec → TDD → PR (automated) | Issue to PR in hours |
 | **Gemini Verification** | AI reviews AI before humans approve | Quality gates that work |
 | **Governance Gates** | Enforced checkpoints (design, code, docs) | Security team approval |
+| **Cost Management** | Per-call tracking, budgets, circuit breakers | Predictable spend |
+| **Observability** | Telemetry, audit trails, structured logging | Full visibility |
+| **Safety & Guardrails** | Kill switches, cascade prevention, rollback | Responsible deployment |
 | **Permission Management** | Eliminate friction, track patterns | Developer productivity |
 | **34 Audits** | Security, privacy, AI safety, compliance | Compliance readiness |
 | **Metrics & KPIs** | Adoption, friction, cost, productivity | Prove ROI to leadership |
@@ -104,9 +126,15 @@ AssemblyZero provides that infrastructure layer:
 
 ### Architects & Technical Leaders
 - [Multi-Agent Orchestration](Multi-Agent-Orchestration) - **The headline feature**
+- [End-to-End Pipeline](End-to-End-Orchestration) - Triage → LLD → Spec → TDD → PR
 - [Gemini Verification](Gemini-Verification) - Claude + Gemini architecture
-- [LangGraph Evolution](LangGraph-Evolution) - **The roadmap** (state machines, checkpointing)
+- [LangGraph Evolution](LangGraph-Evolution) - State machines and checkpointing
 - [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Self-improving governance feedback loop
+
+### Operations & Observability
+- [Observability & Monitoring](Observability-and-Monitoring) - Telemetry, audit trails, stagnation detection
+- [Cost Management](Cost-Management) - Budgets, circuit breakers, provider pricing
+- [Safety & Guardrails](Safety-and-Guardrails) - Kill switches, cascade prevention, rollback
 
 ### Developers
 - [Quick Start](Quick-Start) - 5-minute setup
@@ -115,13 +143,25 @@ AssemblyZero provides that infrastructure layer:
 
 ### Security & Compliance Teams
 - [Governance Gates](Governance-Gates) - LLD, implementation, report gates
+- [Safety & Guardrails](Safety-and-Guardrails) - Kill switches, responsible AI practices
 - [Security Compliance](Security-Compliance) - OWASP, GDPR, AI Safety audits
 
 ---
 
 ## Core Workflows
 
-AssemblyZero implements two primary governed workflows:
+AssemblyZero implements a five-stage governed pipeline:
+
+### End-to-End Pipeline
+```mermaid
+graph LR
+    T["Triage"] --> L["LLD"]
+    L --> S["Spec"]
+    S --> I["TDD Impl"]
+    I --> P["PR"]
+```
+
+Issue → Triage → Design → Spec → Code + Tests → Pull Request. Each stage is retryable, resumable, and gated. [Learn more](End-to-End-Orchestration)
 
 ### Requirements Workflow
 ```mermaid
@@ -169,15 +209,20 @@ Code is reviewed by Gemini before PR creation. [Learn more](Implementation-Workf
 
 ---
 
-## Roadmap: LangGraph Evolution
+## Roadmap
 
-AssemblyZero is **production-ready today** with prompt-based orchestration. The roadmap transforms it into an enterprise-grade state machine platform:
+AssemblyZero is **production-ready today** with LangGraph-based orchestration. The roadmap extends into enterprise-grade capabilities:
 
-| Timeline | Milestone | Impact |
+| Timeline | Milestone | Status |
 |----------|-----------|--------|
-| **Q1 2026** | LangGraph state machines, checkpointing | Gates enforced, not suggested |
-| **Q2 2026** | Supervisor pattern, LangSmith observability | Autonomous task decomposition |
-| **Q3 2026** | Dynamic tool graphs, multi-tenant support | Scale to organizations |
+| **Q1 2026** | LangGraph state machines, checkpointing | **SHIPPED** |
+| **Q1 2026** | End-to-end orchestration pipeline | **SHIPPED** |
+| **Q1 2026** | Cost management & circuit breakers | **SHIPPED** |
+| **Q1 2026** | Telemetry system (DynamoDB + JSONL) | **SHIPPED** |
+| **Q1 2026** | Multi-framework test support | **SHIPPED** |
+| **Q1 2026** | Cascade prevention system | **SHIPPED** |
+| **Q2 2026** | Supervisor pattern, LangSmith observability | In Progress |
+| **Q3 2026** | Dynamic tool graphs, multi-tenant support | Planned |
 
 See: [LangGraph Evolution](LangGraph-Evolution) for the full technical vision.
 
@@ -194,7 +239,10 @@ We obsess over permission friction because it's the #1 adoption killer. Our fric
 ### 3. Self-Improving Governance
 The system learns from Gemini verdicts to improve templates automatically. 164 verdicts analyzed, 6 template sections added. [Learn more](How-the-AssemblyZero-Learns)
 
-### 4. Discworld Personas
+### 4. End-to-End Automation
+From GitHub issue to pull request — fully automated, fully governed, fully observable. Five stages, three retry levels, resumable state. [Learn more](End-to-End-Orchestration)
+
+### 5. Discworld Personas
 Every workflow has a [Discworld character](Dramatis-Personae) defining its philosophy. This isn't whimsy - it's intuitive system design. Vimes guards (regression tests), Lu-Tze sweeps (janitor), Brutha remembers (RAG).
 
 ---
@@ -218,9 +266,10 @@ Every workflow has a [Discworld character](Dramatis-Personae) defining its philo
 ## Get Started
 
 1. **Read the architecture**: [Multi-Agent Orchestration](Multi-Agent-Orchestration)
-2. **Understand the roadmap**: [LangGraph Evolution](LangGraph-Evolution)
-3. **See the metrics**: [Measuring Productivity](Measuring-Productivity)
-4. **Try it**: [Quick Start](Quick-Start)
+2. **See the pipeline**: [End-to-End Orchestration](End-to-End-Orchestration)
+3. **Understand cost control**: [Cost Management](Cost-Management)
+4. **See the metrics**: [Measuring Productivity](Measuring-Productivity)
+5. **Try it**: [Quick Start](Quick-Start)
 
 ---
 

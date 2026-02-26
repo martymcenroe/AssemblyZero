@@ -9,14 +9,17 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total Issues Created** | 207 |
-| **Total Issues Closed** | 159 |
-| **Currently Open** | 48 |
-| **Closure Rate** | 76.8% |
-| **Active Days** | 27 (Jan 10 - Feb 5) |
+| **Total Issues Created** | 310 |
+| **Total Issues Closed** | 282 |
+| **Currently Open** | 28 |
+| **Closure Rate** | 90.9% |
+| **Active Days** | 48 (Jan 10 - Feb 26) |
 | **Average Velocity** | 5.9 closed/day |
 | **Peak Day (Closes)** | 55 (Feb 3) |
 | **Peak Day (Opens)** | 55 (Feb 2) |
+| **Commits (since Feb 25)** | 712 |
+| **Test Count** | 3,386 |
+| **Test Files** | 134 |
 
 ---
 
@@ -41,9 +44,9 @@ xychart-beta
 xychart-beta
     title "Cumulative Issues Over Time"
     x-axis ["1/10", "1/14", "1/17", "1/21", "1/28", "2/1", "2/2", "2/3", "2/4", "2/5"]
-    y-axis "Total Issues" 0 --> 220
-    line [2, 13, 31, 31, 56, 68, 123, 150, 194, 207]
-    line [0, 5, 15, 27, 29, 36, 59, 114, 145, 159]
+    y-axis "Total Issues" 0 --> 320
+    line [2, 13, 31, 31, 56, 68, 123, 150, 194, 310]
+    line [0, 5, 15, 27, 29, 36, 59, 114, 145, 282]
 ```
 
 **Legend:** Top line = Total Created, Bottom line = Total Closed
@@ -56,6 +59,7 @@ xychart-beta
 Jan 10-17:  ████████░░░░░░░░░░░░  30 opened, 15 closed (warmup)
 Jan 21-29:  ██████████░░░░░░░░░░  37 opened, 26 closed (steady state)
 Feb 01-05:  ████████████████████ 136 opened, 118 closed (hyperdrive)
+Feb 05-26:  ████████████████████ 107 opened, 123 closed (sustained)
 ```
 
 **The inflection point:** Feb 2, when 55 issues were created in a single day. This marked the transition from "building AssemblyZero" to "AssemblyZero building itself."
@@ -80,11 +84,48 @@ Feb 01-05:  ████████████████████ 136 ope
 
 ```mermaid
 pie title Issue Status Distribution
-    "Closed" : 159
-    "Open" : 48
+    "Closed" : 282
+    "Open" : 28
 ```
 
 **Average time to close:** Most issues close within 24 hours of creation. The governance workflow (LLD → Gemini → Implementation → PR) typically completes in 2-4 hours for straightforward features.
+
+---
+
+## Cost Metrics (SHIPPED)
+
+Per-call cost tracking is now production. Every LLM call records:
+
+| Metric | Source | Status |
+|--------|--------|--------|
+| **Per-call cost** | `LLMCallResult.cost_usd` | **Live** — logged with every `[LLM]` line |
+| **Cumulative session cost** | `_cumulative_cost_usd` global | **Live** — visible as `cumulative=$X.XX` |
+| **Token budget usage** | `budget_summary()` | **Live** — saved to audit trail |
+| **Provider pricing** | Opus $5/$25, Sonnet $3/$15, Haiku $1/$5 per M | **Configured** |
+| **Cache economics** | Read: 10% of input price, Create: 125% | **Tracked** |
+| **FallbackProvider savings** | CLI (free) vs API (paid) | **Tracked** |
+
+**Budget guard:** Default `$5.00` per workflow run. Circuit breaker trips when next iteration would exceed token budget.
+
+See: [Cost Management](Cost-Management) for the full three-layer cost control architecture.
+
+---
+
+## Telemetry Metrics (SHIPPED)
+
+Telemetry events flow to DynamoDB with JSONL fallback:
+
+| Metric | Source | Status |
+|--------|--------|--------|
+| **Workflow events** | `emit()` + `track_tool()` | **Live** — DynamoDB + JSONL buffer |
+| **Actor attribution** | `claude` vs `human` detection | **Live** — automatic |
+| **Cascade events** | Pattern detection JSONL | **Live** — `tmp/cascade-events.jsonl` |
+| **Gemini API events** | Credential rotation log | **Live** — `~/.assemblyzero/gemini-api.jsonl` |
+| **Audit trail** | Sequential numbered files | **Live** — `docs/lineage/active/{issue}-testing/` |
+
+**Kill switch:** `ASSEMBLYZERO_TELEMETRY=0` disables all emission. 90-day TTL auto-expires DynamoDB records.
+
+See: [Observability & Monitoring](Observability-and-Monitoring) for the full telemetry architecture.
 
 ---
 
@@ -94,44 +135,39 @@ AssemblyZero is used by multiple repositories:
 
 | Repository | Status | Issues Processed |
 |------------|--------|------------------|
-| **AssemblyZero** | Active | 207 |
-| **RCA-PDF** | Active | TBD |
-| **dispatch** | Planned | - |
+| **AssemblyZero** | Active | 310 |
+| **Aletheia** | Active | In progress |
+| **Talos** | Planned | - |
 
-> **Note:** Cross-project metrics aggregation is tracked in [#329](https://github.com/martymcenroe/AssemblyZero/issues/329)
+> **Note:** Cross-project metrics aggregation is tracked in [#329](https://github.com/martymcenroe/AssemblyZero/issues/329). PyGithub collection, Gemini verdict counting, and approval rate computation are now implemented.
 
 ---
 
-## Future Metrics (Roadmap)
+## Governance Metrics
 
-### Governance Metrics
 | Metric | Description | Status |
 |--------|-------------|--------|
-| **LLD First-Pass Rate** | % of LLDs approved on first Gemini review | Planned |
-| **Revision Count** | Average revisions before approval | Planned |
-| **Gate Time** | Time spent in each governance gate | Planned |
-| **Block Reasons** | Categorized reasons for BLOCK verdicts | Planned |
+| **LLD First-Pass Rate** | % of LLDs approved on first Gemini review | **Tracked** via verdict files |
+| **Revision Count** | Average revisions before approval | **Tracked** via iteration count |
+| **Gate Time** | Time spent in each governance gate | **Tracked** via `StageResult.duration_seconds` |
+| **Block Reasons** | Categorized reasons for BLOCK verdicts | **Tracked** via audit trail |
 
-### Cost Metrics
+## Quality Metrics
+
 | Metric | Description | Status |
 |--------|-------------|--------|
-| **Gemini API Cost** | Daily/weekly Gemini usage | Planned |
-| **Claude API Cost** | Token usage by workflow | Planned |
-| **Cost per Issue** | Total cost / issues closed | Planned |
+| **Test Count** | Total tests across all modules | **3,386 tests** in 134 files |
+| **Test Coverage** | Aggregate coverage across modules | Tracked per-issue |
+| **Stagnation Events** | Iterations halted for no progress | **Tracked** via `[STAGNANT]` logs |
+| **Circuit Breaker Trips** | Budget exceeded events | **Tracked** via `[CIRCUIT]` logs |
 
-### Quality Metrics
+## Agent Metrics
+
 | Metric | Description | Status |
 |--------|-------------|--------|
-| **Test Coverage** | Aggregate coverage across modules | Planned |
-| **Regression Rate** | New failures per release | Planned |
-| **Reopen Rate** | % of issues reopened after close | Planned |
-
-### Agent Metrics
-| Metric | Description | Status |
-|--------|-------------|--------|
-| **Concurrent Agents** | Peak simultaneous agent count | Planned |
-| **Agent Success Rate** | % of agent tasks completing | Planned |
-| **Permission Friction** | Prompts per hour by agent | Logged |
+| **Concurrent Agents** | Peak simultaneous agent count | 12+ |
+| **Agent Success Rate** | % of agent tasks completing | **Tracked** via telemetry |
+| **Permission Friction** | Prompts per hour by agent | **Logged** via Zugzwang |
 
 ---
 
@@ -148,9 +184,9 @@ Vetinari Index = (Closure Rate × 0.3) +
                  (Agent Success Rate × 0.2)
 ```
 
-**Current Index:** 0.77 × 0.3 + (estimated 0.65 × 0.3) + (0.80 × 0.2) + (0.90 × 0.2) = **0.77**
+**Current Index:** 0.91 × 0.3 + (estimated 0.70 × 0.3) + (0.85 × 0.2) + (0.90 × 0.2) = **0.83**
 
-*A Vetinari Index above 0.75 indicates a well-functioning city. Above 0.85, the Patrician permits himself a thin smile.*
+*A Vetinari Index above 0.75 indicates a well-functioning city. Above 0.85, the Patrician permits himself a thin smile. We're getting close.*
 
 ---
 
@@ -181,6 +217,10 @@ This wasn't a crisis—it was **visibility**. The audit proved the governance sy
 
 February 3rd saw 55 issues closed—a testament to the multi-agent architecture. While [The Great God Om](The-Great-God-Om) slept (briefly), agents continued their work.
 
+### The February Push
+
+Between Feb 5 and Feb 26, 712 commits landed — circuit breakers, cost tracking, multi-framework test runners, telemetry, cascade prevention, end-to-end orchestration, and more. The closure rate climbed from 76.8% to 90.9%.
+
 ---
 
 ## Related
@@ -188,6 +228,8 @@ February 3rd saw 55 issues closed—a testament to the multi-agent architecture.
 - [Measuring Productivity](Measuring-Productivity) - KPI framework
 - [How the AssemblyZero Learns](How-the-AssemblyZero-Learns) - Self-improvement metrics
 - [Governance Gates](Governance-Gates) - Gate performance metrics
+- [Cost Management](Cost-Management) - Cost tracking metrics
+- [Observability & Monitoring](Observability-and-Monitoring) - Telemetry metrics
 
 ---
 

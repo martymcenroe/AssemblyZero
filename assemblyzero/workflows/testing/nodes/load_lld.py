@@ -25,7 +25,9 @@ from assemblyzero.workflows.testing.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.testing.framework_detector import resolve_framework
 from assemblyzero.workflows.testing.knowledge.patterns import detect_test_types
+from assemblyzero.workflows.testing.runner_registry import get_framework_config
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
 
 
@@ -681,6 +683,11 @@ def _load_from_issue(
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "issue-only-spec.md", lld_content)
 
+    # Issue #381: Detect test framework
+    framework = resolve_framework(lld_content, str(repo_root))
+    fw_config = get_framework_config(framework)
+    gate_log(f"    Framework: {framework.value}")
+
     # Log workflow start
     log_workflow_execution(
         target_repo=repo_root,
@@ -692,6 +699,7 @@ def _load_from_issue(
             "title": title,
             "body_length": len(body),
             "scenario_count": len(test_scenarios),
+            "framework": framework.value,
         },
     )
 
@@ -706,6 +714,8 @@ def _load_from_issue(
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": next_file_number(audit_dir),
+        "framework_config": dict(fw_config),
+        "total_scenarios": len(test_scenarios),
     }
 
 
@@ -834,6 +844,11 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
         test_plan_content += f"- Description: {scenario['description']}\n\n"
     save_audit_file(audit_dir, file_num, "test-plan.md", test_plan_content)
 
+    # Issue #381: Detect test framework
+    framework = resolve_framework(lld_content, str(repo_root))
+    fw_config = get_framework_config(framework)
+    print(f"    Framework: {framework.value}")
+
     # Log workflow start
     log_workflow_execution(
         target_repo=repo_root,
@@ -844,6 +859,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
             "lld_path": str(lld_path_obj),
             "scenario_count": len(test_scenarios),
             "test_types": detected_types,
+            "framework": framework.value,
         },
     )
 
@@ -860,6 +876,8 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
+        "framework_config": dict(fw_config),
+        "total_scenarios": len(test_scenarios),
     }
 
 
@@ -934,6 +952,10 @@ Requirement: REQ-2
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "lld.md", mock_lld)
 
+    # Issue #381: Detect test framework (even in mock mode)
+    framework = resolve_framework(mock_lld, str(repo_root))
+    fw_config = get_framework_config(framework)
+
     print(f"    [MOCK] Loaded mock LLD for issue #{issue_number}")
 
     return {
@@ -948,4 +970,6 @@ Requirement: REQ-2
         "file_counter": file_num,
         "iteration_count": 0,
         "error_message": "",
+        "framework_config": dict(fw_config),
+        "total_scenarios": len(mock_scenarios),
     }

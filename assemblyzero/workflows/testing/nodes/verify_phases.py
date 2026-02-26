@@ -29,6 +29,8 @@ from assemblyzero.workflows.testing.exit_code_router import (
     describe_exit_code,
     route_by_exit_code,
 )
+from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
+from assemblyzero.workflows.testing.runner_registry import get_runner
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 
@@ -148,6 +150,13 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Check for mock mode
     if state.get("mock_mode"):
         return _mock_verify_red_phase(state)
+
+    # Issue #381: Framework-aware red phase
+    framework_config = state.get("framework_config")
+    if framework_config:
+        fw_enum = _resolve_framework_enum(framework_config)
+        if fw_enum and fw_enum != TestFramework.PYTEST:
+            return _verify_red_non_pytest(state, framework_config, fw_enum)
 
     # Get data from state
     test_files = state.get("test_files", [])
@@ -308,6 +317,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Check for mock mode
     if state.get("mock_mode"):
         return _mock_verify_green_phase(state)
+
+    # Issue #381: Framework-aware green phase
+    framework_config = state.get("framework_config")
+    if framework_config:
+        fw_enum = _resolve_framework_enum(framework_config)
+        if fw_enum and fw_enum != TestFramework.PYTEST:
+            return _verify_green_non_pytest(state, framework_config, fw_enum)
 
     # Get data from state
     test_files = state.get("test_files", [])
@@ -707,6 +723,356 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "previous_passed": passed_count,
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
+        "next_node": "N6_e2e_validation",
+        "error_message": "",
+    }
+
+
+def _resolve_framework_enum(framework_config: dict) -> TestFramework | None:
+    """Extract TestFramework enum from framework_config dict.
+
+    The framework field may be a TestFramework enum or its string value
+    (after serialization through LangGraph state).
+    """
+    fw = framework_config.get("framework")
+    if isinstance(fw, TestFramework):
+        return fw
+    if isinstance(fw, str):
+        try:
+            return TestFramework(fw)
+        except ValueError:
+            return None
+    return None
+
+
+def _verify_red_non_pytest(
+    state: TestingWorkflowState,
+    framework_config: dict,
+    framework: TestFramework,
+) -> dict[str, Any]:
+    """Red phase verification for non-pytest frameworks (Playwright/Jest/Vitest).
+
+    Issue #381: Uses the runner registry to execute tests. In red phase,
+    ALL tests should fail (none should pass).
+    """
+    test_files = state.get("test_files", [])
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+
+    if not test_files:
+        print("    [GUARD] BLOCKED: No test files to run")
+        return {"error_message": "GUARD: No test files generated"}
+
+    print(f"    Running {framework.value} on {len(test_files)} test file(s)...")
+
+    try:
+        runner = get_runner(framework, str(repo_root))
+    except (ValueError, EnvironmentError) as e:
+        return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
+
+    result = runner.run_tests(test_paths=test_files)
+
+    output = result["raw_output"]
+    passed = result["passed"]
+    failed = result["failed"]
+    errors = result["errors"]
+    exit_code = result["exit_code"]
+
+    print(f"    Results: {passed} passed, {failed} failed, {errors} errors")
+    print(f"    Exit code: {exit_code}")
+
+    # Save output to audit trail
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir and audit_dir.exists():
+        file_num = next_file_number(audit_dir)
+        save_audit_file(audit_dir, file_num, "red-phase.txt", output)
+    else:
+        file_num = state.get("file_counter", 0)
+
+    # Red phase: ALL tests must fail
+    if passed > 0:
+        print(f"    [GUARD] WARNING: {passed} tests passed unexpectedly!")
+        return {
+            "red_phase_output": output,
+            "file_counter": file_num,
+            "test_run_result": dict(result),
+            "error_message": f"Red phase failed: {passed} tests passed unexpectedly.",
+            "next_node": "END",
+        }
+
+    total_red = failed + errors
+    if total_red == 0:
+        print("    [GUARD] WARNING: No tests ran!")
+        return {
+            "red_phase_output": output,
+            "file_counter": file_num,
+            "test_run_result": dict(result),
+            "error_message": "Red phase failed: No tests were collected/run",
+            "next_node": "END",
+        }
+
+    print(f"    Red phase PASSED: {total_red} tests failed as expected ({framework.value})")
+
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event="red_phase_complete",
+        details={
+            "failed": failed,
+            "errors": errors,
+            "exit_code": exit_code,
+            "framework": framework.value,
+        },
+    )
+
+    return {
+        "red_phase_output": output,
+        "file_counter": file_num,
+        "test_run_result": dict(result),
+        "next_node": "N4_implement_code",
+        "error_message": "",
+    }
+
+
+def _verify_green_non_pytest(
+    state: TestingWorkflowState,
+    framework_config: dict,
+    framework: TestFramework,
+) -> dict[str, Any]:
+    """Green phase verification for non-pytest frameworks (Playwright/Jest/Vitest).
+
+    Issue #381: Uses the runner registry to execute tests. Handles both
+    line-based coverage (Jest/Vitest) and scenario-based coverage (Playwright).
+    Preserves stagnation detection and circuit breaker logic.
+    """
+    test_files = state.get("test_files", [])
+    coverage_target = state.get("coverage_target", 90)
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+    iteration_count = state.get("iteration_count", 0)
+    max_iterations = state.get("max_iterations", 5)
+    total_scenarios = state.get("total_scenarios", 0)
+
+    print(f"    Running {framework.value} with coverage target: {coverage_target}%")
+
+    try:
+        runner = get_runner(framework, str(repo_root))
+    except (ValueError, EnvironmentError) as e:
+        return {"error_message": f"Runner unavailable for {framework.value}: {e}"}
+
+    result = runner.run_tests(test_paths=test_files)
+
+    output = result["raw_output"]
+    passed = result["passed"]
+    failed = result["failed"]
+    errors = result["errors"]
+    exit_code = result["exit_code"]
+
+    # Compute coverage based on coverage_type
+    coverage_type = framework_config.get("coverage_type")
+    if isinstance(coverage_type, str):
+        try:
+            coverage_type = CoverageType(coverage_type)
+        except ValueError:
+            coverage_type = CoverageType.LINE
+
+    if coverage_type == CoverageType.SCENARIO:
+        # Playwright: coverage = passed / total_scenarios
+        coverage_achieved = runner.compute_scenario_coverage(result, total_scenarios) * 100.0
+    else:
+        # Jest/Vitest: line coverage from runner output
+        coverage_achieved = result.get("coverage_percent", 0.0)
+
+    print(f"    [N5] Results: {passed} passed, {failed} failed | "
+          f"Coverage: {coverage_achieved:.1f}% | Exit: {exit_code} ({framework.value})")
+
+    # Save output to audit trail
+    audit_dir_str = state.get("audit_dir", "")
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    if audit_dir and audit_dir.exists():
+        file_num = next_file_number(audit_dir)
+        save_audit_file(audit_dir, file_num, "green-phase.txt", output)
+    else:
+        file_num = state.get("file_counter", 0)
+
+    # Stagnation detection
+    previous_coverage = state.get("previous_coverage", -1.0)
+    previous_passed = state.get("previous_passed", -1)
+
+    if failed > 0 or errors > 0:
+        if iteration_count + 1 >= max_iterations:
+            error_msg = (
+                f"Green phase failed after {max_iterations} iterations: "
+                f"{failed} tests still failing ({framework.value})"
+            )
+            print(f"    [ERROR] {error_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": error_msg,
+            }
+
+        # Stagnation: passed count unchanged
+        if previous_passed >= 0 and passed == previous_passed:
+            stagnant_msg = (
+                f"Test count stagnant: {passed}/{passed + failed} passed "
+                f"(unchanged from previous iteration). Halting."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
+        # Circuit breaker
+        should_trip, trip_reason = check_circuit_breaker(state)
+        if should_trip:
+            print(f"    {trip_reason}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": trip_reason,
+            }
+
+        print(f"    [N5] Iteration {iteration_count + 1}/{max_iterations} | "
+              f"Tests: {passed}/{passed + failed} passed | "
+              f"Coverage: {coverage_achieved:.1f}% | Target: {coverage_target}%")
+
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
+            "previous_passed": passed,
+            "file_counter": file_num,
+            "test_run_result": dict(result),
+            "iteration_count": iteration_count + 1,
+            "next_node": "N4_implement_code",
+            "error_message": "",
+        }
+
+    # All tests pass — check coverage
+    if coverage_achieved < coverage_target:
+        if iteration_count + 1 >= max_iterations:
+            error_msg = (
+                f"Green phase failed after {max_iterations} iterations: "
+                f"coverage {coverage_achieved:.1f}% < target {coverage_target}%"
+            )
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": error_msg,
+            }
+
+        # Stagnation on coverage
+        if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+            stagnant_msg = (
+                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
+                f"(< 1% improvement). Halting."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
+        # Circuit breaker
+        should_trip, trip_reason = check_circuit_breaker(state)
+        if should_trip:
+            print(f"    {trip_reason}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed,
+                "file_counter": file_num,
+                "test_run_result": dict(result),
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": trip_reason,
+            }
+
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
+            "previous_passed": passed,
+            "file_counter": file_num,
+            "test_run_result": dict(result),
+            "iteration_count": iteration_count + 1,
+            "next_node": "N4_implement_code",
+            "error_message": "",
+        }
+
+    # Success
+    print(f"    [N5] Green phase PASSED: {passed} tests, "
+          f"{coverage_achieved:.1f}% coverage ({framework.value})")
+
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event="green_phase_complete",
+        details={
+            "passed": passed,
+            "coverage": coverage_achieved,
+            "iterations": iteration_count,
+            "framework": framework.value,
+        },
+    )
+
+    if state.get("skip_e2e"):
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": coverage_achieved,
+            "previous_coverage": coverage_achieved,
+            "previous_passed": passed,
+            "file_counter": file_num,
+            "test_run_result": dict(result),
+            "next_node": "N7_finalize",
+            "error_message": "",
+        }
+
+    return {
+        "green_phase_output": output,
+        "coverage_achieved": coverage_achieved,
+        "previous_coverage": coverage_achieved,
+        "previous_passed": passed,
+        "file_counter": file_num,
+        "test_run_result": dict(result),
         "next_node": "N6_e2e_validation",
         "error_message": "",
     }

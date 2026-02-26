@@ -33,7 +33,6 @@
 
 - [The Pipeline](The-Pipeline) (Issue → Code)
 - [Requirements Workflow](Requirements-Workflow)
-- [Implementation Spec](The-Pipeline#stage-2-implementation-spec-workflow-new---304)
 - [Implementation Workflow](Implementation-Workflow)
 - [The Scout](The-Scout-External-Intelligence-Gathering-Workflow)
 
@@ -54,6 +53,25 @@
 
 ---
 
+### Observability & Operations
+
+- [Observability & Monitoring](Observability-and-Monitoring)
+- [Cost Management](Cost-Management)
+
+---
+
+### Safety & Guardrails
+
+- [Safety & Guardrails](Safety-and-Guardrails)
+
+---
+
+### Orchestration
+
+- [End-to-End Pipeline](End-to-End-Orchestration)
+
+---
+
 ### Getting Started
 
 - [Quick Start](Quick-Start)
@@ -66,8 +84,6 @@
 - [Tools Reference](Tools-Reference)
 
 ---
-- [Implementation Spec Cross Project Metrics Aggregation for AssemblyZero Usage Tracking](Implementation-Spec-Cross-Project-Metrics-Aggregation-for-AssemblyZero-Usage-Tracking)
-- [Implementation Spec N9 Cleanup Node   Worktree Removal Lineage Archival and Learning Summary](Implementation-Spec-N9-Cleanup-Node---Worktree-Removal-Lineage-Archival-and-Learning-Summary)
 
 ### Reflections
 

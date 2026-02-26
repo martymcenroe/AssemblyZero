@@ -13,6 +13,8 @@ import re
 from typing import Any, Literal
 
 from assemblyzero.workflows.testing.audit import gate_log
+from assemblyzero.workflows.testing.framework_detector import TestFramework
+from assemblyzero.workflows.testing.runner_registry import get_runner
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +232,21 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     scenarios = parsed_scenarios.get("scenarios", [])
     scaffold_attempts = state.get("scaffold_attempts", 0)
 
+    # Issue #381: Framework-aware validation branch
+    framework_config = state.get("framework_config")
+    if framework_config:
+        fw_enum = framework_config.get("framework")
+        # Normalize: could be a TestFramework enum or its string value
+        if isinstance(fw_enum, str):
+            try:
+                fw_enum = TestFramework(fw_enum)
+            except ValueError:
+                fw_enum = None
+        if fw_enum and fw_enum != TestFramework.PYTEST:
+            return _validate_non_pytest(
+                state, generated_tests, fw_enum, scaffold_attempts
+            )
+
     all_errors = []
     stub_count = 0
 
@@ -285,6 +302,73 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "validation_result": validation_result,
+        "scaffold_attempts": new_attempts,
+    }
+
+
+def _validate_non_pytest(
+    state: dict[str, Any],
+    generated_tests: str,
+    framework: TestFramework,
+    scaffold_attempts: int,
+) -> dict[str, Any]:
+    """Validate non-pytest test files using framework-specific runner validators.
+
+    Issue #381: Playwright/Jest/Vitest files can't be validated with Python AST.
+    Instead, use the runner's validate_test_file() method which checks for
+    framework-specific patterns (imports, test blocks, etc.).
+    """
+    repo_root = state.get("repo_root", ".")
+    test_files = state.get("test_files", [])
+
+    all_errors: list[str] = []
+
+    try:
+        runner = get_runner(framework, repo_root)
+    except (ValueError, EnvironmentError) as e:
+        # If runner can't be created (e.g., npx not installed), skip validation
+        print(f"    [N2.5] Runner unavailable for {framework.value}: {e}")
+        print("    [N2.5] Skipping mechanical validation (runner unavailable)")
+        return {
+            "validation_result": {
+                "is_valid": True,
+                "errors": [],
+                "warnings": [f"Runner unavailable: {e}"],
+                "stub_count": 0,
+                "real_test_count": 0,
+            },
+            "scaffold_attempts": scaffold_attempts,
+        }
+
+    # Validate each test file using the runner
+    if test_files:
+        for tf in test_files:
+            errors = runner.validate_test_file(tf, generated_tests)
+            all_errors.extend(errors)
+    else:
+        # If no test_files list, validate the generated content directly
+        errors = runner.validate_test_file("<generated>", generated_tests)
+        all_errors.extend(errors)
+
+    is_valid = len(all_errors) == 0
+
+    if is_valid:
+        print(f"    [N2.5] {framework.value} validation PASSED")
+    else:
+        print(f"    [N2.5] {framework.value} validation FAILED: {len(all_errors)} errors")
+        for error in all_errors[:5]:
+            print(f"      - {error}")
+
+    new_attempts = scaffold_attempts + 1 if not is_valid else scaffold_attempts
+
+    return {
+        "validation_result": {
+            "is_valid": is_valid,
+            "errors": all_errors,
+            "warnings": [],
+            "stub_count": 0,
+            "real_test_count": 0,
+        },
         "scaffold_attempts": new_attempts,
     }
 

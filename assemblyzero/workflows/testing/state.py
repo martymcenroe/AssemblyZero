@@ -7,6 +7,7 @@ Issue #335: Scaffold validation fields
 Issue #147: Completeness gate fields (completeness_verdict, completeness_issues, review_materials)
 Issue #292: pytest_exit_code for exit code routing
 Issue #180: N9 Cleanup node fields (pr_url, pr_merged, learning_summary_path, cleanup_skipped_reason)
+Issue #381: Multi-framework TDD support (framework_config, test_run_result, total_scenarios)
 
 This TypedDict travels through nodes N0-N8, tracking the testing workflow
 from LLD loading through test generation, implementation, E2E validation,
@@ -230,6 +231,11 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Issue #476: API cost budget
     cost_budget_usd: float
+
+    # Issue #381: Multi-framework TDD support
+    framework_config: dict | None   # FrameworkConfig from runner_registry (None = pytest default)
+    test_run_result: dict | None    # TestRunResult from runner (non-pytest frameworks)
+    total_scenarios: int            # For scenario-based coverage (Playwright)
 
     # === N9: Cleanup (Issue #180) ===
     pr_url: str                    # GitHub PR URL (e.g., "https://github.com/org/repo/pull/42")
