@@ -1,4 +1,4 @@
-# LLD Review: 102-Feature: TDD Test Initialization Gate
+# LLD Review: 102 - Feature: TDD Test Initialization Gate
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
@@ -7,71 +7,77 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The Low-Level Design is exceptionally thorough, demonstrating a strong grasp of git internals (specifically the GPG signing lifecycle) and providing robust fallback mechanisms for the red-green-refactor cycle. The test coverage is comprehensive (100%), and the architecture minimizes friction while enforcing discipline.
-
-However, the design contains a **Tier 1 Safety Violation** regarding file system scope. The requirement to store pending issues in the user's home directory (`~/.tdd-pending-issues.json`) violates the strict worktree isolation protocol. This must be changed to project-scoped storage (e.g., inside `.git/`) before approval.
+The Low-Level Design is comprehensive, robust, and addresses previous validation failures regarding test coverage. The architecture correctly balances strict enforcement with necessary escape hatches (overrides). The reliance on Git hooks and local state files, backed by commit footers for CI verification, is a sound distributed system design for this constraint.
 
 ## Open Questions Resolved
-- [x] ~~Does the team use "Squash and Merge" for Pull Requests?~~ **RESOLVED: Yes.** The design supports this natively by scanning commit footers in the PR branch (`git log --format=%B`), which works regardless of merge strategy.
-- [x] ~~Strict blocking (CI failure) or soft blocking (warning/audit log) for MVP?~~ **RESOLVED: Strict blocking.** Soft blocking is generally ignored. The design correctly implements strict blocking at both the local hook and CI levels.
-- [x] ~~Should "Hotfix Override" require manager approval (via CODEOWNERS) or is developer self-attestation sufficient?~~ **RESOLVED: Self-attestation.** Manager approval introduces unacceptable latency for hotfixes. The proposed audit trail + async issue creation provides sufficient accountability.
+- [x] ~~Does the team use "Squash and Merge" for Pull Requests?~~ **RESOLVED: Yes.** The design's footer extraction strategy (`git log ... origin/main..HEAD`) works correctly in a PR context. Upon squashing, the footers in individual commits will be preserved in the description of the squashed commit, maintaining the audit trail.
+- [x] ~~Should the "Hotfix Override" require manager approval?~~ **RESOLVED: No.** Developer self-attestation is sufficient. The visibility created by the automated `gh issue create` acts as a social control mechanism. Hard blocking requiring external approval would dangerously impede hotfixes.
+- [x] ~~Does the team prefer strict blocking or soft blocking?~~ **RESOLVED: Strict blocking.** The `pre-commit` hook should block by default to enforce the behavior change. The `--skip-tdd-gate` flag provides the "soft" escape hatch, ensuring strictness doesn't become obstruction.
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| 1 | Pre-commit hook MUST block commits of source files without corresponding test files | T110, T120 | ✓ Covered |
-| 2 | Pre-commit hook MUST exclude documentation files and config files | T040, T060, T070, T130 | ✓ Covered |
-| 3 | `tdd-gate --verify-red` MUST run ONLY the specified test file | T210 | ✓ Covered |
-| 4 | Red phase verification MUST accept only exit code `1` | T140, T410 | ✓ Covered |
-| 5 | Red phase verification MUST reject exit codes `0`, `2`, `5` | T150, T160, T400 | ✓ Covered |
-| 6 | Exit code `5` error message MUST suggest checking file naming conventions | T170 | ✓ Covered |
-| 7 | Red phase proof MUST be stored as commit message footer | T230, T240 | ✓ Covered |
-| 8 | Prepare-commit-msg hook MUST run before GPG signing | T440 | ✓ Covered |
-| 9 | CI gate MUST extract `TDD-Red-Phase` footer from ALL commits in PR branch | T300, T310 | ✓ Covered |
-| 10 | `--skip-tdd-gate` MUST allow immediate commit (non-blocking) | T250, T260, T450 | ✓ Covered |
-| 11 | Override MUST log debt locally to `~/.tdd-pending-issues.json` | T320, T330, T460 | ✓ Covered |
-| 12 | Pending issue creation MUST be async and non-blocking | T350, T470 | ✓ Covered |
-| 13 | `tdd-pending-issues --flush` MUST manually trigger pending issue upload | T340, T360 | ✓ Covered |
-| 14 | `--reason` argument MUST be sanitized via subprocess list args | T200, T270 | ✓ Covered |
-| 15 | Audit trail MUST be append-only at `docs/reports/{IssueID}/tdd-audit.md` | T280, T290, T370, T380, T390 | ✓ Covered |
-| 16 | Configuration MUST be customizable via `.tdd-config.json` | T010, T020, T030, T430 | ✓ Covered |
-| 17 | `.tdd-state.json` MUST be listed in `.gitignore` | T480 | ✓ Covered |
-| 18 | Husky MUST auto-install hooks via `prepare` script | T490 | ✓ Covered |
-| 19 | MUST work with pytest | T080 | ✓ Covered |
-| 20 | MUST work with Jest | T090 | ✓ Covered |
+| 1 | Pre-commit hook MUST block commits without tests | T260, T270, T300, T450 | ✓ Covered |
+| 2 | Pre-commit hook MUST exclude docs/config | T040, T050, T070, T280, T290, T440 | ✓ Covered |
+| 3 | `verify-red` MUST run ONLY specified test file | T100, T430 | ✓ Covered |
+| 4 | `verify-red` MUST confirm exit 1 & record | T120, T160 | ✓ Covered |
+| 5 | `verify-red` MUST reject exit 0, 2, 5 | T130, T140, T150, T200 | ✓ Covered |
+| 6 | `verify-green` MUST confirm exit 0 & record | T170, T180, T190, T250 | ✓ Covered |
+| 7 | Red phase proof written as footer | T240, T310, T330 | ✓ Covered |
+| 8 | Prepare-commit-msg runs before signing | T320, T340 | ✓ Covered |
+| 9 | Override MUST work with justification | T210, T220 | ✓ Covered |
+| 10 | Override logs debt locally | T380, T400, T420 | ✓ Covered |
+| 11 | `flush` triggers upload | T390, T410 | ✓ Covered |
+| 12 | Reason argument MUST be sanitized | T230, T460 | ✓ Covered |
+| 13 | Audit trail MUST append | T350, T360, T370 | ✓ Covered |
+| 14 | MUST work with pytest | T080 | ✓ Covered |
+| 15 | MUST work with Jest | T110 | ✓ Covered |
+| 16 | Config customizable | T010, T020, T030 | ✓ Covered |
+| 17 | `.tdd-state.json` in `.gitignore` | T470 | ✓ Covered |
+| 18 | Husky configured with `prepare` | T480 | ✓ Covered |
 
-**Coverage Calculation:** 20 requirements covered / 20 total = **100%**
+**Coverage Calculation:** 18 requirements covered / 18 total = **100%**
 
 **Verdict:** PASS
 
 ## Tier 1: BLOCKING Issues
+No blocking issues found. LLD is approved for implementation.
 
 ### Cost
-- No issues found.
+- [ ] No issues found. Local execution incurs zero cost. `gh` API usage is minimal and within free tier limits.
 
 ### Safety
-- [ ] **Worktree Scope Violation (CRITICAL):** Requirement #11 and the implementation plan specify storing pending issues in `~/.tdd-pending-issues.json` (User Home Directory). This violates the strict safety protocol: "All file operations must be scoped to the worktree."
-    - **Recommendation:** Change storage location to `.git/tdd-pending-issues.json`. This keeps the data local to the project (preserving the `repo` context logic) and strictly within the worktree, while still persisting across branch switches. It is acceptable that this data is lost if the repository is deleted.
+- [ ] No issues found. Worktree scope is respected. Destructive operations (overwriting source) are not present. Fail-open strategy on config error prevents blocking development.
 
 ### Security
-- No issues found.
+- [ ] No issues found. Input sanitization (Section 7.1 and Test T460) effectively mitigates command injection risks via the `--reason` flag.
 
 ### Legal
-- No issues found.
+- [ ] No issues found. Licenses are compatible.
 
 ## Tier 2: HIGH PRIORITY Issues
 No high-priority issues found.
 
+### Architecture
+- [ ] No issues found. The separation of concerns between the CLI (`tools/`) and hooks (`hooks/`) is clean.
+
+### Observability
+- [ ] No issues found. The combination of local state, markdown audit logs, and commit footers provides excellent traceability.
+
+### Quality
+- [ ] **Requirement Coverage:** PASS (100%).
+- [ ] Test plan is robust and includes specific scenarios for error handling and edge cases.
+
 ## Tier 3: SUGGESTIONS
-- **Architecture:** Moving the pending issues file to `.git/` simplifies the data structure (no need to store `repo` field in `PendingIssue` since the file is now repo-specific).
-- **Usability:** Consider adding a `tdd-gate --status` command to show current phase and pending debt without flushing.
+- **Pre-commit Performance:** Ensure `find_test_file` logic caches results if the list of staged files is large, though for typical commits this is negligible.
+- **Git Hook Path:** Ensure the `pre_commit_tdd_gate.py` script handles being called from different working directories correctly (hooks run from root, but robust path handling using `pathlib.Path.cwd()` is recommended).
 
 ## Questions for Orchestrator
 1. None.
 
 ## Verdict
-[ ] **APPROVED** - Ready for implementation
-[x] **REVISE** - Fix Tier 1/2 issues first
+[x] **APPROVED** - Ready for implementation
+[ ] **REVISE** - Fix Tier 1/2 issues first
 [ ] **DISCUSS** - Needs Orchestrator decision
