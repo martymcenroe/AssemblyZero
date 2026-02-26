@@ -429,6 +429,12 @@ Examples:
         default=20,
         help="Maximum revision iterations (default: 20)",
     )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=5.0,
+        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
+    )
 
     return parser.parse_args(args)
 
@@ -556,7 +562,7 @@ def build_initial_state(
             if brief_path.parent == ideas_active:
                 source_idea = str(brief_path)
 
-        return create_initial_state(
+        state = create_initial_state(
             workflow_type="issue",
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
@@ -571,7 +577,7 @@ def build_initial_state(
             source_idea=source_idea,
         )
     else:  # lld
-        return create_initial_state(
+        state = create_initial_state(
             workflow_type="lld",
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
@@ -585,6 +591,10 @@ def build_initial_state(
             issue_number=args.issue or 0,
             context_files=args.context or [],
         )
+
+    # Issue #476: API cost budget
+    state["cost_budget_usd"] = getattr(args, "budget", 5.0)
+    return state
 
 
 def run_single_workflow(

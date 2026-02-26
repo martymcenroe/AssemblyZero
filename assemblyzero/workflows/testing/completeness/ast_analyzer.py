@@ -333,6 +333,25 @@ def analyze_empty_branches(
     return issues
 
 
+def _has_abstractmethod_decorator(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Check if a function has the @abstractmethod decorator.
+
+    Handles both bare ``@abstractmethod`` and qualified ``@abc.abstractmethod``.
+
+    Args:
+        node: AST function definition node.
+
+    Returns:
+        True if the function is decorated with @abstractmethod.
+    """
+    for decorator in node.decorator_list:
+        if isinstance(decorator, ast.Name) and decorator.id == "abstractmethod":
+            return True
+        if isinstance(decorator, ast.Attribute) and decorator.attr == "abstractmethod":
+            return True
+    return False
+
+
 def analyze_docstring_only_functions(
     source_code: str, file_path: str
 ) -> list[CompletenessIssue]:
@@ -340,6 +359,7 @@ def analyze_docstring_only_functions(
 
     Issue #147, Requirement 4: Detects functions that have a docstring
     but no real implementation — just pass, return None, or ellipsis.
+    Issue #477: Skip @abstractmethod functions (trivial body is intentional).
 
     Args:
         source_code: Python source code to analyze.
@@ -366,6 +386,10 @@ def analyze_docstring_only_functions(
         # Skip dunder methods that legitimately have trivial bodies
         # (e.g., __init__ with just pass in abstract classes)
         if node.name.startswith("__") and node.name.endswith("__"):
+            continue
+
+        # Issue #477: Skip @abstractmethod — trivial body is intentional
+        if _has_abstractmethod_decorator(node):
             continue
 
         # Must have a docstring to qualify as "docstring-only"

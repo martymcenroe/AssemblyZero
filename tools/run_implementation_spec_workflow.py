@@ -209,6 +209,14 @@ Examples:
         help="Resume from checkpoint",
     )
 
+    # Issue #476: Cost budget
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=5.0,
+        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
+    )
+
     return parser
 
 
@@ -369,6 +377,8 @@ def build_initial_state(
         "next_node": "",
         # Error handling
         "error_message": "",
+        # Issue #476: API cost budget
+        "cost_budget_usd": args.budget,
     }
 
     return state

@@ -67,12 +67,34 @@ class LLMCallResult:
     rate_limited: bool = False
 
 
+# =============================================================================
+# Issue #476: Cumulative cost tracking
+# =============================================================================
+
+_cumulative_cost_usd: float = 0.0
+
+
+def get_cumulative_cost() -> float:
+    """Return the cumulative API cost in USD across all calls this session."""
+    return _cumulative_cost_usd
+
+
+def reset_cumulative_cost() -> None:
+    """Reset the cumulative cost counter to zero."""
+    global _cumulative_cost_usd
+    _cumulative_cost_usd = 0.0
+
+
 def log_llm_call(result: LLMCallResult) -> None:
     """Log token usage and cost for an LLM call.
 
     Issue #398: Prints a structured line after every LLM call.
     Issue #399: Includes rate limit warning if 429 was hit.
+    Issue #476: Accumulates cumulative cost and prints running total.
     """
+    global _cumulative_cost_usd
+    _cumulative_cost_usd += result.cost_usd
+
     duration_s = result.duration_ms / 1000.0
     parts = [
         f"[LLM] provider={result.provider}",
@@ -87,6 +109,8 @@ def log_llm_call(result: LLMCallResult) -> None:
         parts.append(f"cache_create={result.cache_creation_tokens}")
     if result.cost_usd > 0:
         parts.append(f"cost=${result.cost_usd:.4f}")
+    if _cumulative_cost_usd > 0:
+        parts.append(f"cumulative=${_cumulative_cost_usd:.2f}")
     parts.append(f"duration={duration_s:.1f}s")
     if not result.success:
         parts.append(f"ERROR={result.error_message or 'unknown'}")
@@ -636,6 +660,9 @@ class FallbackProvider(LLMProvider):
         self._primary = primary
         self._fallback = fallback
         self._primary_timeout = primary_timeout
+        # Issue #476: Circuit breaker — stop after consecutive both-fail calls
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 2
 
     @property
     def provider_name(self) -> str:
@@ -653,6 +680,8 @@ class FallbackProvider(LLMProvider):
     ) -> LLMCallResult:
         """Invoke primary, fall back to secondary on failure.
 
+        Issue #476: Circuit breaker trips after consecutive both-fail calls.
+
         Args:
             system_prompt: System instructions for the model.
             content: User content to process.
@@ -661,10 +690,30 @@ class FallbackProvider(LLMProvider):
         Returns:
             LLMCallResult from whichever provider succeeded (or last failure).
         """
+        # Issue #476: Circuit breaker — refuse if too many consecutive failures
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            n = self._consecutive_failures
+            msg = (
+                f"[CIRCUIT BREAKER] {n} consecutive failures. "
+                f"Use --resume after API recovers."
+            )
+            print(f"    {msg}")
+            return LLMCallResult(
+                success=False,
+                response=None,
+                raw_response=None,
+                error_message=msg,
+                provider=self.provider_name,
+                model_used=self.model,
+                duration_ms=0,
+                attempts=0,
+            )
+
         # Try primary with shorter timeout
         effective_timeout = min(timeout_seconds, self._primary_timeout)
         result = self._primary.invoke(system_prompt, content, effective_timeout)
         if result.success:
+            self._consecutive_failures = 0
             return result
 
         # Primary failed — try fallback with full timeout
@@ -673,7 +722,16 @@ class FallbackProvider(LLMProvider):
             f"({result.error_message[:80] if result.error_message else 'unknown'}), "
             f"falling back to {self._fallback.provider_name}..."
         )
-        return self._fallback.invoke(system_prompt, content, timeout_seconds)
+        fallback_result = self._fallback.invoke(system_prompt, content, timeout_seconds)
+        if fallback_result.success:
+            self._consecutive_failures = 0
+        else:
+            self._consecutive_failures += 1
+            print(
+                f"    [CIRCUIT] {self._consecutive_failures}/"
+                f"{self._max_consecutive_failures} consecutive failures"
+            )
+        return fallback_result
 
 
 class GeminiProvider(LLMProvider):

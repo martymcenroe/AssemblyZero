@@ -29,9 +29,11 @@ from assemblyzero.core.llm_provider import (
     FallbackProvider,
     GeminiProvider,
     MockProvider,
+    get_cumulative_cost,
     get_provider,
     log_llm_call,
     parse_provider_spec,
+    reset_cumulative_cost,
     _load_anthropic_api_key,
 )
 
@@ -1069,3 +1071,130 @@ class TestRateLimitLogging:
         log_llm_call(result)
         output = capsys.readouterr().out
         assert "RATE_LIMITED=true" in output
+
+
+class TestCircuitBreaker:
+    """Tests for Issue #476: FallbackProvider circuit breaker."""
+
+    def _make_result(self, success, provider_name="mock", error_msg=None, cost=0.0):
+        """Helper to create LLMCallResult."""
+        return LLMCallResult(
+            success=success,
+            response="OK" if success else None,
+            raw_response="OK" if success else None,
+            error_message=error_msg,
+            provider=provider_name,
+            model_used="test",
+            duration_ms=100,
+            attempts=1,
+            cost_usd=cost,
+        )
+
+    def test_circuit_breaker_trips_after_consecutive_failures(self):
+        """Circuit breaker trips after 2 consecutive both-fail calls."""
+        primary = Mock(spec=LLMProvider)
+        primary.provider_name = "claude"
+        primary.model = "opus"
+        primary.invoke.return_value = self._make_result(False, "claude", "CLI error")
+
+        fallback = Mock(spec=LLMProvider)
+        fallback.provider_name = "anthropic"
+        fallback.invoke.return_value = self._make_result(False, "anthropic", "API error")
+
+        fb = FallbackProvider(primary=primary, fallback=fallback)
+
+        # Call 1: both fail → counter=1
+        r1 = fb.invoke("system", "content")
+        assert r1.success is False
+
+        # Call 2: both fail → counter=2
+        r2 = fb.invoke("system", "content")
+        assert r2.success is False
+
+        # Call 3: circuit breaker trips — neither provider called
+        primary.invoke.reset_mock()
+        fallback.invoke.reset_mock()
+        r3 = fb.invoke("system", "content")
+        assert r3.success is False
+        assert "CIRCUIT BREAKER" in r3.error_message
+        primary.invoke.assert_not_called()
+        fallback.invoke.assert_not_called()
+
+    def test_circuit_breaker_resets_on_success(self):
+        """Circuit breaker resets when a call succeeds."""
+        primary = Mock(spec=LLMProvider)
+        primary.provider_name = "claude"
+        primary.model = "opus"
+
+        fallback = Mock(spec=LLMProvider)
+        fallback.provider_name = "anthropic"
+
+        fb = FallbackProvider(primary=primary, fallback=fallback)
+
+        # Call 1: both fail → counter=1
+        primary.invoke.return_value = self._make_result(False, "claude", "error")
+        fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
+        fb.invoke("system", "content")
+        assert fb._consecutive_failures == 1
+
+        # Call 2: primary succeeds → counter resets to 0
+        primary.invoke.return_value = self._make_result(True, "claude")
+        fb.invoke("system", "content")
+        assert fb._consecutive_failures == 0
+
+        # Call 3+4: both fail again → counter goes to 2
+        primary.invoke.return_value = self._make_result(False, "claude", "error")
+        fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
+        fb.invoke("system", "content")
+        fb.invoke("system", "content")
+        assert fb._consecutive_failures == 2
+
+        # Call 5: would trip, but verify it does
+        r = fb.invoke("system", "content")
+        assert "CIRCUIT BREAKER" in r.error_message
+
+
+class TestCumulativeCost:
+    """Tests for Issue #476: Cumulative cost tracking."""
+
+    def setup_method(self):
+        """Reset cumulative cost before each test."""
+        reset_cumulative_cost()
+
+    def test_cumulative_tracks_across_calls(self):
+        """Cumulative cost sums across multiple log_llm_call invocations."""
+        reset_cumulative_cost()
+        for cost in [0.05, 0.10, 0.25]:
+            result = LLMCallResult(
+                success=True,
+                response="ok",
+                raw_response="ok",
+                error_message=None,
+                provider="mock",
+                model_used="test",
+                duration_ms=100,
+                attempts=1,
+                cost_usd=cost,
+            )
+            log_llm_call(result)
+
+        assert abs(get_cumulative_cost() - 0.40) < 1e-10
+
+    def test_reset_zeroes(self):
+        """reset_cumulative_cost returns counter to zero."""
+        result = LLMCallResult(
+            success=True,
+            response="ok",
+            raw_response="ok",
+            error_message=None,
+            provider="mock",
+            model_used="test",
+            duration_ms=100,
+            attempts=1,
+            cost_usd=1.50,
+        )
+        log_llm_call(result)
+        assert get_cumulative_cost() > 0
+
+        reset_cumulative_cost()
+        assert get_cumulative_cost() == 0.0

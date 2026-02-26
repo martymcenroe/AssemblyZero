@@ -420,6 +420,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Use issue body as spec (skip LLD/spec file search). For small changes.",
     )
     parser.add_argument(
+        "--budget",
+        type=float,
+        default=5.0,
+        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
+    )
+    parser.add_argument(
         "--token-budget",
         type=int,
         default=0,
@@ -702,6 +708,7 @@ def main():
         "issue_only": args.issue_only,
         "token_budget": args.token_budget,
         "estimated_tokens_used": 0,
+        "cost_budget_usd": args.budget,
     }
 
     # Track worktree for later reference (cleanup, PR creation)

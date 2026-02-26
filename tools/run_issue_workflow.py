@@ -335,6 +335,7 @@ def run_new_workflow(
             "issue_number": 0,
             "issue_url": "",
             "error_message": "",
+            "cost_budget_usd": args.budget,
         }
 
         # Use brief filename as thread ID for checkpointing
@@ -747,6 +748,12 @@ Examples:
         "--repo",
         type=str,
         help="Target repository root (default: auto-detect via git)",
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=5.0,
+        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
     )
 
     return parser

@@ -228,6 +228,9 @@ class TestingWorkflowState(TypedDict, total=False):
     token_budget: int  # Max estimated tokens (0 = unlimited)
     estimated_tokens_used: int  # Running estimate of tokens consumed
 
+    # Issue #476: API cost budget
+    cost_budget_usd: float
+
     # === N9: Cleanup (Issue #180) ===
     pr_url: str                    # GitHub PR URL (e.g., "https://github.com/org/repo/pull/42")
     pr_merged: bool                # Set by N9 after checking PR merge status

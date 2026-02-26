@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from assemblyzero.core.llm_provider import get_provider
+from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
@@ -183,6 +183,14 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     if not result.success:
         print(f"    ERROR: {result.error_message}")
         return {"error_message": f"Reviewer failed: {result.error_message}"}
+
+    # Issue #476: Budget check
+    cumulative = get_cumulative_cost()
+    budget = state.get("cost_budget_usd", 0.0)
+    if budget > 0 and cumulative > budget:
+        msg = f"[BUDGET] ${cumulative:.2f} exceeds ${budget:.2f} budget. Halting."
+        print(f"    {msg}")
+        return {"error_message": msg}
 
     verdict_content = result.response or ""
 

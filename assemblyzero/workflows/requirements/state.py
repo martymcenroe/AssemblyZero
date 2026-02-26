@@ -232,6 +232,9 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # Codebase context (Issue #401)
     codebase_context: dict
 
+    # Issue #476: API cost budget
+    cost_budget_usd: float
+
 
 def create_initial_state(
     workflow_type: Literal["issue", "lld"],

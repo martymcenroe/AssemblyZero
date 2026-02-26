@@ -148,3 +148,6 @@ class ImplementationSpecState(TypedDict, total=False):
     human_gate_enabled: bool
     error_message: str
     next_node: str
+
+    # Issue #476: API cost budget
+    cost_budget_usd: float

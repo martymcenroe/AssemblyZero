@@ -355,6 +355,34 @@ class TestDocstringOnlyFunctions:
         issues = analyze_docstring_only_functions(source, "cls.py")
         assert issues == []
 
+    def test_abstractmethod_skipped(self) -> None:
+        """Issue #477: @abstractmethod functions are not flagged."""
+        source = textwrap.dedent("""\
+            from abc import abstractmethod
+
+            class Base:
+                @abstractmethod
+                def run(self):
+                    \"\"\"Run the task.\"\"\"
+                    ...
+        """)
+        issues = analyze_docstring_only_functions(source, "base.py")
+        assert issues == []
+
+    def test_abc_dot_abstractmethod_skipped(self) -> None:
+        """Issue #477: @abc.abstractmethod functions are not flagged."""
+        source = textwrap.dedent("""\
+            import abc
+
+            class Base:
+                @abc.abstractmethod
+                def run(self):
+                    \"\"\"Run the task.\"\"\"
+                    pass
+        """)
+        issues = analyze_docstring_only_functions(source, "base.py")
+        assert issues == []
+
 
 # =============================================================================
 # T050: Trivial Assertion Detection
