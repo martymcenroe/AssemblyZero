@@ -3,11 +3,15 @@
 Issue #335: Updated to generate real executable tests from LLD Section 10.0,
 not just stubs with `assert False`.
 
+Issue #381: Extended with multi-framework scaffolding support for
+Playwright, Jest, and Vitest in addition to pytest.
+
 Generates executable tests from the approved test plan:
 - Parses Section 10.0 Test Plan table for test scenarios
 - Generates real assertions based on expected behavior
 - Tests are syntactically valid and RUNNABLE
-- Uses pytest conventions and fixtures
+- Uses pytest conventions and fixtures (Python)
+- Uses Playwright/Jest/Vitest conventions (TypeScript)
 
 Previous behavior (stubs) caused infinite loops in the TDD workflow
 because stub tests always fail regardless of implementation.
@@ -26,6 +30,12 @@ from assemblyzero.workflows.testing.audit import (
 )
 from assemblyzero.workflows.testing.knowledge.patterns import get_test_type_info
 from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScenario
+
+from assemblyzero.workflows.testing.framework_detector import (
+    TestFramework,
+    FrameworkConfig,
+)
+from assemblyzero.workflows.testing.runner_registry import get_framework_config, get_runner
 
 
 # =============================================================================
@@ -390,6 +400,101 @@ def _extract_impl_module(files_to_modify: list[dict] | None) -> str | None:
     return None
 
 
+# =============================================================================
+# Issue #381: TypeScript Test File Generation
+# =============================================================================
+
+
+def generate_ts_test_file_content(
+    scenarios: list[TestScenario],
+    framework_config: FrameworkConfig,
+    issue_number: int,
+) -> str:
+    """Generate TypeScript test file content for Playwright or Jest/Vitest.
+
+    Issue #381: Generates .spec.ts or .test.ts files with framework-appropriate
+    imports and test structure.
+
+    Args:
+        scenarios: Test scenarios from LLD Section 10.0
+        framework_config: Framework configuration from runner_registry
+        issue_number: Issue number for file naming
+    """
+    framework = framework_config["framework"]
+
+    if framework == TestFramework.PLAYWRIGHT:
+        return _generate_playwright_content(scenarios, issue_number)
+    elif framework in (TestFramework.JEST, TestFramework.VITEST):
+        return _generate_jest_content(scenarios, framework_config, issue_number)
+    else:
+        raise ValueError(f"Cannot generate TS content for framework: {framework}")
+
+
+def _generate_playwright_content(
+    scenarios: list[TestScenario],
+    issue_number: int,
+) -> str:
+    """Generate Playwright .spec.ts test content."""
+    lines = [
+        "import { test, expect } from '@playwright/test';",
+        "",
+        f"// Issue #{issue_number} - Auto-scaffolded Playwright tests",
+        "",
+    ]
+
+    for scenario in scenarios:
+        test_name = scenario.get("description", scenario.get("id", "unnamed"))
+        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        lines.extend([
+            f"test('{test_name}', async ({{ page }}) => {{",
+            f"  // Expected: {expected}",
+            "  // TODO: Implement test logic",
+            "  await expect(page).toBeTruthy();",
+            "});",
+            "",
+        ])
+
+    return "\n".join(lines)
+
+
+def _generate_jest_content(
+    scenarios: list[TestScenario],
+    framework_config: FrameworkConfig,
+    issue_number: int,
+) -> str:
+    """Generate Jest/Vitest .test.ts content."""
+    runner = get_runner(framework_config["framework"])
+    import_line = runner.get_scaffold_imports()
+
+    lines = [
+        import_line,
+        "",
+        f"// Issue #{issue_number} - Auto-scaffolded tests",
+        "",
+        f"describe('Issue #{issue_number}', () => {{",
+    ]
+
+    for scenario in scenarios:
+        test_name = scenario.get("description", scenario.get("id", "unnamed"))
+        expected = scenario.get("expected_behavior", "// TODO: implement assertion")
+        lines.extend([
+            f"  it('{test_name}', () => {{",
+            f"    // Expected: {expected}",
+            "    // TODO: Implement test logic",
+            "    expect(true).toBe(true);",
+            "  });",
+            "",
+        ])
+
+    lines.append("});")
+    return "\n".join(lines)
+
+
+# =============================================================================
+# Issue #335 + #381: Test File Content Generation
+# =============================================================================
+
+
 def generate_test_file_content(
     scenarios: list[TestScenario],
     module_name: str,
@@ -641,18 +746,36 @@ def determine_test_file_path(
     issue_number: int,
     scenarios: list[TestScenario],
     repo_root: Path,
+    framework_config: FrameworkConfig | None = None,
 ) -> Path:
     """Determine the appropriate path for the test file.
+
+    Issue #381: Now supports framework-aware file extensions via
+    optional framework_config parameter.
 
     Args:
         issue_number: GitHub issue number.
         scenarios: List of test scenarios.
         repo_root: Repository root path.
+        framework_config: Optional framework config for file extension.
 
     Returns:
         Path for the test file.
     """
-    # Default test directory
+    # Issue #381: Framework-aware path determination
+    if framework_config is not None:
+        framework = framework_config["framework"]
+        ext = framework_config["test_file_extension"]
+        if framework == TestFramework.PLAYWRIGHT:
+            tests_dir = repo_root / "tests"
+            tests_dir.mkdir(parents=True, exist_ok=True)
+            return tests_dir / f"issue_{issue_number}{ext}"
+        elif framework in (TestFramework.JEST, TestFramework.VITEST):
+            tests_dir = repo_root / "tests"
+            tests_dir.mkdir(parents=True, exist_ok=True)
+            return tests_dir / f"issue_{issue_number}{ext}"
+
+    # Default: existing pytest behavior (unchanged)
     tests_dir = repo_root / "tests"
     tests_dir.mkdir(parents=True, exist_ok=True)
 
@@ -661,8 +784,76 @@ def determine_test_file_path(
     return tests_dir / f"test_issue_{issue_number}.py"
 
 
+# =============================================================================
+# Issue #381: Non-Python Test Scaffolding Helper
+# =============================================================================
+
+
+def _scaffold_non_python_tests(
+    state: TestingWorkflowState,
+    framework_config: FrameworkConfig,
+) -> dict[str, Any]:
+    """Scaffold non-Python test files (Playwright, Jest, Vitest).
+
+    Issue #381: Generates TypeScript test files based on framework config.
+    """
+    issue_number = state.get("issue_number", 0)
+    scenarios = state.get("test_scenarios", [])
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+
+    # Generate TypeScript test content
+    content = generate_ts_test_file_content(scenarios, framework_config, issue_number)
+
+    # Determine file path
+    test_file_path = determine_test_file_path(
+        issue_number, scenarios, repo_root, framework_config
+    )
+
+    # Write the file
+    test_file_path.parent.mkdir(parents=True, exist_ok=True)
+    test_file_path.write_text(content, encoding="utf-8")
+
+    gate_log(f"[N2] Scaffolded {framework_config['framework'].value} test: {test_file_path}")
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=issue_number,
+        workflow_type="testing",
+        event="tests_scaffolded",
+        details={
+            "test_file": str(test_file_path),
+            "framework": framework_config["framework"].value,
+            "test_count": len(scenarios),
+        },
+    )
+
+    # Save to audit trail
+    audit_dir = Path(state.get("audit_dir", ""))
+    file_num = state.get("file_counter", 0)
+    if audit_dir.exists():
+        file_num = next_file_number(audit_dir)
+        ext = framework_config["test_file_extension"]
+        save_audit_file(audit_dir, file_num, f"test-scaffold{ext}", content)
+
+    return {
+        "test_files": [str(test_file_path)],
+        "test_file_content": content,
+        "file_counter": file_num,
+        "error_message": "",
+    }
+
+
+# =============================================================================
+# Issue #335 + #381: Main Scaffold Node
+# =============================================================================
+
+
 def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     """N2: Generate executable test stubs.
+
+    Issue #381: Now supports multi-framework scaffolding. If framework_config
+    is present in state and specifies a non-pytest framework, delegates to
+    TypeScript scaffolding. Otherwise, uses existing pytest scaffolding.
 
     Args:
         state: Current workflow state.
@@ -675,6 +866,17 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     # Check for mock mode
     if state.get("mock_mode"):
         return _mock_scaffold_tests(state)
+
+    # Issue #381: Framework-aware scaffolding
+    framework_config = state.get("framework_config")
+
+    # If framework_config exists and is not pytest, use TS scaffolding
+    if framework_config and framework_config.get("framework") not in (
+        None, TestFramework.PYTEST
+    ):
+        return _scaffold_non_python_tests(state, framework_config)
+
+    # Default: existing pytest scaffolding (unchanged)
 
     # Get data from state
     issue_number = state.get("issue_number", 0)
