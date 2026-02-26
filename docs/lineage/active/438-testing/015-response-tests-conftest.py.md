@@ -1,3 +1,4 @@
+```python
 """Pytest configuration for test suite."""
 
 import os
@@ -22,10 +23,6 @@ def pytest_configure(config):
         "markers",
         "e2e: End-to-end tests (deselect with '-m \"not e2e\"')",
     )
-    config.addinivalue_line(
-        "markers",
-        "timeout(seconds): set a timeout for the test (requires pytest-timeout plugin)",
-    )
 
 
 @pytest.fixture
@@ -49,3 +46,4 @@ def mock_file_size(monkeypatch):
         monkeypatch.setattr("os.path.getsize", _patched_getsize)
 
     return _mock
+```

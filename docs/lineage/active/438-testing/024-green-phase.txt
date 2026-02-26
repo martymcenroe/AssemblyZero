@@ -1,0 +1,203 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 9 items / 9 deselected / 0 selected
+
+ERROR: Coverage failure: total of 0 is less than fail-under=95
+
+============================== warnings summary ===============================
+tests\e2e\test_lld_workflow_mock.py:42
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:42: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:69
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:69: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:105
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:105: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:139
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:139: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:171
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:171: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:219
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:219: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:275
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:275: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:346
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:346: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+tests\e2e\test_lld_workflow_mock.py:408
+  C:\Users\mcwiz\Projects\AssemblyZero\tests\e2e\test_lld_workflow_mock.py:408: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(60)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                                                        Stmts   Miss  Cover   Missing
+---------------------------------------------------------------------------------------------------------
+assemblyzero\__init__.py                                                        1      1     0%   3
+assemblyzero\core\__init__.py                                                   5      5     0%   3-30
+assemblyzero\core\audit.py                                                    102    102     0%   12-328
+assemblyzero\core\claude_client.py                                             36     36     0%   11-123
+assemblyzero\core\config.py                                                    16     16     0%   7-66
+assemblyzero\core\gemini_client.py                                            281    281     0%   12-804
+assemblyzero\core\llm_provider.py                                             322    322     0%   19-957
+assemblyzero\core\state.py                                                      6      6     0%   7-70
+assemblyzero\core\tdd_path_tracking.py                                         61     61     0%   9-190
+assemblyzero\core\validation\__init__.py                                        2      2     0%   6-21
+assemblyzero\core\validation\test_plan_validator.py                           168    168     0%   10-551
+assemblyzero\graphs\__init__.py                                                 0      0   100%
+assemblyzero\hooks\__init__.py                                                  5      5     0%   3-20
+assemblyzero\hooks\cascade_action.py                                           34     34     0%   8-118
+assemblyzero\hooks\cascade_detector.py                                         72     72     0%   9-195
+assemblyzero\hooks\cascade_patterns.py                                         70     70     0%   9-292
+assemblyzero\hooks\file_write_validator.py                                     40     40     0%   8-126
+assemblyzero\hooks\types.py                                                    16     16     0%   9-33
+assemblyzero\metrics\__init__.py                                                8      8     0%   6-44
+assemblyzero\metrics\aggregator.py                                             25     25     0%   6-47
+assemblyzero\metrics\cache.py                                                  73     73     0%   6-128
+assemblyzero\metrics\collector.py                                             129    129     0%   6-241
+assemblyzero\metrics\config.py                                                 53     53     0%   6-102
+assemblyzero\metrics\formatters.py                                             57     57     0%   6-99
+assemblyzero\metrics\models.py                                                 53     53     0%   6-125
+assemblyzero\nodes\__init__.py                                                  5      5     0%   3-11
+assemblyzero\nodes\check_type_renames.py                                      125    125     0%   9-314
+assemblyzero\nodes\designer.py                                                134    134     0%   15-501
+assemblyzero\nodes\lld_reviewer.py                                             90     90     0%   7-335
+assemblyzero\nodes\smoke_test_node.py                                          58     58     0%   9-204
+assemblyzero\telemetry\__init__.py                                              3      3     0%   19-27
+assemblyzero\telemetry\__main__.py                                              2      2     0%   3-5
+assemblyzero\telemetry\actor.py                                                30     30     0%   7-62
+assemblyzero\telemetry\cascade_events.py                                       71     71     0%   9-163
+assemblyzero\telemetry\emitter.py                                             119    119     0%   10-243
+assemblyzero\telemetry\sync.py                                                  9      9     0%   7-22
+assemblyzero\tracing.py                                                        10     10     0%   13-39
+assemblyzero\utils\__init__.py                                                  4      4     0%   3-27
+assemblyzero\utils\codebase_reader.py                                         153    153     0%   12-372
+assemblyzero\utils\file_type.py                                                12     12     0%   7-59
+assemblyzero\utils\github_metrics_client.py                                    83     83     0%   9-243
+assemblyzero\utils\lld_path_enforcer.py                                        79     79     0%   11-221
+assemblyzero\utils\lld_verification.py                                         98     98     0%   14-361
+assemblyzero\utils\metrics_aggregator.py                                      161    161     0%   9-447
+assemblyzero\utils\metrics_config.py                                           78     78     0%   6-207
+assemblyzero\utils\metrics_models.py                                           59     59     0%   6-97
+assemblyzero\utils\pattern_scanner.py                                         185    185     0%   11-493
+assemblyzero\workflow\__init__.py                                               2      2     0%   6-8
+assemblyzero\workflow\checkpoint.py                                            27     27     0%   7-77
+assemblyzero\workflows\__init__.py                                              0      0   100%
+assemblyzero\workflows\implementation_spec\__init__.py                          3      3     0%   24-36
+assemblyzero\workflows\implementation_spec\graph.py                            85     85     0%   27-324
+assemblyzero\workflows\implementation_spec\nodes\__init__.py                    8      8     0%   15-46
+assemblyzero\workflows\implementation_spec\nodes\analyze_codebase.py          382    382     0%   18-971
+assemblyzero\workflows\implementation_spec\nodes\finalize_spec.py              80     80     0%   22-311
+assemblyzero\workflows\implementation_spec\nodes\generate_spec.py             206    206     0%   20-764
+assemblyzero\workflows\implementation_spec\nodes\human_gate.py                 62     62     0%   21-204
+assemblyzero\workflows\implementation_spec\nodes\load_lld.py                   92     92     0%   16-299
+assemblyzero\workflows\implementation_spec\nodes\review_spec.py               132    132     0%   22-521
+assemblyzero\workflows\implementation_spec\nodes\validate_completeness.py     189    189     0%   21-654
+assemblyzero\workflows\implementation_spec\state.py                            43     43     0%   12-150
+assemblyzero\workflows\issue\__init__.py                                        3      3     0%   10-13
+assemblyzero\workflows\issue\audit.py                                         186    186     0%   12-570
+assemblyzero\workflows\issue\graph.py                                          59     59     0%   11-249
+assemblyzero\workflows\issue\nodes\__init__.py                                  8      8     0%   15-23
+assemblyzero\workflows\issue\nodes\draft.py                                    94     94     0%   10-294
+assemblyzero\workflows\issue\nodes\file_issue.py                              185    185     0%   9-472
+assemblyzero\workflows\issue\nodes\human_edit_draft.py                        131    131     0%   9-252
+assemblyzero\workflows\issue\nodes\human_edit_verdict.py                      140    140     0%   10-278
+assemblyzero\workflows\issue\nodes\load_brief.py                               49     49     0%   9-184
+assemblyzero\workflows\issue\nodes\review.py                                   77     77     0%   9-193
+assemblyzero\workflows\issue\nodes\sandbox.py                                  30     30     0%   11-104
+assemblyzero\workflows\issue\state.py                                          18     18     0%   9-40
+assemblyzero\workflows\orchestrator\__init__.py                                 4      4     0%   6-26
+assemblyzero\workflows\orchestrator\artifacts.py                               58     58     0%   6-125
+assemblyzero\workflows\orchestrator\config.py                                  57     57     0%   6-143
+assemblyzero\workflows\orchestrator\graph.py                                  142    142     0%   6-322
+assemblyzero\workflows\orchestrator\resume.py                                  68     68     0%   6-154
+assemblyzero\workflows\orchestrator\stages.py                                 143    143     0%   11-432
+assemblyzero\workflows\orchestrator\state.py                                   66     66     0%   6-150
+assemblyzero\workflows\parallel\__init__.py                                     5      5     0%   3-8
+assemblyzero\workflows\parallel\coordinator.py                                 85     85     0%   3-184
+assemblyzero\workflows\parallel\credential_coordinator.py                      59     59     0%   3-127
+assemblyzero\workflows\parallel\input_sanitizer.py                             13     13     0%   3-39
+assemblyzero\workflows\parallel\output_prefixer.py                             19     19     0%   3-45
+assemblyzero\workflows\requirements\__init__.py                                 4      4     0%   17-31
+assemblyzero\workflows\requirements\audit.py                                  231    231     0%   20-870
+assemblyzero\workflows\requirements\config.py                                  68     68     0%   11-241
+assemblyzero\workflows\requirements\git_operations.py                          30     30     0%   6-101
+assemblyzero\workflows\requirements\graph.py                                  119    119     0%   47-494
+assemblyzero\workflows\requirements\nodes\__init__.py                           9      9     0%   20-38
+assemblyzero\workflows\requirements\nodes\analyze_codebase.py                 229    229     0%   13-567
+assemblyzero\workflows\requirements\nodes\finalize.py                         163    163     0%   7-402
+assemblyzero\workflows\requirements\nodes\generate_draft.py                   156    156     0%   13-390
+assemblyzero\workflows\requirements\nodes\human_gate.py                        88     88     0%   14-233
+assemblyzero\workflows\requirements\nodes\load_input.py                       114    114     0%   14-321
+assemblyzero\workflows\requirements\nodes\review.py                           118    118     0%   11-340
+assemblyzero\workflows\requirements\nodes\validate_mechanical.py              429    429     0%   29-1345
+assemblyzero\workflows\requirements\nodes\validate_test_plan.py                58     58     0%   13-142
+assemblyzero\workflows\requirements\parsers\__init__.py                         3      3     0%   6-14
+assemblyzero\workflows\requirements\parsers\draft_updater.py                  130    130     0%   8-315
+assemblyzero\workflows\requirements\parsers\verdict_parser.py                  94     94     0%   8-295
+assemblyzero\workflows\requirements\state.py                                   44     44     0%   18-391
+assemblyzero\workflows\scout\__init__.py                                        3      3     0%   7-18
+assemblyzero\workflows\scout\budget.py                                         21     21     0%   7-76
+assemblyzero\workflows\scout\graph.py                                           5      5     0%   6-62
+assemblyzero\workflows\scout\instrumentation.py                                40     40     0%   6-126
+assemblyzero\workflows\scout\nodes.py                                         151    151     0%   6-345
+assemblyzero\workflows\scout\prompts.py                                        11     11     0%   7-76
+assemblyzero\workflows\scout\security.py                                       44     44     0%   6-132
+assemblyzero\workflows\scout\templates.py                                      33     33     0%   6-124
+assemblyzero\workflows\testing\__init__.py                                      3      3     0%   18-21
+assemblyzero\workflows\testing\audit.py                                        88     88     0%   13-321
+assemblyzero\workflows\testing\circuit_breaker.py                              46     46     0%   11-139
+assemblyzero\workflows\testing\completeness\__init__.py                         3      3     0%   7-21
+assemblyzero\workflows\testing\completeness\ast_analyzer.py                   280    280     0%   17-725
+assemblyzero\workflows\testing\completeness\report_generator.py               129    129     0%   14-429
+assemblyzero\workflows\testing\exit_code_router.py                             27     27     0%   17-92
+assemblyzero\workflows\testing\graph.py                                       123    123     0%   52-479
+assemblyzero\workflows\testing\knowledge\__init__.py                            2      2     0%   8-10
+assemblyzero\workflows\testing\knowledge\patterns.py                           60     60     0%   7-193
+assemblyzero\workflows\testing\nodes\__init__.py                               12     12     0%   23-45
+assemblyzero\workflows\testing\nodes\cleanup.py                                76     76     0%   11-153
+assemblyzero\workflows\testing\nodes\cleanup_helpers.py                       234    234     0%   10-526
+assemblyzero\workflows\testing\nodes\completeness_gate.py                     115    115     0%   19-352
+assemblyzero\workflows\testing\nodes\document.py                              140    140     0%   13-361
+assemblyzero\workflows\testing\nodes\e2e_validation.py                        109    109     0%   9-359
+assemblyzero\workflows\testing\nodes\finalize.py                              110    110     0%   10-261
+assemblyzero\workflows\testing\nodes\implement_code.py                        627    627     0%   16-1680
+assemblyzero\workflows\testing\nodes\load_lld.py                              327    327     0%   14-939
+assemblyzero\workflows\testing\nodes\review_test_plan.py                      168    168     0%   13-566
+assemblyzero\workflows\testing\nodes\scaffold_tests.py                        317    317     0%   16-774
+assemblyzero\workflows\testing\nodes\validate_commit_message.py                12     12     0%   7-47
+assemblyzero\workflows\testing\nodes\validate_tests_mechanical.py             114    114     0%   10-324
+assemblyzero\workflows\testing\nodes\verify_phases.py                         242    242     0%   11-760
+assemblyzero\workflows\testing\path_validator.py                               70     70     0%   7-181
+assemblyzero\workflows\testing\state.py                                        13     13     0%   16-43
+assemblyzero\workflows\testing\templates\__init__.py                            5      5     0%   12-23
+assemblyzero\workflows\testing\templates\cp_docs.py                            73     73     0%   9-296
+assemblyzero\workflows\testing\templates\lessons.py                           115    115     0%   8-304
+assemblyzero\workflows\testing\templates\runbook.py                            94     94     0%   8-259
+assemblyzero\workflows\testing\templates\wiki_page.py                          74     74     0%   8-207
+---------------------------------------------------------------------------------------------------------
+TOTAL                                                                       12416  12416     0%
+FAIL Required test coverage of 95% not reached. Total coverage: 0.00%
+====================== 9 deselected, 9 warnings in 0.84s ======================
+
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.13.1/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")
