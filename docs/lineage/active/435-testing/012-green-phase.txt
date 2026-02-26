@@ -1,0 +1,179 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 22 items
+
+tests/test_issue_435.py::test_t010 FAILED                                [  4%]
+tests/test_issue_435.py::test_t020 FAILED                                [  9%]
+tests/test_issue_435.py::test_t030 FAILED                                [ 13%]
+tests/test_issue_435.py::test_t040 FAILED                                [ 18%]
+tests/test_issue_435.py::test_t050 FAILED                                [ 22%]
+tests/test_issue_435.py::test_t060 FAILED                                [ 27%]
+tests/test_issue_435.py::test_t070 FAILED                                [ 31%]
+tests/test_issue_435.py::test_t080 FAILED                                [ 36%]
+tests/test_issue_435.py::test_t090 FAILED                                [ 40%]
+tests/test_issue_435.py::test_t100 FAILED                                [ 45%]
+tests/test_issue_435.py::test_t110 FAILED                                [ 50%]
+tests/test_issue_435.py::test_t120 FAILED                                [ 54%]
+tests/test_issue_435.py::test_t130 FAILED                                [ 59%]
+tests/test_issue_435.py::test_t140 FAILED                                [ 63%]
+tests/test_issue_435.py::test_t150 FAILED                                [ 68%]
+tests/test_issue_435.py::test_t160 FAILED                                [ 72%]
+tests/test_issue_435.py::test_t170 FAILED                                [ 77%]
+tests/test_issue_435.py::test_t180 FAILED                                [ 81%]
+tests/test_issue_435.py::test_t190 FAILED                                [ 86%]
+tests/test_issue_435.py::test_t200 FAILED                                [ 90%]
+tests/test_issue_435.py::test_t210 FAILED                                [ 95%]
+tests/test_issue_435.py::test_t220 FAILED                                [100%]
+ERROR: Coverage failure: total of 14 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+__________________________________ test_t010 __________________________________
+tests\test_issue_435.py:30: in test_t010
+    assert False, 'TDD RED: test_t010 not implemented'
+E   AssertionError: TDD RED: test_t010 not implemented
+E   assert False
+__________________________________ test_t020 __________________________________
+tests\test_issue_435.py:46: in test_t020
+    assert False, 'TDD RED: test_t020 not implemented'
+E   AssertionError: TDD RED: test_t020 not implemented
+E   assert False
+__________________________________ test_t030 __________________________________
+tests\test_issue_435.py:61: in test_t030
+    assert False, 'TDD RED: test_t030 not implemented'
+E   AssertionError: TDD RED: test_t030 not implemented
+E   assert False
+__________________________________ test_t040 __________________________________
+tests\test_issue_435.py:77: in test_t040
+    assert False, 'TDD RED: test_t040 not implemented'
+E   AssertionError: TDD RED: test_t040 not implemented
+E   assert False
+__________________________________ test_t050 __________________________________
+tests\test_issue_435.py:93: in test_t050
+    assert False, 'TDD RED: test_t050 not implemented'
+E   AssertionError: TDD RED: test_t050 not implemented
+E   assert False
+__________________________________ test_t060 __________________________________
+tests\test_issue_435.py:109: in test_t060
+    assert False, 'TDD RED: test_t060 not implemented'
+E   AssertionError: TDD RED: test_t060 not implemented
+E   assert False
+__________________________________ test_t070 __________________________________
+tests\test_issue_435.py:125: in test_t070
+    assert False, 'TDD RED: test_t070 not implemented'
+E   AssertionError: TDD RED: test_t070 not implemented
+E   assert False
+__________________________________ test_t080 __________________________________
+tests\test_issue_435.py:141: in test_t080
+    assert False, 'TDD RED: test_t080 not implemented'
+E   AssertionError: TDD RED: test_t080 not implemented
+E   assert False
+__________________________________ test_t090 __________________________________
+tests\test_issue_435.py:157: in test_t090
+    assert False, 'TDD RED: test_t090 not implemented'
+E   AssertionError: TDD RED: test_t090 not implemented
+E   assert False
+__________________________________ test_t100 __________________________________
+tests\test_issue_435.py:173: in test_t100
+    assert False, 'TDD RED: test_t100 not implemented'
+E   AssertionError: TDD RED: test_t100 not implemented
+E   assert False
+__________________________________ test_t110 __________________________________
+tests\test_issue_435.py:189: in test_t110
+    assert False, 'TDD RED: test_t110 not implemented'
+E   AssertionError: TDD RED: test_t110 not implemented
+E   assert False
+__________________________________ test_t120 __________________________________
+tests\test_issue_435.py:206: in test_t120
+    assert False, 'TDD RED: test_t120 not implemented'
+E   AssertionError: TDD RED: test_t120 not implemented
+E   assert False
+__________________________________ test_t130 __________________________________
+tests\test_issue_435.py:222: in test_t130
+    assert False, 'TDD RED: test_t130 not implemented'
+E   AssertionError: TDD RED: test_t130 not implemented
+E   assert False
+__________________________________ test_t140 __________________________________
+tests\test_issue_435.py:239: in test_t140
+    assert False, 'TDD RED: test_t140 not implemented'
+E   AssertionError: TDD RED: test_t140 not implemented
+E   assert False
+__________________________________ test_t150 __________________________________
+tests\test_issue_435.py:255: in test_t150
+    assert False, 'TDD RED: test_t150 not implemented'
+E   AssertionError: TDD RED: test_t150 not implemented
+E   assert False
+__________________________________ test_t160 __________________________________
+tests\test_issue_435.py:272: in test_t160
+    assert False, 'TDD RED: test_t160 not implemented'
+E   AssertionError: TDD RED: test_t160 not implemented
+E   assert False
+__________________________________ test_t170 __________________________________
+tests\test_issue_435.py:289: in test_t170
+    assert False, 'TDD RED: test_t170 not implemented'
+E   AssertionError: TDD RED: test_t170 not implemented
+E   assert False
+__________________________________ test_t180 __________________________________
+tests\test_issue_435.py:306: in test_t180
+    assert False, 'TDD RED: test_t180 not implemented'
+E   AssertionError: TDD RED: test_t180 not implemented
+E   assert False
+__________________________________ test_t190 __________________________________
+tests\test_issue_435.py:323: in test_t190
+    assert False, 'TDD RED: test_t190 not implemented'
+E   AssertionError: TDD RED: test_t190 not implemented
+E   assert False
+__________________________________ test_t200 __________________________________
+tests\test_issue_435.py:341: in test_t200
+    assert False, 'TDD RED: test_t200 not implemented'
+E   AssertionError: TDD RED: test_t200 not implemented
+E   assert False
+__________________________________ test_t210 __________________________________
+tests\test_issue_435.py:358: in test_t210
+    assert False, 'TDD RED: test_t210 not implemented'
+E   AssertionError: TDD RED: test_t210 not implemented
+E   assert False
+__________________________________ test_t220 __________________________________
+tests\test_issue_435.py:375: in test_t220
+    assert False, 'TDD RED: test_t220 not implemented'
+E   AssertionError: TDD RED: test_t220 not implemented
+E   assert False
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name         Stmts   Miss  Cover   Missing
+------------------------------------------
+example.py      77     66    14%   35-37, 58-105, 118-133, 159-193
+------------------------------------------
+TOTAL           77     66    14%
+FAIL Required test coverage of 95% not reached. Total coverage: 14.29%
+=========================== short test summary info ===========================
+FAILED tests/test_issue_435.py::test_t010 - AssertionError: TDD RED: test_t01...
+FAILED tests/test_issue_435.py::test_t020 - AssertionError: TDD RED: test_t02...
+FAILED tests/test_issue_435.py::test_t030 - AssertionError: TDD RED: test_t03...
+FAILED tests/test_issue_435.py::test_t040 - AssertionError: TDD RED: test_t04...
+FAILED tests/test_issue_435.py::test_t050 - AssertionError: TDD RED: test_t05...
+FAILED tests/test_issue_435.py::test_t060 - AssertionError: TDD RED: test_t06...
+FAILED tests/test_issue_435.py::test_t070 - AssertionError: TDD RED: test_t07...
+FAILED tests/test_issue_435.py::test_t080 - AssertionError: TDD RED: test_t08...
+FAILED tests/test_issue_435.py::test_t090 - AssertionError: TDD RED: test_t09...
+FAILED tests/test_issue_435.py::test_t100 - AssertionError: TDD RED: test_t10...
+FAILED tests/test_issue_435.py::test_t110 - AssertionError: TDD RED: test_t11...
+FAILED tests/test_issue_435.py::test_t120 - AssertionError: TDD RED: test_t12...
+FAILED tests/test_issue_435.py::test_t130 - AssertionError: TDD RED: test_t13...
+FAILED tests/test_issue_435.py::test_t140 - AssertionError: TDD RED: test_t14...
+FAILED tests/test_issue_435.py::test_t150 - AssertionError: TDD RED: test_t15...
+FAILED tests/test_issue_435.py::test_t160 - AssertionError: TDD RED: test_t16...
+FAILED tests/test_issue_435.py::test_t170 - AssertionError: TDD RED: test_t17...
+FAILED tests/test_issue_435.py::test_t180 - AssertionError: TDD RED: test_t18...
+FAILED tests/test_issue_435.py::test_t190 - AssertionError: TDD RED: test_t19...
+FAILED tests/test_issue_435.py::test_t200 - AssertionError: TDD RED: test_t20...
+FAILED tests/test_issue_435.py::test_t210 - AssertionError: TDD RED: test_t21...
+FAILED tests/test_issue_435.py::test_t220 - AssertionError: TDD RED: test_t22...
+============================= 22 failed in 0.14s ==============================
+

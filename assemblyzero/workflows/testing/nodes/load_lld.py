@@ -540,11 +540,12 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:
         re.IGNORECASE,
     )
 
-    match = lld_pattern.search(lld_content)
-    table_format = "lld"
+    # Try spec pattern first (more specific header), fall back to LLD pattern
+    match = spec_pattern.search(lld_content)
+    table_format = "spec"
     if not match:
-        match = spec_pattern.search(lld_content)
-        table_format = "spec"
+        match = lld_pattern.search(lld_content)
+        table_format = "lld"
     if not match:
         return files
 

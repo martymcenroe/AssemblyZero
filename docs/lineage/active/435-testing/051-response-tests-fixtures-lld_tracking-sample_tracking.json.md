@@ -1,0 +1,33 @@
+The file already exists with the correct content matching the LLD specification exactly. No changes needed.
+
+```json
+{
+    "100": {
+        "issue_id": 100,
+        "lld_path": "docs/lld/active/100-feature-example.md",
+        "status": "approved",
+        "gemini_reviewed": true,
+        "review_verdict": "APPROVED",
+        "review_timestamp": "2026-02-20T14:30:00Z",
+        "evidence_embedded": true
+    },
+    "200": {
+        "issue_id": 200,
+        "lld_path": "docs/lld/active/200-bugfix-example.md",
+        "status": "draft",
+        "gemini_reviewed": false,
+        "review_verdict": null,
+        "review_timestamp": null,
+        "evidence_embedded": false
+    },
+    "300": {
+        "issue_id": 300,
+        "lld_path": "docs/lld/active/300-docs-example.md",
+        "status": "reviewed",
+        "gemini_reviewed": true,
+        "review_verdict": "REJECTED",
+        "review_timestamp": "2026-02-24T09:15:00Z",
+        "evidence_embedded": false
+    }
+}
+```

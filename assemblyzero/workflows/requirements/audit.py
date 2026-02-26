@@ -461,6 +461,21 @@ def assemble_context(
 # =============================================================================
 
 
+def detect_gemini_review(lld_content: str) -> bool:
+    """Detect whether an LLD contains a Gemini review section.
+
+    Checks for the presence of the '### Gemini Review' heading that is added
+    when a Gemini model reviews an LLD document.
+
+    Args:
+        lld_content: The LLD markdown content to inspect.
+
+    Returns:
+        True if a '### Gemini Review' heading is found, False otherwise.
+    """
+    return "### Gemini Review" in lld_content
+
+
 class LLDStatusEntry(TypedDict):
     """Schema for a single LLD status entry."""
 
