@@ -1,1 +1,1 @@
-"""Unit tests for the RAG infrastructure package."""
+"""Unit tests for the RAG subsystem (Issue #88)."""

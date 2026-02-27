@@ -12,7 +12,7 @@ import pytest
 from assemblyzero.rag import _reset_singletons, get_query_engine, get_store
 from assemblyzero.rag.collections import CollectionManager
 from assemblyzero.rag.config import RAGConfig
-from assemblyzero.rag.embeddings import EmbeddingProvider
+from assemblyzero.rag.embeddings import EmbeddingProvider, LocalEmbeddingProvider
 from assemblyzero.rag.errors import CollectionNotFoundError
 from assemblyzero.rag.query import QueryEngine, QueryResponse, QueryResult
 from assemblyzero.rag.store import VectorStore
@@ -35,7 +35,7 @@ def store(config: RAGConfig) -> VectorStore:
 @pytest.fixture
 def embedding_provider() -> EmbeddingProvider:
     """Embedding provider (function-scoped to match mock lifecycle)."""
-    return EmbeddingProvider()
+    return LocalEmbeddingProvider()
 
 
 @pytest.fixture

@@ -1,3 +1,0 @@
-# Governance Verdict: BLOCK
-
-The LLD proposes a solid, offline-first RAG architecture ("The Librarian") using ChromaDB and local embeddings. The "Adapter" pattern for optional dependencies is well-designed. However, the design is **functionally incomplete**: it defines how to retrieve data and store it in the state, but fails to define how the downstream `Designer` node will **consume** this data (i.e., the Prompt Template updates are missing).
