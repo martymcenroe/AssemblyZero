@@ -6,8 +6,8 @@
 
 ```mermaid
 graph TD
-    subgraph Intent["THE GREAT GOD OM"]
-        O["Human Intent<br/>& Oversight"]
+    subgraph Intent["HUMAN ORCHESTRATOR"]
+        O["Intent<br/>& Oversight"]
     end
 
     subgraph Agents["CLAUDE AGENTS (12+)"]
