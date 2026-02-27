@@ -379,6 +379,9 @@ def build_initial_state(
         "error_message": "",
         # Issue #476: API cost budget
         "cost_budget_usd": args.budget,
+        # LLM config
+        "config_reviewer": args.reviewer,
+        "config_drafter": args.drafter,
     }
 
     return state

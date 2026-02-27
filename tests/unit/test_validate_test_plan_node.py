@@ -164,10 +164,10 @@ class TestNodeMaxAttempts:
             error_message="Test plan validation failed after 3 attempts",
         )
         route = route_after_validate_test_plan(state)
-        assert route == "END"
+        assert route == "HALT"
 
     def test_routing_max_iterations_ends(self):
-        """Max iterations reached routes to END."""
+        """Max iterations reached routes to HALT."""
         state = _make_state(
             test_plan_validation_result={"passed": False},
             error_message="",
@@ -175,7 +175,7 @@ class TestNodeMaxAttempts:
             max_iterations=20,
         )
         route = route_after_validate_test_plan(state)
-        assert route == "END"
+        assert route == "HALT"
 
 
 # =============================================================================

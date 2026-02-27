@@ -151,3 +151,8 @@ class ImplementationSpecState(TypedDict, total=False):
 
     # Issue #476: API cost budget
     cost_budget_usd: float
+
+    # Issue #486: Halt-and-Plan
+    previous_review_feedback: str
+    recovery_plan_path: str
+    state_snapshot_path: str

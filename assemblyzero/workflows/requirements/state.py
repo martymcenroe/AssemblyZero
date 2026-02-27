@@ -235,6 +235,11 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # Issue #476: API cost budget
     cost_budget_usd: float
 
+    # Issue #486: Halt-and-Plan
+    previous_review_feedback: str  # For two-strike stagnation detection
+    recovery_plan_path: str
+    state_snapshot_path: str
+
 
 def create_initial_state(
     workflow_type: Literal["issue", "lld"],
@@ -331,6 +336,14 @@ def create_initial_state(
         # Lineage tracking (Issue #334)
         "lineage_path": lineage_path,
         "draft_number": 1,
+        # Codebase context (Issue #401)
+        "codebase_context": {},
+        # Issue #476: API cost budget
+        "cost_budget_usd": 0.0,
+        # Issue #486: Halt-and-Plan
+        "previous_review_feedback": "",
+        "recovery_plan_path": "",
+        "state_snapshot_path": "",
     }
 
     # Add workflow-type specific fields

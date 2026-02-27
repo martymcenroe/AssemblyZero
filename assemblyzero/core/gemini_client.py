@@ -562,7 +562,7 @@ class GeminiClient:
                     error_type = self._classify_error(error_str)
 
                     if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
-                        # 529: Backoff and retry same credential
+                        # 529/503: Backoff and retry same credential
                         delay = self._backoff_delay(attempt)
                         log_gemini_event(
                             event_type="capacity_exhausted",
@@ -611,11 +611,20 @@ class GeminiClient:
                         )
                         errors.append(f"{cred.name}: {error_str[:100]}")
                         break  # Move to next credential
+            else:
+                # Issue #483: while loop exhausted without break — all retries
+                # failed with capacity errors. Previously this was silently dropped.
+                errors.append(
+                    f"{cred.name}: Capacity exhausted after "
+                    f"{MAX_RETRIES_PER_CREDENTIAL} retries (503/529)"
+                )
 
         # All credentials failed
         duration_ms = int((time.time() - start_time) * 1000)
         # Check if any are quota exhausted (vs other errors)
         quota_errors = [e for e in errors if "Quota exhausted" in e]
+        capacity_errors = [e for e in errors if "Capacity exhausted" in e]
+        is_capacity_exhausted = len(capacity_errors) > 0 and len(quota_errors) == 0
         is_pool_exhausted = len(quota_errors) == len(errors) and len(errors) > 0
         # Find earliest reset time from state
         earliest_reset = ""
@@ -636,11 +645,19 @@ class GeminiClient:
                 "earliest_reset": earliest_reset,
             },
         )
+        # Determine error type: capacity > quota > unknown
+        if is_capacity_exhausted:
+            final_error_type = GeminiErrorType.CAPACITY_EXHAUSTED
+        elif is_pool_exhausted:
+            final_error_type = GeminiErrorType.QUOTA_EXHAUSTED
+        else:
+            final_error_type = GeminiErrorType.UNKNOWN
+
         return GeminiCallResult(
             success=False,
             response=None,
             raw_response=None,
-            error_type=GeminiErrorType.QUOTA_EXHAUSTED if is_pool_exhausted else GeminiErrorType.UNKNOWN,
+            error_type=final_error_type,
             error_message=f"All credentials failed:\n  - " + "\n  - ".join(errors),
             credential_used="",
             rotation_occurred=len(available) > 1,

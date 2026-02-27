@@ -87,6 +87,7 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 from assemblyzero.workflows.testing.nodes.adversarial_node import (
     run_adversarial_node,
 )
+from assemblyzero.core.halt_node import create_halt_node
 
 
 def route_after_load(
@@ -384,6 +385,7 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N7_5_adversarial", run_adversarial_node)  # Issue #352
     workflow.add_node("N8_document", document)
     workflow.add_node("N9_cleanup", cleanup)  # Issue #180
+    workflow.add_node("HALT", create_halt_node("testing"))  # Issue #486
 
     # Set entry point
     workflow.set_entry_point("N0_load_lld")
@@ -515,6 +517,9 @@ def build_testing_workflow() -> StateGraph:
             "end": END,
         },
     )
+
+    # HALT -> END (Issue #486: HALT processes error, then terminates)
+    workflow.add_edge("HALT", END)
 
     # N9 -> END
     workflow.add_edge("N9_cleanup", END)

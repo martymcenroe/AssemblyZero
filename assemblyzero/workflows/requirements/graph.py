@@ -63,6 +63,7 @@ from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
     print_validation_errors,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+from assemblyzero.core.halt_node import create_halt_node
 
 
 # =============================================================================
@@ -78,6 +79,7 @@ N2_HUMAN_GATE_DRAFT = "N2_human_gate_draft"
 N3_REVIEW = "N3_review"
 N4_HUMAN_GATE_VERDICT = "N4_human_gate_verdict"
 N5_FINALIZE = "N5_finalize"
+HALT = "HALT"
 
 
 # =============================================================================
@@ -87,15 +89,16 @@ N5_FINALIZE = "N5_finalize"
 
 def route_after_load_input(
     state: RequirementsWorkflowState,
-) -> Literal["N0b_analyze_codebase", "N1_generate_draft", "END"]:
+) -> Literal["N0b_analyze_codebase", "N1_generate_draft", "HALT"]:
     """Route after load_input node.
 
     Issue #401: LLD workflows route through N0b (codebase analysis) first.
+    Issue #486: Error routes to HALT instead of END.
 
     Routes to:
     - N0b_analyze_codebase: LLD workflow (Issue #401)
     - N1_generate_draft: Issue workflow
-    - END: Error loading input
+    - HALT: Error loading input
 
     Args:
         state: Current workflow state.
@@ -104,7 +107,7 @@ def route_after_load_input(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
     # Issue #401: LLD workflows analyze codebase before drafting
     if state.get("workflow_type") == "lld":
         return "N0b_analyze_codebase"
@@ -113,14 +116,14 @@ def route_after_load_input(
 
 def route_after_generate_draft(
     state: RequirementsWorkflowState,
-) -> Literal["N1_5_validate_mechanical", "N2_human_gate_draft", "N3_review", "END"]:
+) -> Literal["N1_5_validate_mechanical", "N2_human_gate_draft", "N3_review", "HALT"]:
     """Route after generate_draft node.
 
     Routes to:
     - N1_5_validate_mechanical: LLD workflow (Issue #277)
     - N2_human_gate_draft: Issue workflow with gate enabled
     - N3_review: Issue workflow with gate disabled
-    - END: Error generating draft
+    - HALT: Error generating draft (Issue #486)
 
     Issue #248: Pre-review validation gate removed. Drafts with open
     questions now proceed to review where Gemini can answer them.
@@ -134,7 +137,7 @@ def route_after_generate_draft(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
 
     # Issue #277: LLD workflows go through mechanical validation
     if state.get("workflow_type") == "lld":
@@ -149,17 +152,18 @@ def route_after_generate_draft(
 
 def route_after_validate_mechanical(
     state: RequirementsWorkflowState,
-) -> Literal["N1b_validate_test_plan", "N1_generate_draft", "END"]:
+) -> Literal["N1b_validate_test_plan", "N1_generate_draft", "HALT"]:
     """Route after validate_lld_mechanical node.
 
     Issue #277: Routes based on validation result.
     Issue #334: Prints validation errors to console for immediate feedback.
     Issue #166: On pass, routes to N1b (test plan validation) instead of N2.
+    Issue #486: Max iteration exits route to HALT.
 
     Routes to:
     - N1b_validate_test_plan: Validation passed (Issue #166)
     - N1_generate_draft: Validation failed (BLOCKED), return to drafter
-    - END: Error or max iterations reached
+    - HALT: Max iterations reached
 
     Args:
         state: Current workflow state.
@@ -178,8 +182,8 @@ def route_after_validate_mechanical(
         iteration_count = state.get("iteration_count", 0)
         max_iterations = state.get("max_iterations", 20)
         if iteration_count >= max_iterations:
-            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with validation errors - ending")
-            return "END"
+            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with validation errors - halting")
+            return "HALT"
         print("    [ROUTING] Mechanical validation failed - returning to drafter")
         return "N1_generate_draft"
 
@@ -189,16 +193,17 @@ def route_after_validate_mechanical(
 
 def route_after_validate_test_plan(
     state: RequirementsWorkflowState,
-) -> Literal["N2_human_gate_draft", "N3_review", "N1_generate_draft", "END"]:
+) -> Literal["N2_human_gate_draft", "N3_review", "N1_generate_draft", "HALT"]:
     """Route after validate_test_plan node.
 
     Issue #166: Routes based on test plan validation result.
+    Issue #486: Error/max-iteration routes to HALT.
 
     Routes to:
     - N2_human_gate_draft: Validation passed, gate enabled
     - N3_review: Validation passed, gate disabled
     - N1_generate_draft: Validation failed, return to drafter
-    - END: Error or escalation (max attempts reached)
+    - HALT: Error or max iterations reached
 
     Args:
         state: Current workflow state.
@@ -207,7 +212,7 @@ def route_after_validate_test_plan(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
 
     # Check if test plan validation failed (lld_status set to BLOCKED by node)
     result = state.get("test_plan_validation_result")
@@ -216,8 +221,8 @@ def route_after_validate_test_plan(
         iteration_count = state.get("iteration_count", 0)
         max_iterations = state.get("max_iterations", 20)
         if iteration_count >= max_iterations:
-            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with test plan errors - ending")
-            return "END"
+            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with test plan errors - halting")
+            return "HALT"
         print("    [ROUTING] Test plan validation failed - returning to drafter")
         return "N1_generate_draft"
 
@@ -236,7 +241,7 @@ def route_from_human_gate_draft(
     Routes based on next_node set by the gate:
     - N3_review: Send to review
     - N1_generate_draft: Revise draft
-    - END: Manual handling
+    - END: Manual handling (normal exit, not error — no HALT needed)
 
     Args:
         state: Current workflow state.
@@ -256,17 +261,18 @@ def route_from_human_gate_draft(
 
 def route_after_review(
     state: RequirementsWorkflowState,
-) -> Literal["N4_human_gate_verdict", "N5_finalize", "N1_generate_draft", "N3_review", "END"]:
+) -> Literal["N4_human_gate_verdict", "N5_finalize", "N1_generate_draft", "N3_review", "HALT"]:
     """Route after review node.
 
     Issue #248: Extended routing for open questions loop.
+    Issue #486: Error routes to HALT. Two-strike stagnation detection.
 
     Routes to:
     - N4_human_gate_verdict: Gate enabled OR open questions HUMAN_REQUIRED
     - N5_finalize: Gate disabled and approved
     - N1_generate_draft: Gate disabled and blocked (if iterations remain)
     - N3_review: Open questions UNANSWERED (loop back for followup)
-    - END: Error in review or max iterations reached
+    - HALT: Error in review, max iterations, or two-strike stagnation
 
     Args:
         state: Current workflow state.
@@ -275,7 +281,7 @@ def route_after_review(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
 
     # Issue #248: Check open questions status first
     open_questions_status = state.get("open_questions_status", "NONE")
@@ -305,6 +311,14 @@ def route_after_review(
         if lld_status == "APPROVED":
             return "N5_finalize"
         else:
+            # Issue #486: Two-strike stagnation detection
+            if lld_status == "BLOCKED" and state.get("previous_review_feedback"):
+                current_feedback = state.get("current_verdict", "")
+                previous_feedback = state.get("previous_review_feedback", "")
+                if _same_blocking_issues(current_feedback, previous_feedback):
+                    print("    [HALT] Two consecutive BLOCKED verdicts with same issues. Halting.")
+                    return "HALT"
+
             # Check max iterations before looping back
             iteration_count = state.get("iteration_count", 0)
             max_iterations = state.get("max_iterations", 20)
@@ -312,6 +326,35 @@ def route_after_review(
                 # Max iterations reached - finalize with current status
                 return "N5_finalize"
             return "N1_generate_draft"
+
+
+def _same_blocking_issues(current_feedback: str, previous_feedback: str) -> bool:
+    """Check if two BLOCKED verdicts have overlapping blocking issues.
+
+    Issue #486: Two-strike stagnation detection.
+    Uses simple substring overlap heuristic: if >50% of lines from the
+    current feedback appear in the previous feedback, it's stagnation.
+    """
+    if not current_feedback or not previous_feedback:
+        return False
+
+    current_lines = {
+        line.strip().lower()
+        for line in current_feedback.splitlines()
+        if line.strip() and len(line.strip()) > 10  # Skip short/empty lines
+    }
+    previous_lines = {
+        line.strip().lower()
+        for line in previous_feedback.splitlines()
+        if line.strip() and len(line.strip()) > 10
+    }
+
+    if not current_lines:
+        return False
+
+    overlap = current_lines & previous_lines
+    overlap_ratio = len(overlap) / len(current_lines)
+    return overlap_ratio > 0.5
 
 
 def route_from_human_gate_verdict(
@@ -393,12 +436,16 @@ def create_requirements_graph() -> StateGraph:
     graph.add_node(N3_REVIEW, review)
     graph.add_node(N4_HUMAN_GATE_VERDICT, human_gate_verdict)
     graph.add_node(N5_FINALIZE, finalize)
+    graph.add_node(HALT, create_halt_node("requirements"))  # Issue #486
 
     # Add edges
     # START -> N0
     graph.add_edge(START, N0_LOAD_INPUT)
 
-    # N0 -> N0b (LLD) or N1 or END (on error)
+    # HALT -> END (Issue #486: HALT processes error, then terminates)
+    graph.add_edge(HALT, END)
+
+    # N0 -> N0b (LLD) or N1 or HALT (on error)
     # Issue #401: LLD workflows go through codebase analysis
     graph.add_conditional_edges(
         N0_LOAD_INPUT,
@@ -406,14 +453,14 @@ def create_requirements_graph() -> StateGraph:
         {
             "N0b_analyze_codebase": N0B_ANALYZE_CODEBASE,
             "N1_generate_draft": N1_GENERATE_DRAFT,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
     # N0b -> N1 (always proceeds to draft generation)
     graph.add_edge(N0B_ANALYZE_CODEBASE, N1_GENERATE_DRAFT)
 
-    # N1 -> N1.5 (LLD) or N2 or N3 or END (based on workflow type, gates, error)
+    # N1 -> N1.5 (LLD) or N2 or N3 or HALT (based on workflow type, gates, error)
     # Issue #277: LLD workflows go through mechanical validation
     graph.add_conditional_edges(
         N1_GENERATE_DRAFT,
@@ -422,11 +469,11 @@ def create_requirements_graph() -> StateGraph:
             "N1_5_validate_mechanical": N1_5_VALIDATE_MECHANICAL,
             "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
             "N3_review": N3_REVIEW,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
-    # N1.5 -> N1b or N1 or END (based on validation result)
+    # N1.5 -> N1b or N1 or HALT (based on validation result)
     # Issue #277: Mechanical validation routes based on BLOCKED status
     # Issue #166: On pass, routes to N1b (test plan validation)
     graph.add_conditional_edges(
@@ -435,11 +482,11 @@ def create_requirements_graph() -> StateGraph:
         {
             "N1b_validate_test_plan": N1B_VALIDATE_TEST_PLAN,
             "N1_generate_draft": N1_GENERATE_DRAFT,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
-    # N1b -> N2 or N3 or N1 or END (based on test plan validation)
+    # N1b -> N2 or N3 or N1 or HALT (based on test plan validation)
     # Issue #166: Test plan validation routes
     graph.add_conditional_edges(
         N1B_VALIDATE_TEST_PLAN,
@@ -448,7 +495,7 @@ def create_requirements_graph() -> StateGraph:
             "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
             "N3_review": N3_REVIEW,
             "N1_generate_draft": N1_GENERATE_DRAFT,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
@@ -463,8 +510,9 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N3 -> N4 or N5 or N1 or N3 or END (based on gates, verdict, and open questions)
+    # N3 -> N4 or N5 or N1 or N3 or HALT (based on gates, verdict, open questions, stagnation)
     # Issue #248: Added N3_review as possible target for open questions loop
+    # Issue #486: Added HALT for error/stagnation
     graph.add_conditional_edges(
         N3_REVIEW,
         route_after_review,
@@ -473,7 +521,7 @@ def create_requirements_graph() -> StateGraph:
             "N5_finalize": N5_FINALIZE,
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "N3_review": N3_REVIEW,
-            "END": END,
+            "HALT": HALT,
         },
     )
 

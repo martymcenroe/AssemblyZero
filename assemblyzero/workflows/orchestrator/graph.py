@@ -37,6 +37,7 @@ from assemblyzero.workflows.orchestrator.state import (
     get_next_stage,
     update_stage_result,
 )
+from assemblyzero.core.halt_node import create_halt_node
 
 
 class OrchestrationResult(TypedDict):
@@ -167,7 +168,7 @@ def create_orchestration_graph() -> StateGraph:
     workflow.add_node("init", _init_node)
     workflow.add_node("run_stage", _run_stage_node)
     workflow.add_node("done", lambda state: {"completed_at": datetime.now(tz=timezone.utc).isoformat()})
-    workflow.add_node("terminal", lambda state: {})
+    workflow.add_node("terminal", create_halt_node("orchestrator"))  # Issue #486
 
     workflow.set_entry_point("init")
     workflow.add_edge("init", "run_stage")
