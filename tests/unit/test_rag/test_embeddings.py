@@ -1,67 +1,83 @@
-"""Tests for EmbeddingProvider (T060, T070, T080, T120).
+"""Unit tests for embedding provider abstraction.
 
-Issue #113: Vector Database Infrastructure (RAG Foundation)
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T240
 """
+
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from assemblyzero.rag.embeddings import EmbeddingProvider
+from assemblyzero.rag.models import RAGConfig
 
 
-@pytest.fixture
-def provider() -> EmbeddingProvider:
-    """Embedding provider (function-scoped to match mock lifecycle)."""
-    return EmbeddingProvider()
+class TestCreateEmbeddingProvider:
+    """Tests for create_embedding_provider()."""
+
+    def test_unknown_provider(self) -> None:
+        """Unknown provider raises ValueError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="unknown")
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            create_embedding_provider(config)
+
+    def test_openai_not_implemented(self) -> None:
+        """OpenAI provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="openai")
+        with pytest.raises(NotImplementedError, match="OpenAI"):
+            create_embedding_provider(config)
+
+    def test_gemini_not_implemented(self) -> None:
+        """Gemini provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="gemini")
+        with pytest.raises(NotImplementedError, match="Gemini"):
+            create_embedding_provider(config)
 
 
-class TestEmbedQuery:
-    """T060: Embedding provider generates local vectors."""
+@pytest.mark.rag
+class TestLocalEmbeddingProvider:
+    """Tests for LocalEmbeddingProvider (requires [rag] extra)."""
 
-    def test_embed_query_returns_384_floats(
-        self, provider: EmbeddingProvider
-    ) -> None:
-        vector = provider.embed_query("hello world")
-        assert isinstance(vector, list)
-        assert len(vector) == 384
-        assert all(isinstance(v, float) for v in vector)
+    def test_embed_query_dimensions(self) -> None:
+        """T240: Embedding returns correct dimensions (REQ-2)."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
 
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embedding = provider.embed_query("test query about governance")
+        assert isinstance(embedding, list)
+        assert len(embedding) == 384
+        assert all(isinstance(v, float) for v in embedding)
 
-class TestEmbedTexts:
-    """T070: Embedding provider batch encoding."""
+    def test_embed_texts_batch(self) -> None:
+        """Batch embedding returns correct count and dimensions."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
 
-    def test_embed_texts_batch(self, provider: EmbeddingProvider) -> None:
-        vectors = provider.embed_texts(["a", "b", "c"])
-        assert len(vectors) == 3
-        for vec in vectors:
-            assert len(vec) == 384
-            assert all(isinstance(v, float) for v in vec)
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        texts = ["first text", "second text", "third text"]
+        embeddings = provider.embed_texts(texts)
+        assert len(embeddings) == 3
+        assert all(len(e) == 384 for e in embeddings)
 
+    def test_embed_texts_empty(self) -> None:
+        """Empty text list returns empty embeddings list."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
 
-class TestLazyLoading:
-    """T080: Embedding provider lazy loads model."""
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embeddings = provider.embed_texts([])
+        assert embeddings == []
 
-    def test_is_loaded_false_before_use(self) -> None:
-        fresh = EmbeddingProvider()
-        assert fresh.is_loaded is False
+    def test_lazy_model_loading(self) -> None:
+        """Model is not loaded until first embed call."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
 
-    def test_is_loaded_true_after_use(
-        self, provider: EmbeddingProvider
-    ) -> None:
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        assert provider._model is None  # Not yet loaded
         provider.embed_query("trigger load")
-        assert provider.is_loaded is True
-
-    def test_dimension_property(self, provider: EmbeddingProvider) -> None:
-        assert provider.dimension == 384
-
-
-class TestMissingDependency:
-    """T120: Graceful error on missing sentence-transformers."""
-
-    def test_missing_sentence_transformers_raises(self) -> None:
-        fresh = EmbeddingProvider()
-        with patch.dict("sys.modules", {"sentence_transformers": None}):
-            with pytest.raises(ImportError, match="sentence-transformers"):
-                fresh.embed_query("test")
+        assert provider._model is not None  # Now loaded

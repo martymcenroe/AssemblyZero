@@ -1,0 +1,6761 @@
+# Implementation Request: assemblyzero/rag/vector_store.py
+
+## Task
+
+Write the complete contents of `assemblyzero/rag/vector_store.py`.
+
+Change type: Add
+Description: ChromaDB wrapper: init, query, health check
+
+## LLD Specification
+
+# Implementation Spec: RAG Injection - Automated Context Retrieval ("The Librarian")
+
+| Field | Value |
+|-------|-------|
+| Issue | #88 |
+| LLD | `docs/lld/active/88-rag-librarian.md` |
+| Generated | 2026-02-27 |
+| Status | DRAFT |
+
+## 1. Overview
+
+Implement an automated RAG node ("The Librarian") that queries a local ChromaDB vector store with the issue brief and injects the top-3 most relevant governance documents into the Designer's context. The system is entirely opt-in via `pip install assemblyzero[rag]` and degrades gracefully when dependencies or the vector store are absent.
+
+**Objective:** Automate context retrieval from governance documents (ADRs, standards, completed LLDs) to augment the Designer node with relevant project knowledge.
+
+**Success Criteria:** Librarian retrieves top-3 documents above 0.7 similarity threshold in <500ms (warm), workflow continues unimpacted when RAG is unavailable, core install remains lightweight.
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `assemblyzero/rag/__init__.py` | Add | RAG package init with conditional import guards |
+| 2 | `assemblyzero/rag/models.py` | Add | Data models: RetrievedDocument, ChunkMetadata, RAGConfig, IngestionSummary |
+| 3 | `assemblyzero/rag/dependencies.py` | Add | Conditional import checker with friendly error messages |
+| 4 | `assemblyzero/rag/chunker.py` | Add | Markdown document chunker: split on H1/H2 headers |
+| 5 | `assemblyzero/rag/embeddings.py` | Add | Embedding provider abstraction (local SentenceTransformer) |
+| 6 | `assemblyzero/rag/vector_store.py` | Add | ChromaDB wrapper: init, query, health check |
+| 7 | `assemblyzero/rag/librarian.py` | Add | Core LibrarianNode: embed query, retrieve docs, filter |
+| 8 | `assemblyzero/workflows/lld/__init__.py` | Add | LLD workflow package init |
+| 9 | `assemblyzero/workflows/lld/state.py` | Add | LLD workflow State schema |
+| 10 | `assemblyzero/nodes/librarian.py` | Add | LangGraph node wrapper for workflow integration |
+| 11 | `assemblyzero/workflows/lld/graph.py` | Add | LLD workflow graph wiring |
+| 12 | `tools/rebuild_knowledge_base.py` | Add | CLI tool for knowledge base ingestion |
+| 13 | `pyproject.toml` | Modify | Verify version pins for `[rag]` optional deps |
+| 14 | `.gitignore` | Modify | Add `.assemblyzero/vector_store/` entry |
+| 15 | `tests/fixtures/rag/sample_adr.md` | Add | Test fixture: sample ADR |
+| 16 | `tests/fixtures/rag/sample_standard.md` | Add | Test fixture: sample standard |
+| 17 | `tests/fixtures/rag/sample_lld.md` | Add | Test fixture: sample LLD |
+| 18 | `tests/unit/test_rag/__init__.py` | Add | Test package init |
+| 19 | `tests/unit/test_rag/test_models.py` | Add | Unit tests for data models |
+| 20 | `tests/unit/test_rag/test_dependencies.py` | Add | Unit tests for dependency checking |
+| 21 | `tests/unit/test_rag/test_chunker.py` | Add | Unit tests for chunker |
+| 22 | `tests/unit/test_rag/test_embeddings.py` | Add | Unit tests for embedding provider |
+| 23 | `tests/unit/test_rag/test_vector_store.py` | Add | Unit tests for vector store |
+| 24 | `tests/unit/test_rag/test_librarian.py` | Add | Unit tests for LibrarianNode |
+| 25 | `tests/integration/test_rag_workflow.py` | Add | Integration test: end-to-end workflow |
+| 26 | `tests/integration/test_rag_degradation.py` | Add | Integration test: graceful degradation |
+| 27 | `docs/adrs/0205-rag-librarian.md` | Add | ADR for RAG Librarian |
+
+**Implementation Order Rationale:** Models first (no dependencies), then dependency checker (needed by everything), then chunker (pure logic), then embeddings (wraps sentence-transformers), then vector store (wraps chromadb), then librarian (uses embeddings + vector_store), then workflow integration (uses librarian), then CLI tool (uses all), then config modifications, then tests bottom-up.
+
+## 3. Current State (for Modify/Delete files)
+
+### 3.1 `pyproject.toml`
+
+**Relevant excerpt** (lines 30-34, the `[project.optional-dependencies]` section):
+
+```toml
+[project.optional-dependencies]
+rag = [
+    "chromadb (>=0.5.0,<1.0.0)",
+    "sentence-transformers (>=3.0.0,<4.0.0)",
+]
+```
+
+**What changes:** Verify these version pins are correct and present. No modification expected unless pins need updating. The section already exists.
+
+**Relevant excerpt** (lines 36-43, the `[tool.pytest.ini_options]` section):
+
+```toml
+[tool.pytest.ini_options]
+addopts = "-m 'not integration and not e2e and not adversarial'"
+markers = [
+    "integration: tests that call real external services (deselect with '-m \"not integration\"')",
+    "e2e: end-to-end workflow tests requiring sandbox repo",
+    "expensive: tests that use significant API quota",
+    "adversarial: adversarial tests generated by Gemini Pro (deselect with '-m \"not adversarial\"')",
+]
+```
+
+**What changes:** Add a new marker for `rag` tests that require the `[rag]` optional dependency.
+
+### 3.2 `.gitignore`
+
+**Relevant excerpt** (lines 38-40, the `.assemblyzero/` section):
+
+```gitignore
+# Local AssemblyZero state (Issue #78)
+.assemblyzero/
+! .assemblyzero/config.example.json
+```
+
+**What changes:** The existing `.assemblyzero/` pattern already covers `.assemblyzero/vector_store/`. Add an explicit comment for clarity but the functional gitignore already works. We'll add a specific comment-only line to document the vector store purpose.
+
+## 4. Data Structures
+
+### 4.1 `ChunkMetadata`
+
+**Definition:**
+
+```python
+@dataclass(frozen=True)
+class ChunkMetadata:
+    file_path: str
+    section_title: str
+    chunk_index: int
+    doc_type: str
+    last_modified: str
+```
+
+**Concrete Example:**
+
+```json
+{
+    "file_path": "docs/adrs/0201-adversarial-audit.md",
+    "section_title": "## 2. Decision",
+    "chunk_index": 2,
+    "doc_type": "adr",
+    "last_modified": "2026-02-15T10:30:00Z"
+}
+```
+
+### 4.2 `RetrievedDocument`
+
+**Definition:**
+
+```python
+@dataclass(frozen=True)
+class RetrievedDocument:
+    file_path: str
+    section: str
+    content_snippet: str
+    score: float
+    doc_type: str
+```
+
+**Concrete Example:**
+
+```json
+{
+    "file_path": "docs/adrs/0201-adversarial-audit.md",
+    "section": "## 2. Decision",
+    "content_snippet": "We will implement adversarial audit as a mandatory gate in the CI pipeline. Every LLD must pass automated security review before merge...",
+    "score": 0.85,
+    "doc_type": "adr"
+}
+```
+
+### 4.3 `RAGConfig`
+
+**Definition:**
+
+```python
+@dataclass
+class RAGConfig:
+    vector_store_path: Path
+    embedding_model: str
+    similarity_threshold: float
+    top_k_candidates: int
+    top_n_results: int
+    source_directories: list[str]
+    chunk_max_tokens: int
+    embedding_provider: str
+```
+
+**Concrete Example:**
+
+```json
+{
+    "vector_store_path": ".assemblyzero/vector_store",
+    "embedding_model": "all-MiniLM-L6-v2",
+    "similarity_threshold": 0.7,
+    "top_k_candidates": 5,
+    "top_n_results": 3,
+    "source_directories": ["docs/adrs", "docs/standards", "docs/LLDs/done"],
+    "chunk_max_tokens": 512,
+    "embedding_provider": "local"
+}
+```
+
+### 4.4 `IngestionSummary`
+
+**Definition:**
+
+```python
+@dataclass
+class IngestionSummary:
+    files_indexed: int
+    chunks_created: int
+    files_skipped: int
+    elapsed_seconds: float
+    errors: list[str]
+```
+
+**Concrete Example:**
+
+```json
+{
+    "files_indexed": 47,
+    "chunks_created": 213,
+    "files_skipped": 53,
+    "elapsed_seconds": 4.82,
+    "errors": []
+}
+```
+
+### 4.5 `LLDState`
+
+**Definition:**
+
+```python
+class LLDState(TypedDict):
+    issue_brief: str
+    manual_context_paths: list[str]
+    retrieved_context: list[dict]
+    rag_status: str
+    designer_output: str
+```
+
+**Concrete Example:**
+
+```json
+{
+    "issue_brief": "# 88 - Feature: RAG Injection\n\nImplement automated context retrieval for the Designer node using a local vector store...",
+    "manual_context_paths": ["docs/standards/0005-testing-strategy.md"],
+    "retrieved_context": [
+        {
+            "file_path": "docs/adrs/0201-adversarial-audit.md",
+            "section": "## 2. Decision",
+            "content_snippet": "We will implement adversarial audit...",
+            "score": 0.85,
+            "doc_type": "adr"
+        }
+    ],
+    "rag_status": "success",
+    "designer_output": ""
+}
+```
+
+## 5. Function Specifications
+
+### 5.1 `check_rag_dependencies()`
+
+**File:** `assemblyzero/rag/dependencies.py`
+
+**Signature:**
+
+```python
+def check_rag_dependencies() -> tuple[bool, str]:
+    """Check if RAG optional dependencies are installed."""
+    ...
+```
+
+**Input Example:**
+
+```python
+# No arguments
+```
+
+**Output Example (deps available):**
+
+```python
+(True, "RAG dependencies available")
+```
+
+**Output Example (deps missing):**
+
+```python
+(False, "RAG dependencies not installed. Install with: pip install assemblyzero[rag]")
+```
+
+**Edge Cases:**
+- `chromadb` installed but `sentence-transformers` missing → `(False, "Missing: sentence-transformers. Install with: pip install assemblyzero[rag]")`
+- Both installed but wrong version → returns `(True, ...)` (version checks are handled by pip)
+
+### 5.2 `require_rag_dependencies()`
+
+**File:** `assemblyzero/rag/dependencies.py`
+
+**Signature:**
+
+```python
+def require_rag_dependencies() -> None:
+    """Raise ImportError with friendly message if RAG dependencies unavailable."""
+    ...
+```
+
+**Input Example:**
+
+```python
+# No arguments
+```
+
+**Output Example (success):**
+
+```python
+# Returns None, no exception
+```
+
+**Output Example (failure):**
+
+```python
+# Raises ImportError("RAG dependencies not installed. Install with: pip install assemblyzero[rag]")
+```
+
+### 5.3 `chunk_markdown_document()`
+
+**File:** `assemblyzero/rag/chunker.py`
+
+**Signature:**
+
+```python
+def chunk_markdown_document(
+    file_path: Path,
+    max_tokens: int = 512,
+) -> list[tuple[str, ChunkMetadata]]:
+    """Split a markdown document into chunks on H1/H2 headers."""
+    ...
+```
+
+**Input Example:**
+
+```python
+file_path = Path("docs/adrs/0201-adversarial-audit.md")
+max_tokens = 512
+```
+
+**Output Example:**
+
+```python
+[
+    (
+        "# ADR-0201: Adversarial Audit\n\nStatus: Accepted\nDate: 2026-02-01",
+        ChunkMetadata(
+            file_path="docs/adrs/0201-adversarial-audit.md",
+            section_title="# ADR-0201: Adversarial Audit",
+            chunk_index=0,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00Z",
+        ),
+    ),
+    (
+        "## 2. Decision\n\nWe will implement adversarial audit as a mandatory gate...",
+        ChunkMetadata(
+            file_path="docs/adrs/0201-adversarial-audit.md",
+            section_title="## 2. Decision",
+            chunk_index=1,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00Z",
+        ),
+    ),
+]
+```
+
+**Edge Cases:**
+- File has no H1/H2 headers → single chunk with `section_title="Untitled"`
+- File is empty → returns empty list `[]`
+- Chunk exceeds `max_tokens` → split further at paragraph boundaries (double newline)
+- File path does not exist → raises `FileNotFoundError`
+
+### 5.4 `detect_doc_type()`
+
+**File:** `assemblyzero/rag/chunker.py`
+
+**Signature:**
+
+```python
+def detect_doc_type(file_path: Path) -> str:
+    """Determine document type from file path."""
+    ...
+```
+
+**Input Example:**
+
+```python
+file_path = Path("docs/adrs/0201-adversarial-audit.md")
+```
+
+**Output Example:**
+
+```python
+"adr"
+```
+
+**Edge Cases:**
+- `Path("docs/standards/0002-code-style.md")` → `"standard"`
+- `Path("docs/LLDs/done/44-feature.md")` → `"lld"`
+- `Path("docs/other/unknown.md")` → `"unknown"`
+
+### 5.5 `split_on_headers()`
+
+**File:** `assemblyzero/rag/chunker.py`
+
+**Signature:**
+
+```python
+def split_on_headers(content: str) -> list[tuple[str, str]]:
+    """Split markdown content on H1/H2 headers."""
+    ...
+```
+
+**Input Example:**
+
+```python
+content = "# Title\n\nIntro text\n\n## Section 1\n\nContent 1\n\n## Section 2\n\nContent 2"
+```
+
+**Output Example:**
+
+```python
+[
+    ("# Title", "Intro text"),
+    ("## Section 1", "Content 1"),
+    ("## Section 2", "Content 2"),
+]
+```
+
+**Edge Cases:**
+- No headers → `[("Untitled", "entire content")]`
+- Content before first header → included as `("Untitled", "pre-header content")`
+- Empty content → `[]`
+- H3+ headers are not split points, included in parent section content
+
+### 5.6 `LocalEmbeddingProvider.__init__()`
+
+**File:** `assemblyzero/rag/embeddings.py`
+
+**Signature:**
+
+```python
+class LocalEmbeddingProvider(EmbeddingProvider):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Initialize with model name. Loads model on first use (lazy)."""
+        ...
+```
+
+**Input Example:**
+
+```python
+provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+```
+
+**Edge Cases:**
+- Model not yet downloaded → downloads on first `embed_texts()`/`embed_query()` call
+- Invalid model name → `sentence_transformers` raises `OSError` on first use
+
+### 5.7 `LocalEmbeddingProvider.embed_texts()`
+
+**File:** `assemblyzero/rag/embeddings.py`
+
+**Signature:**
+
+```python
+def embed_texts(self, texts: list[str]) -> list[list[float]]:
+    """Embed a batch of text strings into vector representations."""
+    ...
+```
+
+**Input Example:**
+
+```python
+texts = ["We will implement adversarial audit", "Coding standards require type hints"]
+```
+
+**Output Example:**
+
+```python
+[
+    [0.0234, -0.0891, 0.1456, ...],  # 384 floats
+    [0.0567, -0.0234, 0.0891, ...],  # 384 floats
+]
+```
+
+**Edge Cases:**
+- Empty list `[]` → returns `[]`
+- Single text → returns list with one embedding
+- Very long text (>512 tokens) → sentence-transformers truncates automatically
+
+### 5.8 `LocalEmbeddingProvider.embed_query()`
+
+**File:** `assemblyzero/rag/embeddings.py`
+
+**Signature:**
+
+```python
+def embed_query(self, query: str) -> list[float]:
+    """Embed a single query string for similarity search."""
+    ...
+```
+
+**Input Example:**
+
+```python
+query = "How should we handle adversarial testing in CI?"
+```
+
+**Output Example:**
+
+```python
+[0.0234, -0.0891, 0.1456, ...]  # 384 floats
+```
+
+### 5.9 `create_embedding_provider()`
+
+**File:** `assemblyzero/rag/embeddings.py`
+
+**Signature:**
+
+```python
+def create_embedding_provider(config: RAGConfig) -> EmbeddingProvider:
+    """Factory: create the appropriate embedding provider based on config."""
+    ...
+```
+
+**Input Example:**
+
+```python
+config = RAGConfig(embedding_provider="local", embedding_model="all-MiniLM-L6-v2")
+```
+
+**Output Example:**
+
+```python
+LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+```
+
+**Edge Cases:**
+- `embedding_provider="openai"` → raises `NotImplementedError("OpenAI embeddings not yet implemented")`
+- `embedding_provider="gemini"` → raises `NotImplementedError("Gemini embeddings not yet implemented")`
+- Unknown provider → raises `ValueError(f"Unknown embedding provider: {config.embedding_provider}")`
+
+### 5.10 `VectorStoreManager.__init__()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+class VectorStoreManager:
+    def __init__(self, config: RAGConfig) -> None:
+        """Initialize with RAG configuration."""
+        ...
+```
+
+**Input Example:**
+
+```python
+config = RAGConfig(vector_store_path=Path(".assemblyzero/vector_store"))
+manager = VectorStoreManager(config)
+```
+
+### 5.11 `VectorStoreManager.is_initialized()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def is_initialized(self) -> bool:
+    """Check if vector store directory exists and contains valid data."""
+    ...
+```
+
+**Input Example:**
+
+```python
+manager = VectorStoreManager(config)
+```
+
+**Output Example (store exists):**
+
+```python
+True
+```
+
+**Output Example (store missing):**
+
+```python
+False
+```
+
+### 5.12 `VectorStoreManager.initialize()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def initialize(self) -> None:
+    """Create vector store directory and ChromaDB collection."""
+    ...
+```
+
+**Edge Cases:**
+- Directory already exists → no-op (idempotent)
+- Parent directory doesn't exist → creates recursively
+
+### 5.13 `VectorStoreManager.add_chunks()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def add_chunks(
+    self,
+    chunks: list[tuple[str, ChunkMetadata]],
+    embeddings: list[list[float]],
+) -> int:
+    """Add document chunks with pre-computed embeddings to the store."""
+    ...
+```
+
+**Input Example:**
+
+```python
+chunks = [
+    ("We will implement adversarial audit...", ChunkMetadata(
+        file_path="docs/adrs/0201-adversarial-audit.md",
+        section_title="## 2. Decision",
+        chunk_index=1,
+        doc_type="adr",
+        last_modified="2026-02-15T10:30:00Z",
+    )),
+]
+embeddings = [[0.0234, -0.0891, 0.1456, ...]]  # 384-dim
+```
+
+**Output Example:**
+
+```python
+1  # number of chunks added
+```
+
+**Edge Cases:**
+- Empty chunks list → returns `0`
+- `len(chunks) != len(embeddings)` → raises `ValueError`
+
+### 5.14 `VectorStoreManager.query()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def query(
+    self,
+    query_embedding: list[float],
+    n_results: int = 5,
+) -> list[RetrievedDocument]:
+    """Query the vector store for similar documents."""
+    ...
+```
+
+**Input Example:**
+
+```python
+query_embedding = [0.0234, -0.0891, 0.1456, ...]  # 384 floats
+n_results = 5
+```
+
+**Output Example:**
+
+```python
+[
+    RetrievedDocument(
+        file_path="docs/adrs/0201-adversarial-audit.md",
+        section="## 2. Decision",
+        content_snippet="We will implement adversarial audit as a mandatory gate...",
+        score=0.85,
+        doc_type="adr",
+    ),
+    RetrievedDocument(
+        file_path="docs/standards/0005-testing-strategy.md",
+        section="## 3. Unit Test Requirements",
+        content_snippet="All new code must have >= 95% test coverage...",
+        score=0.72,
+        doc_type="standard",
+    ),
+]
+```
+
+**Edge Cases:**
+- Empty collection → returns `[]`
+- `n_results` greater than collection size → returns all available results
+- ChromaDB returns distances (not similarities) → convert: `score = 1.0 - distance` for cosine
+
+### 5.15 `VectorStoreManager.get_indexed_files()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def get_indexed_files(self) -> dict[str, str]:
+    """Return mapping of file_path -> last_modified for all indexed files."""
+    ...
+```
+
+**Output Example:**
+
+```python
+{
+    "docs/adrs/0201-adversarial-audit.md": "2026-02-15T10:30:00Z",
+    "docs/standards/0005-testing-strategy.md": "2026-02-10T08:00:00Z",
+}
+```
+
+### 5.16 `VectorStoreManager.delete_by_file()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def delete_by_file(self, file_path: str) -> int:
+    """Delete all chunks for a given file path. Returns count deleted."""
+    ...
+```
+
+**Input Example:**
+
+```python
+file_path = "docs/adrs/0201-adversarial-audit.md"
+```
+
+**Output Example:**
+
+```python
+3  # number of chunks deleted
+```
+
+### 5.17 `VectorStoreManager.collection_stats()`
+
+**File:** `assemblyzero/rag/vector_store.py`
+
+**Signature:**
+
+```python
+def collection_stats(self) -> dict[str, int]:
+    """Return collection statistics."""
+    ...
+```
+
+**Output Example:**
+
+```python
+{"total_chunks": 213, "unique_files": 47}
+```
+
+### 5.18 `LibrarianNode.__init__()`
+
+**File:** `assemblyzero/rag/librarian.py`
+
+**Signature:**
+
+```python
+class LibrarianNode:
+    def __init__(self, config: RAGConfig | None = None) -> None:
+        """Initialize with optional config. Uses defaults if None."""
+        ...
+```
+
+### 5.19 `LibrarianNode.retrieve()`
+
+**File:** `assemblyzero/rag/librarian.py`
+
+**Signature:**
+
+```python
+def retrieve(
+    self,
+    issue_brief: str,
+    threshold: float | None = None,
+) -> list[RetrievedDocument]:
+    """Retrieve relevant governance documents for the given brief."""
+    ...
+```
+
+**Input Example:**
+
+```python
+issue_brief = "# 88 - Feature: RAG Injection\n\nImplement automated context retrieval..."
+threshold = None  # uses config default 0.7
+```
+
+**Output Example:**
+
+```python
+[
+    RetrievedDocument(
+        file_path="docs/adrs/0201-adversarial-audit.md",
+        section="## 2. Decision",
+        content_snippet="We will implement adversarial audit...",
+        score=0.85,
+        doc_type="adr",
+    ),
+    RetrievedDocument(
+        file_path="docs/standards/0005-testing-strategy.md",
+        section="## 3. Unit Test Requirements",
+        content_snippet="All new code must have >= 95% coverage...",
+        score=0.78,
+        doc_type="standard",
+    ),
+]
+```
+
+**Edge Cases:**
+- All candidates below threshold → returns `[]`
+- More than `top_n_results` above threshold → returns only top 3 by score
+- Dependencies not installed → raises `ImportError` (caller should use `check_availability()` first)
+
+### 5.20 `LibrarianNode.check_availability()`
+
+**File:** `assemblyzero/rag/librarian.py`
+
+**Signature:**
+
+```python
+def check_availability(self) -> tuple[bool, str]:
+    """Check if the Librarian can operate."""
+    ...
+```
+
+**Output Example (all good):**
+
+```python
+(True, "Librarian ready: 213 chunks indexed from 47 files")
+```
+
+**Output Example (no deps):**
+
+```python
+(False, "deps_missing")
+```
+
+**Output Example (no store):**
+
+```python
+(False, "unavailable")
+```
+
+### 5.21 `LibrarianNode.format_context_for_designer()`
+
+**File:** `assemblyzero/rag/librarian.py`
+
+**Signature:**
+
+```python
+def format_context_for_designer(
+    self,
+    documents: list[RetrievedDocument],
+) -> str:
+    """Format retrieved documents into a text block for Designer prompt injection."""
+    ...
+```
+
+**Input Example:**
+
+```python
+documents = [
+    RetrievedDocument(
+        file_path="docs/adrs/0201-adversarial-audit.md",
+        section="## 2. Decision",
+        content_snippet="We will implement adversarial audit as a mandatory gate...",
+        score=0.85,
+        doc_type="adr",
+    ),
+]
+```
+
+**Output Example:**
+
+```python
+"""--- Retrieved Context (RAG) ---
+
+### Source: docs/adrs/0201-adversarial-audit.md
+**Section:** ## 2. Decision
+**Relevance Score:** 0.85
+**Type:** adr
+
+We will implement adversarial audit as a mandatory gate...
+
+---"""
+```
+
+### 5.22 `query_knowledge_base()`
+
+**File:** `assemblyzero/rag/librarian.py`
+
+**Signature:**
+
+```python
+def query_knowledge_base(query: str, config: RAGConfig | None = None) -> list[RetrievedDocument]:
+    """Convenience function for ad-hoc querying."""
+    ...
+```
+
+**Input Example:**
+
+```python
+query = "testing strategy for adversarial audits"
+```
+
+**Output Example:**
+
+```python
+[RetrievedDocument(file_path="docs/adrs/0201-adversarial-audit.md", ...)]
+```
+
+### 5.23 `librarian_node()`
+
+**File:** `assemblyzero/nodes/librarian.py`
+
+**Signature:**
+
+```python
+def librarian_node(state: dict) -> dict:
+    """LangGraph node function: retrieve context and update workflow state."""
+    ...
+```
+
+**Input Example:**
+
+```python
+state = {
+    "issue_brief": "# 88 - Feature: RAG Injection\n\nImplement...",
+    "manual_context_paths": ["docs/standards/0005-testing-strategy.md"],
+    "retrieved_context": [],
+    "rag_status": "",
+    "designer_output": "",
+}
+```
+
+**Output Example (success):**
+
+```python
+{
+    "retrieved_context": [
+        {
+            "file_path": "docs/adrs/0201-adversarial-audit.md",
+            "section": "## 2. Decision",
+            "content_snippet": "We will implement adversarial audit...",
+            "score": 0.85,
+            "doc_type": "adr",
+        },
+    ],
+    "rag_status": "success",
+}
+```
+
+**Output Example (deps missing):**
+
+```python
+{
+    "retrieved_context": [],
+    "rag_status": "deps_missing",
+}
+```
+
+**Output Example (store unavailable):**
+
+```python
+{
+    "retrieved_context": [],
+    "rag_status": "unavailable",
+}
+```
+
+**Output Example (no results above threshold):**
+
+```python
+{
+    "retrieved_context": [],
+    "rag_status": "no_results",
+}
+```
+
+### 5.24 `merge_contexts()`
+
+**File:** `assemblyzero/nodes/librarian.py`
+
+**Signature:**
+
+```python
+def merge_contexts(
+    rag_results: list[RetrievedDocument],
+    manual_context_paths: list[str],
+) -> list[dict]:
+    """Merge RAG results with manually-specified context files."""
+    ...
+```
+
+**Input Example:**
+
+```python
+rag_results = [
+    RetrievedDocument(
+        file_path="docs/adrs/0201-adversarial-audit.md",
+        section="## 2. Decision",
+        content_snippet="We will implement...",
+        score=0.85,
+        doc_type="adr",
+    ),
+    RetrievedDocument(
+        file_path="docs/standards/0005-testing-strategy.md",
+        section="## 1. Overview",
+        content_snippet="Testing strategy...",
+        score=0.75,
+        doc_type="standard",
+    ),
+]
+manual_context_paths = ["docs/standards/0005-testing-strategy.md"]
+```
+
+**Output Example:**
+
+```python
+[
+    {
+        "file_path": "docs/standards/0005-testing-strategy.md",
+        "section": "Full Document",
+        "content_snippet": "# Testing Strategy\n\n## 1. Overview\n...",  # full file content
+        "score": 1.0,
+        "doc_type": "manual",
+    },
+    {
+        "file_path": "docs/adrs/0201-adversarial-audit.md",
+        "section": "## 2. Decision",
+        "content_snippet": "We will implement...",
+        "score": 0.85,
+        "doc_type": "adr",
+    },
+    # Note: docs/standards/0005-testing-strategy.md from RAG is deduplicated (manual wins)
+]
+```
+
+### 5.25 `build_lld_graph()`
+
+**File:** `assemblyzero/workflows/lld/graph.py`
+
+**Signature:**
+
+```python
+def build_lld_graph() -> StateGraph:
+    """Build the LLD workflow graph with Librarian RAG node."""
+    ...
+```
+
+**Output Example:**
+
+```python
+# Returns a compiled LangGraph StateGraph with nodes:
+# "check_rag" -> conditional edge -> "librarian" or "skip_rag"
+# "librarian" -> "merge_context"
+# "skip_rag" -> "merge_context" 
+# "merge_context" -> END
+```
+
+### 5.26 `main()` (rebuild_knowledge_base)
+
+**File:** `tools/rebuild_knowledge_base.py`
+
+**Signature:**
+
+```python
+def main() -> None:
+    """CLI entry point for rebuilding the RAG knowledge base."""
+    ...
+```
+
+**CLI Usage Example:**
+
+```bash
+# Full rebuild
+python tools/rebuild_knowledge_base.py --full --verbose
+
+# Incremental (default)
+python tools/rebuild_knowledge_base.py
+
+# Custom source dirs
+python tools/rebuild_knowledge_base.py --source-dirs docs/adrs docs/standards
+```
+
+**Output Example (stdout):**
+
+```
+[RAG] Rebuilding knowledge base (full mode)...
+[RAG] Discovering documents in: docs/adrs, docs/standards, docs/LLDs/done
+[RAG] Found 47 markdown files
+[RAG] Indexing docs/adrs/0201-adversarial-audit.md (5 chunks)
+[RAG] Indexing docs/adrs/0202-multi-model.md (3 chunks)
+...
+[RAG] Complete: 47 files indexed, 213 chunks created, 0 errors (4.82s)
+```
+
+### 5.27 `discover_documents()`
+
+**File:** `tools/rebuild_knowledge_base.py`
+
+**Signature:**
+
+```python
+def discover_documents(source_dirs: list[str]) -> list[Path]:
+    """Find all markdown files in the specified source directories."""
+    ...
+```
+
+**Input Example:**
+
+```python
+source_dirs = ["docs/adrs", "docs/standards"]
+```
+
+**Output Example:**
+
+```python
+[
+    Path("docs/adrs/0201-adversarial-audit.md"),
+    Path("docs/adrs/0202-multi-model.md"),
+    Path("docs/standards/0001-naming.md"),
+    Path("docs/standards/0002-code-style.md"),
+]
+```
+
+### 5.28 `compute_file_hash()`
+
+**File:** `tools/rebuild_knowledge_base.py`
+
+**Signature:**
+
+```python
+def compute_file_hash(file_path: Path) -> str:
+    """Compute MD5 hash of file content for change detection."""
+    ...
+```
+
+**Input Example:**
+
+```python
+file_path = Path("docs/adrs/0201-adversarial-audit.md")
+```
+
+**Output Example:**
+
+```python
+"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+```
+
+### 5.29 `run_full_ingestion()`
+
+**File:** `tools/rebuild_knowledge_base.py`
+
+**Signature:**
+
+```python
+def run_full_ingestion(
+    config: RAGConfig,
+    verbose: bool = False,
+) -> IngestionSummary:
+    """Drop and rebuild the entire vector store."""
+    ...
+```
+
+### 5.30 `run_incremental_ingestion()`
+
+**File:** `tools/rebuild_knowledge_base.py`
+
+**Signature:**
+
+```python
+def run_incremental_ingestion(
+    config: RAGConfig,
+    verbose: bool = False,
+) -> IngestionSummary:
+    """Only reindex files that have changed since last ingestion."""
+    ...
+```
+
+## 6. Change Instructions
+
+### 6.1 `assemblyzero/rag/__init__.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""RAG (Retrieval-Augmented Generation) subsystem for AssemblyZero.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+This module provides optional RAG capabilities for augmenting LLD design
+with relevant governance documents. All heavy dependencies (chromadb,
+sentence-transformers) are optional and loaded conditionally.
+
+Install RAG dependencies: pip install assemblyzero[rag]
+"""
+
+from assemblyzero.rag.models import (
+    ChunkMetadata,
+    IngestionSummary,
+    RAGConfig,
+    RetrievedDocument,
+)
+from assemblyzero.rag.dependencies import check_rag_dependencies, require_rag_dependencies
+
+__all__ = [
+    "ChunkMetadata",
+    "IngestionSummary",
+    "RAGConfig",
+    "RetrievedDocument",
+    "check_rag_dependencies",
+    "require_rag_dependencies",
+]
+```
+
+### 6.2 `assemblyzero/rag/models.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Data models for the RAG subsystem.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+These models have no external dependencies and can be imported
+without the [rag] optional extra installed.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class ChunkMetadata:
+    """Metadata attached to each indexed document chunk."""
+
+    file_path: str
+    section_title: str
+    chunk_index: int
+    doc_type: str
+    last_modified: str
+
+
+@dataclass(frozen=True)
+class RetrievedDocument:
+    """A single document chunk retrieved from the vector store."""
+
+    file_path: str
+    section: str
+    content_snippet: str
+    score: float
+    doc_type: str
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for state serialization."""
+        return {
+            "file_path": self.file_path,
+            "section": self.section,
+            "content_snippet": self.content_snippet,
+            "score": self.score,
+            "doc_type": self.doc_type,
+        }
+
+
+@dataclass
+class RAGConfig:
+    """Configuration for the Librarian RAG system."""
+
+    vector_store_path: Path = field(
+        default_factory=lambda: Path(".assemblyzero/vector_store")
+    )
+    embedding_model: str = "all-MiniLM-L6-v2"
+    similarity_threshold: float = 0.7
+    top_k_candidates: int = 5
+    top_n_results: int = 3
+    source_directories: list[str] = field(
+        default_factory=lambda: ["docs/adrs", "docs/standards", "docs/LLDs/done"]
+    )
+    chunk_max_tokens: int = 512
+    embedding_provider: str = "local"
+
+
+@dataclass
+class IngestionSummary:
+    """Summary of a knowledge base ingestion run."""
+
+    files_indexed: int = 0
+    chunks_created: int = 0
+    files_skipped: int = 0
+    elapsed_seconds: float = 0.0
+    errors: list[str] = field(default_factory=list)
+```
+
+### 6.3 `assemblyzero/rag/dependencies.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Conditional import checker for RAG optional dependencies.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Provides friendly error messages when chromadb or sentence-transformers
+are not installed. This module itself has zero external dependencies.
+"""
+
+from __future__ import annotations
+
+_INSTALL_MSG = "RAG dependencies not installed. Install with: pip install assemblyzero[rag]"
+
+
+def check_rag_dependencies() -> tuple[bool, str]:
+    """Check if RAG optional dependencies (chromadb, sentence-transformers) are installed.
+
+    Returns:
+        Tuple of (available: bool, message: str). If not available,
+        message contains user-friendly installation instructions.
+    """
+    missing = []
+
+    try:
+        import chromadb  # noqa: F401
+    except ImportError:
+        missing.append("chromadb")
+
+    try:
+        import sentence_transformers  # noqa: F401
+    except ImportError:
+        missing.append("sentence-transformers")
+
+    if missing:
+        names = ", ".join(missing)
+        return (
+            False,
+            f"Missing: {names}. Install with: pip install assemblyzero[rag]",
+        )
+
+    return (True, "RAG dependencies available")
+
+
+def require_rag_dependencies() -> None:
+    """Raise ImportError with friendly message if RAG dependencies unavailable."""
+    available, message = check_rag_dependencies()
+    if not available:
+        raise ImportError(message)
+```
+
+### 6.4 `assemblyzero/rag/chunker.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Markdown document chunker for RAG ingestion.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Splits markdown documents on H1/H2 headers to create semantically
+meaningful chunks for vector store indexing. Preserves metadata
+about source file, section title, and document type.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+from assemblyzero.rag.models import ChunkMetadata
+
+# Regex to match H1 (# ) or H2 (## ) headers at line start
+_HEADER_PATTERN = re.compile(r"^(#{1,2})\s+(.+)$", re.MULTILINE)
+
+# Approximate tokens per character (conservative estimate for English)
+_CHARS_PER_TOKEN = 4
+
+
+def chunk_markdown_document(
+    file_path: Path,
+    max_tokens: int = 512,
+) -> list[tuple[str, ChunkMetadata]]:
+    """Split a markdown document into chunks on H1/H2 headers.
+
+    Args:
+        file_path: Path to the markdown file.
+        max_tokens: Maximum approximate token count per chunk.
+
+    Returns:
+        List of (content_text, metadata) tuples.
+
+    Raises:
+        FileNotFoundError: If file_path does not exist.
+    """
+    content = file_path.read_text(encoding="utf-8")
+    if not content.strip():
+        return []
+
+    doc_type = detect_doc_type(file_path)
+    stat = file_path.stat()
+    last_modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+    sections = split_on_headers(content)
+    max_chars = max_tokens * _CHARS_PER_TOKEN
+
+    chunks: list[tuple[str, ChunkMetadata]] = []
+    chunk_index = 0
+
+    for section_title, section_content in sections:
+        # Combine title and content for the chunk text
+        full_text = f"{section_title}\n\n{section_content}".strip()
+
+        if len(full_text) <= max_chars:
+            metadata = ChunkMetadata(
+                file_path=str(file_path),
+                section_title=section_title,
+                chunk_index=chunk_index,
+                doc_type=doc_type,
+                last_modified=last_modified,
+            )
+            chunks.append((full_text, metadata))
+            chunk_index += 1
+        else:
+            # Split oversized sections on paragraph boundaries
+            sub_chunks = _split_on_paragraphs(full_text, max_chars)
+            for sub_text in sub_chunks:
+                metadata = ChunkMetadata(
+                    file_path=str(file_path),
+                    section_title=section_title,
+                    chunk_index=chunk_index,
+                    doc_type=doc_type,
+                    last_modified=last_modified,
+                )
+                chunks.append((sub_text, metadata))
+                chunk_index += 1
+
+    return chunks
+
+
+def detect_doc_type(file_path: Path) -> str:
+    """Determine document type from file path.
+
+    Returns 'adr', 'standard', 'lld', or 'unknown' based on directory location.
+    """
+    path_str = str(file_path).replace("\\", "/")
+
+    if "/adrs/" in path_str or path_str.startswith("docs/adrs/"):
+        return "adr"
+    elif "/standards/" in path_str or path_str.startswith("docs/standards/"):
+        return "standard"
+    elif "/LLDs/" in path_str or path_str.startswith("docs/LLDs/"):
+        return "lld"
+    else:
+        return "unknown"
+
+
+def split_on_headers(content: str) -> list[tuple[str, str]]:
+    """Split markdown content on H1/H2 headers.
+
+    Returns list of (section_title, section_content) tuples.
+    H3+ headers are included in their parent section.
+    """
+    matches = list(_HEADER_PATTERN.finditer(content))
+
+    if not matches:
+        stripped = content.strip()
+        if stripped:
+            return [("Untitled", stripped)]
+        return []
+
+    sections: list[tuple[str, str]] = []
+
+    # Handle content before first header
+    first_match_start = matches[0].start()
+    pre_header = content[:first_match_start].strip()
+    if pre_header:
+        sections.append(("Untitled", pre_header))
+
+    for i, match in enumerate(matches):
+        title = match.group(0).strip()
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        section_content = content[start:end].strip()
+        sections.append((title, section_content))
+
+    return sections
+
+
+def _split_on_paragraphs(text: str, max_chars: int) -> list[str]:
+    """Split text on paragraph boundaries (double newlines) to fit max_chars."""
+    paragraphs = re.split(r"\n\n+", text)
+    chunks: list[str] = []
+    current_chunk: list[str] = []
+    current_length = 0
+
+    for para in paragraphs:
+        para_len = len(para)
+        if current_length + para_len + 2 > max_chars and current_chunk:
+            chunks.append("\n\n".join(current_chunk))
+            current_chunk = [para]
+            current_length = para_len
+        else:
+            current_chunk.append(para)
+            current_length += para_len + 2  # +2 for \n\n separator
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
+```
+
+### 6.5 `assemblyzero/rag/embeddings.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Embedding provider abstraction for RAG.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Provides a strategy pattern for embedding generation. Default is local
+sentence-transformers (all-MiniLM-L6-v2). External API providers
+(OpenAI, Gemini) can be added as future extensions.
+
+Requires: pip install assemblyzero[rag]
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+from assemblyzero.rag.dependencies import require_rag_dependencies
+from assemblyzero.rag.models import RAGConfig
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+
+class EmbeddingProvider(ABC):
+    """Abstract base for embedding generation."""
+
+    @abstractmethod
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of text strings into vector representations."""
+        ...
+
+    @abstractmethod
+    def embed_query(self, query: str) -> list[float]:
+        """Embed a single query string for similarity search."""
+        ...
+
+
+class LocalEmbeddingProvider(EmbeddingProvider):
+    """Local embedding using sentence-transformers.
+
+    Default model: all-MiniLM-L6-v2 (384 dimensions, ~80MB).
+    Model is loaded lazily on first use.
+    """
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Initialize with model name. Loads model on first use (lazy)."""
+        require_rag_dependencies()
+        self._model_name = model_name
+        self._model: SentenceTransformer | None = None
+
+    def _get_model(self) -> SentenceTransformer:
+        """Lazily load the sentence-transformers model."""
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
+        return self._model
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of text strings into vector representations."""
+        if not texts:
+            return []
+        model = self._get_model()
+        embeddings = model.encode(texts, convert_to_numpy=True)
+        return [embedding.tolist() for embedding in embeddings]
+
+    def embed_query(self, query: str) -> list[float]:
+        """Embed a single query string for similarity search."""
+        model = self._get_model()
+        embedding = model.encode(query, convert_to_numpy=True)
+        return embedding.tolist()
+
+
+def create_embedding_provider(config: RAGConfig) -> EmbeddingProvider:
+    """Factory: create the appropriate embedding provider based on config.
+
+    Args:
+        config: RAG configuration with embedding_provider and embedding_model.
+
+    Returns:
+        An initialized EmbeddingProvider instance.
+
+    Raises:
+        ValueError: For unknown provider names.
+        NotImplementedError: For providers not yet implemented.
+    """
+    if config.embedding_provider == "local":
+        return LocalEmbeddingProvider(model_name=config.embedding_model)
+    elif config.embedding_provider == "openai":
+        raise NotImplementedError("OpenAI embedding provider not yet implemented")
+    elif config.embedding_provider == "gemini":
+        raise NotImplementedError("Gemini embedding provider not yet implemented")
+    else:
+        raise ValueError(f"Unknown embedding provider: {config.embedding_provider}")
+```
+
+### 6.6 `assemblyzero/rag/vector_store.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""ChromaDB vector store wrapper for RAG.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Manages ChromaDB persistent vector store lifecycle including initialization,
+adding chunks, querying, and collection management.
+
+Requires: pip install assemblyzero[rag]
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from assemblyzero.rag.dependencies import require_rag_dependencies
+from assemblyzero.rag.models import ChunkMetadata, RAGConfig, RetrievedDocument
+
+if TYPE_CHECKING:
+    import chromadb
+
+logger = logging.getLogger(__name__)
+
+_COLLECTION_NAME = "assemblyzero_governance"
+
+
+class VectorStoreManager:
+    """Manages ChromaDB persistent vector store lifecycle."""
+
+    def __init__(self, config: RAGConfig) -> None:
+        """Initialize with RAG configuration."""
+        require_rag_dependencies()
+        self._config = config
+        self._client: chromadb.ClientAPI | None = None
+        self._collection: Any = None
+
+    def _get_client(self) -> chromadb.ClientAPI:
+        """Lazily initialize ChromaDB persistent client."""
+        if self._client is None:
+            import chromadb
+
+            self._config.vector_store_path.mkdir(parents=True, exist_ok=True)
+            self._client = chromadb.PersistentClient(
+                path=str(self._config.vector_store_path)
+            )
+        return self._client
+
+    def _get_collection(self) -> Any:
+        """Get or create the governance documents collection."""
+        if self._collection is None:
+            client = self._get_client()
+            self._collection = client.get_or_create_collection(
+                name=_COLLECTION_NAME,
+                metadata={"hnsw:space": "cosine"},
+            )
+        return self._collection
+
+    def is_initialized(self) -> bool:
+        """Check if vector store directory exists and contains valid data."""
+        store_path = self._config.vector_store_path
+        if not store_path.exists():
+            return False
+        # Check for ChromaDB files
+        chroma_sqlite = store_path / "chroma.sqlite3"
+        return chroma_sqlite.exists()
+
+    def initialize(self) -> None:
+        """Create vector store directory and ChromaDB collection."""
+        self._get_collection()
+        logger.info(
+            "[Librarian] Vector store initialized at %s",
+            self._config.vector_store_path,
+        )
+
+    def add_chunks(
+        self,
+        chunks: list[tuple[str, ChunkMetadata]],
+        embeddings: list[list[float]],
+    ) -> int:
+        """Add document chunks with pre-computed embeddings to the store.
+
+        Returns number of chunks added.
+
+        Raises:
+            ValueError: If len(chunks) != len(embeddings).
+        """
+        if not chunks:
+            return 0
+
+        if len(chunks) != len(embeddings):
+            raise ValueError(
+                f"Chunk count ({len(chunks)}) != embedding count ({len(embeddings)})"
+            )
+
+        collection = self._get_collection()
+
+        ids = []
+        documents = []
+        metadatas = []
+
+        for i, (content, metadata) in enumerate(chunks):
+            # Generate unique ID: file_path::chunk_index
+            chunk_id = f"{metadata.file_path}::{metadata.chunk_index}"
+            ids.append(chunk_id)
+            documents.append(content)
+            metadatas.append(
+                {
+                    "file_path": metadata.file_path,
+                    "section_title": metadata.section_title,
+                    "chunk_index": metadata.chunk_index,
+                    "doc_type": metadata.doc_type,
+                    "last_modified": metadata.last_modified,
+                }
+            )
+
+        collection.upsert(
+            ids=ids,
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas,
+        )
+
+        return len(chunks)
+
+    def query(
+        self,
+        query_embedding: list[float],
+        n_results: int = 5,
+    ) -> list[RetrievedDocument]:
+        """Query the vector store for similar documents.
+
+        Args:
+            query_embedding: The embedded query vector.
+            n_results: Maximum number of results to return.
+
+        Returns:
+            List of RetrievedDocument sorted by descending score.
+        """
+        collection = self._get_collection()
+        count = collection.count()
+        if count == 0:
+            return []
+
+        # Don't request more results than exist
+        actual_n = min(n_results, count)
+
+        results = collection.query(
+            query_embeddings=[query_embedding],
+            n_results=actual_n,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        documents: list[RetrievedDocument] = []
+
+        if not results["ids"] or not results["ids"][0]:
+            return []
+
+        for i, doc_id in enumerate(results["ids"][0]):
+            distance = results["distances"][0][i]
+            # Convert cosine distance to similarity score
+            score = 1.0 - distance
+            metadata = results["metadatas"][0][i]
+            content = results["documents"][0][i]
+
+            documents.append(
+                RetrievedDocument(
+                    file_path=metadata["file_path"],
+                    section=metadata["section_title"],
+                    content_snippet=content,
+                    score=round(score, 4),
+                    doc_type=metadata["doc_type"],
+                )
+            )
+
+        # Sort by score descending
+        documents.sort(key=lambda d: d.score, reverse=True)
+        return documents
+
+    def get_indexed_files(self) -> dict[str, str]:
+        """Return mapping of file_path -> last_modified for all indexed files.
+
+        Used for incremental update detection.
+        """
+        collection = self._get_collection()
+        count = collection.count()
+        if count == 0:
+            return {}
+
+        all_data = collection.get(include=["metadatas"])
+        file_map: dict[str, str] = {}
+        for metadata in all_data["metadatas"]:
+            fp = metadata["file_path"]
+            lm = metadata["last_modified"]
+            # Keep the latest last_modified for each file
+            if fp not in file_map or lm > file_map[fp]:
+                file_map[fp] = lm
+
+        return file_map
+
+    def delete_by_file(self, file_path: str) -> int:
+        """Delete all chunks for a given file path. Returns count deleted."""
+        collection = self._get_collection()
+
+        # Find all IDs matching this file_path
+        results = collection.get(
+            where={"file_path": file_path},
+            include=[],
+        )
+
+        if not results["ids"]:
+            return 0
+
+        count = len(results["ids"])
+        collection.delete(ids=results["ids"])
+        return count
+
+    def collection_stats(self) -> dict[str, int]:
+        """Return collection statistics: total_chunks, unique_files."""
+        collection = self._get_collection()
+        total = collection.count()
+
+        if total == 0:
+            return {"total_chunks": 0, "unique_files": 0}
+
+        all_data = collection.get(include=["metadatas"])
+        unique_files = len({m["file_path"] for m in all_data["metadatas"]})
+
+        return {"total_chunks": total, "unique_files": unique_files}
+
+    def reset(self) -> None:
+        """Delete and recreate the collection. Used for full reindex."""
+        client = self._get_client()
+        try:
+            client.delete_collection(name=_COLLECTION_NAME)
+        except Exception:
+            pass  # Collection may not exist
+        self._collection = None
+        self._get_collection()
+```
+
+### 6.7 `assemblyzero/rag/librarian.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Core LibrarianNode: embed query, retrieve docs, filter by threshold.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+The LibrarianNode is the main entry point for RAG retrieval. It embeds
+the issue brief, queries the vector store, filters by similarity threshold,
+and returns the top-N most relevant governance documents.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from assemblyzero.rag.dependencies import check_rag_dependencies
+from assemblyzero.rag.models import RAGConfig, RetrievedDocument
+
+if TYPE_CHECKING:
+    from assemblyzero.rag.embeddings import EmbeddingProvider
+    from assemblyzero.rag.vector_store import VectorStoreManager
+
+logger = logging.getLogger(__name__)
+
+
+class LibrarianNode:
+    """Core RAG retrieval engine for the Librarian."""
+
+    def __init__(self, config: RAGConfig | None = None) -> None:
+        """Initialize with optional config. Uses defaults if None."""
+        self._config = config or RAGConfig()
+        self._embedding_provider: EmbeddingProvider | None = None
+        self._vector_store: VectorStoreManager | None = None
+
+    def _get_embedding_provider(self) -> EmbeddingProvider:
+        """Lazily create the embedding provider."""
+        if self._embedding_provider is None:
+            from assemblyzero.rag.embeddings import create_embedding_provider
+
+            self._embedding_provider = create_embedding_provider(self._config)
+        return self._embedding_provider
+
+    def _get_vector_store(self) -> VectorStoreManager:
+        """Lazily create the vector store manager."""
+        if self._vector_store is None:
+            from assemblyzero.rag.vector_store import VectorStoreManager
+
+            self._vector_store = VectorStoreManager(self._config)
+        return self._vector_store
+
+    def retrieve(
+        self,
+        issue_brief: str,
+        threshold: float | None = None,
+    ) -> list[RetrievedDocument]:
+        """Retrieve relevant governance documents for the given brief.
+
+        Args:
+            issue_brief: The text of the issue/brief to find context for.
+            threshold: Override similarity threshold (uses config default if None).
+
+        Returns:
+            Top-N documents scoring above threshold, sorted by score descending.
+        """
+        actual_threshold = threshold if threshold is not None else self._config.similarity_threshold
+
+        # Embed the issue brief
+        provider = self._get_embedding_provider()
+        query_embedding = provider.embed_query(issue_brief)
+
+        # Query vector store for candidates
+        store = self._get_vector_store()
+        candidates = store.query(
+            query_embedding=query_embedding,
+            n_results=self._config.top_k_candidates,
+        )
+
+        # Filter by threshold
+        filtered = [doc for doc in candidates if doc.score >= actual_threshold]
+
+        # Return top N
+        top_n = filtered[: self._config.top_n_results]
+
+        return top_n
+
+    def check_availability(self) -> tuple[bool, str]:
+        """Check if the Librarian can operate (deps installed, store exists).
+
+        Returns:
+            Tuple of (available: bool, status_message: str).
+        """
+        available, msg = check_rag_dependencies()
+        if not available:
+            return (False, "deps_missing")
+
+        store = self._get_vector_store()
+        if not store.is_initialized():
+            return (False, "unavailable")
+
+        try:
+            stats = store.collection_stats()
+            return (
+                True,
+                f"Librarian ready: {stats['total_chunks']} chunks indexed "
+                f"from {stats['unique_files']} files",
+            )
+        except Exception as e:
+            logger.warning("[Librarian] Vector store error: %s", e)
+            return (False, "unavailable")
+
+    def format_context_for_designer(
+        self,
+        documents: list[RetrievedDocument],
+    ) -> str:
+        """Format retrieved documents into a text block for Designer prompt injection.
+
+        Returns formatted string with file references, section titles, and content.
+        """
+        if not documents:
+            return ""
+
+        parts = ["--- Retrieved Context (RAG) ---\n"]
+
+        for doc in documents:
+            parts.append(f"### Source: {doc.file_path}")
+            parts.append(f"**Section:** {doc.section}")
+            parts.append(f"**Relevance Score:** {doc.score}")
+            parts.append(f"**Type:** {doc.doc_type}")
+            parts.append("")
+            parts.append(doc.content_snippet)
+            parts.append("\n---\n")
+
+        return "\n".join(parts)
+
+
+def query_knowledge_base(
+    query: str, config: RAGConfig | None = None
+) -> list[RetrievedDocument]:
+    """Convenience function for ad-hoc querying (used in testing/debugging).
+
+    Args:
+        query: The search query text.
+        config: Optional RAG configuration override.
+
+    Returns:
+        List of RetrievedDocument results.
+    """
+    librarian = LibrarianNode(config=config)
+    return librarian.retrieve(query)
+```
+
+### 6.8 `assemblyzero/workflows/lld/__init__.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""LLD workflow with Librarian RAG augmentation.
+
+Issue #88: The Librarian - Automated Context Retrieval
+"""
+```
+
+### 6.9 `assemblyzero/workflows/lld/state.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""LLD workflow State schema with RAG augmentation fields.
+
+Issue #88: The Librarian - Automated Context Retrieval
+"""
+
+from __future__ import annotations
+
+from typing import TypedDict
+
+
+class LLDState(TypedDict):
+    """State schema for the LLD workflow with RAG augmentation."""
+
+    issue_brief: str
+    manual_context_paths: list[str]
+    retrieved_context: list[dict]
+    rag_status: str
+    designer_output: str
+```
+
+### 6.10 `assemblyzero/nodes/librarian.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""LangGraph node wrapper for the Librarian RAG retrieval.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Integrates the LibrarianNode into the LangGraph workflow state machine.
+Handles all failure modes gracefully — the workflow never crashes due
+to RAG issues.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from assemblyzero.rag.dependencies import check_rag_dependencies
+from assemblyzero.rag.models import RAGConfig, RetrievedDocument
+
+logger = logging.getLogger(__name__)
+
+
+def librarian_node(state: dict) -> dict:
+    """LangGraph node function: retrieve context and update workflow state.
+
+    Reads `issue_brief` from state, runs RAG retrieval, updates
+    `retrieved_context` and `rag_status` fields.
+
+    Handles all failure modes gracefully:
+    - Missing dependencies -> rag_status = "deps_missing"
+    - Missing vector store -> rag_status = "unavailable"
+    - No results above threshold -> rag_status = "no_results"
+    - Success -> rag_status = "success"
+    """
+    issue_brief = state.get("issue_brief", "")
+    manual_context_paths = state.get("manual_context_paths", [])
+
+    # Step 1: Check dependencies
+    deps_available, deps_msg = check_rag_dependencies()
+    if not deps_available:
+        logger.warning(
+            "[Librarian] RAG dependencies not installed. "
+            "Run 'pip install assemblyzero[rag]'. Message: %s",
+            deps_msg,
+        )
+        return {
+            "retrieved_context": [],
+            "rag_status": "deps_missing",
+        }
+
+    # Step 2: Import and initialize (only after deps check passes)
+    from assemblyzero.rag.librarian import LibrarianNode
+
+    config = RAGConfig()
+    librarian = LibrarianNode(config=config)
+
+    # Step 3: Check vector store availability
+    available, status_msg = librarian.check_availability()
+    if not available:
+        if status_msg == "deps_missing":
+            logger.warning(
+                "[Librarian] RAG dependencies not installed. "
+                "Run 'pip install assemblyzero[rag]'"
+            )
+            return {
+                "retrieved_context": [],
+                "rag_status": "deps_missing",
+            }
+        else:
+            logger.warning(
+                "[Librarian] Vector store not found. "
+                "Run 'python tools/rebuild_knowledge_base.py' to build it."
+            )
+            return {
+                "retrieved_context": [],
+                "rag_status": "unavailable",
+            }
+
+    # Step 4: Retrieve relevant documents
+    try:
+        logger.info("[Librarian] Retrieving relevant context...")
+        results = librarian.retrieve(issue_brief)
+    except Exception as e:
+        logger.error("[Librarian] Retrieval failed: %s", e)
+        return {
+            "retrieved_context": [],
+            "rag_status": "unavailable",
+        }
+
+    # Step 5: Check if we got results
+    if not results:
+        logger.info(
+            "[Librarian] No relevant governance documents found above threshold"
+        )
+        merged = merge_contexts([], manual_context_paths)
+        return {
+            "retrieved_context": merged,
+            "rag_status": "no_results",
+        }
+
+    # Step 6: Success — merge with manual context
+    file_paths = [doc.file_path for doc in results]
+    logger.info(
+        "[Librarian] Retrieved %d documents: %s",
+        len(results),
+        ", ".join(file_paths),
+    )
+
+    merged = merge_contexts(results, manual_context_paths)
+
+    return {
+        "retrieved_context": merged,
+        "rag_status": "success",
+    }
+
+
+def merge_contexts(
+    rag_results: list[RetrievedDocument],
+    manual_context_paths: list[str],
+) -> list[dict]:
+    """Merge RAG results with manually-specified context files.
+
+    Manual context takes precedence. Duplicates (same file_path) are deduplicated,
+    keeping the manual version.
+
+    Args:
+        rag_results: Documents retrieved by RAG.
+        manual_context_paths: File paths from --context CLI flag.
+
+    Returns:
+        Combined list of context entries (manual first, then RAG, deduplicated).
+    """
+    merged: list[dict] = []
+    manual_file_set: set[str] = set()
+
+    # Process manual context first
+    for path_str in manual_context_paths:
+        path = Path(path_str)
+        manual_file_set.add(path_str)
+        # Normalize path for comparison
+        normalized = str(path).replace("\\", "/")
+        manual_file_set.add(normalized)
+
+        content = ""
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except Exception as e:
+                logger.warning(
+                    "[Librarian] Could not read manual context %s: %s", path_str, e
+                )
+                content = f"[Error reading file: {e}]"
+
+        merged.append(
+            {
+                "file_path": path_str,
+                "section": "Full Document",
+                "content_snippet": content,
+                "score": 1.0,
+                "doc_type": "manual",
+            }
+        )
+
+    # Add RAG results, excluding duplicates with manual context
+    for doc in rag_results:
+        normalized_path = doc.file_path.replace("\\", "/")
+        if doc.file_path in manual_file_set or normalized_path in manual_file_set:
+            continue  # Skip — manual version takes precedence
+        merged.append(doc.to_dict())
+
+    return merged
+```
+
+### 6.11 `assemblyzero/workflows/lld/graph.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""LLD workflow graph with Librarian RAG node.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Graph topology:
+    START -> check_rag -> librarian_node (if available) -> END
+                       -> skip_rag (if unavailable) -> END
+
+This is a focused sub-workflow for RAG context retrieval.
+It can be composed into larger LLD generation workflows.
+"""
+
+from __future__ import annotations
+
+from langgraph.graph import END, StateGraph
+
+from assemblyzero.nodes.librarian import librarian_node
+from assemblyzero.rag.dependencies import check_rag_dependencies
+from assemblyzero.workflows.lld.state import LLDState
+
+
+def _check_rag_available(state: dict) -> str:
+    """Conditional edge: check if RAG is available."""
+    available, _ = check_rag_dependencies()
+    if not available:
+        return "skip_rag"
+    return "librarian"
+
+
+def _skip_rag_node(state: dict) -> dict:
+    """No-op node when RAG is unavailable. Sets status for downstream."""
+    return {
+        "retrieved_context": [],
+        "rag_status": "deps_missing",
+    }
+
+
+def build_lld_graph() -> StateGraph:
+    """Build the LLD workflow graph with Librarian RAG node.
+
+    Returns:
+        Compiled LangGraph StateGraph.
+    """
+    graph = StateGraph(LLDState)
+
+    # Add nodes
+    graph.add_node("librarian", librarian_node)
+    graph.add_node("skip_rag", _skip_rag_node)
+
+    # Set entry point with conditional routing
+    graph.set_conditional_entry_point(
+        _check_rag_available,
+        {
+            "librarian": "librarian",
+            "skip_rag": "skip_rag",
+        },
+    )
+
+    # Both paths lead to END
+    graph.add_edge("librarian", END)
+    graph.add_edge("skip_rag", END)
+
+    return graph.compile()
+```
+
+### 6.12 `tools/rebuild_knowledge_base.py` (Add)
+
+**Complete file contents:**
+
+```python
+#!/usr/bin/env python3
+"""CLI tool: ingest docs into ChromaDB vector store.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Usage:
+    python tools/rebuild_knowledge_base.py                     # Incremental (default)
+    python tools/rebuild_knowledge_base.py --full              # Full rebuild
+    python tools/rebuild_knowledge_base.py --full --verbose    # Verbose full rebuild
+    python tools/rebuild_knowledge_base.py --source-dirs docs/adrs docs/standards
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import sys
+import time
+from pathlib import Path
+
+# Ensure project root is on path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from assemblyzero.rag.dependencies import check_rag_dependencies
+from assemblyzero.rag.models import IngestionSummary, RAGConfig
+
+
+def main() -> None:
+    """CLI entry point for rebuilding the RAG knowledge base."""
+    parser = argparse.ArgumentParser(
+        description="Rebuild the RAG knowledge base for the Librarian",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        default=False,
+        help="Reindex all documents from scratch (default: incremental)",
+    )
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        default=True,
+        help="Only reindex changed/new files (default behavior)",
+    )
+    parser.add_argument(
+        "--source-dirs",
+        nargs="+",
+        default=None,
+        help="Override default source directories",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Show per-file indexing progress",
+    )
+
+    args = parser.parse_args()
+
+    # Check dependencies
+    available, msg = check_rag_dependencies()
+    if not available:
+        print(f"[RAG] Error: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build config
+    config = RAGConfig()
+    if args.source_dirs:
+        config.source_directories = args.source_dirs
+
+    # Run appropriate mode
+    if args.full:
+        print("[RAG] Rebuilding knowledge base (full mode)...")
+        summary = run_full_ingestion(config, verbose=args.verbose)
+    else:
+        print("[RAG] Updating knowledge base (incremental mode)...")
+        summary = run_incremental_ingestion(config, verbose=args.verbose)
+
+    # Print summary
+    print(
+        f"[RAG] Complete: {summary.files_indexed} files indexed, "
+        f"{summary.chunks_created} chunks created, "
+        f"{summary.files_skipped} files skipped, "
+        f"{len(summary.errors)} errors "
+        f"({summary.elapsed_seconds:.2f}s)"
+    )
+
+    if summary.errors:
+        print("[RAG] Errors:")
+        for error in summary.errors:
+            print(f"  - {error}")
+
+    sys.exit(0)
+
+
+def discover_documents(source_dirs: list[str]) -> list[Path]:
+    """Find all markdown files in the specified source directories."""
+    documents: list[Path] = []
+    for dir_str in source_dirs:
+        dir_path = Path(dir_str)
+        if not dir_path.exists():
+            continue
+        for md_file in sorted(dir_path.rglob("*.md")):
+            if md_file.is_file():
+                documents.append(md_file)
+    return documents
+
+
+def compute_file_hash(file_path: Path) -> str:
+    """Compute MD5 hash of file content for change detection."""
+    content = file_path.read_bytes()
+    return hashlib.md5(content).hexdigest()
+
+
+def run_full_ingestion(
+    config: RAGConfig,
+    verbose: bool = False,
+) -> IngestionSummary:
+    """Drop and rebuild the entire vector store."""
+    from assemblyzero.rag.chunker import chunk_markdown_document
+    from assemblyzero.rag.embeddings import create_embedding_provider
+    from assemblyzero.rag.vector_store import VectorStoreManager
+
+    start_time = time.time()
+    summary = IngestionSummary()
+
+    # Initialize store (reset if exists)
+    store = VectorStoreManager(config)
+    store.reset()
+
+    # Create embedding provider
+    provider = create_embedding_provider(config)
+
+    # Discover and process documents
+    source_dirs = config.source_directories
+    print(f"[RAG] Discovering documents in: {', '.join(source_dirs)}")
+    documents = discover_documents(source_dirs)
+    print(f"[RAG] Found {len(documents)} markdown files")
+
+    for doc_path in documents:
+        try:
+            chunks = chunk_markdown_document(doc_path, max_tokens=config.chunk_max_tokens)
+            if not chunks:
+                continue
+
+            # Extract texts for batch embedding
+            texts = [content for content, _metadata in chunks]
+            embeddings = provider.embed_texts(texts)
+
+            # Add to store
+            added = store.add_chunks(chunks, embeddings)
+            summary.files_indexed += 1
+            summary.chunks_created += added
+
+            if verbose:
+                print(f"[RAG] Indexed {doc_path} ({added} chunks)")
+
+        except Exception as e:
+            summary.errors.append(f"{doc_path}: {e}")
+            if verbose:
+                print(f"[RAG] Error indexing {doc_path}: {e}")
+
+    summary.elapsed_seconds = time.time() - start_time
+    return summary
+
+
+def run_incremental_ingestion(
+    config: RAGConfig,
+    verbose: bool = False,
+) -> IngestionSummary:
+    """Only reindex files that have changed since last ingestion."""
+    from assemblyzero.rag.chunker import chunk_markdown_document
+    from assemblyzero.rag.embeddings import create_embedding_provider
+    from assemblyzero.rag.vector_store import VectorStoreManager
+
+    start_time = time.time()
+    summary = IngestionSummary()
+
+    store = VectorStoreManager(config)
+    if not store.is_initialized():
+        # No existing store — fall back to full ingestion
+        print("[RAG] No existing store found. Running full ingestion.")
+        return run_full_ingestion(config, verbose=verbose)
+
+    provider = create_embedding_provider(config)
+
+    # Get currently indexed files
+    indexed_files = store.get_indexed_files()
+    indexed_paths = set(indexed_files.keys())
+
+    # Discover current documents
+    documents = discover_documents(config.source_directories)
+    current_paths = {str(doc) for doc in documents}
+
+    # Handle deleted files: remove chunks for files no longer in source dirs
+    deleted_paths = indexed_paths - current_paths
+    for deleted_path in deleted_paths:
+        removed = store.delete_by_file(deleted_path)
+        if verbose and removed > 0:
+            print(f"[RAG] Removed {removed} chunks for deleted file: {deleted_path}")
+
+    for doc_path in documents:
+        try:
+            doc_path_str = str(doc_path)
+
+            # Check if file has changed by comparing last_modified timestamps
+            from datetime import datetime, timezone
+
+            stat = doc_path.stat()
+            current_mtime = datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat()
+
+            if doc_path_str in indexed_files:
+                stored_mtime = indexed_files[doc_path_str]
+                if current_mtime <= stored_mtime:
+                    summary.files_skipped += 1
+                    if verbose:
+                        print(f"[RAG] Skipping unchanged: {doc_path}")
+                    continue
+
+            # File is new or changed — reindex
+            # Delete old chunks first (if any)
+            store.delete_by_file(doc_path_str)
+
+            chunks = chunk_markdown_document(
+                doc_path, max_tokens=config.chunk_max_tokens
+            )
+            if not chunks:
+                continue
+
+            texts = [content for content, _metadata in chunks]
+            embeddings = provider.embed_texts(texts)
+            added = store.add_chunks(chunks, embeddings)
+
+            summary.files_indexed += 1
+            summary.chunks_created += added
+
+            if verbose:
+                print(f"[RAG] Indexed {doc_path} ({added} chunks)")
+
+        except Exception as e:
+            summary.errors.append(f"{doc_path}: {e}")
+            if verbose:
+                print(f"[RAG] Error indexing {doc_path}: {e}")
+
+    summary.elapsed_seconds = time.time() - start_time
+    return summary
+
+
+if __name__ == "__main__":
+    main()
+```
+
+### 6.13 `pyproject.toml` (Modify)
+
+**Change 1:** Verify `[project.optional-dependencies]` section (lines 30-34). The `[rag]` extra already exists. No changes expected unless version pins differ.
+
+```diff
+ [project.optional-dependencies]
+ rag = [
+     "chromadb (>=0.5.0,<1.0.0)",
+     "sentence-transformers (>=3.0.0,<4.0.0)",
+ ]
+```
+
+**Change 2:** Add `rag` marker to `[tool.pytest.ini_options]` (after line 43):
+
+```diff
+ markers = [
+     "integration: tests that call real external services (deselect with '-m \"not integration\"')",
+     "e2e: end-to-end workflow tests requiring sandbox repo",
+     "expensive: tests that use significant API quota",
+     "adversarial: adversarial tests generated by Gemini Pro (deselect with '-m \"not adversarial\"')",
++    "rag: tests requiring the [rag] optional dependency (deselect with '-m \"not rag\"')",
+ ]
+```
+
+### 6.14 `.gitignore` (Modify)
+
+**Change 1:** Add explicit comment for vector store below the existing `.assemblyzero/` entry (around line 40):
+
+```diff
+ # Local AssemblyZero state (Issue #78)
+ .assemblyzero/
+-! .assemblyzero/config.example.json
++!.assemblyzero/config.example.json
++# RAG vector store (Issue #88) - regenerated via tools/rebuild_knowledge_base.py
+```
+
+Note: The existing `.assemblyzero/` gitignore pattern already covers `.assemblyzero/vector_store/`. The comment is purely documentary. Fix the space in the exception pattern if present.
+
+### 6.15 `tests/fixtures/rag/sample_adr.md` (Add)
+
+**Complete file contents:**
+
+```markdown
+# ADR-0099: Logging Strategy
+
+**Status:** Accepted
+**Date:** 2026-01-15
+
+## 1. Context
+
+The project needs a consistent logging approach across all modules. Current logging is ad-hoc with inconsistent formats and levels.
+
+## 2. Decision
+
+We will use Python's standard `logging` module with structured JSON output in production and human-readable format in development. All modules must use `logging.getLogger(__name__)` for logger instantiation.
+
+Log levels:
+- DEBUG: Detailed diagnostic information
+- INFO: Confirmation of expected behavior
+- WARNING: Unexpected but recoverable situations
+- ERROR: Failures that prevent a specific operation
+
+## 3. Consequences
+
+- All new code must use the standard logging module
+- Existing print() statements should be migrated to logging
+- Log aggregation becomes possible via structured JSON format
+- Performance impact is negligible for INFO-level logging
+```
+
+### 6.16 `tests/fixtures/rag/sample_standard.md` (Add)
+
+**Complete file contents:**
+
+```markdown
+# Standard 0099: Code Review Requirements
+
+## 1. Overview
+
+All code changes must undergo peer review before merging to the main branch. This standard defines the minimum requirements for code review.
+
+## 2. Review Criteria
+
+Reviewers must verify:
+- Correctness: Code does what it claims to do
+- Test coverage: New code has >= 95% test coverage
+- Style: Code follows project naming conventions
+- Security: No hardcoded secrets or SQL injection vulnerabilities
+- Documentation: Public APIs have docstrings
+
+## 3. Review Process
+
+1. Author creates pull request with description
+2. At least one reviewer approves
+3. CI pipeline passes all checks
+4. Author merges after approval
+```
+
+### 6.17 `tests/fixtures/rag/sample_lld.md` (Add)
+
+**Complete file contents:**
+
+```markdown
+# 42 - Feature: Automated Testing Pipeline
+
+## 1. Context & Goal
+
+Implement an automated testing pipeline that runs unit, integration, and e2e tests on every pull request.
+
+## 2. Proposed Changes
+
+### 2.1 Files Changed
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `.github/workflows/ci.yml` | Modify | Add test stages |
+| `tests/conftest.py` | Add | Shared test fixtures |
+
+## 3. Requirements
+
+1. All tests run in under 5 minutes
+2. Test results reported as PR checks
+3. Coverage report generated automatically
+
+## 4. Architecture Decisions
+
+We chose pytest over unittest for its simpler syntax and rich plugin ecosystem. GitHub Actions was selected as the CI platform for native GitHub integration.
+```
+
+### 6.18 `tests/unit/test_rag/__init__.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for the RAG subsystem (Issue #88)."""
+```
+
+### 6.19 `tests/unit/test_rag/test_models.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for RAG data models.
+
+Issue #88: The Librarian - Automated Context Retrieval
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from assemblyzero.rag.models import (
+    ChunkMetadata,
+    IngestionSummary,
+    RAGConfig,
+    RetrievedDocument,
+)
+
+
+class TestChunkMetadata:
+    """Tests for ChunkMetadata dataclass."""
+
+    def test_creation(self) -> None:
+        meta = ChunkMetadata(
+            file_path="docs/adrs/0201.md",
+            section_title="## 2. Decision",
+            chunk_index=1,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00+00:00",
+        )
+        assert meta.file_path == "docs/adrs/0201.md"
+        assert meta.section_title == "## 2. Decision"
+        assert meta.chunk_index == 1
+        assert meta.doc_type == "adr"
+
+    def test_frozen(self) -> None:
+        meta = ChunkMetadata(
+            file_path="docs/adrs/0201.md",
+            section_title="## 2. Decision",
+            chunk_index=1,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00+00:00",
+        )
+        try:
+            meta.file_path = "other.md"  # type: ignore[misc]
+            assert False, "Should have raised FrozenInstanceError"
+        except AttributeError:
+            pass  # Expected
+
+
+class TestRetrievedDocument:
+    """Tests for RetrievedDocument dataclass."""
+
+    def test_creation(self) -> None:
+        doc = RetrievedDocument(
+            file_path="docs/adrs/0201.md",
+            section="## 2. Decision",
+            content_snippet="We will implement...",
+            score=0.85,
+            doc_type="adr",
+        )
+        assert doc.score == 0.85
+        assert doc.doc_type == "adr"
+
+    def test_to_dict(self) -> None:
+        doc = RetrievedDocument(
+            file_path="docs/adrs/0201.md",
+            section="## 2. Decision",
+            content_snippet="We will implement...",
+            score=0.85,
+            doc_type="adr",
+        )
+        d = doc.to_dict()
+        assert d == {
+            "file_path": "docs/adrs/0201.md",
+            "section": "## 2. Decision",
+            "content_snippet": "We will implement...",
+            "score": 0.85,
+            "doc_type": "adr",
+        }
+
+
+class TestRAGConfig:
+    """Tests for RAGConfig dataclass."""
+
+    def test_defaults(self) -> None:
+        config = RAGConfig()
+        assert config.vector_store_path == Path(".assemblyzero/vector_store")
+        assert config.embedding_model == "all-MiniLM-L6-v2"
+        assert config.similarity_threshold == 0.7
+        assert config.top_k_candidates == 5
+        assert config.top_n_results == 3
+        assert config.chunk_max_tokens == 512
+        assert config.embedding_provider == "local"
+        assert "docs/adrs" in config.source_directories
+
+    def test_custom_values(self) -> None:
+        config = RAGConfig(
+            similarity_threshold=0.8,
+            top_n_results=5,
+        )
+        assert config.similarity_threshold == 0.8
+        assert config.top_n_results == 5
+
+
+class TestIngestionSummary:
+    """Tests for IngestionSummary dataclass."""
+
+    def test_defaults(self) -> None:
+        summary = IngestionSummary()
+        assert summary.files_indexed == 0
+        assert summary.chunks_created == 0
+        assert summary.files_skipped == 0
+        assert summary.elapsed_seconds == 0.0
+        assert summary.errors == []
+
+    def test_mutable_errors(self) -> None:
+        summary = IngestionSummary()
+        summary.errors.append("test error")
+        assert len(summary.errors) == 1
+
+        # Verify independent instances
+        summary2 = IngestionSummary()
+        assert len(summary2.errors) == 0
+```
+
+### 6.20 `tests/unit/test_rag/test_dependencies.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for RAG dependency checking.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T040, T050
+"""
+
+from __future__ import annotations
+
+import sys
+from unittest.mock import patch
+
+import pytest
+
+
+class TestCheckRagDependencies:
+    """Tests for check_rag_dependencies()."""
+
+    def test_missing_chromadb(self) -> None:
+        """T040: Dependency checker detects missing chromadb (REQ-9)."""
+        with patch.dict(sys.modules, {"chromadb": None}):
+            # Force reimport
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is False
+            assert "pip install assemblyzero[rag]" in message
+
+    def test_missing_sentence_transformers(self) -> None:
+        """T040: Dependency checker detects missing sentence-transformers (REQ-9)."""
+        with patch.dict(sys.modules, {"sentence_transformers": None}):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is False
+            assert "pip install assemblyzero[rag]" in message
+
+    def test_all_dependencies_available(self) -> None:
+        """T050: Dependency checker succeeds with mocked imports (REQ-9)."""
+        # Mock both modules as available
+        mock_chromadb = type(sys)("chromadb")
+        mock_st = type(sys)("sentence_transformers")
+        with patch.dict(
+            sys.modules,
+            {"chromadb": mock_chromadb, "sentence_transformers": mock_st},
+        ):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is True
+            assert "available" in message.lower()
+
+
+class TestRequireRagDependencies:
+    """Tests for require_rag_dependencies()."""
+
+    def test_raises_when_missing(self) -> None:
+        """require_rag_dependencies raises ImportError when deps missing."""
+        with patch.dict(sys.modules, {"chromadb": None}):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            with pytest.raises(ImportError, match="pip install assemblyzero"):
+                dependencies.require_rag_dependencies()
+
+    def test_succeeds_when_available(self) -> None:
+        """require_rag_dependencies succeeds when deps available."""
+        mock_chromadb = type(sys)("chromadb")
+        mock_st = type(sys)("sentence_transformers")
+        with patch.dict(
+            sys.modules,
+            {"chromadb": mock_chromadb, "sentence_transformers": mock_st},
+        ):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            # Should not raise
+            dependencies.require_rag_dependencies()
+```
+
+### 6.21 `tests/unit/test_rag/test_chunker.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for markdown document chunker.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T010, T020, T030
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from assemblyzero.rag.chunker import (
+    chunk_markdown_document,
+    detect_doc_type,
+    split_on_headers,
+)
+
+
+class TestSplitOnHeaders:
+    """Tests for split_on_headers()."""
+
+    def test_split_h1_h2(self) -> None:
+        """T010: Chunker splits markdown on H1/H2 headers (REQ-3)."""
+        content = (
+            "# Title\n\nIntro text\n\n"
+            "## Section 1\n\nContent 1\n\n"
+            "## Section 2\n\nContent 2"
+        )
+        sections = split_on_headers(content)
+        assert len(sections) == 3
+        assert sections[0] == ("# Title", "Intro text")
+        assert sections[1] == ("## Section 1", "Content 1")
+        assert sections[2] == ("## Section 2", "Content 2")
+
+    def test_no_headers(self) -> None:
+        """T030: Chunker handles document with no headers."""
+        content = "Just some plain text\nwith multiple lines"
+        sections = split_on_headers(content)
+        assert len(sections) == 1
+        assert sections[0][0] == "Untitled"
+        assert "plain text" in sections[0][1]
+
+    def test_empty_content(self) -> None:
+        """Empty content returns empty list."""
+        sections = split_on_headers("")
+        assert sections == []
+
+    def test_whitespace_only(self) -> None:
+        """Whitespace-only content returns empty list."""
+        sections = split_on_headers("   \n\n   ")
+        assert sections == []
+
+    def test_h3_not_split(self) -> None:
+        """H3+ headers are included in parent section, not split."""
+        content = "## Section\n\n### Subsection\n\nContent"
+        sections = split_on_headers(content)
+        assert len(sections) == 1
+        assert "### Subsection" in sections[0][1]
+
+    def test_content_before_first_header(self) -> None:
+        """Content before first header gets 'Untitled' section."""
+        content = "Preamble text\n\n# Title\n\nBody"
+        sections = split_on_headers(content)
+        assert len(sections) == 2
+        assert sections[0] == ("Untitled", "Preamble text")
+        assert sections[1][0] == "# Title"
+
+
+class TestDetectDocType:
+    """Tests for detect_doc_type()."""
+
+    def test_adr(self) -> None:
+        """T020: Chunker detects 'adr' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/adrs/0201-adversarial.md")) == "adr"
+
+    def test_standard(self) -> None:
+        """T020: Chunker detects 'standard' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/standards/0002-style.md")) == "standard"
+
+    def test_lld(self) -> None:
+        """T020: Chunker detects 'lld' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/LLDs/done/44-feature.md")) == "lld"
+
+    def test_unknown(self) -> None:
+        """Unknown path returns 'unknown'."""
+        assert detect_doc_type(Path("docs/other/readme.md")) == "unknown"
+
+
+class TestChunkMarkdownDocument:
+    """Tests for chunk_markdown_document()."""
+
+    def test_chunk_fixture_adr(self) -> None:
+        """T010: Full chunking of sample ADR fixture (REQ-3)."""
+        fixture = Path("tests/fixtures/rag/sample_adr.md")
+        if not fixture.exists():
+            pytest.skip("Fixture not found")
+
+        chunks = chunk_markdown_document(fixture)
+        assert len(chunks) >= 3  # Title + Decision + Consequences sections
+        for content, metadata in chunks:
+            assert metadata.file_path == str(fixture)
+            assert metadata.doc_type == "adr"
+            assert metadata.last_modified  # non-empty ISO timestamp
+            assert content  # non-empty content
+
+    def test_chunk_nonexistent_file(self) -> None:
+        """FileNotFoundError for nonexistent file."""
+        with pytest.raises(FileNotFoundError):
+            chunk_markdown_document(Path("nonexistent.md"))
+
+    def test_chunk_empty_file(self, tmp_path: Path) -> None:
+        """Empty file returns empty list."""
+        empty_file = tmp_path / "empty.md"
+        empty_file.write_text("")
+        chunks = chunk_markdown_document(empty_file)
+        assert chunks == []
+
+    def test_chunk_max_tokens_splitting(self, tmp_path: Path) -> None:
+        """Oversized sections are split on paragraph boundaries."""
+        # Create a file with a very large section
+        large_content = "# Title\n\n" + "\n\n".join(
+            [f"Paragraph {i} with some content to fill space." for i in range(100)]
+        )
+        large_file = tmp_path / "large.md"
+        large_file.write_text(large_content)
+
+        chunks = chunk_markdown_document(large_file, max_tokens=50)  # Very small limit
+        assert len(chunks) > 1  # Should be split into multiple chunks
+```
+
+### 6.22 `tests/unit/test_rag/test_embeddings.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for embedding provider abstraction.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T240
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig
+
+
+class TestCreateEmbeddingProvider:
+    """Tests for create_embedding_provider()."""
+
+    def test_unknown_provider(self) -> None:
+        """Unknown provider raises ValueError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="unknown")
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            create_embedding_provider(config)
+
+    def test_openai_not_implemented(self) -> None:
+        """OpenAI provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="openai")
+        with pytest.raises(NotImplementedError, match="OpenAI"):
+            create_embedding_provider(config)
+
+    def test_gemini_not_implemented(self) -> None:
+        """Gemini provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="gemini")
+        with pytest.raises(NotImplementedError, match="Gemini"):
+            create_embedding_provider(config)
+
+
+@pytest.mark.rag
+class TestLocalEmbeddingProvider:
+    """Tests for LocalEmbeddingProvider (requires [rag] extra)."""
+
+    def test_embed_query_dimensions(self) -> None:
+        """T240: Embedding returns correct dimensions (REQ-2)."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embedding = provider.embed_query("test query about governance")
+        assert len(embedding) == 384
+        assert all(isinstance(v, float) for v in embedding)
+
+    def test_embed_texts_batch(self) -> None:
+        """Batch embedding returns correct count and dimensions."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        texts = ["first text", "second text", "third text"]
+        embeddings = provider.embed_texts(texts)
+        assert len(embeddings) == 3
+        assert all(len(e) == 384 for e in embeddings)
+
+    def test_embed_texts_empty(self) -> None:
+        """Empty text list returns empty embeddings list."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embeddings = provider.embed_texts([])
+        assert embeddings == []
+
+    def test_lazy_model_loading(self) -> None:
+        """Model is not loaded until first embed call."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        assert provider._model is None  # Not yet loaded
+        provider.embed_query("trigger load")
+        assert provider._model is not None  # Now loaded
+```
+
+### 6.23 `tests/unit/test_rag/test_vector_store.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for ChromaDB vector store wrapper.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T060, T070, T080, T290
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from assemblyzero.rag.models import ChunkMetadata, RAGConfig
+
+
+@pytest.mark.rag
+class TestVectorStoreManager:
+    """Tests for VectorStoreManager (requires [rag] extra)."""
+
+    def _make_config(self, tmp_path: Path) -> RAGConfig:
+        """Create a RAGConfig pointing to a temp directory."""
+        return RAGConfig(vector_store_path=tmp_path / "test_vector_store")
+
+    def test_is_initialized_missing_dir(self, tmp_path: Path) -> None:
+        """T060: Vector store not initialized returns False (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        assert manager.is_initialized() is False
+
+    def test_initialize_creates_store(self, tmp_path: Path) -> None:
+        """Initialize creates the vector store directory and collection."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+        assert config.vector_store_path.exists()
+
+    def test_add_and_query_round_trip(self, tmp_path: Path) -> None:
+        """T070: Round-trip add chunks then query (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        # Create test chunks with known embeddings
+        chunks = [
+            (
+                "We will implement adversarial audit as a mandatory gate",
+                ChunkMetadata(
+                    file_path="docs/adrs/0201.md",
+                    section_title="## 2. Decision",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-02-15T10:30:00+00:00",
+                ),
+            ),
+            (
+                "All code must have 95% test coverage minimum",
+                ChunkMetadata(
+                    file_path="docs/standards/0005.md",
+                    section_title="## 3. Coverage",
+                    chunk_index=0,
+                    doc_type="standard",
+                    last_modified="2026-02-10T08:00:00+00:00",
+                ),
+            ),
+        ]
+
+        # Use simple embeddings for testing (not real model)
+        # Embedding 1: mostly positive
+        emb1 = [0.1] * 384
+        # Embedding 2: mostly negative
+        emb2 = [-0.1] * 384
+
+        manager.add_chunks(chunks, [emb1, emb2])
+
+        # Query with embedding similar to emb1
+        results = manager.query(query_embedding=emb1, n_results=2)
+        assert len(results) > 0
+        assert results[0].file_path == "docs/adrs/0201.md"
+        assert results[0].score > 0.5
+
+    def test_query_empty_collection(self, tmp_path: Path) -> None:
+        """T080: Query on empty collection returns empty list (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        results = manager.query(query_embedding=[0.0] * 384, n_results=5)
+        assert results == []
+
+    def test_add_chunks_length_mismatch(self, tmp_path: Path) -> None:
+        """Mismatched chunks/embeddings raises ValueError."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "content",
+                ChunkMetadata(
+                    file_path="test.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        with pytest.raises(ValueError, match="Chunk count"):
+            manager.add_chunks(chunks, [])
+
+    def test_delete_by_file(self, tmp_path: Path) -> None:
+        """delete_by_file removes chunks for specified file."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content A",
+                ChunkMetadata(
+                    file_path="file_a.md",
+                    section_title="## A",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+            (
+                "Content B",
+                ChunkMetadata(
+                    file_path="file_b.md",
+                    section_title="## B",
+                    chunk_index=0,
+                    doc_type="standard",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        embeddings = [[0.1] * 384, [-0.1] * 384]
+        manager.add_chunks(chunks, embeddings)
+
+        deleted = manager.delete_by_file("file_a.md")
+        assert deleted == 1
+
+        stats = manager.collection_stats()
+        assert stats["total_chunks"] == 1
+
+    def test_collection_stats(self, tmp_path: Path) -> None:
+        """collection_stats returns correct counts."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        stats = manager.collection_stats()
+        assert stats == {"total_chunks": 0, "unique_files": 0}
+
+    def test_get_indexed_files(self, tmp_path: Path) -> None:
+        """get_indexed_files returns correct mapping."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content",
+                ChunkMetadata(
+                    file_path="docs/adrs/0201.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-02-15T10:30:00+00:00",
+                ),
+            ),
+        ]
+        manager.add_chunks(chunks, [[0.1] * 384])
+
+        files = manager.get_indexed_files()
+        assert "docs/adrs/0201.md" in files
+        assert files["docs/adrs/0201.md"] == "2026-02-15T10:30:00+00:00"
+
+    def test_persistence_across_instances(self, tmp_path: Path) -> None:
+        """T290: Vector store persists between sessions (REQ-13)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+
+        # Instance 1: add data
+        manager1 = VectorStoreManager(config)
+        manager1.initialize()
+        chunks = [
+            (
+                "Persistent content",
+                ChunkMetadata(
+                    file_path="persist.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        manager1.add_chunks(chunks, [[0.1] * 384])
+
+        # Instance 2: query same data (simulates process restart)
+        manager2 = VectorStoreManager(config)
+        results = manager2.query(query_embedding=[0.1] * 384, n_results=1)
+        assert len(results) == 1
+        assert results[0].file_path == "persist.md"
+
+    def test_reset(self, tmp_path: Path) -> None:
+        """reset clears all data and recreates collection."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content",
+                ChunkMetadata(
+                    file_path="test.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        manager.add_chunks(chunks, [[0.1] * 384])
+        assert manager.collection_stats()["total_chunks"] == 1
+
+        manager.reset()
+        assert manager.collection_stats()["total_chunks"] == 0
+```
+
+### 6.24 `tests/unit/test_rag/test_librarian.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for LibrarianNode retrieval logic.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T090, T100, T110, T120, T130, T140, T150, T160, T170, T180, T190
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig, RetrievedDocument
+
+
+def _make_doc(
+    file_path: str = "docs/adrs/0201.md",
+    section: str = "## 2. Decision",
+    score: float = 0.85,
+    doc_type: str = "adr",
+) -> RetrievedDocument:
+    """Helper to create a RetrievedDocument for testing."""
+    return RetrievedDocument(
+        file_path=file_path,
+        section=section,
+        content_snippet=f"Content from {file_path}",
+        score=score,
+        doc_type=doc_type,
+    )
+
+
+class TestLibrarianNodeRetrieve:
+    """Tests for LibrarianNode.retrieve()."""
+
+    @pytest.mark.rag
+    def test_threshold_filtering(self, tmp_path: Path) -> None:
+        """T090: LibrarianNode.retrieve filters by threshold (REQ-4)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.7,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        # Mock the embedding provider and vector store
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(score=0.90),
+            _make_doc(file_path="docs/adrs/0202.md", score=0.75),
+            _make_doc(file_path="docs/standards/0001.md", score=0.60),  # Below threshold
+            _make_doc(file_path="docs/standards/0002.md", score=0.50),  # Below threshold
+        ]
+        librarian._vector_store = mock_store
+
+        results = librarian.retrieve("test brief")
+        assert all(doc.score >= 0.7 for doc in results)
+        assert len(results) == 2  # Only 2 above 0.7
+
+    @pytest.mark.rag
+    def test_top_n_limiting(self, tmp_path: Path) -> None:
+        """T100: LibrarianNode.retrieve returns max top_n_results (REQ-4)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.5,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(file_path=f"docs/adrs/020{i}.md", score=0.9 - i * 0.05)
+            for i in range(5)
+        ]
+        librarian._vector_store = mock_store
+
+        results = librarian.retrieve("test brief")
+        assert len(results) == 3  # top_n_results limits to 3
+
+
+class TestLibrarianNodeAvailability:
+    """Tests for LibrarianNode.check_availability()."""
+
+    def test_no_deps(self) -> None:
+        """T110: check_availability with no deps (REQ-9)."""
+        with patch(
+            "assemblyzero.rag.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.rag.librarian import LibrarianNode
+
+            librarian = LibrarianNode()
+            available, status = librarian.check_availability()
+            assert available is False
+            assert status == "deps_missing"
+
+    @pytest.mark.rag
+    def test_no_store(self, tmp_path: Path) -> None:
+        """T120: check_availability with no store (REQ-8)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(vector_store_path=tmp_path / "nonexistent_store")
+        librarian = LibrarianNode(config=config)
+        available, status = librarian.check_availability()
+        assert available is False
+        assert status == "unavailable"
+
+
+class TestLibrarianNodeFormat:
+    """Tests for LibrarianNode.format_context_for_designer()."""
+
+    def test_format_produces_readable_output(self) -> None:
+        """T190: format_context_for_designer produces readable output."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        librarian = LibrarianNode()
+        docs = [
+            _make_doc(file_path="docs/adrs/0201.md", score=0.85),
+            _make_doc(
+                file_path="docs/standards/0005.md",
+                section="## 3. Coverage",
+                score=0.72,
+                doc_type="standard",
+            ),
+        ]
+        formatted = librarian.format_context_for_designer(docs)
+        assert "docs/adrs/0201.md" in formatted
+        assert "docs/standards/0005.md" in formatted
+        assert "0.85" in formatted
+        assert "## 2. Decision" in formatted
+        assert "Retrieved Context (RAG)" in formatted
+
+    def test_format_empty_documents(self) -> None:
+        """Empty document list returns empty string."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        librarian = LibrarianNode()
+        assert librarian.format_context_for_designer([]) == ""
+
+
+class TestLibrarianNode:
+    """Tests for librarian_node() LangGraph wrapper."""
+
+    def test_deps_missing_graceful(self) -> None:
+        """T130: librarian_node sets rag_status='deps_missing' (REQ-9)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "test brief",
+                "manual_context_paths": [],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+
+    def test_store_unavailable_graceful(self) -> None:
+        """T140: librarian_node sets rag_status='unavailable' (REQ-8)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_librarian_instance = MagicMock()
+            mock_librarian_instance.check_availability.return_value = (
+                False,
+                "unavailable",
+            )
+            mock_librarian_cls.return_value = mock_librarian_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                # Need to re-import since we're patching at module level
+                import importlib
+
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+
+    def test_no_results_above_threshold(self) -> None:
+        """T150: librarian_node sets rag_status='no_results' (REQ-4)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.return_value = []  # No results
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                import importlib
+
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "no_results"
+
+    def test_success_with_info_logging(self, caplog: pytest.LogCaptureFixture) -> None:
+        """T160: librarian_node success with INFO logging (REQ-14)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.return_value = [
+                _make_doc(score=0.85),
+                _make_doc(file_path="docs/standards/0005.md", score=0.75),
+            ]
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                import importlib
+
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief about RAG retrieval",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                with caplog.at_level(logging.INFO):
+                    result = lib_mod.librarian_node(state)
+
+                assert result["rag_status"] == "success"
+                assert len(result["retrieved_context"]) == 2
+                assert any(
+                    "Retrieved 2 documents" in record.message
+                    for record in caplog.records
+                )
+
+
+class TestMergeContexts:
+    """Tests for merge_contexts()."""
+
+    def test_dedup_by_file_path(self, tmp_path: Path) -> None:
+        """T170: merge_contexts deduplicates by file_path (REQ-7)."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        # Create a manual file
+        manual_file = tmp_path / "standards" / "0005.md"
+        manual_file.parent.mkdir(parents=True)
+        manual_file.write_text("Manual content")
+
+        rag_results = [
+            _make_doc(file_path=str(manual_file), score=0.85),
+            _make_doc(file_path="docs/adrs/0201.md", score=0.75),
+        ]
+        manual_paths = [str(manual_file)]
+
+        merged = merge_contexts(rag_results, manual_paths)
+        # Manual version kept, RAG version of same file removed
+        file_paths = [m["file_path"] for m in merged]
+        assert file_paths.count(str(manual_file)) == 1
+        assert len(merged) == 2  # 1 manual + 1 unique RAG
+
+    def test_manual_first(self, tmp_path: Path) -> None:
+        """T180: merge_contexts puts manual first (REQ-7)."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        manual_file = tmp_path / "manual.md"
+        manual_file.write_text("Manual content")
+
+        rag_results = [
+            _make_doc(file_path="docs/adrs/0201.md", score=0.85),
+        ]
+        manual_paths = [str(manual_file)]
+
+        merged = merge_contexts(rag_results, manual_paths)
+        assert merged[0]["doc_type"] == "manual"
+        assert merged[0]["file_path"] == str(manual_file)
+        assert merged[1]["file_path"] == "docs/adrs/0201.md"
+
+    def test_no_manual_no_rag(self) -> None:
+        """Empty inputs produce empty output."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        merged = merge_contexts([], [])
+        assert merged == []
+```
+
+### 6.25 `tests/integration/test_rag_workflow.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Integration test: end-to-end LLD workflow with RAG.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T200, T210, T220
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig
+
+
+@pytest.mark.integration
+@pytest.mark.rag
+class TestRagWorkflowIntegration:
+    """Integration tests requiring [rag] extra and real ChromaDB."""
+
+    def test_full_ingestion(self, tmp_path: Path) -> None:
+        """T200: Full ingestion indexes fixture docs (REQ-10)."""
+        from assemblyzero.rag.chunker import chunk_markdown_document
+        from assemblyzero.rag.embeddings import create_embedding_provider
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            source_directories=["tests/fixtures/rag"],
+        )
+
+        store = VectorStoreManager(config)
+        store.initialize()
+        provider = create_embedding_provider(config)
+
+        fixtures_dir = Path("tests/fixtures/rag")
+        files = list(fixtures_dir.glob("*.md"))
+        assert len(files) >= 3, "Expected at least 3 fixture files"
+
+        total_files = 0
+        total_chunks = 0
+        for md_file in files:
+            chunks = chunk_markdown_document(md_file)
+            if chunks:
+                texts = [c for c, _m in chunks]
+                embeddings = provider.embed_texts(texts)
+                added = store.add_chunks(chunks, embeddings)
+                total_files += 1
+                total_chunks += added
+
+        assert total_files >= 3
+        assert total_chunks > 0
+        stats = store.collection_stats()
+        assert stats["total_chunks"] == total_chunks
+
+    def test_incremental_ingestion_skips_unchanged(self, tmp_path: Path) -> None:
+        """T210: Incremental ingestion skips unchanged files (REQ-10)."""
+        import sys
+
+        sys.path.insert(0, str(Path("tools").resolve()))
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            source_directories=["tests/fixtures/rag"],
+        )
+
+        # First: full ingestion
+        from tools.rebuild_knowledge_base import run_full_ingestion, run_incremental_ingestion
+
+        full_summary = run_full_ingestion(config, verbose=False)
+        assert full_summary.files_indexed >= 3
+
+        # Second: incremental should skip all
+        inc_summary = run_incremental_ingestion(config, verbose=False)
+        assert inc_summary.files_skipped >= full_summary.files_indexed
+        assert inc_summary.files_indexed == 0
+
+    def test_lld_workflow_graph_execution(self, tmp_path: Path) -> None:
+        """T220: Integration: librarian_node in LLD workflow graph."""
+        from assemblyzero.rag.chunker import chunk_markdown_document
+        from assemblyzero.rag.embeddings import create_embedding_provider
+        from assemblyzero.rag.models import RAGConfig
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        # Build a real vector store with fixture data
+        config = RAGConfig(vector_store_path=tmp_path / "store")
+
+        store = VectorStoreManager(config)
+        store.initialize()
+        provider = create_embedding_provider(config)
+
+        fixtures_dir = Path("tests/fixtures/rag")
+        for md_file in fixtures_dir.glob("*.md"):
+            chunks = chunk_markdown_document(md_file)
+            if chunks:
+                texts = [c for c, _m in chunks]
+                embeddings = provider.embed_texts(texts)
+                store.add_chunks(chunks, embeddings)
+
+        # Now test the librarian_node directly with real store
+        from unittest.mock import patch
+
+        from assemblyzero.nodes.librarian import librarian_node
+
+        state = {
+            "issue_brief": "Implement automated testing pipeline with code review",
+            "manual_context_paths": [],
+            "retrieved_context": [],
+            "rag_status": "",
+            "designer_output": "",
+        }
+
+        # Patch RAGConfig to point to our tmp store
+        with patch(
+            "assemblyzero.nodes.librarian.RAGConfig",
+            return_value=config,
+        ):
+            result = librarian_node(state)
+
+        # Should succeed since we have a real store with data
+        assert result["rag_status"] in ("success", "no_results")
+        if result["rag_status"] == "success":
+            assert len(result["retrieved_context"]) > 0
+```
+
+### 6.26 `tests/integration/test_rag_degradation.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Integration test: graceful degradation without deps/store.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T230
+"""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+
+@pytest.mark.integration
+class TestRagDegradation:
+    """Tests for graceful degradation when RAG is unavailable."""
+
+    def test_workflow_continues_without_deps(self) -> None:
+        """T230: Integration: workflow degrades without deps (REQ-9)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb, sentence-transformers"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "Test brief for degradation testing",
+                "manual_context_paths": ["docs/standards/0005.md"],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+            # Workflow can continue — no exception raised
+
+    def test_workflow_continues_without_store(self) -> None:
+        """Workflow degrades gracefully when vector store is missing."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            from unittest.mock import MagicMock
+
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (False, "unavailable")
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                import importlib
+
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "Test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+```
+
+### 6.27 `docs/adrs/0205-rag-librarian.md` (Add)
+
+**Complete file contents:**
+
+```markdown
+# ADR-0205: RAG Librarian for Automated Context Retrieval
+
+**Status:** Accepted
+**Date:** 2026-02-27
+**Issue:** #88
+
+## 1. Context
+
+The Designer node in the LLD workflow requires relevant governance documents (ADRs, standards, completed LLDs) as context to produce high-quality designs. Currently, context is provided manually via the `--context` CLI flag, which requires the user to know which documents are relevant.
+
+## 2. Decision
+
+Implement an automated RAG (Retrieval-Augmented Generation) system — "The Librarian" — that:
+- Indexes governance documents in a local ChromaDB vector store
+- Embeds issue briefs using `all-MiniLM-L6-v2` (local, no external API)
+- Retrieves top-3 most relevant document chunks above a 0.7 similarity threshold
+- Injects retrieved context into the Designer's prompt
+
+The system is entirely optional via `pip install assemblyzero[rag]`.
+
+## 3. Consequences
+
+### Positive
+- Designers automatically receive relevant context without manual curation
+- Local-first: no data leaves the developer machine
+- Zero ongoing cost (local model, local storage)
+- Graceful degradation: workflow continues if RAG is unavailable
+
+### Negative
+- Optional dependency size: ~2GB (PyTorch) + ~200MB (model + ChromaDB)
+- Requires manual knowledge base rebuild when docs change
+- Initial cold-boot latency (~5-10s for model loading)
+
+## 4. License Compliance
+
+| Dependency | License | Compatible with PolyForm-NC-1.0.0? |
+|------------|---------|--------------------------------------|
+| chromadb | Apache 2.0 | ✅ Yes |
+| sentence-transformers | Apache 2.0 | ✅ Yes |
+| torch (transitive) | BSD-3-Clause | ✅ Yes |
+| all-MiniLM-L6-v2 (model) | Apache 2.0 | ✅ Yes |
+
+All dependencies use permissive open-source licenses compatible with our PolyForm-Noncommercial-1.0.0 project license.
+
+## 5. Alternatives Considered
+
+See LLD #88 Section 4 for full analysis. Key alternatives rejected:
+- **FAISS + pickle:** No built-in persistence or metadata management
+- **SQLite FTS5:** No semantic search capability
+- **LangChain vector store:** Extra abstraction without benefit
+```
+
+## 7. Pattern References
+
+### 7.1 LangGraph Node Implementation Pattern
+
+**File:** `assemblyzero/workflows/implementation_spec/nodes/analyze_codebase.py` (lines 1-50)
+
+```python
+# Pattern: LangGraph node as a function that takes state dict, returns partial state update
+def analyze_codebase_node(state: dict) -> dict:
+    """Analyze the codebase for implementation context."""
+    # Read from state
+    lld_content = state.get("lld_content", "")
+    
+    # Do work...
+    
+    # Return partial state update
+    return {
+        "codebase_analysis": result,
+        "error_message": "",
+    }
+```
+
+**Relevance:** The `librarian_node()` function follows this exact pattern: read from state, do work, return partial state update dict. Error handling convention: return status fields rather than raising exceptions.
+
+### 7.2 LangGraph Graph Construction Pattern
+
+**File:** `assemblyzero/workflows/implementation_spec/graph.py` (lines 1-100)
+
+```python
+# Pattern: Build a StateGraph with nodes and edges
+from langgraph.graph import END, StateGraph
+
+def build_implementation_spec_graph():
+    graph = StateGraph(ImplementationSpecState)
+    
+    graph.add_node("analyze", analyze_codebase_node)
+    graph.add_node("generate", generate_spec_node)
+    graph.add_node("finalize", finalize_spec_node)
+    
+    graph.set_entry_point("analyze")
+    graph.add_edge("analyze", "generate")
+    graph.add_edge("generate", "finalize")
+    graph.add_edge("finalize", END)
+    
+    return graph.compile()
+```
+
+**Relevance:** The `build_lld_graph()` function follows this pattern for graph construction. Uses `StateGraph`, `set_conditional_entry_point` for branching, and `END` for terminal edges.
+
+### 7.3 TypedDict State Definition Pattern
+
+**File:** `assemblyzero/workflows/implementation_spec/state.py` (lines 1-100)
+
+```python
+from typing import TypedDict
+
+class ImplementationSpecState(TypedDict):
+    """State schema for the Implementation Spec workflow."""
+    issue_number: int
+    lld_content: str
+    codebase_analysis: str
+    error_message: str
+```
+
+**Relevance:** The `LLDState` TypedDict follows this exact pattern for workflow state definition.
+
+### 7.4 CLI Tool Pattern
+
+**File:** `tools/run_audit.py` (lines 1-60)
+
+```python
+#!/usr/bin/env python3
+"""Run audit tool."""
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+def main():
+    parser = argparse.ArgumentParser(description="...")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+    # ... do work ...
+
+if __name__ == "__main__":
+    main()
+```
+
+**Relevance:** The `tools/rebuild_knowledge_base.py` follows this pattern for CLI tool structure: shebang line, sys.path insertion for project root, argparse, `if __name__ == "__main__"` guard.
+
+### 7.5 Workflow Test Pattern
+
+**File:** `tests/e2e/test_issue_workflow_mock.py` (lines 1-80)
+
+```python
+# Pattern: Mock external dependencies, test workflow graph execution
+class TestIssueWorkflowMock:
+    def test_workflow_executes(self):
+        # Set up state
+        state = {"issue_number": 1, ...}
+        # Build and run graph
+        graph = build_graph()
+        result = graph.invoke(state)
+        # Assert on result state
+        assert result["error_message"] == ""
+```
+
+**Relevance:** Integration tests for the LLD workflow follow this pattern: set up initial state, invoke the graph, assert on result state fields.
+
+## 8. Dependencies & Imports
+
+| Import | Source | Used In |
+|--------|--------|---------|
+| `from __future__ import annotations` | stdlib | All new files |
+| `from dataclasses import dataclass, field` | stdlib | `models.py` |
+| `from pathlib import Path` | stdlib | Most files |
+| `from typing import TypedDict, TYPE_CHECKING` | stdlib | `state.py`, `embeddings.py`, `vector_store.py` |
+| `from abc import ABC, abstractmethod` | stdlib | `embeddings.py` |
+| `import re` | stdlib | `chunker.py` |
+| `import logging` | stdlib | `librarian.py`, `nodes/librarian.py`, `vector_store.py` |
+| `import hashlib` | stdlib | `rebuild_knowledge_base.py` |
+| `import argparse` | stdlib | `rebuild_knowledge_base.py` |
+| `import time` | stdlib | `rebuild_knowledge_base.py` |
+| `import sys` | stdlib | `rebuild_knowledge_base.py` |
+| `from datetime import datetime, timezone` | stdlib | `chunker.py`, `rebuild_knowledge_base.py` |
+| `from langgraph.graph import END, StateGraph` | langgraph (core dep) | `workflows/lld/graph.py` |
+| `import chromadb` | chromadb (optional [rag]) | `vector_store.py` (conditional) |
+| `from sentence_transformers import SentenceTransformer` | sentence-transformers (optional [rag]) | `embeddings.py` (conditional) |
+| `from assemblyzero.rag.models import *` | internal | Multiple RAG files |
+| `from assemblyzero.rag.dependencies import *` | internal | Multiple RAG files |
+| `from assemblyzero.rag.chunker import chunk_markdown_document` | internal | `rebuild_knowledge_base.py` |
+| `from assemblyzero.rag.embeddings import create_embedding_provider` | internal | `librarian.py`, `rebuild_knowledge_base.py` |
+| `from assemblyzero.rag.vector_store import VectorStoreManager` | internal | `librarian.py`, `rebuild_knowledge_base.py` |
+| `from assemblyzero.rag.librarian import LibrarianNode` | internal | `nodes/librarian.py` (conditional import) |
+| `from assemblyzero.nodes.librarian import librarian_node` | internal | `workflows/lld/graph.py` |
+| `from assemblyzero.workflows.lld.state import LLDState` | internal | `workflows/lld/graph.py` |
+| `import pytest` | dev dep | All test files |
+| `from unittest.mock import MagicMock, patch` | stdlib | Test files |
+
+**New Dependencies:** None. The `[rag]` optional dependency group already exists in `pyproject.toml`. Only a new pytest marker is added.
+
+## 9. Test Mapping
+
+| Test ID | Tests Function | Input | Expected Output |
+|---------|---------------|-------|-----------------|
+| T010 | `split_on_headers()`, `chunk_markdown_document()` | Markdown with H2 sections / fixture ADR | Correct section count and titles |
+| T020 | `detect_doc_type()` | Paths from adrs/, standards/, LLDs/done/ | "adr", "standard", "lld" |
+| T030 | `split_on_headers()` | Plain text, no headers | 1 section, title="Untitled" |
+| T040 | `check_rag_dependencies()` | Mocked missing chromadb | `(False, "...pip install assemblyzero[rag]")` |
+| T050 | `check_rag_dependencies()` | Mocked available imports | `(True, "RAG dependencies available")` |
+| T060 | `VectorStoreManager.is_initialized()` | Non-existent path | `False` |
+| T070 | `VectorStoreManager.add_chunks()` + `.query()` | Add 2 chunks, query similar | Top result matches, score > 0.5 |
+| T080 | `VectorStoreManager.query()` | Empty collection | `[]` |
+| T090 | `LibrarianNode.retrieve()` | 4 candidates, 2 above 0.7 | 2 results, all scores >= 0.7 |
+| T100 | `LibrarianNode.retrieve()` | 5 above threshold, top_n=3 | 3 results |
+| T110 | `LibrarianNode.check_availability()` | Mocked deps unavailable | `(False, "deps_missing")` |
+| T120 | `LibrarianNode.check_availability()` | Deps OK, store missing | `(False, "unavailable")` |
+| T130 | `librarian_node()` | Mocked deps unavailable | `{"rag_status": "deps_missing"}` |
+| T140 | `librarian_node()` | Mocked deps OK, store missing | `{"rag_status": "unavailable"}` |
+| T150 | `librarian_node()` | Mocked retrieve returns [] | `{"rag_status": "no_results"}` |
+| T160 | `librarian_node()` | Mocked retrieve returns 2 docs | `{"rag_status": "success"}`, INFO log |
+| T170 | `merge_contexts()` | Overlapping RAG + manual paths | Deduplicated, manual kept |
+| T180 | `merge_contexts()` | 1 manual + 1 RAG | Manual at index 0 |
+| T190 | `LibrarianNode.format_context_for_designer()` | 2 RetrievedDocuments | String with file paths, sections |
+| T200 | `run_full_ingestion()` via integration | 3 fixture files | files_indexed >= 3 |
+| T210 | `run_incremental_ingestion()` via integration | After full, no changes | files_skipped >= 3 |
+| T220 | `librarian_node()` via integration | Real store + fixture data | rag_status in ("success", "no_results") |
+| T230 | `librarian_node()` via integration | Mocked deps missing | rag_status = "deps_missing" |
+| T240 | `LocalEmbeddingProvider.embed_query()` | Single text string | 384-dim float list |
+| T250 | `LibrarianNode.retrieve()` performance | Warm store query | elapsed < 500ms |
+| T260 | CLI spinner display | — | Deferred to manual verification or integration test |
+| T270 | `run_full_ingestion()` performance | 100 files | elapsed < 10s |
+| T280 | Core install check | — | Deferred to CI environment test |
+| T290 | `VectorStoreManager` persistence | Add, new instance, query | Previous data accessible |
+
+**Notes on T250, T260, T270, T280:**
+- T250 (latency) and T270 (reindex timing) are best tested in integration tests with `@pytest.mark.rag` since they require real model loading.
+- T260 (spinner) requires terminal interaction — covered by the implementation logging pattern rather than automated assertion.
+- T280 (core install) is a CI-level check verified by the dependency isolation approach.
+
+## 10. Implementation Notes
+
+### 10.1 Error Handling Convention
+
+All node functions return state update dicts rather than raising exceptions. The `rag_status` field communicates the outcome:
+- `"success"` — retrieval worked, `retrieved_context` populated
+- `"no_results"` — retrieval worked but nothing above threshold
+- `"unavailable"` — vector store missing or corrupted
+- `"deps_missing"` — chromadb/sentence-transformers not installed
+
+Downstream nodes check `rag_status` and proceed accordingly. No node should ever crash the workflow due to RAG issues.
+
+### 10.2 Logging Convention
+
+Use `logging.getLogger(__name__)` in all modules. Prefix log messages with `[Librarian]` for easy grep-ability:
+
+```python
+logger.info("[Librarian] Retrieved %d documents: %s", count, paths)
+logger.warning("[Librarian] Vector store not found. Run 'python tools/rebuild_knowledge_base.py'")
+```
+
+The CLI tool (`rebuild_knowledge_base.py`) uses `print()` with `[RAG]` prefix for direct user feedback.
+
+### 10.3 Constants
+
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| `_COLLECTION_NAME` | `"assemblyzero_governance"` | ChromaDB collection name, consistent across sessions |
+| `_CHARS_PER_TOKEN` | `4` | Conservative estimate for English text tokenization approximation |
+| `_HEADER_PATTERN` | `r"^(#{1,2})\s+(.+)$"` | Matches H1/H2 headers only (H3+ are not split points) |
+| Default `similarity_threshold` | `0.7` | Empirically reasonable for governance doc retrieval; configurable |
+| Default `top_k_candidates` | `5` | Fetch 5 candidates from ChromaDB, then filter/limit |
+| Default `top_n_results` | `3` | Return at most 3 results to avoid context overload |
+| Default `chunk_max_tokens` | `512` | Fits well within embedding model context window |
+
+### 10.4 Conditional Import Strategy
+
+Heavy dependencies (`chromadb`, `sentence_transformers`) are **never** imported at module level in any file outside `assemblyzero/rag/embeddings.py` and `assemblyzero/rag/vector_store.py`. Even in those files, the actual imports are deferred:
+
+1. `embeddings.py`: Uses `TYPE_CHECKING` guard for type hints, actual import in `_get_model()` method
+2. `vector_store.py`: Uses `TYPE_CHECKING` guard for type hints, actual import in `_get_client()` method
+3. `dependencies.py`: Uses `try/except` for import detection only
+4. `__init__.py`: Only imports from `models.py` and `dependencies.py` (no heavy deps)
+
+This ensures that `from assemblyzero.rag import RAGConfig` works even without the `[rag]` extra installed.
+
+### 10.5 ChromaDB Score Conversion
+
+ChromaDB returns **distances**, not similarities. For cosine distance space:
+- `distance = 0.0` means identical → `similarity = 1.0`
+- `distance = 2.0` means opposite → `similarity = -1.0`
+
+Conversion: `similarity = 1.0 - distance`
+
+The `VectorStoreManager.query()` method handles this conversion internally, so all code outside the vector store module works with similarity scores in the 0.0-1.0 range.
+
+---
+
+## Completeness Checklist
+
+- [x] Every "Modify" file has a current state excerpt (Section 3): `pyproject.toml` and `.gitignore`
+- [x] Every data structure has a concrete JSON/YAML example (Section 4): ChunkMetadata, RetrievedDocument, RAGConfig, IngestionSummary, LLDState
+- [x] Every function has input/output examples with realistic values (Section 5): 30 function specifications
+- [x] Change instructions are diff-level specific (Section 6): Complete file contents for Add, diff snippets for Modify
+- [x] Pattern references include file:line and are verified to exist (Section 7): 5 pattern references
+- [x] All imports are listed and verified (Section 8): 30+ imports mapped
+- [x] Test mapping covers all LLD test scenarios (Section 9): T010-T290 mapped
+
+---
+
+## Review Log
+
+| Field | Value |
+|-------|-------|
+| Issue | #88 |
+| Verdict | DRAFT |
+| Date | 2026-02-27 |
+| Iterations | 1 |
+| Finalized | — |
+
+---
+
+## Review Log
+
+| Field | Value |
+|-------|-------|
+| Issue | #88 |
+| Verdict | APPROVED |
+| Date | 2026-02-27 |
+| Iterations | 0 |
+| Finalized | 2026-02-27T10:05:52Z |
+
+### Review Feedback Summary
+
+Approved with suggestions:
+- **Vector Store Locking:** While the implementation uses `chromadb.PersistentClient`, ensure that concurrent runs of the CLI tool and the workflow (if accessing the store simultaneously) do not corrupt the SQLite database. ChromaDB handles this reasonably well, but it's worth noting as a potential edge case during high-concurrency testing.
+- **Token limit safety:** In `assemblyzero/nodes/librarian.py`, when merging contexts, there isn't an explicit check to ensure the...
+
+
+## Required File Paths (from LLD - do not deviate)
+
+The following paths are specified in the LLD. Write ONLY to these paths:
+
+- `tests/conftest.py` — **DO NOT MODIFY** (already scaffolded)
+- `.github/workflows/ci.yml`
+
+Any files written to other paths will be rejected.
+
+## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+tests/
+  accessibility/
+  adversarial/
+  benchmark/
+  compliance/
+  contract/
+  e2e/
+  fixtures/
+    issue_workflow/
+    lld_tracking/
+    metrics/
+    mock_lineage/
+    mock_repo/
+      src/
+    rag/
+    scout/
+    scraper/
+    verdict_analyzer/
+  harness/
+  integration/
+  security/
+  tools/
+  unit/
+    test_gate/
+    test_metrics/
+    test_rag/
+  visual/
+  __init__.py
+  conftest.py
+  test_assemblyzero_config.py
+  test_audit.py
+  test_audit_sharding.py
+  test_credentials.py
+  test_designer.py
+  test_gemini_client.py
+  test_gemini_credentials_v2.py
+  test_integration_workflow.py
+  ... and 13 more files
+assemblyzero/
+  core/
+    validation/
+  graphs/
+  hooks/
+  metrics/
+  nodes/
+  rag/
+  telemetry/
+  utils/
+  workflow/
+  workflows/
+    implementation_spec/
+      nodes/
+    issue/
+      nodes/
+    lld/
+    orchestrator/
+    parallel/
+    requirements/
+      nodes/
+      parsers/
+    scout/
+    testing/
+      completeness/
+      knowledge/
+      nodes/
+      runners/
+      templates/
+  __init__.py
+  tracing.py
+dashboard/
+  src/
+    client/
+      components/
+      pages/
+  package.json
+  tsconfig.client.json
+  tsconfig.json
+  tsconfig.worker.json
+  wrangler.toml
+data/
+  unleashed/
+  handoff-log.md
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+## Tests That Must Pass
+
+```python
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_models.py
+"""Unit tests for RAG data models.
+
+Issue #88: The Librarian - Automated Context Retrieval
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from assemblyzero.rag.models import (
+    ChunkMetadata,
+    IngestionSummary,
+    RAGConfig,
+    RetrievedDocument,
+)
+
+
+class TestChunkMetadata:
+    """Tests for ChunkMetadata dataclass."""
+
+    def test_creation(self) -> None:
+        meta = ChunkMetadata(
+            file_path="docs/adrs/0201.md",
+            section_title="## 2. Decision",
+            chunk_index=1,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00+00:00",
+        )
+        assert meta.file_path == "docs/adrs/0201.md"
+        assert meta.section_title == "## 2. Decision"
+        assert meta.chunk_index == 1
+        assert meta.doc_type == "adr"
+
+    def test_frozen(self) -> None:
+        meta = ChunkMetadata(
+            file_path="docs/adrs/0201.md",
+            section_title="## 2. Decision",
+            chunk_index=1,
+            doc_type="adr",
+            last_modified="2026-02-15T10:30:00+00:00",
+        )
+        try:
+            meta.file_path = "other.md"  # type: ignore[misc]
+            assert False, "Should have raised FrozenInstanceError"
+        except AttributeError:
+            pass  # Expected
+
+
+class TestRetrievedDocument:
+    """Tests for RetrievedDocument dataclass."""
+
+    def test_creation(self) -> None:
+        doc = RetrievedDocument(
+            file_path="docs/adrs/0201.md",
+            section="## 2. Decision",
+            content_snippet="We will implement...",
+            score=0.85,
+            doc_type="adr",
+        )
+        assert doc.score == 0.85
+        assert doc.doc_type == "adr"
+
+    def test_to_dict(self) -> None:
+        doc = RetrievedDocument(
+            file_path="docs/adrs/0201.md",
+            section="## 2. Decision",
+            content_snippet="We will implement...",
+            score=0.85,
+            doc_type="adr",
+        )
+        d = doc.to_dict()
+        assert d == {
+            "file_path": "docs/adrs/0201.md",
+            "section": "## 2. Decision",
+            "content_snippet": "We will implement...",
+            "score": 0.85,
+            "doc_type": "adr",
+        }
+
+
+class TestRAGConfig:
+    """Tests for RAGConfig dataclass."""
+
+    def test_defaults(self) -> None:
+        config = RAGConfig()
+        assert config.vector_store_path == Path(".assemblyzero/vector_store")
+        assert config.embedding_model == "all-MiniLM-L6-v2"
+        assert config.similarity_threshold == 0.7
+        assert config.top_k_candidates == 5
+        assert config.top_n_results == 3
+        assert config.chunk_max_tokens == 512
+        assert config.embedding_provider == "local"
+        assert "docs/adrs" in config.source_directories
+
+    def test_custom_values(self) -> None:
+        config = RAGConfig(
+            similarity_threshold=0.8,
+            top_n_results=5,
+        )
+        assert config.similarity_threshold == 0.8
+        assert config.top_n_results == 5
+
+
+class TestIngestionSummary:
+    """Tests for IngestionSummary dataclass."""
+
+    def test_defaults(self) -> None:
+        summary = IngestionSummary()
+        assert summary.files_indexed == 0
+        assert summary.chunks_created == 0
+        assert summary.files_skipped == 0
+        assert summary.elapsed_seconds == 0.0
+        assert summary.errors == []
+
+    def test_mutable_errors(self) -> None:
+        summary = IngestionSummary()
+        summary.errors.append("test error")
+        assert len(summary.errors) == 1
+
+        # Verify independent instances
+        summary2 = IngestionSummary()
+        assert len(summary2.errors) == 0
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_dependencies.py
+"""Unit tests for RAG dependency checking.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T040, T050
+"""
+
+from __future__ import annotations
+
+import sys
+from unittest.mock import patch
+
+import pytest
+
+
+class TestCheckRagDependencies:
+    """Tests for check_rag_dependencies()."""
+
+    def test_missing_chromadb(self) -> None:
+        """T040: Dependency checker detects missing chromadb (REQ-9)."""
+        with patch.dict(sys.modules, {"chromadb": None}):
+            # Force reimport
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is False
+            assert "pip install assemblyzero[rag]" in message
+
+    def test_missing_sentence_transformers(self) -> None:
+        """T040: Dependency checker detects missing sentence-transformers (REQ-9)."""
+        with patch.dict(sys.modules, {"sentence_transformers": None}):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is False
+            assert "pip install assemblyzero[rag]" in message
+
+    def test_all_dependencies_available(self) -> None:
+        """T050: Dependency checker succeeds with mocked imports (REQ-9)."""
+        # Mock both modules as available
+        mock_chromadb = type(sys)("chromadb")
+        mock_st = type(sys)("sentence_transformers")
+        with patch.dict(
+            sys.modules,
+            {"chromadb": mock_chromadb, "sentence_transformers": mock_st},
+        ):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            available, message = dependencies.check_rag_dependencies()
+            assert available is True
+            assert "available" in message.lower()
+
+
+class TestRequireRagDependencies:
+    """Tests for require_rag_dependencies()."""
+
+    def test_raises_when_missing(self) -> None:
+        """require_rag_dependencies raises ImportError when deps missing."""
+        with patch.dict(sys.modules, {"chromadb": None}):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            with pytest.raises(ImportError, match="pip install assemblyzero"):
+                dependencies.require_rag_dependencies()
+
+    def test_succeeds_when_available(self) -> None:
+        """require_rag_dependencies succeeds when deps available."""
+        mock_chromadb = type(sys)("chromadb")
+        mock_st = type(sys)("sentence_transformers")
+        with patch.dict(
+            sys.modules,
+            {"chromadb": mock_chromadb, "sentence_transformers": mock_st},
+        ):
+            import importlib
+
+            from assemblyzero.rag import dependencies
+
+            importlib.reload(dependencies)
+            # Should not raise
+            dependencies.require_rag_dependencies()
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_chunker.py
+"""Unit tests for markdown document chunker.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T010, T020, T030
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from assemblyzero.rag.chunker import (
+    chunk_markdown_document,
+    detect_doc_type,
+    split_on_headers,
+)
+
+
+class TestSplitOnHeaders:
+    """Tests for split_on_headers()."""
+
+    def test_split_h1_h2(self) -> None:
+        """T010: Chunker splits markdown on H1/H2 headers (REQ-3)."""
+        content = (
+            "# Title\n\nIntro text\n\n"
+            "## Section 1\n\nContent 1\n\n"
+            "## Section 2\n\nContent 2"
+        )
+        sections = split_on_headers(content)
+        assert len(sections) == 3
+        assert sections[0] == ("# Title", "Intro text")
+        assert sections[1] == ("## Section 1", "Content 1")
+        assert sections[2] == ("## Section 2", "Content 2")
+
+    def test_no_headers(self) -> None:
+        """T030: Chunker handles document with no headers."""
+        content = "Just some plain text\nwith multiple lines"
+        sections = split_on_headers(content)
+        assert len(sections) == 1
+        assert sections[0][0] == "Untitled"
+        assert "plain text" in sections[0][1]
+
+    def test_empty_content(self) -> None:
+        """Empty content returns empty list."""
+        sections = split_on_headers("")
+        assert sections == []
+
+    def test_whitespace_only(self) -> None:
+        """Whitespace-only content returns empty list."""
+        sections = split_on_headers("   \n\n   ")
+        assert sections == []
+
+    def test_h3_not_split(self) -> None:
+        """H3+ headers are included in parent section, not split."""
+        content = "## Section\n\n### Subsection\n\nContent"
+        sections = split_on_headers(content)
+        assert len(sections) == 1
+        assert "### Subsection" in sections[0][1]
+
+    def test_content_before_first_header(self) -> None:
+        """Content before first header gets 'Untitled' section."""
+        content = "Preamble text\n\n# Title\n\nBody"
+        sections = split_on_headers(content)
+        assert len(sections) == 2
+        assert sections[0] == ("Untitled", "Preamble text")
+        assert sections[1][0] == "# Title"
+
+
+class TestDetectDocType:
+    """Tests for detect_doc_type()."""
+
+    def test_adr(self) -> None:
+        """T020: Chunker detects 'adr' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/adrs/0201-adversarial.md")) == "adr"
+
+    def test_standard(self) -> None:
+        """T020: Chunker detects 'standard' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/standards/0002-style.md")) == "standard"
+
+    def test_lld(self) -> None:
+        """T020: Chunker detects 'lld' doc type (REQ-3)."""
+        assert detect_doc_type(Path("docs/LLDs/done/44-feature.md")) == "lld"
+
+    def test_unknown(self) -> None:
+        """Unknown path returns 'unknown'."""
+        assert detect_doc_type(Path("docs/other/readme.md")) == "unknown"
+
+
+class TestChunkMarkdownDocument:
+    """Tests for chunk_markdown_document()."""
+
+    def test_chunk_fixture_adr(self) -> None:
+        """T010: Full chunking of sample ADR fixture (REQ-3)."""
+        fixture = Path("tests/fixtures/rag/sample_adr.md")
+        if not fixture.exists():
+            pytest.skip("Fixture not found")
+
+        chunks = chunk_markdown_document(fixture)
+        assert len(chunks) >= 3  # Title + Decision + Consequences sections
+        for content, metadata in chunks:
+            assert metadata.file_path == str(fixture)
+            assert metadata.doc_type == "adr"
+            assert metadata.last_modified  # non-empty ISO timestamp
+            assert content  # non-empty content
+
+    def test_chunk_nonexistent_file(self) -> None:
+        """FileNotFoundError for nonexistent file."""
+        with pytest.raises(FileNotFoundError):
+            chunk_markdown_document(Path("nonexistent.md"))
+
+    def test_chunk_empty_file(self, tmp_path: Path) -> None:
+        """Empty file returns empty list."""
+        empty_file = tmp_path / "empty.md"
+        empty_file.write_text("")
+        chunks = chunk_markdown_document(empty_file)
+        assert chunks == []
+
+    def test_chunk_max_tokens_splitting(self, tmp_path: Path) -> None:
+        """Oversized sections are split on paragraph boundaries."""
+        # Create a file with a very large section
+        large_content = "# Title\n\n" + "\n\n".join(
+            [f"Paragraph {i} with some content to fill space." for i in range(100)]
+        )
+        large_file = tmp_path / "large.md"
+        large_file.write_text(large_content)
+
+        chunks = chunk_markdown_document(large_file, max_tokens=50)  # Very small limit
+        assert len(chunks) > 1  # Should be split into multiple chunks
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_embeddings.py
+"""Unit tests for embedding provider abstraction.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T240
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig
+
+
+class TestCreateEmbeddingProvider:
+    """Tests for create_embedding_provider()."""
+
+    def test_unknown_provider(self) -> None:
+        """Unknown provider raises ValueError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="unknown")
+        with pytest.raises(ValueError, match="Unknown embedding provider"):
+            create_embedding_provider(config)
+
+    def test_openai_not_implemented(self) -> None:
+        """OpenAI provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="openai")
+        with pytest.raises(NotImplementedError, match="OpenAI"):
+            create_embedding_provider(config)
+
+    def test_gemini_not_implemented(self) -> None:
+        """Gemini provider raises NotImplementedError."""
+        from assemblyzero.rag.embeddings import create_embedding_provider
+
+        config = RAGConfig(embedding_provider="gemini")
+        with pytest.raises(NotImplementedError, match="Gemini"):
+            create_embedding_provider(config)
+
+
+@pytest.mark.rag
+class TestLocalEmbeddingProvider:
+    """Tests for LocalEmbeddingProvider (requires [rag] extra)."""
+
+    def test_embed_query_dimensions(self) -> None:
+        """T240: Embedding returns correct dimensions (REQ-2)."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embedding = provider.embed_query("test query about governance")
+        assert len(embedding) == 384
+        assert all(isinstance(v, float) for v in embedding)
+
+    def test_embed_texts_batch(self) -> None:
+        """Batch embedding returns correct count and dimensions."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        texts = ["first text", "second text", "third text"]
+        embeddings = provider.embed_texts(texts)
+        assert len(embeddings) == 3
+        assert all(len(e) == 384 for e in embeddings)
+
+    def test_embed_texts_empty(self) -> None:
+        """Empty text list returns empty embeddings list."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        embeddings = provider.embed_texts([])
+        assert embeddings == []
+
+    def test_lazy_model_loading(self) -> None:
+        """Model is not loaded until first embed call."""
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider
+
+        provider = LocalEmbeddingProvider(model_name="all-MiniLM-L6-v2")
+        assert provider._model is None  # Not yet loaded
+        provider.embed_query("trigger load")
+        assert provider._model is not None  # Now loaded
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_vector_store.py
+"""Unit tests for ChromaDB vector store wrapper.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T060, T070, T080, T290
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from assemblyzero.rag.models import ChunkMetadata, RAGConfig
+
+
+@pytest.mark.rag
+class TestVectorStoreManager:
+    """Tests for VectorStoreManager (requires [rag] extra)."""
+
+    def _make_config(self, tmp_path: Path) -> RAGConfig:
+        """Create a RAGConfig pointing to a temp directory."""
+        return RAGConfig(vector_store_path=tmp_path / "test_vector_store")
+
+    def test_is_initialized_missing_dir(self, tmp_path: Path) -> None:
+        """T060: Vector store not initialized returns False (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        assert manager.is_initialized() is False
+
+    def test_initialize_creates_store(self, tmp_path: Path) -> None:
+        """Initialize creates the vector store directory and collection."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+        assert config.vector_store_path.exists()
+
+    def test_add_and_query_round_trip(self, tmp_path: Path) -> None:
+        """T070: Round-trip add chunks then query (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        # Create test chunks with known embeddings
+        chunks = [
+            (
+                "We will implement adversarial audit as a mandatory gate",
+                ChunkMetadata(
+                    file_path="docs/adrs/0201.md",
+                    section_title="## 2. Decision",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-02-15T10:30:00+00:00",
+                ),
+            ),
+            (
+                "All code must have 95% test coverage minimum",
+                ChunkMetadata(
+                    file_path="docs/standards/0005.md",
+                    section_title="## 3. Coverage",
+                    chunk_index=0,
+                    doc_type="standard",
+                    last_modified="2026-02-10T08:00:00+00:00",
+                ),
+            ),
+        ]
+
+        # Use simple embeddings for testing (not real model)
+        # Embedding 1: mostly positive
+        emb1 = [0.1] * 384
+        # Embedding 2: mostly negative
+        emb2 = [-0.1] * 384
+
+        manager.add_chunks(chunks, [emb1, emb2])
+
+        # Query with embedding similar to emb1
+        results = manager.query(query_embedding=emb1, n_results=2)
+        assert len(results) > 0
+        assert results[0].file_path == "docs/adrs/0201.md"
+        assert results[0].score > 0.5
+
+    def test_query_empty_collection(self, tmp_path: Path) -> None:
+        """T080: Query on empty collection returns empty list (REQ-1)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        results = manager.query(query_embedding=[0.0] * 384, n_results=5)
+        assert results == []
+
+    def test_add_chunks_length_mismatch(self, tmp_path: Path) -> None:
+        """Mismatched chunks/embeddings raises ValueError."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "content",
+                ChunkMetadata(
+                    file_path="test.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        with pytest.raises(ValueError, match="Chunk count"):
+            manager.add_chunks(chunks, [])
+
+    def test_delete_by_file(self, tmp_path: Path) -> None:
+        """delete_by_file removes chunks for specified file."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content A",
+                ChunkMetadata(
+                    file_path="file_a.md",
+                    section_title="## A",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+            (
+                "Content B",
+                ChunkMetadata(
+                    file_path="file_b.md",
+                    section_title="## B",
+                    chunk_index=0,
+                    doc_type="standard",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        embeddings = [[0.1] * 384, [-0.1] * 384]
+        manager.add_chunks(chunks, embeddings)
+
+        deleted = manager.delete_by_file("file_a.md")
+        assert deleted == 1
+
+        stats = manager.collection_stats()
+        assert stats["total_chunks"] == 1
+
+    def test_collection_stats(self, tmp_path: Path) -> None:
+        """collection_stats returns correct counts."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        stats = manager.collection_stats()
+        assert stats == {"total_chunks": 0, "unique_files": 0}
+
+    def test_get_indexed_files(self, tmp_path: Path) -> None:
+        """get_indexed_files returns correct mapping."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content",
+                ChunkMetadata(
+                    file_path="docs/adrs/0201.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-02-15T10:30:00+00:00",
+                ),
+            ),
+        ]
+        manager.add_chunks(chunks, [[0.1] * 384])
+
+        files = manager.get_indexed_files()
+        assert "docs/adrs/0201.md" in files
+        assert files["docs/adrs/0201.md"] == "2026-02-15T10:30:00+00:00"
+
+    def test_persistence_across_instances(self, tmp_path: Path) -> None:
+        """T290: Vector store persists between sessions (REQ-13)."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+
+        # Instance 1: add data
+        manager1 = VectorStoreManager(config)
+        manager1.initialize()
+        chunks = [
+            (
+                "Persistent content",
+                ChunkMetadata(
+                    file_path="persist.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        manager1.add_chunks(chunks, [[0.1] * 384])
+
+        # Instance 2: query same data (simulates process restart)
+        manager2 = VectorStoreManager(config)
+        results = manager2.query(query_embedding=[0.1] * 384, n_results=1)
+        assert len(results) == 1
+        assert results[0].file_path == "persist.md"
+
+    def test_reset(self, tmp_path: Path) -> None:
+        """reset clears all data and recreates collection."""
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = self._make_config(tmp_path)
+        manager = VectorStoreManager(config)
+        manager.initialize()
+
+        chunks = [
+            (
+                "Content",
+                ChunkMetadata(
+                    file_path="test.md",
+                    section_title="## Test",
+                    chunk_index=0,
+                    doc_type="adr",
+                    last_modified="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+        ]
+        manager.add_chunks(chunks, [[0.1] * 384])
+        assert manager.collection_stats()["total_chunks"] == 1
+
+        manager.reset()
+        assert manager.collection_stats()["total_chunks"] == 0
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_rag\test_librarian.py
+"""Unit tests for LibrarianNode retrieval logic.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T090, T100, T110, T120, T130, T140, T150, T160, T170, T180, T190
+"""
+
+from __future__ import annotations
+
+import importlib
+import logging
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig, RetrievedDocument
+
+
+def _make_doc(
+    file_path: str = "docs/adrs/0201.md",
+    section: str = "## 2. Decision",
+    score: float = 0.85,
+    doc_type: str = "adr",
+) -> RetrievedDocument:
+    """Helper to create a RetrievedDocument for testing."""
+    return RetrievedDocument(
+        file_path=file_path,
+        section=section,
+        content_snippet=f"Content from {file_path}",
+        score=score,
+        doc_type=doc_type,
+    )
+
+
+class TestLibrarianNodeRetrieve:
+    """Tests for LibrarianNode.retrieve()."""
+
+    @pytest.mark.rag
+    def test_threshold_filtering(self, tmp_path: Path) -> None:
+        """T090: LibrarianNode.retrieve filters by threshold (REQ-4)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.7,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        # Mock the embedding provider and vector store
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(score=0.90),
+            _make_doc(file_path="docs/adrs/0202.md", score=0.75),
+            _make_doc(file_path="docs/standards/0001.md", score=0.60),  # Below threshold
+            _make_doc(file_path="docs/standards/0002.md", score=0.50),  # Below threshold
+        ]
+        librarian._vector_store = mock_store
+
+        results = librarian.retrieve("test brief")
+        assert all(doc.score >= 0.7 for doc in results)
+        assert len(results) == 2  # Only 2 above 0.7
+
+    @pytest.mark.rag
+    def test_top_n_limiting(self, tmp_path: Path) -> None:
+        """T100: LibrarianNode.retrieve returns max top_n_results (REQ-4)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.5,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(file_path=f"docs/adrs/020{i}.md", score=0.9 - i * 0.05)
+            for i in range(5)
+        ]
+        librarian._vector_store = mock_store
+
+        results = librarian.retrieve("test brief")
+        assert len(results) == 3  # top_n_results limits to 3
+
+    @pytest.mark.rag
+    def test_threshold_override(self, tmp_path: Path) -> None:
+        """LibrarianNode.retrieve respects explicit threshold override."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.7,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(score=0.90),
+            _make_doc(file_path="docs/adrs/0202.md", score=0.85),
+            _make_doc(file_path="docs/standards/0001.md", score=0.60),
+        ]
+        librarian._vector_store = mock_store
+
+        # Override threshold to 0.8
+        results = librarian.retrieve("test brief", threshold=0.8)
+        assert all(doc.score >= 0.8 for doc in results)
+        assert len(results) == 2
+
+    @pytest.mark.rag
+    def test_all_below_threshold_returns_empty(self, tmp_path: Path) -> None:
+        """All candidates below threshold returns empty list."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.9,
+            top_k_candidates=5,
+            top_n_results=3,
+        )
+        librarian = LibrarianNode(config=config)
+
+        mock_provider = MagicMock()
+        mock_provider.embed_query.return_value = [0.1] * 384
+        librarian._embedding_provider = mock_provider
+
+        mock_store = MagicMock()
+        mock_store.query.return_value = [
+            _make_doc(score=0.60),
+            _make_doc(file_path="docs/adrs/0202.md", score=0.50),
+        ]
+        librarian._vector_store = mock_store
+
+        results = librarian.retrieve("test brief")
+        assert results == []
+
+
+class TestLibrarianNodeAvailability:
+    """Tests for LibrarianNode.check_availability()."""
+
+    def test_no_deps(self) -> None:
+        """T110: check_availability with no deps (REQ-9)."""
+        with patch(
+            "assemblyzero.rag.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.rag.librarian import LibrarianNode
+
+            librarian = LibrarianNode()
+            available, status = librarian.check_availability()
+            assert available is False
+            assert status == "deps_missing"
+
+    @pytest.mark.rag
+    def test_no_store(self, tmp_path: Path) -> None:
+        """T120: check_availability with no store (REQ-8)."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        config = RAGConfig(vector_store_path=tmp_path / "nonexistent_store")
+        librarian = LibrarianNode(config=config)
+        available, status = librarian.check_availability()
+        assert available is False
+        assert status == "unavailable"
+
+    @pytest.mark.rag
+    def test_store_ready(self, tmp_path: Path) -> None:
+        """check_availability succeeds with initialized store."""
+        from assemblyzero.rag.librarian import LibrarianNode
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = RAGConfig(vector_store_path=tmp_path / "store")
+        store = VectorStoreManager(config)
+        store.initialize()
+
+        librarian = LibrarianNode(config=config)
+        available, status = librarian.check_availability()
+        assert available is True
+        assert "Librarian ready" in status
+
+
+class TestLibrarianNodeFormat:
+    """Tests for LibrarianNode.format_context_for_designer()."""
+
+    def test_format_produces_readable_output(self) -> None:
+        """T190: format_context_for_designer produces readable output."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        librarian = LibrarianNode()
+        docs = [
+            _make_doc(file_path="docs/adrs/0201.md", score=0.85),
+            _make_doc(
+                file_path="docs/standards/0005.md",
+                section="## 3. Coverage",
+                score=0.72,
+                doc_type="standard",
+            ),
+        ]
+        formatted = librarian.format_context_for_designer(docs)
+        assert "docs/adrs/0201.md" in formatted
+        assert "docs/standards/0005.md" in formatted
+        assert "0.85" in formatted
+        assert "## 2. Decision" in formatted
+        assert "Retrieved Context (RAG)" in formatted
+
+    def test_format_empty_documents(self) -> None:
+        """Empty document list returns empty string."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        librarian = LibrarianNode()
+        assert librarian.format_context_for_designer([]) == ""
+
+    def test_format_single_document(self) -> None:
+        """Single document formats correctly."""
+        from assemblyzero.rag.librarian import LibrarianNode
+
+        librarian = LibrarianNode()
+        docs = [_make_doc(file_path="docs/adrs/0201.md", score=0.85)]
+        formatted = librarian.format_context_for_designer(docs)
+        assert "docs/adrs/0201.md" in formatted
+        assert "0.85" in formatted
+        assert "adr" in formatted
+        assert "---" in formatted
+
+
+class TestLibrarianNode:
+    """Tests for librarian_node() LangGraph wrapper."""
+
+    def test_deps_missing_graceful(self) -> None:
+        """T130: librarian_node sets rag_status='deps_missing' (REQ-9)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "test brief",
+                "manual_context_paths": [],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+
+    def test_store_unavailable_graceful(self) -> None:
+        """T140: librarian_node sets rag_status='unavailable' (REQ-8)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_librarian_instance = MagicMock()
+            mock_librarian_instance.check_availability.return_value = (
+                False,
+                "unavailable",
+            )
+            mock_librarian_cls.return_value = mock_librarian_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                # Need to re-import since we're patching at module level
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+
+    def test_no_results_above_threshold(self) -> None:
+        """T150: librarian_node sets rag_status='no_results' (REQ-4)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.return_value = []  # No results
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "no_results"
+
+    def test_success_with_info_logging(self, caplog: pytest.LogCaptureFixture) -> None:
+        """T160: librarian_node success with INFO logging (REQ-14)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.return_value = [
+                _make_doc(score=0.85),
+                _make_doc(file_path="docs/standards/0005.md", score=0.75),
+            ]
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief about RAG retrieval",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                with caplog.at_level(logging.INFO):
+                    result = lib_mod.librarian_node(state)
+
+                assert result["rag_status"] == "success"
+                assert len(result["retrieved_context"]) == 2
+                assert any(
+                    "Retrieved 2 documents" in record.message
+                    for record in caplog.records
+                )
+
+    def test_deps_missing_status_from_check_availability(self) -> None:
+        """librarian_node handles deps_missing from check_availability."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (
+                False,
+                "deps_missing",
+            )
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "deps_missing"
+
+    def test_retrieval_exception_graceful(self) -> None:
+        """librarian_node handles retrieval exceptions gracefully."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.side_effect = RuntimeError("Connection lost")
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+                assert result["retrieved_context"] == []
+
+
+class TestMergeContexts:
+    """Tests for merge_contexts()."""
+
+    def test_dedup_by_file_path(self, tmp_path: Path) -> None:
+        """T170: merge_contexts deduplicates by file_path (REQ-7)."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        # Create a manual file
+        manual_file = tmp_path / "standards" / "0005.md"
+        manual_file.parent.mkdir(parents=True)
+        manual_file.write_text("Manual content")
+
+        rag_results = [
+            _make_doc(file_path=str(manual_file), score=0.85),
+            _make_doc(file_path="docs/adrs/0201.md", score=0.75),
+        ]
+        manual_paths = [str(manual_file)]
+
+        merged = merge_contexts(rag_results, manual_paths)
+        # Manual version kept, RAG version of same file removed
+        file_paths = [m["file_path"] for m in merged]
+        assert file_paths.count(str(manual_file)) == 1
+        assert len(merged) == 2  # 1 manual + 1 unique RAG
+
+    def test_manual_first(self, tmp_path: Path) -> None:
+        """T180: merge_contexts puts manual first (REQ-7)."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        manual_file = tmp_path / "manual.md"
+        manual_file.write_text("Manual content")
+
+        rag_results = [
+            _make_doc(file_path="docs/adrs/0201.md", score=0.85),
+        ]
+        manual_paths = [str(manual_file)]
+
+        merged = merge_contexts(rag_results, manual_paths)
+        assert merged[0]["doc_type"] == "manual"
+        assert merged[0]["file_path"] == str(manual_file)
+        assert merged[1]["file_path"] == "docs/adrs/0201.md"
+
+    def test_no_manual_no_rag(self) -> None:
+        """Empty inputs produce empty output."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        merged = merge_contexts([], [])
+        assert merged == []
+
+    def test_manual_score_is_one(self, tmp_path: Path) -> None:
+        """Manual context entries have score 1.0."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        manual_file = tmp_path / "manual.md"
+        manual_file.write_text("Manual content")
+
+        merged = merge_contexts([], [str(manual_file)])
+        assert len(merged) == 1
+        assert merged[0]["score"] == 1.0
+        assert merged[0]["doc_type"] == "manual"
+        assert merged[0]["section"] == "Full Document"
+
+    def test_manual_file_not_found(self, tmp_path: Path) -> None:
+        """Missing manual file is handled gracefully with error content."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        missing_path = str(tmp_path / "nonexistent.md")
+        merged = merge_contexts([], [missing_path])
+        assert len(merged) == 1
+        assert merged[0]["file_path"] == missing_path
+        assert merged[0]["doc_type"] == "manual"
+
+    def test_rag_only(self) -> None:
+        """RAG results without manual context work correctly."""
+        from assemblyzero.nodes.librarian import merge_contexts
+
+        rag_results = [
+            _make_doc(file_path="docs/adrs/0201.md", score=0.85),
+            _make_doc(file_path="docs/standards/0005.md", score=0.72),
+        ]
+        merged = merge_contexts(rag_results, [])
+        assert len(merged) == 2
+        assert merged[0]["file_path"] == "docs/adrs/0201.md"
+        assert merged[1]["file_path"] == "docs/standards/0005.md"
+
+
+class TestQueryKnowledgeBase:
+    """Tests for query_knowledge_base() convenience function."""
+
+    @pytest.mark.rag
+    def test_convenience_function(self, tmp_path: Path) -> None:
+        """query_knowledge_base delegates to LibrarianNode.retrieve."""
+        from assemblyzero.rag.librarian import LibrarianNode, query_knowledge_base
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            similarity_threshold=0.5,
+        )
+
+        with patch.object(LibrarianNode, "retrieve", return_value=[_make_doc()]) as mock_retrieve:
+            results = query_knowledge_base("test query", config=config)
+            assert len(results) == 1
+            mock_retrieve.assert_called_once_with("test query")
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\integration\test_rag_workflow.py
+"""Integration test: end-to-end LLD workflow with RAG.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T200, T210, T220
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from assemblyzero.rag.models import RAGConfig
+
+
+@pytest.mark.integration
+@pytest.mark.rag
+class TestRagWorkflowIntegration:
+    """Integration tests requiring [rag] extra and real ChromaDB."""
+
+    def test_full_ingestion(self, tmp_path: Path) -> None:
+        """T200: Full ingestion indexes fixture docs (REQ-10)."""
+        from assemblyzero.rag.chunker import chunk_markdown_document
+        from assemblyzero.rag.embeddings import create_embedding_provider
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            source_directories=["tests/fixtures/rag"],
+        )
+
+        store = VectorStoreManager(config)
+        store.initialize()
+        provider = create_embedding_provider(config)
+
+        fixtures_dir = Path("tests/fixtures/rag")
+        files = list(fixtures_dir.glob("*.md"))
+        assert len(files) >= 3, "Expected at least 3 fixture files"
+
+        total_files = 0
+        total_chunks = 0
+        for md_file in files:
+            chunks = chunk_markdown_document(md_file)
+            if chunks:
+                texts = [c for c, _m in chunks]
+                embeddings = provider.embed_texts(texts)
+                added = store.add_chunks(chunks, embeddings)
+                total_files += 1
+                total_chunks += added
+
+        assert total_files >= 3
+        assert total_chunks > 0
+        stats = store.collection_stats()
+        assert stats["total_chunks"] == total_chunks
+
+    def test_incremental_ingestion_skips_unchanged(self, tmp_path: Path) -> None:
+        """T210: Incremental ingestion skips unchanged files (REQ-10)."""
+        config = RAGConfig(
+            vector_store_path=tmp_path / "store",
+            source_directories=["tests/fixtures/rag"],
+        )
+
+        # First: full ingestion
+        from tools.rebuild_knowledge_base import run_full_ingestion, run_incremental_ingestion
+
+        full_summary = run_full_ingestion(config, verbose=False)
+        assert full_summary.files_indexed >= 3
+
+        # Second: incremental should skip all
+        inc_summary = run_incremental_ingestion(config, verbose=False)
+        assert inc_summary.files_skipped >= full_summary.files_indexed
+        assert inc_summary.files_indexed == 0
+
+    def test_lld_workflow_graph_execution(self, tmp_path: Path) -> None:
+        """T220: Integration: librarian_node in LLD workflow graph."""
+        from assemblyzero.rag.chunker import chunk_markdown_document
+        from assemblyzero.rag.embeddings import create_embedding_provider
+        from assemblyzero.rag.models import RAGConfig
+        from assemblyzero.rag.vector_store import VectorStoreManager
+
+        # Build a real vector store with fixture data
+        config = RAGConfig(vector_store_path=tmp_path / "store")
+
+        store = VectorStoreManager(config)
+        store.initialize()
+        provider = create_embedding_provider(config)
+
+        fixtures_dir = Path("tests/fixtures/rag")
+        for md_file in fixtures_dir.glob("*.md"):
+            chunks = chunk_markdown_document(md_file)
+            if chunks:
+                texts = [c for c, _m in chunks]
+                embeddings = provider.embed_texts(texts)
+                store.add_chunks(chunks, embeddings)
+
+        # Now test the librarian_node directly with real store
+        from assemblyzero.nodes.librarian import librarian_node
+
+        state = {
+            "issue_brief": "Implement automated testing pipeline with code review",
+            "manual_context_paths": [],
+            "retrieved_context": [],
+            "rag_status": "",
+            "designer_output": "",
+        }
+
+        # Patch RAGConfig to point to our tmp store
+        with patch(
+            "assemblyzero.nodes.librarian.RAGConfig",
+            return_value=config,
+        ):
+            result = librarian_node(state)
+
+        # Should succeed since we have a real store with data
+        assert result["rag_status"] in ("success", "no_results")
+        if result["rag_status"] == "success":
+            assert len(result["retrieved_context"]) > 0
+
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\integration\test_rag_degradation.py
+"""Integration test: graceful degradation without deps/store.
+
+Issue #88: The Librarian - Automated Context Retrieval
+Tests: T230
+"""
+
+from __future__ import annotations
+
+import importlib
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+@pytest.mark.integration
+class TestRagDegradation:
+    """Tests for graceful degradation when RAG is unavailable."""
+
+    def test_workflow_continues_without_deps(self) -> None:
+        """T230: Integration: workflow degrades without deps (REQ-9)."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb, sentence-transformers"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "Test brief for degradation testing",
+                "manual_context_paths": ["docs/standards/0005.md"],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+            # Workflow can continue — no exception raised
+
+    def test_workflow_continues_without_store(self) -> None:
+        """Workflow degrades gracefully when vector store is missing."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (False, "unavailable")
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "Test brief",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+                assert result["retrieved_context"] == []
+
+    def test_retrieval_exception_does_not_crash_workflow(self) -> None:
+        """Workflow degrades gracefully when retrieval raises an exception."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(True, "available"),
+        ):
+            mock_librarian_cls = MagicMock()
+            mock_instance = MagicMock()
+            mock_instance.check_availability.return_value = (True, "ready")
+            mock_instance.retrieve.side_effect = RuntimeError("ChromaDB corrupted")
+            mock_librarian_cls.return_value = mock_instance
+
+            with patch(
+                "assemblyzero.nodes.librarian.LibrarianNode",
+                mock_librarian_cls,
+            ):
+                from assemblyzero.nodes import librarian as lib_mod
+
+                importlib.reload(lib_mod)
+
+                state = {
+                    "issue_brief": "Test brief for exception handling",
+                    "manual_context_paths": [],
+                    "retrieved_context": [],
+                    "rag_status": "",
+                    "designer_output": "",
+                }
+
+                # Should NOT raise — graceful degradation
+                result = lib_mod.librarian_node(state)
+                assert result["rag_status"] == "unavailable"
+                assert result["retrieved_context"] == []
+
+    def test_manual_context_still_works_without_rag(self) -> None:
+        """Manual context paths are preserved even when RAG is unavailable."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "Test brief",
+                "manual_context_paths": [
+                    "docs/standards/0005.md",
+                    "docs/adrs/0201.md",
+                ],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+            # Downstream nodes can still use manual_context_paths from state
+            # (the node only updates retrieved_context and rag_status)
+            assert "manual_context_paths" not in result  # Not overwritten
+
+    def test_empty_issue_brief_does_not_crash(self) -> None:
+        """Empty issue brief degrades gracefully without crashing."""
+        with patch(
+            "assemblyzero.nodes.librarian.check_rag_dependencies",
+            return_value=(False, "Missing: chromadb"),
+        ):
+            from assemblyzero.nodes.librarian import librarian_node
+
+            state = {
+                "issue_brief": "",
+                "manual_context_paths": [],
+                "retrieved_context": [],
+                "rag_status": "",
+                "designer_output": "",
+            }
+
+            result = librarian_node(state)
+            assert result["rag_status"] == "deps_missing"
+            assert result["retrieved_context"] == []
+
+
+```
+
+## Previously Implemented Files
+
+These files have already been implemented. Use them for imports and references:
+
+### assemblyzero/rag/__init__.py (signatures)
+
+```python
+"""RAG (Retrieval-Augmented Generation) subsystem for AssemblyZero.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+This module provides optional RAG capabilities for augmenting LLD design
+with relevant governance documents. All heavy dependencies (chromadb,
+sentence-transformers) are optional and loaded conditionally.
+
+Install RAG dependencies: pip install assemblyzero[rag]
+"""
+
+from assemblyzero.rag.models import (
+    ChunkMetadata,
+    IngestionSummary,
+    RAGConfig,
+    RetrievedDocument,
+)
+
+from assemblyzero.rag.dependencies import check_rag_dependencies, require_rag_dependencies
+
+def _reset_singletons() -> None:
+    """Reset any cached singleton state in RAG submodules.
+
+Called by test fixtures (tests/unit/test_rag/conftest.py) after each"""
+    ...
+
+__all__ = [
+    "ChunkMetadata",
+    "IngestionSummary",
+    "RAGConfig",
+    "RetrievedDocument",
+    "check_rag_dependencies",
+    "require_rag_dependencies",
+    "_reset_singletons",
+]
+```
+
+### assemblyzero/rag/models.py (signatures)
+
+```python
+"""Data models for the RAG subsystem.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+These models have no external dependencies and can be imported
+without the [rag] optional extra installed.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from pathlib import Path
+
+class ChunkMetadata:
+
+    """Metadata attached to each indexed document chunk."""
+
+class RetrievedDocument:
+
+    """A single document chunk retrieved from the vector store."""
+
+    def to_dict(self) -> dict:
+    """Convert to dictionary for state serialization."""
+    ...
+
+class RAGConfig:
+
+    """Configuration for the Librarian RAG system."""
+
+class IngestionSummary:
+
+    """Summary of a knowledge base ingestion run."""
+```
+
+### assemblyzero/rag/dependencies.py (signatures)
+
+```python
+"""Conditional import checker for RAG optional dependencies.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Provides friendly error messages when chromadb or sentence-transformers
+are not installed. This module itself has zero external dependencies.
+"""
+
+from __future__ import annotations
+
+def check_rag_dependencies() -> tuple[bool, str]:
+    """Check if RAG optional dependencies (chromadb, sentence-transformers) are installed.
+
+Returns:"""
+    ...
+
+def require_rag_dependencies() -> None:
+    """Raise ImportError with friendly message if RAG dependencies unavailable."""
+    ...
+
+_INSTALL_MSG = "RAG dependencies not installed. Install with: pip install assemblyzero[rag]"
+```
+
+### assemblyzero/rag/chunker.py (signatures)
+
+```python
+"""Markdown document chunker for RAG ingestion.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Splits markdown documents on H1/H2 headers to create semantically
+meaningful chunks for vector store indexing. Preserves metadata
+about source file, section title, and document type.
+"""
+
+from __future__ import annotations
+
+import re
+
+from datetime import datetime, timezone
+
+from pathlib import Path
+
+from assemblyzero.rag.models import ChunkMetadata
+
+def chunk_markdown_document(
+    file_path: Path,
+    max_tokens: int = 512,
+) -> list[tuple[str, ChunkMetadata]]:
+    """Split a markdown document into chunks on H1/H2 headers.
+
+Args:"""
+    ...
+
+def detect_doc_type(file_path: Path) -> str:
+    """Determine document type from file path.
+
+Checks directory structure first, then falls back to filename patterns."""
+    ...
+
+def split_on_headers(content: str) -> list[tuple[str, str]]:
+    """Split markdown content on H1/H2 headers.
+
+Returns list of (section_title, section_content) tuples."""
+    ...
+
+def _split_on_paragraphs(text: str, max_chars: int) -> list[str]:
+    """Split text on paragraph boundaries (double newlines) to fit max_chars."""
+    ...
+
+_HEADER_PATTERN = re.compile(r"^(#{1,2})\s+(.+)$", re.MULTILINE)
+
+_CHARS_PER_TOKEN = 4
+```
+
+### assemblyzero/rag/embeddings.py (full)
+
+```python
+"""Embedding provider abstraction for RAG.
+
+Issue #88: The Librarian - Automated Context Retrieval
+
+Provides a strategy pattern for embedding generation. Default is local
+sentence-transformers (all-MiniLM-L6-v2). External API providers
+(OpenAI, Gemini) can be added as future extensions.
+
+Requires: pip install assemblyzero[rag]
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+from assemblyzero.rag.dependencies import require_rag_dependencies
+from assemblyzero.rag.models import RAGConfig
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+
+class EmbeddingProvider(ABC):
+    """Abstract base for embedding generation."""
+
+    @abstractmethod
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of text strings into vector representations."""
+        ...
+
+    @abstractmethod
+    def embed_query(self, query: str) -> list[float]:
+        """Embed a single query string for similarity search."""
+        ...
+
+
+class LocalEmbeddingProvider(EmbeddingProvider):
+    """Local embedding using sentence-transformers.
+
+    Default model: all-MiniLM-L6-v2 (384 dimensions, ~80MB).
+    Model is loaded lazily on first use.
+    """
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Initialize with model name. Loads model on first use (lazy)."""
+        require_rag_dependencies()
+        self._model_name = model_name
+        self._model: SentenceTransformer | None = None
+
+    def _get_model(self) -> SentenceTransformer:
+        """Lazily load the sentence-transformers model."""
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(self._model_name)
+        return self._model
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of text strings into vector representations."""
+        if not texts:
+            return []
+        model = self._get_model()
+        embeddings = model.encode(texts, convert_to_numpy=True)
+        return [embedding.tolist() for embedding in embeddings]
+
+    def embed_query(self, query: str) -> list[float]:
+        """Embed a single query string for similarity search."""
+        model = self._get_model()
+        # Pass as single-element list and extract first result to guarantee
+        # a 1D array regardless of sentence-transformers version behavior.
+        embeddings = model.encode([query], convert_to_numpy=True)
+        return embeddings[0].tolist()
+
+
+def create_embedding_provider(config: RAGConfig) -> EmbeddingProvider:
+    """Factory: create the appropriate embedding provider based on config.
+
+    Args:
+        config: RAG configuration with embedding_provider and embedding_model.
+
+    Returns:
+        An initialized EmbeddingProvider instance.
+
+    Raises:
+        ValueError: For unknown provider names.
+        NotImplementedError: For providers not yet implemented.
+    """
+    if config.embedding_provider == "local":
+        return LocalEmbeddingProvider(model_name=config.embedding_model)
+    elif config.embedding_provider == "openai":
+        raise NotImplementedError("OpenAI embedding provider not yet implemented")
+    elif config.embedding_provider == "gemini":
+        raise NotImplementedError("Gemini embedding provider not yet implemented")
+    else:
+        raise ValueError(f"Unknown embedding provider: {config.embedding_provider}")
+```
+
+## Previous Attempt Failed
+
+The previous implementation had this error:
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 75 items / 8 deselected / 67 selected
+
+tests/unit/test_rag/test_models.py::TestChunkMetadata::test_creation PASSED [  1%]
+tests/unit/test_rag/test_models.py::TestChunkMetadata::test_creation ERROR [  1%]
+tests/unit/test_rag/test_models.py::TestChunkMetadata::test_frozen PASSED [  2%]
+tests/unit/test_rag/test_models.py::TestChunkMetadata::test_frozen ERROR [  2%]
+tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_creation PASSED [  4%]
+tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_creation ERROR [  4%]
+tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_to_dict PASSED [  5%]
+tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_to_dict ERROR [  5%]
+tests/unit/test_rag/test_models.py::TestRAGConfig::test_defaults PASSED  [  7%]
+tests/unit/test_rag/test_models.py::TestRAGConfig::test_defaults ERROR   [  7%]
+tests/unit/test_rag/test_models.py::TestRAGConfig::test_custom_values PASSED [  8%]
+tests/unit/test_rag/test_models.py::TestRAGConfig::test_custom_values ERROR [  8%]
+tests/unit/test_rag/test_models.py::TestIngestionSummary::test_defaults PASSED [ 10%]
+tests/unit/test_rag/test_models.py::TestIngestionSummary::test_defaults ERROR [ 10%]
+tests/unit/test_rag/test_models.py::TestIngestionSummary::test_mutable_errors PASSED [ 11%]
+tests/unit/test_rag/test_models.py::TestIngestionSummary::test_mutable_errors ERROR [ 11%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_chromadb PASSED [ 13%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_chromadb ERROR [ 13%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_sentence_transformers PASSED [ 14%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_sentence_transformers ERROR [ 14%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_all_dependencies_available PASSED [ 16%]
+tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_all_dependencies_available ERROR [ 16%]
+tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_raises_when_missing PASSED [ 17%]
+tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_raises_when_missing ERROR [ 17%]
+tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_succeeds_when_available PASSED [ 19%]
+tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_succeeds_when_available ERROR [ 19%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_split_h1_h2 PASSED [ 20%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_split_h1_h2 ERROR [ 20%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_no_headers PASSED [ 22%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_no_headers ERROR [ 22%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_empty_content PASSED [ 23%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_empty_content ERROR [ 23%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_whitespace_only PASSED [ 25%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_whitespace_only ERROR [ 25%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_h3_not_split PASSED [ 26%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_h3_not_split ERROR [ 26%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_content_before_first_header PASSED [ 28%]
+tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_content_before_first_header ERROR [ 28%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_adr PASSED  [ 29%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_adr ERROR   [ 29%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_standard PASSED [ 31%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_standard ERROR [ 31%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_lld PASSED  [ 32%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_lld ERROR   [ 32%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_unknown PASSED [ 34%]
+tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_unknown ERROR [ 34%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_fixture_adr FAILED [ 35%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_fixture_adr ERROR [ 35%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_nonexistent_file PASSED [ 37%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_nonexistent_file ERROR [ 37%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_empty_file PASSED [ 38%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_empty_file ERROR [ 38%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_max_tokens_splitting PASSED [ 40%]
+tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_max_tokens_splitting ERROR [ 40%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_unknown_provider PASSED [ 41%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_unknown_provider ERROR [ 41%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_openai_not_implemented PASSED [ 43%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_openai_not_implemented ERROR [ 43%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_gemini_not_implemented PASSED [ 44%]
+tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_gemini_not_implemented ERROR [ 44%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_query_dimensions FAILED [ 46%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_query_dimensions ERROR [ 46%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_batch PASSED [ 47%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_batch ERROR [ 47%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_empty PASSED [ 49%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_empty ERROR [ 49%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_lazy_model_loading PASSED [ 50%]
+tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_lazy_model_loading ERROR [ 50%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_is_initialized_missing_dir PASSED [ 52%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_is_initialized_missing_dir ERROR [ 52%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_initialize_creates_store PASSED [ 53%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_initialize_creates_store ERROR [ 53%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_and_query_round_trip PASSED [ 55%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_and_query_round_trip ERROR [ 55%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_query_empty_collection PASSED [ 56%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_query_empty_collection ERROR [ 56%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_chunks_length_mismatch PASSED [ 58%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_chunks_length_mismatch ERROR [ 58%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_delete_by_file FAILED [ 59%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_delete_by_file ERROR [ 59%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_collection_stats PASSED [ 61%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_collection_stats ERROR [ 61%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_get_indexed_files PASSED [ 62%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_get_indexed_files ERROR [ 62%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_persistence_across_instances FAILED [ 64%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_persistence_across_instances ERROR [ 64%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_reset PASSED [ 65%]
+tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_reset ERROR [ 65%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_filtering PASSED [ 67%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_filtering ERROR [ 67%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_top_n_limiting PASSED [ 68%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_top_n_limiting ERROR [ 68%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_override PASSED [ 70%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_override ERROR [ 70%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_all_below_threshold_returns_empty PASSED [ 71%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_all_below_threshold_returns_empty ERROR [ 71%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_deps PASSED [ 73%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_deps ERROR [ 73%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_store PASSED [ 74%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_store ERROR [ 74%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_store_ready FAILED [ 76%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_store_ready ERROR [ 76%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_produces_readable_output PASSED [ 77%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_produces_readable_output ERROR [ 77%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_empty_documents PASSED [ 79%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_empty_documents ERROR [ 79%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_single_document PASSED [ 80%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_single_document ERROR [ 80%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_graceful PASSED [ 82%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_graceful ERROR [ 82%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_store_unavailable_graceful FAILED [ 83%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_store_unavailable_graceful ERROR [ 83%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_no_results_above_threshold FAILED [ 85%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_no_results_above_threshold ERROR [ 85%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_success_with_info_logging FAILED [ 86%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_success_with_info_logging ERROR [ 86%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_status_from_check_availability FAILED [ 88%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_status_from_check_availability ERROR [ 88%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_retrieval_exception_graceful FAILED [ 89%]
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_retrieval_exception_graceful ERROR [ 89%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_dedup_by_file_path PASSED [ 91%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_dedup_by_file_path ERROR [ 91%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_first PASSED [ 92%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_first ERROR [ 92%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_no_manual_no_rag PASSED [ 94%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_no_manual_no_rag ERROR [ 94%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_score_is_one PASSED [ 95%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_score_is_one ERROR [ 95%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_file_not_found PASSED [ 97%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_file_not_found ERROR [ 97%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_rag_only PASSED [ 98%]
+tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_rag_only ERROR [ 98%]
+tests/unit/test_rag/test_librarian.py::TestQueryKnowledgeBase::test_convenience_function PASSED [100%]
+tests/unit/test_rag/test_librarian.py::TestQueryKnowledgeBase::test_convenience_function ERROR [100%]
+
+=================================== ERRORS ====================================
+____________ ERROR at teardown of TestChunkMetadata.test_creation _____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____________ ERROR at teardown of TestChunkMetadata.test_frozen ______________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__________ ERROR at teardown of TestRetrievedDocument.test_creation ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___________ ERROR at teardown of TestRetrievedDocument.test_to_dict ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+______________ ERROR at teardown of TestRAGConfig.test_defaults _______________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____________ ERROR at teardown of TestRAGConfig.test_custom_values ____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___________ ERROR at teardown of TestIngestionSummary.test_defaults ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+________ ERROR at teardown of TestIngestionSummary.test_mutable_errors ________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____ ERROR at teardown of TestCheckRagDependencies.test_missing_chromadb _____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestCheckRagDependencies.test_missing_sentence_transformers _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestCheckRagDependencies.test_all_dependencies_available _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestRequireRagDependencies.test_raises_when_missing ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestRequireRagDependencies.test_succeeds_when_available _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__________ ERROR at teardown of TestSplitOnHeaders.test_split_h1_h2 ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___________ ERROR at teardown of TestSplitOnHeaders.test_no_headers ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_________ ERROR at teardown of TestSplitOnHeaders.test_empty_content __________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+________ ERROR at teardown of TestSplitOnHeaders.test_whitespace_only _________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__________ ERROR at teardown of TestSplitOnHeaders.test_h3_not_split __________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestSplitOnHeaders.test_content_before_first_header ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______________ ERROR at teardown of TestDetectDocType.test_adr _______________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____________ ERROR at teardown of TestDetectDocType.test_standard _____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______________ ERROR at teardown of TestDetectDocType.test_lld _______________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____________ ERROR at teardown of TestDetectDocType.test_unknown _____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____ ERROR at teardown of TestChunkMarkdownDocument.test_chunk_fixture_adr ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestChunkMarkdownDocument.test_chunk_nonexistent_file __
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____ ERROR at teardown of TestChunkMarkdownDocument.test_chunk_empty_file _____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestChunkMarkdownDocument.test_chunk_max_tokens_splitting _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestCreateEmbeddingProvider.test_unknown_provider ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestCreateEmbeddingProvider.test_openai_not_implemented _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestCreateEmbeddingProvider.test_gemini_not_implemented _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestLocalEmbeddingProvider.test_embed_query_dimensions _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLocalEmbeddingProvider.test_embed_texts_batch ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLocalEmbeddingProvider.test_embed_texts_empty ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLocalEmbeddingProvider.test_lazy_model_loading ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestVectorStoreManager.test_is_initialized_missing_dir _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestVectorStoreManager.test_initialize_creates_store __
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestVectorStoreManager.test_add_and_query_round_trip __
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestVectorStoreManager.test_query_empty_collection ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestVectorStoreManager.test_add_chunks_length_mismatch _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______ ERROR at teardown of TestVectorStoreManager.test_delete_by_file _______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+______ ERROR at teardown of TestVectorStoreManager.test_collection_stats ______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____ ERROR at teardown of TestVectorStoreManager.test_get_indexed_files ______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestVectorStoreManager.test_persistence_across_instances _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___________ ERROR at teardown of TestVectorStoreManager.test_reset ____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLibrarianNodeRetrieve.test_threshold_filtering ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____ ERROR at teardown of TestLibrarianNodeRetrieve.test_top_n_limiting ______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLibrarianNodeRetrieve.test_threshold_override ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestLibrarianNodeRetrieve.test_all_below_threshold_returns_empty _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______ ERROR at teardown of TestLibrarianNodeAvailability.test_no_deps _______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+______ ERROR at teardown of TestLibrarianNodeAvailability.test_no_store _______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_____ ERROR at teardown of TestLibrarianNodeAvailability.test_store_ready _____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestLibrarianNodeFormat.test_format_produces_readable_output _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestLibrarianNodeFormat.test_format_empty_documents ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestLibrarianNodeFormat.test_format_single_document ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+______ ERROR at teardown of TestLibrarianNode.test_deps_missing_graceful ______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+------------------------------ Captured log call ------------------------------
+WARNING  assemblyzero.nodes.librarian:librarian.py:39 [Librarian] RAG dependencies not installed. Run 'pip install assemblyzero[rag]'. Message: Missing: chromadb
+___ ERROR at teardown of TestLibrarianNode.test_store_unavailable_graceful ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+___ ERROR at teardown of TestLibrarianNode.test_no_results_above_threshold ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____ ERROR at teardown of TestLibrarianNode.test_success_with_info_logging ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_ ERROR at teardown of TestLibrarianNode.test_deps_missing_status_from_check_availability _
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__ ERROR at teardown of TestLibrarianNode.test_retrieval_exception_graceful ___
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______ ERROR at teardown of TestMergeContexts.test_dedup_by_file_path ________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+__________ ERROR at teardown of TestMergeContexts.test_manual_first ___________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+________ ERROR at teardown of TestMergeContexts.test_no_manual_no_rag _________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+_______ ERROR at teardown of TestMergeContexts.test_manual_score_is_one _______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+______ ERROR at teardown of TestMergeContexts.test_manual_file_not_found ______
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____________ ERROR at teardown of TestMergeContexts.test_rag_only _____________
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+____ ERROR at teardown of TestQueryKnowledgeBase.test_convenience_function ____
+tests\unit\test_rag\conftest.py:179: in reset_rag_singletons
+    from assemblyzero.rag import _reset_singletons
+E   ImportError: cannot import name '_reset_singletons' from 'assemblyzero.rag' (C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\rag\__init__.py)
+================================== FAILURES ===================================
+______________ TestChunkMarkdownDocument.test_chunk_fixture_adr _______________
+tests\unit\test_rag\test_chunker.py:103: in test_chunk_fixture_adr
+    assert metadata.doc_type == "adr"
+E   AssertionError: assert 'unknown' == 'adr'
+E     
+E     - adr
+E     + unknown
+___________ TestLocalEmbeddingProvider.test_embed_query_dimensions ____________
+tests\unit\test_rag\test_embeddings.py:54: in test_embed_query_dimensions
+    assert len(embedding) == 384
+E   assert 1 == 384
+E    +  where 1 = len([[0.8278271555900574, 0.20759879052639008, 0.6070106029510498, 0.3087627589702606, 0.6899394989013672, 0.918113648891449, ...]])
+_________________ TestVectorStoreManager.test_delete_by_file __________________
+tests\unit\test_rag\test_vector_store.py:154: in test_delete_by_file
+    deleted = manager.delete_by_file("file_a.md")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+assemblyzero\rag\vector_store.py:205: in delete_by_file
+    results = collection.get(
+E   TypeError: FakeCollection.get() got an unexpected keyword argument 'where'
+__________ TestVectorStoreManager.test_persistence_across_instances ___________
+tests\unit\test_rag\test_vector_store.py:223: in test_persistence_across_instances
+    assert len(results) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+_______________ TestLibrarianNodeAvailability.test_store_ready ________________
+tests\unit\test_rag\test_librarian.py:193: in test_store_ready
+    assert available is True
+E   assert False is True
+______________ TestLibrarianNode.test_store_unavailable_graceful ______________
+tests\unit\test_rag\test_librarian.py:277: in test_store_unavailable_graceful
+    with patch(
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'assemblyzero.nodes.librarian' from 'C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\nodes\\librarian.py'> does not have the attribute 'LibrarianNode'
+______________ TestLibrarianNode.test_no_results_above_threshold ______________
+tests\unit\test_rag\test_librarian.py:308: in test_no_results_above_threshold
+    with patch(
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'assemblyzero.nodes.librarian' from 'C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\nodes\\librarian.py'> does not have the attribute 'LibrarianNode'
+______________ TestLibrarianNode.test_success_with_info_logging _______________
+tests\unit\test_rag\test_librarian.py:341: in test_success_with_info_logging
+    with patch(
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'assemblyzero.nodes.librarian' from 'C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\nodes\\librarian.py'> does not have the attribute 'LibrarianNode'
+_____ TestLibrarianNode.test_deps_missing_status_from_check_availability ______
+tests\unit\test_rag\test_librarian.py:380: in test_deps_missing_status_from_check_availability
+    with patch(
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'assemblyzero.nodes.librarian' from 'C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\nodes\\librarian.py'> does not have the attribute 'LibrarianNode'
+_____________ TestLibrarianNode.test_retrieval_exception_graceful _____________
+tests\unit\test_rag\test_librarian.py:410: in test_retrieval_exception_graceful
+    with patch(
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1503: in __enter__
+    original, local = self.get_original()
+                      ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python314\Lib\unittest\mock.py:1473: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'assemblyzero.nodes.librarian' from 'C:\\Users\\mcwiz\\Projects\\AssemblyZero\\assemblyzero\\nodes\\librarian.py'> does not have the attribute 'LibrarianNode'
+============================== warnings summary ===============================
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_graceful
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_graceful
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                         Stmts   Miss  Cover   Missing
+----------------------------------------------------------
+assemblyzero\rag\models.py      36      0   100%
+----------------------------------------------------------
+TOTAL                           36      0   100%
+Required test coverage of 95% reached. Total coverage: 100.00%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_fixture_adr
+FAILED tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_query_dimensions
+FAILED tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_delete_by_file
+FAILED tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_persistence_across_instances
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_store_ready
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_store_unavailable_graceful
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_no_results_above_threshold
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_success_with_info_logging
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_status_from_check_availability
+FAILED tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_retrieval_exception_graceful
+ERROR tests/unit/test_rag/test_models.py::TestChunkMetadata::test_creation - ...
+ERROR tests/unit/test_rag/test_models.py::TestChunkMetadata::test_frozen - Im...
+ERROR tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_creation
+ERROR tests/unit/test_rag/test_models.py::TestRetrievedDocument::test_to_dict
+ERROR tests/unit/test_rag/test_models.py::TestRAGConfig::test_defaults - Impo...
+ERROR tests/unit/test_rag/test_models.py::TestRAGConfig::test_custom_values
+ERROR tests/unit/test_rag/test_models.py::TestIngestionSummary::test_defaults
+ERROR tests/unit/test_rag/test_models.py::TestIngestionSummary::test_mutable_errors
+ERROR tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_chromadb
+ERROR tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_missing_sentence_transformers
+ERROR tests/unit/test_rag/test_dependencies.py::TestCheckRagDependencies::test_all_dependencies_available
+ERROR tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_raises_when_missing
+ERROR tests/unit/test_rag/test_dependencies.py::TestRequireRagDependencies::test_succeeds_when_available
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_split_h1_h2
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_no_headers
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_empty_content
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_whitespace_only
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_h3_not_split
+ERROR tests/unit/test_rag/test_chunker.py::TestSplitOnHeaders::test_content_before_first_header
+ERROR tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_adr - Impo...
+ERROR tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_standard
+ERROR tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_lld - Impo...
+ERROR tests/unit/test_rag/test_chunker.py::TestDetectDocType::test_unknown - ...
+ERROR tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_fixture_adr
+ERROR tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_nonexistent_file
+ERROR tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_empty_file
+ERROR tests/unit/test_rag/test_chunker.py::TestChunkMarkdownDocument::test_chunk_max_tokens_splitting
+ERROR tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_unknown_provider
+ERROR tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_openai_not_implemented
+ERROR tests/unit/test_rag/test_embeddings.py::TestCreateEmbeddingProvider::test_gemini_not_implemented
+ERROR tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_query_dimensions
+ERROR tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_batch
+ERROR tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_embed_texts_empty
+ERROR tests/unit/test_rag/test_embeddings.py::TestLocalEmbeddingProvider::test_lazy_model_loading
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_is_initialized_missing_dir
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_initialize_creates_store
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_and_query_round_trip
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_query_empty_collection
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_add_chunks_length_mismatch
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_delete_by_file
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_collection_stats
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_get_indexed_files
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_persistence_across_instances
+ERROR tests/unit/test_rag/test_vector_store.py::TestVectorStoreManager::test_reset
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_filtering
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_top_n_limiting
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_threshold_override
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeRetrieve::test_all_below_threshold_returns_empty
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_deps
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_no_store
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeAvailability::test_store_ready
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_produces_readable_output
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_empty_documents
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNodeFormat::test_format_single_document
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_graceful
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_store_unavailable_graceful
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_no_results_above_threshold
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_success_with_info_logging
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_deps_missing_status_from_check_availability
+ERROR tests/unit/test_rag/test_librarian.py::TestLibrarianNode::test_retrieval_exception_graceful
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_dedup_by_file_path
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_first
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_no_manual_no_rag
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_score_is_one
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_manual_file_not_found
+ERROR tests/unit/test_rag/test_librarian.py::TestMergeContexts::test_rag_only
+ERROR tests/unit/test_rag/test_librarian.py::TestQueryKnowledgeBase::test_convenience_function
+===== 10 failed, 57 passed, 8 deselected, 2 warnings, 67 errors in 1.63s ======
+
+
+```
+
+Fix the issue in your implementation.
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block

@@ -1,23 +1,32 @@
-"""RAG infrastructure for vector-based document retrieval.
+"""RAG (Retrieval-Augmented Generation) subsystem for AssemblyZero.
 
 Issue #113: Vector Database Infrastructure (RAG Foundation)
+Issue #88: The Librarian - Automated Context Retrieval
 
 Public API:
-    - get_store() — singleton VectorStore
-    - get_query_engine() — singleton QueryEngine wired with store + embeddings
-    - RAGConfig — configuration dataclass
-    - TextChunker, TextChunk — document chunking utilities
-    - QueryEngine, QueryResult, QueryResponse — query interface
-    - VectorStore — store lifecycle management
-    - EmbeddingProvider — local embedding generation
-    - CollectionManager — collection CRUD
-    - Error classes — RAGError hierarchy
+    Foundation (#113):
+        - get_store() — singleton VectorStore
+        - get_query_engine() — singleton QueryEngine wired with store + embeddings
+        - RAGConfig (config.py) — configuration dataclass
+        - TextChunker, TextChunk — document chunking utilities
+        - QueryEngine, QueryResult, QueryResponse — query interface
+        - VectorStore — store lifecycle management
+        - EmbeddingProvider — local embedding generation
+        - CollectionManager — collection CRUD
+        - Error classes — RAGError hierarchy
+
+    Librarian (#88):
+        - ChunkMetadata, IngestionSummary, RetrievedDocument — models
+        - check_rag_dependencies, require_rag_dependencies — dependency checks
+
+Install RAG dependencies: pip install assemblyzero[rag]
 """
 from __future__ import annotations
 
 import threading
 from typing import TYPE_CHECKING
 
+# Issue #113 exports (foundation)
 from assemblyzero.rag.config import RAGConfig
 from assemblyzero.rag.errors import (
     CollectionNotFoundError,
@@ -28,13 +37,22 @@ from assemblyzero.rag.errors import (
 )
 from assemblyzero.rag.chunking import TextChunk, TextChunker
 
+# Issue #88 exports (librarian)
+from assemblyzero.rag.models import (
+    ChunkMetadata,
+    IngestionSummary,
+    RetrievedDocument,
+)
+from assemblyzero.rag.dependencies import check_rag_dependencies, require_rag_dependencies
+
 if TYPE_CHECKING:
     from assemblyzero.rag.store import VectorStore
-    from assemblyzero.rag.embeddings import EmbeddingProvider
+    from assemblyzero.rag.embeddings import EmbeddingProvider as _EmbeddingProvider113
     from assemblyzero.rag.collections import CollectionManager
     from assemblyzero.rag.query import QueryEngine, QueryResult, QueryResponse
 
 __all__ = [
+    # #113 foundation
     "get_store",
     "get_query_engine",
     "RAGConfig",
@@ -45,7 +63,16 @@ __all__ = [
     "CollectionNotFoundError",
     "EmbeddingError",
     "StoreCorruptedError",
+    # #88 librarian
+    "ChunkMetadata",
+    "IngestionSummary",
+    "RetrievedDocument",
+    "check_rag_dependencies",
+    "require_rag_dependencies",
+    "_reset_singletons",
 ]
+
+# --- Singleton factories (#113) ---
 
 _lock = threading.RLock()
 _store_instance: VectorStore | None = None
@@ -80,17 +107,15 @@ def get_store(config: RAGConfig | None = None) -> VectorStore:
 
 
 def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
-    """Get a fully wired QueryEngine with store + embeddings.
+    """Get or create the singleton QueryEngine instance.
 
-    Convenience factory for consumers (#88, #92).
-    Initializes store and creates embedding provider on first call.
-    Thread-safe singleton.
+    Thread-safe. Automatically creates VectorStore and EmbeddingProvider.
 
     Args:
         config: Optional RAG configuration. Uses defaults if None.
 
     Returns:
-        The singleton QueryEngine instance, ready for add/query operations.
+        The singleton QueryEngine, ready for queries.
     """
     global _query_engine_instance
     if _query_engine_instance is not None:
@@ -98,29 +123,41 @@ def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
     with _lock:
         if _query_engine_instance is not None:
             return _query_engine_instance
-        from assemblyzero.rag.embeddings import EmbeddingProvider as _EmbeddingProvider
-        from assemblyzero.rag.query import QueryEngine as _QueryEngine
+        from assemblyzero.rag.embeddings import LocalEmbeddingProvider as _LEP
+        from assemblyzero.rag.query import QueryEngine as _QE
 
         cfg = config or RAGConfig()
         store = get_store(cfg)
-        provider = _EmbeddingProvider(cfg.embedding_model_name)
-        engine = _QueryEngine(store, provider, cfg)
+        embedder = _LEP()
+        engine = _QE(store, embedder, cfg)
         _query_engine_instance = engine
         return _query_engine_instance
 
 
 def _reset_singletons() -> None:
-    """Reset singleton instances. For testing only.
+    """Reset singleton state for test isolation.
 
-    Not included in __all__. Tests must call this in try/finally
-    to avoid polluting other test runs.
+    Called by test fixtures after each test to prevent cross-test
+    contamination when modules are reloaded.
     """
+    import importlib
+    import sys
+
     global _store_instance, _query_engine_instance
-    with _lock:
-        if _store_instance is not None:
+    _store_instance = None
+    _query_engine_instance = None
+
+    # Also reload submodules that may hold cached state from mocked imports (#88)
+    for mod_name in [
+        "assemblyzero.rag.dependencies",
+        "assemblyzero.rag.chunker",
+        "assemblyzero.rag.embeddings",
+        "assemblyzero.rag.vector_store",
+        "assemblyzero.rag.librarian",
+        "assemblyzero.nodes.librarian",
+    ]:
+        if mod_name in sys.modules:
             try:
-                _store_instance.close()
+                importlib.reload(sys.modules[mod_name])
             except Exception:
                 pass
-        _store_instance = None
-        _query_engine_instance = None

@@ -1,23 +1,24 @@
 # 188 - Feature: RAG Injection: Automated Context Retrieval ("The Librarian")
 
 <!-- Template Metadata
-Last Updated: 2025-01-XX
-Updated By: LLD Designer Agent
-Update Reason: Initial LLD creation for Issue #88
+Last Updated: 2026-02-02
+Updated By: Issue #117 fix
+Update Reason: Moved Verification & Testing to Section 10 (was Section 11) to match 0702c review prompt and testing workflow expectations
+Previous: Added sections based on 80 blocking issues from 164 governance verdicts (2026-02-01)
 -->
 
 ## 1. Context & Goal
 * **Issue:** #88
-* **Objective:** Implement an automated RAG node that retrieves relevant governance documents from a local vector store and injects them into the LLD Designer's context, ensuring generated designs align with existing architectural decisions.
+* **Objective:** Implement automated RAG retrieval that queries a local vector store with issue briefs and injects top-3 relevant governance documents into the Designer Agent's context
 * **Status:** Draft
-* **Related Issues:** None
+* **Related Issues:** None (standalone enhancement)
 
 ### Open Questions
 *Questions that need clarification before or during implementation. Remove when resolved.*
 
-- [x] ~~Should we support multiple embedding providers or focus on local-only for MVP?~~ **Resolved:** Support local `all-MiniLM-L6-v2` by default, with optional external API support (user opt-in via API keys)
-- [x] ~~What is the minimum acceptable similarity score threshold?~~ **Resolved:** 0.7 threshold (configurable)
-- [ ] Should vector store be per-project or shared across projects in a workspace?
+- [ ] Should the similarity threshold (0.7) be configurable via environment variable or CLI flag?
+- [ ] What is the expected cold-boot time budget for embedding model loading (currently specified as spinner at 500ms)?
+- [ ] Should we support hybrid search (keyword + semantic) for edge cases where semantic similarity misses exact terminology matches?
 
 ## 2. Proposed Changes
 
@@ -27,15 +28,15 @@ Update Reason: Initial LLD creation for Issue #88
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `tools/rebuild_knowledge_base.py` | Add | CLI tool for indexing docs into vector store |
+| `tools/rebuild_knowledge_base.py` | Add | CLI tool to ingest docs into vector store |
 | `agentos/nodes/librarian.py` | Add | RAG retrieval node with conditional imports |
-| `agentos/workflows/lld/graph.py` | Modify | Wire Librarian node into workflow graph |
+| `agentos/workflows/lld/graph.py` | Modify | Wire Librarian node into workflow between Load Brief and Designer |
 | `agentos/workflows/lld/state.py` | Modify | Add `retrieved_context` field to State schema |
 | `pyproject.toml` | Modify | Add `[rag]` optional dependencies |
 | `.gitignore` | Modify | Add `.agentos/vector_store/` |
-| `docs/adrs/0215-rag-librarian.md` | Add | ADR documenting architectural decision and license compliance |
+| `docs/adrs/0XXX-rag-librarian.md` | Add | ADR documenting decision and license compliance |
 | `tests/unit/test_librarian.py` | Add | Unit tests for Librarian node |
-| `tests/integration/test_librarian_workflow.py` | Add | Integration tests for RAG workflow |
+| `tests/integration/test_rag_workflow.py` | Add | Integration tests for RAG-augmented LLD workflow |
 
 ### 2.2 Dependencies
 
@@ -45,44 +46,43 @@ Update Reason: Initial LLD creation for Issue #88
 # pyproject.toml additions - OPTIONAL dependencies under [rag] extra
 [project.optional-dependencies]
 rag = [
-    "chromadb>=0.4.22,<0.6.0",
+    "chromadb>=0.4.0,<1.0.0",
     "sentence-transformers>=2.2.0,<3.0.0",
 ]
 ```
 
-**License Compliance (verified):**
-| Package | License | Compatible |
-|---------|---------|------------|
-| `chromadb` | Apache 2.0 | ✅ Yes |
-| `sentence-transformers` | Apache 2.0 | ✅ Yes |
-| `torch` (transitive) | BSD-3-Clause | ✅ Yes |
-| `huggingface-hub` (transitive) | Apache 2.0 | ✅ Yes |
-| `all-MiniLM-L6-v2` model | Apache 2.0 | ✅ Yes |
+**License Compliance:**
+| Package | License | Compatible | Notes |
+|---------|---------|------------|-------|
+| `chromadb` | Apache 2.0 | ✅ Yes | Permissive, no copyleft concerns |
+| `sentence-transformers` | Apache 2.0 | ✅ Yes | Permissive, no copyleft concerns |
+| `torch` (transitive) | BSD-style | ✅ Yes | PyTorch Foundation license |
+| `huggingface-hub` (transitive) | Apache 2.0 | ✅ Yes | Permissive |
+| `all-MiniLM-L6-v2` model | Apache 2.0 | ✅ Yes | Model card confirms commercial use permitted |
 
 ### 2.3 Data Structures
 
 ```python
 # Pseudocode - NOT implementation
-from typing import TypedDict, Optional
-
 class RetrievedDocument(TypedDict):
-    file_path: str          # e.g., "docs/adrs/0204-single-identity.md"
-    section: str            # e.g., "Decision" (H1/H2 header)
-    content_snippet: str    # Truncated content (first 500 chars)
-    score: float            # Similarity score (0.0 - 1.0)
+    file_path: str          # Path to source document
+    section: str            # H1/H2 section title
+    content_snippet: str    # Extracted text chunk
+    score: float            # Similarity score (0.0-1.0)
 
-class LibrarianOutput(TypedDict):
-    retrieved_documents: list[RetrievedDocument]  # Top 3 results
-    query_embedding_time_ms: float                # Performance metric
-    retrieval_time_ms: float                      # Performance metric
+class LLDWorkflowState(TypedDict):
+    issue_brief: str                           # Input brief text
+    manual_context: list[str]                  # User-provided --context paths
+    retrieved_context: list[RetrievedDocument] # RAG-retrieved documents
+    combined_context: str                      # Merged context for Designer
+    # ... existing fields ...
 
-class LLDState(TypedDict):
-    # Existing fields...
-    issue_brief: str
-    manual_context: list[str]
-    # New fields
-    retrieved_context: list[RetrievedDocument]    # RAG results
-    rag_enabled: bool                             # Whether RAG was available
+class LibrarianConfig(TypedDict):
+    similarity_threshold: float  # Default: 0.7
+    top_k_candidates: int        # Default: 5
+    top_k_results: int           # Default: 3
+    embedding_model: str         # Default: "all-MiniLM-L6-v2"
+    vector_store_path: str       # Default: ".agentos/vector_store/"
 ```
 
 ### 2.4 Function Signatures
@@ -90,256 +90,277 @@ class LLDState(TypedDict):
 ```python
 # agentos/nodes/librarian.py
 
-def check_rag_available() -> tuple[bool, str]:
-    """Check if RAG dependencies are installed.
+def check_rag_dependencies() -> tuple[bool, str]:
+    """Check if RAG optional dependencies are installed.
     
     Returns:
         Tuple of (available: bool, message: str)
     """
     ...
 
-def check_vector_store_exists(store_path: Path) -> bool:
-    """Check if vector store directory exists and is initialized.
+def check_vector_store_exists(store_path: str = ".agentos/vector_store/") -> bool:
+    """Check if vector store has been initialized.
     
-    Args:
-        store_path: Path to .agentos/vector_store/
-        
     Returns:
-        True if store exists and has collections, False otherwise
+        True if vector store exists and is valid, False otherwise.
     """
     ...
 
-def embed_query(query: str, model: SentenceTransformer) -> list[float]:
-    """Generate embedding for a query string.
+def load_embedding_model(model_name: str = "all-MiniLM-L6-v2") -> Any:
+    """Load the sentence transformer embedding model.
     
     Args:
-        query: The issue brief text to embed
-        model: Loaded SentenceTransformer model
+        model_name: HuggingFace model identifier
         
     Returns:
-        384-dimensional embedding vector
+        Loaded SentenceTransformer model
+        
+    Raises:
+        ImportError: If sentence-transformers not installed
     """
     ...
 
 def query_knowledge_base(
     query: str,
-    k: int = 5,
+    top_k: int = 3,
     threshold: float = 0.7,
-    store_path: Optional[Path] = None,
+    store_path: str = ".agentos/vector_store/"
 ) -> list[RetrievedDocument]:
     """Query the vector store for relevant documents.
     
     Args:
-        query: Issue brief text
-        k: Number of candidates to retrieve before filtering
+        query: The text to search for (issue brief)
+        top_k: Maximum number of results to return
         threshold: Minimum similarity score (0.0-1.0)
-        store_path: Optional custom path to vector store
+        store_path: Path to ChromaDB persistent storage
         
     Returns:
-        Top 3 documents above threshold, sorted by score descending
+        List of RetrievedDocument sorted by score descending
     """
     ...
 
-def librarian_node(state: LLDState) -> LLDState:
-    """LangGraph node that retrieves relevant context.
+def librarian_node(state: LLDWorkflowState) -> LLDWorkflowState:
+    """LangGraph node that retrieves relevant context via RAG.
     
     Args:
-        state: Current workflow state with issue_brief
+        state: Current workflow state containing issue_brief
         
     Returns:
         Updated state with retrieved_context populated
     """
     ...
 
-
-# tools/rebuild_knowledge_base.py
-
-def discover_documents(docs_dirs: list[Path]) -> list[Path]:
-    """Find all markdown files in documentation directories.
+def merge_context(
+    manual_context: list[str],
+    rag_context: list[RetrievedDocument]
+) -> str:
+    """Merge manual and RAG context, with manual taking precedence.
     
     Args:
-        docs_dirs: List of directories to scan
+        manual_context: User-provided file paths
+        rag_context: RAG-retrieved documents
         
     Returns:
-        List of markdown file paths
+        Combined context string for Designer node
     """
     ...
+```
 
-def chunk_document(file_path: Path) -> list[dict]:
-    """Split document by H1/H2 headers into chunks.
+```python
+# tools/rebuild_knowledge_base.py
+
+def parse_markdown_sections(file_path: str) -> list[dict]:
+    """Split markdown file by H1/H2 headers into chunks.
     
     Args:
         file_path: Path to markdown file
         
     Returns:
-        List of chunks with metadata (file_path, section, content)
+        List of {title, content, file_path} dicts
     """
     ...
 
-def build_knowledge_base(
-    docs_dirs: list[Path],
-    store_path: Path,
-    incremental: bool = False,
-) -> dict:
-    """Index documents into ChromaDB vector store.
+def get_file_hash(file_path: str) -> str:
+    """Compute hash for incremental update detection.
     
     Args:
-        docs_dirs: Directories to index
-        store_path: Where to create/update vector store
+        file_path: Path to file
+        
+    Returns:
+        SHA256 hash string
+    """
+    ...
+
+def index_documents(
+    docs_dirs: list[str],
+    store_path: str,
+    incremental: bool = True
+) -> dict:
+    """Index markdown documents into ChromaDB.
+    
+    Args:
+        docs_dirs: List of directories to scan
+        store_path: Path for ChromaDB persistent storage
         incremental: If True, only reindex changed files
         
     Returns:
         Summary dict with files_indexed, chunks_created, time_elapsed
     """
     ...
+
+def main() -> None:
+    """CLI entry point for rebuild_knowledge_base.py"""
+    ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
-**Librarian Node Flow:**
+**Librarian Node Execution:**
 ```
 1. Receive state with issue_brief
 2. Check RAG dependencies installed
-   IF not installed:
-   - Log friendly message: "RAG dependencies not installed..."
-   - Set rag_enabled = False
-   - Return state unchanged
+   IF NOT installed THEN
+     - Log: "[Librarian] RAG dependencies not installed..."
+     - Return state unchanged (graceful degradation)
 3. Check vector store exists at .agentos/vector_store/
-   IF not exists:
-   - Log warning: "Vector store not found. Run rebuild_knowledge_base.py..."
-   - Set rag_enabled = False
-   - Return state unchanged
-4. Display spinner: "Loading embedding model..."
-5. Load SentenceTransformer model (cached after first load)
-6. Embed issue_brief text
-7. Query ChromaDB with k=5 candidates
-8. Filter results by threshold >= 0.7
+   IF NOT exists THEN
+     - Log warning: "[Librarian] Vector store not found..."
+     - Return state unchanged (graceful degradation)
+4. Show CLI spinner if cold boot (model not cached)
+5. Load embedding model (all-MiniLM-L6-v2)
+6. Embed issue_brief into query vector
+7. Query ChromaDB for k=5 candidates
+8. Filter results with score >= 0.7 threshold
 9. Take top 3 results
-10. Merge with manual_context (manual takes precedence, dedupe by file_path)
-11. Update state.retrieved_context with results
-12. Log retrieved documents at INFO level
+10. IF no results above threshold THEN
+    - Log: "[Librarian] No relevant documents found..."
+11. Merge RAG results with manual --context
+    - Manual context takes precedence
+    - Deduplicate by file_path
+12. Update state.retrieved_context and state.combined_context
 13. Return updated state
 ```
 
-**Rebuild Knowledge Base Flow:**
+**Knowledge Base Rebuild:**
 ```
-1. Parse CLI arguments (--full or --incremental)
-2. Discover all .md files in docs/adrs/, docs/standards/, docs/LLDs/done/
-3. IF incremental:
-   - Load existing index metadata
-   - Filter to only changed files (mtime comparison)
-4. FOR each document:
-   - Split by H1/H2 headers into chunks
-   - Preserve metadata (file_path, section_title)
-5. Load embedding model
-6. Generate embeddings for all chunks
-7. Upsert into ChromaDB collection
-8. Save index metadata for incremental support
-9. Print summary: "{N} files indexed, {M} chunks created, {T}s elapsed"
+1. Parse CLI args (--full or --incremental)
+2. Scan docs/adrs/, docs/standards/, docs/LLDs/done/
+3. FOR each markdown file:
+   a. Compute file hash
+   b. IF incremental AND hash unchanged THEN skip
+   c. Parse file into H1/H2 sections
+   d. Create chunk with metadata (file_path, section_title)
+4. Initialize/update ChromaDB collection
+5. Batch embed and upsert chunks
+6. Output summary: files indexed, chunks created, time elapsed
 ```
 
 ### 2.6 Technical Approach
 
 * **Module:** `agentos/nodes/librarian.py`, `tools/rebuild_knowledge_base.py`
-* **Pattern:** Decorator pattern for optional dependency loading; Strategy pattern for embedding provider selection
+* **Pattern:** Strategy pattern for embedding backends (local vs API), Null Object for graceful degradation
 * **Key Decisions:**
-  - ChromaDB chosen for zero-config local storage with HNSW index
-  - `all-MiniLM-L6-v2` chosen for balance of quality (384d) and size (~80MB)
-  - Conditional imports prevent core package bloat
-  - H1/H2 chunking preserves document structure context
+  - ChromaDB chosen for zero-config local persistence with HNSW indexing
+  - `all-MiniLM-L6-v2` balances quality (384 dimensions) with size (~80MB)
+  - Optional dependencies keep core installation lightweight
+  - Conditional imports prevent ImportError on standard installs
 
 ### 2.7 Architecture Decisions
 
+*Document key architectural decisions that affect the design.*
+
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Vector Store | ChromaDB, FAISS+pickle, SQLite-VSS | ChromaDB | Zero-config, persistent, metadata support, good ecosystem |
-| Embedding Model | all-MiniLM-L6-v2, all-mpnet-base-v2, OpenAI ada-002 | all-MiniLM-L6-v2 | Local-first (privacy), small footprint, good quality |
-| Chunking Strategy | Fixed size, Sentence-based, Header-based | Header-based (H1/H2) | Preserves semantic units, respects document structure |
-| Dependency Model | Required deps, Optional deps, Separate package | Optional deps (`[rag]`) | Keeps core lightweight, explicit opt-in |
-| Similarity Threshold | Fixed 0.7, Configurable, Adaptive | Configurable (default 0.7) | Allows tuning per project without code changes |
+| Vector Store | ChromaDB, FAISS+pickle, Qdrant | ChromaDB | Zero-config persistence, built-in HNSW, Apache 2.0 license |
+| Embedding Model | all-MiniLM-L6-v2, OpenAI ada-002, custom fine-tuned | all-MiniLM-L6-v2 (default) | Local execution (privacy), good quality, small footprint |
+| Chunking Strategy | Fixed-size, H1/H2 headers, semantic | H1/H2 headers | Preserves document structure, enables section-level retrieval |
+| Dependency Strategy | Required, Optional, Plugin | Optional (`[rag]` extra) | Core stays lightweight, RAG is opt-in feature |
+| Threshold Default | 0.5, 0.7, 0.8 | 0.7 | Balances recall vs precision for governance docs |
 
 **Architectural Constraints:**
-- Must not add ML dependencies to core package installation
-- Must work fully offline (local embeddings) as default
-- Must gracefully degrade when dependencies or vector store unavailable
-- Must integrate with existing LangGraph workflow structure
+- Must integrate with existing LangGraph workflow without breaking non-RAG paths
+- Cannot require external services for default operation (local-first)
+- Must support graceful degradation for users without RAG extras installed
+- Vector store must be regenerable (not committed to git)
 
 ## 3. Requirements
 
 *What must be true when this is done. These become acceptance criteria.*
 
-1. **R1:** `tools/rebuild_knowledge_base.py` indexes `docs/` directories in < 10 seconds for 100+ files
-2. **R2:** Query "How do I log errors?" retrieves logging-related standards/LLDs with scores > 0.7
-3. **R3:** Query "authentication flow" retrieves identity/auth ADRs with scores > 0.7
-4. **R4:** Librarian Node completes retrieval in < 500ms after model warm-up
-5. **R5:** Generated LLD references retrieved ADRs without manual prompting
-6. **R6:** Workflow gracefully degrades when vector store missing (warning only)
-7. **R7:** Workflow gracefully degrades when `[rag]` extra not installed (friendly message)
-8. **R8:** Manual `--context` flag takes precedence over RAG results
-9. **R9:** Vector store persists between sessions (no re-embedding every run)
-10. **R10:** Core package installs without ML dependencies
-11. **R11:** RAG extra installs cleanly on Linux/Mac/Windows CI environments
-12. **R12:** CLI spinner displays during cold-boot model loading (> 500ms)
+1. `tools/rebuild_knowledge_base.py` indexes 100+ files in < 10 seconds
+2. Queries complete in < 500ms after model warm-up
+3. Query "How do I log errors?" retrieves logging-related documents
+4. Query "authentication flow" retrieves identity/auth ADRs
+5. Workflow gracefully degrades when vector store is missing (warning, continues)
+6. Workflow gracefully degrades when `[rag]` extra not installed (friendly message, continues)
+7. Manual `--context` takes precedence over RAG results
+8. Vector store persists between sessions (no re-embedding on every run)
+9. Core `pip install agentos` does not pull torch/chromadb
+10. `pip install agentos[rag]` works cleanly on Linux/Mac/Windows
+11. CLI spinner displays during cold-boot model loading
+12. Generated LLDs reference retrieved ADRs in Constraints section automatically
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| **ChromaDB + sentence-transformers** | Zero-config, local-first, good quality, persistent | Larger optional deps (~500MB with torch) | **Selected** |
-| FAISS + pickle | Lighter deps, fast | No metadata support, manual persistence, harder API | Rejected |
-| SQLite-VSS | SQLite ecosystem, smaller | Less mature, fewer features | Rejected |
-| LangChain RAG | Higher-level abstractions | Heavy dependency, less control | Rejected |
-| Required dependencies (always installed) | Simpler code | Bloats core package, forces ML deps on all users | Rejected |
+| ChromaDB local vector store | Zero-config, persistent, Apache 2.0, good Python API | Larger dependency tree than FAISS | **Selected** |
+| FAISS + pickle | Lightweight, fast, minimal deps | Manual persistence, no metadata filtering | Rejected |
+| Remote vector store (Pinecone/Weaviate) | Team sync, managed infrastructure | External dependency, network latency, cost | Rejected (future scope) |
+| Required dependencies (not optional) | Simpler implementation | Bloats core install with ML deps | Rejected |
+| Plugin architecture | Maximum flexibility | Overengineered for single feature | Rejected |
 
-**Rationale:** ChromaDB provides the best balance of features (metadata, persistence, querying) with acceptable dependency size as an optional extra. Local-first approach ensures privacy by default while allowing opt-in to external APIs.
+**Rationale:** ChromaDB provides the best balance of ease-of-use, local-first operation, and production-ready features. Optional dependencies preserve the lightweight core installation while making RAG available to users who need it.
 
 ## 5. Data & Fixtures
+
+*Per [0108-lld-pre-implementation-review.md](0108-lld-pre-implementation-review.md) - complete this section BEFORE implementation.*
 
 ### 5.1 Data Sources
 
 | Attribute | Value |
 |-----------|-------|
 | Source | Local filesystem: `docs/adrs/`, `docs/standards/`, `docs/LLDs/done/` |
-| Format | Markdown files |
-| Size | ~100 files, ~500KB total |
+| Format | Markdown (.md files) |
+| Size | ~100 files, ~500KB total (estimated) |
 | Refresh | Manual via `rebuild_knowledge_base.py` |
-| Copyright/License | Project-internal documentation (N/A) |
+| Copyright/License | Internal documentation, project-owned |
 
 ### 5.2 Data Pipeline
 
 ```
-docs/*.md ──chunk_document()──► Chunks with metadata ──embed()──► ChromaDB collection
-                                                                          │
-LLD workflow ──issue_brief──► embed_query() ──query()──► Retrieved docs ──┘
+Markdown Files ──parse_sections──► Chunks ──embed──► Vectors ──upsert──► ChromaDB
+                                     │
+                                     └── Metadata (file_path, section, hash)
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| `tests/fixtures/sample_adrs/` | Generated | 3-5 minimal ADR files for testing |
-| `tests/fixtures/sample_standards/` | Generated | 2-3 minimal standards for testing |
-| `tests/fixtures/mock_embeddings.json` | Hardcoded | Pre-computed embeddings for unit tests |
-| `tests/fixtures/test_queries.json` | Hardcoded | Query/expected-result pairs for validation |
+| Sample ADR (logging) | Generated | Tests retrieval of logging-related content |
+| Sample ADR (auth) | Generated | Tests retrieval of auth-related content |
+| Sample Standard | Generated | Tests retrieval of coding standards |
+| Mock ChromaDB collection | Mocked | Unit tests without real vector store |
+| Empty vector store | Generated | Tests graceful degradation |
 
 ### 5.4 Deployment Pipeline
 
 ```
-Development:
-  - Local vector store at .agentos/vector_store/
-  - Developer runs rebuild_knowledge_base.py manually
-
-CI/CD:
-  - Fixtures provide small test vector store
-  - No production vector store in CI (tests use fixtures)
-
-Production (user machine):
-  - User runs: pip install agentos[rag]
-  - User runs: python tools/rebuild_knowledge_base.py --full
-  - Vector store created locally, persists across sessions
+Development: .agentos/vector_store/ (local, gitignored)
+    │
+    └── rebuild_knowledge_base.py --full
+    
+CI/Testing: Ephemeral vector store in test fixtures
+    │
+    └── pytest fixtures create/destroy per test session
+    
+Production: User runs rebuild_knowledge_base.py after install
+    │
+    └── Documentation guides initial setup
 ```
 
-**External data source:** No - all data is local project documentation.
+**External utility needed:** No - `rebuild_knowledge_base.py` is part of this issue.
 
 ## 6. Diagram
 
@@ -355,163 +376,168 @@ Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.l
 
 **Agent Auto-Inspection (MANDATORY):**
 
+AI agents MUST render and view the diagram before committing:
+1. Base64 encode diagram → fetch PNG from `https://mermaid.ink/img/{base64}`
+2. Read the PNG file (multimodal inspection)
+3. Document results below
+
 **Auto-Inspection Results:**
 ```
-- Touching elements: [x] None
-- Hidden lines: [x] None
-- Label readability: [x] Pass
-- Flow clarity: [x] Clear
+- Touching elements: [x] None / [ ] Found: ___
+- Hidden lines: [x] None / [ ] Found: ___
+- Label readability: [x] Pass / [ ] Issue: ___
+- Flow clarity: [x] Clear / [ ] Issue: ___
 ```
 
-### 6.2 Diagram
+*Reference: [0006-mermaid-diagrams.md](0006-mermaid-diagrams.md)*
 
-```mermaid
-flowchart TB
-    subgraph CLI["CLI Layer"]
-        A[agentos lld create --brief ...]
-        B[--context manual.md]
-    end
-    
-    subgraph Workflow["LLD Workflow Graph"]
-        C[Load Brief Node]
-        D[Librarian Node]
-        E[Designer Node]
-        F[Output Node]
-    end
-    
-    subgraph RAG["RAG Infrastructure"]
-        G[(ChromaDB<br/>Vector Store)]
-        H[SentenceTransformer<br/>Embedding Model]
-    end
-    
-    subgraph Docs["Documentation"]
-        I[docs/adrs/]
-        J[docs/standards/]
-        K[docs/LLDs/done/]
-    end
-    
-    A --> C
-    B -.-> C
-    C --> D
-    D --> E
-    E --> F
-    
-    D <--> G
-    D <--> H
-    
-    I --> G
-    J --> G
-    K --> G
-    
-    style D fill:#e1f5fe
-    style G fill:#fff3e0
-    style H fill:#fff3e0
-```
-
-**Sequence: Librarian Node Execution**
+### 6.2 Workflow Integration Diagram
 
 ```mermaid
 sequenceDiagram
-    participant W as Workflow
-    participant L as Librarian Node
-    participant C as ChromaDB
-    participant M as Embedding Model
+    participant CLI as agentos CLI
+    participant LB as Load Brief Node
+    participant LIB as Librarian Node
+    participant VS as Vector Store
+    participant EM as Embedding Model
+    participant DES as Designer Node
+
+    CLI->>LB: --brief "Implement logging"
+    LB->>LIB: state{issue_brief}
     
-    W->>L: state.issue_brief
-    
-    alt RAG not installed
-        L-->>W: state (unchanged, rag_enabled=false)
-    else Vector store missing
-        L-->>W: state (unchanged, rag_enabled=false)
-    else Normal operation
-        L->>M: Load model (if cold)
-        M-->>L: Model ready
-        L->>M: Embed query
-        M-->>L: Query embedding
-        L->>C: Query k=5, threshold=0.7
-        C-->>L: Candidate documents
-        L->>L: Filter & rank top 3
-        L->>L: Merge with manual context
-        L-->>W: state.retrieved_context
+    alt RAG Available
+        LIB->>LIB: Check dependencies
+        LIB->>VS: Check store exists
+        LIB->>EM: Load model (cold boot: spinner)
+        EM-->>LIB: Model ready
+        LIB->>EM: Embed query
+        EM-->>LIB: Query vector
+        LIB->>VS: Query top-5
+        VS-->>LIB: Candidates + scores
+        LIB->>LIB: Filter >= 0.7, take top-3
+        LIB->>LIB: Merge with manual context
+    else RAG Unavailable
+        LIB->>LIB: Log warning
+        LIB->>LIB: Return state unchanged
     end
+    
+    LIB->>DES: state{retrieved_context}
+    DES->>DES: Generate LLD with context
+```
+
+### 6.3 Knowledge Base Indexing Flow
+
+```mermaid
+flowchart TD
+    A[Start rebuild_knowledge_base.py] --> B{--full or --incremental?}
+    B -->|--full| C[Clear existing store]
+    B -->|--incremental| D[Load file hashes]
+    C --> E[Scan docs directories]
+    D --> E
+    E --> F[For each .md file]
+    F --> G{Hash changed?}
+    G -->|No| H[Skip file]
+    G -->|Yes| I[Parse H1/H2 sections]
+    H --> F
+    I --> J[Create chunks with metadata]
+    J --> K[Batch embed chunks]
+    K --> L[Upsert to ChromaDB]
+    L --> F
+    F -->|Done| M[Output summary]
+    M --> N[End]
 ```
 
 ## 7. Security & Safety Considerations
+
+*This section addresses security (10 patterns) and safety (9 patterns) concerns from governance feedback.*
 
 ### 7.1 Security
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Prompt injection via docs | Documents are internal/trusted; no user-controlled content in vector store | Addressed |
-| API key exposure | External API keys only in env vars; never logged or stored in vector DB | Addressed |
-| Data exfiltration (external APIs) | Clear opt-in model; local embeddings by default; documented data residency | Addressed |
-| Vector store tampering | `.agentos/` should be gitignored; regenerable from source | Addressed |
+| Data exfiltration via embeddings | Default mode uses local model - no data leaves machine | Addressed |
+| External API data exposure | If user opts into OpenAI/Gemini APIs, document text sent externally - requires explicit API key configuration | Addressed (documented) |
+| Vector store tampering | Store is gitignored, regenerable from source docs, no secrets stored | Addressed |
+| Prompt injection via docs | Documents are internal/trusted; query is sanitized before embedding | Addressed |
+| Path traversal in file access | Restrict indexing to configured directories only | Addressed |
 
 ### 7.2 Safety
 
+*Safety concerns focus on preventing data loss, ensuring fail-safe behavior, and protecting system integrity.*
+
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Model loading timeout | Spinner feedback + reasonable timeout (30s max) | Addressed |
-| Corrupted vector store | Graceful degradation; suggest rebuild | Addressed |
-| Disk space exhaustion | Vector store ~50MB for 100 docs; warn if disk low | TODO |
-| Infinite loop in chunking | Max chunks per file limit (100) | Addressed |
+| Missing dependencies crash | Conditional imports with graceful fallback and user-friendly message | Addressed |
+| Missing vector store crash | Check existence before query, continue workflow without RAG | Addressed |
+| Corrupted vector store | Catch ChromaDB errors, log warning, continue without RAG | Addressed |
+| Model loading timeout | CLI spinner feedback, no hard timeout (user can Ctrl+C) | Addressed |
+| Resource exhaustion during indexing | Batch processing, progress feedback, interruptible | Addressed |
 
-**Fail Mode:** Fail Open - If RAG fails, workflow continues without augmented context (graceful degradation)
+**Fail Mode:** Fail Open - If RAG unavailable, workflow continues with manual context only. No blocking failures.
 
 **Recovery Strategy:** 
-1. Delete `.agentos/vector_store/`
-2. Run `python tools/rebuild_knowledge_base.py --full`
-3. Retry workflow
+- Corrupted vector store: `rm -rf .agentos/vector_store/` then `rebuild_knowledge_base.py --full`
+- Dependency issues: Clear pip cache, reinstall `agentos[rag]`
 
 ## 8. Performance & Cost Considerations
+
+*This section addresses performance and cost concerns (6 patterns) from governance feedback.*
 
 ### 8.1 Performance
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Cold-boot model load | < 5s | SentenceTransformer lazy loading + caching |
-| Query latency (warm) | < 500ms | HNSW index in ChromaDB |
-| Full reindex (100 files) | < 10s | Batch embedding, parallel I/O |
-| Memory (model loaded) | < 500MB | all-MiniLM-L6-v2 is ~80MB model |
+| Query latency (warm) | < 500ms | ChromaDB HNSW index, in-memory after first query |
+| Query latency (cold) | < 5s | Model loading dominates; spinner provides feedback |
+| Full reindex time | < 10s for 100 files | Batch embedding, efficient chunking |
+| Memory (model loaded) | ~200MB | all-MiniLM-L6-v2 is optimized for size |
+| Disk (vector store) | ~50MB | Depends on corpus size; gitignored |
 
 **Bottlenecks:** 
-- First query cold-boots the embedding model (~3-5s)
-- ChromaDB initial load requires reading HNSW index from disk
+- Cold boot model loading (~3-5s) - mitigated with spinner feedback
+- Large document indexing - mitigated with batching and incremental updates
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| Local compute | $0 | All local | $0 |
-| Disk storage | ~50MB | Vector store | $0 |
-| External API (optional) | $0.0001/1K tokens | N/A by default | $0 |
+| Local embedding (default) | $0 | Unlimited | $0 |
+| OpenAI ada-002 (optional) | $0.0001/1K tokens | ~10K tokens/index | ~$0.001 |
+| Disk storage | ~$0 | 50MB | $0 |
+| CI time increase | ~$0.01/min | +2 min for `[rag]` test | ~$0.60/month |
 
 **Cost Controls:**
-- [x] Default is 100% local (zero external API cost)
-- [x] External API is explicit opt-in via env vars
-- [x] No rate limiting needed for local operation
+- [x] Default is free (local model)
+- [x] External APIs require explicit opt-in via environment variables
+- [x] No ongoing costs for typical usage
 
-**Worst-Case Scenario:** User indexes 10,000 documents → ~5GB vector store, ~2 min reindex time. Still acceptable for local operation.
+**Worst-Case Scenario:** User configures OpenAI embeddings and reindexes frequently - still <$1/month. Local default prevents runaway costs.
 
 ## 9. Legal & Compliance
 
+*This section addresses legal concerns (8 patterns) from governance feedback.*
+
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | No | Vector store contains only internal documentation |
-| Third-Party Licenses | Yes | All dependencies verified Apache 2.0 / BSD compatible |
-| Terms of Service | N/A | No external services in default mode |
-| Data Retention | N/A | Local data only, user controls deletion |
-| Export Controls | No | No restricted algorithms |
+| PII/Personal Data | No | Only internal docs indexed, no PII expected |
+| Third-Party Licenses | Yes | All dependencies Apache 2.0 or BSD - compatible with project |
+| Terms of Service | Yes (if external API) | OpenAI/Gemini usage documented in README with ToS reminder |
+| Data Retention | N/A | Vector store is regenerable cache, user controls deletion |
+| Export Controls | No | No restricted algorithms or data |
 
-**Data Classification:** Internal (project documentation only)
+**Data Classification:** Internal - project documentation only
 
 **Compliance Checklist:**
-- [x] No PII stored without consent (N/A - no PII)
-- [x] All third-party licenses compatible with project license
-- [x] External API usage compliant with provider ToS (opt-in only)
-- [x] Data retention policy documented (local, user-controlled)
+- [x] No PII stored without consent
+- [x] All third-party licenses compatible with project license (verified Apache 2.0)
+- [x] External API usage documented with provider ToS considerations
+- [x] Data retention is user-controlled (regenerable from source)
 
 ## 10. Verification & Testing
+
+*Ref: [0005-testing-strategy-and-protocols.md](0005-testing-strategy-and-protocols.md)*
+
+**Testing Philosophy:** Strive for 100% automated test coverage. Manual tests are a last resort for scenarios that genuinely cannot be automated.
 
 ### 10.0 Test Plan (TDD - Complete Before Implementation)
 
@@ -519,22 +545,22 @@ sequenceDiagram
 
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
-| T010 | test_check_rag_available_installed | Returns (True, "") when deps present | RED |
-| T020 | test_check_rag_available_missing | Returns (False, friendly_message) when deps absent | RED |
-| T030 | test_check_vector_store_exists_true | Returns True for initialized store | RED |
-| T040 | test_check_vector_store_exists_false | Returns False for missing/empty dir | RED |
-| T050 | test_embed_query_returns_vector | Returns 384-dim float list | RED |
-| T060 | test_query_knowledge_base_happy_path | Returns top 3 docs above threshold | RED |
-| T070 | test_query_knowledge_base_no_results | Returns empty list when all below threshold | RED |
-| T080 | test_librarian_node_rag_disabled | Returns unchanged state, logs message | RED |
-| T090 | test_librarian_node_no_vector_store | Returns unchanged state, logs warning | RED |
-| T100 | test_librarian_node_success | Returns state with retrieved_context | RED |
-| T110 | test_manual_context_takes_precedence | Manual files appear first, no duplicates | RED |
-| T120 | test_chunk_document_by_headers | Splits on H1/H2, preserves metadata | RED |
-| T130 | test_build_knowledge_base_full | Creates vector store with correct count | RED |
-| T140 | test_build_knowledge_base_incremental | Only reindexes changed files | RED |
-| T150 | test_integration_workflow_with_rag | End-to-end LLD generation with RAG | RED |
-| T160 | test_integration_graceful_degradation | Workflow completes without RAG deps | RED |
+| T010 | test_check_rag_deps_installed | Returns (True, "") when chromadb available | RED |
+| T020 | test_check_rag_deps_missing | Returns (False, helpful message) when missing | RED |
+| T030 | test_check_vector_store_exists | Returns True when .agentos/vector_store/ valid | RED |
+| T040 | test_check_vector_store_missing | Returns False when directory absent | RED |
+| T050 | test_query_returns_top_3 | Returns <= 3 results sorted by score | RED |
+| T060 | test_query_filters_below_threshold | Results with score < 0.7 excluded | RED |
+| T070 | test_query_empty_when_no_matches | Returns [] when all scores below threshold | RED |
+| T080 | test_merge_context_manual_precedence | Manual context appears before RAG | RED |
+| T090 | test_merge_context_deduplicates | Same file_path not duplicated | RED |
+| T100 | test_librarian_node_graceful_no_deps | Logs warning, returns unchanged state | RED |
+| T110 | test_librarian_node_graceful_no_store | Logs warning, returns unchanged state | RED |
+| T120 | test_rebuild_full_mode | Indexes all files, clears existing | RED |
+| T130 | test_rebuild_incremental_skips_unchanged | Only reindexes modified files | RED |
+| T140 | test_parse_markdown_sections | Correctly splits on H1/H2 | RED |
+| T150 | test_integration_logging_query | "log errors" retrieves logging docs | RED |
+| T160 | test_integration_auth_query | "authentication" retrieves auth docs | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -542,43 +568,51 @@ sequenceDiagram
 - [ ] All tests written before implementation
 - [ ] Tests currently RED (failing)
 - [ ] Test IDs match scenario IDs in 10.1
-- [ ] Test file created at: `tests/unit/test_librarian.py`
+- [ ] Test file created at: `tests/unit/test_librarian.py`, `tests/integration/test_rag_workflow.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | RAG deps installed check | Auto | Mocked import success | `(True, "")` | Returns tuple correctly |
-| 020 | RAG deps missing check | Auto | Mocked ImportError | `(False, "RAG dependencies not installed...")` | Friendly message returned |
-| 030 | Vector store exists | Auto | Initialized test store | `True` | Correct detection |
-| 040 | Vector store missing | Auto | Empty/missing path | `False` | Correct detection |
-| 050 | Embed query | Auto | "test query" | 384-dim vector | Length == 384, all floats |
-| 060 | Query happy path | Auto | "logging errors" + fixture store | 3 docs, scores > 0.7 | Count == 3, min(scores) > 0.7 |
-| 070 | Query no results | Auto | "xyzzy nonsense" + fixture store | Empty list | len(results) == 0 |
-| 080 | Node - RAG disabled | Auto | State + mocked missing deps | State unchanged | `rag_enabled == False` |
-| 090 | Node - no store | Auto | State + missing store path | State unchanged | Warning logged |
-| 100 | Node - success | Auto | State + fixture store | State with 3 docs | `len(retrieved_context) <= 3` |
-| 110 | Manual precedence | Auto | Manual + RAG results | Manual first, no dupes | Order and uniqueness correct |
-| 120 | Chunk by headers | Auto | Sample markdown | Chunks with sections | Each chunk has section metadata |
-| 130 | Build full KB | Auto | Fixture docs | Vector store created | File count matches |
-| 140 | Build incremental | Auto | Modified fixture | Only changed reindexed | Chunk count delta correct |
-| 150 | E2E workflow with RAG | Auto-Live | Real brief + fixture store | LLD with constraints | ADR referenced in output |
-| 160 | E2E graceful degradation | Auto | Brief + no RAG deps | LLD generated | No errors, warning logged |
+| 010 | RAG deps check - installed | Auto | Mock chromadb available | (True, "") | check_rag_dependencies returns success |
+| 020 | RAG deps check - missing | Auto | Mock import failure | (False, "Run 'pip install...'") | Returns helpful message |
+| 030 | Vector store exists | Auto | Valid .agentos/vector_store/ | True | check_vector_store_exists returns True |
+| 040 | Vector store missing | Auto | No directory | False | Returns False, no exception |
+| 050 | Query returns top 3 | Auto | 5 candidates above threshold | 3 results | Length <= 3, sorted desc by score |
+| 060 | Query filters low scores | Auto | Mix of scores 0.3-0.9 | Only >= 0.7 | All returned scores >= 0.7 |
+| 070 | Query no matches | Auto | Irrelevant query | [] | Empty list, no error |
+| 080 | Manual context precedence | Auto | Manual + RAG overlap | Manual first | Combined string starts with manual |
+| 090 | Context deduplication | Auto | Same file in both | Single entry | No duplicate file_paths |
+| 100 | Graceful - no deps | Auto | chromadb import fails | Warning logged, state unchanged | State identical to input |
+| 110 | Graceful - no store | Auto | Missing directory | Warning logged, state unchanged | State identical to input |
+| 120 | Rebuild full mode | Auto | --full flag | All files indexed | File count matches glob |
+| 130 | Rebuild incremental | Auto | --incremental, 1 changed | Only changed indexed | Skip count > 0 |
+| 140 | Markdown parsing | Auto | File with H1, H2 | Section list | Sections match headers |
+| 150 | E2E logging query | Auto-Live | "How do I log errors?" | Logging docs retrieved | Score > 0.7 for logging doc |
+| 160 | E2E auth query | Auto-Live | "authentication flow" | Auth ADRs retrieved | Score > 0.7 for auth doc |
+| 170 | CLI spinner cold boot | Auto | First query in session | Spinner displayed | Spinner visible if >500ms |
+| 180 | Core install lightweight | Auto | pip install agentos | No torch/chromadb | pip list excludes heavy deps |
+| 190 | RAG extra installs | Auto | pip install agentos[rag] | chromadb importable | import chromadb succeeds |
 
 ### 10.2 Test Commands
 
 ```bash
 # Run all automated tests
-poetry run pytest tests/unit/test_librarian.py tests/integration/test_librarian_workflow.py -v
+poetry run pytest tests/unit/test_librarian.py tests/integration/test_rag_workflow.py -v
 
 # Run only fast/mocked tests (exclude live)
 poetry run pytest tests/unit/test_librarian.py -v -m "not live"
 
-# Run live integration tests
-poetry run pytest tests/integration/test_librarian_workflow.py -v -m live
+# Run live integration tests (requires vector store)
+poetry run pytest tests/integration/test_rag_workflow.py -v -m live
 
-# Run with coverage
-poetry run pytest tests/unit/test_librarian.py --cov=agentos.nodes.librarian --cov-report=term-missing
+# Test core install is lightweight
+python -m venv test_core && source test_core/bin/activate
+pip install -e . && pip list | grep -E "(torch|chromadb)" && echo "FAIL" || echo "PASS"
+
+# Test RAG extra installation
+python -m venv test_rag && source test_rag/bin/activate  
+pip install -e ".[rag]" && python -c "import chromadb; print('OK')"
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -589,37 +623,47 @@ poetry run pytest tests/unit/test_librarian.py --cov=agentos.nodes.librarian --c
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| ChromaDB has breaking API changes | Med | Low | Pin version range `>=0.4.22,<0.6.0` |
-| Torch dependency conflicts with user's env | High | Med | Document in README; provide troubleshooting |
-| Model download fails on air-gapped machines | Med | Low | Document offline installation; allow bundled model |
-| Vector store corruption | Low | Low | Graceful degradation + rebuild instructions |
-| Embedding quality insufficient | Med | Low | Threshold tuning; document expected quality |
+| ChromaDB/pydantic version conflicts | Med | Med | Pin versions, document known issues in README |
+| Model download fails on air-gapped systems | Low | Low | Document offline model installation |
+| Query latency exceeds 500ms | Low | Low | Benchmark in CI, optimize if needed |
+| Embedding quality insufficient | Med | Low | Threshold tuning, fallback to OpenAI option |
+| CI time/artifact size bloat | Low | Med | Separate RAG tests into optional CI job |
+| sqlite version incompatibility (ChromaDB) | Med | Low | Document minimum sqlite version requirement |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] Implementation complete and linted
 - [ ] Code comments reference this LLD
-- [ ] Conditional imports implemented for graceful degradation
+- [ ] Conditional imports implemented with graceful fallbacks
+- [ ] CLI spinner implemented for cold boot
 
 ### Tests
-- [ ] All test scenarios pass
+- [ ] All test scenarios pass (010-190)
 - [ ] Test coverage ≥ 95% for new code
-- [ ] Integration tests pass on Linux/Mac/Windows CI
+- [ ] Integration tests verify retrieval quality
+- [ ] Graceful degradation tests pass
 
 ### Documentation
 - [ ] LLD updated with any deviations
 - [ ] Implementation Report (0103) completed
 - [ ] Test Report (0113) completed
+- [ ] `docs/adrs/0XXX-rag-librarian.md` created with license findings
 - [ ] README.md updated with RAG setup instructions
-- [ ] ADR 0215 created with license compliance findings
-- [ ] File inventory (0003) updated
+- [ ] `docs/0003-file-inventory.md` updated with new files
+- [ ] LLD Workflow wiki page updated with Librarian Node
 
 ### Review
 - [ ] Code review completed
-- [ ] 0809 Security Audit - PASS
-- [ ] 0817 Wiki Alignment Audit - PASS
 - [ ] User approval before closing issue
+
+### Reports (Pre-Merge Gate)
+- [ ] `docs/reports/88/implementation-report.md` created
+- [ ] `docs/reports/88/test-report.md` created
+
+### Verification
+- [ ] Run 0809 Security Audit - PASS
+- [ ] Run 0817 Wiki Alignment Audit - PASS
 
 ---
 
@@ -627,10 +671,12 @@ poetry run pytest tests/unit/test_librarian.py --cov=agentos.nodes.librarian --c
 
 *Track all review feedback with timestamps and implementation status.*
 
+<!-- Note: Timestamps are auto-generated by the workflow. Do not fill in manually. -->
+
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | - |
+| - | - | - | Awaiting initial review |
 
 **Final Status:** PENDING

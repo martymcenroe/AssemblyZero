@@ -1,3 +1,0 @@
-# Governance Verdict: BLOCK
-
-The LLD proposes a solid "Opt-in" architecture for RAG, correctly prioritizing local execution and fallback safety. The modular approach using `pip install .[rag]` is excellent. However, there are significant gaps in **Index Hygiene** (handling deleted files) and **Prompt Integration** (how the Designer actually consumes the data) that must be addressed to ensure the feature works as intended.

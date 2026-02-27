@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 88
+url: https://github.com/martymcenroe/AgentOS/issues/88
+fetched: 2026-02-04T14:47:21.505049Z
+---
+
 # Issue #88: RAG Injection: Automated Context Retrieval ("The Librarian")
 
 # RAG Injection: Automated Context Retrieval ("The Librarian")
@@ -36,7 +43,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 
 ### Scenario 4: Vector Store Not Initialized
 1. User runs `agentos lld create --brief "..."`
-2. Librarian checks for `.agentos/vector_store/` â€” not found
+2. Librarian checks for `.agentos/vector_store/` — not found
 3. System logs warning: `[Librarian] Vector store not found. Run 'tools/rebuild_knowledge_base.py' to enable RAG.`
 4. Workflow continues without RAG augmentation
 5. Result: Graceful degradation to manual-only context
@@ -87,7 +94,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 
 ### Optional Dependencies
 1. Add `chromadb` and `sentence-transformers` as **optional dependencies** via `project.optional-dependencies` under `[rag]` extra
-2. Core installation remains lightweight â€” RAG features require explicit `pip install agentos[rag]`
+2. Core installation remains lightweight — RAG features require explicit `pip install agentos[rag]`
 3. Implement conditional imports in `LibrarianNode` with clear error messaging when extras not installed
 
 ### Technical Verification
@@ -114,30 +121,30 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 
 ## Security Considerations
 - Vector store contains only internal documentation (no secrets)
-- **Default mode (local embeddings):** Embedding model runs locally â€” no data leaves the machine
+- **Default mode (local embeddings):** Embedding model runs locally — no data leaves the machine
 - **External API mode:** If user configures OpenAI/Gemini embedding APIs via environment variables, document text **will be sent to external services** for embedding generation. Users must explicitly opt-in by providing API keys. This is a user choice that trades privacy for potentially higher-quality embeddings.
 - `.agentos/vector_store/` should be gitignored (local cache, regenerable)
 - Input sanitization will be verified during code review
 
 ## Files to Create/Modify
-- `tools/rebuild_knowledge_base.py` â€” CLI tool to ingest docs into vector store
-- `agentos/nodes/librarian.py` â€” RAG retrieval node implementation with conditional imports
-- `agentos/workflows/lld/graph.py` â€” Wire Librarian into workflow graph
-- `agentos/workflows/lld/state.py` â€” Add `retrieved_context` to State schema
-- `pyproject.toml` â€” Add `chromadb`, `sentence-transformers` as **optional** dependencies under `[rag]` extra
-- `.gitignore` â€” Add `.agentos/vector_store/`
-- `docs/adrs/XXXX-rag-librarian.md` â€” Document architectural decision including license compliance findings
+- `tools/rebuild_knowledge_base.py` — CLI tool to ingest docs into vector store
+- `agentos/nodes/librarian.py` — RAG retrieval node implementation with conditional imports
+- `agentos/workflows/lld/graph.py` — Wire Librarian into workflow graph
+- `agentos/workflows/lld/state.py` — Add `retrieved_context` to State schema
+- `pyproject.toml` — Add `chromadb`, `sentence-transformers` as **optional** dependencies under `[rag]` extra
+- `.gitignore` — Add `.agentos/vector_store/`
+- `docs/adrs/XXXX-rag-librarian.md` — Document architectural decision including license compliance findings
 
 ## Dependencies
-- None â€” this is a standalone enhancement to the LLD workflow
+- None — this is a standalone enhancement to the LLD workflow
 
 ## Out of Scope (Future)
-- **Automatic reindexing on file change** â€” requires file watcher, deferred
-- **Remote/shared vector store** â€” team sync use case, not MVP
-- **Query refinement/reranking** â€” single-stage retrieval sufficient for now
-- **Cross-repository RAG** â€” multi-repo context is a separate feature
-- **Semantic caching** â€” cache similar queries, optimization for later
-- **Lightweight alternatives (FAISS + pickle)** â€” evaluate if ChromaDB proves too heavy for optional install
+- **Automatic reindexing on file change** — requires file watcher, deferred
+- **Remote/shared vector store** — team sync use case, not MVP
+- **Query refinement/reranking** — single-stage retrieval sufficient for now
+- **Cross-repository RAG** — multi-repo context is a separate feature
+- **Semantic caching** — cache similar queries, optimization for later
+- **Lightweight alternatives (FAISS + pickle)** — evaluate if ChromaDB proves too heavy for optional install
 
 ## Acceptance Criteria
 - [ ] `tools/rebuild_knowledge_base.py` indexes `docs/` in < 10 seconds for 100+ files
@@ -210,7 +217,7 @@ for r in results:
 # Remove vector store
 rm -rf .agentos/vector_store/
 
-# Run LLD workflow â€” should warn but not fail
+# Run LLD workflow — should warn but not fail
 agentos lld create --brief "Test brief"
 ```
 
@@ -221,7 +228,7 @@ python -m venv test_env_core
 source test_env_core/bin/activate
 pip install -e .  # Core only, no [rag]
 
-# Run LLD workflow â€” should show friendly message and continue
+# Run LLD workflow — should show friendly message and continue
 agentos lld create --brief "Test brief"
 # Expected: "[Librarian] RAG dependencies not installed. Run 'pip install agentos[rag]' to enable."
 ```
@@ -247,7 +254,7 @@ python -c "import chromadb; import sentence_transformers; print('OK')"
 
 **To verify lightweight core install:**
 ```bash
-# Fresh virtual environment â€” core only
+# Fresh virtual environment — core only
 python -m venv test_env_light
 source test_env_light/bin/activate
 pip install -e .
@@ -260,4 +267,4 @@ pip list | grep -E "(torch|chromadb)" && echo "FAIL: Heavy deps in core" || echo
 `feature:rag`, `workflow:lld`, `enhancement`, `dependencies`
 
 ## Effort Estimate
-**Large (L)** â€” 5-8 story points due to integration testing complexity, dependency verification across platforms, and license compliance verification.
+**Large (L)** — 5-8 story points due to integration testing complexity, dependency verification across platforms, and license compliance verification.

@@ -7,68 +7,54 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The design for "The Librarian" is architecturally sound, choosing appropriate local-first technologies (ChromaDB, SentenceTransformers) that align with the project's privacy and license constraints. The optional dependency model is well-structured. However, the Testing Plan currently lacks coverage for performance and UI requirements specified in Section 3, resulting in a coverage check failure.
+The design for "The Librarian" is robust, featuring a well-structured local RAG implementation with careful attention to fallback mechanisms and optional dependencies. The architecture using ChromaDB and `sentence-transformers` is appropriate for the scale. However, the LLD currently fails the Requirement Coverage check (<95%) due to missing tests for performance budgets and the final output requirement. These must be addressed before implementation.
 
 ## Open Questions Resolved
-- [x] ~~Should vector store be per-project or shared across projects in a workspace?~~ **RESOLVED: Per-project (`.agentos/vector_store/`).** This ensures project isolation, prevents context leakage between unrelated efforts, and simplifies file path resolution relative to the project root.
+- [x] ~~Should the similarity threshold (0.7) be configurable via environment variable or CLI flag?~~ **RESOLVED: Yes. Use an environment variable (e.g., `AGENTOS_RAG_THRESHOLD`) with a default of 0.7 to allow tuning without code changes.**
+- [x] ~~What is the expected cold-boot time budget for embedding model loading (currently specified as spinner at 500ms)?~~ **RESOLVED: Allocate a 5-10s budget for model loading. 500ms is unrealistic for loading PyTorch/weights. The spinner is mandatory.**
+- [x] ~~Should we support hybrid search (keyword + semantic) for edge cases where semantic similarity misses exact terminology matches?~~ **RESOLVED: No. Stick to semantic search for this MVP to minimize complexity. Hybrid search can be a future enhancement if recall issues are proven.**
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| R1 | Indexing < 10s for 100+ files | T130 (checks count only) | **GAP** - No timing assertion |
-| R2 | Query "log errors" > 0.7 | T060 | ✓ Covered |
-| R3 | Query "auth flow" > 0.7 | T060 (generic happy path) | ✓ Covered |
-| R4 | Retrieval < 500ms | - | **GAP** - No latency test |
-| R5 | Generated LLD refs ADRs | T150 | ✓ Covered |
-| R6 | Degrade: Store missing | T090 | ✓ Covered |
-| R7 | Degrade: Deps missing | T080 | ✓ Covered |
-| R8 | Manual context precedence | T110 | ✓ Covered |
-| R9 | Store persistence | T030, T130 | ✓ Covered |
-| R10 | Core installs w/o ML deps | T020 (logic check) | ✓ Covered |
-| R11 | RAG extra installs on CI | T150, T160 (integration) | ✓ Covered |
-| R12 | CLI spinner displays | - | **GAP** - No UI interaction test |
+| 1 | `tools/rebuild_knowledge_base.py` indexes 100+ files in < 10 seconds | - | **GAP** |
+| 2 | Queries complete in < 500ms after model warm-up | - | **GAP** |
+| 3 | Query "How do I log errors?" retrieves logging-related documents | T150 | ✓ Covered |
+| 4 | Query "authentication flow" retrieves identity/auth ADRs | T160 | ✓ Covered |
+| 5 | Workflow gracefully degrades when vector store is missing | T040, T110 | ✓ Covered |
+| 6 | Workflow gracefully degrades when `[rag]` extra not installed | T020, T100 | ✓ Covered |
+| 7 | Manual `--context` takes precedence over RAG results | T080 | ✓ Covered |
+| 8 | Vector store persists between sessions | T030, T150 | ✓ Covered |
+| 9 | Core `pip install agentos` does not pull torch/chromadb | T180 | ✓ Covered |
+| 10 | `pip install agentos[rag]` works cleanly | T190 | ✓ Covered |
+| 11 | CLI spinner displays during cold-boot model loading | T170 | ✓ Covered |
+| 12 | Generated LLDs reference retrieved ADRs in Constraints section automatically | - | **GAP** |
 
 **Coverage Calculation:** 9 requirements covered / 12 total = **75%**
 
-**Verdict:** **BLOCK** (Requires ≥95%)
+**Verdict:** BLOCK
 
 **Missing Test Scenarios:**
-1. `test_indexing_performance`: benchmark test asserting indexing time is within limits for a generated dataset.
-2. `test_query_latency`: benchmark test asserting query time < 500ms (after warmup).
-3. `test_cli_spinner`: unit test mocking stdout/stderr to verify spinner invocation during model load.
+1.  **Performance Test (Indexing):** A test measuring execution time of `rebuild_knowledge_base.py` on a fixture of 100 small files.
+2.  **Performance Test (Query):** A benchmark test asserting `query_knowledge_base` takes <500ms on a warmed-up model.
+3.  **E2E Output Verification:** An integration test verifying that when RAG context is injected, the resulting LLD (or a mock Designer step) actually includes the referenced material in its output.
 
 ## Tier 1: BLOCKING Issues
-No blocking issues found in Cost, Safety, Security, or Legal categories.
-
-### Cost
-- No issues found. Local inference costs $0.
-
-### Safety
-- No issues found. Operations are read-only or scoped to project directory.
-
-### Security
-- No issues found.
-
-### Legal
-- No issues found.
+No Tier 1 blocking issues found. Cost, Safety, Security, and Legal sections are well-handled.
 
 ## Tier 2: HIGH PRIORITY Issues
 
-### Architecture
-- No issues found.
-
-### Observability
-- No issues found.
-
 ### Quality
-- [ ] **Requirement Coverage Gap:** The Test Plan (Section 10) misses specific scenarios for performance constraints (R1, R4) and UI feedback (R12). While functional logic is tested, the acceptance criteria explicitly list performance budgets which must be asserted in the automated suite (marked as "performance" or "benchmark" tests).
-- [ ] **Test Assertions:** T130 "test_build_knowledge_base_full" verifies the vector store is created, but does not strictly verify R1 (time limit). Add an assertion or a specific performance test case.
+- [ ] **Requirement Coverage Gap (75%):** The test plan misses critical performance constraints and the final functional output requirement.
+    *   **Recommendation:** Add scenarios T200 (Indexing Perf), T210 (Query Perf), and T220 (E2E Content Verification) to Section 10.1 and the TDD checklist.
+- [ ] **Performance Testing Strategy:** Requirements 1 and 2 specify strict timing (<10s, <500ms) but no automated tests enforce these budgets.
+    *   **Recommendation:** Add specific performance assertions using `time.perf_counter()` in the new test scenarios.
 
 ## Tier 3: SUGGESTIONS
-- **Performance:** Consider adding a "warm-up" step in `librarian_node` initialization if the workflow is long-running, to hide the 3-5s model load time before the user reaches that step.
-- **Maintainability:** The `chunk_document` function relying on H1/H2 headers is a good start, but consider a fallback for documents that use different structure (e.g., only bold text) to ensure content isn't lost.
+- **Configuration:** Add `AGENTOS_RAG_THRESHOLD` and `AGENTOS_RAG_MODEL` to the `LibrarianConfig` definition to support the resolution of Open Question #1.
+- **CLI UX:** Ensure `rebuild_knowledge_base.py` provides a progress bar (e.g., `tqdm`) as 100+ files might feel slow even if <10s.
 
 ## Questions for Orchestrator
 1. None.

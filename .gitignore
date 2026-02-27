@@ -40,8 +40,9 @@ harvest-*.xlsx
 docs/blog/
 
 # Local AssemblyZero state (Issue #78)
+# RAG vector store (Issue #88) - regenerated via tools/rebuild_knowledge_base.py
 .assemblyzero/
-! .assemblyzero/config.example.json
+!.assemblyzero/config.example.json
 
 # Keep databases ignored (redundant but explicit)
 *.db
