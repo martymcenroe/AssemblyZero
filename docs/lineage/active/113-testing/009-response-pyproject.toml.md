@@ -1,0 +1,67 @@
+
+
+```toml
+[project]
+name = "assemblyzero-tools"
+version = "0.1.0"
+description = "AssemblyZero configuration and tooling"
+authors = [{name = "Marty McEnroe"}]
+readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+requires-python = "^3.10"
+dependencies = [
+    "keyring (>=25.7.0,<26.0.0)",
+    "anthropic (>=0.78.0,<0.79.0)",
+    "langgraph (>=1.0.7,<2.0.0)",
+    "langgraph-checkpoint-sqlite (>=3.0.3,<4.0.0)",
+    "langchain (>=1.2.8,<2.0.0)",
+    "langchain-google-genai (>=4.2.0,<5.0.0)",
+    "langchain-anthropic (>=1.3.1,<2.0.0)",
+    "watchdog (>=6.0.0,<7.0.0)",
+    "google-genai (>=1.60.0,<2.0.0)",
+    "pygithub (>=2.8.1,<3.0.0)",
+    "tiktoken (>=0.9.0,<1.0.0)",
+    "langchain-core (>=1.2.9,<2.0.0)",
+    "cryptography (>=46.0.4,<47.0.0)",
+    "tenacity (>=9.1.3,<10.0.0)",
+    "packaging (>=26.0,<27.0)",
+    "pathspec (>=1.0.4,<2.0.0)",
+    "aiosqlite (>=0.22.1,<0.23.0)",
+    "jiter (>=0.13.0,<0.14.0)",
+    "orjson (>=3.11.7,<4.0.0)",
+    "langsmith (>=0.6.9,<0.7.0)",
+    "google-auth (>=2.48.0,<3.0.0)",
+    "pycparser (>=3.0,<4.0)",
+    "boto3 (>=1.35.0,<2.0.0)",
+    "chromadb (>=0.5.0,<1.0.0)",
+    "sentence-transformers (>=3.0.0,<4.0.0)"
+]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not integration and not e2e'"
+markers = [
+    "integration: tests that call real external services (deselect with '-m \"not integration\"')",
+    "e2e: end-to-end workflow tests requiring sandbox repo",
+    "expensive: tests that use significant API quota",
+]
+
+[tool.poetry]
+packages = [{include = "assemblyzero"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.2,<10.0.0)",
+    "mypy (>=1.0.0,<2.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)"
+]
+
+[tool.coverage.run]
+source = ["assemblyzero"]
+
+[tool.coverage.report]
+show_missing = true
+```

@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 113
+url: https://github.com/martymcenroe/AgentOS/issues/113
+fetched: 2026-02-04T07:57:15.599246Z
+---
+
 # Issue #113: Brutha: Vector Database Infrastructure (RAG Foundation)
 
 # Brutha: Vector Database Infrastructure (RAG Foundation)
