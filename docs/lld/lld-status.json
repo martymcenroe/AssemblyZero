@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-02-27T06:29:53.229313+00:00",
+  "last_updated": "2026-02-27T08:17:03.486402+00:00",
   "issues": {
     "15": {
       "lld_path": "docs\\lld\\done\\15-path-parameterization.md",
@@ -848,6 +848,14 @@
       "has_gemini_review": true,
       "final_verdict": "APPROVED",
       "last_review_date": "2026-02-26T07:26:10.573635+00:00",
+      "review_count": 1
+    },
+    "352": {
+      "lld_path": "docs\\lld\\active\\LLD-352.md",
+      "status": "approved",
+      "has_gemini_review": true,
+      "final_verdict": "APPROVED",
+      "last_review_date": "2026-02-27T08:17:03.478992+00:00",
       "review_count": 1
     }
   }
