@@ -1,8 +1,8 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 113
-url: https://github.com/martymcenroe/AgentOS/issues/113
-fetched: 2026-02-04T14:47:33.820124Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/113
+fetched: 2026-02-27T06:04:13.941416Z
 ---
 
 # Issue #113: Brutha: Vector Database Infrastructure (RAG Foundation)
@@ -32,7 +32,7 @@ Implement the foundational RAG infrastructure that other personas (Librarian, He
 - Local vector store (no external API calls for embeddings)
 - Collection-per-domain architecture (`documentation`, `codebase`, etc.)
 - Unified query interface
-- Persistence in `.agentos/vector_store/`
+- Persistence in `.assemblyzero/vector_store/`
 
 ## Acceptance Criteria
 - [ ] Vector store initializes on first use
@@ -49,4 +49,4 @@ Implement the foundational RAG infrastructure that other personas (Librarian, He
 ## Philosophy
 Brutha was a simple novice with eidetic memory. He remembered every word, every page, every conversation—perfectly and without embellishment. 
 
-In AgentOS, Brutha is the RAG layer. He does not invent. He does not guess. He only recalls exactly what was stored.
+In AssemblyZero, Brutha is the RAG layer. He does not invent. He does not guess. He only recalls exactly what was stored.

@@ -10,7 +10,7 @@ Previous: Revised to fix mechanical test plan validation — all 10 requirements
 ## 1. Context & Goal
 * **Issue:** #113
 * **Objective:** Implement foundational RAG infrastructure (vector database + embedding generation) that downstream personas (The Librarian #88, Hex #92) consume for document and codebase retrieval.
-* **Status:** Approved (gemini-3-pro-preview, 2026-02-27)
+* **Status:** Draft
 * **Related Issues:** #88 (The Librarian - documentation retrieval), #92 (Hex - codebase retrieval)
 
 ### Open Questions
@@ -942,12 +942,6 @@ Mechanical validation:
 
 ---
 
-## Reviewer Suggestions
-
-*Non-blocking recommendations from the reviewer.*
-
-- Consider adding a simple "smoke test" script in the repository that runs `get_query_engine()` to verify the installation of `sentence-transformers` and `chromadb` on a new developer machine, as these can sometimes have platform-specific build issues.
-
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
@@ -970,10 +964,9 @@ Mechanical validation:
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| 2 | 2026-02-27 | APPROVED | `gemini-3-pro-preview` |
 | Mechanical Validation #1 | 2026-02-10 | REJECTED | 9/10 requirements had no test coverage |
 | Revision #1 | 2026-02-10 | PENDING | Added (REQ-N) suffixes to all scenarios, expanded test plan to cover all 10 requirements |
 | Gemini Review #1 | 2026-02-11 | REVISE | Tier 1: Chunker infinite loop; Tier 2: Missing path traversal test |
 | Revision #2 | 2026-02-11 | PENDING | Added chunker validation (T350), path traversal test (T360), config __post_init__, chunk_file project_root param |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING

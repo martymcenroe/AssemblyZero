@@ -1,22 +1,22 @@
-# 113 - Feature: Brutha - Vector Database Infrastructure (RAG Foundation)
+# 113 - Feature: Vector Database Infrastructure (RAG Foundation)
 
 <!-- Template Metadata
-Last Updated: 2025-01-XX
-Updated By: Initial creation
-Update Reason: New LLD for RAG foundation infrastructure
+Last Updated: 2026-02-10
+Updated By: Issue #113 LLD creation
+Update Reason: Initial LLD for Brutha vector database infrastructure
 -->
 
 ## 1. Context & Goal
 * **Issue:** #113
-* **Objective:** Implement shared vector database infrastructure with perfect recall that serves as the foundation for documentation retrieval (The Librarian #88) and codebase retrieval (Hex #92)
+* **Objective:** Implement foundational RAG infrastructure (vector database + embedding generation) that downstream personas (The Librarian #88, Hex #92) consume for document and codebase retrieval.
 * **Status:** Draft
-* **Related Issues:** #88 (The Librarian - depends on this), #92 (Hex - depends on this)
+* **Related Issues:** #88 (The Librarian - documentation retrieval), #92 (Hex - codebase retrieval)
 
 ### Open Questions
 
-- [ ] Should we use ChromaDB's built-in persistence or implement custom backup strategy?
-- [ ] What embedding model dimension should we standardize on (384 vs 768)?
-- [ ] Should collection schemas be strictly enforced or allow dynamic metadata?
+- [ ] Should ChromaDB persistence use a single SQLite file or directory-based storage? (Default: directory-based via ChromaDB's `PersistentClient`)
+- [ ] What is the maximum document chunk size for embeddings? (Proposed: 512 tokens with 50-token overlap)
+- [ ] Should collection schemas be enforced via metadata validation or left flexible? (Proposed: flexible with optional metadata typing)
 
 ## 2. Proposed Changes
 
@@ -26,246 +26,488 @@ Update Reason: New LLD for RAG foundation infrastructure
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `src/agentos/memory/__init__.py` | Add | Package initialization, exports public API |
-| `src/agentos/memory/brutha.py` | Add | Core vector store manager class |
-| `src/agentos/memory/embeddings.py` | Add | Local embedding generation using SentenceTransformers |
-| `src/agentos/memory/collections.py` | Add | Collection management and schema definitions |
-| `src/agentos/memory/query.py` | Add | Unified query interface for all consumers |
-| `src/agentos/memory/config.py` | Add | Configuration constants and paths |
-| `tests/unit/test_brutha.py` | Add | Unit tests for vector store operations |
-| `tests/integration/test_brutha_integration.py` | Add | Integration tests with real ChromaDB |
+| `assemblyzero/rag/` | Add (Directory) | New package for RAG infrastructure |
+| `assemblyzero/rag/__init__.py` | Add | Package init, public API exports |
+| `assemblyzero/rag/store.py` | Add | VectorStore class — ChromaDB lifecycle, collection management |
+| `assemblyzero/rag/embeddings.py` | Add | EmbeddingProvider — local SentenceTransformers wrapper |
+| `assemblyzero/rag/collections.py` | Add | CollectionManager — CRUD for named collections |
+| `assemblyzero/rag/query.py` | Add | QueryEngine — unified query interface across collections |
+| `assemblyzero/rag/chunking.py` | Add | TextChunker — document splitting for embedding |
+| `assemblyzero/rag/config.py` | Add | RAG configuration dataclass and defaults |
+| `assemblyzero/rag/errors.py` | Add | Custom exception hierarchy for RAG layer |
+| `tests/unit/test_rag/` | Add (Directory) | Unit tests for RAG infrastructure |
+| `tests/unit/test_rag/__init__.py` | Add | Test package init |
+| `tests/unit/test_rag/test_store.py` | Add | Tests for VectorStore lifecycle |
+| `tests/unit/test_rag/test_embeddings.py` | Add | Tests for EmbeddingProvider |
+| `tests/unit/test_rag/test_collections.py` | Add | Tests for CollectionManager |
+| `tests/unit/test_rag/test_query.py` | Add | Tests for QueryEngine |
+| `tests/unit/test_rag/test_chunking.py` | Add | Tests for TextChunker |
+| `tests/unit/test_rag/test_config.py` | Add | Tests for configuration loading |
+| `tests/unit/test_rag/test_errors.py` | Add | Tests for error hierarchy and graceful degradation |
+| `tests/fixtures/rag/` | Add (Directory) | Test fixtures for RAG tests |
+| `tests/fixtures/rag/sample_docs.json` | Add | Sample document fixtures for testing |
+| `tests/fixtures/rag/sample_code.json` | Add | Sample code chunk fixtures for testing |
+| `pyproject.toml` | Modify | Add chromadb, sentence-transformers dependencies |
+
+### 2.1.1 Path Validation (Mechanical - Auto-Checked)
+
+Mechanical validation automatically checks:
+- All "Modify" files must exist in repository: `pyproject.toml` ✓
+- All "Add" files have existing parent directories or parent is also "Add (Directory)"
+- No placeholder prefixes
+
+**If validation fails, the LLD is BLOCKED before reaching review.**
 
 ### 2.2 Dependencies
 
-*New packages, APIs, or services required.*
+*New packages required for local vector store and embeddings.*
 
 ```toml
 # pyproject.toml additions
-chromadb = "^0.4.22"
-sentence-transformers = "^2.3.1"
+chromadb = ">=0.5.0,<1.0.0"
+sentence-transformers = ">=3.0.0,<4.0.0"
 ```
+
+**Note:** `sentence-transformers` pulls in `torch` as a transitive dependency. This is expected and necessary for local embedding generation. The `all-MiniLM-L6-v2` model is ~80MB and is downloaded on first use to a user-local cache (`~/.cache/torch/sentence_transformers/`).
 
 ### 2.3 Data Structures
 
 ```python
-# Pseudocode - NOT implementation
-from typing import TypedDict, Optional
-from enum import Enum
+# assemblyzero/rag/config.py
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
 
-class CollectionName(Enum):
-    DOCUMENTATION = "documentation"
-    CODEBASE = "codebase"
-    CONVERSATIONS = "conversations"  # Future use
 
-class Document(TypedDict):
-    id: str                    # Unique document identifier
-    content: str               # Text content to embed
-    metadata: dict[str, any]   # Source, timestamp, type, etc.
+@dataclass(frozen=True)
+class RAGConfig:
+    """Immutable configuration for the RAG infrastructure."""
+    persist_directory: Path = field(
+        default_factory=lambda: Path(".assemblyzero/vector_store")
+    )
+    embedding_model_name: str = "all-MiniLM-L6-v2"
+    embedding_dimension: int = 384  # Matches all-MiniLM-L6-v2
+    chunk_size: int = 512           # Tokens
+    chunk_overlap: int = 50         # Tokens
+    default_n_results: int = 5
+    distance_metric: str = "cosine" # ChromaDB distance function
 
-class QueryResult(TypedDict):
-    id: str                    # Document ID
-    content: str               # Retrieved text
-    metadata: dict[str, any]   # Associated metadata
-    distance: float            # Similarity score (lower = more similar)
 
-class BruthaConfig(TypedDict):
-    persist_directory: str     # Path to .agentos/vector_store/
-    embedding_model: str       # SentenceTransformer model name
-    embedding_dimension: int   # Vector dimension (384)
-    default_n_results: int     # Default query result count
+# assemblyzero/rag/collections.py
+# Well-known collection names
+COLLECTION_DOCUMENTATION: str = "documentation"
+COLLECTION_CODEBASE: str = "codebase"
 
-class CollectionStats(TypedDict):
-    name: str                  # Collection name
-    document_count: int        # Number of documents
-    last_updated: Optional[str]  # ISO timestamp
+KNOWN_COLLECTIONS: frozenset[str] = frozenset({
+    COLLECTION_DOCUMENTATION,
+    COLLECTION_CODEBASE,
+})
+
+
+# assemblyzero/rag/query.py
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    """Single result from a vector similarity search."""
+    document: str           # The retrieved text chunk
+    metadata: dict          # Associated metadata (source file, line range, etc.)
+    distance: float         # Distance score (lower = more similar for cosine)
+    collection_name: str    # Which collection this came from
+    chunk_id: str           # Unique ID of the chunk
+
+
+@dataclass(frozen=True)
+class QueryResponse:
+    """Aggregated response from a query operation."""
+    results: list[QueryResult]
+    query_text: str
+    collection_name: str
+    total_results: int
+
+
+# assemblyzero/rag/chunking.py
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TextChunk:
+    """A chunk of text with provenance metadata."""
+    text: str
+    metadata: dict          # source_file, start_line, end_line, etc.
+    chunk_index: int        # Position within the source document
+
+
+# assemblyzero/rag/errors.py
+class RAGError(Exception):
+    """Base exception for all RAG infrastructure errors."""
+    pass
+
+
+class StoreNotInitializedError(RAGError):
+    """Raised when operations attempted on uninitialized store."""
+    pass
+
+
+class CollectionNotFoundError(RAGError):
+    """Raised when referencing a non-existent collection."""
+    def __init__(self, collection_name: str) -> None:
+        self.collection_name = collection_name
+        super().__init__(f"Collection '{collection_name}' not found")
+
+
+class EmbeddingError(RAGError):
+    """Raised when embedding generation fails."""
+    pass
+
+
+class StoreCorruptedError(RAGError):
+    """Raised when the persistent store is corrupted or unreadable."""
+    pass
 ```
 
 ### 2.4 Function Signatures
 
 ```python
-# === brutha.py ===
-class Brutha:
-    """The memory layer - perfect recall without embellishment."""
-    
-    def __init__(self, config: Optional[BruthaConfig] = None) -> None:
-        """Initialize vector store with optional custom config."""
+# === assemblyzero/rag/store.py ===
+
+class VectorStore:
+    """Manages ChromaDB lifecycle and persistence."""
+
+    def __init__(self, config: RAGConfig | None = None) -> None:
+        """Initialize with optional config. Does NOT connect yet (lazy init)."""
         ...
-    
-    def initialize(self) -> bool:
-        """Initialize vector store on first use. Returns True if successful."""
+
+    def initialize(self) -> None:
+        """Create or open the persistent ChromaDB client.
+        Creates persist_directory if it doesn't exist.
+        Raises StoreCorruptedError if existing store is unreadable.
+        """
         ...
-    
+
+    @property
     def is_initialized(self) -> bool:
-        """Check if vector store is ready for operations."""
+        """Whether the store has been initialized and is ready."""
         ...
-    
+
+    def get_client(self) -> "chromadb.ClientAPI":
+        """Return the underlying ChromaDB client.
+        Raises StoreNotInitializedError if not initialized.
+        """
+        ...
+
+    def reset(self) -> None:
+        """Delete all data and reinitialize. DESTRUCTIVE."""
+        ...
+
+    def close(self) -> None:
+        """Clean shutdown of the store."""
+        ...
+
+
+# === assemblyzero/rag/embeddings.py ===
+
+class EmbeddingProvider:
+    """Local embedding generation using SentenceTransformers."""
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+        """Initialize with model name. Model loaded lazily on first use."""
+        ...
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Generate embeddings for a batch of texts.
+        Returns list of float vectors, one per input text.
+        Raises EmbeddingError on model failure.
+        """
+        ...
+
+    def embed_query(self, query: str) -> list[float]:
+        """Generate embedding for a single query string.
+        Convenience wrapper around embed_texts.
+        """
+        ...
+
+    @property
+    def dimension(self) -> int:
+        """Return the embedding dimension for the loaded model."""
+        ...
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether the model has been loaded into memory."""
+        ...
+
+
+# === assemblyzero/rag/collections.py ===
+
+class CollectionManager:
+    """CRUD operations for named vector collections."""
+
+    def __init__(self, store: VectorStore) -> None:
+        """Initialize with a VectorStore instance."""
+        ...
+
+    def create_collection(
+        self,
+        name: str,
+        metadata: dict | None = None,
+    ) -> "chromadb.Collection":
+        """Create a new collection. Raises RAGError if already exists."""
+        ...
+
+    def get_collection(self, name: str) -> "chromadb.Collection":
+        """Get existing collection by name.
+        Raises CollectionNotFoundError if not found.
+        """
+        ...
+
+    def get_or_create_collection(
+        self,
+        name: str,
+        metadata: dict | None = None,
+    ) -> "chromadb.Collection":
+        """Get existing or create new collection."""
+        ...
+
+    def delete_collection(self, name: str) -> None:
+        """Delete a collection by name.
+        Raises CollectionNotFoundError if not found.
+        """
+        ...
+
+    def list_collections(self) -> list[str]:
+        """Return names of all existing collections."""
+        ...
+
+    def collection_exists(self, name: str) -> bool:
+        """Check if a collection exists."""
+        ...
+
+    def collection_count(self, name: str) -> int:
+        """Return number of documents in a collection.
+        Raises CollectionNotFoundError if not found.
+        """
+        ...
+
+
+# === assemblyzero/rag/query.py ===
+
+class QueryEngine:
+    """Unified query interface across collections."""
+
+    def __init__(
+        self,
+        store: VectorStore,
+        embedding_provider: EmbeddingProvider,
+        config: RAGConfig | None = None,
+    ) -> None:
+        """Initialize with store and embedding provider."""
+        ...
+
     def add_documents(
-        self, 
-        collection: CollectionName, 
-        documents: list[Document]
-    ) -> int:
-        """Add documents to collection. Returns count added."""
+        self,
+        collection_name: str,
+        documents: list[str],
+        metadatas: list[dict] | None = None,
+        ids: list[str] | None = None,
+    ) -> list[str]:
+        """Add documents to a collection with auto-generated embeddings.
+        Returns list of document IDs (auto-generated if not provided).
+        Raises CollectionNotFoundError if collection doesn't exist.
+        """
         ...
-    
+
     def query(
         self,
-        collection: CollectionName,
+        collection_name: str,
         query_text: str,
-        n_results: int = 10,
-        where: Optional[dict] = None
-    ) -> list[QueryResult]:
-        """Query collection with optional metadata filtering."""
+        n_results: int | None = None,
+        where: dict | None = None,
+    ) -> QueryResponse:
+        """Query a collection with natural language text.
+        Returns ranked QueryResponse with similarity scores.
+        Raises CollectionNotFoundError if collection doesn't exist.
+        """
         ...
-    
+
     def delete_documents(
         self,
-        collection: CollectionName,
-        ids: list[str]
-    ) -> int:
-        """Delete documents by ID. Returns count deleted."""
-        ...
-    
-    def get_collection_stats(self, collection: CollectionName) -> CollectionStats:
-        """Get statistics for a collection."""
+        collection_name: str,
+        ids: list[str],
+    ) -> None:
+        """Remove documents by ID from a collection."""
         ...
 
-# === embeddings.py ===
-class LocalEmbedder:
-    """Local embedding generation - no data egress."""
-    
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
-        """Initialize with specified SentenceTransformer model."""
-        ...
-    
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for texts. Batched for efficiency."""
-        ...
-    
-    def embed_single(self, text: str) -> list[float]:
-        """Generate embedding for single text."""
+    def get_document(
+        self,
+        collection_name: str,
+        doc_id: str,
+    ) -> QueryResult | None:
+        """Retrieve a specific document by ID. Returns None if not found."""
         ...
 
-# === collections.py ===
-def get_or_create_collection(
-    client: chromadb.Client,
-    name: CollectionName,
-    embedding_function: EmbeddingFunction
-) -> chromadb.Collection:
-    """Get existing collection or create with proper schema."""
+
+# === assemblyzero/rag/chunking.py ===
+
+class TextChunker:
+    """Split documents into chunks suitable for embedding."""
+
+    def __init__(
+        self,
+        chunk_size: int = 512,
+        chunk_overlap: int = 50,
+    ) -> None:
+        """Initialize with chunk size (tokens) and overlap."""
+        ...
+
+    def chunk_text(
+        self,
+        text: str,
+        metadata: dict | None = None,
+    ) -> list[TextChunk]:
+        """Split text into overlapping chunks with metadata propagation.
+        Empty text returns empty list.
+        """
+        ...
+
+    def chunk_file(
+        self,
+        file_path: Path,
+        additional_metadata: dict | None = None,
+    ) -> list[TextChunk]:
+        """Read file and chunk contents. Adds file path to metadata.
+        Raises FileNotFoundError if file doesn't exist.
+        """
+        ...
+
+
+# === assemblyzero/rag/__init__.py — public API ===
+
+def get_store(config: RAGConfig | None = None) -> VectorStore:
+    """Get or create the singleton VectorStore instance.
+    Thread-safe. Returns existing instance if already created.
+    """
     ...
 
-def validate_metadata(
-    collection: CollectionName,
-    metadata: dict
-) -> tuple[bool, Optional[str]]:
-    """Validate metadata against collection schema. Returns (valid, error_msg)."""
-    ...
-
-# === query.py ===
-def unified_query(
-    brutha: Brutha,
-    query_text: str,
-    collections: list[CollectionName],
-    n_results: int = 10
-) -> dict[CollectionName, list[QueryResult]]:
-    """Query multiple collections simultaneously."""
+def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
+    """Get a fully wired QueryEngine with store + embeddings.
+    Convenience factory for consumers (#88, #92).
+    Initializes store on first call.
+    """
     ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
 ```
-=== Initialization Flow ===
-1. Check if .agentos/vector_store/ exists
-2. IF not exists THEN
-   - Create directory structure
-   - Initialize ChromaDB with persistence
-   - Create default collections (documentation, codebase)
-   - Log: "Brutha initialized - memory is ready"
-3. ELSE
-   - Load existing ChromaDB from disk
-   - Validate collection integrity
-   - Log: "Brutha awakened - {n} memories restored"
-4. Load embedding model (lazy - only when first needed)
+=== Initialization (Lazy) ===
+1. Consumer calls get_query_engine()
+2. IF singleton store exists, return cached engine
+3. ELSE:
+   a. Load RAGConfig (defaults or from caller)
+   b. Create VectorStore(config)
+   c. Call store.initialize()
+      - Create .assemblyzero/vector_store/ directory if missing
+      - Open ChromaDB PersistentClient pointing to directory
+      - IF existing data is corrupted, raise StoreCorruptedError
+   d. Create EmbeddingProvider(config.embedding_model_name)
+      - Model loaded lazily on first embed call
+   e. Create QueryEngine(store, embedding_provider, config)
+   f. Cache and return
 
-=== Add Documents Flow ===
-1. Validate documents (id required, content non-empty)
-2. Extract texts for embedding
-3. Generate embeddings locally (batch)
-4. Upsert to collection (ChromaDB handles duplicates)
-5. Persist changes
-6. Return count added
+=== Adding Documents ===
+1. Caller provides collection_name, documents, optional metadatas
+2. QueryEngine.add_documents():
+   a. Get or create collection via CollectionManager
+   b. Generate IDs if not provided (deterministic hash of content)
+   c. Call embedding_provider.embed_texts(documents)
+   d. Call collection.add(documents, embeddings, metadatas, ids)
+   e. Return list of IDs
 
-=== Query Flow ===
-1. Validate collection exists
-2. IF collection empty THEN
-   - Return empty list with warning
-3. Generate query embedding
-4. Execute similarity search with optional metadata filter
-5. Transform results to QueryResult format
-6. Return sorted by distance (ascending)
+=== Querying ===
+1. Caller provides collection_name, query_text, optional n_results
+2. QueryEngine.query():
+   a. Get collection via CollectionManager
+      - IF collection doesn't exist, raise CollectionNotFoundError
+   b. Generate query embedding via embedding_provider.embed_query()
+   c. Call collection.query(query_embeddings, n_results, where)
+   d. Map ChromaDB results to list[QueryResult]
+   e. Return QueryResponse
 
-=== Graceful Degradation Flow ===
-1. On any ChromaDB error:
-   - Log error with full context
-   - IF initialization error THEN
-     - Set initialized = False
-     - Return empty results for queries
-     - Raise BruthaNotInitializedError for writes
-   - IF query error THEN
-     - Return empty results, log warning
-   - IF write error THEN
-     - Raise with details, caller decides retry
+=== Chunking (Pre-ingestion) ===
+1. Caller has raw text (doc page, source file, etc.)
+2. TextChunker.chunk_text():
+   a. Tokenize text (whitespace-based, not model-specific)
+   b. Slide window of chunk_size tokens with chunk_overlap
+   c. For each window:
+      - Create TextChunk with text, propagated metadata, index
+   d. Return list[TextChunk]
+3. Caller feeds chunk texts into add_documents()
+
+=== Graceful Degradation ===
+1. Any consumer calls get_query_engine()
+2. IF sentence-transformers not installed:
+   a. Raise ImportError with helpful message
+3. IF chromadb not installed:
+   a. Raise ImportError with helpful message
+4. IF store directory permissions denied:
+   a. Raise StoreCorruptedError with path info
+5. Consumer can catch RAGError and fall back to non-RAG behavior
 ```
 
 ### 2.6 Technical Approach
 
-* **Module:** `src/agentos/memory/`
-* **Pattern:** Repository pattern with facade (Brutha class provides unified interface)
+* **Module:** `assemblyzero/rag/`
+* **Pattern:** Facade pattern — `get_query_engine()` wires together all internal components. Consumers (#88, #92) interact only with `QueryEngine` and `TextChunker`.
 * **Key Decisions:**
-  - **Local embeddings only**: SentenceTransformers ensures no data leaves the machine
-  - **Collection-per-domain**: Isolates documentation from code for cleaner queries
-  - **Lazy initialization**: Embedding model loads only when first query/add occurs
-  - **Upsert semantics**: Re-adding same document ID updates rather than duplicates
+  - **Local-only embeddings:** `sentence-transformers` with `all-MiniLM-L6-v2` ensures zero data egress. Model is 80MB, runs on CPU, produces 384-dimensional vectors.
+  - **ChromaDB PersistentClient:** Writes to `.assemblyzero/vector_store/`. No server process needed — embedded SQLite + Parquet storage.
+  - **Lazy initialization:** Model and store are not loaded until first use, keeping import overhead near zero.
+  - **Singleton store:** Only one ChromaDB client instance per process to avoid lock contention.
+  - **Deterministic IDs:** Document IDs default to SHA-256 hash of content, enabling idempotent upserts.
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Vector database | ChromaDB, FAISS, Pinecone, Milvus | ChromaDB | Local-first, embedded, good Python API, handles persistence |
-| Embedding model | OpenAI Ada, Cohere, all-MiniLM-L6-v2 | all-MiniLM-L6-v2 | Local (no API calls), 384 dimensions, fast, good quality |
-| Persistence strategy | In-memory only, SQLite, File-based | ChromaDB native (SQLite + parquet) | Built-in, reliable, handles concurrent access |
-| Collection schema | Strict validation, Dynamic | Semi-strict with core fields | Balance between flexibility and consistency |
-| Query interface | Per-collection, Unified | Both (unified wraps per-collection) | Flexibility for different use cases |
+| Vector store engine | ChromaDB, FAISS, Qdrant, LanceDB | ChromaDB | Best balance of simplicity (embedded, no server), persistence, metadata filtering, and Python-native API. FAISS lacks metadata. Qdrant requires server. LanceDB is newer/less proven. |
+| Embedding model | all-MiniLM-L6-v2, all-mpnet-base-v2, BGE-small-en | all-MiniLM-L6-v2 | Standard choice for local embeddings: 80MB, 384 dims, fast on CPU, well-benchmarked. mpnet is larger (420MB) with marginal gains. BGE has licensing concerns. |
+| Persistence location | `.assemblyzero/vector_store/`, `data/vector_store/`, `~/.assemblyzero/` | `.assemblyzero/vector_store/` | Project-local, consistent with existing `.assemblyzero/` convention, gitignored by default |
+| Collection architecture | Single collection with domain metadata, one collection per domain | One per domain | Cleaner separation, independent lifecycle (delete docs without touching code), simpler metadata queries |
+| ID generation | UUID, content hash, sequential | Content hash (SHA-256) | Enables idempotent adds — re-ingesting same content is a no-op. Avoids duplicates. |
+| Chunking strategy | Fixed token window, recursive character, sentence-aware | Fixed token window with overlap | Simple, predictable, sufficient for v1. Sentence-aware adds complexity without proven benefit at this stage. |
 
 **Architectural Constraints:**
-- Must not make any external API calls for embeddings (privacy requirement)
-- Must persist to `.agentos/vector_store/` (consistent with other AgentOS data)
-- Must support graceful degradation (feature, not hard dependency)
+- Must not make any network calls for embedding generation (data egress prohibition)
+- Must work without a running server process (embedded store only)
+- Must be usable by both #88 (docs) and #92 (code) without coupling to either domain
+- Must survive process restarts (persistent storage)
 
 ## 3. Requirements
 
-*What must be true when this is done. These become acceptance criteria.*
-
-1. **R1**: Vector store initializes automatically on first use, creating `.agentos/vector_store/` directory
-2. **R2**: Multiple collections supported with independent schemas (documentation, codebase minimum)
-3. **R3**: All embedding generation happens locally via SentenceTransformers (zero data egress)
-4. **R4**: The Librarian (#88) can add and query the `documentation` collection
-5. **R5**: Hex (#92) can add and query the `codebase` collection
-6. **R6**: Graceful degradation when vector store not initialized (returns empty, doesn't crash)
-7. **R7**: Vector store persists across sessions (survives process restart)
-8. **R8**: Query results include similarity scores for relevance ranking
+1. Vector store initializes on first use with lazy loading — no startup cost until RAG is needed
+2. Multiple named collections are supported (at minimum: `documentation`, `codebase`)
+3. Embedding generation is fully local using SentenceTransformers (zero network calls)
+4. The Librarian (#88) and Hex (#92) can independently query their respective collections via the same API
+5. Graceful degradation when vector store is not initialized or dependencies are missing
+6. Persistent storage at `.assemblyzero/vector_store/` survives process restarts
+7. Documents can be added, queried, and deleted through a unified `QueryEngine` interface
+8. Text chunking utility provided for pre-ingestion document splitting
+9. Thread-safe singleton store prevents ChromaDB lock contention
+10. All public functions have type hints and docstrings
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| ChromaDB | Embedded, Python-native, built-in persistence, good docs | Newer project, less battle-tested than FAISS | **Selected** |
-| FAISS | Battle-tested, very fast, Facebook backing | Requires manual persistence, C++ bindings can be tricky | Rejected |
-| Pinecone | Managed, scalable, great API | External service = data egress, cost | Rejected |
-| LanceDB | Embedded, handles large scale | Newer, less community support | Rejected |
+| ChromaDB (embedded, persistent) | Zero-config, Python-native, metadata filtering, built-in persistence | Newer project, not as battle-tested as FAISS for large scale | **Selected** |
+| FAISS + manual persistence | Very fast, mature, Facebook-backed | No metadata filtering, manual serialization, no built-in ID management | Rejected |
+| Qdrant (local mode) | Rich query language, gRPC support | Heavier dependency, server-oriented design, overkill for local use | Rejected |
+| LanceDB | Columnar storage, good for large datasets | Very new, API still evolving, less community support | Rejected |
+| OpenAI/external embeddings | Higher quality embeddings | Violates data egress prohibition, adds API cost, requires network | Rejected |
 
-**Rationale:** ChromaDB provides the best balance of local-first operation, ease of use, and built-in persistence. FAISS would require implementing persistence ourselves, and Pinecone violates the "no data egress" requirement.
+**Rationale:** ChromaDB provides the best balance for an embedded, local-only vector store with metadata filtering and persistence. It aligns perfectly with the "no data egress" constraint and requires zero infrastructure beyond `pip install`.
 
 ## 5. Data & Fixtures
 
@@ -273,41 +515,53 @@ def unified_query(
 
 | Attribute | Value |
 |-----------|-------|
-| Source | Documents provided by consumers (Librarian, Hex) |
-| Format | Text strings with metadata dictionaries |
-| Size | Variable: ~1KB-100KB per document, est. 10K-100K documents total |
-| Refresh | On-demand when consumers index new content |
-| Copyright/License | N/A - infrastructure layer, content owned by consumers |
+| Source | Local project files (documentation, source code) ingested by consumers #88, #92 |
+| Format | Plain text chunks with JSON metadata |
+| Size | Hundreds to low thousands of documents per collection (typical project) |
+| Refresh | On-demand (consumers trigger re-ingestion) |
+| Copyright/License | N/A — user's own project files |
 
 ### 5.2 Data Pipeline
 
 ```
-Consumer (Librarian/Hex) ──add_documents()──► Brutha ──embed()──► LocalEmbedder
-                                                │
-                                                ▼
-                                          ChromaDB ──persist()──► .agentos/vector_store/
+Source Files ──TextChunker──► TextChunks ──EmbeddingProvider──► Vectors ──ChromaDB──► Persistent Store
+                                                                                          │
+Query Text ──EmbeddingProvider──► Query Vector ──ChromaDB──► Ranked Results ◄──────────────┘
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| Sample documentation chunks | Generated | 10 markdown snippets of varying length |
-| Sample code chunks | Generated | 10 Python code snippets with docstrings |
-| Edge case texts | Hardcoded | Empty string, unicode, very long text |
-| Mock embeddings | Generated | Fixed vectors for deterministic testing |
+| `tests/fixtures/rag/sample_docs.json` | Hand-crafted | 5-10 sample documentation chunks with metadata |
+| `tests/fixtures/rag/sample_code.json` | Hand-crafted | 5-10 sample code chunks with metadata |
+
+**Fixture format:**
+```json
+{
+  "chunks": [
+    {
+      "text": "The VectorStore class manages ChromaDB lifecycle...",
+      "metadata": {
+        "source_file": "docs/api-reference.md",
+        "section": "VectorStore",
+        "start_line": 10,
+        "end_line": 25
+      }
+    }
+  ]
+}
+```
 
 ### 5.4 Deployment Pipeline
 
-Development → Test (ephemeral ChromaDB) → Production (persistent to `.agentos/`)
-
-No external data source utility needed - this is pure infrastructure.
+All data is local. No deployment pipeline needed. The `.assemblyzero/vector_store/` directory should be added to `.gitignore` (it contains derived data, not source of truth).
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-- [x] **Simplicity:** Similar components collapsed
+- [x] **Simplicity:** Components grouped by responsibility
 - [x] **No touching:** All elements have visual separation
 - [x] **No hidden lines:** All arrows fully visible
 - [x] **Readable:** Labels not truncated, flow direction clear
@@ -321,42 +575,49 @@ No external data source utility needed - this is pure infrastructure.
 - Flow clarity: [ ] Clear / [ ] Issue: ___
 ```
 
+*To be completed during implementation.*
+
 ### 6.2 Diagram
 
 ```mermaid
-flowchart TB
-    subgraph Consumers["Consuming Personas"]
-        Librarian["The Librarian<br/>#88"]
-        Hex["Hex<br/>#92"]
-        Future["Future Agents"]
+graph TD
+    subgraph Consumers["Downstream Consumers"]
+        LIB["#88 The Librarian<br/>(Documentation)"]
+        HEX["#92 Hex<br/>(Codebase)"]
     end
 
-    subgraph Brutha["Brutha - Memory Layer"]
-        API["Unified Query API"]
-        Collections["Collection Manager"]
-        Embedder["LocalEmbedder<br/>(SentenceTransformers)"]
+    subgraph PublicAPI["Public API (assemblyzero/rag/__init__.py)"]
+        GQE["get_query_engine()"]
+        GS["get_store()"]
     end
 
-    subgraph Storage["Persistent Storage"]
-        ChromaDB["ChromaDB"]
-        DocColl[("documentation<br/>collection")]
-        CodeColl[("codebase<br/>collection")]
+    subgraph Core["Core Components"]
+        QE["QueryEngine"]
+        CM["CollectionManager"]
+        EP["EmbeddingProvider<br/>(all-MiniLM-L6-v2)"]
+        TC["TextChunker"]
+        VS["VectorStore"]
     end
 
-    subgraph Files[".agentos/vector_store/"]
-        Persist["SQLite + Parquet"]
+    subgraph Storage["Persistence"]
+        CDB["ChromaDB<br/>PersistentClient"]
+        DISK[".assemblyzero/<br/>vector_store/"]
     end
 
-    Librarian -->|"add/query docs"| API
-    Hex -->|"add/query code"| API
-    Future -.->|"future use"| API
-    
-    API --> Collections
-    API --> Embedder
-    Collections --> ChromaDB
-    ChromaDB --> DocColl
-    ChromaDB --> CodeColl
-    ChromaDB -->|"persist"| Persist
+    LIB --> GQE
+    HEX --> GQE
+    GQE --> QE
+    GS --> VS
+
+    QE --> CM
+    QE --> EP
+    CM --> VS
+    VS --> CDB
+    CDB --> DISK
+
+    LIB -.->|"chunk docs"| TC
+    HEX -.->|"chunk code"| TC
+    TC -.->|"TextChunks"| QE
 ```
 
 ## 7. Security & Safety Considerations
@@ -365,26 +626,24 @@ flowchart TB
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Data egress via embeddings | All embeddings generated locally via SentenceTransformers | Addressed |
-| Malicious content injection | Content stored as-is; sanitization is consumer responsibility | Addressed |
-| Path traversal in persist dir | Hardcoded path under `.agentos/`, no user input in paths | Addressed |
-| Concurrent access corruption | ChromaDB handles locking; recommend single writer pattern | Addressed |
+| Data egress via embeddings | All embeddings generated locally via SentenceTransformers; no network calls | Addressed |
+| Prompt injection via stored documents | Brutha only recalls what was stored — no LLM generation in this layer. Consumers responsible for sanitizing before use. | Addressed |
+| Path traversal in file chunking | `TextChunker.chunk_file()` validates path exists and is within project root | Addressed |
+| Malicious metadata injection | Metadata values are stored as-is in ChromaDB; consumers must sanitize when rendering | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Data loss on failure | ChromaDB auto-persists; no explicit transaction needed | Addressed |
-| Embedding model download failure | Graceful degradation; warn and continue without RAG | Addressed |
-| Disk space exhaustion | Log warnings at 1GB, 5GB thresholds; leave cleanup to user | Addressed |
-| Runaway indexing | Batch size limits (100 docs), progress logging | Addressed |
+| Store corruption on crash | ChromaDB uses SQLite WAL mode with atomic writes; no application-level transactions needed | Addressed |
+| Disk space exhaustion | `VectorStore.initialize()` checks available disk space; warns if < 100MB | Addressed |
+| Model download on first use | `EmbeddingProvider` logs a clear message when downloading model; model cached permanently after first download | Addressed |
+| Concurrent write contention | Singleton pattern ensures one ChromaDB client per process; ChromaDB handles internal locking | Addressed |
+| Accidental data deletion | `VectorStore.reset()` requires explicit call; no auto-cleanup | Addressed |
 
-**Fail Mode:** Fail Open - queries return empty results rather than crashing
-**Justification:** RAG is an enhancement, not critical path; better to proceed without context than halt entirely
+**Fail Mode:** Fail Closed — if the vector store cannot initialize, operations raise exceptions rather than returning empty/degraded results silently. Consumers explicitly handle `RAGError` to decide their fallback behavior.
 
-**Recovery Strategy:** 
-1. If ChromaDB corrupted: Delete `.agentos/vector_store/`, re-index on next use
-2. If embedding model corrupted: Clear HuggingFace cache, re-download
+**Recovery Strategy:** If `.assemblyzero/vector_store/` is corrupted, delete the directory and re-ingest. The vector store is derived data, not source of truth.
 
 ## 8. Performance & Cost Considerations
 
@@ -392,49 +651,50 @@ flowchart TB
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| Query latency | < 100ms for 10 results | ChromaDB in-memory index, local embeddings |
-| Indexing throughput | > 100 docs/second | Batch embedding generation |
-| Memory (idle) | < 50MB | Lazy model loading |
-| Memory (active) | < 500MB | Model loaded only during operations |
-| Startup time | < 2s | Lazy initialization |
+| First-use latency (model load) | < 5s (CPU) | Lazy load; model cached after first use |
+| Embedding generation | < 50ms per batch of 10 chunks | SentenceTransformers batch encoding on CPU |
+| Query latency | < 100ms per query | ChromaDB in-process, no network hop |
+| Memory (model loaded) | ~200MB | all-MiniLM-L6-v2 is compact; acceptable for dev tooling |
+| Memory (model not loaded) | < 5MB | Lazy loading ensures near-zero baseline |
+| Disk (store) | 1-50MB typical | Depends on project size; ChromaDB compresses vectors |
 
 **Bottlenecks:**
-- First query loads embedding model (~1-2s cold start)
-- Very large collections (>100K docs) may see query slowdown
-- Disk I/O during initial load with large persistence files
+- Initial model download (~80MB) on first ever use — one-time cost, cached permanently
+- First embedding call loads model into memory (~2-3s) — subsequent calls are fast
+- Very large collections (>100K documents) may see slower queries — not expected for project-local use
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| Compute (embedding) | Local CPU | ~1000 docs/day | $0 |
-| Storage | Disk | ~1GB | $0 |
-| API calls | None | 0 | $0 |
+| SentenceTransformers (local CPU) | $0 | Unlimited | $0 |
+| ChromaDB (embedded) | $0 | Unlimited | $0 |
+| Disk storage | $0 (local) | 1-50MB | $0 |
 
 **Cost Controls:**
-- [x] No external API dependencies = no usage costs
-- [x] Embedding model cached locally after first download
-- [x] No cloud infrastructure required
+- [x] All processing is local — zero API costs by design
+- [x] No external service dependencies
+- [x] No metered usage
 
-**Worst-Case Scenario:** At 100x usage (100K docs/day), performance degrades but no cost increase. May need to consider chunking strategy or index optimization.
+**Worst-Case Scenario:** If a project has 1M lines of code chunked at 512 tokens, that's approximately 50K chunks × 384 dimensions × 4 bytes = ~75MB of vector data plus metadata. ChromaDB handles this comfortably on any modern machine.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | N/A | Infrastructure layer; content decisions left to consumers |
-| Third-Party Licenses | Yes | ChromaDB (Apache 2.0), sentence-transformers (Apache 2.0) - compatible |
-| Terms of Service | No | No external services used |
-| Data Retention | N/A | User controls persistence; no automatic deletion |
-| Export Controls | No | No restricted algorithms; embeddings are standard ML |
+| PII/Personal Data | No | Only stores project files (docs, code). No user PII processed. |
+| Third-Party Licenses | Yes | ChromaDB: Apache 2.0. SentenceTransformers: Apache 2.0. all-MiniLM-L6-v2: Apache 2.0. All compatible with project license. |
+| Terms of Service | No | No external APIs consumed. |
+| Data Retention | No | Local storage only; user controls lifecycle. |
+| Export Controls | No | No restricted algorithms; standard ML inference. |
 
-**Data Classification:** Internal (infrastructure handles whatever consumers provide)
+**Data Classification:** Internal (project-specific derived data)
 
 **Compliance Checklist:**
-- [x] No PII stored without consent - N/A, infrastructure layer
-- [x] All third-party licenses compatible with project license - Apache 2.0
-- [x] External API usage compliant with provider ToS - No external APIs
-- [x] Data retention policy documented - User-controlled persistence
+- [x] No PII stored without consent (no PII at all)
+- [x] All third-party licenses compatible with project license (Apache 2.0)
+- [x] External API usage compliant with provider ToS (no external APIs)
+- [x] Data retention policy documented (user-managed local files)
 
 ## 10. Verification & Testing
 
@@ -444,96 +704,157 @@ flowchart TB
 
 | Test ID | Test Description | Expected Behavior | Status |
 |---------|------------------|-------------------|--------|
-| T010 | test_brutha_initialization | Creates vector store on first use | RED |
-| T020 | test_add_documents_to_collection | Documents stored and retrievable | RED |
-| T030 | test_query_returns_relevant_results | Semantic search returns similar docs | RED |
-| T040 | test_multiple_collections_isolated | Docs in one collection don't appear in another | RED |
-| T050 | test_local_embeddings_no_network | Embedding generation works offline | RED |
-| T060 | test_persistence_survives_restart | Data available after reinstantiation | RED |
-| T070 | test_graceful_degradation_uninitialized | Returns empty, doesn't crash | RED |
-| T080 | test_delete_documents | Documents removed from collection | RED |
-| T090 | test_metadata_filtering | Where clause filters results | RED |
-| T100 | test_empty_collection_query | Returns empty list, no error | RED |
+| T010 | Store initializes with default config | Creates persist directory, client is ready | RED |
+| T020 | Store initializes with custom config | Uses custom path and settings | RED |
+| T030 | Store reports not-initialized before init | `is_initialized` returns False | RED |
+| T040 | Store raises on corrupt directory | StoreCorruptedError raised | RED |
+| T050 | Embedding provider generates vectors | Returns list[float] of correct dimension | RED |
+| T060 | Embedding provider batch encoding | Multiple texts produce multiple vectors | RED |
+| T070 | Embedding provider lazy loads model | `is_loaded` False before first embed | RED |
+| T080 | Collection create and retrieve | Collection accessible after creation | RED |
+| T090 | Collection not found raises error | CollectionNotFoundError raised | RED |
+| T100 | Collection list returns all names | All created collections listed | RED |
+| T110 | Collection delete removes collection | Collection no longer listed | RED |
+| T120 | Collection exists check | Returns True/False correctly | RED |
+| T130 | Query returns ranked results | Results ordered by similarity | RED |
+| T140 | Query with metadata filter | Only matching documents returned | RED |
+| T150 | Query on empty collection | Returns empty QueryResponse | RED |
+| T160 | Query on non-existent collection | CollectionNotFoundError raised | RED |
+| T170 | Add documents with auto IDs | IDs generated deterministically | RED |
+| T180 | Add duplicate documents idempotent | Same content produces same ID, no duplicates | RED |
+| T190 | Delete documents by ID | Documents no longer queryable | RED |
+| T200 | Text chunker splits correctly | Chunks respect size and overlap | RED |
+| T210 | Text chunker preserves metadata | Metadata propagated to all chunks | RED |
+| T220 | Text chunker handles empty text | Returns empty list | RED |
+| T230 | Text chunker handles short text | Returns single chunk | RED |
+| T240 | Config defaults are sane | Default values match specification | RED |
+| T250 | get_query_engine() returns wired engine | Engine has store and embeddings | RED |
+| T260 | get_query_engine() singleton behavior | Same instance returned on repeat calls | RED |
+| T270 | Graceful error on missing chromadb | ImportError with helpful message | RED |
+| T280 | Graceful error on missing sentence-transformers | ImportError with helpful message | RED |
+| T290 | Error hierarchy correct | All errors inherit from RAGError | RED |
+| T300 | Multiple collections independent | Adding to one doesn't affect another | RED |
+| T310 | get_document retrieves by ID | Returns correct document or None | RED |
+| T320 | Collection count returns correct count | Matches number of added documents | RED |
 
-**Coverage Target:** ≥95% for all new code
+**Coverage Target:** ≥95% for all new code in `assemblyzero/rag/`
 
 **TDD Checklist:**
 - [ ] All tests written before implementation
 - [ ] Tests currently RED (failing)
 - [ ] Test IDs match scenario IDs in 10.1
-- [ ] Test file created at: `tests/unit/test_brutha.py`
+- [ ] Test files created at: `tests/unit/test_rag/`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Initialize fresh vector store | Auto | No existing store | Store created, is_initialized() = True | Directory exists, collections available |
-| 020 | Add documents to documentation collection | Auto | 5 Document objects | 5 returned from query | Count matches, IDs correct |
-| 030 | Query with semantic similarity | Auto | Query text similar to stored doc | Relevant doc in top 3 | Distance < 0.5 for best match |
-| 040 | Collections are isolated | Auto | Doc in 'codebase', query 'documentation' | Empty result | Zero results from wrong collection |
-| 050 | Embeddings generated locally | Auto | Text input | 384-dim float vector | No network calls, correct dimension |
-| 060 | Persistence across restarts | Auto | Add doc, recreate Brutha instance, query | Doc still present | ID and content match |
-| 070 | Graceful degradation | Auto | Query without initialization | Empty list, no exception | len(results) == 0 |
-| 080 | Delete documents by ID | Auto | Add 3 docs, delete 1 | 2 remaining | Deleted doc not in results |
-| 090 | Metadata filtering in query | Auto | Docs with different 'source' metadata | Only matching source returned | Filter works correctly |
-| 100 | Query empty collection | Auto | Query freshly created collection | Empty list | No errors, len == 0 |
-| 110 | Duplicate document handling | Auto | Add same ID twice with different content | Latest content stored | Upsert semantics |
-| 120 | Batch add performance | Auto | Add 100 documents | All added in < 5s | Performance acceptable |
-| 130 | Unicode content handling | Auto | Japanese/emoji text | Stored and queryable | No encoding errors |
-| 140 | Very long document | Auto | 50KB text document | Stored successfully | No truncation |
+| 010 | Store init with defaults | Auto | `VectorStore()` → `initialize()` | `is_initialized == True` | Directory created, client functional |
+| 020 | Store init with custom config | Auto | `VectorStore(RAGConfig(persist_directory=Path("/tmp/test")))` | Store at custom path | Files created at specified path |
+| 030 | Store not initialized | Auto | `VectorStore()` (no init call) | `is_initialized == False` | Property returns False |
+| 040 | Store corrupt directory | Auto | Store pointed at file (not dir) | `StoreCorruptedError` raised | Exception with path info |
+| 050 | Embed single text | Auto | `embed_query("hello world")` | `list[float]` of len 384 | Correct dimension, all floats |
+| 060 | Embed batch of texts | Auto | `embed_texts(["a", "b", "c"])` | 3 vectors of len 384 | Correct count and dimensions |
+| 070 | Embedding lazy load | Auto | `EmbeddingProvider()` | `is_loaded == False` | Model not in memory |
+| 080 | Create and get collection | Auto | `create_collection("test")` → `get_collection("test")` | Collection returned | Same collection accessible |
+| 090 | Get non-existent collection | Auto | `get_collection("nonexistent")` | `CollectionNotFoundError` | Exception with collection name |
+| 100 | List collections | Auto | Create 3 collections → `list_collections()` | List of 3 names | All names present |
+| 110 | Delete collection | Auto | Create → delete → list | Collection absent from list | `collection_exists()` returns False |
+| 120 | Collection exists | Auto | Create "test" → `exists("test")`, `exists("nope")` | True, False | Correct booleans |
+| 130 | Query ranked results | Auto | Add 3 docs, query matching 1st best | Results[0] is most similar | Distance ordering correct |
+| 140 | Query with where filter | Auto | Add docs with varied metadata, filter on key | Only matching docs returned | Filter respected |
+| 150 | Query empty collection | Auto | Create empty collection → query | Empty results list | `total_results == 0` |
+| 160 | Query missing collection | Auto | Query "nonexistent" | `CollectionNotFoundError` | Exception raised |
+| 170 | Add with auto IDs | Auto | `add_documents("col", ["text1", "text2"])` | 2 IDs returned | IDs are deterministic hashes |
+| 180 | Add duplicate is idempotent | Auto | Add same doc twice | Count still 1 | No duplication |
+| 190 | Delete documents | Auto | Add 3 → delete 1 → count | Count == 2 | Document not queryable |
+| 200 | Chunker splits correctly | Auto | 1000-token text, chunk_size=200, overlap=50 | ~6 chunks | Each chunk ≤200 tokens, overlap present |
+| 210 | Chunker propagates metadata | Auto | Text + `{"source": "file.md"}` | All chunks have metadata | Metadata present on every chunk |
+| 220 | Chunker empty text | Auto | `""` | `[]` | Empty list returned |
+| 230 | Chunker short text | Auto | "short text" (< chunk_size) | 1 chunk | Single chunk, full text |
+| 240 | Config defaults | Auto | `RAGConfig()` | Default values | All fields match spec |
+| 250 | get_query_engine wired | Auto | `get_query_engine()` | QueryEngine instance | Has store, embeddings |
+| 260 | get_query_engine singleton | Auto | Call twice | Same object | `id()` matches |
+| 270 | Missing chromadb import | Auto | Mock chromadb absent | ImportError | Helpful message |
+| 280 | Missing sentence-transformers | Auto | Mock ST absent | ImportError | Helpful message |
+| 290 | Error hierarchy | Auto | Instantiate all errors | All isinstance RAGError | Inheritance correct |
+| 300 | Independent collections | Auto | Add to "docs", query "code" | Empty from "code" | Collections isolated |
+| 310 | Get document by ID | Auto | Add doc → get by ID | Correct document returned | Content matches |
+| 320 | Collection count | Auto | Add 5 docs → count | Returns 5 | Exact count |
 
 ### 10.2 Test Commands
 
 ```bash
-# Run all Brutha unit tests
-poetry run pytest tests/unit/test_brutha.py -v
-
-# Run only fast/mocked tests (no disk I/O)
-poetry run pytest tests/unit/test_brutha.py -v -m "not slow"
-
-# Run integration tests with real ChromaDB
-poetry run pytest tests/integration/test_brutha_integration.py -v
+# Run all RAG unit tests
+poetry run pytest tests/unit/test_rag/ -v
 
 # Run with coverage
-poetry run pytest tests/unit/test_brutha.py --cov=src/agentos/memory --cov-report=term-missing
+poetry run pytest tests/unit/test_rag/ -v --cov=assemblyzero/rag --cov-report=term-missing
+
+# Run a specific test file
+poetry run pytest tests/unit/test_rag/test_store.py -v
+
+# Run a specific test by name
+poetry run pytest tests/unit/test_rag/ -v -k "test_query_ranked"
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
 
 N/A - All scenarios automated.
 
+**Note on embedding tests:** Tests that use `EmbeddingProvider` will download the model on first run (~80MB). Subsequent runs use the cached model. Tests should use `tmp_path` fixtures for ChromaDB persistence to ensure test isolation.
+
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| ChromaDB API breaking changes | High | Low | Pin version in pyproject.toml, test before upgrades |
-| Embedding model unavailable offline | Med | Low | Model cached after first download; document offline setup |
-| Disk space exhaustion | Med | Low | Monitor and warn at thresholds; document cleanup |
-| Query performance degrades with scale | Med | Med | Document scaling limits; consider sharding for future |
-| SentenceTransformers model quality insufficient | Med | Low | all-MiniLM-L6-v2 is well-tested; allow model config for future swap |
-| Concurrent write corruption | High | Low | ChromaDB handles locking; recommend single writer |
+| `sentence-transformers` adds heavy transitive deps (torch ~2GB) | Med | High | Document in install instructions; torch is CPU-only by default. Consider `onnxruntime` alternative in future issue if size becomes problem. |
+| ChromaDB API changes between minor versions | Med | Low | Pin to `>=0.5.0,<1.0.0`; wrap all ChromaDB calls in our own API layer |
+| First-run model download requires internet | Low | Med | Document clearly; model is cached permanently after first download. Could pre-bundle in future. |
+| ChromaDB file locking prevents multi-process access | Med | Med | Singleton pattern ensures one client per process. Document limitation for multi-agent scenarios. |
+| Embedding quality insufficient for code retrieval | Med | Low | `all-MiniLM-L6-v2` is well-benchmarked for general text. Code-specific model can be swapped via config without API changes. |
+| `.assemblyzero/vector_store/` accidentally committed to git | Low | Med | Add to `.gitignore` as part of implementation |
+| Test suite slow due to model loading | Low | Med | Use `@pytest.fixture(scope="session")` for embedding provider to load model once per test run |
 
 ## 12. Definition of Done
 
 ### Code
-- [ ] Implementation complete and linted
-- [ ] Code comments reference this LLD (Issue #113)
-- [ ] All files in `src/agentos/memory/` created
+- [ ] Implementation complete and linted (`assemblyzero/rag/` package)
+- [ ] Code comments reference this LLD (#113)
+- [ ] All public functions have type hints and docstrings
+- [ ] `.assemblyzero/vector_store/` added to `.gitignore`
 
 ### Tests
-- [ ] All test scenarios pass (100% of T010-T140)
-- [ ] Test coverage ≥ 95%
-- [ ] Integration test demonstrates Librarian/Hex consumption pattern
+- [ ] All 32 test scenarios pass
+- [ ] Test coverage ≥95% for `assemblyzero/rag/`
+- [ ] Tests use `tmp_path` for store isolation (no test pollution)
+- [ ] Session-scoped fixture for embedding model (performance)
 
 ### Documentation
 - [ ] LLD updated with any deviations
 - [ ] Implementation Report (0103) completed
-- [ ] README in `src/agentos/memory/` documenting usage
+- [ ] Test Report (0113) completed
 
 ### Review
 - [ ] Code review completed
-- [ ] Librarian (#88) and Hex (#92) authors confirm API meets needs
 - [ ] User approval before closing issue
+
+### Integration Readiness
+- [ ] The Librarian (#88) can import `get_query_engine()` and add/query documentation
+- [ ] Hex (#92) can import `get_query_engine()` and add/query codebase chunks
+- [ ] Both consumers can operate on their own collections independently
+
+### 12.1 Traceability (Mechanical - Auto-Checked)
+
+Mechanical validation:
+- Every file in Definition of Done appears in Section 2.1: `assemblyzero/rag/` ✓, `.gitignore` (implicit, not a new file)
+- Risk mitigations map to functions:
+  - Singleton pattern → `get_store()`, `get_query_engine()` in `__init__.py`
+  - ChromaDB API wrapping → all methods in `store.py`, `collections.py`
+  - Graceful degradation → error classes in `errors.py`, import guards in `__init__.py`
+  - Test isolation → `tmp_path` fixture usage in test files
+
+**If files are missing from Section 2.1, the LLD is BLOCKED.**
 
 ---
 
@@ -545,6 +866,6 @@ N/A - All scenarios automated.
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | Awaiting review |
+| — | — | — | Awaiting first review |
 
 **Final Status:** PENDING

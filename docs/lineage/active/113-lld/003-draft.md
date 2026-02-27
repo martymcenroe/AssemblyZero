@@ -1,25 +1,22 @@
 # 113 - Feature: Vector Database Infrastructure (RAG Foundation)
 
 <!-- Template Metadata
-Last Updated: 2026-02-11
-Updated By: Issue #113 LLD revision
-Update Reason: Address Gemini Review #1 — Tier 1 (chunker loop bounds validation) and Tier 2 (path traversal security test) fixes
-Previous: Revised to fix mechanical test plan validation — all 10 requirements now have test coverage with (REQ-N) references
+Last Updated: 2026-02-10
+Updated By: Issue #113 LLD creation
+Update Reason: Revised to fix mechanical test plan validation — all 10 requirements now have test coverage with (REQ-N) references
 -->
 
 ## 1. Context & Goal
 * **Issue:** #113
 * **Objective:** Implement foundational RAG infrastructure (vector database + embedding generation) that downstream personas (The Librarian #88, Hex #92) consume for document and codebase retrieval.
-* **Status:** Approved (gemini-3-pro-preview, 2026-02-27)
+* **Status:** Draft
 * **Related Issues:** #88 (The Librarian - documentation retrieval), #92 (Hex - codebase retrieval)
 
 ### Open Questions
 
-*All questions resolved during review.*
-
-- [x] Should ChromaDB persistence use a single SQLite file or directory-based storage? **RESOLVED: Directory-based via ChromaDB's `PersistentClient`.**
-- [x] What is the maximum document chunk size for embeddings? **RESOLVED: 512 tokens with 50-token overlap, matching `all-MiniLM-L6-v2` max context.**
-- [x] Should collection schemas be enforced via metadata validation or left flexible? **RESOLVED: Flexible. Consumer-side validation at this foundational stage.**
+- [ ] Should ChromaDB persistence use a single SQLite file or directory-based storage? (Default: directory-based via ChromaDB's `PersistentClient`)
+- [ ] What is the maximum document chunk size for embeddings? (Proposed: 512 tokens with 50-token overlap)
+- [ ] Should collection schemas be enforced via metadata validation or left flexible? (Proposed: flexible with optional metadata typing)
 
 ## 2. Proposed Changes
 
@@ -94,28 +91,6 @@ class RAGConfig:
     chunk_overlap: int = 50         # Tokens
     default_n_results: int = 5
     distance_metric: str = "cosine" # ChromaDB distance function
-
-    def __post_init__(self) -> None:
-        """Validate configuration invariants.
-
-        Raises:
-            ValueError: If chunk_overlap >= chunk_size (would cause infinite
-                loop in sliding window chunker) or if either value is <= 0.
-        """
-        if self.chunk_size <= 0:
-            raise ValueError(
-                f"chunk_size must be positive, got {self.chunk_size}"
-            )
-        if self.chunk_overlap < 0:
-            raise ValueError(
-                f"chunk_overlap must be non-negative, got {self.chunk_overlap}"
-            )
-        if self.chunk_overlap >= self.chunk_size:
-            raise ValueError(
-                f"chunk_overlap ({self.chunk_overlap}) must be strictly less "
-                f"than chunk_size ({self.chunk_size}) to ensure forward "
-                f"progress in the chunking loop"
-            )
 
 
 # assemblyzero/rag/collections.py
@@ -383,12 +358,7 @@ class TextChunker:
         chunk_size: int = 512,
         chunk_overlap: int = 50,
     ) -> None:
-        """Initialize with chunk size (tokens) and overlap.
-
-        Raises:
-            ValueError: If chunk_overlap >= chunk_size or if either
-                value is non-positive (chunk_size) or negative (chunk_overlap).
-        """
+        """Initialize with chunk size (tokens) and overlap."""
         ...
 
     def chunk_text(
@@ -405,17 +375,9 @@ class TextChunker:
         self,
         file_path: Path,
         additional_metadata: dict | None = None,
-        project_root: Path | None = None,
     ) -> list[TextChunk]:
         """Read file and chunk contents. Adds file path to metadata.
-
-        Validates that file_path exists and resolves to a location
-        within project_root (defaults to current working directory).
-
-        Raises:
-            FileNotFoundError: If file doesn't exist.
-            ValueError: If resolved file_path is outside project_root
-                (path traversal protection).
+        Raises FileNotFoundError if file doesn't exist.
         """
         ...
 
@@ -444,20 +406,15 @@ def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
 2. IF singleton store exists, return cached engine
 3. ELSE:
    a. Load RAGConfig (defaults or from caller)
-   b. Validate config via __post_init__:
-      - ASSERT chunk_size > 0
-      - ASSERT chunk_overlap >= 0
-      - ASSERT chunk_overlap < chunk_size
-      - IF any violated, raise ValueError with descriptive message
-   c. Create VectorStore(config)
-   d. Call store.initialize()
+   b. Create VectorStore(config)
+   c. Call store.initialize()
       - Create .assemblyzero/vector_store/ directory if missing
       - Open ChromaDB PersistentClient pointing to directory
       - IF existing data is corrupted, raise StoreCorruptedError
-   e. Create EmbeddingProvider(config.embedding_model_name)
+   d. Create EmbeddingProvider(config.embedding_model_name)
       - Model loaded lazily on first embed call
-   f. Create QueryEngine(store, embedding_provider, config)
-   g. Cache and return
+   e. Create QueryEngine(store, embedding_provider, config)
+   f. Cache and return
 
 === Adding Documents ===
 1. Caller provides collection_name, documents, optional metadatas
@@ -480,27 +437,13 @@ def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
 
 === Chunking (Pre-ingestion) ===
 1. Caller has raw text (doc page, source file, etc.)
-2. TextChunker.__init__():
-   a. Validate chunk_overlap < chunk_size
-   b. IF violated, raise ValueError
-3. TextChunker.chunk_text():
+2. TextChunker.chunk_text():
    a. Tokenize text (whitespace-based, not model-specific)
-   b. Compute stride = chunk_size - chunk_overlap (guaranteed > 0)
-   c. Slide window of chunk_size tokens with stride
-   d. For each window:
+   b. Slide window of chunk_size tokens with chunk_overlap
+   c. For each window:
       - Create TextChunk with text, propagated metadata, index
-   e. Return list[TextChunk]
-4. TextChunker.chunk_file():
-   a. Resolve file_path to absolute path
-   b. Resolve project_root to absolute path (default: cwd)
-   c. Verify resolved file_path starts with resolved project_root
-      - IF NOT, raise ValueError("Path traversal: {path} is outside {root}")
-   d. Verify file exists
-      - IF NOT, raise FileNotFoundError
-   e. Read file contents
-   f. Call chunk_text() with file path in metadata
-   g. Return list[TextChunk]
-5. Caller feeds chunk texts into add_documents()
+   d. Return list[TextChunk]
+3. Caller feeds chunk texts into add_documents()
 
 === Graceful Degradation ===
 1. Any consumer calls get_query_engine()
@@ -523,8 +466,6 @@ def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
   - **Lazy initialization:** Model and store are not loaded until first use, keeping import overhead near zero.
   - **Singleton store:** Only one ChromaDB client instance per process to avoid lock contention.
   - **Deterministic IDs:** Document IDs default to SHA-256 hash of content, enabling idempotent upserts.
-  - **Chunker input validation:** `RAGConfig.__post_init__` and `TextChunker.__init__` both validate `chunk_overlap < chunk_size` to prevent infinite loops in the sliding window algorithm (stride = chunk_size - chunk_overlap must be > 0).
-  - **Path traversal protection:** `TextChunker.chunk_file()` resolves both the file path and project root to absolute paths and verifies containment before reading, preventing `../` traversal attacks.
 
 ### 2.7 Architecture Decisions
 
@@ -536,14 +477,12 @@ def get_query_engine(config: RAGConfig | None = None) -> QueryEngine:
 | Collection architecture | Single collection with domain metadata, one collection per domain | One per domain | Cleaner separation, independent lifecycle (delete docs without touching code), simpler metadata queries |
 | ID generation | UUID, content hash, sequential | Content hash (SHA-256) | Enables idempotent adds — re-ingesting same content is a no-op. Avoids duplicates. |
 | Chunking strategy | Fixed token window, recursive character, sentence-aware | Fixed token window with overlap | Simple, predictable, sufficient for v1. Sentence-aware adds complexity without proven benefit at this stage. |
-| Chunker overlap validation | Silently clamp, raise error, ignore | Raise ValueError | Fail-fast on misconfiguration; an overlap >= chunk_size produces stride ≤ 0 which causes an infinite loop. Explicit error is safer than silent correction. |
 
 **Architectural Constraints:**
 - Must not make any network calls for embedding generation (data egress prohibition)
 - Must work without a running server process (embedded store only)
 - Must be usable by both #88 (docs) and #92 (code) without coupling to either domain
 - Must survive process restarts (persistent storage)
-- chunk_overlap must be strictly less than chunk_size (invariant enforced at construction)
 
 ## 3. Requirements
 
@@ -689,7 +628,7 @@ graph TD
 |---------|------------|--------|
 | Data egress via embeddings | All embeddings generated locally via SentenceTransformers; no network calls | Addressed |
 | Prompt injection via stored documents | Brutha only recalls what was stored — no LLM generation in this layer. Consumers responsible for sanitizing before use. | Addressed |
-| Path traversal in file chunking | `TextChunker.chunk_file()` resolves both `file_path` and `project_root` to absolute paths, then verifies `file_path` is a descendant of `project_root`. Raises `ValueError` if not. Verified by test T360. | Addressed |
+| Path traversal in file chunking | `TextChunker.chunk_file()` validates path exists and is within project root | Addressed |
 | Malicious metadata injection | Metadata values are stored as-is in ChromaDB; consumers must sanitize when rendering | Addressed |
 
 ### 7.2 Safety
@@ -701,7 +640,6 @@ graph TD
 | Model download on first use | `EmbeddingProvider` logs a clear message when downloading model; model cached permanently after first download | Addressed |
 | Concurrent write contention | Singleton pattern ensures one ChromaDB client per process; ChromaDB handles internal locking | Addressed |
 | Accidental data deletion | `VectorStore.reset()` requires explicit call; no auto-cleanup | Addressed |
-| Infinite loop in chunker | `RAGConfig.__post_init__` and `TextChunker.__init__` validate `chunk_overlap < chunk_size`, ensuring stride > 0. Raises `ValueError` on misconfiguration. Verified by test T350. | Addressed |
 
 **Fail Mode:** Fail Closed — if the vector store cannot initialize, operations raise exceptions rather than returning empty/degraded results silently. Consumers explicitly handle `RAGError` to decide their fallback behavior.
 
@@ -800,8 +738,6 @@ graph TD
 | T320 | Collection count returns correct count (REQ-2) | Matches number of added documents | RED |
 | T330 | Config defaults are sane (REQ-1) | Default values match specification | RED |
 | T340 | Query non-existent collection raises error (REQ-5, REQ-7) | CollectionNotFoundError raised | RED |
-| T350 | RAGConfig rejects overlap >= chunk_size (REQ-8) | ValueError raised with descriptive message | RED |
-| T360 | chunk_file rejects path outside project root (REQ-8) | ValueError raised for path traversal attempt | RED |
 
 **Coverage Target:** ≥95% for all new code in `assemblyzero/rag/`
 
@@ -849,8 +785,6 @@ graph TD
 | 320 | Collection count matches documents (REQ-2) | Auto | Add 5 docs → `collection_count()` | Returns 5 | Exact count |
 | 330 | Config defaults match specification (REQ-1) | Auto | `RAGConfig()` | Default values | All fields match spec in §2.3 |
 | 340 | Query non-existent collection raises error (REQ-5, REQ-7) | Auto | Query "nonexistent" | `CollectionNotFoundError` | Exception raised with collection name |
-| 350 | Config rejects invalid overlap settings (REQ-8) | Auto | `RAGConfig(chunk_size=100, chunk_overlap=100)` and `RAGConfig(chunk_size=100, chunk_overlap=150)` | `ValueError` raised | Message explains overlap must be < chunk_size; also test overlap == 0 (valid), chunk_size <= 0 (invalid), overlap < 0 (invalid) |
-| 360 | chunk_file rejects path traversal (REQ-8) | Auto | Create file at `/tmp/outside.txt`, call `chunk_file(Path("/tmp/outside.txt"), project_root=Path("/some/project"))` | `ValueError` raised | Message indicates path is outside project root; also test with `../` relative paths |
 
 ### 10.2 Test Commands
 
@@ -866,12 +800,6 @@ poetry run pytest tests/unit/test_rag/test_store.py -v
 
 # Run a specific test by name
 poetry run pytest tests/unit/test_rag/ -v -k "test_query_ranked"
-
-# Run chunker validation tests specifically
-poetry run pytest tests/unit/test_rag/test_chunking.py -v -k "test_overlap_validation or test_path_traversal"
-
-# Run config validation tests specifically
-poetry run pytest tests/unit/test_rag/test_config.py -v -k "test_invalid_overlap"
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -891,8 +819,6 @@ N/A - All scenarios automated.
 | Embedding quality insufficient for code retrieval | Med | Low | `all-MiniLM-L6-v2` is well-benchmarked for general text. Code-specific model can be swapped via config without API changes. |
 | `.assemblyzero/vector_store/` accidentally committed to git | Low | Med | Add to `.gitignore` as part of implementation |
 | Test suite slow due to model loading | Low | Med | Use `@pytest.fixture(scope="session")` for embedding provider to load model once per test run |
-| Infinite loop in chunker from bad config | High | Low | `RAGConfig.__post_init__` and `TextChunker.__init__` validate `chunk_overlap < chunk_size`; enforced by T350 |
-| Path traversal via chunk_file | Med | Low | `chunk_file()` validates resolved path is within project root; enforced by T360 |
 
 ## 12. Definition of Done
 
@@ -901,16 +827,12 @@ N/A - All scenarios automated.
 - [ ] Code comments reference this LLD (#113)
 - [ ] All public functions have type hints and docstrings
 - [ ] `.assemblyzero/vector_store/` added to `.gitignore`
-- [ ] `RAGConfig.__post_init__` validates `chunk_overlap < chunk_size`
-- [ ] `TextChunker.chunk_file()` validates path within project root
 
 ### Tests
-- [ ] All 36 test scenarios pass (T010–T360)
+- [ ] All 34 test scenarios pass
 - [ ] Test coverage ≥95% for `assemblyzero/rag/`
 - [ ] Tests use `tmp_path` for store isolation (no test pollution)
 - [ ] Session-scoped fixture for embedding model (performance)
-- [ ] T350 verifies chunker overlap validation (ValueError on overlap >= chunk_size)
-- [ ] T360 verifies path traversal rejection (ValueError on paths outside project root)
 
 ### Documentation
 - [ ] LLD updated with any deviations
@@ -935,45 +857,20 @@ Mechanical validation:
   - ChromaDB API wrapping → all methods in `store.py`, `collections.py`
   - Graceful degradation → error classes in `errors.py`, import guards in `__init__.py`
   - Test isolation → `tmp_path` fixture usage in test files
-  - Infinite loop prevention → `RAGConfig.__post_init__` in `config.py`, `TextChunker.__init__` in `chunking.py`
-  - Path traversal protection → `TextChunker.chunk_file()` in `chunking.py`
 
 **If files are missing from Section 2.1, the LLD is BLOCKED.**
 
 ---
 
-## Reviewer Suggestions
-
-*Non-blocking recommendations from the reviewer.*
-
-- Consider adding a simple "smoke test" script in the repository that runs `get_query_engine()` to verify the installation of `sentence-transformers` and `chromadb` on a new developer machine, as these can sometimes have platform-specific build issues.
-
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
-
-### Gemini Review #1 (REVISE)
-
-**Reviewer:** Gemini 3 Pro
-**Verdict:** REVISE
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| G1.1 | **[TIER 1 - BLOCKING / Cost]** Loop Bounds in Chunker: If `chunk_overlap >= chunk_size`, the loop stride becomes ≤ 0, resulting in an infinite loop. Validate `chunk_overlap < chunk_size` in `RAGConfig.__post_init__` or `TextChunker.__init__`. Add test T350. | YES - Added `__post_init__` validation to `RAGConfig` (§2.3), validation in `TextChunker.__init__` (§2.4), test T350 (§10.0, §10.1), updated Logic Flow (§2.5), Architecture Decisions (§2.7), Safety (§7.2), Risks (§11), Definition of Done (§12) |
-| G1.2 | **[TIER 2 - HIGH / Quality]** Missing Security Test: Section 7.1 claims path traversal mitigation in `chunk_file()` but no test verifies it. Add test T360. | YES - Added `project_root` parameter to `chunk_file()` signature (§2.4), path validation logic to pseudocode (§2.5), test T360 (§10.0, §10.1), updated Security table (§7.1), Risks (§11), Definition of Done (§12) |
-| G1.3 | **[TIER 3 - SUGGESTION]** Consider adding a benchmark test for 50ms/batch target. | NOTED - Not added to test plan (Tier 3 suggestion), can be added as future `@pytest.mark.slow` test |
-| G1.4 | **[TIER 3 - SUGGESTION]** Pin `torch` to CPU-only version to avoid multi-GB CUDA download. | NOTED - Acknowledged in §2.2 note; typically handled at environment level |
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| 2 | 2026-02-27 | APPROVED | `gemini-3-pro-preview` |
 | Mechanical Validation #1 | 2026-02-10 | REJECTED | 9/10 requirements had no test coverage |
 | Revision #1 | 2026-02-10 | PENDING | Added (REQ-N) suffixes to all scenarios, expanded test plan to cover all 10 requirements |
-| Gemini Review #1 | 2026-02-11 | REVISE | Tier 1: Chunker infinite loop; Tier 2: Missing path traversal test |
-| Revision #2 | 2026-02-11 | PENDING | Added chunker validation (T350), path traversal test (T360), config __post_init__, chunk_file project_root param |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING
