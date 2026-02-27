@@ -3,21 +3,21 @@
 <!-- Template Metadata
 Last Updated: 2025-01-15
 Updated By: LLD Generation
-Update Reason: Initial LLD creation for codebase RAG injection system
+Update Reason: Revised to address Gemini Review #1 feedback - added test scenarios T150, T160 for R5/R6 coverage
 -->
 
 ## 1. Context & Goal
 * **Issue:** #92
 * **Objective:** Implement a codebase retrieval system that indexes Python code via AST parsing and injects relevant function signatures into the Coder Node's context before code generation, eliminating hallucinated imports and wheel reinvention.
-* **Status:** Draft
+* **Status:** Approved (gemini-3-pro-preview, 2026-02-04)
 * **Related Issues:** #DN-002 (Librarian - Vector Store Infrastructure)
 
 ### Open Questions
 
 - [x] ~~Should we index private methods (`_method`) or only public APIs?~~ **Resolved: Public APIs only per issue scope**
 - [x] ~~What embedding model to use?~~ **Resolved: Local sentence-transformers/all-MiniLM-L6-v2**
-- [ ] Should we cache embeddings between index rebuilds to speed up incremental updates? (Marked as out-of-scope for MVP but worth reconsidering if rebuild times exceed 60s)
-- [ ] What token budget should we allocate for injected codebase context? (Propose 2000 tokens as initial limit)
+- [x] ~~Should we cache embeddings between index rebuilds to speed up incremental updates?~~ **Resolved: No. For the MVP target of ~20k LOC, rebuild times should remain <60s. Keep architecture simple; add caching only if latency becomes an issue later.**
+- [x] ~~What token budget should we allocate for injected codebase context?~~ **Resolved: 2000 tokens. This leaves sufficient room for the system prompt and generation output. Define this as a configurable constant (`MAX_CODEBASE_CONTEXT_TOKENS`).**
 
 ## 2. Proposed Changes
 
@@ -44,10 +44,10 @@ sentence-transformers = "^2.2.0"  # Local embedding generation, Apache 2.0 licen
 
 **Dependency License Compliance:**
 
-| Package | License | Compatibility |
-|---------|---------|---------------|
-| `sentence-transformers` | Apache 2.0 | ✅ Compatible with MIT |
-| `chromadb` | Apache 2.0 | ✅ Already in project |
+| Package | License | Compatibility | Version Notes |
+|---------|---------|---------------|---------------|
+| `sentence-transformers` | Apache 2.0 | ✅ Compatible with MIT | Requires numpy>=1.21.0 |
+| `chromadb` | Apache 2.0 | ✅ Already in project (v0.4.x) | Compatible with sentence-transformers numpy requirements |
 
 **Rejected Dependencies:**
 - `scikit-learn` (BSD-3) — Evaluated for TF-IDF keyword extraction but rejected due to ~100MB dependency weight for marginal improvement on short text inputs
@@ -87,6 +87,9 @@ class CodebaseIndexMetadata(TypedDict):
 ```python
 # === agentos/core/codebase_retrieval.py ===
 
+# Configurable constant for token budget
+MAX_CODEBASE_CONTEXT_TOKENS: int = 2000
+
 def extract_keywords(lld_content: str, max_keywords: int = 5) -> list[str]:
     """
     Extract technical keywords from LLD content using term frequency analysis.
@@ -111,7 +114,7 @@ def retrieve_codebase_context(
 
 def apply_token_budget(
     results: list[RetrievalResult],
-    max_tokens: int = 2000
+    max_tokens: int = MAX_CODEBASE_CONTEXT_TOKENS
 ) -> list[RetrievalResult]:
     """
     Trim results to fit within token budget.
@@ -125,12 +128,13 @@ def format_codebase_context(results: list[RetrievalResult]) -> str:
     Format retrieved code chunks as markdown for prompt injection.
     
     Returns empty string if no results.
+    Output includes module_path for each chunk to enable correct imports.
     """
     ...
 
 def get_codebase_context_for_lld(
     lld_content: str,
-    max_tokens: int = 2000
+    max_tokens: int = MAX_CODEBASE_CONTEXT_TOKENS
 ) -> str:
     """
     Main entry point: extract keywords, retrieve, apply budget, format.
@@ -231,6 +235,7 @@ def generate_local_embeddings(texts: list[str]) -> list[list[float]]:
    b. Add instruction: "Use these existing utilities. DO NOT reinvent them."
    c. FOR each chunk:
       - Add source file path
+      - Add module path (for import statement)
       - Add code block with content
 6. Return formatted context string
 ```
@@ -244,7 +249,7 @@ def generate_local_embeddings(texts: list[str]) -> list[list[float]]:
       - Log warning
       - Continue without codebase context
    c. IF context returned:
-      - Prepend to system prompt
+      - Prepend to system prompt under "Reference Codebase" section
 3. Send enhanced prompt to LLM
 4. Continue normal workflow
 ```
@@ -283,8 +288,8 @@ def generate_local_embeddings(texts: list[str]) -> list[list[float]]:
 2. **R2:** Vector store contains chunks with correct metadata (`type: code`, `module`, `kind`, `name`)
 3. **R3:** Keyword extraction identifies technical terms from LLD text (CamelCase, snake_case splitting)
 4. **R4:** Retrieval returns relevant code chunks when queried with matching keywords (threshold > 0.75)
-5. **R5:** N3_Coder prompt includes "Reference Codebase" section when relevant utilities found
-6. **R6:** Generated code uses correct import paths (e.g., `from agentos.core.audit import GovernanceAuditLog`)
+5. **R5:** N3_Coder prompt includes "Reference Codebase" section when relevant utilities found (verified via workflow integration test)
+6. **R6:** Generated code uses correct import paths (verified by ensuring formatted context includes `module_path` for each chunk)
 7. **R7:** Workflow completes gracefully when codebase collection is empty or missing
 8. **R8:** Token budget exceeded scenario drops whole chunks (preserves code integrity)
 9. **R9:** No network calls made during embedding generation (verified via test)
@@ -507,6 +512,8 @@ flowchart TB
 | T120 | Graceful degradation on missing collection | Warning logged, empty context returned | RED |
 | T130 | Format includes instruction header | "DO NOT reinvent them" in output | RED |
 | T140 | Index CLI creates collection | ChromaDB collection exists after run | RED |
+| T150 | Workflow injects context into prompt | Prompt contains "Reference Codebase" section | RED |
+| T160 | Formatted context includes module_path | Each chunk in output includes module path for imports | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -534,6 +541,8 @@ flowchart TB
 | 120 | Missing collection graceful | Auto | Query missing collection | Empty string, warning logged | No exception raised |
 | 130 | Format includes instruction | Auto | Retrieved chunks | Formatted markdown | Header text present |
 | 140 | CLI creates collection | Auto-Live | CLI command | ChromaDB collection | Collection exists and queryable |
+| 150 | Workflow injects context into prompt | Auto | Mock retrieval returns chunks | N3_Coder prompt construction | Prompt string contains "Reference Codebase" section |
+| 160 | Formatted context includes module_path | Auto | Retrieved chunks with module_path | Formatted output | Each code block preceded by `# Module: {module_path}` comment |
 
 ### 10.2 Test Commands
 
@@ -549,6 +558,9 @@ poetry run pytest tests/unit/test_codebase_retrieval.py --cov=agentos.core.codeb
 
 # Verify no network calls (optional, uses network mocking)
 poetry run pytest tests/unit/test_codebase_retrieval.py::test_embeddings_are_local -v
+
+# Run workflow integration test
+poetry run pytest tests/integration/test_codebase_indexing.py::test_workflow_injects_context -v
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -577,9 +589,11 @@ poetry run pytest tests/unit/test_codebase_retrieval.py::test_embeddings_are_loc
 - [ ] Code comments reference this LLD (#92)
 
 ### Tests
-- [ ] All test scenarios pass (T010-T140)
+- [ ] All test scenarios pass (T010-T160)
 - [ ] Test coverage ≥ 95% for new code
 - [ ] Integration test confirms end-to-end indexing
+- [ ] Workflow integration test confirms prompt injection (T150)
+- [ ] Module path inclusion test confirms import path data (T160)
 
 ### Documentation
 - [ ] LLD updated with any implementation deviations
@@ -600,14 +614,34 @@ poetry run pytest tests/unit/test_codebase_retrieval.py::test_embeddings_are_loc
 
 ---
 
+## Reviewer Suggestions
+
+*Non-blocking recommendations from the reviewer.*
+
+- **Metadata Verification:** While T010/T020 verify chunk extraction logic, consider adding an explicit assertion in T140 (integration) that inspects one retrieved record from ChromaDB to verify the persisted `module` metadata field matches the expected value, ensuring the pipeline correctly passes data to the DB.
+
 ## Appendix: Review Log
 
 *Track all review feedback with timestamps and implementation status.*
+
+### Gemini Review #1 (REVISE)
+
+**Reviewer:** Gemini 3 Pro
+**Verdict:** REVISE
+
+#### Comments
+
+| ID | Comment | Implemented? |
+|----|---------|--------------|
+| G1.1 | "R5 (Workflow Integration): T130 tests the formatting helper, but no test confirms that run_implementation_workflow.py actually calls this logic and injects it into the prompt." | YES - Added T150 test scenario |
+| G1.2 | "R6 (Import Paths): Update T130 or add a new test to assert that the formatted context string explicitly includes the module_path for the retrieved chunks." | YES - Added T160 test scenario |
+| G1.3 | "Open Questions: Should we cache embeddings... / What token budget..." | YES - Resolved both open questions in Section 1 |
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | Pending initial review |
+| 2 | 2026-02-04 | APPROVED | `gemini-3-pro-preview` |
+| Gemini #1 | 2025-01-15 | REVISE | Test coverage gaps for R5/R6 (80% → 100%) |
 
-**Final Status:** PENDING
+**Final Status:** APPROVED

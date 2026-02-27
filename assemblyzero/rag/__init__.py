@@ -19,6 +19,15 @@ Public API:
         - ChunkMetadata, IngestionSummary, RetrievedDocument — models
         - check_rag_dependencies, require_rag_dependencies — dependency checks
 
+    Codebase Retrieval (#92):
+        - CodeChunk, RetrievalResult, CodebaseContext — data structures
+        - parse_python_file, scan_codebase — AST-based code parsing
+        - extract_keywords, split_compound_terms — keyword extraction
+        - query_codebase_collection — vector similarity search
+        - retrieve_codebase_context — end-to-end retrieval pipeline
+        - format_codebase_context — markdown context formatting
+        - estimate_token_count, apply_token_budget — token management
+
 Install RAG dependencies: pip install assemblyzero[rag]
 """
 from __future__ import annotations
@@ -45,6 +54,22 @@ from assemblyzero.rag.models import (
 )
 from assemblyzero.rag.dependencies import check_rag_dependencies, require_rag_dependencies
 
+# Issue #92 exports (codebase retrieval)
+from assemblyzero.rag.codebase_retrieval import (
+    CodebaseContext,
+    CodeChunk,
+    RetrievalResult,
+    apply_token_budget,
+    estimate_token_count,
+    extract_keywords,
+    format_codebase_context,
+    parse_python_file,
+    query_codebase_collection,
+    retrieve_codebase_context,
+    scan_codebase,
+    split_compound_terms,
+)
+
 if TYPE_CHECKING:
     from assemblyzero.rag.store import VectorStore
     from assemblyzero.rag.embeddings import EmbeddingProvider as _EmbeddingProvider113
@@ -70,6 +95,19 @@ __all__ = [
     "check_rag_dependencies",
     "require_rag_dependencies",
     "_reset_singletons",
+    # #92 codebase retrieval
+    "CodebaseContext",
+    "CodeChunk",
+    "RetrievalResult",
+    "apply_token_budget",
+    "estimate_token_count",
+    "extract_keywords",
+    "format_codebase_context",
+    "parse_python_file",
+    "query_codebase_collection",
+    "retrieve_codebase_context",
+    "scan_codebase",
+    "split_compound_terms",
 ]
 
 # --- Singleton factories (#113) ---

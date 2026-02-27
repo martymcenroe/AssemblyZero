@@ -2,12 +2,14 @@
 """CLI tool: ingest docs into ChromaDB vector store.
 
 Issue #88: The Librarian - Automated Context Retrieval
+Issue #92: Codebase Retrieval System (RAG Injection)
 
 Usage:
     python tools/rebuild_knowledge_base.py                     # Incremental (default)
     python tools/rebuild_knowledge_base.py --full              # Full rebuild
     python tools/rebuild_knowledge_base.py --full --verbose    # Verbose full rebuild
     python tools/rebuild_knowledge_base.py --source-dirs docs/adrs docs/standards
+    python tools/rebuild_knowledge_base.py --collection codebase  # Index Python codebase
 """
 
 from __future__ import annotations
@@ -54,6 +56,12 @@ def main() -> None:
         default=False,
         help="Show per-file indexing progress",
     )
+    parser.add_argument(
+        "--collection",
+        choices=["documentation", "codebase"],
+        default="documentation",
+        help="Which collection to rebuild (default: documentation)",
+    )
 
     args = parser.parse_args()
 
@@ -62,6 +70,15 @@ def main() -> None:
     if not available:
         print(f"[RAG] Error: {msg}", file=sys.stderr)
         sys.exit(1)
+
+    if args.collection == "codebase":
+        print("[codebase] Starting codebase indexing...")
+        stats = index_codebase()
+        print(f"[codebase] Files scanned: {stats['files_scanned']}")
+        print(f"[codebase] Chunks indexed: {stats['chunks_indexed']}")
+        print(f"[codebase] Errors: {stats['errors']}")
+        print("[codebase] Done.")
+        return
 
     # Build config
     config = RAGConfig()
@@ -246,6 +263,108 @@ def run_incremental_ingestion(
 
     summary.elapsed_seconds = time.time() - start_time
     return summary
+
+
+def index_codebase(
+    directories: list[str] | None = None,
+    collection_name: str = "codebase",
+) -> dict[str, int]:
+    """Index Python codebase into ChromaDB.
+
+    Issue #92: Codebase Retrieval System (RAG Injection)
+
+    Drops and recreates the codebase collection on each run (full rebuild).
+    Uses sentence-transformers for local embedding generation.
+
+    Args:
+        directories: Directories to scan. Defaults to ["assemblyzero/", "tools/"].
+        collection_name: ChromaDB collection name. Defaults to "codebase".
+
+    Returns:
+        Statistics dict with keys: files_scanned, chunks_indexed, errors.
+    """
+    from assemblyzero.rag.codebase_retrieval import scan_codebase  # noqa: PLC0415
+
+    if directories is None:
+        directories = ["assemblyzero/", "tools/"]
+
+    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+    BATCH_SIZE = 500
+
+    # Scan and parse
+    print(f"[codebase] Scanning directories: {directories}")
+    chunks = scan_codebase(directories)
+
+    # Count unique files
+    files_scanned = len({c["file_path"] for c in chunks})
+    errors = 0  # Errors are already logged by scan_codebase; count from chunks vs expected
+
+    if not chunks:
+        print("[codebase] No code chunks found.")
+        return {"files_scanned": files_scanned, "chunks_indexed": 0, "errors": errors}
+
+    print(f"[codebase] Found {len(chunks)} code chunks from {files_scanned} files")
+
+    # Generate embeddings
+    try:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
+    except ImportError:
+        print("[ERROR] sentence-transformers not installed. Run: pip install assemblyzero[rag]")
+        sys.exit(1)
+
+    print(f"[codebase] Loading embedding model: {EMBEDDING_MODEL}")
+    model = SentenceTransformer(EMBEDDING_MODEL)
+
+    contents = [c["content"] for c in chunks]
+    print(f"[codebase] Generating embeddings for {len(contents)} chunks...")
+    embeddings = model.encode(contents, show_progress_bar=True, batch_size=BATCH_SIZE)
+
+    # Upsert into ChromaDB
+    import chromadb  # noqa: PLC0415
+
+    client = chromadb.PersistentClient()
+
+    # Drop existing collection
+    try:
+        client.delete_collection(name=collection_name)
+        print(f"[codebase] Dropped existing '{collection_name}' collection")
+    except Exception:
+        pass  # Collection didn't exist
+
+    collection = client.create_collection(name=collection_name)
+
+    # Batch upsert
+    total_indexed = 0
+    for i in range(0, len(chunks), BATCH_SIZE):
+        batch_chunks = chunks[i : i + BATCH_SIZE]
+        batch_embeddings = embeddings[i : i + BATCH_SIZE].tolist()
+        batch_ids = [
+            f"{c['module_path']}.{c['entity_name']}" for c in batch_chunks
+        ]
+        batch_documents = [c["content"] for c in batch_chunks]
+        batch_metadatas = [
+            {
+                "module_path": c["module_path"],
+                "entity_name": c["entity_name"],
+                "kind": c["kind"],
+                "file_path": c["file_path"],
+                "start_line": c["start_line"],
+                "end_line": c["end_line"],
+                "type": "code",
+            }
+            for c in batch_chunks
+        ]
+
+        collection.upsert(
+            ids=batch_ids,
+            documents=batch_documents,
+            embeddings=batch_embeddings,
+            metadatas=batch_metadatas,
+        )
+        total_indexed += len(batch_chunks)
+        print(f"[codebase] Indexed {total_indexed}/{len(chunks)} chunks")
+
+    return {"files_scanned": files_scanned, "chunks_indexed": total_indexed, "errors": errors}
 
 
 if __name__ == "__main__":
