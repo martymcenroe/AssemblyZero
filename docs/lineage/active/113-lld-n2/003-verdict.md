@@ -1,4 +1,4 @@
-# LLD Review: 113 - Feature: Brutha - Vector Database Infrastructure (RAG Foundation)
+# LLD Review: 113-Feature: Brutha Vector Database Infrastructure (RAG Foundation)
 
 ## Identity Confirmation
 I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
@@ -7,61 +7,66 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 PASSED
 
 ## Review Summary
-The LLD is well-structured and technically sound, providing a robust foundation for local RAG operations. The test plan (Section 10) is excellent and fully covers requirements. However, I have identified a critical Tier 1 privacy configuration issue regarding the chosen dependency (ChromaDB) and a Tier 2 observability gap that must be addressed before implementation.
+The LLD is well-structured, thorough, and ready for implementation. It includes a strong TDD plan with high coverage targets and clear fail-safe strategies (graceful degradation). The architectural decisions (ChromaDB + Local Embeddings) are well-justified for the constraints.
+
+## Open Questions Resolved
+- [x] ~~Embedding model selection - all-MiniLM-L6-v2 vs. all-mpnet-base-v2?~~ **RESOLVED: all-MiniLM-L6-v2.** (Confirmed in Section 2.7 and 4; chosen for 80MB footprint vs 420MB).
+- [x] ~~Collection naming convention - domain-based or persona-based?~~ **RESOLVED: Domain-based.** (Confirmed in Section 2.7; provides clear separation for consumers like Librarian/Hex).
+- [x] ~~Persistence location - `.agentos/vector_store/` or configurable?~~ **RESOLVED: Configurable with default.** `BruthaConfig` in Section 2.3 defines `persist_directory`, allowing override, but defaults to `.agentos/vector_store/`.
 
 ## Requirement Coverage Analysis (MANDATORY)
 
 **Section 3 Requirements:**
 | # | Requirement | Test(s) | Status |
 |---|-------------|---------|--------|
-| 1 | Vector store initializes on first use with sensible defaults | test_010 | ✓ Covered |
-| 2 | Multiple collections supported (documentation, codebase) with clean separation | test_020, test_130 | ✓ Covered |
-| 3 | Embedding generation is fully local using SentenceTransformers | test_140, integration | ✓ Covered |
-| 4 | The Librarian (#88) can query the `documentation` collection | test_040 (generic capability) | ✓ Covered |
-| 5 | Hex (#92) can query the `codebase` collection | test_040 (generic capability) | ✓ Covered |
-| 6 | Graceful degradation: queries return empty results when store not initialized | test_160 | ✓ Covered |
-| 7 | Persistence survives process restarts | test_110 | ✓ Covered |
-| 8 | Batch operations support adding hundreds of documents efficiently | test_030 | ✓ Covered |
+| 1 | Vector store initializes automatically on first use with sensible defaults | T010 | ✓ Covered |
+| 2 | Multiple named collections supported (at minimum: `documentation`, `codebase`) | T020, T100, T110 | ✓ Covered |
+| 3 | All embedding generation happens locally via sentence-transformers | T080, T120 | ✓ Covered |
+| 4 | The Librarian (#88) can store and query documentation in `documentation` collection | T030, T040 (Capability Coverage) | ✓ Covered |
+| 5 | Hex (#92) can store and query code in `codebase` collection | T030, T040 (Capability Coverage) | ✓ Covered |
+| 6 | Graceful degradation: queries return empty results when store not initialized | T050, T060 | ✓ Covered |
+| 7 | Data persists in `.agentos/vector_store/` across sessions | T090 | ✓ Covered |
+| 8 | No PII or sensitive data transmitted externally | T080 (No network test) | ✓ Covered |
 
 **Coverage Calculation:** 8 requirements covered / 8 total = **100%**
 
 **Verdict:** PASS
 
 ## Tier 1: BLOCKING Issues
+No blocking issues found. LLD is approved for implementation.
 
 ### Cost
-- [ ] No issues found.
+- No issues found. Local compute usage is appropriate.
 
 ### Safety
-- [ ] No issues found.
+- No issues found. Fail-closed strategy (graceful degradation) is explicitly defined.
 
 ### Security
-- [ ] No issues found.
+- No issues found.
 
 ### Legal
-- [ ] **Unintended Data Egress (ChromaDB Telemetry):** The LLD states "No external API calls" and "No data egress" (Section 7.1). However, `chromadb` enables anonymized telemetry by default, which "phones home" to PostHog.
-    - **Recommendation:** You MUST explicitly configure `anonymized_telemetry=False` in the `chromadb.Settings()` during initialization in `src/agentos/memory/brutha.py` to adhere to the privacy constraints.
+- No issues found.
 
 ## Tier 2: HIGH PRIORITY Issues
+No high-priority issues found.
 
 ### Architecture
-- [ ] No issues found.
+- [ ] **Dependency Weight:** `sentence-transformers` pulls in PyTorch, which is heavy. Ensure the development environment instructions account for this. The note in 2.2 about `onnxruntime` is a good long-term optimization but `sentence-transformers` is fine for MVP.
 
 ### Observability
-- [ ] **Missing Tracing:** RAG systems require detailed introspection to debug retrieval quality. The `query` and `add_documents` methods are black boxes in this design.
-    - **Recommendation:** Add LangSmith tracing (e.g., `@traceable` decorator) to `Brutha.query` to capture inputs, latency, and retrieved chunks. This is critical for future tuning of the Librarian and Hex agents.
+- No issues found.
 
 ### Quality
-- [ ] No issues found. Requirement coverage is perfect.
+- [ ] **Security Implementation:** Section 7.1 lists "Validate path is under project root" with status "TODO". Ensure this validation is explicitly implemented in `Brutha.__init__` to prevent writing the vector store to arbitrary system locations if the config is misconfigured.
 
 ## Tier 3: SUGGESTIONS
-- **Model Cache Locking:** Ensure `sentence-transformers` handles concurrent downloads safely if multiple agents start simultaneously on a fresh install.
-- **Environment config:** Consider allowing the `persist_directory` to be overridden by an environment variable (e.g., `AGENTOS_VECTOR_STORE_DIR`) for easier testing/CI configuration.
+- **Performance:** Consider adding a `health_check()` method that explicitly verifies the embedding model is loaded and working, useful for readiness probes.
+- **Maintainability:** Since `reset_collection` is destructive, ensure it logs an info/warning level event when called.
 
 ## Questions for Orchestrator
 1. None.
 
 ## Verdict
-[ ] **APPROVED** - Ready for implementation
-[x] **REVISE** - Fix Tier 1/2 issues first
+[x] **APPROVED** - Ready for implementation
+[ ] **REVISE** - Fix Tier 1/2 issues first
 [ ] **DISCUSS** - Needs Orchestrator decision

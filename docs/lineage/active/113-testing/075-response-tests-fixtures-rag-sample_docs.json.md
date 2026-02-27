@@ -1,0 +1,53 @@
+
+
+```json
+{
+    "chunks": [
+        {
+            "text": "The VectorStore class manages ChromaDB lifecycle and provides persistence across process restarts. It uses a PersistentClient that writes to the .assemblyzero/vector_store/ directory.",
+            "metadata": {
+                "source_file": "docs/api-reference.md",
+                "section": "VectorStore",
+                "start_line": 10,
+                "end_line": 25
+            }
+        },
+        {
+            "text": "The EmbeddingProvider generates local embeddings using SentenceTransformers with the all-MiniLM-L6-v2 model. No network calls are made.",
+            "metadata": {
+                "source_file": "docs/api-reference.md",
+                "section": "EmbeddingProvider",
+                "start_line": 30,
+                "end_line": 45
+            }
+        },
+        {
+            "text": "Collections provide isolated namespaces for different document types. The documentation collection stores parsed markdown files. The codebase collection stores source code chunks.",
+            "metadata": {
+                "source_file": "docs/architecture.md",
+                "section": "Collections",
+                "start_line": 1,
+                "end_line": 15
+            }
+        },
+        {
+            "text": "The QueryEngine provides a unified interface for adding, querying, and deleting documents across any collection. It automatically generates embeddings for incoming documents.",
+            "metadata": {
+                "source_file": "docs/api-reference.md",
+                "section": "QueryEngine",
+                "start_line": 50,
+                "end_line": 65
+            }
+        },
+        {
+            "text": "Text chunking splits large documents into overlapping windows of configurable size. The default chunk size is 512 tokens with a 50-token overlap for context continuity.",
+            "metadata": {
+                "source_file": "docs/api-reference.md",
+                "section": "TextChunker",
+                "start_line": 70,
+                "end_line": 85
+            }
+        }
+    ]
+}
+```

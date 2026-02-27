@@ -1,42 +1,39 @@
-# 113 - Feature: Brutha - Vector Database Infrastructure (RAG Foundation)
+# 113 - Feature: Brutha Vector Database Infrastructure (RAG Foundation)
 
 <!-- Template Metadata
-Last Updated: 2025-01-XX
-Updated By: Initial creation
-Update Reason: New LLD for vector database infrastructure
+Last Updated: 2025-01-13
+Updated By: LLD Creation
+Update Reason: Initial LLD for vector database infrastructure
 -->
 
 ## 1. Context & Goal
 * **Issue:** #113
-* **Objective:** Implement foundational RAG infrastructure with ChromaDB and local embeddings that serves as the shared memory layer for The Librarian (#88) and Hex (#92).
+* **Objective:** Implement shared vector database infrastructure with local embeddings that serves as the RAG foundation for documentation (The Librarian #88) and codebase (Hex #92) retrieval.
 * **Status:** Draft
-* **Related Issues:** #88 (The Librarian - documentation retrieval), #92 (Hex - codebase retrieval)
+* **Related Issues:** #88 (The Librarian - depends on this), #92 (Hex - depends on this)
 
 ### Open Questions
 
-- [x] Should we use ChromaDB or an alternative like Qdrant/FAISS? → ChromaDB selected for simplicity and Python-native API
-- [x] Which embedding model to use? → `all-MiniLM-L6-v2` for balance of quality and speed
-- [ ] Should collections be auto-created or explicit? → Leaning toward explicit for safety
-- [ ] Maximum chunk size for documents? → Considering 512 tokens default
+- [x] ChromaDB vs. alternatives (LanceDB, Qdrant) - **Decision: ChromaDB** for maturity and ecosystem
+- [ ] Embedding model selection - all-MiniLM-L6-v2 vs. all-mpnet-base-v2?
+- [ ] Collection naming convention - domain-based or persona-based?
+- [ ] Persistence location - `.agentos/vector_store/` or configurable?
 
 ## 2. Proposed Changes
 
-*This section is the **source of truth** for implementation. Describe exactly what will be built.*
+*This section is the **source of truth** for implementation. Describes exactly what will be built.*
 
 ### 2.1 Files Changed
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `src/agentos/memory/__init__.py` | Add | Module initialization with public exports |
-| `src/agentos/memory/brutha.py` | Add | Core vector store manager class |
-| `src/agentos/memory/embeddings.py` | Add | Local embedding generation utilities |
-| `src/agentos/memory/collections.py` | Add | Collection management and schemas |
-| `src/agentos/memory/types.py` | Add | Type definitions for memory layer |
-| `tests/test_memory/__init__.py` | Add | Test module initialization |
-| `tests/test_memory/test_brutha.py` | Add | Unit tests for Brutha core |
-| `tests/test_memory/test_embeddings.py` | Add | Tests for embedding generation |
-| `tests/test_memory/test_collections.py` | Add | Tests for collection management |
-| `pyproject.toml` | Modify | Add chromadb and sentence-transformers dependencies |
+| `src/agentos/rag/__init__.py` | Add | Package initialization, exports public API |
+| `src/agentos/rag/brutha.py` | Add | Core Brutha class - vector store manager |
+| `src/agentos/rag/embeddings.py` | Add | Local embedding model wrapper |
+| `src/agentos/rag/collections.py` | Add | Collection management and configuration |
+| `src/agentos/rag/config.py` | Add | Configuration dataclasses |
+| `tests/unit/test_brutha.py` | Add | Unit tests for Brutha infrastructure |
+| `tests/integration/test_rag_integration.py` | Add | Integration tests with real embeddings |
 
 ### 2.2 Dependencies
 
@@ -48,259 +45,229 @@ chromadb = "^0.4.22"
 sentence-transformers = "^2.2.2"
 ```
 
-**Note:** `sentence-transformers` pulls in PyTorch. First run will download the embedding model (~90MB). All operations are local—no external API calls.
+**Note:** `sentence-transformers` pulls in PyTorch. Consider `onnxruntime` backend for lighter footprint if needed.
 
 ### 2.3 Data Structures
 
 ```python
 # Pseudocode - NOT implementation
-from typing import TypedDict, Optional
-from enum import Enum
 
-class CollectionName(Enum):
-    """Predefined collection names for type safety."""
-    DOCUMENTATION = "documentation"
-    CODEBASE = "codebase"
-    CONVERSATIONS = "conversations"  # Future use
-
-class Document(TypedDict):
-    """A document to be stored in the vector store."""
-    id: str                    # Unique identifier
-    content: str               # Raw text content
-    metadata: dict[str, any]   # Source, path, timestamp, etc.
+class CollectionConfig(TypedDict):
+    name: str              # Collection identifier (e.g., "documentation", "codebase")
+    embedding_model: str   # Model name from sentence-transformers
+    distance_metric: str   # "cosine" | "l2" | "ip"
+    metadata_schema: dict  # Expected metadata fields
 
 class QueryResult(TypedDict):
-    """Result from a vector similarity search."""
-    id: str
-    content: str
-    metadata: dict[str, any]
-    distance: float            # Lower = more similar
+    id: str                # Document ID
+    content: str           # Original text content
+    metadata: dict         # Associated metadata
+    distance: float        # Distance/similarity score
+    collection: str        # Source collection name
 
 class BruthaConfig(TypedDict):
-    """Configuration for the Brutha vector store."""
-    persist_directory: str     # Default: .agentos/vector_store/
-    embedding_model: str       # Default: all-MiniLM-L6-v2
-    default_n_results: int     # Default: 5
-    distance_metric: str       # Default: cosine
+    persist_directory: Path       # Where to store ChromaDB data
+    default_embedding_model: str  # Default model for new collections
+    default_distance_metric: str  # Default distance metric
+    max_batch_size: int           # Max documents per batch operation
 
-class CollectionStats(TypedDict):
-    """Statistics about a collection."""
-    name: str
-    count: int
-    metadata: dict[str, any]
+class EmbeddingResult(TypedDict):
+    embeddings: list[list[float]]  # Vector embeddings
+    model: str                      # Model used
+    dimension: int                  # Embedding dimension
 ```
 
 ### 2.4 Function Signatures
 
 ```python
-# src/agentos/memory/brutha.py
+# Signatures only - implementation in source files
 
+# brutha.py
 class Brutha:
-    """
-    Vector database manager - the perfect memory.
+    """Vector database manager - the memory that never forgets."""
     
-    'The turtle moves. And I remember everything.'
-    """
-    
-    def __init__(self, config: Optional[BruthaConfig] = None) -> None:
+    def __init__(self, config: BruthaConfig | None = None) -> None:
         """Initialize Brutha with optional configuration."""
+        ...
+    
+    def get_or_create_collection(
+        self, 
+        name: str, 
+        config: CollectionConfig | None = None
+    ) -> Collection:
+        """Get existing collection or create new one."""
         ...
     
     def add_documents(
         self,
-        collection: CollectionName,
-        documents: list[Document],
-        *,
-        batch_size: int = 100
-    ) -> int:
-        """
-        Add documents to a collection. Returns count of documents added.
-        Generates embeddings locally using configured model.
-        """
+        collection: str,
+        documents: list[str],
+        metadatas: list[dict] | None = None,
+        ids: list[str] | None = None
+    ) -> list[str]:
+        """Add documents to a collection. Returns document IDs."""
         ...
     
     def query(
         self,
-        collection: CollectionName,
+        collection: str,
         query_text: str,
-        *,
         n_results: int = 5,
-        where: Optional[dict] = None,
-        where_document: Optional[dict] = None
+        where: dict | None = None,
+        where_document: dict | None = None
     ) -> list[QueryResult]:
-        """
-        Query a collection by semantic similarity.
-        Returns results ordered by relevance (closest first).
-        """
+        """Query a collection with natural language."""
         ...
     
     def delete_documents(
         self,
-        collection: CollectionName,
-        ids: list[str]
+        collection: str,
+        ids: list[str] | None = None,
+        where: dict | None = None
     ) -> int:
-        """Delete documents by ID. Returns count deleted."""
+        """Delete documents by ID or filter. Returns count deleted."""
         ...
     
-    def get_collection_stats(
-        self,
-        collection: CollectionName
-    ) -> CollectionStats:
+    def get_collection_stats(self, collection: str) -> dict:
         """Get statistics about a collection."""
         ...
     
-    def reset_collection(
-        self,
-        collection: CollectionName,
-        *,
-        confirm: bool = False
-    ) -> bool:
-        """
-        Delete all documents in a collection.
-        Requires confirm=True as safety measure.
-        """
+    def list_collections(self) -> list[str]:
+        """List all available collections."""
         ...
     
-    @classmethod
-    def is_initialized(cls, persist_directory: Optional[str] = None) -> bool:
-        """Check if vector store has been initialized."""
+    def reset_collection(self, collection: str) -> None:
+        """Clear all documents from a collection."""
+        ...
+    
+    @property
+    def is_initialized(self) -> bool:
+        """Check if vector store is properly initialized."""
         ...
 
-
-# src/agentos/memory/embeddings.py
-
+# embeddings.py
 class LocalEmbedder:
-    """Generate embeddings using local SentenceTransformers model."""
+    """Local embedding model wrapper - no data egress."""
     
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
-        """Initialize with specified model. Downloads on first use."""
+        """Initialize with specified model."""
         ...
     
-    def embed_text(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
+    def embed_documents(self, texts: list[str]) -> EmbeddingResult:
+        """Generate embeddings for multiple documents."""
         ...
     
-    def embed_batch(
-        self,
-        texts: list[str],
-        *,
-        batch_size: int = 32,
-        show_progress: bool = False
-    ) -> list[list[float]]:
-        """Generate embeddings for multiple texts efficiently."""
+    def embed_query(self, text: str) -> list[float]:
+        """Generate embedding for a single query."""
         ...
     
     @property
     def dimension(self) -> int:
-        """Return the embedding dimension (384 for MiniLM)."""
+        """Return embedding dimension for current model."""
         ...
 
+# collections.py
+PREDEFINED_COLLECTIONS: dict[str, CollectionConfig] = {
+    "documentation": CollectionConfig(...),
+    "codebase": CollectionConfig(...),
+}
 
-# src/agentos/memory/collections.py
-
-def ensure_collection(
-    client: chromadb.Client,
-    name: CollectionName,
-    embedding_function: chromadb.EmbeddingFunction
-) -> chromadb.Collection:
-    """Get or create a collection with proper configuration."""
-    ...
-
-def validate_document(doc: Document) -> tuple[bool, Optional[str]]:
-    """Validate document structure. Returns (is_valid, error_message)."""
+def get_collection_config(name: str) -> CollectionConfig:
+    """Get predefined or default collection configuration."""
     ...
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
 
 ```
-=== Initialization Flow ===
-1. Load config (or use defaults)
-2. Ensure persist_directory exists (.agentos/vector_store/)
-3. Initialize ChromaDB PersistentClient
-4. Initialize LocalEmbedder (lazy-loads model)
-5. Store references for later use
+INITIALIZATION:
+1. Load config from environment/defaults
+2. Set persist_directory to .agentos/vector_store/
+3. Initialize ChromaDB client with persistence
+4. Load embedding model lazily (on first use)
 
-=== Add Documents Flow ===
-1. Validate collection name is known CollectionName
-2. Validate each document has required fields
-3. Get or create collection
-4. For each batch of documents:
-   a. Extract texts for embedding
-   b. Generate embeddings via LocalEmbedder.embed_batch()
-   c. Upsert to ChromaDB (ids, embeddings, metadatas, documents)
-5. Return total count added
+ADD DOCUMENTS:
+1. Validate inputs (documents not empty, IDs unique)
+2. Get or create target collection
+3. Generate embeddings locally via LocalEmbedder
+4. Batch documents if exceeding max_batch_size
+5. FOR each batch:
+   - Call collection.add() with embeddings, docs, metadata
+6. Return list of document IDs
 
-=== Query Flow ===
+QUERY:
 1. Validate collection exists
-2. Generate embedding for query_text
-3. Call collection.query() with:
+2. IF collection not initialized:
+   - Return empty results (graceful degradation)
+3. Generate query embedding locally
+4. Call collection.query() with:
    - query_embeddings
    - n_results
-   - where (metadata filter)
-   - where_document (content filter)
-4. Transform ChromaDB results to QueryResult list
-5. Return sorted by distance (ascending)
+   - where filters
+5. Transform ChromaDB results to QueryResult format
+6. Return sorted by relevance
 
-=== Graceful Degradation Flow ===
-1. On any operation, check if ChromaDB is accessible
-2. IF not initialized:
+GRACEFUL DEGRADATION:
+1. IF vector store fails to initialize:
    - Log warning
-   - Return empty results (query) or raise friendly error (write)
-3. IF model download fails:
-   - Raise with clear message about network/disk requirements
+   - Set is_initialized = False
+2. IF query on uninitialized store:
+   - Return empty list (not error)
+3. IF collection doesn't exist:
+   - Return empty list (not error)
 ```
 
 ### 2.6 Technical Approach
 
-* **Module:** `src/agentos/memory/`
-* **Pattern:** Repository pattern with collection-per-domain architecture
+* **Module:** `src/agentos/rag/`
+* **Pattern:** Repository pattern - Brutha wraps ChromaDB, providing domain-specific interface
 * **Key Decisions:**
-  - **ChromaDB** selected for Python-native API, built-in persistence, and ChromaDB embedding function interface
-  - **Local embeddings** ensure no data egress—all processing on user machine
-  - **Lazy initialization** for model loading to avoid startup delay
-  - **Typed enums** for collection names to prevent typos
+  - Local embeddings only - sentence-transformers runs on CPU, no API calls
+  - Collection-per-domain - keeps concerns separated, enables domain-specific tuning
+  - Lazy initialization - embedding model loads on first use, not import
+  - Graceful degradation - consumers get empty results, not exceptions
 
 ### 2.7 Architecture Decisions
 
 | Decision | Options Considered | Choice | Rationale |
 |----------|-------------------|--------|-----------|
-| Vector Store | ChromaDB, FAISS, Qdrant, Milvus | ChromaDB | Python-native, simple API, built-in persistence, good docs |
-| Embedding Model | OpenAI API, all-MiniLM-L6-v2, all-mpnet-base-v2 | all-MiniLM-L6-v2 | Local (no data egress), fast, small (90MB), good quality |
-| Persistence | In-memory, SQLite, Custom | ChromaDB's built-in SQLite | Reliable, zero config, handles concurrency |
-| Collection Strategy | Single collection, Collection per type | Collection per type | Clean separation, independent lifecycle, filtered queries |
-| Embedding Caching | None, LRU cache, Persistent cache | None (ChromaDB stores) | ChromaDB stores embeddings; regenerate only on update |
+| Vector Store | ChromaDB, LanceDB, Qdrant, FAISS | ChromaDB | Mature, Pythonic API, built-in persistence, good for local use |
+| Embedding Model | OpenAI API, Cohere, sentence-transformers | sentence-transformers (local) | No data egress requirement, free, runs offline |
+| Specific Model | all-MiniLM-L6-v2, all-mpnet-base-v2 | all-MiniLM-L6-v2 | Smaller (80MB), faster, good quality for retrieval |
+| Persistence | In-memory, SQLite, DuckDB | SQLite (ChromaDB default) | Persistence across sessions, good for single-user |
+| Collection Strategy | Single collection, Per-domain, Per-persona | Per-domain | Clear separation, can have different schemas |
 
 **Architectural Constraints:**
-- Must not make external API calls for embeddings (privacy requirement)
-- Must support concurrent reads from multiple agents (Librarian, Hex)
-- Must persist across sessions in `.agentos/vector_store/`
-- Must gracefully degrade when not initialized (no crashes)
+- Must be fully local - no external API calls for embeddings
+- Must integrate with Librarian (#88) and Hex (#92) as consumers
+- Must persist data in `.agentos/` directory structure
+- Must handle missing/uninitialized state gracefully
 
 ## 3. Requirements
 
 *What must be true when this is done. These become acceptance criteria.*
 
-1. Vector store initializes on first use with sensible defaults
-2. Multiple collections supported (documentation, codebase) with clean separation
-3. Embedding generation is fully local using SentenceTransformers
-4. The Librarian (#88) can query the `documentation` collection
-5. Hex (#92) can query the `codebase` collection
+1. Vector store initializes automatically on first use with sensible defaults
+2. Multiple named collections supported (at minimum: `documentation`, `codebase`)
+3. All embedding generation happens locally via sentence-transformers
+4. The Librarian (#88) can store and query documentation in `documentation` collection
+5. Hex (#92) can store and query code in `codebase` collection
 6. Graceful degradation: queries return empty results when store not initialized
-7. Persistence survives process restarts
-8. Batch operations support adding hundreds of documents efficiently
+7. Data persists in `.agentos/vector_store/` across sessions
+8. No PII or sensitive data transmitted externally
 
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
 |--------|------|------|----------|
-| ChromaDB | Python-native, simple API, built-in persistence | Newer project, less battle-tested | **Selected** |
-| FAISS | Facebook-backed, extremely fast, battle-tested | No built-in persistence, complex API | Rejected |
-| Qdrant | Production-grade, excellent performance | Requires separate server process | Rejected |
-| OpenAI Embeddings | Higher quality embeddings | External API calls, data egress, cost | Rejected |
-| all-mpnet-base-v2 | Better quality than MiniLM | 420MB vs 90MB, slower | Rejected |
+| ChromaDB | Pythonic, built-in persistence, active community | Heavier than FAISS | **Selected** |
+| LanceDB | Very fast, Lance format | Newer, less mature API | Rejected |
+| FAISS | Facebook-backed, extremely fast | No built-in persistence, complex API | Rejected |
+| Qdrant | Production-ready, rich filtering | Overkill for local use, needs separate server | Rejected |
+| OpenAI Embeddings | High quality | Requires API key, data egress, cost | Rejected |
+| all-mpnet-base-v2 | Higher quality embeddings | 420MB vs 80MB, slower | Rejected (for default) |
 
-**Rationale:** ChromaDB provides the best balance of simplicity, features, and Python integration. For a local-first RAG system, its persistent client with SQLite backend is ideal. The all-MiniLM-L6-v2 model offers excellent quality-to-size ratio and is the most commonly used local embedding model.
+**Rationale:** ChromaDB provides the best balance of ease-of-use, persistence, and Python-native API. Local embeddings via sentence-transformers meet the no-data-egress requirement while maintaining quality.
 
 ## 5. Data & Fixtures
 
@@ -308,62 +275,55 @@ def validate_document(doc: Document) -> tuple[bool, Optional[str]]:
 
 | Attribute | Value |
 |-----------|-------|
-| Source | User's local documentation and codebase |
-| Format | Plain text (extracted from markdown, code files) |
-| Size | Variable; expect 1K-100K documents per collection |
-| Refresh | On-demand by consumer agents |
-| Copyright/License | User's own content |
+| Source | Documents provided by consumers (Librarian, Hex) |
+| Format | Plain text strings with optional metadata dicts |
+| Size | Varies - expected 100s to 10,000s of documents |
+| Refresh | On-demand via consumer agents |
+| Copyright/License | N/A - infrastructure only, content is caller's responsibility |
 
 ### 5.2 Data Pipeline
 
 ```
-[User Files] ──Consumer Agent──► [Brutha.add_documents()] ──LocalEmbedder──► [ChromaDB Store]
-                                                                                    │
-[User Query] ──Consumer Agent──► [Brutha.query()] ──────────────────────────────────┘
+Consumer (Librarian/Hex) 
+    ──add_documents()──► 
+        Brutha 
+            ──embed()──► 
+                LocalEmbedder (sentence-transformers)
+                    ──vectors──► 
+                        ChromaDB (SQLite persistence)
 ```
 
 ### 5.3 Test Fixtures
 
 | Fixture | Source | Notes |
 |---------|--------|-------|
-| Sample documentation | Generated | 10 markdown-style documents about Discworld |
-| Sample code snippets | Generated | 10 Python function docstrings |
-| Query test cases | Hardcoded | Known queries with expected top results |
+| Sample documents | Hardcoded strings | Generic technical content |
+| Sample queries | Hardcoded strings | Match sample documents |
+| Mock embeddings | Generated deterministically | For unit tests without model |
+| Model fixture | Downloaded on first test run | Cached in CI |
 
 ### 5.4 Deployment Pipeline
 
-Development:
-```
-1. Run tests with ephemeral in-memory ChromaDB
-2. Integration tests use temp directory for persistence
-3. No external services required
-```
-
-Production:
-```
-1. First use creates .agentos/vector_store/
-2. Model downloads on first embed operation (~90MB)
-3. Data persists locally between sessions
-```
+- **Dev:** Vector store in `.agentos/vector_store/` (gitignored)
+- **Test:** Ephemeral in-memory store or temp directory
+- **Production:** Same as dev - local persistence
 
 ## 6. Diagram
 
 ### 6.1 Mermaid Quality Gate
 
-Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.live) or GitHub preview:
-
-- [x] **Simplicity:** Similar components collapsed (per 0006 §8.1)
-- [x] **No touching:** All elements have visual separation (per 0006 §8.2)
-- [x] **No hidden lines:** All arrows fully visible (per 0006 §8.3)
+- [x] **Simplicity:** Components collapsed appropriately
+- [x] **No touching:** All elements have visual separation
+- [x] **No hidden lines:** All arrows fully visible
 - [x] **Readable:** Labels not truncated, flow direction clear
-- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed (per 0006 §8.5)
+- [ ] **Auto-inspected:** Agent rendered via mermaid.ink and viewed
 
 **Auto-Inspection Results:**
 ```
-- Touching elements: [x] None / [ ] Found: ___
-- Hidden lines: [x] None / [ ] Found: ___
-- Label readability: [x] Pass / [ ] Issue: ___
-- Flow clarity: [x] Clear / [ ] Issue: ___
+- Touching elements: [ ] None / [ ] Found: ___
+- Hidden lines: [ ] None / [ ] Found: ___
+- Label readability: [ ] Pass / [ ] Issue: ___
+- Flow clarity: [ ] Clear / [ ] Issue: ___
 ```
 
 ### 6.2 Diagram
@@ -371,59 +331,55 @@ Before finalizing any diagram, verify in [Mermaid Live Editor](https://mermaid.l
 ```mermaid
 flowchart TB
     subgraph Consumers["Consumer Agents"]
-        L["The Librarian<br/>#88"]
-        H["Hex<br/>#92"]
-        F["Future Agents"]
+        LIB["The Librarian<br/>#88 - Documentation"]
+        HEX["Hex<br/>#92 - Codebase"]
     end
 
-    subgraph Brutha["Brutha Memory Layer"]
-        API["Brutha API<br/>add_documents()<br/>query()"]
-        EMB["LocalEmbedder<br/>all-MiniLM-L6-v2"]
+    subgraph Brutha["Brutha RAG Infrastructure #113"]
+        API["Brutha API<br/>add/query/delete"]
+        EMB["LocalEmbedder<br/>sentence-transformers"]
         
-        subgraph Collections["ChromaDB Collections"]
+        subgraph Collections["Collections"]
             DOC["documentation"]
             CODE["codebase"]
-            CONV["conversations"]
         end
     end
 
-    subgraph Storage["Persistence"]
-        DB[".agentos/vector_store/<br/>SQLite + Parquet"]
+    subgraph Storage["Persistence Layer"]
+        CHROMA["ChromaDB<br/>SQLite Backend"]
+        DISK[".agentos/vector_store/"]
     end
 
-    L -->|"query docs"| API
-    H -->|"query code"| API
-    F -.->|"future"| API
-    
-    API --> EMB
-    EMB --> Collections
-    Collections --> DB
+    LIB -->|"add/query"| API
+    HEX -->|"add/query"| API
+    API -->|"embed text"| EMB
+    API -->|"store/retrieve"| Collections
+    Collections --> CHROMA
+    CHROMA --> DISK
 ```
 
 ```mermaid
 sequenceDiagram
-    participant Agent as Consumer Agent
-    participant B as Brutha
-    participant E as LocalEmbedder
-    participant C as ChromaDB
+    participant Consumer as Librarian/Hex
+    participant Brutha
+    participant Embedder as LocalEmbedder
+    participant Chroma as ChromaDB
 
-    Note over Agent,C: Add Documents Flow
-    Agent->>B: add_documents(collection, docs)
-    B->>B: validate documents
-    B->>E: embed_batch(texts)
-    E->>E: generate embeddings locally
-    E-->>B: embeddings[]
-    B->>C: upsert(ids, embeddings, metadatas)
-    C-->>B: success
-    B-->>Agent: count added
+    Note over Consumer,Chroma: Add Documents Flow
+    Consumer->>Brutha: add_documents(collection, docs)
+    Brutha->>Embedder: embed_documents(docs)
+    Embedder-->>Brutha: EmbeddingResult
+    Brutha->>Chroma: collection.add(embeddings, docs)
+    Chroma-->>Brutha: success
+    Brutha-->>Consumer: document IDs
 
-    Note over Agent,C: Query Flow
-    Agent->>B: query(collection, "search text")
-    B->>E: embed_text("search text")
-    E-->>B: query_embedding
-    B->>C: query(embedding, n_results)
-    C-->>B: results
-    B-->>Agent: QueryResult[]
+    Note over Consumer,Chroma: Query Flow
+    Consumer->>Brutha: query(collection, text)
+    Brutha->>Embedder: embed_query(text)
+    Embedder-->>Brutha: query_vector
+    Brutha->>Chroma: collection.query(vector)
+    Chroma-->>Brutha: results
+    Brutha-->>Consumer: list[QueryResult]
 ```
 
 ## 7. Security & Safety Considerations
@@ -432,26 +388,25 @@ sequenceDiagram
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Data egress | All embeddings generated locally; no external API calls | Addressed |
-| Path traversal | persist_directory validated, constrained to .agentos/ | Addressed |
-| Injection in metadata | ChromaDB handles escaping; metadata values sanitized | Addressed |
-| Model tampering | Model downloaded from HuggingFace with checksums | Addressed |
+| Data egress via embeddings | All embeddings local, no API calls | Addressed |
+| Injection via metadata | Metadata keys/values sanitized | TODO |
+| Path traversal in persist_directory | Validate path is under project root | TODO |
+| Model download security | sentence-transformers uses HuggingFace CDN with checksums | Addressed |
 
 ### 7.2 Safety
 
 | Concern | Mitigation | Status |
 |---------|------------|--------|
-| Accidental data loss | reset_collection() requires explicit confirm=True | Addressed |
-| Corrupted store | ChromaDB uses SQLite with WAL mode; atomic operations | Addressed |
-| Disk exhaustion | Warning logged when store exceeds 1GB | TODO |
-| Concurrent writes | ChromaDB handles via SQLite locking | Addressed |
+| Vector store corruption | ChromaDB handles atomic writes | Addressed |
+| Disk space exhaustion | Log warnings at configurable thresholds | TODO |
+| Memory exhaustion from large batches | max_batch_size configuration, default 500 | Addressed |
+| Model download failure | Graceful error with clear message | TODO |
 
-**Fail Mode:** Fail Closed - Operations fail gracefully with empty results or clear errors rather than corrupting data or exposing partial state.
+**Fail Mode:** Fail Closed - queries return empty results rather than raising exceptions or proceeding without RAG
 
 **Recovery Strategy:** 
-1. If store corrupted: Delete `.agentos/vector_store/` and rebuild from source files
-2. If model corrupted: Delete `~/.cache/huggingface/` model cache, re-download
-3. Consumer agents should handle empty results gracefully
+- Corrupted store: Delete `.agentos/vector_store/` and rebuild from source documents
+- Failed initialization: Clear error message, consumers proceed without RAG
 
 ## 8. Performance & Cost Considerations
 
@@ -459,124 +414,139 @@ sequenceDiagram
 
 | Metric | Budget | Approach |
 |--------|--------|----------|
-| First load latency | < 5s | Lazy model loading; warn user on first run |
-| Embedding single text | < 50ms | MiniLM is optimized for speed |
-| Embedding batch (100) | < 500ms | Batch processing on GPU if available |
-| Query latency | < 100ms | ChromaDB HNSW index for approximate NN |
-| Memory (idle) | < 200MB | Model loaded on demand, unloaded if unused |
+| First query latency | < 5s (includes model load) | Lazy load, then cached |
+| Subsequent query latency | < 500ms | Model stays in memory |
+| Embedding throughput | > 100 docs/sec | Batch processing |
+| Memory footprint | < 500MB | MiniLM model is ~80MB + ChromaDB overhead |
 
 **Bottlenecks:**
-- First-time model download (~90MB) requires network
-- Large batch inserts may spike memory temporarily
-- Very large collections (>1M docs) may need index tuning
+- First embedding generation loads model (~2-3s)
+- Large batch inserts limited by embedding generation speed
+- ChromaDB query performance degrades past ~100k documents
 
 ### 8.2 Cost Analysis
 
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
-| LLM API calls | N/A | 0 | $0 |
-| Cloud compute | N/A | 0 (local only) | $0 |
-| Storage | ~$0.10/GB | ~100MB typical | ~$0.01 |
-| Network | ISP rate | ~90MB one-time download | One-time |
+| CPU compute | Local | Background process | $0 |
+| Disk storage | Local | ~1GB for 100k docs | $0 |
+| Model download | One-time | ~80MB | $0 |
+| API calls | None | 0 | $0 |
 
 **Cost Controls:**
-- [x] No external API calls = no runaway costs
-- [x] Local storage only
-- [x] Model cached after first download
+- [x] No external API dependencies
+- [x] All compute is local
+- [ ] Disk usage monitoring (future)
 
-**Worst-Case Scenario:** User indexes their entire home directory. Storage could reach several GB, but cost remains local disk only. Memory spikes during large batch operations.
+**Worst-Case Scenario:** User indexes 1M documents - disk usage grows to ~10GB, query latency increases. Mitigate with collection size warnings.
 
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
 |---------|----------|------------|
-| PII/Personal Data | Yes | User's own data; no transmission; user responsible for content |
-| Third-Party Licenses | Yes | ChromaDB (Apache 2.0), sentence-transformers (Apache 2.0), model (Apache 2.0) |
-| Terms of Service | No | No external APIs used |
-| Data Retention | N/A | User controls their local data |
-| Export Controls | No | Standard ML model, no restricted algorithms |
+| PII/Personal Data | N/A | Infrastructure only - content is caller's responsibility |
+| Third-Party Licenses | Yes | ChromaDB (Apache 2.0), sentence-transformers (Apache 2.0) - compatible |
+| Terms of Service | N/A | No external services |
+| Data Retention | N/A | User controls - can delete collections |
+| Export Controls | No | No restricted algorithms |
 
-**Data Classification:** Internal (user's local data, never transmitted)
+**Data Classification:** Internal - all data stays local
 
 **Compliance Checklist:**
-- [x] No PII transmitted externally
-- [x] All third-party licenses compatible with Apache 2.0
+- [x] No PII handling at infrastructure level
+- [x] All third-party licenses Apache 2.0 compatible
 - [x] No external API usage
-- [x] Data retention: user's responsibility (local files)
+- [x] User controls data retention via collection management
 
 ## 10. Verification & Testing
 
-*Ref: [0005-testing-strategy-and-protocols.md](0005-testing-strategy-and-protocols.md)*
+### 10.0 Test Plan (TDD - Complete Before Implementation)
 
-**Testing Philosophy:** All tests automated. No manual tests required—vector store operations are deterministic given fixed inputs and embedding model.
+**TDD Requirement:** Tests MUST be written and failing BEFORE implementation begins.
+
+| Test ID | Test Description | Expected Behavior | Status |
+|---------|------------------|-------------------|--------|
+| T010 | test_brutha_initialization | Creates ChromaDB client and persist dir | RED |
+| T020 | test_create_collection | Creates new named collection | RED |
+| T030 | test_add_documents | Adds documents and returns IDs | RED |
+| T040 | test_query_returns_results | Query returns relevant documents | RED |
+| T050 | test_query_empty_collection | Returns empty list, not error | RED |
+| T060 | test_query_nonexistent_collection | Returns empty list, not error | RED |
+| T070 | test_delete_documents | Removes documents by ID | RED |
+| T080 | test_local_embedder_no_network | Embeddings generated without network | RED |
+| T090 | test_persistence_across_sessions | Data survives Brutha recreation | RED |
+| T100 | test_multiple_collections | Different collections isolated | RED |
+
+**Coverage Target:** ≥95% for all new code
+
+**TDD Checklist:**
+- [ ] All tests written before implementation
+- [ ] Tests currently RED (failing)
+- [ ] Test IDs match scenario IDs in 10.1
+- [ ] Test file created at: `tests/unit/test_brutha.py`
 
 ### 10.1 Test Scenarios
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Initialize Brutha with defaults | Auto | None | Brutha instance | No exceptions, store directory created |
-| 020 | Add single document | Auto | 1 Document | Return 1 | Document retrievable by ID |
-| 030 | Add batch of documents | Auto | 50 Documents | Return 50 | All documents queryable |
-| 040 | Query returns relevant results | Auto | "turtle moves" query | QueryResult[] | Top result contains "turtle" |
-| 050 | Query with metadata filter | Auto | where={"type": "doc"} | Filtered QueryResult[] | All results have type="doc" |
-| 060 | Query empty collection | Auto | Query on empty collection | Empty list | No exceptions, [] returned |
-| 070 | Delete documents by ID | Auto | IDs to delete | Return count | Documents no longer queryable |
-| 080 | Reset collection with confirm | Auto | confirm=True | True | Collection empty |
-| 090 | Reset collection without confirm | Auto | confirm=False | Exception | Collection unchanged |
-| 100 | Collection stats | Auto | Populated collection | CollectionStats | Correct count, name |
-| 110 | Persistence across restarts | Auto | Add, close, reopen, query | Same results | Data persists |
-| 120 | Invalid document rejected | Auto | Document missing 'id' | Validation error | Clear error message |
-| 130 | Unknown collection fails gracefully | Auto | Query "unknown" collection | Error or empty | No crash |
-| 140 | Embedding dimension consistency | Auto | Multiple texts | All same length | len(embedding) == 384 |
-| 150 | Concurrent reads | Auto | Parallel queries | All succeed | No corruption |
-| 160 | Graceful degradation when uninitialized | Auto | Query before init | Empty results or warning | No crash |
+| 010 | Initialize Brutha | Auto | Default config | Brutha instance with is_initialized=True | Client created, persist dir exists |
+| 020 | Create collection | Auto | name="test" | Collection object | Collection in list_collections() |
+| 030 | Add single document | Auto | doc="Hello world", collection="test" | ["id-0"] | Document retrievable |
+| 040 | Add batch documents | Auto | 100 documents | 100 IDs | All documents queryable |
+| 050 | Query with results | Auto | query="hello", n=3 | 3 QueryResults | Results sorted by relevance |
+| 060 | Query empty collection | Auto | query on empty collection | [] | No exception raised |
+| 070 | Query nonexistent collection | Auto | query on "fake" | [] | No exception raised |
+| 080 | Delete by ID | Auto | delete id="doc-1" | 1 | Document not in subsequent query |
+| 090 | Delete by filter | Auto | where={"source": "test"} | N | Matching docs removed |
+| 100 | Persistence test | Auto | Add docs, recreate Brutha | Same docs returned | Count matches |
+| 110 | Multiple collections | Auto | Add to "a" and "b" | Isolated results | Query "a" doesn't return "b" docs |
+| 120 | Local embedding verification | Auto-Live | Disconnect network, embed | Embeddings generated | No network error |
+| 130 | Large batch handling | Auto | 1000 documents | All indexed | Under 30s |
 
 ### 10.2 Test Commands
 
 ```bash
 # Run all automated tests
-poetry run pytest tests/test_memory/ -v
+poetry run pytest tests/unit/test_brutha.py -v
 
-# Run only fast/mocked tests (exclude live model loading)
-poetry run pytest tests/test_memory/ -v -m "not slow"
+# Run only fast/mocked tests (exclude live)
+poetry run pytest tests/unit/test_brutha.py -v -m "not live"
+
+# Run integration tests with real embeddings
+poetry run pytest tests/integration/test_rag_integration.py -v -m live
 
 # Run with coverage
-poetry run pytest tests/test_memory/ -v --cov=src/agentos/memory
-
-# Run integration tests (loads real model)
-poetry run pytest tests/test_memory/ -v -m integration
+poetry run pytest tests/unit/test_brutha.py --cov=src/agentos/rag --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
 
-N/A - All scenarios automated.
+**N/A - All scenarios automated.**
 
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
-| Model download fails (network issues) | High | Low | Clear error message with retry instructions; document offline setup |
-| ChromaDB API changes in future versions | Med | Med | Pin version; wrap API in our abstractions |
-| Embedding quality insufficient for use case | Med | Low | Model is industry standard; can swap models if needed |
-| Large codebases overwhelm storage | Med | Low | Document recommended limits; chunking strategy |
-| Consumer agents misuse API | Low | Med | Strong typing, validation, clear error messages |
+| sentence-transformers model download fails | High | Low | Clear error message, offline mode docs |
+| ChromaDB breaking changes | Med | Low | Pin version, monitor releases |
+| Disk space exhaustion | Med | Low | Logging warnings, documentation |
+| Memory pressure from model | Med | Med | Document requirements, lazy loading |
+| Query performance at scale | Low | Med | Document limits, future sharding |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] Implementation complete and linted
 - [ ] Code comments reference this LLD
-- [ ] All functions have docstrings with examples
 
 ### Tests
 - [ ] All test scenarios pass
-- [ ] Test coverage > 90%
-- [ ] Integration tests pass with real model
+- [ ] Test coverage ≥95%
 
 ### Documentation
 - [ ] LLD updated with any deviations
 - [ ] Implementation Report (0103) completed
-- [ ] README in `src/agentos/memory/` with usage examples
+- [ ] Docstrings on all public methods
 
 ### Review
 - [ ] Code review completed
@@ -592,7 +562,6 @@ N/A - All scenarios automated.
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| - | - | - | Awaiting initial review |
+| - | - | - | Awaiting first review |
 
 **Final Status:** PENDING
-<!-- Note: This field is auto-updated to APPROVED by the workflow when finalized -->
