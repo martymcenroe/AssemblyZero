@@ -1,3 +1,6 @@
+
+
+```python
 """Pytest configuration for test suite."""
 
 import os
@@ -53,3 +56,4 @@ def mock_file_size(monkeypatch):
         monkeypatch.setattr("os.path.getsize", _patched_getsize)
 
     return _mock
+```

@@ -1,0 +1,177 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 143 items / 1 deselected / 142 selected
+
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_happy_path_generates_tests PASSED [  0%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_quota_skip PASSED [  1%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_downgrade_skip PASSED [  2%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_empty_implementation_skip PASSED [  2%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_malformed_response_error PASSED [  3%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_timeout_triggers_retry PASSED [  4%]
+tests/unit/test_adversarial_node.py::TestRunAdversarialNode::test_mock_violations_rejected PASSED [  4%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_valid_json_parsed PASSED [  5%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_malformed_json_raises PASSED [  6%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_all_four_categories_present PASSED [  7%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_missing_category_raises PASSED [  7%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_markdown_code_block_stripped PASSED [  8%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_empty_response_raises PASSED [  9%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_whitespace_only_response_raises PASSED [  9%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_missing_test_cases_raises PASSED [ 10%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_test_cases_not_list_raises PASSED [ 11%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_empty_test_cases_valid PASSED [ 11%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_test_case_missing_field_raises PASSED [ 12%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_non_dict_response_raises PASSED [ 13%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_multiple_test_cases_parsed PASSED [ 14%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_missing_uncovered_edge_cases_raises PASSED [ 14%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_missing_missing_error_handling_raises PASSED [ 15%]
+tests/unit/test_adversarial_node.py::TestParseGeminiResponse::test_missing_implicit_assumptions_raises PASSED [ 16%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_token_budget_trimming PASSED [ 16%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_empty_state PASSED [ 17%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_small_input_not_truncated PASSED [ 18%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_multiple_impl_files_concatenated PASSED [ 19%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_oversized_impl_truncated_with_marker PASSED [ 19%]
+tests/unit/test_adversarial_node.py::TestCollectContext::test_missing_keys_handled PASSED [ 20%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_groups_by_category PASSED [ 21%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_file_naming_convention PASSED [ 21%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_empty_test_cases_no_files PASSED [ 22%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_creates_output_dir PASSED [ 23%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_files_written_to_disk PASSED [ 23%]
+tests/unit/test_adversarial_writer.py::TestWriteAdversarialTests::test_multiple_categories_separate_files PASSED [ 24%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_renders_valid_pytest_syntax PASSED [ 25%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_adversarial_header_present PASSED [ 26%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_header_includes_issue_and_category PASSED [ 26%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_no_mock_docstring PASSED [ 27%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_empty_cases_renders_header_only PASSED [ 28%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_test_code_without_def_wrapped PASSED [ 28%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_severity_comment_present PASSED [ 29%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_claim_challenged_comment PASSED [ 30%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_multiple_cases_all_rendered PASSED [ 30%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_empty_test_code_skipped PASSED [ 31%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_generator_comment_in_header PASSED [ 32%]
+tests/unit/test_adversarial_writer.py::TestRenderTestFile::test_warning_comment_in_header PASSED [ 33%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_normal_category PASSED [ 33%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_uppercase PASSED [ 34%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_special_chars PASSED [ 35%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_empty PASSED [ 35%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_spaces PASSED [ 36%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_multiple_special_chars PASSED [ 37%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_leading_trailing_special_chars PASSED [ 38%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_numbers_preserved PASSED [ 38%]
+tests/unit/test_adversarial_writer.py::TestSanitizeCategory::test_mixed_case_with_special PASSED [ 39%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_unittest_mock_import PASSED [ 40%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_magicmock_instantiation PASSED [ 40%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_patch_decorator PASSED [ 41%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_monkeypatch_fixture PASSED [ 42%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_aliased_import PASSED [ 42%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_import_unittest_mock PASSED [ 43%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_from_unittest_import_mock PASSED [ 44%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_clean_code_no_violations PASSED [ 45%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_mock_in_string_not_flagged PASSED [ 45%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_syntax_error_returns_empty PASSED [ 46%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_async_mock PASSED [ 47%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_detects_mock_patch_attribute PASSED [ 47%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_filepath_in_violation_message PASSED [ 48%]
+tests/unit/test_adversarial_validator.py::TestCheckNoMocks::test_line_number_in_violation_message PASSED [ 49%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_clean_file_passes PASSED [ 50%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_mock_test_rejected PASSED [ 50%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_empty_files_valid PASSED [ 51%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_syntax_error_invalid PASSED [ 52%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_multiple_files_mixed_results PASSED [ 52%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_warnings_for_missing_assertions PASSED [ 53%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_duplicate_test_names_warning PASSED [ 54%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_syntax_error_skips_ast_analysis PASSED [ 54%]
+tests/unit/test_adversarial_validator.py::TestValidateAdversarialTests::test_only_mock_violations_make_invalid PASSED [ 55%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_syntax_error_detected PASSED [ 56%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_valid_syntax_no_errors PASSED [ 57%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_filepath_in_error_message PASSED [ 57%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_line_number_in_error_message PASSED [ 58%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_empty_code_valid PASSED [ 59%]
+tests/unit/test_adversarial_validator.py::TestCheckSyntax::test_complex_valid_code PASSED [ 59%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_missing_assertions_warning PASSED [ 60%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_has_assertion_no_warning PASSED [ 61%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_pytest_raises_counts_as_assertion PASSED [ 61%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_non_test_function_ignored PASSED [ 62%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_empty_file_no_warnings PASSED [ 63%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_multiple_test_functions_mixed PASSED [ 64%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_syntax_error_returns_empty PASSED [ 64%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_filepath_in_warning_message PASSED [ 65%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_assert_in_nested_function_not_counted PASSED [ 66%]
+tests/unit/test_adversarial_validator.py::TestCheckAssertions::test_class_based_test_methods PASSED [ 66%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_no_mock_enforcement PASSED [ 67%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_requires_four_categories PASSED [ 68%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_json_output_required PASSED [ 69%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_returns_string PASSED [ 69%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_severity_levels_documented PASSED [ 70%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_max_test_cases_mentioned PASSED [ 71%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_no_markdown_code_blocks_instruction PASSED [ 71%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_assert_requirement PASSED [ 72%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialSystemPrompt::test_test_prefix_requirement PASSED [ 73%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_prompt_contains_all_sections PASSED [ 73%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_empty_existing_tests PASSED [ 74%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_schema_included PASSED [ 75%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_returns_string PASSED [ 76%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_implementation_code_section PASSED [ 76%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_lld_section PASSED [ 77%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_existing_tests_section_when_provided PASSED [ 78%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_multiple_patterns_listed PASSED [ 78%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_no_mock_reminder PASSED [ 79%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_instructions_section PASSED [ 80%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_json_only_requirement PASSED [ 80%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_schema_has_required_fields PASSED [ 81%]
+tests/unit/test_adversarial_prompts.py::TestBuildAdversarialAnalysisPrompt::test_empty_patterns_list PASSED [ 82%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_delegates_to_provider PASSED [ 83%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_timeout_raises_gemini_timeout_error PASSED [ 83%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_quota_error_from_response_content PASSED [ 84%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_quota_error_from_status_code PASSED [ 85%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_flash_model_in_response_raises PASSED [ 85%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_uses_default_patterns_when_none PASSED [ 86%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_custom_patterns_used PASSED [ 87%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_provider_injected PASSED [ 88%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_auto_discovery_import_error PASSED [ 88%]
+tests/unit/test_adversarial_gemini.py::TestAdversarialGeminiClient::test_langchain_provider_strategy PASSED [ 89%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_pro_model_passes PASSED [ 90%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_flash_detected_raises PASSED [ 90%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_empty_metadata_raises PASSED [ 91%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_unknown_model_passes_with_warning PASSED [ 92%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_pro_case_insensitive PASSED [ 92%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_empty_model_string_raises PASSED [ 93%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_flash_exp_detected PASSED [ 94%]
+tests/unit/test_adversarial_gemini.py::TestVerifyModelIsPro::test_pro_preview_variant PASSED [ 95%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_status_code_429 PASSED [ 95%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_resource_exhausted_in_response PASSED [ 96%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_rate_limit_in_response PASSED [ 97%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_normal_response_not_quota_error PASSED [ 97%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_empty_response_not_quota_error PASSED [ 98%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_none_response_not_quota_error PASSED [ 99%]
+tests/unit/test_adversarial_gemini.py::TestIsQuotaError::test_quota_word_in_response PASSED [100%]
+
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                                  Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------------------
+assemblyzero\workflows\testing\adversarial_state.py       5      0   100%
+-----------------------------------------------------------------------------------
+TOTAL                                                     5      0   100%
+Required test coverage of 95% reached. Total coverage: 100.00%
+================ 142 passed, 1 deselected, 6 warnings in 1.18s ================
+
