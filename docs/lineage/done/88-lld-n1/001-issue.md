@@ -1,8 +1,8 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 88
-url: https://github.com/martymcenroe/AgentOS/issues/88
-fetched: 2026-02-04T14:47:21.505049Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/88
+fetched: 2026-02-27T09:15:54.914260Z
 ---
 
 # Issue #88: RAG Injection: Automated Context Retrieval ("The Librarian")
@@ -20,7 +20,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 ## UX Flow
 
 ### Scenario 1: Happy Path - Relevant Documents Found
-1. User runs `agentos lld create --brief "Implement distributed error logging"`
+1. User runs `assemblyzero lld create --brief "Implement distributed error logging"`
 2. Librarian Node embeds the brief and queries the vector store
 3. System retrieves `docs/LLDs/done/57-distributed-logging.md` (score: 0.89), `docs/standards/0002-coding-standards.md` (score: 0.82), `docs/adrs/0204-single-identity-orchestration.md` (score: 0.71)
 4. Retrieved documents are silently appended to Designer context
@@ -28,7 +28,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 6. Result: LLD aligns with existing architecture
 
 ### Scenario 2: No Relevant Documents Found
-1. User runs `agentos lld create --brief "Add support for Klingon language localization"`
+1. User runs `assemblyzero lld create --brief "Add support for Klingon language localization"`
 2. Librarian Node queries the vector store
 3. All results score below 0.7 threshold
 4. System logs: `[Librarian] No relevant governance documents found (best score: 0.42)`
@@ -36,29 +36,29 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 6. Result: Designer proceeds without RAG augmentation
 
 ### Scenario 3: Manual Context Override
-1. User runs `agentos lld create --brief "..." --context docs/adrs/0199-special-case.md`
+1. User runs `assemblyzero lld create --brief "..." --context docs/adrs/0199-special-case.md`
 2. Librarian retrieves 3 documents automatically
 3. System merges: manual context takes precedence, duplicates removed
 4. Result: Final context = manual selections + RAG selections (deduplicated)
 
 ### Scenario 4: Vector Store Not Initialized
-1. User runs `agentos lld create --brief "..."`
-2. Librarian checks for `.agentos/vector_store/` — not found
+1. User runs `assemblyzero lld create --brief "..."`
+2. Librarian checks for `.assemblyzero/vector_store/` — not found
 3. System logs warning: `[Librarian] Vector store not found. Run 'tools/rebuild_knowledge_base.py' to enable RAG.`
 4. Workflow continues without RAG augmentation
 5. Result: Graceful degradation to manual-only context
 
 ### Scenario 5: Cold Boot with CLI Spinner
-1. User runs `agentos lld create --brief "..."` for the first time in a session
+1. User runs `assemblyzero lld create --brief "..."` for the first time in a session
 2. Vector store/embedding model loading begins
 3. CLI displays spinner: `[Librarian] Loading embedding model...`
 4. If loading exceeds 500ms, spinner remains visible until complete
 5. Result: User has feedback during potentially slow cold-boot operations
 
 ### Scenario 6: RAG Dependencies Not Installed
-1. User runs `agentos lld create --brief "..."` without RAG optional dependencies
+1. User runs `assemblyzero lld create --brief "..."` without RAG optional dependencies
 2. Librarian Node attempts to import `chromadb`/`sentence-transformers`
-3. Import fails gracefully with friendly message: `[Librarian] RAG dependencies not installed. Run 'pip install agentos[rag]' to enable.`
+3. Import fails gracefully with friendly message: `[Librarian] RAG dependencies not installed. Run 'pip install assemblyzero[rag]' to enable.`
 4. Workflow continues without RAG augmentation
 5. Result: Graceful degradation preserving lightweight installation
 
@@ -66,7 +66,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 
 ### Vector Infrastructure
 1. Use ChromaDB for local, file-based vector storage (no external dependencies for default mode)
-2. Store vector database in `.agentos/vector_store/`
+2. Store vector database in `.assemblyzero/vector_store/`
 3. Support embedding models: `all-MiniLM-L6-v2` (default/local) or OpenAI/Gemini if API key available
 4. Index all markdown files in `docs/adrs/`, `docs/standards/`, and `docs/LLDs/done/`
 5. Split documents by H1/H2 headers for granular retrieval
@@ -94,7 +94,7 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 
 ### Optional Dependencies
 1. Add `chromadb` and `sentence-transformers` as **optional dependencies** via `project.optional-dependencies` under `[rag]` extra
-2. Core installation remains lightweight — RAG features require explicit `pip install agentos[rag]`
+2. Core installation remains lightweight — RAG features require explicit `pip install assemblyzero[rag]`
 3. Implement conditional imports in `LibrarianNode` with clear error messaging when extras not installed
 
 ### Technical Verification
@@ -123,16 +123,16 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 - Vector store contains only internal documentation (no secrets)
 - **Default mode (local embeddings):** Embedding model runs locally — no data leaves the machine
 - **External API mode:** If user configures OpenAI/Gemini embedding APIs via environment variables, document text **will be sent to external services** for embedding generation. Users must explicitly opt-in by providing API keys. This is a user choice that trades privacy for potentially higher-quality embeddings.
-- `.agentos/vector_store/` should be gitignored (local cache, regenerable)
+- `.assemblyzero/vector_store/` should be gitignored (local cache, regenerable)
 - Input sanitization will be verified during code review
 
 ## Files to Create/Modify
 - `tools/rebuild_knowledge_base.py` — CLI tool to ingest docs into vector store
-- `agentos/nodes/librarian.py` — RAG retrieval node implementation with conditional imports
-- `agentos/workflows/lld/graph.py` — Wire Librarian into workflow graph
-- `agentos/workflows/lld/state.py` — Add `retrieved_context` to State schema
+- `assemblyzero/nodes/librarian.py` — RAG retrieval node implementation with conditional imports
+- `assemblyzero/workflows/lld/graph.py` — Wire Librarian into workflow graph
+- `assemblyzero/workflows/lld/state.py` — Add `retrieved_context` to State schema
 - `pyproject.toml` — Add `chromadb`, `sentence-transformers` as **optional** dependencies under `[rag]` extra
-- `.gitignore` — Add `.agentos/vector_store/`
+- `.gitignore` — Add `.assemblyzero/vector_store/`
 - `docs/adrs/XXXX-rag-librarian.md` — Document architectural decision including license compliance findings
 
 ## Dependencies
@@ -156,8 +156,8 @@ Implement an automated RAG (Retrieval-Augmented Generation) node that queries a 
 - [ ] Workflow gracefully degrades when `[rag]` extra not installed (friendly message, not error)
 - [ ] Manual `--context` flag still works and takes precedence over RAG results
 - [ ] Vector store persists between sessions (no re-embedding on every run)
-- [ ] Core package installs without ML dependencies (`pip install agentos`)
-- [ ] RAG extra installs cleanly on Linux/Mac/Windows CI environments (`pip install agentos[rag]`)
+- [ ] Core package installs without ML dependencies (`pip install assemblyzero`)
+- [ ] RAG extra installs cleanly on Linux/Mac/Windows CI environments (`pip install assemblyzero[rag]`)
 - [ ] CLI spinner displays during cold-boot model loading
 
 ## Definition of Done
@@ -205,7 +205,7 @@ python tools/rebuild_knowledge_base.py --full
 
 # Test queries manually
 python -c "
-from agentos.nodes.librarian import query_knowledge_base
+from assemblyzero.nodes.librarian import query_knowledge_base
 results = query_knowledge_base('How should I implement logging?')
 for r in results:
     print(f'{r.score:.2f} | {r.file_path} | {r.section}')
@@ -215,10 +215,10 @@ for r in results:
 **To test graceful degradation (no vector store):**
 ```bash
 # Remove vector store
-rm -rf .agentos/vector_store/
+rm -rf .assemblyzero/vector_store/
 
 # Run LLD workflow — should warn but not fail
-agentos lld create --brief "Test brief"
+assemblyzero lld create --brief "Test brief"
 ```
 
 **To test graceful degradation (no RAG dependencies):**
@@ -229,14 +229,14 @@ source test_env_core/bin/activate
 pip install -e .  # Core only, no [rag]
 
 # Run LLD workflow — should show friendly message and continue
-agentos lld create --brief "Test brief"
-# Expected: "[Librarian] RAG dependencies not installed. Run 'pip install agentos[rag]' to enable."
+assemblyzero lld create --brief "Test brief"
+# Expected: "[Librarian] RAG dependencies not installed. Run 'pip install assemblyzero[rag]' to enable."
 ```
 
 **To test manual override precedence:**
 ```bash
 # Provide conflicting manual context
-agentos lld create \
+assemblyzero lld create \
   --brief "Implement logging" \
   --context docs/adrs/0001-unrelated.md
 
@@ -258,7 +258,7 @@ python -c "import chromadb; import sentence_transformers; print('OK')"
 python -m venv test_env_light
 source test_env_light/bin/activate
 pip install -e .
-python -c "import agentos; print('Core OK')"
+python -c "import assemblyzero; print('Core OK')"
 # Verify torch/chromadb NOT installed
 pip list | grep -E "(torch|chromadb)" && echo "FAIL: Heavy deps in core" || echo "PASS: Core is lightweight"
 ```
