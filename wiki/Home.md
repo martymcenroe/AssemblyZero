@@ -35,21 +35,23 @@ graph TD
 
 ---
 
-## Production Evidence: 310 Issues, 282 Closed
+## Production Evidence: 310 Issues, 286 Closed
 
-AssemblyZero isn't theoretical. It's been battle-tested through **310 issues** (282 closed, 28 open) across 48 days — with 712 commits since the last major update:
+AssemblyZero isn't theoretical. It's been battle-tested through **310 issues** (286 closed, 24 open) across 48 days — with 727 commits since the last major update:
 
 **[View Full Metrics Dashboard →](Metrics)**
 
 ```
 Issues closed per day (Central Time):
-2026-01-11:   2 ##
-2026-01-17:   8 ########
+2026-01-17:   9 #########
 2026-01-21:  12 ############
-2026-02-01:   7 #######
-2026-02-02:  23 #######################
-2026-02-03:  55 #######################################################
-2026-02-04:  31 ###############################
+2026-02-03:  60 ############################################################
+2026-02-05:  19 ###################
+2026-02-15:  12 ############
+2026-02-17:  24 ########################
+2026-02-25:  20 ####################
+2026-02-26:  17 #################
+2026-02-27:   4 ####
 ```
 
 | Theme | Examples |
@@ -57,10 +59,10 @@ Issues closed per day (Central Time):
 | **Workflow Automation** | LLD workflow, implementation workflow, TDD workflow |
 | **Governance & Gates** | Gemini verification, mechanical validation, skipped test gates |
 | **Bug Fixes** | Unicode encoding, import errors, stale state bugs |
-| **Intelligence Layer** | Scout workflow, verdict analyzer, template learning |
-| **Infrastructure** | GitHub Actions, Poetry dependencies, cross-platform |
+| **Intelligence Layer** | Scout workflow, verdict analyzer, template learning, RAG injection |
+| **Infrastructure** | GitHub Actions, Poetry dependencies, cross-platform, telemetry |
 
-**Current velocity:** 5.9 issues/day average | **Closure rate:** 90.9% | **Peak day:** 55 closes (Feb 3)
+**Current velocity:** 6.1 issues/day average | **Closure rate:** 92.3% | **Peak day:** 60 closes (Feb 3)
 
 ---
 
