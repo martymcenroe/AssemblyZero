@@ -1,8 +1,8 @@
-# The Pipeline: Issue to Code
+# The Pipeline: Idea to Tested and Deployed Code
 
 > *"Entia non sunt multiplicanda praeter necessitatem."* — but sometimes you need three workflows.
 
-AssemblyZero automates the full journey from a GitHub issue to merged, tested code. Three workflows run in sequence, each producing an artifact that feeds the next.
+AssemblyZero automates the full journey from an idea to tested, reviewed, and merged code. Three workflows run in sequence, each producing an artifact that feeds the next.
 
 ---
 

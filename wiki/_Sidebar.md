@@ -31,7 +31,7 @@
 
 ### Core Workflows
 
-- [The Pipeline](The-Pipeline) (Issue → Code)
+- [The Pipeline](The-Pipeline) (Idea → Tested Code)
 - [Requirements Workflow](Requirements-Workflow)
 - [Implementation Workflow](Implementation-Workflow)
 - [The Scout](The-Scout-External-Intelligence-Gathering-Workflow)
