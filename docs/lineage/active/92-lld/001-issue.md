@@ -1,8 +1,8 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 92
-url: https://github.com/martymcenroe/AgentOS/issues/92
-fetched: 2026-02-04T07:56:51.473344Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/92
+fetched: 2026-02-27T11:13:54.240172Z
 ---
 
 # Issue #92: Hex: Codebase Retrieval System (RAG Injection)
@@ -10,7 +10,7 @@ fetched: 2026-02-04T07:56:51.473344Z
 # RAG Injection: Codebase Retrieval System (The Smart Engineer)
 
 ## User Story
-As a **Developer using AgentOS workflows**,
+As a **Developer using AssemblyZero workflows**,
 I want the **Coder Node to automatically receive context about existing utilities and patterns**,
 So that **generated code uses actual project imports and avoids reinventing existing functionality**.
 
@@ -24,7 +24,7 @@ Implement a codebase retrieval system that indexes Python code via AST parsing a
 2. System extracts keywords: ["audit", "logging", "GovernanceAuditLog"]
 3. System queries vector store with keywords, retrieves `GovernanceAuditLog` class definition
 4. System injects reference code into Coder's system prompt
-5. Coder generates implementation using `from agentos.core.audit import GovernanceAuditLog`
+5. Coder generates implementation using `from assemblyzero.core.audit import GovernanceAuditLog`
 6. Result: Code passes lint/audit gates on first attempt
 
 ### Scenario 2: No Relevant Codebase Match
@@ -54,7 +54,7 @@ Implement a codebase retrieval system that indexes Python code via AST parsing a
 ### Codebase Indexing
 1. Parse Python files using `ast` module (not line-based chunking)
 2. Extract chunks by **Class** and **Top-Level Function** boundaries
-3. Index files from `agentos/**/*.py` and `tools/**/*.py`
+3. Index files from `assemblyzero/**/*.py` and `tools/**/*.py`
 4. Store metadata: `type: code`, `module: <full.module.path>`, `kind: class|function`
 5. Include docstrings and type hints in indexed content
 6. Store in dedicated collection `codebase` (separate from `documentation`)
@@ -118,8 +118,8 @@ Implement a codebase retrieval system that indexes Python code via AST parsing a
 
 ## Files to Create/Modify
 - `tools/rebuild_knowledge_base.py` — Add AST-based Python code parsing, new `codebase` collection
-- `agentos/core/codebase_retrieval.py` — New module for keyword extraction (Counter-based) and retrieval logic
-- `agentos/workflows/run_implementation_workflow.py` — Integrate codebase context injection into N3_Coder with token budget management
+- `assemblyzero/core/codebase_retrieval.py` — New module for keyword extraction (Counter-based) and retrieval logic
+- `assemblyzero/workflows/run_implementation_workflow.py` — Integrate codebase context injection into N3_Coder with token budget management
 - `tests/test_codebase_retrieval.py` — Unit tests for new retrieval functionality
 
 ## Dependencies
@@ -145,12 +145,12 @@ Implement a codebase retrieval system that indexes Python code via AST parsing a
 
 ## Acceptance Criteria
 - [ ] `tools/rebuild_knowledge_base.py --collection codebase` successfully indexes Python files
-- [ ] Vector store contains chunks for `agentos/core/audit.py` with `GovernanceAuditLog` class
-- [ ] Vector store contains chunks for `agentos/core/gemini_client.py` with `GeminiClient` class
+- [ ] Vector store contains chunks for `assemblyzero/core/audit.py` with `GovernanceAuditLog` class
+- [ ] Vector store contains chunks for `assemblyzero/core/gemini_client.py` with `GeminiClient` class
 - [ ] Keyword extraction correctly identifies "GovernanceAuditLog" from LLD text mentioning "audit logging"
 - [ ] Retrieval returns `GovernanceAuditLog` definition when queried with "audit" keyword
 - [ ] N3_Coder prompt includes "Reference Codebase" section when relevant utilities found
-- [ ] Generated code uses `from agentos.core.audit import GovernanceAuditLog` (correct import path)
+- [ ] Generated code uses `from assemblyzero.core.audit import GovernanceAuditLog` (correct import path)
 - [ ] No `ImportError` failures from hallucinated module paths in generated code
 - [ ] Workflow completes gracefully when codebase collection is empty/missing
 - [ ] Token budget exceeded scenario drops whole chunks (not mid-function truncation)
@@ -260,8 +260,8 @@ def test_embeddings_are_local(mocker):
 **The "Hallucinating Junior Engineer" Failure Mode:**
 When the Coder Node (`N3_Coder`) implements a feature, it often:
 
-1. **Reinvents Wheels:** Writes a new `log_to_file` function because it doesn't know `agentos.core.audit` exists.
-2. **Hallucinates Imports:** Guesses `from agentos.utils import logger` (which doesn't exist) instead of the correct path.
+1. **Reinvents Wheels:** Writes a new `log_to_file` function because it doesn't know `assemblyzero.core.audit` exists.
+2. **Hallucinates Imports:** Guesses `from assemblyzero.utils import logger` (which doesn't exist) instead of the correct path.
 3. **Ignores Patterns:** Uses `requests` directly instead of your `GeminiClient` wrapper, bypassing rotation and logging logic.
 
 **Result:** The code fails "Lint/Audit" gates or requires heavy human refactoring.
@@ -280,9 +280,9 @@ Implement a **Codebase Retrieval System** that gives the Coder Node access to th
 
 Enhance `tools/rebuild_knowledge_base.py`.
 
-* **Target:** Scan `agentos/**/*.py` and `tools/**/*.py`.
+* **Target:** Scan `assemblyzero/**/*.py` and `tools/**/*.py`.
 * **Strategy:** Don't just chunk by lines. Use Python's `ast` module to chunk by **Class** and **Top-Level Function**.
-* **Metadata:** Tag chunks with `type: code` and `module: agentos.core.audit` (for example).
+* **Metadata:** Tag chunks with `type: code` and `module: assemblyzero.core.audit` (for example).
 
 ### 2. The "Tech Lead" Logic (in `run_implementation_workflow.py`)
 
@@ -302,7 +302,7 @@ Modify the prompt construction for `N3_Coder`.
     ## Reference Codebase
     Use these existing utilities. DO NOT reinvent them.
 
-    [Source: agentos/core/audit.py]
+    [Source: assemblyzero/core/audit.py]
     class GovernanceAuditLog:
         def log(self, entry: dict): ...
     ```
@@ -313,7 +313,7 @@ This sits inside the **N3_Coder** node of the `Implementation Workflow` (from th
 
 ## Success Criteria
 
-* [ ] The Vector Store contains chunks for `agentos/core/audit.py` and `agentos/core/gemini_client.py`.
+* [ ] The Vector Store contains chunks for `assemblyzero/core/audit.py` and `assemblyzero/core/gemini_client.py`.
 * [ ] When an LLD mentions "logging", the Coder context automatically receives the `GovernanceAuditLog` class definition.
-* [ ] The generated implementation uses `from agentos.core.audit import GovernanceAuditLog` correctly on the first try.
+* [ ] The generated implementation uses `from assemblyzero.core.audit import GovernanceAuditLog` correctly on the first try.
 * [ ] Zero `ImportError` failures caused by hallucinated module paths.

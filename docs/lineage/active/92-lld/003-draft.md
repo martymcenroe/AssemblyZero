@@ -3,7 +3,7 @@
 <!-- Template Metadata
 Last Updated: 2026-02-16
 Updated By: Issue #92
-Update Reason: Fix mechanical validation errors for test coverage gaps (REQ-1, REQ-3, REQ-5, REQ-12); add missing test scenario mappings
+Update Reason: Fix mechanical validation error for non-existent Modify file; revise integration path
 -->
 
 ## 1. Context & Goal
@@ -103,8 +103,7 @@ def parse_python_file(file_path: str) -> list[CodeChunk]:
     """Parse a single Python file using ast module, extracting classes and top-level functions.
 
     Skips private entities (names starting with '_').
-    Returns empty list if file cannot be parsed (SyntaxError, IOError, etc.).
-    Logs warning on parse failure.
+    Returns empty list if file cannot be parsed.
     """
     ...
 
@@ -434,18 +433,18 @@ def inject_codebase_context(
 
 ## 3. Requirements
 
-1. Python files in `assemblyzero/**/*.py` and `tools/**/*.py` are parsed using `ast` module, extracting `ClassDef` and top-level `FunctionDef` nodes with docstrings and type hints
-2. Each indexed chunk includes metadata: `type: code`, `module: <full.module.path>`, `kind: class|function`, `entity_name: <name>`
-3. All embeddings generated locally via `sentence-transformers/all-MiniLM-L6-v2` — no source code transmitted externally
-4. Technical keywords extracted from LLD content using `collections.Counter` with CamelCase/snake_case splitting and domain stopwords, limited to top 5
-5. Only results with similarity score > 0.75 are returned
-6. Results deduplicated by module path, keeping highest-scoring entry
-7. Maximum 10 chunks returned per query
-8. If injected context exceeds 4096 tokens, lowest-relevance whole chunks are dropped (never mid-function truncation)
-9. Missing/empty codebase collection logs a warning and proceeds without context injection
-10. Retrieved code formatted in markdown code blocks with source file paths and clear instruction header
-11. Entities with names starting with `_` are not indexed
-12. Malformed Python files are skipped with a warning, not a crash
+1. **AST Parsing:** Python files in `assemblyzero/**/*.py` and `tools/**/*.py` are parsed using `ast` module, extracting `ClassDef` and top-level `FunctionDef` nodes with docstrings and type hints
+2. **Metadata Tagging:** Each indexed chunk includes metadata: `type: code`, `module: <full.module.path>`, `kind: class|function`, `entity_name: <name>`
+3. **Local Embeddings:** All embeddings generated locally via `sentence-transformers/all-MiniLM-L6-v2` — no source code transmitted externally
+4. **Keyword Extraction:** Technical keywords extracted from LLD content using `collections.Counter` with CamelCase/snake_case splitting and domain stopwords, limited to top 5
+5. **Similarity Threshold:** Only results with similarity score > 0.75 are returned
+6. **Deduplication:** Results deduplicated by module path, keeping highest-scoring entry
+7. **Result Limit:** Maximum 10 chunks returned per query
+8. **Token Budget:** If injected context exceeds 4096 tokens, lowest-relevance whole chunks are dropped (never mid-function truncation)
+9. **Graceful Degradation:** Missing/empty codebase collection logs a warning and proceeds without context injection
+10. **Prompt Injection Format:** Retrieved code formatted in markdown code blocks with source file paths and clear instruction header
+11. **Private Entity Exclusion:** Entities with names starting with `_` are not indexed
+12. **Parse Error Resilience:** Malformed Python files are skipped with a warning, not a crash
 
 ## 4. Alternatives Considered
 
@@ -659,10 +658,6 @@ sequenceDiagram
 | T230 | inject_codebase_context handles exception gracefully | Exception during retrieval logs warning, returns original prompt | RED |
 | T240 | Embeddings generated locally (no network calls) | urllib3/requests not called during embedding generation | RED |
 | T250 | Domain stopwords comprehensive | Common Python/programming terms filtered | RED |
-| T260 | AST extracts ClassDef with docstring and type hints from Python files | CodeChunk includes docstring text and type-annotated signatures | RED |
-| T270 | Embeddings generated locally via sentence-transformers model | SentenceTransformer("all-MiniLM-L6-v2") called; no external API invoked | RED |
-| T280 | Similarity threshold filters results below 0.75 | Results with score <= 0.75 excluded from returned list | RED |
-| T290 | Malformed Python file produces empty result with logged warning | parse_python_file on malformed file returns [] and emits warning log | RED |
 
 **Coverage Target:** ≥95% for `assemblyzero/rag/codebase_retrieval.py`
 
@@ -676,35 +671,31 @@ sequenceDiagram
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | AST class extraction with docstring and type hints (REQ-1) | Auto | Python source with `class MyClass` + docstring + typed methods | CodeChunk with content containing class name, docstring, and type hints | `"MyClass" in chunk.content and "docstring" in chunk.content` |
-| 020 | AST function extraction (REQ-1) | Auto | Python source with `def func(x: int) -> str` | CodeChunk with kind="function", type hints preserved | `chunk.kind == "function" and "int" in chunk.content` |
-| 030 | Private entity skip (REQ-11) | Auto | Python source with `class _Internal` and `def _helper()` | Empty list | `len(chunks) == 0` |
-| 040 | Malformed file handling (REQ-12) | Auto | File with `def broken(` (no closing paren) | Empty list, no exception, warning logged | `len(chunks) == 0` and no raised exception and warning in log |
-| 050 | Empty __init__.py skip (REQ-1) | Auto | File with only `"""Package docstring."""` | Empty list | `len(chunks) == 0` |
-| 060 | Module path conversion (REQ-2) | Auto | `"assemblyzero/core/audit.py"` | `"assemblyzero.core.audit"` | Exact string match |
-| 070 | CamelCase keyword extraction (REQ-4) | Auto | `"Implement audit logging using GovernanceAuditLog"` | Keywords include `"GovernanceAuditLog"` and `"audit"` | Both terms present in result list |
-| 080 | snake_case keyword extraction (REQ-4) | Auto | `"Use audit_log_entry for tracking"` | Keywords include split terms | `"audit" in keywords or "audit_log_entry" in keywords` |
-| 090 | Stopword filtering (REQ-4) | Auto | `"Implement the feature using a new system"` | None of the stopwords in result | No stopwords in returned list |
-| 100 | Keyword limit (REQ-4) | Auto | LLD with 20 distinct technical terms | Exactly 5 keywords returned | `len(keywords) == 5` |
-| 110 | Keyword fallback (REQ-4) | Auto | `"Use FooBarBaz"` (very short) | `"FooBarBaz"` extracted via regex fallback | `"FooBarBaz" in keywords` |
-| 120 | Threshold filtering (REQ-5) | Auto | Query `["xyznonexistent123"]` against populated collection | Empty results | `len(results) == 0` |
-| 130 | Module deduplication (REQ-6) | Auto | Two chunks from `assemblyzero.core.audit` with scores 0.9 and 0.8 | Only score 0.9 chunk returned | `len(results) == 1 and results[0].relevance_score == 0.9` |
-| 140 | Max results limit (REQ-7) | Auto | Query matching 15 chunks | Exactly 10 returned | `len(results) == 10` |
-| 150 | Missing collection graceful degradation (REQ-9) | Auto | Query against non-existent collection | Empty results, warning logged | `len(results) == 0` and warning in log |
-| 160 | Token budget truncation (REQ-8) | Auto | 3 chunks (100 tokens each), budget 150 | Only highest-relevance chunk | `len(result) == 1` |
-| 170 | Token budget sufficient (REQ-8) | Auto | 3 chunks (100 tokens each), budget 500 | All 3 chunks | `len(result) == 3` |
-| 180 | Markdown formatting (REQ-10) | Auto | 2 RetrievalResults | Markdown with header, instruction, 2 code blocks | Contains `"Reference Codebase"` and `"DO NOT reinvent"` |
-| 190 | Empty formatting (REQ-10) | Auto | Empty results list | Empty formatted_text | `context.formatted_text == ""` |
-| 200 | End-to-end audit scenario (REQ-1) | Auto | LLD mentioning "audit logging" + pre-indexed codebase | Context contains GovernanceAuditLog | `"GovernanceAuditLog" in context.formatted_text` |
-| 210 | Prompt injection on match (REQ-10) | Auto | Base prompt + LLD with matches | Prompt starts with "## Reference Codebase" | `"Reference Codebase" in modified_prompt` |
-| 220 | Prompt passthrough on no match (REQ-9) | Auto | Base prompt + LLD with no matches | Original prompt unchanged | `modified_prompt == base_prompt` |
-| 230 | Exception handling (REQ-9) | Auto | Retrieval function mocked to raise RuntimeError | Original prompt returned, warning logged | `modified_prompt == base_prompt` and warning logged |
-| 240 | Local embedding verification (REQ-3) | Auto | Embedding generation with mocked network layer | Network layer not called | `mock_request.assert_not_called()` |
-| 250 | Domain stopwords coverage (REQ-4) | Auto | Check stopword set contents | Contains Python keywords and common programming terms | All expected terms present in set |
-| 260 | AST extracts ClassDef with docstring and type hints (REQ-1) | Auto | Python source with typed `class Foo` + docstring + `def bar(self, x: int) -> str` | CodeChunk content includes docstring text and `int`, `str` type annotations | `"Foo" in chunk.content and "int" in chunk.content and "str" in chunk.content` |
-| 270 | Local sentence-transformers embedding generation (REQ-3) | Auto | List of code strings passed to embedding generator | SentenceTransformer model loaded locally; embeddings are 384-dim float arrays; no HTTP requests made | `embeddings.shape[1] == 384 and mock_http.assert_not_called()` |
-| 280 | Similarity threshold boundary at 0.75 (REQ-5) | Auto | Two results: one with score 0.76, one with score 0.74 | Only the 0.76 result returned | `len(results) == 1 and results[0].relevance_score == 0.76` |
-| 290 | Malformed Python file skipped with warning (REQ-12) | Auto | `sample_module_malformed.py` fixture with `def broken(` syntax error | Returns empty list; `WARNING` log message contains file path | `len(chunks) == 0` and `"sample_module_malformed.py" in warning_log` |
+| 010 | AST class extraction | Auto | Python source with `class MyClass` + docstring + methods | CodeChunk with content containing class name and docstring | `"MyClass" in chunk.content and "docstring" in chunk.content` |
+| 020 | AST function extraction | Auto | Python source with `def func(x: int) -> str` | CodeChunk with kind="function", type hints preserved | `chunk.kind == "function" and "int" in chunk.content` |
+| 030 | Private entity skip | Auto | Python source with `class _Internal` and `def _helper()` | Empty list | `len(chunks) == 0` |
+| 040 | Malformed file handling | Auto | File with `def broken(` (no closing paren) | Empty list, no exception | `len(chunks) == 0` and no raised exception |
+| 050 | Empty __init__.py skip | Auto | File with only `"""Package docstring."""` | Empty list | `len(chunks) == 0` |
+| 060 | Module path conversion | Auto | `"assemblyzero/core/audit.py"` | `"assemblyzero.core.audit"` | Exact string match |
+| 070 | CamelCase keyword extraction | Auto | `"Implement audit logging using GovernanceAuditLog"` | Keywords include `"GovernanceAuditLog"` and `"audit"` | Both terms present in result list |
+| 080 | snake_case keyword extraction | Auto | `"Use audit_log_entry for tracking"` | Keywords include split terms | `"audit" in keywords or "audit_log_entry" in keywords` |
+| 090 | Stopword filtering | Auto | `"Implement the feature using a new system"` | None of the stopwords in result | No stopwords in returned list |
+| 100 | Keyword limit | Auto | LLD with 20 distinct technical terms | Exactly 5 keywords returned | `len(keywords) == 5` |
+| 110 | Keyword fallback | Auto | `"Use FooBarBaz"` (very short) | `"FooBarBaz"` extracted via regex fallback | `"FooBarBaz" in keywords` |
+| 120 | Threshold filtering | Auto | Query `["xyznonexistent123"]` against populated collection | Empty results | `len(results) == 0` |
+| 130 | Module deduplication | Auto | Two chunks from `assemblyzero.core.audit` with scores 0.9 and 0.8 | Only score 0.9 chunk returned | `len(results) == 1 and results[0].relevance_score == 0.9` |
+| 140 | Max results limit | Auto | Query matching 15 chunks | Exactly 10 returned | `len(results) == 10` |
+| 150 | Missing collection graceful degradation | Auto | Query against non-existent collection | Empty results, warning logged | `len(results) == 0` and warning in log |
+| 160 | Token budget truncation | Auto | 3 chunks (100 tokens each), budget 150 | Only highest-relevance chunk | `len(result) == 1` |
+| 170 | Token budget sufficient | Auto | 3 chunks (100 tokens each), budget 500 | All 3 chunks | `len(result) == 3` |
+| 180 | Markdown formatting | Auto | 2 RetrievalResults | Markdown with header, instruction, 2 code blocks | Contains `"Reference Codebase"` and `"DO NOT reinvent"` |
+| 190 | Empty formatting | Auto | Empty results list | Empty formatted_text | `context.formatted_text == ""` |
+| 200 | End-to-end audit scenario | Auto | LLD mentioning "audit logging" + pre-indexed codebase | Context contains GovernanceAuditLog | `"GovernanceAuditLog" in context.formatted_text` |
+| 210 | Prompt injection on match | Auto | Base prompt + LLD with matches | Prompt starts with "## Reference Codebase" | `"Reference Codebase" in modified_prompt` |
+| 220 | Prompt passthrough on no match | Auto | Base prompt + LLD with no matches | Original prompt unchanged | `modified_prompt == base_prompt` |
+| 230 | Exception handling | Auto | Retrieval function mocked to raise RuntimeError | Original prompt returned, warning logged | `modified_prompt == base_prompt` and warning logged |
+| 240 | Local embedding verification | Auto | Embedding generation with mocked network layer | Network layer not called | `mock_request.assert_not_called()` |
+| 250 | Domain stopwords coverage | Auto | Check stopword set contents | Contains Python keywords and common programming terms | All expected terms present in set |
 
 ### 10.2 Test Commands
 
@@ -751,7 +742,7 @@ N/A — All scenarios automated. Network verification (T240) uses mocked urllib3
 - [ ] Code comments reference this LLD (#92)
 
 ### Tests
-- [ ] All 29 test scenarios pass (T010–T290)
+- [ ] All 25 test scenarios pass (T010–T250)
 - [ ] Test coverage ≥95% for `assemblyzero/rag/codebase_retrieval.py`
 - [ ] Tests use `@pytest.mark.rag` marker for optional dependency gating
 - [ ] Existing tests unbroken (regression)
@@ -797,23 +788,6 @@ Risk mitigations mapped to functions:
 | Stopword filtering | `get_domain_stopwords()` + `extract_keywords()` |
 | Integration point non-existence | New file `coder_node.py` (Add) avoids Modify on missing file |
 
-Requirements mapped to test scenarios:
-
-| Requirement | Test Scenario IDs |
-|-------------|-------------------|
-| REQ-1 | 010, 020, 050, 200, 260 |
-| REQ-2 | 060 |
-| REQ-3 | 240, 270 |
-| REQ-4 | 070, 080, 090, 100, 110, 250 |
-| REQ-5 | 120, 280 |
-| REQ-6 | 130 |
-| REQ-7 | 140 |
-| REQ-8 | 160, 170 |
-| REQ-9 | 150, 220, 230 |
-| REQ-10 | 180, 190, 210 |
-| REQ-11 | 030 |
-| REQ-12 | 040, 290 |
-
 ---
 
 ## Appendix: Review Log
@@ -831,25 +805,10 @@ Requirements mapped to test scenarios:
 |----|---------|--------------|
 | MV1.1 | "File marked Modify but does not exist: assemblyzero/workflows/run_implementation_workflow.py" | YES - Changed to Add new file `assemblyzero/workflows/implementation_spec/nodes/coder_node.py` under existing directory. All references updated throughout LLD. |
 
-### Mechanical Validation Review #2 (FEEDBACK)
-
-**Reviewer:** Automated Validation (Test Plan Coverage)
-**Verdict:** FEEDBACK
-
-#### Comments
-
-| ID | Comment | Implemented? |
-|----|---------|--------------|
-| MV2.1 | "Requirement REQ-1 has no test coverage" | YES - Added scenarios 260 (AST ClassDef with docstring+type hints) and explicit REQ-1 tags on scenarios 010, 020, 050, 200. |
-| MV2.2 | "Requirement REQ-3 has no test coverage" | YES - Added scenario 270 (local sentence-transformers embedding generation) and explicit REQ-3 tag on scenario 240. |
-| MV2.3 | "Requirement REQ-5 has no test coverage" | YES - Added scenario 280 (similarity threshold boundary at 0.75) and explicit REQ-5 tag on scenario 120. |
-| MV2.4 | "Requirement REQ-12 has no test coverage" | YES - Added scenario 290 (malformed file skipped with warning) and explicit REQ-12 tag on scenario 040. |
-
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
 | Mechanical Validation #1 | 2026-02-16 | FEEDBACK | Non-existent Modify target file |
-| Mechanical Validation #2 | 2026-02-16 | FEEDBACK | 4 requirements without test coverage (REQ-1, REQ-3, REQ-5, REQ-12) |
 
 **Final Status:** PENDING
