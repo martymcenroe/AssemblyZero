@@ -1,3 +1,10 @@
+---
+repo: martymcenroe/AgentOS
+issue: 92
+url: https://github.com/martymcenroe/AgentOS/issues/92
+fetched: 2026-02-04T07:56:51.473344Z
+---
+
 # Issue #92: Hex: Codebase Retrieval System (RAG Injection)
 
 # RAG Injection: Codebase Retrieval System (The Smart Engineer)
