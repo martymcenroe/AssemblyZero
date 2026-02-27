@@ -64,7 +64,7 @@ Issues closed per day (Central Time):
 
 ---
 
-## What's New (Since Feb 2025)
+## What's New (Q1 2026)
 
 Major features shipped in the last 712 commits:
 

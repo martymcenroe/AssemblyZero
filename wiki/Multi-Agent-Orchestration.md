@@ -107,7 +107,7 @@ Three mandatory checkpoints:
 | **Implementation Review** | Before PR creation | Gemini reviews code changes |
 | **Report Generation** | Before merge | Auto-generate implementation docs |
 
-These gates are **enforced** through CLAUDE.md protocols, and will become **impossible to skip** with LangGraph state machines.
+These gates are **enforced** through LangGraph state machines — the graph topology has no edge that bypasses review, making gates structurally impossible to skip.
 
 ---
 

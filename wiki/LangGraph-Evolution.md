@@ -246,7 +246,7 @@ result = supervisor.invoke({
 # 4. Collects results and reports back
 ```
 
-**Why this matters for RealPage:**
+**Why this matters for enterprise adoption:**
 - Scale from "one person orchestrates" to "system orchestrates"
 - Human becomes strategic reviewer, not tactical router
 - Complex epics decompose automatically
