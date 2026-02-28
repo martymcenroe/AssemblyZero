@@ -8,11 +8,13 @@ Uses the configured reviewer LLM to review the current draft.
 Saves verdict to audit trail and updates verdict history.
 """
 
+import difflib
 import re
 from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.workflows.requirements.audit import (
     load_review_prompt,
     next_file_number,
@@ -88,18 +90,26 @@ Key responsibilities:
 
 Follow the Review Instructions exactly. Be specific about what needs to change for BLOCKED verdicts."""
 
-    # Build review content
-    review_content = f"""## Document to Review
+    # Issue #491: Build review content with diff-aware support
+    previous_draft = state.get("previous_draft", "")
+    review_content = _build_review_content(
+        current_draft=current_draft,
+        review_prompt=review_prompt,
+        previous_draft=previous_draft,
+    )
 
-{current_draft}
-
-## Review Instructions
-
-{review_prompt}"""
+    # Issue #492: Pass structured schema when reviewer is Gemini
+    invoke_kwargs: dict = {
+        "system_prompt": system_prompt,
+        "content": review_content,
+    }
+    is_gemini = reviewer_spec.startswith("gemini:")
+    if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
+        invoke_kwargs["response_schema"] = VERDICT_SCHEMA
 
     # Call reviewer
     print(f"    Reviewer: {reviewer_spec}")
-    result = reviewer.invoke(system_prompt=system_prompt, content=review_content)
+    result = reviewer.invoke(**invoke_kwargs)
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -127,8 +137,17 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # Append to verdict history
     verdict_history.append(verdict_content)
 
-    # Determine LLD status from verdict
-    lld_status = _parse_verdict_status(verdict_content)
+    # Issue #492: Try structured JSON parsing first, fall back to regex
+    structured = parse_structured_verdict(verdict_content) if is_gemini else None
+    if structured:
+        lld_status = structured["verdict"]
+        # Map REVISE -> BLOCKED for workflow purposes
+        if lld_status == "REVISE":
+            lld_status = "BLOCKED"
+        print(f"    Parsed structured verdict: {structured['verdict']}")
+    else:
+        # Determine LLD status from verdict via regex
+        lld_status = _parse_verdict_status(verdict_content)
 
     # Issue #248: Check open questions resolution status
     open_questions_status = _check_open_questions_status(current_draft, verdict_content)
@@ -157,6 +176,62 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         "current_draft": updated_draft,  # Issue #257: Return updated draft
         "error_message": "",
     }
+
+
+def _build_review_content(
+    current_draft: str,
+    review_prompt: str,
+    previous_draft: str = "",
+) -> str:
+    """Build review content, optionally using diff format for revisions.
+
+    Issue #491: When previous_draft exists and changes are <20% of total,
+    send diff format instead of full draft. This reduces token usage
+    significantly on revision reviews.
+
+    Args:
+        current_draft: Current draft to review.
+        review_prompt: Review instructions.
+        previous_draft: Previous draft for diff comparison.
+
+    Returns:
+        Formatted review content string.
+    """
+    if not previous_draft:
+        # First review — send full draft
+        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+
+    # Calculate diff
+    prev_lines = previous_draft.splitlines(keepends=True)
+    curr_lines = current_draft.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(prev_lines, curr_lines, n=3))
+
+    if not diff:
+        # No changes — send full draft (shouldn't happen in practice)
+        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+
+    # Count changed lines in current (additions only, exclude diff headers)
+    changed_lines = sum(
+        1 for line in diff
+        if line.startswith("+")
+        and not line.startswith("+++")
+    )
+    total_lines = max(len(curr_lines), 1)
+    change_ratio = changed_lines / total_lines
+
+    if change_ratio > 0.20:
+        # Too many changes — diff won't help, send full draft
+        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+
+    # Send diff format with context
+    diff_text = "".join(diff)
+    return (
+        f"## CHANGES SINCE LAST REVIEW (unified diff)\n\n"
+        f"Focus your review on these changes. The rest of the document is unchanged.\n\n"
+        f"```diff\n{diff_text}```\n\n"
+        f"## Full Document (for reference)\n\n{current_draft}\n\n"
+        f"## Review Instructions\n\n{review_prompt}"
+    )
 
 
 def _update_draft_with_verdict(draft: str, verdict_content: str) -> str:

@@ -22,6 +22,7 @@ from assemblyzero.workflows.requirements.audit import (
     assemble_context,
     create_audit_dir,
     generate_slug,
+    get_repo_structure,
     next_file_number,
     save_audit_file,
 )
@@ -108,11 +109,15 @@ def _load_brief(state: RequirementsWorkflowState) -> Dict[str, Any]:
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "brief.md", brief_content)
 
+    # Issue #490: Compute repo structure once, cache in state
+    repo_structure = get_repo_structure(target_repo) if target_repo else ""
+
     return {
         "brief_content": brief_content,
         "slug": slug,
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
+        "repo_structure": repo_structure,
         "error_message": "",
     }
 
@@ -218,12 +223,16 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
     file_num = next_file_number(audit_dir)
     save_audit_file(audit_dir, file_num, "issue.md", issue_content_with_frontmatter)
 
+    # Issue #490: Compute repo structure once, cache in state
+    repo_structure = get_repo_structure(str(target_repo))
+
     return {
         "issue_title": issue_title,
         "issue_body": issue_body,
         "context_content": context_content,
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
+        "repo_structure": repo_structure,
         "error_message": "",
     }
 
@@ -269,12 +278,16 @@ This is a mock issue for testing.
         frontmatter + issue_content
     )
 
+    # Issue #490: Compute repo structure once, cache in state
+    repo_structure = get_repo_structure(str(target_repo))
+
     return {
         "issue_title": mock_title,
         "issue_body": mock_body,
         "context_content": "",
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
+        "repo_structure": repo_structure,
         "error_message": "",
     }
 

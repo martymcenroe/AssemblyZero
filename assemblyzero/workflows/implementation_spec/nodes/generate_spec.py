@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.section_utils import (
+    build_targeted_prompt,
+    extract_sections,
+    identify_changed_sections,
+)
 from assemblyzero.workflows.requirements.audit import (
     get_repo_structure,
     load_template,
@@ -171,6 +176,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         files_to_modify=state.get("files_to_modify", []),
         project_context=state.get("project_context", ""),
         import_dependencies=state.get("import_dependencies", ""),
+        repo_structure=state.get("repo_structure", ""),
     )
 
     # -------------------------------------------------------------------------
@@ -258,6 +264,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "review_iteration": review_iteration,
         "completeness_issues": [],  # Clear after use
         "previous_review_feedback": review_feedback,  # Issue #486: Save for two-strike
+        "previous_spec_draft": state.get("spec_draft", ""),  # Issue #491: Save for diff-aware review
         "review_feedback": "",  # Clear after use
         "error_message": "",
     }
@@ -281,6 +288,7 @@ def build_drafter_prompt(
     files_to_modify: list | None = None,
     project_context: str = "",
     import_dependencies: str = "",
+    repo_structure: str = "",
 ) -> str:
     """Build the prompt for Claude spec generation.
 
@@ -332,6 +340,7 @@ def build_drafter_prompt(
             completeness_issues=completeness_issues,
             repo_root=repo_root,
             files_to_modify=files_to_modify,
+            repo_structure=repo_structure,
         )
     else:
         return _build_initial_prompt(
@@ -441,6 +450,7 @@ def _build_revision_prompt(
     completeness_issues: list[str],
     repo_root: str,
     files_to_modify: list,
+    repo_structure: str = "",
 ) -> str:
     """Build prompt for spec revision based on feedback.
 
@@ -459,6 +469,35 @@ def _build_revision_prompt(
     Returns:
         Revision prompt string.
     """
+    # Issue #489: Try section-level revision for focused changes
+    if review_feedback and existing_draft:
+        draft_sections = extract_sections(existing_draft)
+        changed = identify_changed_sections(review_feedback, draft_sections)
+        if changed:
+            targeted = build_targeted_prompt(
+                sections=draft_sections,
+                changed_headings=changed,
+                template=template,
+                feedback=review_feedback,
+            )
+            if targeted:
+                parts = [
+                    "IMPORTANT: Output ONLY the markdown content. "
+                    "Start with # title. No preamble.",
+                    targeted,
+                    f"## Original LLD (Issue #{issue_number})\n\n{lld_content}",
+                    "CRITICAL REVISION INSTRUCTIONS:\n"
+                    "1. Fix ALL issues from feedback\n"
+                    "2. PRESERVE sections marked [UNCHANGED] exactly as-is\n"
+                    "3. ONLY modify sections marked [REVISE]\n"
+                    "4. Keep ALL template sections intact\n\n"
+                    "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE.",
+                ]
+                prompt = "\n\n".join(parts)
+                if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+                    return prompt
+
+    # Fallback: full revision prompt
     sections: list[str] = []
 
     sections.append(
@@ -477,8 +516,9 @@ def _build_revision_prompt(
             issues_text += f"- **ERROR:** {issue}\n"
 
         # Show repo structure to help fix path-related issues
+        # Issue #490: Use cached repo_structure, fallback to inline call
         if repo_root:
-            repo_structure = get_repo_structure(repo_root)
+            repo_structure = repo_structure or get_repo_structure(repo_root)
             issues_text += "\n## ACTUAL REPOSITORY STRUCTURE\n\n"
             issues_text += (
                 "**Use ONLY these existing directories** "

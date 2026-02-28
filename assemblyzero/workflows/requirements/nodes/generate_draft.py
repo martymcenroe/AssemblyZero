@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.section_utils import (
+    build_targeted_prompt,
+    extract_sections,
+    identify_changed_sections,
+)
 from assemblyzero.workflows.requirements.audit import (
     get_repo_structure,
     load_template,
@@ -163,6 +168,7 @@ Use the template structure provided. Include all sections. Be specific about:
         "file_counter": file_num,
         "user_feedback": "",  # Clear feedback after use
         "previous_review_feedback": state.get("current_verdict", ""),  # Issue #486: Save for two-strike
+        "previous_draft": state.get("current_draft", ""),  # Issue #491: Save for diff-aware review
         "validation_errors": [],  # Clear validation errors after use (Issue #294)
         "error_message": "",
     }
@@ -231,9 +237,10 @@ def _build_prompt(
             revision_context += "\n"
 
             # Issue #339: Show actual repo structure so drafter can use real paths
+            # Issue #490: Use cached repo_structure from state, fallback to inline call
             target_repo = state.get("target_repo", "")
             if target_repo:
-                repo_structure = get_repo_structure(target_repo)
+                repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
                 revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
                 revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
                 revision_context += f"```\n{repo_structure}\n```\n\n"
@@ -254,7 +261,40 @@ def _build_prompt(
         if user_feedback:
             revision_context += f"## Additional Human Feedback\n\n{user_feedback}\n\n"
 
-        prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+        # Issue #489: Try section-level revision for focused changes
+        targeted = ""
+        all_feedback = revision_context
+        if verdict_history:
+            latest_verdict = verdict_history[-1] if verdict_history else ""
+            draft_sections = extract_sections(current_draft)
+            changed = identify_changed_sections(latest_verdict, draft_sections)
+            if changed:
+                targeted = build_targeted_prompt(
+                    sections=draft_sections,
+                    changed_headings=changed,
+                    template=template,
+                    feedback=all_feedback,
+                )
+
+        if targeted:
+            prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+
+{targeted}
+
+## Original {input_label}
+{input_content}
+
+CRITICAL REVISION INSTRUCTIONS:
+1. Fix ALL mechanical validation errors FIRST (invalid file paths, missing sections)
+2. Implement EVERY change requested by feedback
+3. PRESERVE sections marked [UNCHANGED] exactly as-is
+4. ONLY modify sections marked [REVISE]
+5. Keep ALL template sections intact
+
+Revise the draft to address ALL feedback above.
+START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
+        else:
+            prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
 
 {revision_context}## Current Draft (to revise)
 {current_draft}
@@ -278,10 +318,11 @@ START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
     else:
         # Initial draft mode
         # Issue #389: Include repo structure so drafter uses real paths
+        # Issue #490: Use cached repo_structure from state, fallback to inline call
         repo_context = ""
         target_repo = state.get("target_repo", "")
         if target_repo:
-            repo_structure = get_repo_structure(target_repo)
+            repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
             repo_context = f"""## TARGET REPOSITORY STRUCTURE
 
 **Use ONLY these existing directories** (or explicitly Add new ones in Section 2.1):

@@ -240,6 +240,12 @@ class RequirementsWorkflowState(TypedDict, total=False):
     recovery_plan_path: str
     state_snapshot_path: str
 
+    # Issue #490: Cached repo structure (computed once, reused across iterations)
+    repo_structure: str
+
+    # Issue #491: Previous draft for diff-aware review
+    previous_draft: str
+
 
 def create_initial_state(
     workflow_type: Literal["issue", "lld"],
