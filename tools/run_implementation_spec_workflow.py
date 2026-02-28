@@ -382,6 +382,7 @@ def build_initial_state(
         # LLM config
         "config_reviewer": args.reviewer,
         "config_drafter": args.drafter,
+        "config_mock_mode": args.mock,
     }
 
     return state

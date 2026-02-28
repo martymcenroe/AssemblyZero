@@ -283,7 +283,7 @@ class GeminiClient:
         if model in FORBIDDEN_MODELS:
             raise ValueError(
                 f"Model '{model}' is explicitly forbidden for governance. "
-                f"Allowed: gemini-3-pro-preview, gemini-3-pro, gemini-3-flash-preview"
+                f"Allowed: gemini-3-pro-preview, gemini-3-flash-preview"
             )
         if not model.startswith("gemini-"):
             raise ValueError(

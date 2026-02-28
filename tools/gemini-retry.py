@@ -56,7 +56,7 @@ from typing import Optional
 # =============================================================================
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
-ALLOWED_MODELS = {"gemini-3-pro-preview", "gemini-3-pro"}
+ALLOWED_MODELS = {"gemini-3-pro-preview"}
 
 # Backoff parameters (can be overridden via environment)
 MAX_RETRIES = int(os.environ.get("GEMINI_RETRY_MAX", "20"))

@@ -228,7 +228,7 @@ The system confirms the actual model matches the requested model:
 
 - **Gemini**: `model_verified` field in `GeminiCallResult` confirms the response came from the requested model
 - **Forbidden models**: Flash and Lite models are rejected for reviews (fail-closed). Only Pro-tier models are permitted
-- **Fallback chain**: `gemini-3-pro-preview` → `gemini-3-pro` (never downgrades to Flash)
+- **Fallback chain**: `gemini-3-pro-preview` only (never downgrades to Flash)
 
 ---
 

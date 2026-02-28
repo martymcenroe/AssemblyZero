@@ -208,7 +208,6 @@ Only these models are approved for verification:
 | Model | Purpose | Status |
 |-------|---------|--------|
 | `gemini-3-pro-preview` | Primary review model | Approved |
-| `gemini-3-pro` | Stable alternative | Approved |
 
 ### Forbidden Models
 
@@ -235,7 +234,7 @@ The `gemini-retry.py` tool verifies the model used:
 response_model = response.get("stats", {}).get("models", [None])[0]
 
 # Verify it's approved
-approved = ["gemini-3-pro-preview", "gemini-3-pro"]
+approved = ["gemini-3-pro-preview"]
 if response_model not in approved:
     raise ValueError(f"Review invalid: used {response_model}, not approved model")
 ```

@@ -156,7 +156,7 @@ Agents must use approved models:
 |-------|--------------|
 | claude-opus-4 | Complex reasoning, architecture |
 | claude-sonnet-4 | General development tasks |
-| gemini-3-pro | Review and verification |
+| gemini-3-pro-preview | Review and verification |
 
 **Silent downgrades are detected and rejected.**
 
@@ -183,7 +183,7 @@ Session: 2026-01-21-001
 ```jsonl
 {"timestamp": "2026-01-21T14:32:00Z", "type": "tool_call", "tool": "Bash", "command": "git status"}
 {"timestamp": "2026-01-21T14:32:01Z", "type": "tool_result", "output": "On branch feature..."}
-{"timestamp": "2026-01-21T14:33:00Z", "type": "gemini_review", "verdict": "APPROVE", "model": "gemini-3-pro"}
+{"timestamp": "2026-01-21T14:33:00Z", "type": "gemini_review", "verdict": "APPROVE", "model": "gemini-3-pro-preview"}
 ```
 
 ### Retention

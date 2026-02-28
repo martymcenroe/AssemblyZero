@@ -11,12 +11,11 @@
 ### After EVERY Gemini call, you MUST state:
 
 ```
-**Gemini Review Model:** [gemini-3-pro-preview | gemini-3-pro | OTHER]
+**Gemini Review Model:** [gemini-3-pro-preview | OTHER]
 ```
 
 ### VALID models (proceed with workflow):
 - `gemini-3-pro-preview` ✅
-- `gemini-3-pro` ✅
 
 ### INVALID models (DEAD STOP - DO NOT PROCEED):
 - `gemini-2.0-flash` ❌ INVALID
@@ -141,9 +140,8 @@ The user can:
 
 ## Model Requirements (MANDATORY)
 
-**ONLY use these models for reviews:**
-- `gemini-3-pro-preview` (primary)
-- `gemini-3-pro` (acceptable)
+**ONLY use this model for reviews:**
+- `gemini-3-pro-preview`
 
 **NEVER substitute Flash or Lite models.** A review with the wrong model is INVALID.
 

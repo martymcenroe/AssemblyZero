@@ -85,8 +85,8 @@ while IFS= read -r model; do
   models_used+=("$model")
 
   # Check if this model is NOT one of the allowed models
-  # Allow: gemini-3-pro-preview, gemini-3-pro (stable), or the explicitly required model
-  if [[ "$model" != "$REQUIRED_MODEL" && "$model" != "gemini-3-pro" && "$model" != "gemini-3-pro-preview" ]]; then
+  # Allow: gemini-3-pro-preview or the explicitly required model
+  if [[ "$model" != "$REQUIRED_MODEL" && "$model" != "gemini-3-pro-preview" ]]; then
     echo "ERROR: Model downgrade detected!" >&2
     echo "Required: $REQUIRED_MODEL" >&2
     echo "Actually used: $model" >&2

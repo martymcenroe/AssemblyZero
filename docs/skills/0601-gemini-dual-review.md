@@ -9,15 +9,14 @@
 
 ## ⚠️ CRITICAL: Model Requirements (READ FIRST)
 
-**ONLY these models are valid for Gemini reviews:**
-- `gemini-3-pro-preview` (preferred)
-- `gemini-3-pro` (acceptable)
+**ONLY this model is valid for Gemini reviews:**
+- `gemini-3-pro-preview`
 
 **INVALID - DO NOT USE:**
 - `gemini-2.0-flash` - WRONG MODEL, review invalid
 - `gemini-2.5-flash` - WRONG MODEL, review invalid
 - `gemini-*-lite` - WRONG MODEL, review invalid
-- Any model not `gemini-3-pro*` - WRONG MODEL, review invalid
+- Any model not `gemini-3-pro-preview` - WRONG MODEL, review invalid
 
 **If quota is exhausted:**
 1. **STOP** - Do not substitute another model
@@ -320,7 +319,7 @@ models=$(echo "$result" | jq -r '.stats.models | keys[]')
 
 # Check for unexpected models
 for model in $models; do
-  if [[ "$model" != "gemini-2.5-pro" && "$model" != "gemini-3-pro" ]]; then
+  if [[ "$model" != "gemini-2.5-pro" && "$model" != "gemini-3-pro-preview" ]]; then
     echo "ERROR: Model downgrade detected!" >&2
     echo "Actually used: $model" >&2
     exit 3  # Abort code 3 = downgrade detected
