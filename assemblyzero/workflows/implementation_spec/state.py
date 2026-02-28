@@ -162,3 +162,7 @@ class ImplementationSpecState(TypedDict, total=False):
 
     # Issue #491: Previous spec draft for diff-aware review
     previous_spec_draft: str
+
+    # Issue #511: Per-node LLM cost tracking
+    node_costs: dict[str, float]  # node_name -> cumulative cost_usd
+    node_tokens: dict[str, dict[str, int]]  # node_name -> {"input": N, "output": N}

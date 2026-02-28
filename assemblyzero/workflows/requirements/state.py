@@ -246,6 +246,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # Issue #491: Previous draft for diff-aware review
     previous_draft: str
 
+    # Issue #511: Per-node LLM cost tracking
+    node_costs: dict[str, float]  # node_name -> cumulative cost_usd
+    node_tokens: dict[str, dict[str, int]]  # node_name -> {"input": N, "output": N}
+
 
 def create_initial_state(
     workflow_type: Literal["issue", "lld"],
@@ -350,6 +354,9 @@ def create_initial_state(
         "previous_review_feedback": "",
         "recovery_plan_path": "",
         "state_snapshot_path": "",
+        # Issue #511: Per-node LLM cost tracking
+        "node_costs": {},
+        "node_tokens": {},
     }
 
     # Add workflow-type specific fields

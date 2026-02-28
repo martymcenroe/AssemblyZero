@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.workflows.requirements.audit import (
     load_review_prompt,
@@ -109,7 +110,9 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
 
     # Call reviewer
     print(f"    Reviewer: {reviewer_spec}")
+    cost_before = get_cumulative_cost()
     result = reviewer.invoke(**invoke_kwargs)
+    node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -165,6 +168,17 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     if verdict_path:
         print(f"    Saved: {verdict_path.name}")
 
+    # Issue #511: Accumulate per-node cost
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "review", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "review",
+        result.input_tokens,
+        result.output_tokens,
+    )
+
     return {
         "current_verdict": verdict_content,
         "current_verdict_path": str(verdict_path) if verdict_path else "",
@@ -175,6 +189,8 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         "open_questions_status": open_questions_status,
         "current_draft": updated_draft,  # Issue #257: Return updated draft
         "error_message": "",
+        "node_costs": node_costs,  # Issue #511
+        "node_tokens": node_tokens,  # Issue #511
     }
 
 

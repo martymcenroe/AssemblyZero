@@ -25,7 +25,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.hooks.file_write_validator import validate_file_write
+from assemblyzero.utils.cost_tracker import accumulate_node_cost
 from assemblyzero.utils.file_type import get_file_type_info, get_language_tag
 from assemblyzero.utils.lld_path_enforcer import (
     build_implementation_prompt_section,
@@ -1196,6 +1198,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("mock_mode"):
         return _mock_implement_code(state)
 
+    # Issue #511: Cost tracking — note: call_claude_for_file() bypasses
+    # provider abstraction (uses subprocess/SDK directly), so
+    # get_cumulative_cost() may not capture all costs here yet.
+    cost_before = get_cumulative_cost()
+
     # Track estimated token cost for this iteration
     estimated_tokens_used = record_iteration_cost(state)
 
@@ -1405,12 +1412,19 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         },
     )
 
+    # Issue #511: Accumulate per-node cost
+    node_cost_usd = get_cumulative_cost() - cost_before
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "implement_code", node_cost_usd,
+    )
+
     return {
         "implementation_files": written_paths,
         "completed_files": completed_files,
         "estimated_tokens_used": estimated_tokens_used,
         "error_message": "",
         "test_files": real_test_files if real_test_files else state.get("test_files", []),
+        "node_costs": node_costs,  # Issue #511
     }
 
 

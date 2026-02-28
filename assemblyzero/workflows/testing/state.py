@@ -246,3 +246,7 @@ class TestingWorkflowState(TypedDict, total=False):
     # Issue #486: Halt-and-Plan
     recovery_plan_path: str
     state_snapshot_path: str
+
+    # Issue #511: Per-node LLM cost tracking
+    node_costs: dict[str, float]  # node_name -> cumulative cost_usd
+    node_tokens: dict[str, dict[str, int]]  # node_name -> {"input": N, "output": N}

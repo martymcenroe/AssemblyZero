@@ -14,6 +14,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.workflows.testing.audit import (
     gate_log,
     get_repo_root,
@@ -323,6 +325,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
 
     # Call Gemini for review (with retry)
+    cost_before = get_cumulative_cost()
     try:
         import time
 
@@ -373,6 +376,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
             }
 
         verdict_content = result.response
+        node_cost_usd = get_cumulative_cost() - cost_before
 
     except ImportError as e:
         print(f"    [ERROR] Gemini client not available: {e}")
@@ -408,6 +412,17 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         },
     )
 
+    # Issue #511: Accumulate per-node cost
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "review_test_plan", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "review_test_plan",
+        result.input_tokens if result else 0,
+        result.output_tokens if result else 0,
+    )
+
     if test_plan_status == "BLOCKED":
         gemini_feedback = _extract_feedback(verdict_content)
         return {
@@ -416,6 +431,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
             "gemini_feedback": gemini_feedback,
             "file_counter": file_num,
             "error_message": "Test plan review BLOCKED - requires LLD revision",
+            "node_costs": node_costs,  # Issue #511
+            "node_tokens": node_tokens,  # Issue #511
         }
 
     return {
@@ -424,6 +441,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         "test_plan_review_prompt": full_prompt,
         "file_counter": file_num,
         "error_message": "",
+        "node_costs": node_costs,  # Issue #511
+        "node_tokens": node_tokens,  # Issue #511
     }
 
 

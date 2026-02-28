@@ -219,20 +219,27 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
         for file_path in archived_files:
             print(f"      - {file_path}")
 
+    # Issue #511: Include cost data in completion event
+    node_costs = dict(state.get("node_costs", {}))
+    cost_details: dict = {
+        "test_count": test_count,
+        "passed_count": passed_count,
+        "coverage": coverage_achieved,
+        "iterations": iteration_count,
+        "report_path": str(report_path),
+        "archived_files": archived_files,
+    }
+    if node_costs:
+        cost_details["total_cost_usd"] = round(sum(node_costs.values()), 6)
+        cost_details["cost_by_node"] = {k: round(v, 6) for k, v in node_costs.items()}
+
     # Log workflow completion
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=issue_number,
         workflow_type="testing",
         event="complete",
-        details={
-            "test_count": test_count,
-            "passed_count": passed_count,
-            "coverage": coverage_achieved,
-            "iterations": iteration_count,
-            "report_path": str(report_path),
-            "archived_files": archived_files,
-        },
+        details=cost_details,
     )
 
     print(f"\n    Testing workflow COMPLETE for issue #{issue_number}!")

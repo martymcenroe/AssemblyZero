@@ -48,7 +48,7 @@ from assemblyzero.tracing import configure_langsmith
 configure_langsmith()
 
 # Issue #424: Telemetry instrumentation
-from assemblyzero.telemetry import flush, track_tool
+from assemblyzero.telemetry import emit, flush, track_tool
 atexit.register(flush)
 
 from assemblyzero.workflows.requirements.audit import (
@@ -957,6 +957,26 @@ def print_result(final_state: dict[str, Any]) -> None:
 
     print(f"Drafts:   {final_state.get('draft_count', 0)}")
     print(f"Reviews:  {final_state.get('verdict_count', 0)}")
+
+    # Issue #511: Display cost summary and emit telemetry
+    node_costs = final_state.get("node_costs", {})
+    if node_costs:
+        total = sum(node_costs.values())
+        print(f"Cost:     ${total:.4f}")
+        for node_name, cost in sorted(node_costs.items()):
+            if cost > 0:
+                print(f"  {node_name}: ${cost:.4f}")
+        emit(
+            "workflow.cost",
+            repo="AssemblyZero",
+            metadata={
+                "workflow_type": final_state.get("workflow_type", "unknown"),
+                "issue_number": final_state.get("issue_number", 0),
+                "total_cost_usd": round(total, 6),
+                "cost_by_node": {k: round(v, 6) for k, v in node_costs.items()},
+            },
+        )
+
     print("=" * 60)
 
 

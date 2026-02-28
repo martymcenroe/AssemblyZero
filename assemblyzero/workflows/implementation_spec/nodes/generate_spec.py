@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.section_utils import (
     build_targeted_prompt,
     extract_sections,
@@ -212,11 +213,13 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Call drafter LLM
     # -------------------------------------------------------------------------
+    cost_before = get_cumulative_cost()
     result = drafter.invoke(
         system_prompt=DRAFTER_SYSTEM_PROMPT,
         content=prompt,
         timeout_seconds=600,  # 10 min — impl specs are large
     )
+    node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -258,6 +261,17 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     if spec_path:
         print(f"    Saved: {spec_path.name}")
 
+    # Issue #511: Accumulate per-node cost
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "generate_spec", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "generate_spec",
+        result.input_tokens,
+        result.output_tokens,
+    )
+
     return {
         "spec_draft": spec_content,
         "spec_path": str(spec_path) if spec_path else "",
@@ -267,6 +281,8 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "previous_spec_draft": state.get("spec_draft", ""),  # Issue #491: Save for diff-aware review
         "review_feedback": "",  # Clear after use
         "error_message": "",
+        "node_costs": node_costs,  # Issue #511
+        "node_tokens": node_tokens,  # Issue #511
     }
 
 

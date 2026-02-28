@@ -429,18 +429,24 @@ def file_issue(state: IssueWorkflowState) -> dict[str, Any]:
                     print(f"Warning: Failed to open VS Code: {error}")
 
             # Log workflow completion to audit trail
+            # Issue #511: Include cost data in completion event
             repo_root_path = Path(repo_root) if repo_root else get_repo_root()
+            node_costs = dict(state.get("node_costs", {}))
+            completion_details: dict = {
+                "issue_number": issue_number,
+                "issue_url": issue_url,
+                "verdict_count": verdict_count,
+                "draft_count": draft_count,
+            }
+            if node_costs:
+                completion_details["total_cost_usd"] = round(sum(node_costs.values()), 6)
+                completion_details["cost_by_node"] = {k: round(v, 6) for k, v in node_costs.items()}
             log_workflow_execution(
                 target_repo=repo_root_path,
                 slug=slug,
                 workflow_type="issue",
                 event="complete",
-                details={
-                    "issue_number": issue_number,
-                    "issue_url": issue_url,
-                    "verdict_count": verdict_count,
-                    "draft_count": draft_count,
-                },
+                details=completion_details,
             )
 
             return {

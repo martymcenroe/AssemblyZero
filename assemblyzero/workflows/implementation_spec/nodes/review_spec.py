@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.workflows.requirements.audit import (
     next_file_number,
@@ -189,7 +190,9 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
         invoke_kwargs["response_schema"] = VERDICT_SCHEMA
 
+    cost_before = get_cumulative_cost()
     result = reviewer.invoke(**invoke_kwargs)
+    node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -255,10 +258,23 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
             feedback_preview += "..."
         print(f"    Feedback: {feedback_preview}")
 
+    # Issue #511: Accumulate per-node cost
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "review_spec", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "review_spec",
+        result.input_tokens,
+        result.output_tokens,
+    )
+
     return {
         "review_verdict": verdict_status,
         "review_feedback": feedback,
         "error_message": "",
+        "node_costs": node_costs,  # Issue #511
+        "node_tokens": node_tokens,  # Issue #511
     }
 
 

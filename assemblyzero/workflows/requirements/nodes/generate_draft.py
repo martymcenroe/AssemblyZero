@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.section_utils import (
     build_targeted_prompt,
     extract_sections,
@@ -127,7 +128,9 @@ Use the template structure provided. Include all sections. Be specific about:
     # Call drafter
     print(f"    Drafter: {drafter_spec}")
 
+    cost_before = get_cumulative_cost()
     result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+    node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -160,6 +163,17 @@ Use the template structure provided. Include all sections. Be specific about:
     # Open questions now proceed to review where Gemini can answer them.
     # The post-review check in review.py handles the loop-back logic.
 
+    # Issue #511: Accumulate per-node cost
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "generate_draft", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "generate_draft",
+        result.input_tokens,
+        result.output_tokens,
+    )
+
     return {
         "current_draft": draft_content,
         "current_draft_path": str(draft_path) if draft_path else "",
@@ -171,6 +185,8 @@ Use the template structure provided. Include all sections. Be specific about:
         "previous_draft": state.get("current_draft", ""),  # Issue #491: Save for diff-aware review
         "validation_errors": [],  # Clear validation errors after use (Issue #294)
         "error_message": "",
+        "node_costs": node_costs,  # Issue #511
+        "node_tokens": node_tokens,  # Issue #511
     }
 
 
