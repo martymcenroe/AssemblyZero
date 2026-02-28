@@ -31,6 +31,7 @@ from assemblyzero.core.llm_provider import (
     MockProvider,
     get_cumulative_cost,
     get_provider,
+    is_non_retryable_error,
     log_llm_call,
     parse_provider_spec,
     reset_cumulative_cost,
@@ -1152,6 +1153,137 @@ class TestCircuitBreaker:
         # Call 5: would trip, but verify it does
         r = fb.invoke("system", "content")
         assert "CIRCUIT BREAKER" in r.error_message
+
+
+class TestIsNonRetryableError:
+    """Tests for Issue #516: Non-retryable error detection."""
+
+    def test_billing_error(self):
+        """Credit balance error is non-retryable."""
+        assert is_non_retryable_error("Your credit balance is too low") is True
+
+    def test_invalid_api_key(self):
+        """Invalid API key is non-retryable."""
+        assert is_non_retryable_error("invalid_api_key") is True
+        assert is_non_retryable_error("Error: invalid api key provided") is True
+
+    def test_authentication_error(self):
+        """Authentication errors are non-retryable."""
+        assert is_non_retryable_error("authentication_error") is True
+        assert is_non_retryable_error("Authentication failed for account") is True
+
+    def test_permission_denied(self):
+        """Permission denied is non-retryable."""
+        assert is_non_retryable_error("permission_denied") is True
+        assert is_non_retryable_error("Permission denied for resource") is True
+
+    def test_account_disabled(self):
+        """Disabled account is non-retryable."""
+        assert is_non_retryable_error("account has been disabled") is True
+
+    def test_transient_errors_are_retryable(self):
+        """Timeout, rate limit, and server errors are retryable."""
+        assert is_non_retryable_error("Connection timed out") is False
+        assert is_non_retryable_error("rate limit exceeded") is False
+        assert is_non_retryable_error("Internal server error") is False
+        assert is_non_retryable_error("503 Service Unavailable") is False
+
+    def test_none_and_empty(self):
+        """None and empty strings are retryable (not non-retryable)."""
+        assert is_non_retryable_error(None) is False
+        assert is_non_retryable_error("") is False
+
+    def test_case_insensitive(self):
+        """Detection is case-insensitive."""
+        assert is_non_retryable_error("CREDIT BALANCE IS TOO LOW") is True
+        assert is_non_retryable_error("Invalid_API_Key") is True
+
+
+class TestNonRetryableCircuitBreaker:
+    """Tests for Issue #516: Non-retryable errors trip breaker immediately."""
+
+    def _make_result(self, success, provider_name="mock", error_msg=None):
+        return LLMCallResult(
+            success=success,
+            response="OK" if success else None,
+            raw_response="OK" if success else None,
+            error_message=error_msg,
+            provider=provider_name,
+            model_used="test",
+            duration_ms=100,
+            attempts=1,
+        )
+
+    def test_billing_error_trips_breaker_immediately(self):
+        """Billing error on fallback trips circuit breaker on first call."""
+        primary = Mock(spec=LLMProvider)
+        primary.provider_name = "claude"
+        primary.model = "opus"
+        primary.invoke.return_value = self._make_result(
+            False, "claude", "CLI timed out"
+        )
+
+        fallback = Mock(spec=LLMProvider)
+        fallback.provider_name = "anthropic"
+        fallback.invoke.return_value = self._make_result(
+            False, "anthropic", "Your credit balance is too low to access the API"
+        )
+
+        fb = FallbackProvider(primary=primary, fallback=fallback)
+
+        # Call 1: billing error → breaker trips immediately
+        r1 = fb.invoke("system", "content")
+        assert r1.success is False
+        assert fb._consecutive_failures == fb._max_consecutive_failures
+
+        # Call 2: circuit breaker blocks — neither provider called
+        primary.invoke.reset_mock()
+        fallback.invoke.reset_mock()
+        r2 = fb.invoke("system", "content")
+        assert r2.success is False
+        assert "CIRCUIT BREAKER" in r2.error_message
+        primary.invoke.assert_not_called()
+        fallback.invoke.assert_not_called()
+
+    def test_auth_error_trips_breaker_immediately(self):
+        """Auth error on fallback trips circuit breaker on first call."""
+        primary = Mock(spec=LLMProvider)
+        primary.provider_name = "claude"
+        primary.model = "opus"
+        primary.invoke.return_value = self._make_result(
+            False, "claude", "CLI error"
+        )
+
+        fallback = Mock(spec=LLMProvider)
+        fallback.provider_name = "anthropic"
+        fallback.invoke.return_value = self._make_result(
+            False, "anthropic", "authentication_error: invalid API key"
+        )
+
+        fb = FallbackProvider(primary=primary, fallback=fallback)
+        r1 = fb.invoke("system", "content")
+        assert r1.success is False
+        assert fb._consecutive_failures == fb._max_consecutive_failures
+
+    def test_transient_error_does_not_trip_immediately(self):
+        """Transient error increments normally, does not trip immediately."""
+        primary = Mock(spec=LLMProvider)
+        primary.provider_name = "claude"
+        primary.model = "opus"
+        primary.invoke.return_value = self._make_result(
+            False, "claude", "CLI error"
+        )
+
+        fallback = Mock(spec=LLMProvider)
+        fallback.provider_name = "anthropic"
+        fallback.invoke.return_value = self._make_result(
+            False, "anthropic", "Connection timed out"
+        )
+
+        fb = FallbackProvider(primary=primary, fallback=fallback)
+        r1 = fb.invoke("system", "content")
+        assert r1.success is False
+        assert fb._consecutive_failures == 1  # Incremented, NOT tripped
 
 
 class TestCumulativeCost:

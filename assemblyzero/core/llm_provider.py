@@ -648,6 +648,35 @@ class AnthropicProvider(LLMProvider):
             return call_result
 
 
+def is_non_retryable_error(error_msg: str | None) -> bool:
+    """Check if an error message indicates a non-retryable condition.
+
+    Issue #516: Billing, auth, and permission errors should halt immediately
+    instead of entering the retry loop. Retrying these is guaranteed to fail.
+
+    Args:
+        error_msg: Error message string from a failed LLM call.
+
+    Returns:
+        True if the error is non-retryable (halt immediately).
+    """
+    if not error_msg:
+        return False
+    msg = error_msg.lower()
+    non_retryable = [
+        "credit balance is too low",
+        "invalid_api_key",
+        "invalid api key",
+        "authentication_error",
+        "authentication failed",
+        "permission_denied",
+        "permission denied",
+        "account has been disabled",
+        "account is not authorized",
+    ]
+    return any(pattern in msg for pattern in non_retryable)
+
+
 class FallbackProvider(LLMProvider):
     """Tries primary provider first, falls back to secondary on failure.
 
@@ -737,11 +766,19 @@ class FallbackProvider(LLMProvider):
         if fallback_result.success:
             self._consecutive_failures = 0
         else:
-            self._consecutive_failures += 1
-            print(
-                f"    [CIRCUIT] {self._consecutive_failures}/"
-                f"{self._max_consecutive_failures} consecutive failures"
-            )
+            # Issue #516: Non-retryable errors trip breaker immediately
+            if is_non_retryable_error(fallback_result.error_message):
+                self._consecutive_failures = self._max_consecutive_failures
+                print(
+                    f"    [CIRCUIT BREAKER] Non-retryable error detected: "
+                    f"{fallback_result.error_message[:100]}"
+                )
+            else:
+                self._consecutive_failures += 1
+                print(
+                    f"    [CIRCUIT] {self._consecutive_failures}/"
+                    f"{self._max_consecutive_failures} consecutive failures"
+                )
         return fallback_result
 
 
