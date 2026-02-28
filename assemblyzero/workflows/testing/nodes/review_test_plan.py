@@ -419,8 +419,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     node_tokens = accumulate_node_tokens(
         dict(state.get("node_tokens", {})),
         "review_test_plan",
-        result.input_tokens if result else 0,
-        result.output_tokens if result else 0,
+        getattr(result, "input_tokens", 0) if result else 0,
+        getattr(result, "output_tokens", 0) if result else 0,
     )
 
     if test_plan_status == "BLOCKED":
