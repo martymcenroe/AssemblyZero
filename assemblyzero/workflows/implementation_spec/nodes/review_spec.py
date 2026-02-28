@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
@@ -174,11 +175,17 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # -------------------------------------------------------------------------
     # Call reviewer LLM
+    # Issue #492: Pass structured schema when reviewer is Gemini
     # -------------------------------------------------------------------------
-    result = reviewer.invoke(
-        system_prompt=REVIEWER_SYSTEM_PROMPT,
-        content=review_content,
-    )
+    invoke_kwargs: dict = {
+        "system_prompt": REVIEWER_SYSTEM_PROMPT,
+        "content": review_content,
+    }
+    is_gemini = reviewer_spec.startswith("gemini:")
+    if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
+        invoke_kwargs["response_schema"] = VERDICT_SCHEMA
+
+    result = reviewer.invoke(**invoke_kwargs)
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -209,8 +216,25 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # -------------------------------------------------------------------------
     # Parse verdict
+    # Issue #492: Try structured JSON parsing first, fall back to regex
     # -------------------------------------------------------------------------
-    verdict_status, feedback = parse_review_verdict(verdict_content)
+    structured = parse_structured_verdict(verdict_content) if is_gemini else None
+    if structured:
+        verdict_status = structured["verdict"]
+        feedback = structured.get("summary", "")
+        blocking = structured.get("blocking_issues", [])
+        if blocking:
+            feedback += "\n\n## Blocking Issues\n"
+            for issue in blocking:
+                feedback += f"- [{issue.get('severity', 'HIGH')}] {issue.get('section', '')}: {issue.get('issue', '')}\n"
+        suggestions = structured.get("suggestions", [])
+        if suggestions:
+            feedback += "\n\n## Suggestions\n"
+            for s in suggestions:
+                feedback += f"- {s}\n"
+        print(f"    Parsed structured verdict: {verdict_status}")
+    else:
+        verdict_status, feedback = parse_review_verdict(verdict_content)
 
     # -------------------------------------------------------------------------
     # Report results

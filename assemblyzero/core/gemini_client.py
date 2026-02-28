@@ -521,13 +521,19 @@ class GeminiClient:
                         # API key: use new google.genai SDK
                         client = genai.Client(api_key=cred.key)
 
+                        # Issue #492: Wire response_schema into config when provided
+                        config_kwargs = {
+                            "system_instruction": system_instruction,
+                        }
+                        if response_schema is not None:
+                            config_kwargs["response_mime_type"] = "application/json"
+                            config_kwargs["response_schema"] = response_schema
+
                         # Make the API call with system instruction in config
                         response = client.models.generate_content(
                             model=self.model,
                             contents=content,
-                            config=types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                            ),
+                            config=types.GenerateContentConfig(**config_kwargs),
                         )
 
                         # Check for successful response

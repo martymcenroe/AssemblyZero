@@ -811,6 +811,7 @@ class GeminiProvider(LLMProvider):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Gemini via GeminiClient.
 
@@ -818,6 +819,7 @@ class GeminiProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (not directly used - client has own timeout).
+            response_schema: Optional JSON schema for structured output (Issue #492).
 
         Returns:
             LLMCallResult with response or error.
@@ -827,6 +829,7 @@ class GeminiProvider(LLMProvider):
             result = client.invoke(
                 system_instruction=system_prompt,
                 content=content,
+                response_schema=response_schema,
             )
 
             # Issue #399: detect 429 from error type

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.workflows.requirements.audit import (
     load_review_prompt,
     next_file_number,
@@ -97,9 +98,18 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
 
 {review_prompt}"""
 
+    # Issue #492: Pass structured schema when reviewer is Gemini
+    invoke_kwargs: dict = {
+        "system_prompt": system_prompt,
+        "content": review_content,
+    }
+    is_gemini = reviewer_spec.startswith("gemini:")
+    if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
+        invoke_kwargs["response_schema"] = VERDICT_SCHEMA
+
     # Call reviewer
     print(f"    Reviewer: {reviewer_spec}")
-    result = reviewer.invoke(system_prompt=system_prompt, content=review_content)
+    result = reviewer.invoke(**invoke_kwargs)
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -127,8 +137,17 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # Append to verdict history
     verdict_history.append(verdict_content)
 
-    # Determine LLD status from verdict
-    lld_status = _parse_verdict_status(verdict_content)
+    # Issue #492: Try structured JSON parsing first, fall back to regex
+    structured = parse_structured_verdict(verdict_content) if is_gemini else None
+    if structured:
+        lld_status = structured["verdict"]
+        # Map REVISE -> BLOCKED for workflow purposes
+        if lld_status == "REVISE":
+            lld_status = "BLOCKED"
+        print(f"    Parsed structured verdict: {structured['verdict']}")
+    else:
+        # Determine LLD status from verdict via regex
+        lld_status = _parse_verdict_status(verdict_content)
 
     # Issue #248: Check open questions resolution status
     open_questions_status = _check_open_questions_status(current_draft, verdict_content)
