@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.section_utils import (
+    build_targeted_prompt,
+    extract_sections,
+    identify_changed_sections,
+)
 from assemblyzero.workflows.requirements.audit import (
     get_repo_structure,
     load_template,
@@ -464,6 +469,35 @@ def _build_revision_prompt(
     Returns:
         Revision prompt string.
     """
+    # Issue #489: Try section-level revision for focused changes
+    if review_feedback and existing_draft:
+        draft_sections = extract_sections(existing_draft)
+        changed = identify_changed_sections(review_feedback, draft_sections)
+        if changed:
+            targeted = build_targeted_prompt(
+                sections=draft_sections,
+                changed_headings=changed,
+                template=template,
+                feedback=review_feedback,
+            )
+            if targeted:
+                parts = [
+                    "IMPORTANT: Output ONLY the markdown content. "
+                    "Start with # title. No preamble.",
+                    targeted,
+                    f"## Original LLD (Issue #{issue_number})\n\n{lld_content}",
+                    "CRITICAL REVISION INSTRUCTIONS:\n"
+                    "1. Fix ALL issues from feedback\n"
+                    "2. PRESERVE sections marked [UNCHANGED] exactly as-is\n"
+                    "3. ONLY modify sections marked [REVISE]\n"
+                    "4. Keep ALL template sections intact\n\n"
+                    "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE.",
+                ]
+                prompt = "\n\n".join(parts)
+                if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+                    return prompt
+
+    # Fallback: full revision prompt
     sections: list[str] = []
 
     sections.append(

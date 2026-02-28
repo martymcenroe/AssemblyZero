@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
+from assemblyzero.core.section_utils import (
+    build_targeted_prompt,
+    extract_sections,
+    identify_changed_sections,
+)
 from assemblyzero.workflows.requirements.audit import (
     get_repo_structure,
     load_template,
@@ -256,7 +261,40 @@ def _build_prompt(
         if user_feedback:
             revision_context += f"## Additional Human Feedback\n\n{user_feedback}\n\n"
 
-        prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+        # Issue #489: Try section-level revision for focused changes
+        targeted = ""
+        all_feedback = revision_context
+        if verdict_history:
+            latest_verdict = verdict_history[-1] if verdict_history else ""
+            draft_sections = extract_sections(current_draft)
+            changed = identify_changed_sections(latest_verdict, draft_sections)
+            if changed:
+                targeted = build_targeted_prompt(
+                    sections=draft_sections,
+                    changed_headings=changed,
+                    template=template,
+                    feedback=all_feedback,
+                )
+
+        if targeted:
+            prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+
+{targeted}
+
+## Original {input_label}
+{input_content}
+
+CRITICAL REVISION INSTRUCTIONS:
+1. Fix ALL mechanical validation errors FIRST (invalid file paths, missing sections)
+2. Implement EVERY change requested by feedback
+3. PRESERVE sections marked [UNCHANGED] exactly as-is
+4. ONLY modify sections marked [REVISE]
+5. Keep ALL template sections intact
+
+Revise the draft to address ALL feedback above.
+START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
+        else:
+            prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
 
 {revision_context}## Current Draft (to revise)
 {current_draft}
