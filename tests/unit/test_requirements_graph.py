@@ -103,7 +103,7 @@ class TestGraphRouting:
 
         state = {"error_message": "File not found"}
         result = route_after_load_input(state)
-        assert result == "END"
+        assert result == "HALT"
 
     def test_route_from_generate_draft_with_gate(self):
         """Test routing from generate_draft to human gate when enabled."""
@@ -127,7 +127,7 @@ class TestGraphRouting:
 
         state = {"error_message": "API error", "config_gates_draft": True}
         result = route_after_generate_draft(state)
-        assert result == "END"
+        assert result == "HALT"
 
     def test_route_from_human_gate_draft(self):
         """Test routing from human gate draft based on next_node."""
@@ -300,7 +300,7 @@ class TestGraphRoutingExtended:
 
         state = {"error_message": "Review failed", "config_gates_verdict": True}
         result = route_after_review(state)
-        assert result == "END"
+        assert result == "HALT"
 
     def test_route_from_review_to_finalize_on_max_iterations(self):
         """Test routing from review to finalize when max iterations reached."""

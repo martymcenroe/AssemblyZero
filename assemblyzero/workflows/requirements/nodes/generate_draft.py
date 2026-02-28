@@ -78,6 +78,15 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     # Build prompt
     prompt = _build_prompt(state, template, workflow_type)
 
+    # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
+    if not mock_mode:
+        from assemblyzero.core.preflight import check_gemini_available
+        preflight = check_gemini_available()
+        print(f"    [PREFLIGHT] Gemini: {preflight.available_credentials}/{preflight.total_credentials} credentials")
+        if not preflight.passed:
+            warnings_str = ", ".join(preflight.warnings)
+            return {"error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}"}
+
     # Get drafter provider
     try:
         drafter = get_provider(drafter_spec)
@@ -153,6 +162,7 @@ Use the template structure provided. Include all sections. Be specific about:
         "iteration_count": iteration_count,
         "file_counter": file_num,
         "user_feedback": "",  # Clear feedback after use
+        "previous_review_feedback": state.get("current_verdict", ""),  # Issue #486: Save for two-strike
         "validation_errors": [],  # Clear validation errors after use (Issue #294)
         "error_message": "",
     }

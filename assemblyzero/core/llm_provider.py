@@ -755,6 +755,7 @@ class GeminiProvider(LLMProvider):
         "2.5-flash": "gemini-2.5-flash",
         "flash": "gemini-2.5-flash",
         "3-pro-preview": "gemini-3-pro-preview",
+        "3.1-pro-preview": "gemini-3.1-pro-preview",
         "3-pro": "gemini-3-pro",
         "3-flash-preview": "gemini-3-flash-preview",
     }

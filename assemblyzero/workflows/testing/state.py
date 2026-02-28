@@ -242,3 +242,7 @@ class TestingWorkflowState(TypedDict, total=False):
     pr_merged: bool                # Set by N9 after checking PR merge status
     learning_summary_path: str     # Absolute path to generated learning summary
     cleanup_skipped_reason: str    # Reason cleanup was skipped (e.g., "PR not merged")
+
+    # Issue #486: Halt-and-Plan
+    recovery_plan_path: str
+    state_snapshot_path: str

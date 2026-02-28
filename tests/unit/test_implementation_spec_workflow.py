@@ -435,7 +435,7 @@ class TestRouteAfterLoad:
         """Error → END."""
         from assemblyzero.workflows.implementation_spec.graph import route_after_load
 
-        assert route_after_load({"error_message": "LLD not found"}) == "END"
+        assert route_after_load({"error_message": "LLD not found"}) == "HALT"
 
 
 class TestRouteAfterAnalyze:
@@ -451,7 +451,7 @@ class TestRouteAfterAnalyze:
         """Error → END."""
         from assemblyzero.workflows.implementation_spec.graph import route_after_analyze
 
-        assert route_after_analyze({"error_message": "File read error"}) == "END"
+        assert route_after_analyze({"error_message": "File read error"}) == "HALT"
 
 
 class TestRouteAfterValidation:
@@ -494,7 +494,7 @@ class TestRouteAfterValidation:
         state = {
             "validation_passed": False, "review_iteration": 3, "max_iterations": 3,
         }
-        assert route_after_validation(state) == "END"
+        assert route_after_validation(state) == "HALT"
 
 
 class TestRouteAfterHumanGate:
@@ -526,7 +526,7 @@ class TestRouteAfterHumanGate:
         from assemblyzero.workflows.implementation_spec.graph import route_after_human_gate
 
         state = {"error_message": "Something went wrong", "next_node": "N5_review_spec"}
-        assert route_after_human_gate(state) == "END"
+        assert route_after_human_gate(state) == "HALT"
 
     def test_routes_to_end_on_empty_next_node(self):
         """Empty next_node → END."""
@@ -567,7 +567,7 @@ class TestRouteAfterReview:
             "error_message": "", "review_verdict": "BLOCKED",
             "review_iteration": 0, "max_iterations": 3,
         }
-        assert route_after_review(state) == "END"
+        assert route_after_review(state) == "HALT"
 
     def test_routes_to_end_on_revise_at_max(self):
         """REVISE at max iterations → END."""
@@ -577,7 +577,7 @@ class TestRouteAfterReview:
             "error_message": "", "review_verdict": "REVISE",
             "review_iteration": 3, "max_iterations": 3,
         }
-        assert route_after_review(state) == "END"
+        assert route_after_review(state) == "HALT"
 
     def test_routes_to_end_on_error(self):
         """Error → END regardless of verdict."""
@@ -587,7 +587,7 @@ class TestRouteAfterReview:
             "error_message": "API timeout", "review_verdict": "APPROVED",
             "review_iteration": 0, "max_iterations": 3,
         }
-        assert route_after_review(state) == "END"
+        assert route_after_review(state) == "HALT"
 
 
 # =============================================================================
@@ -2025,12 +2025,12 @@ class TestWorkflowPaths:
         base_state["validation_passed"] = False
         base_state["review_iteration"] = 3
         base_state["max_iterations"] = 3
-        assert route_after_validation(base_state) == "END"
+        assert route_after_validation(base_state) == "HALT"
 
         # Review REVISE at max
         base_state["review_verdict"] = "REVISE"
         base_state["error_message"] = ""
-        assert route_after_review(base_state) == "END"
+        assert route_after_review(base_state) == "HALT"
 
     def test_070_revise_regenerates(self, base_state):
         """Scenario 070: REVISE → N2 with feedback."""
@@ -2116,8 +2116,8 @@ class TestEdgeCases:
         # Empty state should not crash
         assert route_after_load({}) == "N1_analyze_codebase"
         assert route_after_analyze({}) == "N2_generate_spec"
-        # Default verdict BLOCKED → END
-        assert route_after_review({}) == "END"
+        # Default verdict BLOCKED → HALT
+        assert route_after_review({}) == "HALT"
 
     def test_validate_completeness_no_files(self, base_state):
         """Validation with no files to modify."""

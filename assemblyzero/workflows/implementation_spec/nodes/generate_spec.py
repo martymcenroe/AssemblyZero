@@ -174,6 +174,20 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     )
 
     # -------------------------------------------------------------------------
+    # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
+    # -------------------------------------------------------------------------
+    if not mock_mode:
+        from assemblyzero.core.preflight import check_gemini_available
+        preflight = check_gemini_available()
+        print(f"    [PREFLIGHT] Gemini: {preflight.available_credentials}/{preflight.total_credentials} credentials")
+        if not preflight.passed:
+            warnings_str = ", ".join(preflight.warnings)
+            return {
+                "error_message": f"[PREFLIGHT] Gemini unavailable: {warnings_str}",
+                "previous_review_feedback": review_feedback,
+            }
+
+    # -------------------------------------------------------------------------
     # Get drafter provider
     # -------------------------------------------------------------------------
     if mock_mode:
@@ -243,6 +257,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "spec_path": str(spec_path) if spec_path else "",
         "review_iteration": review_iteration,
         "completeness_issues": [],  # Clear after use
+        "previous_review_feedback": review_feedback,  # Issue #486: Save for two-strike
         "review_feedback": "",  # Clear after use
         "error_message": "",
     }

@@ -45,6 +45,7 @@ from assemblyzero.workflows.implementation_spec.nodes.validate_completeness impo
     validate_completeness,
 )
 from assemblyzero.workflows.implementation_spec.state import ImplementationSpecState
+from assemblyzero.core.halt_node import create_halt_node
 
 # =============================================================================
 # Node Name Constants
@@ -57,6 +58,7 @@ N3_VALIDATE_COMPLETENESS = "N3_validate_completeness"
 N4_HUMAN_GATE = "N4_human_gate"
 N5_REVIEW_SPEC = "N5_review_spec"
 N6_FINALIZE_SPEC = "N6_finalize_spec"
+HALT = "HALT"
 
 
 # =============================================================================
@@ -66,12 +68,12 @@ N6_FINALIZE_SPEC = "N6_finalize_spec"
 
 def route_after_load(
     state: ImplementationSpecState,
-) -> Literal["N1_analyze_codebase", "END"]:
+) -> Literal["N1_analyze_codebase", "HALT"]:
     """Route after N0: load_lld.
 
     Routes to:
     - N1_analyze_codebase: LLD loaded successfully
-    - END: Error loading LLD (not approved, not found, etc.)
+    - HALT: Error loading LLD (Issue #486)
 
     Args:
         state: Current workflow state.
@@ -80,18 +82,18 @@ def route_after_load(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
     return "N1_analyze_codebase"
 
 
 def route_after_analyze(
     state: ImplementationSpecState,
-) -> Literal["N2_generate_spec", "END"]:
+) -> Literal["N2_generate_spec", "HALT"]:
     """Route after N1: analyze_codebase.
 
     Routes to:
     - N2_generate_spec: Codebase analysis complete
-    - END: Error during analysis
+    - HALT: Error during analysis (Issue #486)
 
     Args:
         state: Current workflow state.
@@ -100,20 +102,20 @@ def route_after_analyze(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
     return "N2_generate_spec"
 
 
 def route_after_validation(
     state: ImplementationSpecState,
-) -> Literal["N4_human_gate", "N5_review_spec", "N2_generate_spec", "END"]:
+) -> Literal["N4_human_gate", "N5_review_spec", "N2_generate_spec", "HALT"]:
     """Route after N3: validate_completeness.
 
     Routes to:
     - N4_human_gate: Validation passed AND human_gate_enabled
     - N5_review_spec: Validation passed AND human gate disabled
     - N2_generate_spec: Validation failed, retry (if iterations remain)
-    - END: Validation failed and max iterations exceeded
+    - HALT: Validation failed and max iterations exceeded (Issue #486)
 
     Args:
         state: Current workflow state.
@@ -148,20 +150,21 @@ def route_after_validation(
 
     print(
         f"    [ROUTING] Max iterations ({max_iterations}) reached "
-        f"with validation failures - aborting"
+        f"with validation failures - halting"
     )
-    return "END"
+    return "HALT"
 
 
 def route_after_human_gate(
     state: ImplementationSpecState,
-) -> Literal["N5_review_spec", "N2_generate_spec", "END"]:
+) -> Literal["N5_review_spec", "N2_generate_spec", "HALT", "END"]:
     """Route after N4: human_gate.
 
     Routes based on human decision:
     - N5_review_spec: Human approved, proceed to Gemini review
     - N2_generate_spec: Human requested revisions
-    - END: Human rejected or error
+    - HALT: Error (Issue #486)
+    - END: Human rejected (normal exit)
 
     Args:
         state: Current workflow state.
@@ -170,7 +173,7 @@ def route_after_human_gate(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
 
     next_node = state.get("next_node", "")
     if next_node == "N5_review_spec":
@@ -182,13 +185,15 @@ def route_after_human_gate(
 
 def route_after_review(
     state: ImplementationSpecState,
-) -> Literal["N6_finalize_spec", "N2_generate_spec", "END"]:
+) -> Literal["N6_finalize_spec", "N2_generate_spec", "HALT"]:
     """Route after N5: review_spec.
+
+    Issue #486: Error/blocked/max-iter routes to HALT. Two-strike stagnation.
 
     Routes to:
     - N6_finalize_spec: Gemini verdict is APPROVED
     - N2_generate_spec: Gemini verdict is REVISE (if iterations remain)
-    - END: Gemini verdict is BLOCKED, error, or max iterations exceeded
+    - HALT: Error, BLOCKED, max iterations, or two-strike stagnation
 
     Args:
         state: Current workflow state.
@@ -197,7 +202,7 @@ def route_after_review(
         Next node name.
     """
     if state.get("error_message"):
-        return "END"
+        return "HALT"
 
     verdict = state.get("review_verdict", "BLOCKED")
     review_iteration = state.get("review_iteration", 0)
@@ -207,6 +212,14 @@ def route_after_review(
         return "N6_finalize_spec"
 
     if verdict == "REVISE" and review_iteration < max_iterations:
+        # Issue #486: Two-strike stagnation detection
+        current_feedback = state.get("review_feedback", "")
+        previous_feedback = state.get("previous_review_feedback", "")
+        if previous_feedback and current_feedback:
+            if _same_review_feedback(current_feedback, previous_feedback):
+                print("    [HALT] Two consecutive REVISE verdicts with same feedback. Halting.")
+                return "HALT"
+
         print(
             f"    [ROUTING] Gemini verdict REVISE "
             f"(iteration {review_iteration}/{max_iterations}) - regenerating spec"
@@ -217,11 +230,37 @@ def route_after_review(
     if review_iteration >= max_iterations:
         print(
             f"    [ROUTING] Max iterations ({max_iterations}) reached "
-            f"with verdict {verdict} - aborting"
+            f"with verdict {verdict} - halting"
         )
     else:
-        print(f"    [ROUTING] Gemini verdict BLOCKED - aborting workflow")
-    return "END"
+        print(f"    [ROUTING] Gemini verdict BLOCKED - halting workflow")
+    return "HALT"
+
+
+def _same_review_feedback(current: str, previous: str) -> bool:
+    """Check if two REVISE verdicts have overlapping feedback.
+
+    Issue #486: Two-strike stagnation detection for implementation spec.
+    """
+    if not current or not previous:
+        return False
+
+    current_lines = {
+        line.strip().lower()
+        for line in current.splitlines()
+        if line.strip() and len(line.strip()) > 10
+    }
+    previous_lines = {
+        line.strip().lower()
+        for line in previous.splitlines()
+        if line.strip() and len(line.strip()) > 10
+    }
+
+    if not current_lines:
+        return False
+
+    overlap = current_lines & previous_lines
+    return len(overlap) / len(current_lines) > 0.5
 
 
 # =============================================================================
@@ -257,34 +296,38 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
     graph.add_node(N4_HUMAN_GATE, human_gate)
     graph.add_node(N5_REVIEW_SPEC, review_spec)
     graph.add_node(N6_FINALIZE_SPEC, finalize_spec)
+    graph.add_node(HALT, create_halt_node("implementation_spec"))  # Issue #486
 
     # START -> N0
     graph.add_edge(START, N0_LOAD_LLD)
 
-    # N0 -> N1 or END (on error)
+    # HALT -> END (Issue #486: HALT processes error, then terminates)
+    graph.add_edge(HALT, END)
+
+    # N0 -> N1 or HALT (on error)
     graph.add_conditional_edges(
         N0_LOAD_LLD,
         route_after_load,
         {
             "N1_analyze_codebase": N1_ANALYZE_CODEBASE,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
-    # N1 -> N2 or END (on error)
+    # N1 -> N2 or HALT (on error)
     graph.add_conditional_edges(
         N1_ANALYZE_CODEBASE,
         route_after_analyze,
         {
             "N2_generate_spec": N2_GENERATE_SPEC,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
     # N2 -> N3 (always proceeds to validation after generation)
     graph.add_edge(N2_GENERATE_SPEC, N3_VALIDATE_COMPLETENESS)
 
-    # N3 -> N4 or N5 or N2 or END (based on validation result and config)
+    # N3 -> N4 or N5 or N2 or HALT (based on validation result and config)
     graph.add_conditional_edges(
         N3_VALIDATE_COMPLETENESS,
         route_after_validation,
@@ -292,29 +335,30 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
             "N4_human_gate": N4_HUMAN_GATE,
             "N5_review_spec": N5_REVIEW_SPEC,
             "N2_generate_spec": N2_GENERATE_SPEC,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
-    # N4 -> N5 or N2 or END (based on human decision)
+    # N4 -> N5 or N2 or HALT or END (based on human decision)
     graph.add_conditional_edges(
         N4_HUMAN_GATE,
         route_after_human_gate,
         {
             "N5_review_spec": N5_REVIEW_SPEC,
             "N2_generate_spec": N2_GENERATE_SPEC,
+            "HALT": HALT,
             "END": END,
         },
     )
 
-    # N5 -> N6 or N2 or END (based on Gemini verdict)
+    # N5 -> N6 or N2 or HALT (based on Gemini verdict, two-strike)
     graph.add_conditional_edges(
         N5_REVIEW_SPEC,
         route_after_review,
         {
             "N6_finalize_spec": N6_FINALIZE_SPEC,
             "N2_generate_spec": N2_GENERATE_SPEC,
-            "END": END,
+            "HALT": HALT,
         },
     )
 
