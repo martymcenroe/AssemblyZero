@@ -1,6 +1,7 @@
 name = "pr-sentinel"
 main = "src/index.js"
 compatibility_date = "2026-02-16"
+account_id = "4fe1c5e241425c85d0f2c35c69fb45b8"
 
 [vars]
 CHECK_NAME = "pr-sentinel / issue-reference"
