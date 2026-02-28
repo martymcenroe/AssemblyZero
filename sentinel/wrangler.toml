@@ -1,0 +1,6 @@
+name = "pr-sentinel"
+main = "src/index.js"
+compatibility_date = "2026-02-16"
+
+[vars]
+CHECK_NAME = "pr-sentinel / issue-reference"

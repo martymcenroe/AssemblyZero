@@ -1,0 +1,15 @@
+{
+  "name": "pr-sentinel",
+  "version": "1.0.0",
+  "description": "PR Issue-Reference Enforcer — GitHub App on Cloudflare Workers",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}
