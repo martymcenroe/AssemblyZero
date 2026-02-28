@@ -1,5 +1,41 @@
 import { describe, it, expect } from "vitest";
-import { validatePRBody } from "../src/validate.js";
+import { validatePRBody, extractIssueRefs } from "../src/validate.js";
+
+describe("extractIssueRefs", () => {
+  it("extracts a simple reference", () => {
+    expect(extractIssueRefs("Closes #42")).toEqual([
+      { owner: null, repo: null, number: 42 },
+    ]);
+  });
+
+  it("extracts cross-repo reference", () => {
+    expect(extractIssueRefs("Closes martymcenroe/Aletheia#123")).toEqual([
+      { owner: "martymcenroe", repo: "Aletheia", number: 123 },
+    ]);
+  });
+
+  it("extracts multiple references", () => {
+    const refs = extractIssueRefs("Closes #1, Fixes owner/repo#2");
+    expect(refs).toEqual([
+      { owner: null, repo: null, number: 1 },
+      { owner: "owner", repo: "repo", number: 2 },
+    ]);
+  });
+
+  it("returns empty for no references", () => {
+    expect(extractIssueRefs("Just a PR")).toEqual([]);
+  });
+
+  it("returns empty for null", () => {
+    expect(extractIssueRefs(null)).toEqual([]);
+  });
+
+  it("handles dots and hyphens in owner/repo", () => {
+    expect(extractIssueRefs("Fixes my-org/my.repo#5")).toEqual([
+      { owner: "my-org", repo: "my.repo", number: 5 },
+    ]);
+  });
+});
 
 describe("validatePRBody", () => {
   describe("passing cases", () => {
@@ -17,11 +53,14 @@ describe("validatePRBody", () => {
     ])("passes for '%s' (%s)", (body) => {
       const result = validatePRBody(body);
       expect(result.valid).toBe(true);
+      expect(result.refs.length).toBeGreaterThan(0);
+      expect(result.noIssue).toBe(false);
     });
 
     it("passes for cross-repo reference", () => {
       const result = validatePRBody("Closes martymcenroe/Aletheia#123");
       expect(result.valid).toBe(true);
+      expect(result.refs[0].owner).toBe("martymcenroe");
     });
 
     it("passes for cross-repo reference with dots/hyphens", () => {
@@ -33,21 +72,26 @@ describe("validatePRBody", () => {
       const body = "This PR refactors the auth module.\n\nCloses #15";
       const result = validatePRBody(body);
       expect(result.valid).toBe(true);
+      expect(result.refs[0].number).toBe(15);
     });
 
     it("passes for No-Issue with reason", () => {
       const result = validatePRBody("No-Issue: infrastructure change");
       expect(result.valid).toBe(true);
+      expect(result.noIssue).toBe(true);
+      expect(result.refs).toEqual([]);
     });
 
     it("passes for No-Issue case-insensitive", () => {
       const result = validatePRBody("no-issue: testing");
       expect(result.valid).toBe(true);
+      expect(result.noIssue).toBe(true);
     });
 
     it("passes for multiple issue references", () => {
       const result = validatePRBody("Closes #1, Fixes #2");
       expect(result.valid).toBe(true);
+      expect(result.refs).toHaveLength(2);
     });
   });
 
@@ -56,6 +100,7 @@ describe("validatePRBody", () => {
       const result = validatePRBody(null);
       expect(result.valid).toBe(false);
       expect(result.reason).toContain("empty");
+      expect(result.refs).toEqual([]);
     });
 
     it("fails for empty string", () => {

@@ -3,6 +3,7 @@
 import { getInstallationToken } from "./auth.js";
 import { createCheckRun } from "./checks.js";
 import { validatePRBody } from "./validate.js";
+import { verifyIssueRefs } from "./verify-issues.js";
 
 /**
  * Verify the HMAC-SHA256 signature from GitHub.
@@ -85,15 +86,26 @@ export async function handleWebhook(request, env) {
   const installationId = payload.installation.id;
   const checkName = env.CHECK_NAME || "pr-sentinel / issue-reference";
 
-  // Validate PR body
-  const result = validatePRBody(pr.body);
+  // Validate PR body (regex check)
+  let result = validatePRBody(pr.body);
 
-  // Get installation token and create check run
+  // Get installation token (needed for both verification and check run)
   const token = await getInstallationToken(
     env.APP_ID,
     env.PRIVATE_KEY_B64,
     installationId
   );
+
+  // If regex passed with issue refs, verify they point to real open issues
+  if (result.valid && result.refs.length > 0) {
+    const verification = await verifyIssueRefs(token, owner, repo, result.refs);
+    if (!verification.valid) {
+      result = {
+        valid: false,
+        reason: verification.reason,
+      };
+    }
+  }
 
   await createCheckRun(token, owner, repo, headSha, checkName, result);
 
