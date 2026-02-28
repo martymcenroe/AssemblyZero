@@ -546,11 +546,22 @@ class AnthropicProvider(LLMProvider):
 
             client = self._get_client()
 
+            # Issue #488: Send cache_control directives for prompt caching.
+            # System prompt and user content are marked as cacheable so that
+            # repeated calls (revision cycles) can read from cache at 10% cost.
             response = client.messages.create(
                 model=self._model_id,
                 max_tokens=self.MAX_TOKENS,
-                system=system_prompt,
-                messages=[{"role": "user", "content": content}],
+                system=[{
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                messages=[{"role": "user", "content": [{
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }]}],
                 timeout=httpx.Timeout(timeout_seconds, connect=30.0),
             )
 
