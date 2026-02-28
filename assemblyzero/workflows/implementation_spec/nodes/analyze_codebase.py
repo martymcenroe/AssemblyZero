@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.requirements.audit import get_repo_structure
 from assemblyzero.workflows.implementation_spec.state import (
     FileToModify,
     ImplementationSpecState,
@@ -108,9 +109,12 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
     if not files_to_modify:
         print("    [GUARD] WARNING: No files to analyze from LLD")
+        # Issue #490: Still compute repo structure even with no files
+        repo_structure = get_repo_structure(str(repo_root))
         return {
             "current_state_snapshots": {},
             "pattern_references": [],
+            "repo_structure": repo_structure,
             "error_message": "",
         }
     # --------------------------------------------------------------------------
@@ -247,12 +251,16 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     if import_dependencies:
         print(f"    Import dependencies: {len(import_dependencies):,} chars")
 
+    # Issue #490: Compute repo structure once, cache in state
+    repo_structure = get_repo_structure(str(repo_root))
+
     return {
         "current_state_snapshots": current_state_snapshots,
         "pattern_references": pattern_references,
         "project_context": project_context,
         "import_dependencies": import_dependencies,
         "files_to_modify": updated_files,
+        "repo_structure": repo_structure,
         "error_message": "",
     }
 

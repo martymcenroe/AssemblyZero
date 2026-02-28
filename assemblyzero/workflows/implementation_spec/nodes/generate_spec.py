@@ -171,6 +171,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         files_to_modify=state.get("files_to_modify", []),
         project_context=state.get("project_context", ""),
         import_dependencies=state.get("import_dependencies", ""),
+        repo_structure=state.get("repo_structure", ""),
     )
 
     # -------------------------------------------------------------------------
@@ -281,6 +282,7 @@ def build_drafter_prompt(
     files_to_modify: list | None = None,
     project_context: str = "",
     import_dependencies: str = "",
+    repo_structure: str = "",
 ) -> str:
     """Build the prompt for Claude spec generation.
 
@@ -332,6 +334,7 @@ def build_drafter_prompt(
             completeness_issues=completeness_issues,
             repo_root=repo_root,
             files_to_modify=files_to_modify,
+            repo_structure=repo_structure,
         )
     else:
         return _build_initial_prompt(
@@ -441,6 +444,7 @@ def _build_revision_prompt(
     completeness_issues: list[str],
     repo_root: str,
     files_to_modify: list,
+    repo_structure: str = "",
 ) -> str:
     """Build prompt for spec revision based on feedback.
 
@@ -477,8 +481,9 @@ def _build_revision_prompt(
             issues_text += f"- **ERROR:** {issue}\n"
 
         # Show repo structure to help fix path-related issues
+        # Issue #490: Use cached repo_structure, fallback to inline call
         if repo_root:
-            repo_structure = get_repo_structure(repo_root)
+            repo_structure = repo_structure or get_repo_structure(repo_root)
             issues_text += "\n## ACTUAL REPOSITORY STRUCTURE\n\n"
             issues_text += (
                 "**Use ONLY these existing directories** "

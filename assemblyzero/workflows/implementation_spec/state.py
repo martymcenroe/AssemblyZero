@@ -156,3 +156,6 @@ class ImplementationSpecState(TypedDict, total=False):
     previous_review_feedback: str
     recovery_plan_path: str
     state_snapshot_path: str
+
+    # Issue #490: Cached repo structure (computed once, reused across iterations)
+    repo_structure: str

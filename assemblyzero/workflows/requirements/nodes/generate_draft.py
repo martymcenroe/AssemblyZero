@@ -231,9 +231,10 @@ def _build_prompt(
             revision_context += "\n"
 
             # Issue #339: Show actual repo structure so drafter can use real paths
+            # Issue #490: Use cached repo_structure from state, fallback to inline call
             target_repo = state.get("target_repo", "")
             if target_repo:
-                repo_structure = get_repo_structure(target_repo)
+                repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
                 revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
                 revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
                 revision_context += f"```\n{repo_structure}\n```\n\n"
@@ -278,10 +279,11 @@ START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
     else:
         # Initial draft mode
         # Issue #389: Include repo structure so drafter uses real paths
+        # Issue #490: Use cached repo_structure from state, fallback to inline call
         repo_context = ""
         target_repo = state.get("target_repo", "")
         if target_repo:
-            repo_structure = get_repo_structure(target_repo)
+            repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
             repo_context = f"""## TARGET REPOSITORY STRUCTURE
 
 **Use ONLY these existing directories** (or explicitly Add new ones in Section 2.1):
