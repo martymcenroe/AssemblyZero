@@ -379,38 +379,42 @@ def _get_review_criteria() -> str:
         Review criteria as formatted markdown string.
     """
     return """\
+## Pre-Validated (Do NOT Re-Check)
+
+Issue #495: Mechanical validation (N3) has already confirmed:
+- All files from LLD Section 2.1 are addressed in the spec
+- "Modify" files include current state excerpts
+- File paths exist in the target repository
+
+Focus your review on SEMANTIC quality, not structural completeness.
+
 ## Readiness Review Criteria
 
 Evaluate the Implementation Spec against these criteria:
 
-### 1. File Coverage (BLOCKING)
-- Does the spec address EVERY file listed in the LLD's Section 2.1?
-- Does each "Modify" file include a current state excerpt?
-- Does each "Add" file include the complete expected content or clear generation instructions?
-
-### 2. Specificity (BLOCKING)
+### 1. Specificity (BLOCKING)
 - Are change instructions specific enough to generate diffs?
 - Do instructions include before/after code snippets where applicable?
 - Are line-level references provided for modifications?
 - Would an AI agent need to ask clarifying questions?
 
-### 3. Concreteness (HIGH PRIORITY)
+### 2. Concreteness (HIGH PRIORITY)
 - Does every data structure have a concrete JSON/YAML example with realistic values?
 - Does every function signature have input/output examples with actual values?
 - Are there real code snippets (not pseudocode) for key implementations?
 
-### 4. Pattern Consistency (HIGH PRIORITY)
+### 3. Pattern Consistency (HIGH PRIORITY)
 - Do the patterns referenced actually exist in the codebase?
 - Are naming conventions consistent with the existing codebase?
 - Does the proposed implementation follow established project patterns?
 
-### 5. Feasibility (HIGH PRIORITY)
+### 4. Feasibility (HIGH PRIORITY)
 - Are the proposed changes technically achievable?
 - Are dependencies correctly identified?
 - Are there any circular dependencies or ordering issues?
 - Is the scope appropriate (not too large for a single implementation)?
 
-### 6. Test Guidance (SUGGESTION)
+### 5. Test Guidance (SUGGESTION)
 - Does the spec include test file locations and patterns?
 - Are test cases concrete enough to implement?"""
 
@@ -431,9 +435,6 @@ You MUST structure your review as follows:
 
 ## Summary
 {2-3 sentence overall assessment of the spec's readiness for implementation}
-
-## File Coverage Assessment
-{For each file in the LLD: covered/not covered, quality of instructions}
 
 ## Blocking Issues
 {If none: "No blocking issues found."}

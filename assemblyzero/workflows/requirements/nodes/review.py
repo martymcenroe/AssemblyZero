@@ -137,9 +137,6 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     else:
         verdict_path = None
 
-    # Append to verdict history
-    verdict_history.append(verdict_content)
-
     # Issue #492: Try structured JSON parsing first, fall back to regex
     structured = parse_structured_verdict(verdict_content) if is_gemini else None
     if structured:
@@ -162,11 +159,21 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         if updated_draft != current_draft:
             print("    Draft updated with resolved open questions")
 
+    # Issue #506: Extract actionable feedback — store structured data in state,
+    # full prose stays in the audit trail file only.
+    actionable_feedback = _extract_actionable_feedback(
+        verdict_content, lld_status, structured
+    )
+
     verdict_lines = len(verdict_content.splitlines()) if verdict_content else 0
-    print(f"    Verdict: {lld_status} ({verdict_lines} lines)")
+    feedback_lines = len(actionable_feedback.splitlines()) if actionable_feedback else 0
+    print(f"    Verdict: {lld_status} ({verdict_lines} lines, {feedback_lines} in feedback)")
     print(f"    Open Questions: {open_questions_status}")
     if verdict_path:
         print(f"    Saved: {verdict_path.name}")
+
+    # Issue #506: Store extracted feedback in verdict_history, not full prose
+    verdict_history.append(actionable_feedback)
 
     # Issue #511: Accumulate per-node cost
     node_costs = accumulate_node_cost(
@@ -180,7 +187,7 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     )
 
     return {
-        "current_verdict": verdict_content,
+        "current_verdict": actionable_feedback,  # Issue #506: structured feedback only
         "current_verdict_path": str(verdict_path) if verdict_path else "",
         "verdict_count": verdict_count,
         "verdict_history": verdict_history,
@@ -311,6 +318,144 @@ def _parse_verdict_status(verdict_content: str) -> str:
     else:
         # Default to BLOCKED if we can't determine status (safe choice)
         return "BLOCKED"
+
+
+def _extract_actionable_feedback(
+    verdict_content: str,
+    lld_status: str,
+    structured: dict | None,
+) -> str:
+    """Extract actionable feedback from verdict, discarding boilerplate.
+
+    Issue #506: Store only actionable feedback in state, not full prose.
+    Full prose stays in the audit trail file. This saves ~2,000 tokens
+    per iteration in the revision prompt.
+
+    For structured JSON verdicts (Issue #492): extracts summary,
+    blocking_issues, and suggestions.
+
+    For unstructured verdicts: regex-extracts Tier 1, Tier 2, Suggestions,
+    and Questions sections. Discards identity confirmation, pre-flight gate,
+    and coverage tables (already validated mechanically).
+
+    Args:
+        verdict_content: Full raw verdict text from reviewer.
+        lld_status: Parsed verdict status (APPROVED/BLOCKED).
+        structured: Parsed structured verdict dict, or None.
+
+    Returns:
+        Concise actionable feedback string.
+    """
+    if not verdict_content or not verdict_content.strip():
+        return f"Verdict: {lld_status}"
+
+    # Path 1: Structured JSON verdict
+    if structured:
+        parts: list[str] = []
+        summary = structured.get("summary", "")
+        if summary:
+            parts.append(f"**Summary:** {summary}")
+
+        blocking = structured.get("blocking_issues", [])
+        if blocking:
+            parts.append("## Blocking Issues")
+            for issue in blocking:
+                severity = issue.get("severity", "HIGH")
+                section = issue.get("section", "")
+                desc = issue.get("issue", "")
+                parts.append(f"- [{severity}] {section}: {desc}")
+
+        suggestions = structured.get("suggestions", [])
+        if suggestions:
+            parts.append("## Suggestions")
+            for s in suggestions:
+                parts.append(f"- {s}")
+
+        if parts:
+            return "\n".join(parts)
+        return f"Verdict: {lld_status}"
+
+    # Path 2: Unstructured markdown verdict — extract actionable sections
+    if lld_status == "APPROVED":
+        # For APPROVED, only suggestions and open questions matter
+        suggestions = _extract_section(verdict_content, "Tier 3")
+        if not suggestions:
+            suggestions = _extract_section(verdict_content, "SUGGESTIONS")
+        oq = _extract_section(verdict_content, "Open Questions Resolved")
+        parts = []
+        if oq:
+            parts.append(f"## Open Questions Resolved\n{oq}")
+        if suggestions:
+            parts.append(f"## Suggestions\n{suggestions}")
+        if parts:
+            return f"Verdict: APPROVED\n\n" + "\n\n".join(parts)
+        return "Verdict: APPROVED. No changes needed."
+
+    # For BLOCKED/REVISE: extract all actionable feedback
+    feedback_parts: list[str] = []
+
+    # Summary is useful context
+    summary = _extract_section(verdict_content, "Review Summary")
+    if summary:
+        feedback_parts.append(f"## Review Summary\n{summary}")
+
+    # Tier 1 blocking issues
+    tier1 = _extract_section(verdict_content, "Tier 1")
+    if tier1:
+        feedback_parts.append(f"## Tier 1: BLOCKING Issues\n{tier1}")
+
+    # Tier 2 high priority
+    tier2 = _extract_section(verdict_content, "Tier 2")
+    if tier2:
+        feedback_parts.append(f"## Tier 2: HIGH PRIORITY Issues\n{tier2}")
+
+    # Suggestions
+    tier3 = _extract_section(verdict_content, "Tier 3")
+    if not tier3:
+        tier3 = _extract_section(verdict_content, "SUGGESTIONS")
+    if tier3:
+        feedback_parts.append(f"## Suggestions\n{tier3}")
+
+    # Questions for orchestrator
+    questions = _extract_section(verdict_content, "Questions for Orchestrator")
+    if questions:
+        feedback_parts.append(f"## Questions for Orchestrator\n{questions}")
+
+    # Open questions resolved
+    oq = _extract_section(verdict_content, "Open Questions Resolved")
+    if oq:
+        feedback_parts.append(f"## Open Questions Resolved\n{oq}")
+
+    if feedback_parts:
+        return "\n\n".join(feedback_parts)
+
+    # Fallback: if no sections could be extracted, return the full content
+    # (e.g., for non-standard verdict formats from non-Gemini reviewers)
+    return verdict_content
+
+
+def _extract_section(content: str, section_name: str) -> str:
+    """Extract content from a named markdown section.
+
+    Issue #506: Shared section extraction for actionable feedback.
+
+    Args:
+        content: Full markdown content.
+        section_name: Name of the section to extract (without ## prefix).
+
+    Returns:
+        Section content (without the heading), or empty string if not found.
+    """
+    # Match section heading (## or ###) with the section name
+    pattern = (
+        rf"^##\s*#?\s*{re.escape(section_name)}[^\n]*\n"
+        rf"(.*?)"
+        rf"(?=^##\s|\Z)"
+    )
+    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
 
 
 def _check_open_questions_status(draft_content: str, verdict_content: str) -> str:

@@ -216,6 +216,8 @@ class TestingWorkflowState(TypedDict, total=False):
     parsed_scenarios: dict  # ParsedLLDTests from Section 10.0
     validation_result: dict  # TestValidationResult from mechanical validation
     scaffold_attempts: int  # Number of scaffold regeneration attempts
+    scaffold_validation_errors: list[str]  # Issue #500: errors from last validation
+    previous_scaffold_hash: str  # Issue #502: SHA-256 of last scaffold output
 
     # Issue #147: Completeness gate (N4b) - Anti-stub detection
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]

@@ -99,17 +99,29 @@ These issues PREVENT implementation from starting. Be exhaustive.
 
 ---
 
+## Pre-Validated (Do NOT Re-Check)
+
+**Issue #495:** The following have been confirmed by automated mechanical gates before this review. Do not re-check these — focus your review time on semantic and architectural judgment instead.
+
+- **Mandatory sections** (including Section 10.0 Test Plan): VERIFIED present
+- **File paths**: VERIFIED — all exist or have valid parent directories
+- **Requirement→test coverage**: VERIFIED ≥ 95%
+- **Test assertions**: VERIFIED — no vague assertions detected
+- **No human delegation**: VERIFIED — no manual verification keywords found
+
+---
+
 ## Tier 2: HIGH PRIORITY (Should Pass)
 
 These issues require fixes but don't block implementation. Be thorough.
 
 ### Architecture
 
-**Note (Issue #277):** File path existence and placeholder prefix validation are performed **mechanically** before this review. If an LLD reaches Gemini review, its paths have already passed automated checks. Focus your path review on **semantic correctness** (right module, right directory structure) rather than file existence.
+**Note (Issue #277):** File path existence is validated mechanically. Focus on **semantic correctness** (right module, right directory structure).
 
 | Check | Question |
 |-------|----------|
-| **Path Structure (CRITICAL)** | Do file paths in "Files Changed" match the actual project directory structure? **BLOCK if LLD uses `src/module/` when project uses `module/` (or vice versa).** Validate against existing codebase layout. Common error: LLDs defaulting to `src/` prefix when project doesn't use it. (Note: Mechanical validation already verifies paths exist; this check is for semantic correctness.) |
+| **Path Structure (CRITICAL)** | Do file paths in "Files Changed" match the actual project directory structure? **BLOCK if LLD uses `src/module/` when project uses `module/` (or vice versa).** (Note: Mechanical validation verifies paths exist; this check is for semantic correctness.) |
 | **Design Patterns** | Does the design follow established project patterns? |
 | **Dependency Chain** | Are blocking dependencies and parallel work identified? |
 | **Offline Development (CRITICAL)** | Can this be developed "on an airplane"? Is a Mock Mode defined for external dependencies (APIs, Auth, LLMs)? |
@@ -125,13 +137,10 @@ These issues require fixes but don't block implementation. Be thorough.
 
 ### Quality
 
+**Note (Issue #495):** Section existence, coverage calculation, assertion vagueness, and human delegation are all validated mechanically before this review. Focus on semantic test quality.
+
 | Check | Question |
 |-------|----------|
-| **Section 10.0 TDD Test Plan (CRITICAL)** | Does Section 10.0 contain a Test Plan table with Test ID, Description, Expected Behavior, and Status columns? Are tests marked as RED (not yet implemented)? Is coverage target ≥95% specified? LLDs without a TDD test plan BLOCK implementation. |
-| **Section 10 Test Scenarios (CRITICAL)** | Does Section 10 contain a structured table of test scenarios with columns for: ID/Name, Scenario/Description, Type (unit/integration/e2e), and Expected behavior? LLDs without parseable test scenarios BLOCK the TDD workflow. |
-| **Requirement Coverage (CRITICAL - 95% threshold)** | You MUST output a **Requirement Coverage Table** (see Output Format below). Extract EVERY numbered requirement from Section 3. Map each to test scenario(s) from Section 10. Calculate coverage = (requirements with tests / total requirements). **BLOCK if coverage < 95%.** Do NOT make qualitative assessments - count explicitly. |
-| **Test Assertions (CRITICAL)** | Does every test scenario have explicit assertions or expected outcomes? **BLOCK if any test is vague** (e.g., "verify it works", "check behavior", "test the feature"). Each test must specify WHAT is checked and WHAT the expected result is. |
-| **No Human Delegation (CRITICAL)** | Do any tests delegate to human verification? **BLOCK if any test says:** "manual verification", "visual check", "observe behavior", "ask user", "human review", or requires judgment to determine pass/fail. ALL tests must be fully automated. |
 | **Test Strategy (CRITICAL)** | Is the test strategy defined? Does it rely on automated assertions, NOT manual "vibes" verification? |
 | **Willison Protocol** | Will tests fail if the implementation is reverted? (Tests must prove the feature works, not just that it doesn't crash.) |
 | **Edge Cases** | Are edge cases covered: empty inputs, invalid inputs, boundary conditions, error conditions? (Warning if missing, not blocking.) |
@@ -173,21 +182,6 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 - [x] ~~Question 2~~ **RESOLVED: Your answer.**
 {If no open questions, write "No open questions found in Section 1."}
 
-## Requirement Coverage Analysis (MANDATORY)
-
-**Section 3 Requirements:**
-| # | Requirement | Test(s) | Status |
-|---|-------------|---------|--------|
-| 1 | {Requirement text from Section 3} | {test_XXX, test_YYY} | ✓ Covered |
-| 2 | {Requirement text} | - | **GAP** |
-{List ALL requirements from Section 3 - do not skip any}
-
-**Coverage Calculation:** {X} requirements covered / {Y} total = **{Z}%**
-
-**Verdict:** {PASS if ≥95%, BLOCK if <95%}
-
-{If any GAP exists, list the missing test scenarios that must be added}
-
 ## Tier 1: BLOCKING Issues
 {If none, write "No blocking issues found. LLD is approved for implementation."}
 
@@ -214,7 +208,6 @@ I am Gemini 3 Pro, acting as Senior Software Architect & AI Governance Lead.
 
 ### Quality
 - [ ] {Issue description + recommendation}
-- [ ] **Requirement Coverage:** {PASS or BLOCK based on coverage calculation above. If BLOCK, this is a Tier 2 issue that prevents approval.}
 
 ## Tier 3: SUGGESTIONS
 {Brief bullet points only}
@@ -311,6 +304,7 @@ The LLD proposes a batch file cleanup utility but contains critical Safety block
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-02-28 | 2.7.0 | Removed 5 redundant checks (section existence, path validity, coverage calc, assertion vagueness, human delegation) — all pre-validated by mechanical gates. Added Pre-Validated preamble. Issue #495. |
 | 2026-02-04 | 2.6.0 | Added note that path existence is validated mechanically before Gemini review. Gemini should focus on semantic path correctness. Issue #277. |
 | 2026-02-03 | 2.5.0 | Added Open Questions Protocol. Gemini must answer unchecked questions in Section 1 before approving. Issue #248. |
 | 2026-02-03 | 2.4.0 | Added TDD Test Plan check (Section 10.0) to Quality tier. Verifies tests are marked RED before implementation and coverage target ≥95% is specified. Issue #209. |

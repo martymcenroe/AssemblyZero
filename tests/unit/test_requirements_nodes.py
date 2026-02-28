@@ -120,6 +120,8 @@ class TestGenerateDraftNode:
             success=True,
             response="# Generated Draft\n\nContent here.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -190,6 +192,8 @@ class TestGenerateDraftNode:
             success=True,
             response="# Draft",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -326,6 +330,8 @@ class TestReviewNode:
             success=True,
             response="## Verdict: APPROVED\n\nAll requirements met.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -361,6 +367,8 @@ class TestReviewNode:
             success=True,
             response="APPROVED",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -394,6 +402,8 @@ class TestReviewNode:
             success=True,
             response="BLOCKED: Missing tests",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -499,6 +509,8 @@ class TestGenerateDraftNodeAdditional:
             success=True,
             response="# LLD for Feature\n\nDesign here.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -551,6 +563,8 @@ class TestGenerateDraftNodeAdditional:
             success=True,
             response="# Revised Draft\n\nFixed issues.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -633,6 +647,8 @@ class TestReviewNodeAdditional:
             success=True,
             response="[x] **APPROVED** - Issue looks good.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -666,6 +682,8 @@ class TestReviewNodeAdditional:
             success=True,
             response="BLOCKED: Missing required sections.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1354,6 +1372,8 @@ class TestReviewNodeCoverage:
             success=True,
             response="APPROVED",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1444,6 +1464,8 @@ class TestReviewNodeCoverage:
             success=True,
             response="APPROVED",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1475,6 +1497,8 @@ class TestReviewNodeCoverage:
             success=True,
             response="[x] **DISCUSS** - Need clarification on requirements",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1507,6 +1531,8 @@ class TestReviewNodeCoverage:
             success=True,
             response="[X] **REVISE** - Missing error handling section",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1539,6 +1565,8 @@ class TestReviewNodeCoverage:
             success=True,
             response="Some random response without clear verdict markers",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1575,6 +1603,8 @@ class TestGenerateDraftNodeCoverage:
             success=True,
             response="# Draft",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1633,6 +1663,8 @@ class TestGenerateDraftNodeCoverage:
             success=True,
             response="# Draft",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1664,6 +1696,8 @@ class TestGenerateDraftNodeCoverage:
             success=True,
             response="# LLD Draft",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 
@@ -1701,6 +1735,8 @@ class TestGenerateDraftNodeCoverage:
             success=True,
             response="# Revised Draft",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_get_provider.return_value = mock_provider
 

@@ -885,6 +885,15 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
 
+    # Issue #500: Log previous validation errors if re-scaffolding
+    scaffold_validation_errors = state.get("scaffold_validation_errors", [])
+    if scaffold_validation_errors:
+        print(f"    Previous validation errors ({len(scaffold_validation_errors)}):")
+        for err in scaffold_validation_errors[:5]:
+            print(f"      - {err}")
+        if len(scaffold_validation_errors) > 5:
+            print(f"      ... and {len(scaffold_validation_errors) - 5} more")
+
     # --------------------------------------------------------------------------
     # GUARD: Validate scenarios
     # --------------------------------------------------------------------------

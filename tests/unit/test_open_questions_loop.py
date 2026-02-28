@@ -357,6 +357,8 @@ class TestStateHasOpenQuestionsStatus:
                 success=True,
                 response="[x] APPROVED",
                 error_message=None,
+                input_tokens=0,
+                output_tokens=0,
             )
             mock_get.return_value = mock_provider
 

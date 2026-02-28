@@ -3,11 +3,14 @@
 Issue #335: Validates that generated tests are real executable tests,
 not stubs with `assert False` placeholders.
 
+Issue #502: Hash-based stagnation detection for scaffold loop.
+
 This node runs after scaffold_tests and before verify_red to catch
 stub tests early and route back for regeneration.
 """
 
 import ast
+import hashlib
 import logging
 import re
 from typing import Any, Literal
@@ -300,10 +303,23 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # Increment attempts if validation failed
     new_attempts = scaffold_attempts + 1 if not is_valid else scaffold_attempts
 
-    return {
+    # Issue #500: Pass validation errors back so scaffold node can use them
+    result_dict: dict[str, Any] = {
         "validation_result": validation_result,
         "scaffold_attempts": new_attempts,
     }
+    if not is_valid:
+        result_dict["scaffold_validation_errors"] = all_errors
+    else:
+        result_dict["scaffold_validation_errors"] = []  # Clear on success
+
+    # Issue #502: Store hash for stagnation detection
+    if generated_tests:
+        result_dict["previous_scaffold_hash"] = hashlib.sha256(
+            generated_tests.encode()
+        ).hexdigest()
+
+    return result_dict
 
 
 def _validate_non_pytest(
@@ -370,6 +386,7 @@ def _validate_non_pytest(
             "real_test_count": 0,
         },
         "scaffold_attempts": new_attempts,
+        "scaffold_validation_errors": all_errors if not is_valid else [],  # Issue #500
     }
 
 
@@ -386,6 +403,10 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
     - "continue": Validation passed, proceed to verify_red
     - "escalate": Validation failed, attempts >= 3, use Claude
 
+    Issue #502: Hash-based stagnation detection. If scaffold output is
+    identical to the previous attempt, escalate immediately instead of
+    wasting another generation cycle.
+
     Args:
         state: Workflow state with validation_result and scaffold_attempts.
 
@@ -398,6 +419,15 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
 
     if is_valid:
         return "continue"
+
+    # Issue #502: Hash-based stagnation detection
+    generated_tests = state.get("generated_tests", "")
+    if generated_tests:
+        current_hash = hashlib.sha256(generated_tests.encode()).hexdigest()
+        previous_hash = state.get("previous_scaffold_hash", "")
+        if previous_hash and current_hash == previous_hash:
+            print("    [STAGNANT] Scaffold produced identical output. Escalating immediately.")
+            return "escalate"
 
     # Max 3 attempts before escalation
     if scaffold_attempts >= 3:

@@ -4445,6 +4445,8 @@ class TestReviewTestPlanCoverageGaps:
 [x] **APPROVED** - Test plan is ready for implementation
 """
             error_message = ""
+            input_tokens = 0
+            output_tokens = 0
 
         class MockGeminiClient:
             def __init__(self, model=None):
@@ -4510,6 +4512,8 @@ class TestReviewTestPlanCoverageGaps:
 2. Fix assertion issues
 """
             error_message = ""
+            input_tokens = 0
+            output_tokens = 0
 
         class MockGeminiClient:
             def __init__(self, model=None):

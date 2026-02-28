@@ -1277,6 +1277,8 @@ class TestGenerateSpec:
             success=True,
             response="# Implementation Spec: Feature\n\n## 1. Overview\n\nDetailed spec.",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_provider.return_value = drafter
 
@@ -1297,7 +1299,7 @@ class TestGenerateSpec:
         """Drafter failure → error returned."""
         mock_template.return_value = "# Template"
         drafter = Mock()
-        drafter.invoke.return_value = Mock(success=False, response=None, error_message="Timeout")
+        drafter.invoke.return_value = Mock(success=False, response=None, error_message="Timeout", input_tokens=0, output_tokens=0)
         mock_provider.return_value = drafter
 
         base_state["lld_content"] = SAMPLE_LLD_APPROVED
@@ -1315,6 +1317,7 @@ class TestGenerateSpec:
         drafter = Mock()
         drafter.invoke.return_value = Mock(
             success=True, response="# Revised Spec\n\n## 1. Overview", error_message=None,
+            input_tokens=0, output_tokens=0,
         )
         mock_provider.return_value = drafter
 
@@ -1558,6 +1561,8 @@ class TestReviewSpec:
             success=True,
             response="## Verdict\n[X] **APPROVED** - Ready\n",
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_provider.return_value = reviewer
 
@@ -1581,6 +1586,8 @@ class TestReviewSpec:
                 "## Verdict\n[X] **REVISE** - Fix issues\n"
             ),
             error_message=None,
+            input_tokens=0,
+            output_tokens=0,
         )
         mock_provider.return_value = reviewer
 
