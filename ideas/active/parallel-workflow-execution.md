@@ -1,103 +1,82 @@
-# Parallel Workflow Execution
+# Brief: Parallel Workflow Execution
 
-## Problem Statement
+**Status:** Active
+**Created:** 2026-02-01
+**Updated:** 2026-02-28
+**Effort:** Low (brief rewrite) | Medium (implementation — frozen)
+**Priority:** Medium
+**Tracking Issue:** #137
 
-The current `--all` option for both LLD and Issue workflows processes items **sequentially**. This is safe but slow - processing 10 LLDs could take hours if each requires multiple Gemini review cycles.
+---
 
-Parallel execution would dramatically improve throughput, but requires solving several concurrency challenges.
+## Problem
 
-## Current Constraints Preventing Parallel Execution
+The `--all` flag on workflow tools processes issues sequentially. With the credential pool limited to 4 Gemini credentials, running N workflows in parallel risks exhausting all credentials simultaneously, leaving the entire pool depleted with no fallback. Issue #137 is deep-frozen for this reason.
 
-### 1. SQLite Single-Writer Limitation (CRITICAL)
+## What Already Exists — Infrastructure Is 80% Built
 
-Both workflows use SQLite for LangGraph checkpointing:
-- `~/.assemblyzero/lld_workflow.db`
-- `~/.assemblyzero/issue_workflow.db`
+The parallel execution infrastructure is fully implemented:
 
-SQLite allows only ONE writer at a time. Concurrent workflows would cause "database is locked" errors.
+| Module | Path | Purpose |
+|--------|------|---------|
+| `coordinator.py` | `workflows/parallel/coordinator.py` | Main parallel coordination — process pooling, result aggregation |
+| `credential_coordinator.py` | `workflows/parallel/credential_coordinator.py` | Credential lease/release across parallel workers |
+| `input_sanitizer.py` | `workflows/parallel/input_sanitizer.py` | Sanitize inputs for parallel execution |
+| `output_prefixer.py` | `workflows/parallel/output_prefixer.py` | Prefix console output per worker (avoid interleaving) |
 
-**Possible Solutions:**
-- Per-workflow isolated databases: `lld_workflow_{issue_number}.db`
-- Switch to PostgreSQL/Redis for concurrent access
-- Use SQLite WAL mode with write queue coordination
+Additionally:
+- **`tools/batch-workflow.sh`** — shell script for batch processing (sequential)
+- **`gemini-rotate.py`** — credential rotation with exhaustion tracking
+- **Per-repo workflow databases** — SQLite isolation already implemented (Issue #78)
 
-### 2. Credential Pool Contention (HIGH)
+## The Gap
 
-Multiple parallel workflows would compete for the same Gemini credential pool:
-- Faster exhaustion of quotas
-- Need fair scheduling across workflows
-- Need to propagate `CredentialPoolExhaustedException` cleanly
+The infrastructure modules exist but aren't wired into the CLI entry points:
 
-**Possible Solutions:**
-- Per-workflow credential reservation
-- Global coordinator that allocates credentials to workflows
-- Reduce parallelism when pool runs low
+1. **No `--parallel N` flag** on `run_requirements_workflow.py` or `run_implement_from_lld.py`
+2. **No per-workflow SQLite DB isolation** at the process level (the modules support it, but the CLI doesn't create isolated DBs per worker)
+3. **`batch-workflow.sh` doesn't use the parallel coordinator** — it loops sequentially
+4. **Credential exhaustion risk is unmitigated** — with 4 credentials and N parallel workers, all credentials can exhaust simultaneously. No backpressure mechanism exists.
 
-### 3. Console Output Collision (MEDIUM)
+## Why #137 Is Frozen
 
-Multiple workflows printing to stdout simultaneously creates chaos.
+The credential pool is the bottleneck. With 4 credentials:
+- **N=2:** survivable — 2 credentials per worker, rotation can absorb spikes
+- **N=3:** risky — credential contention likely
+- **N=4+:** guaranteed exhaustion — each worker grabs a credential, all hit quota, no fallback
 
-**Possible Solutions:**
-- Prefix each line with workflow ID: `[LLD-42] >>> Executing: N1_design`
-- Write to separate log files, show only summary on console
-- Use curses/rich for split-pane display
+Unfreezing requires one of:
+- More credentials (costly, limited by Google's free tier)
+- Smarter backpressure (worker pauses when credential pool is thin)
+- Workflow-level credential budgeting (each workflow gets a quota slice, not unlimited)
 
-### 4. JSONL Audit Log Interleaving (LOW)
+## Proposed Solution (When Unfrozen)
 
-`workflow-audit.jsonl` could have interleaved entries if two workflows write simultaneously.
+1. Add `--parallel N` flag to `run_requirements_workflow.py` and `run_implement_from_lld.py`
+2. Wire CLI to `parallel/coordinator.py` for process management
+3. Create isolated SQLite DB per worker process (temp directory, merge results on completion)
+4. Implement backpressure: if available credentials < N, reduce parallelism dynamically
+5. Update `batch-workflow.sh` to call the Python coordinator instead of looping
 
-**Possible Solutions:**
-- Per-workflow audit files (already done for lineage dirs)
-- File locking around appends
-- Use a logging queue
+## Integration Points
 
-## Proposed Architecture
+- **`tools/run_requirements_workflow.py`** — add `--parallel N` flag
+- **`tools/run_implement_from_lld.py`** — add `--parallel N` flag
+- **`tools/batch-workflow.sh`** — replace sequential loop with coordinator call
+- **`gemini-rotate.py`** — credential pool size determines max safe parallelism
 
-### Option A: Process-Level Isolation
+## Acceptance Criteria
 
-Each workflow runs as a separate subprocess with:
-- Its own checkpoint database
-- Its own log file
-- Prefixed console output
-- Shared credential pool with reservation system
+- [ ] `--parallel N` flag on both workflow CLI tools
+- [ ] Each parallel worker uses an isolated SQLite database
+- [ ] Console output is prefixed per worker (no interleaving)
+- [ ] Credential coordinator prevents all-credential exhaustion
+- [ ] Backpressure reduces parallelism when credential pool is thin
+- [ ] Results are aggregated after all workers complete
 
-```python
-# Parent process coordinates
-pool = ProcessPoolExecutor(max_workers=3)
-futures = [pool.submit(run_workflow, issue) for issue in issues]
-```
+## Dependencies & Cross-References
 
-### Option B: Thread-Level with Database Isolation
-
-Single process, multiple threads, each with isolated resources:
-- Per-thread checkpoint database
-- Thread-local logging
-- Shared credential manager with thread-safe access
-
-### Option C: Worker Queue Architecture
-
-More sophisticated:
-- Worker processes pull from a queue
-- Central coordinator manages checkpoint storage
-- Results written to shared output directory
-
-## Recommendation
-
-Start with **Option A (Process Isolation)** as it's simplest:
-1. Each subprocess uses `ASSEMBLYZERO_WORKFLOW_DB` env var for isolated DB
-2. Console output prefixed with `[{issue}]`
-3. Credential pool already has thread-safe rotation
-4. Easy to limit parallelism (e.g., max 3 concurrent)
-
-## Success Criteria
-
-1. `--all --parallel` or `--parallel N` flag to enable
-2. N workflows run concurrently (default N=3)
-3. Clear per-workflow progress indication
-4. Graceful handling of credential exhaustion (pause all, provide resume)
-5. Summary report at end with all results
-
-## Related Issues
-
-- This brief extends the sequential `--all` implementation
-- Builds on existing `CredentialPoolExhaustedException` handling
+- **Issue #137** — tracking issue (deep-frozen)
+- **Issue #78** — per-repo workflow databases (done — foundation for per-worker isolation)
+- **`workflows/parallel/`** — existing infrastructure modules
+- **`gemini-rotate.py`** — credential pool management

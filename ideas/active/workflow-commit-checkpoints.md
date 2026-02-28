@@ -1,115 +1,65 @@
-# Workflow Commit Checkpoints
+# Brief: Workflow Commit Checkpoints
+
+**Status:** Active
+**Created:** 2026-02-01
+**Updated:** 2026-02-28
+**Effort:** Medium
+**Priority:** High
+**Tracking Issue:** None
+
+---
 
 ## Problem
 
-On 2026-01-31, 6,114 lines of working code (the unified governance workflow) was written, tested, and run - but never committed. When the worktree was deleted, the code became dangling objects in git's lost-and-found. It was recovered only by accident through `git fsck --lost-found`.
+On 2026-01-31, 6,114 lines of working code were lost when a worktree was deleted before code had been committed. The code existed only in the working tree — LangGraph's SqliteSaver checkpoints preserve *graph state* (which node ran, what the LLM returned), not uncommitted file changes. When the worktree was removed, the code vanished with it.
 
-**Root cause:** LLMs execute tasks but lack persistent memory. Without explicit commit gates, an LLM can complete work, report success, and move on - leaving uncommitted code that disappears when the session ends or the worktree is removed.
+This remains an open risk. The TDD workflow (`workflows/testing/graph.py`) generates code across multiple nodes — scaffold tests in N2, implement code in N4, verify green in N5 — and none of these nodes commit to git. A crash, timeout, or premature cleanup at any point loses everything since the last human commit.
+
+## What Already Exists
+
+- **SqliteSaver checkpoints** — save LangGraph state (node outputs, routing decisions), enabling `--resume`. Do NOT save uncommitted file changes.
+- **`workflows/testing/graph.py`** — TDD workflow with nodes N0–N9 plus HALT. Code generation happens in N2 (scaffold), N4 (implement), N5 (verify green).
+- **`tools/run_implement_from_lld.py`** — entry point for implementation workflows; supports `--no-worktree`.
+- **`tools/orchestrate.py`** — end-to-end pipeline (Issue → LLD → Spec → Impl → PR) via `stages.py`.
+- **3,788 tests** across unit, integration, adversarial, e2e, and other categories.
+
+## The Gap
+
+No workflow node commits code to git. The only commits happen when a human (or the orchestrator's PR stage) explicitly runs `git commit`. Between those points, all generated code is ephemeral.
 
 ## Proposed Solution
 
-Add explicit commit checkpoints to the governance workflow that:
-1. Force commits at defined points (not optional, not "will do later")
-2. Verify the commit succeeded before proceeding
-3. Push to remote immediately (local commits can still be lost)
+Add explicit `git commit` checkpoints at three points in the TDD workflow:
 
-### Checkpoint Locations
+| Checkpoint | After Node | What It Saves |
+|-----------|-----------|--------------|
+| CP1: post-scaffold | N2 (scaffold_tests) | Generated test files |
+| CP2: post-implementation | N4 (implement_code) | Implementation code |
+| CP3: post-green | N5 (verify_green_phase) | Green state (tests + code passing) |
 
-| Checkpoint | Trigger | What Gets Committed |
-|------------|---------|---------------------|
-| CP1: Post-Scaffold | After creating new files/directories | Empty files with structure |
-| CP2: Post-Implementation | After writing functional code | Working code (may not pass tests) |
-| CP3: Post-Test-Pass | After tests pass | Tested code |
-| CP4: Post-Review | After Gemini approval | Final reviewed code |
+Each checkpoint:
+1. `git add` only files in the repo's working tree (not `.assemblyzero/` or temp files)
+2. `git commit` with a `[CP:NAME]` prefix (e.g., `[CP:post-scaffold] issue #123: scaffold tests`)
+3. `git push` to the remote branch immediately (protects against local disk loss)
 
-### Implementation
+Checkpoints are commits on the feature branch — they get squashed on merge and leave no trace in `main`.
 
-Add to `run_governance_workflow.py`:
+## Integration Points
 
-```python
-def commit_checkpoint(repo: Path, checkpoint: str, message: str) -> bool:
-    """Force a commit at a workflow checkpoint.
-
-    Returns False if nothing to commit (which is fine).
-    Raises if commit fails.
-    """
-    # Check for uncommitted changes
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=repo, capture_output=True, text=True
-    )
-
-    if not result.stdout.strip():
-        print(f"    [CP:{checkpoint}] No changes to commit")
-        return False
-
-    # Stage all changes in the repo
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-
-    # Commit with checkpoint marker
-    full_message = f"[{checkpoint}] {message}"
-    subprocess.run(
-        ["git", "commit", "-m", full_message],
-        cwd=repo, check=True
-    )
-
-    # Push immediately - local commits can still be lost
-    subprocess.run(
-        ["git", "push", "-u", "origin", "HEAD"],
-        cwd=repo, check=True
-    )
-
-    print(f"    [CP:{checkpoint}] Committed and pushed: {message}")
-    return True
-```
-
-### Workflow Integration
-
-```
-N0: load_input
-    |
-N1: generate_draft
-    |
-    +-- CP1: commit_checkpoint("POST-SCAFFOLD", "scaffold created")
-    |
-N2: human_gate_draft (if enabled)
-    |
-N3: review
-    |
-    +-- CP2: commit_checkpoint("POST-DRAFT", "draft v{n} complete")
-    |
-N4: [loop back to N1 if BLOCKED]
-    |
-N5: finalize
-    |
-    +-- CP3: commit_checkpoint("POST-APPROVE", "approved by Gemini")
-```
-
-### CLI Flag
-
-Add `--no-checkpoint` flag for testing/mock mode only:
-
-```bash
-# Normal usage - checkpoints enforced
-python tools/run_governance_workflow.py --type lld --issue 42
-
-# Testing only - skip checkpoints
-python tools/run_governance_workflow.py --type lld --issue 42 --mock --no-checkpoint
-```
+- **TDD workflow graph** (`workflows/testing/graph.py`) — checkpoints are new nodes inserted after N2, N4, N5
+- **Orchestrator** (`tools/orchestrate.py`) — no changes needed; orchestrator calls the TDD workflow which handles its own checkpoints
+- **Worktree cleanup** — with checkpoints, `git worktree remove` is safe even mid-workflow
 
 ## Acceptance Criteria
 
-- [ ] Workflow refuses to proceed past checkpoint if commit fails
-- [ ] Each checkpoint pushes to remote (not just local commit)
-- [ ] Checkpoint commits have `[CP:NAME]` prefix for easy identification
-- [ ] `--no-checkpoint` flag exists but only works with `--mock`
-- [ ] Attempting `--no-checkpoint` without `--mock` prints warning and ignores flag
+- [ ] Code generated in N2 survives a simulated crash (kill process, verify code recoverable from git)
+- [ ] Code generated in N4 survives a simulated crash
+- [ ] Checkpoint commits use `[CP:NAME]` prefix and are squash-mergeable
+- [ ] Checkpoint commits push to remote immediately
+- [ ] No checkpoint touches files outside the repo working tree
+- [ ] Existing `--resume` behavior (SqliteSaver) is unaffected
 
-## Why This Matters
+## Dependencies & Cross-References
 
-LLMs are like brilliant colleagues with amnesia. They can build incredible things, but without explicit save points, their work exists only in the moment. Commit checkpoints are the stone tablets - they make the work permanent regardless of what happens to the session, the worktree, or the LLM's context.
-
-## Related
-
-- Issue #101: Unified Governance Workflow
-- Incident: 2026-01-31 lost code recovery via `git fsck`
+- **Issue #247** — two-tier commit validation with hourly orphan detection. Complementary: #247 validates commits exist; this brief creates them.
+- **Brief: `city-watch-regression-guardian.md`** — Watch verifies test health; checkpoints ensure code exists to test.

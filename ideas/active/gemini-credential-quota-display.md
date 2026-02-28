@@ -1,135 +1,70 @@
-# Brief: Gemini Credential Quota & Usage Display
+# Brief: Gemini Credential Quota Display
+
+**Status:** Active
+**Created:** 2026-02-02
+**Updated:** 2026-02-28
+**Effort:** Low
+**Priority:** Low
+**Tracking Issue:** None
+
+---
 
 ## Problem
 
-The current `gemini-test-credentials.py` script only tests whether credentials work. It doesn't show:
-- Current quota usage (requests made today)
-- Rate limits (requests per minute/day)
-- Time until quota resets
-- Available capacity
-- Account tier (free/paid)
+The credential pool has 4 credentials (1 OAuth + 3 API keys). When a workflow fails with a quota error, diagnosing which credential is exhausted and when it resets requires manual API calls or guesswork. The rotation system tracks exhaustion events but doesn't expose quota health in a human-readable way.
 
-When managing multiple API keys for rotation, operators need visibility into quota health to:
-1. Know which keys are near exhaustion before they fail
-2. Plan when to add more keys
-3. Debug rotation failures ("why did all keys fail?")
+## What Already Exists
 
-## Proposed Enhancement
+- **`tools/gemini-test-credentials-v2.py`** — tests credentials using the `google.genai` SDK. Validates that each credential can make a successful API call. This is the right foundation to enhance.
+- **`tools/gemini-rotate.py`** — automatic credential rotation. Tracks quota exhaustion in `~/.assemblyzero/gemini-rotation-state.json`. Has a `--status` subcommand showing current rotation state.
+- **`~/.assemblyzero/gemini-credentials.json`** — credential configuration file (4 credentials).
+- **`~/.assemblyzero/gemini-rotation-state.json`** — rotation state including exhaustion timestamps and capacity tracking.
 
-Extend `gemini-test-credentials.py` to query and display quota/usage metadata from the Gemini API.
+## The Gap
 
-### New Output Format
+- `gemini-test-credentials-v2.py` tests if credentials *work* but not how much quota *remains*
+- `gemini-rotate.py --status` shows rotation state (which credential is active, which are exhausted) but not quota numbers
+- No single command answers: "How much quota do I have left across all credentials, and when do exhausted ones reset?"
+
+## Proposed Solution
+
+Enhance `gemini-test-credentials-v2.py` to add a `--status` mode that combines:
+
+1. **Credential health** — existing test (can it make an API call?)
+2. **Rotation state** — read from `gemini-rotation-state.json` (which are exhausted, when did exhaustion occur)
+3. **Quota estimate** — based on exhaustion timestamps and known reset windows (Gemini free tier resets daily at midnight PT)
+
+### Output Example
 
 ```
-============================================================
-GEMINI CREDENTIAL TEST
-Testing with model: gemini-2.0-flash
-============================================================
-
-Testing: oauth-primary [oauth] [ENABLED]
---------------------------------------------------
-  PASS OK - Response: Hello to you.
-  Quota: 1,432 / 1,500 requests today (95%)
-  Rate Limit: 15 RPM, 1,500 RPD
-  Resets: 2026-02-03 00:00 UTC (in 5h 23m)
-  Tier: Free
-
-Testing: api-key-1 (account@example.com) [api_key] [ENABLED]
---------------------------------------------------
-  PASS OK - Response: Hello to you.
-  Quota: 89 / 1,500 requests today (6%)
-  Rate Limit: 15 RPM, 1,500 RPD
-  Resets: 2026-02-03 00:00 UTC (in 5h 23m)
-  Tier: Free
-
-============================================================
-SUMMARY
-============================================================
-Total credentials: 3
-Working: 3
-Working + Enabled: 3
-
-QUOTA HEALTH:
-  oauth-primary:  [##########] 95% - NEAR LIMIT
-  api-key-1:      [#         ]  6% - healthy
-  api-key-2:      [###       ] 28% - healthy
-
-Next reset: 2026-02-03 00:00 UTC (in 5h 23m)
+Credential Status (2026-02-28 14:30 UTC)
+─────────────────────────────────────────
+  oauth-main     OK healthy    last exhausted: never
+  apikey-1       OK healthy    last exhausted: 2026-02-27 08:15
+  apikey-2       XX exhausted  since: 2026-02-28 13:45 (resets ~midnight PT)
+  apikey-3       OK healthy    last exhausted: 2026-02-28 02:00
+─────────────────────────────────────────
+  Pool: 3/4 available
 ```
 
-## Research Needed
+### Retirement of v1
 
-1. **What quota info does `google.genai` SDK expose?**
-   - Check `response` metadata after API calls
-   - Look for `usage_metadata`, `quota_remaining`, headers
-   - Check if there's a dedicated quota/limits endpoint
+After enhancing v2, retire `gemini-test-credentials.py` (v1) — it uses the older SDK and duplicates functionality.
 
-2. **What does Google Cloud Console API expose?**
-   - Cloud Monitoring API for quota metrics
-   - May require additional API enablement
-   - May have latency (not real-time)
+## Integration Points
 
-3. **What do the error messages contain?**
-   - 429 errors often include `Retry-After` header
-   - May include quota reset time in error body
-   - Parse existing rotation state file for reset times
-
-## Implementation Options
-
-### Option A: Parse Response Metadata (Low effort)
-- Check if `google.genai` responses include usage metadata
-- Parse any headers or metadata returned
-- Pros: No additional API calls
-- Cons: May not expose quota limits
-
-### Option B: Dedicated Quota Endpoint (Medium effort)
-- Use Google Cloud APIs to query quota
-- `cloudquotas.googleapis.com` or similar
-- Pros: Accurate, real-time
-- Cons: Requires additional API enablement, may not work for free-tier keys
-
-### Option C: Track Usage Locally (Low effort)
-- Count requests in `gemini-api.jsonl`
-- Estimate based on known limits
-- Pros: Works without API changes
-- Cons: Only tracks our usage, not total account usage
-
-### Option D: Hybrid Approach (Recommended)
-- Parse reset times from rotation state file (already tracked)
-- Count local usage from API log
-- Display whatever metadata the SDK exposes
-- Gracefully degrade if info not available
+- **`gemini-rotate.py`** — reads the same rotation state file; no changes needed to rotation logic
+- **Watch** (`city-watch-regression-guardian.md`) — future: credential health could be a pre-flight check before starting expensive workflows
 
 ## Acceptance Criteria
 
-1. Shows quota usage percentage for each credential
-2. Shows time until quota resets
-3. Shows rate limit info (RPM/RPD) if available
-4. Visual indicator for credentials near limit (>80%)
-5. Summary section with quota health overview
-6. Graceful handling when quota info unavailable
+- [ ] `--status` mode displays health and exhaustion state for all credentials
+- [ ] Reads rotation state from `gemini-rotation-state.json` (no extra API calls for exhausted credentials)
+- [ ] Shows estimated reset time for exhausted credentials
+- [ ] Pool summary (N/M available)
+- [ ] v1 script (`gemini-test-credentials.py`) removed after v2 enhancement
 
-## Files to Modify
+## Dependencies & Cross-References
 
-| File | Change |
-|------|--------|
-| `tools/gemini-test-credentials.py` | Add quota display logic |
-| `docs/runbooks/0905-gemini-credentials.md` | Update example output |
-
-## Dependencies
-
-- May require `google-cloud-quotas` package for full quota API access
-- Current `google-genai` package may expose some metadata
-
-## Related
-
-- Issue #53 migrated to new `google.genai` SDK
-- `~/.assemblyzero/gemini-rotation-state.json` tracks exhaustion times
-- `~/.assemblyzero/gemini-api.jsonl` tracks all API events
-
-## Next Steps
-
-1. Research what `google.genai` SDK exposes in response metadata
-2. Check Google Cloud Quotas API availability for free-tier keys
-3. Prototype Option D (hybrid approach)
-4. Create issue if pursuing this enhancement
+- **`gemini-rotate.py`** — rotation state file is the data source
+- **`gemini-test-credentials-v2.py`** — the file being enhanced
