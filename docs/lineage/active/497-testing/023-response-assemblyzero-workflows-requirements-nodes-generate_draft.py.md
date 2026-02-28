@@ -1,3 +1,4 @@
+```python
 """N1: Generate draft node for Requirements Workflow.
 
 Issue #101: Unified Requirements Workflow
@@ -470,3 +471,4 @@ def validate_draft_structure(content: str) -> str | None:
         return f"BLOCKED: {len(unchecked)} unresolved open questions - resolve before review"
 
     return None
+```

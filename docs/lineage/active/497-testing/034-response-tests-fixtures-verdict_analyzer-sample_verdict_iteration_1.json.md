@@ -1,0 +1,12 @@
+
+
+```json
+{
+    "verdict": "BLOCKED",
+    "blocking_issues": [
+        {"id": 1, "description": "Missing error handling for API timeout"},
+        {"id": 2, "description": "No rollback plan for database migration"},
+        {"id": 3, "description": "Security section omits OWASP references"}
+    ]
+}
+```
