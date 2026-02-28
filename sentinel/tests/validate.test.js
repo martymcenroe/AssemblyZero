@@ -88,6 +88,13 @@ describe("validatePRBody", () => {
       expect(result.noIssue).toBe(true);
     });
 
+    it("passes for No-Issue on its own line in longer body", () => {
+      const body = "Some description here.\n\nNo-Issue: infrastructure change";
+      const result = validatePRBody(body);
+      expect(result.valid).toBe(true);
+      expect(result.noIssue).toBe(true);
+    });
+
     it("passes for multiple issue references", () => {
       const result = validatePRBody("Closes #1, Fixes #2");
       expect(result.valid).toBe(true);
@@ -131,6 +138,11 @@ describe("validatePRBody", () => {
 
     it("fails for No-Issue with only whitespace after colon", () => {
       const result = validatePRBody("No-Issue:   ");
+      expect(result.valid).toBe(false);
+    });
+
+    it("fails for No-Issue embedded mid-line in prose", () => {
+      const result = validatePRBody("This is about No-Issue: stuff but should have an issue");
       expect(result.valid).toBe(false);
     });
   });

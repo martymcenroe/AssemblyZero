@@ -1,14 +1,45 @@
 // Verify that issue references point to real, open issues (not PRs, not closed).
 
+// GitHub owner/repo names: alphanumeric, hyphens, dots, underscores.
+// Must not be ".." (path traversal) or start/end with dots.
+const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+
+// Maximum number of refs to verify per webhook (prevent rate limit exhaustion)
+const MAX_REFS_TO_VERIFY = 10;
+
+/**
+ * Validate that a GitHub owner or repo name is safe for URL construction.
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isValidGitHubName(name) {
+  return (
+    typeof name === "string" &&
+    name.length > 0 &&
+    name.length <= 100 &&
+    !name.includes("..") &&
+    GITHUB_NAME_PATTERN.test(name)
+  );
+}
+
 /**
  * Verify a single issue reference via the GitHub API.
  * @param {string} token - Installation access token
  * @param {string} owner - Repo owner
  * @param {string} repo - Repo name
  * @param {number} number - Issue number
+ * @param {boolean} isCrossRepo - Whether this ref explicitly named a different repo
  * @returns {Promise<{ valid: boolean, reason: string }>}
  */
-async function verifySingleIssue(token, owner, repo, number) {
+async function verifySingleIssue(token, owner, repo, number, isCrossRepo) {
+  // Validate owner/repo names before URL construction (prevent path traversal)
+  if (!isValidGitHubName(owner) || !isValidGitHubName(repo)) {
+    return {
+      valid: false,
+      reason: `Invalid owner/repo name in reference: ${owner}/${repo}#${number}.`,
+    };
+  }
+
   const url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}`;
 
   let response;
@@ -22,7 +53,10 @@ async function verifySingleIssue(token, owner, repo, number) {
       },
     });
   } catch {
-    // Network error — fail open so we don't block PRs on transient failures
+    // Network error — fail open for same-repo (transient), fail closed for cross-repo
+    if (isCrossRepo) {
+      return { valid: false, reason: `Could not verify cross-repo reference ${owner}/${repo}#${number}. Network error.` };
+    }
     return { valid: true, reason: `Could not reach GitHub API for ${owner}/${repo}#${number} — skipping verification.` };
   }
 
@@ -34,11 +68,20 @@ async function verifySingleIssue(token, owner, repo, number) {
   }
 
   if (!response.ok) {
-    // API error (rate limit, auth issue) — fail open
+    // Cross-repo: 403 likely means no access — fail closed
+    // Same-repo: 403 likely means rate limit — fail open
+    if (isCrossRepo) {
+      return { valid: false, reason: `Cannot verify cross-repo reference ${owner}/${repo}#${number} (HTTP ${response.status}). Ensure the issue exists and is accessible.` };
+    }
     return { valid: true, reason: `GitHub API returned ${response.status} for ${owner}/${repo}#${number} — skipping verification.` };
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    return { valid: false, reason: `Invalid response from GitHub API for ${owner}/${repo}#${number}.` };
+  }
 
   if (data.pull_request) {
     return {
@@ -70,13 +113,17 @@ export async function verifyIssueRefs(token, defaultOwner, defaultRepo, refs) {
     return { valid: true, reason: "No references to verify." };
   }
 
+  // Cap refs to prevent rate limit exhaustion
+  const capped = refs.slice(0, MAX_REFS_TO_VERIFY);
+
   const results = await Promise.all(
-    refs.map((ref) =>
+    capped.map((ref) =>
       verifySingleIssue(
         token,
         ref.owner || defaultOwner,
         ref.repo || defaultRepo,
-        ref.number
+        ref.number,
+        ref.owner !== null // isCrossRepo: true when owner was explicitly provided
       )
     )
   );
@@ -89,8 +136,10 @@ export async function verifyIssueRefs(token, defaultOwner, defaultRepo, refs) {
     };
   }
 
-  return {
-    valid: true,
-    reason: results.map((r) => r.reason).join("\n"),
-  };
+  let reason = results.map((r) => r.reason).join("\n");
+  if (refs.length > MAX_REFS_TO_VERIFY) {
+    reason += `\nNote: Only first ${MAX_REFS_TO_VERIFY} of ${refs.length} references were verified.`;
+  }
+
+  return { valid: true, reason };
 }

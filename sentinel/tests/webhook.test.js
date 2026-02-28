@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifySignature } from "../src/webhook.js";
+import { verifySignature, handleWebhook } from "../src/webhook.js";
 
 describe("verifySignature", () => {
   const SECRET = "test-secret-key";
@@ -64,5 +64,29 @@ describe("verifySignature", () => {
     const signature = await sign("wrong-secret", body);
     const result = await verifySignature(SECRET, signature, body);
     expect(result).toBe(false);
+  });
+});
+
+describe("handleWebhook", () => {
+  it("returns 500 when WEBHOOK_SECRET is not configured", async () => {
+    const request = new Request("https://sentinel.example.com/webhook", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const response = await handleWebhook(request, {});
+    expect(response.status).toBe(500);
+    const text = await response.text();
+    expect(text).toBe("Server misconfigured");
+  });
+
+  it("returns 500 when WEBHOOK_SECRET is empty string", async () => {
+    const request = new Request("https://sentinel.example.com/webhook", {
+      method: "POST",
+      body: "{}",
+    });
+
+    const response = await handleWebhook(request, { WEBHOOK_SECRET: "" });
+    expect(response.status).toBe(500);
   });
 });

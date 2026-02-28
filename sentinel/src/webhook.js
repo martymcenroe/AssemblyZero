@@ -50,6 +50,12 @@ export async function verifySignature(secret, signature, body) {
  * Handle incoming webhook requests from GitHub.
  */
 export async function handleWebhook(request, env) {
+  // Guard: webhook secret must be configured
+  if (!env.WEBHOOK_SECRET) {
+    console.error("WEBHOOK_SECRET is not configured");
+    return new Response("Server misconfigured", { status: 500 });
+  }
+
   const body = await request.text();
   const signature = request.headers.get("X-Hub-Signature-256");
 
@@ -65,55 +71,60 @@ export async function handleWebhook(request, env) {
     return new Response("Ignored event", { status: 200 });
   }
 
-  const payload = JSON.parse(body);
-  const action = payload.action;
+  try {
+    const payload = JSON.parse(body);
+    const action = payload.action;
 
-  // Only evaluate on opened, edited, reopened, synchronize
-  if (!["opened", "edited", "reopened", "synchronize"].includes(action)) {
-    return new Response("Ignored action", { status: 200 });
-  }
-
-  const pr = payload.pull_request;
-
-  // Skip dependabot PRs
-  if (pr.user?.login === "dependabot[bot]") {
-    return new Response("Skipped dependabot", { status: 200 });
-  }
-
-  const owner = payload.repository.owner.login;
-  const repo = payload.repository.name;
-  const headSha = pr.head.sha;
-  const installationId = payload.installation.id;
-  const checkName = env.CHECK_NAME || "pr-sentinel / issue-reference";
-
-  // Validate PR body (regex check)
-  let result = validatePRBody(pr.body);
-
-  // Get installation token (needed for both verification and check run)
-  const token = await getInstallationToken(
-    env.APP_ID,
-    env.PRIVATE_KEY_B64,
-    installationId
-  );
-
-  // If regex passed with issue refs, verify they point to real open issues
-  if (result.valid && result.refs.length > 0) {
-    const verification = await verifyIssueRefs(token, owner, repo, result.refs);
-    if (!verification.valid) {
-      result = {
-        valid: false,
-        reason: verification.reason,
-      };
+    // Only evaluate on opened, edited, reopened, synchronize
+    if (!["opened", "edited", "reopened", "synchronize"].includes(action)) {
+      return new Response("Ignored action", { status: 200 });
     }
-  }
 
-  await createCheckRun(token, owner, repo, headSha, checkName, result);
+    const pr = payload.pull_request;
 
-  return new Response(
-    JSON.stringify({ conclusion: result.valid ? "success" : "action_required" }),
-    {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
+    // Skip dependabot PRs
+    if (pr.user?.login === "dependabot[bot]") {
+      return new Response("Skipped dependabot", { status: 200 });
     }
-  );
+
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const headSha = pr.head.sha;
+    const installationId = payload.installation.id;
+    const checkName = env.CHECK_NAME || "pr-sentinel / issue-reference";
+
+    // Validate PR body (regex check)
+    let result = validatePRBody(pr.body);
+
+    // Get installation token (needed for both verification and check run)
+    const token = await getInstallationToken(
+      env.APP_ID,
+      env.PRIVATE_KEY_B64,
+      installationId
+    );
+
+    // If regex passed with issue refs, verify they point to real open issues
+    if (result.valid && result.refs.length > 0) {
+      const verification = await verifyIssueRefs(token, owner, repo, result.refs);
+      if (!verification.valid) {
+        result = {
+          valid: false,
+          reason: verification.reason,
+        };
+      }
+    }
+
+    await createCheckRun(token, owner, repo, headSha, checkName, result);
+
+    return new Response(
+      JSON.stringify({ conclusion: result.valid ? "success" : "action_required" }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    console.error("Webhook processing error:", err.message);
+    return new Response("Internal error", { status: 500 });
+  }
 }

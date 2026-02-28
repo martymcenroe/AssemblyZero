@@ -3,7 +3,7 @@
 // Pass: No-Issue: <reason> (requires non-empty reason)
 // Fail: empty body, no matching pattern
 
-const NO_ISSUE_PATTERN = /No-Issue:\s*\S+/i;
+const NO_ISSUE_PATTERN = /^No-Issue:\s*\S+/im;
 
 /**
  * Extract issue references from a PR body.
