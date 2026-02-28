@@ -19,6 +19,7 @@ This node populates:
 - error_message: "" on success, error text on failure
 """
 
+import difflib
 import re
 from pathlib import Path
 from typing import Any
@@ -150,11 +151,14 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     # Build review content
     # -------------------------------------------------------------------------
+    # Issue #491: Pass previous spec draft for diff-aware review
+    previous_spec_draft = state.get("previous_spec_draft", "")
     review_content = _build_review_content(
         spec_draft=spec_draft,
         lld_content=lld_content,
         issue_number=issue_number,
         review_iteration=review_iteration,
+        previous_spec_draft=previous_spec_draft,
     )
 
     # -------------------------------------------------------------------------
@@ -268,17 +272,22 @@ def _build_review_content(
     lld_content: str,
     issue_number: int,
     review_iteration: int,
+    previous_spec_draft: str = "",
 ) -> str:
     """Build the review content for the Gemini reviewer.
 
     Constructs a structured prompt containing the spec draft, the original
     LLD for reference, and review criteria.
 
+    Issue #491: When previous_spec_draft exists and changes are <20% of total,
+    prepend a unified diff to focus the reviewer on what changed.
+
     Args:
         spec_draft: Generated Implementation Spec markdown.
         lld_content: Original LLD markdown for cross-reference.
         issue_number: GitHub issue number.
         review_iteration: Current review iteration (0-based).
+        previous_spec_draft: Previous spec draft for diff comparison.
 
     Returns:
         Complete review prompt string.
@@ -296,6 +305,29 @@ def _build_review_content(
             "the prior feedback.\n"
         )
     sections.append(context)
+
+    # Issue #491: Add diff section for revisions with small changes
+    if previous_spec_draft and review_iteration > 0:
+        prev_lines = previous_spec_draft.splitlines(keepends=True)
+        curr_lines = spec_draft.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(prev_lines, curr_lines, n=3))
+
+        if diff:
+            changed_lines = sum(
+                1 for line in diff
+                if line.startswith("+")
+                and not line.startswith("+++")
+            )
+            total_lines = max(len(curr_lines), 1)
+            change_ratio = changed_lines / total_lines
+
+            if change_ratio <= 0.20:
+                diff_text = "".join(diff)
+                sections.append(
+                    f"## CHANGES SINCE LAST REVIEW (unified diff)\n\n"
+                    f"Focus your review on these changes.\n\n"
+                    f"```diff\n{diff_text}```"
+                )
 
     # Implementation Spec to review
     sections.append(

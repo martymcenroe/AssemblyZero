@@ -159,3 +159,6 @@ class ImplementationSpecState(TypedDict, total=False):
 
     # Issue #490: Cached repo structure (computed once, reused across iterations)
     repo_structure: str
+
+    # Issue #491: Previous spec draft for diff-aware review
+    previous_spec_draft: str

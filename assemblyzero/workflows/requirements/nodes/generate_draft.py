@@ -163,6 +163,7 @@ Use the template structure provided. Include all sections. Be specific about:
         "file_counter": file_num,
         "user_feedback": "",  # Clear feedback after use
         "previous_review_feedback": state.get("current_verdict", ""),  # Issue #486: Save for two-strike
+        "previous_draft": state.get("current_draft", ""),  # Issue #491: Save for diff-aware review
         "validation_errors": [],  # Clear validation errors after use (Issue #294)
         "error_message": "",
     }

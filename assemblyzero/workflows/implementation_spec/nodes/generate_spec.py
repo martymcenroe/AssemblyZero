@@ -259,6 +259,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "review_iteration": review_iteration,
         "completeness_issues": [],  # Clear after use
         "previous_review_feedback": review_feedback,  # Issue #486: Save for two-strike
+        "previous_spec_draft": state.get("spec_draft", ""),  # Issue #491: Save for diff-aware review
         "review_feedback": "",  # Clear after use
         "error_message": "",
     }
