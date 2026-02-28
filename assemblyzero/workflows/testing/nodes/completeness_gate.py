@@ -242,9 +242,13 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     # Return state updates
     # =========================================================================
 
+    # Issue #505: Store issue identities for stagnation detection
+    issue_ids = [list(_completeness_issue_identity(i)) for i in issues]
+
     result: dict[str, Any] = {
         "completeness_verdict": verdict,
         "completeness_issues": issues,
+        "previous_completeness_issues": issue_ids,
         "implementation_report_path": implementation_report_path,
         "error_message": "",
     }
@@ -262,6 +266,22 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
 # =============================================================================
 
 
+def _completeness_issue_identity(issue: dict) -> tuple:
+    """Extract identity tuple from a completeness issue for set comparison.
+
+    Issue #505: Uses (file_path, line_number, category) as the identity
+    for stagnation detection across completeness gate iterations.
+    """
+    category = issue.get("category", "")
+    if hasattr(category, "value"):
+        category = category.value
+    return (
+        issue.get("file_path", ""),
+        issue.get("line_number", 0),
+        str(category),
+    )
+
+
 def route_after_completeness_gate(
     state: TestingWorkflowState,
 ) -> Literal["N5_verify_green", "N4_implement_code", "end"]:
@@ -271,6 +291,9 @@ def route_after_completeness_gate(
     - BLOCK verdict: route back to N4 for re-implementation (up to 3 iterations)
     - PASS/WARN verdict: route forward to N5
     - BLOCK at max iterations (3): route to end (hard stop)
+
+    Issue #505: AST stagnation detection — identical issues across
+    2 consecutive iterations routes to end immediately.
 
     Args:
         state: Current workflow state with completeness_verdict set.
@@ -292,6 +315,23 @@ def route_after_completeness_gate(
                 f"(max {MAX_COMPLETENESS_ITERATIONS}) — routing to end"
             )
             return "end"
+
+        # Issue #505: AST stagnation detection
+        current_issues = state.get("completeness_issues", [])
+        previous_issue_ids = state.get("previous_completeness_issues", [])
+
+        if current_issues and previous_issue_ids:
+            current_ids = sorted(
+                _completeness_issue_identity(i) for i in current_issues
+            )
+            prev_ids = sorted(tuple(x) for x in previous_issue_ids)
+            if current_ids == prev_ids:
+                print(
+                    f"    [N4b] [STAGNANT] Same {len(current_ids)} completeness issues "
+                    f"across 2 iterations. Halting."
+                )
+                return "end"
+
         print(
             f"    [N4b] BLOCK — routing back to N4 "
             f"(iteration {iteration_count}/{MAX_COMPLETENESS_ITERATIONS})"

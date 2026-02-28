@@ -43,6 +43,23 @@ def _parse_e2e_passed(output: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+def _extract_failed_test_names(output: str) -> list[str]:
+    """Extract failed test names from pytest output.
+
+    Issue #504: Parse FAILED lines from pytest summary to get test identities.
+
+    Args:
+        output: Combined stdout + stderr from pytest.
+
+    Returns:
+        Sorted list of failed test names (e.g., ["test_a", "test_b"]).
+    """
+    # Match patterns like "FAILED tests/test_foo.py::test_bar - AssertionError"
+    # or "FAILED tests/test_foo.py::TestClass::test_bar"
+    failures = re.findall(r"FAILED\s+(\S+)", output)
+    return sorted(set(failures))
+
+
 def run_e2e_tests(
     test_files: list[str],
     sandbox_repo: str | None,
@@ -262,6 +279,8 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
 
         e2e_passed = _parse_e2e_passed(output)
         previous_e2e_passed = state.get("previous_e2e_passed", -1)
+        current_failures = _extract_failed_test_names(output)
+        previous_failures = state.get("previous_e2e_failures", [])
 
         print(f"    E2E tests failed - iteration {iteration_count} | passed: {e2e_passed}")
 
@@ -273,17 +292,28 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
             details={"iteration": iteration_count, "passed": e2e_passed},
         )
 
-        # E2E stagnation detection: if pass count didn't improve, halt
-        if previous_e2e_passed >= 0 and e2e_passed <= previous_e2e_passed:
+        # E2E stagnation detection (Issue #504):
+        # 1. Count-based: pass count didn't improve
+        count_stagnant = previous_e2e_passed >= 0 and e2e_passed <= previous_e2e_passed
+        # 2. Identity-based: same tests still failing even if count changed
+        identity_stagnant = (
+            bool(current_failures)
+            and bool(previous_failures)
+            and current_failures == sorted(previous_failures)
+        )
+
+        if count_stagnant or identity_stagnant:
+            reason = "same failures persisting" if identity_stagnant else "no improvement"
             stagnant_msg = (
                 f"E2E stagnant: {previous_e2e_passed} -> {e2e_passed} passed "
-                f"(no improvement). Halting to prevent token waste."
+                f"({reason}). Halting to prevent token waste."
             )
             print(f"    [STAGNANT] {stagnant_msg}")
             return {
                 "e2e_output": output,
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
+                "previous_e2e_failures": current_failures,
                 "error_message": stagnant_msg,
             }
 
@@ -295,6 +325,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "e2e_output": output,
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
+                "previous_e2e_failures": current_failures,
                 "error_message": trip_reason,
             }
 
@@ -305,6 +336,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "e2e_output": output,
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
+                "previous_e2e_failures": current_failures,
                 "iteration_count": iteration_count + 1,
                 "next_node": "N4_implement_code",
                 "error_message": "",
@@ -314,6 +346,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "e2e_output": output,
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
+                "previous_e2e_failures": current_failures,
                 "error_message": f"E2E failed after {max_iterations} iterations",
             }
 

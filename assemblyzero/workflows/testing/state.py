@@ -165,6 +165,7 @@ class TestingWorkflowState(TypedDict, total=False):
     previous_passed: int  # Previous iteration pass count for stagnation detection
     e2e_output: str
     previous_e2e_passed: int  # Previous E2E pass count for stagnation detection
+    previous_e2e_failures: list[str]  # Issue #504: Previous E2E failed test names for identity comparison
 
     # Review artifacts
     test_plan_review_prompt: str
@@ -222,6 +223,7 @@ class TestingWorkflowState(TypedDict, total=False):
     # Issue #147: Completeness gate (N4b) - Anti-stub detection
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]
     completeness_issues: list[dict]  # List of CompletenessIssue dicts
+    previous_completeness_issues: list[list]  # Issue #505: Previous issue IDs for stagnation detection
     review_materials: dict | None  # ReviewMaterials for Gemini Layer 2
 
     # Issue #292: Pytest exit code routing
