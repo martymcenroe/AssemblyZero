@@ -1,0 +1,1 @@
+File written: `tests/fixtures/janitor/mock_repo/README.md` — mock README with broken link (`./docs/old-guide.md`), valid link (`./docs/guide.md`), external URL, image reference, and anchor link for janitor probe testing.

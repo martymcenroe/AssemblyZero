@@ -1,3 +1,4 @@
+```
 # AssemblyZero-specific gitignore
 # Note: Parent Projects/.gitignore covers common patterns
 
@@ -55,3 +56,4 @@ docs/blog/
 data/unleashed/
 data/handoff-log.md
 transcripts/
+```

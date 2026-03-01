@@ -1,0 +1,325 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 163 items
+
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_creation_with_defaults PASSED [  0%]
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_creation_with_all_fields PASSED [  1%]
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_severity_values PASSED [  1%]
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_probe_scope_values PASSED [  2%]
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_fixable_flag PASSED [  3%]
+tests/unit/test_janitor/test_state.py::TestFinding::test_finding_fix_data_dict PASSED [  3%]
+tests/unit/test_janitor/test_state.py::TestProbeResult::test_probe_result_ok PASSED [  4%]
+tests/unit/test_janitor/test_state.py::TestProbeResult::test_probe_result_error PASSED [  4%]
+tests/unit/test_janitor/test_state.py::TestProbeResult::test_probe_result_findings PASSED [  5%]
+tests/unit/test_janitor/test_state.py::TestProbeResult::test_probe_result_default_findings_independent PASSED [  6%]
+tests/unit/test_janitor/test_state.py::TestProbeResult::test_probe_result_status_values PASSED [  6%]
+tests/unit/test_janitor/test_state.py::TestFixAction::test_fix_action_applied PASSED [  7%]
+tests/unit/test_janitor/test_state.py::TestFixAction::test_fix_action_dry_run PASSED [  7%]
+tests/unit/test_janitor/test_state.py::TestFixAction::test_fix_action_multiple_files PASSED [  8%]
+tests/unit/test_janitor/test_state.py::TestFixAction::test_fix_action_empty_files PASSED [  9%]
+tests/unit/test_janitor/test_state.py::TestFixAction::test_fix_action_commit_message PASSED [  9%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_initial_state_construction PASSED [ 10%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_full_scope PASSED [ 11%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_with_findings PASSED [ 11%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_with_probe_results PASSED [ 12%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_with_fix_actions PASSED [ 12%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_report_url PASSED [ 13%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_exit_codes PASSED [ 14%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_reporter_type_values PASSED [ 14%]
+tests/unit/test_janitor/test_state.py::TestJanitorState::test_state_boolean_flags PASSED [ 15%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_probe_links_detects_broken_link PASSED [ 15%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_probe_links_ignores_external_urls PASSED [ 16%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_probe_links_handles_valid_links PASSED [ 17%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_extract_internal_links PASSED [ 17%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_resolve_link_existing PASSED [ 18%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_resolve_link_missing PASSED [ 19%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_resolve_link_with_anchor PASSED [ 19%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_find_likely_target_unique_match PASSED [ 20%]
+tests/unit/test_janitor/test_probes.py::TestProbeLinkDetection::test_find_likely_target_no_match PASSED [ 20%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_probe_worktrees_detects_stale PASSED [ 21%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_probe_worktrees_ignores_active PASSED [ 22%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_list_worktrees_parses_porcelain PASSED [ 22%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_list_worktrees_detached PASSED [ 23%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_get_branch_last_commit_date PASSED [ 23%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_get_branch_last_commit_date_nonexistent PASSED [ 24%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_is_branch_merged PASSED [ 25%]
+tests/unit/test_janitor/test_probes.py::TestProbeWorktrees::test_is_branch_not_merged PASSED [ 25%]
+tests/unit/test_janitor/test_probes.py::TestProbeTodo::test_probe_todo_finds_stale PASSED [ 26%]
+tests/unit/test_janitor/test_probes.py::TestProbeTodo::test_probe_todo_ignores_recent PASSED [ 26%]
+tests/unit/test_janitor/test_probes.py::TestProbeTodo::test_extract_todos PASSED [ 27%]
+tests/unit/test_janitor/test_probes.py::TestProbeTodo::test_get_line_date_parses_blame PASSED [ 28%]
+tests/unit/test_janitor/test_probes.py::TestProbeTodo::test_get_line_date_untracked PASSED [ 28%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_probe_harvest_missing_script PASSED [ 29%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_parse_harvest_output_drift_lines PASSED [ 30%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_parse_harvest_output_no_drift PASSED [ 30%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_find_harvest_script_in_root PASSED [ 31%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_find_harvest_script_in_tools PASSED [ 31%]
+tests/unit/test_janitor/test_probes.py::TestProbeHarvest::test_find_harvest_script_not_found PASSED [ 32%]
+tests/unit/test_janitor/test_probes.py::TestProbeIsolation::test_run_probe_safe_catches_exception PASSED [ 33%]
+tests/unit/test_janitor/test_probes.py::TestProbeIsolation::test_run_probe_safe_passes_through_success PASSED [ 33%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_updates_file PASSED [ 34%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_dry_run PASSED [ 34%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_no_fix_data PASSED [ 35%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_missing_new_link PASSED [ 36%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_multiple_in_same_file PASSED [ 36%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_nonexistent_file PASSED [ 37%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_description_format PASSED [ 38%]
+tests/unit/test_janitor/test_fixers.py::TestFixBrokenLinks::test_fix_broken_links_no_file_path PASSED [ 38%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_calls_git_remove PASSED [ 39%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_dry_run PASSED [ 39%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_description_applied PASSED [ 40%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_description_dry_run PASSED [ 41%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_missing_fix_data PASSED [ 41%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_missing_worktree_path PASSED [ 42%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_multiple PASSED [ 42%]
+tests/unit/test_janitor/test_fixers.py::TestFixStaleWorktrees::test_fix_stale_worktrees_empty_files_modified PASSED [ 43%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_links_commit_message PASSED [ 44%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_worktrees_commit_message PASSED [ 44%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_single_link_commit_message PASSED [ 45%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_unknown_category_fallback PASSED [ 46%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_commit_message_includes_ref PASSED [ 46%]
+tests/unit/test_janitor/test_fixers.py::TestCommitMessage::test_commit_message_worktrees_plural PASSED [ 47%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixCommit::test_create_fix_commit_stages_and_commits PASSED [ 47%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixCommit::test_create_fix_commit_empty_files_noop PASSED [ 48%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixCommit::test_create_fix_commit_multiple_files PASSED [ 49%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixCommit::test_create_fix_commit_message_passed PASSED [ 49%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixPR::test_create_fix_pr_success PASSED [ 50%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixPR::test_create_fix_pr_failure PASSED [ 50%]
+tests/unit/test_janitor/test_fixers.py::TestCreateFixPR::test_create_fix_pr_git_exception PASSED [ 51%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_create_report PASSED [ 52%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_update_report PASSED [ 52%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_find_existing_report_today PASSED [ 53%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_find_existing_report_none PASSED [ 53%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_creates_janitor_reports_dir PASSED [ 54%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_create_report_filename_format PASSED [ 55%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_create_report_content_encoding PASSED [ 55%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_update_report_preserves_path PASSED [ 56%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_find_existing_report_returns_first_match PASSED [ 57%]
+tests/unit/test_janitor/test_reporter.py::TestLocalFileReporter::test_reporter_dir_already_exists PASSED [ 57%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_init_with_gh_auth PASSED [ 58%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_init_with_github_token PASSED [ 58%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_init_no_auth_raises PASSED [ 59%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_find_existing_report PASSED [ 60%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_find_existing_report_none PASSED [ 60%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_find_existing_report_gh_failure PASSED [ 61%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_find_existing_report_invalid_json PASSED [ 61%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_create_report PASSED [ 62%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_create_report_failure PASSED [ 63%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_update_report PASSED [ 63%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_update_report_failure PASSED [ 64%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_update_report_extracts_issue_number PASSED [ 65%]
+tests/unit/test_janitor/test_reporter.py::TestGitHubReporter::test_create_report_uses_maintenance_label PASSED [ 65%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_all_sections PASSED [ 66%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_no_unfixable PASSED [ 66%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_severity_counts PASSED [ 67%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_no_probe_errors PASSED [ 68%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_multiple_unfixable_categories PASSED [ 68%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_fix_action_not_applied PASSED [ 69%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_applied_fix_checkmark PASSED [ 69%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_finding_location_with_line PASSED [ 70%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_finding_location_without_line PASSED [ 71%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_all_zero_severity PASSED [ 71%]
+tests/unit/test_janitor/test_reporter.py::TestBuildReportBody::test_build_report_body_multiple_probe_errors PASSED [ 72%]
+tests/unit/test_janitor/test_reporter.py::TestGetReporter::test_get_reporter_local PASSED [ 73%]
+tests/unit/test_janitor/test_reporter.py::TestGetReporter::test_get_reporter_github PASSED [ 73%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_no_findings_returns_end PASSED [ 74%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_fixable_auto_fix_returns_fixer PASSED [ 74%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_fixable_no_auto_fix_returns_reporter PASSED [ 75%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_unfixable_only_returns_reporter PASSED [ 76%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_mixed_fixable_and_unfixable_returns_fixer PASSED [ 76%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_mixed_fixable_and_unfixable_no_auto_fix_returns_reporter PASSED [ 77%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_empty_state_defaults PASSED [ 77%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterSweep::test_multiple_fixable_returns_fixer PASSED [ 78%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterFix::test_all_fixed_returns_end PASSED [ 79%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterFix::test_unfixable_remain_returns_reporter PASSED [ 79%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterFix::test_multiple_unfixable_returns_reporter PASSED [ 80%]
+tests/unit/test_janitor/test_graph.py::TestRouteAfterFix::test_empty_state_defaults PASSED [ 80%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_build_janitor_graph_compiles PASSED [ 81%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_with_no_findings PASSED [ 82%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_with_empty_scope PASSED [ 82%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_end_no_findings PASSED [ 83%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_reporter_unfixable_only FAILED [ 84%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_fixer_to_end_all_fixed FAILED [ 84%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_fixer_to_reporter_mixed FAILED [ 85%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_dry_run_no_file_modifications PASSED [ 85%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_auto_fix_false_skips_fixer PASSED [ 86%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_probe_error_handled PASSED [ 87%]
+tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_multiple_probes PASSED [ 87%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_defaults PASSED [ 88%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_all_flags PASSED [ 88%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_invalid_scope PASSED [ 89%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_scope_worktrees PASSED [ 90%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_scope_harvest PASSED [ 90%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_scope_todo PASSED [ 91%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_reporter_local PASSED [ 92%]
+tests/unit/test_janitor/test_cli.py::TestParseArgs::test_auto_fix_false PASSED [ 92%]
+tests/unit/test_janitor/test_cli.py::TestBuildInitialState::test_build_initial_state_scope_all PASSED [ 93%]
+tests/unit/test_janitor/test_cli.py::TestBuildInitialState::test_build_initial_state_single_scope PASSED [ 93%]
+tests/unit/test_janitor/test_cli.py::TestMainEntryPoint::test_exit_code_2_not_git_repo PASSED [ 94%]
+tests/unit/test_janitor/test_cli.py::TestMainEntryPoint::test_exit_code_0_clean_run PASSED [ 95%]
+tests/unit/test_janitor/test_cli.py::TestMainEntryPoint::test_exit_code_1_unfixable PASSED [ 95%]
+tests/unit/test_janitor/test_cli.py::TestMainEntryPoint::test_silent_no_stdout PASSED [ 96%]
+tests/unit/test_janitor/test_cli.py::TestMainEntryPoint::test_fatal_exception_returns_2 PASSED [ 96%]
+tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_clean_run_exits_zero PASSED [ 97%]
+tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_unfixable_findings_create_local_report FAILED [ 98%]
+tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_fixable_findings_auto_fixed FAILED [ 98%]
+tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_dry_run_no_modifications PASSED [ 99%]
+tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_mixed_findings_fix_then_report FAILED [100%]
+
+================================== FAILURES ===================================
+_____ TestBuildJanitorGraph.test_graph_sweeper_to_reporter_unfixable_only _____
+tests\unit\test_janitor\test_graph.py:272: in test_graph_sweeper_to_reporter_unfixable_only
+    assert len(final_state["unfixable_findings"]) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+_____ TestBuildJanitorGraph.test_graph_sweeper_to_fixer_to_end_all_fixed ______
+tests\unit\test_janitor\test_graph.py:324: in test_graph_sweeper_to_fixer_to_end_all_fixed
+    final_state = graph.invoke(initial_state)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:3071: in invoke
+    for chunk in self.stream(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:2646: in stream
+    for _ in runner.tick(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_runner.py:167: in tick
+    run_with_retry(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_retry.py:42: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:656: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:400: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+assemblyzero\workflows\janitor\graph.py:100: in n1_fixer
+    create_fix_commit(repo_root, category, files, msg)
+assemblyzero\workflows\janitor\fixers.py:132: in create_fix_commit
+    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
+..\..\AppData\Local\Programs\Python\Python314\Lib\subprocess.py:577: in run
+    raise CalledProcessError(retcode, process.args,
+E   subprocess.CalledProcessError: Command '['git', 'add', 'README.md']' returned non-zero exit status 128.
+E   During task with name 'n1_fixer' and id '290937f8-b82d-0886-ae7e-600255985f6d'
+---------------------------- Captured stderr call -----------------------------
+fatal: not a git repository (or any of the parent directories): .git
+_____ TestBuildJanitorGraph.test_graph_sweeper_to_fixer_to_reporter_mixed _____
+tests\unit\test_janitor\test_graph.py:388: in test_graph_sweeper_to_fixer_to_reporter_mixed
+    final_state = graph.invoke(initial_state)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:3071: in invoke
+    for chunk in self.stream(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:2646: in stream
+    for _ in runner.tick(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_runner.py:167: in tick
+    run_with_retry(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_retry.py:42: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:656: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:400: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+assemblyzero\workflows\janitor\graph.py:100: in n1_fixer
+    create_fix_commit(repo_root, category, files, msg)
+assemblyzero\workflows\janitor\fixers.py:132: in create_fix_commit
+    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
+..\..\AppData\Local\Programs\Python\Python314\Lib\subprocess.py:577: in run
+    raise CalledProcessError(retcode, process.args,
+E   subprocess.CalledProcessError: Command '['git', 'add', 'README.md']' returned non-zero exit status 128.
+E   During task with name 'n1_fixer' and id '97f9eb05-2a19-28c8-8368-4c666fca5798'
+---------------------------- Captured stderr call -----------------------------
+fatal: not a git repository (or any of the parent directories): .git
+___ TestFullWorkflowIntegration.test_unfixable_findings_create_local_report ___
+tests\integration\test_janitor_workflow.py:89: in test_unfixable_findings_create_local_report
+    assert "stale_todo" in report_content
+E   AssertionError: assert 'stale_todo' in '# Janitor Report\n\n## Summary\n\n| Severity | Count |\n|----------|-------|\n| Critical | 0 |\n| Warning | 0 |\n| Info | 0 |\n\n## Auto-Fixed Issues\n\nNo auto-fixes applied.\n\n## Requires Human Attention\n\nNo issues require human attention.\n'
+________ TestFullWorkflowIntegration.test_fixable_findings_auto_fixed _________
+tests\integration\test_janitor_workflow.py:125: in test_fixable_findings_auto_fixed
+    final = graph.invoke(state)
+            ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:3071: in invoke
+    for chunk in self.stream(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:2646: in stream
+    for _ in runner.tick(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_runner.py:167: in tick
+    run_with_retry(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_retry.py:42: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:656: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:400: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+assemblyzero\workflows\janitor\graph.py:100: in n1_fixer
+    create_fix_commit(repo_root, category, files, msg)
+assemblyzero\workflows\janitor\fixers.py:132: in create_fix_commit
+    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
+..\..\AppData\Local\Programs\Python\Python314\Lib\subprocess.py:577: in run
+    raise CalledProcessError(retcode, process.args,
+E   subprocess.CalledProcessError: Command '['git', 'add', 'README.md']' returned non-zero exit status 128.
+E   During task with name 'n1_fixer' and id '6117cdc8-78aa-71f0-778f-ee63478fd1e8'
+---------------------------- Captured stderr call -----------------------------
+fatal: not a git repository (or any of the parent directories): .git
+_______ TestFullWorkflowIntegration.test_mixed_findings_fix_then_report _______
+tests\integration\test_janitor_workflow.py:201: in test_mixed_findings_fix_then_report
+    final = graph.invoke(state)
+            ^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:3071: in invoke
+    for chunk in self.stream(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\main.py:2646: in stream
+    for _ in runner.tick(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_runner.py:167: in tick
+    run_with_retry(
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\pregel\_retry.py:42: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:656: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langgraph\_internal\_runnable.py:400: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+assemblyzero\workflows\janitor\graph.py:100: in n1_fixer
+    create_fix_commit(repo_root, category, files, msg)
+assemblyzero\workflows\janitor\fixers.py:132: in create_fix_commit
+    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
+..\..\AppData\Local\Programs\Python\Python314\Lib\subprocess.py:577: in run
+    raise CalledProcessError(retcode, process.args,
+E   subprocess.CalledProcessError: Command '['git', 'add', 'README.md']' returned non-zero exit status 128.
+E   During task with name 'n1_fixer' and id 'e35fcec2-f6c0-4848-7a07-8ac7d2c1a101'
+---------------------------- Captured stderr call -----------------------------
+fatal: not a git repository (or any of the parent directories): .git
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                      Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------
+assemblyzero\workflows\janitor\state.py      42      0   100%
+-----------------------------------------------------------------------
+TOTAL                                        42      0   100%
+Required test coverage of 95% reached. Total coverage: 100.00%
+=========================== short test summary info ===========================
+FAILED tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_reporter_unfixable_only
+FAILED tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_fixer_to_end_all_fixed
+FAILED tests/unit/test_janitor/test_graph.py::TestBuildJanitorGraph::test_graph_sweeper_to_fixer_to_reporter_mixed
+FAILED tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_unfixable_findings_create_local_report
+FAILED tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_fixable_findings_auto_fixed
+FAILED tests/integration/test_janitor_workflow.py::TestFullWorkflowIntegration::test_mixed_findings_fix_then_report
+================== 6 failed, 157 passed, 3 warnings in 1.22s ==================
+

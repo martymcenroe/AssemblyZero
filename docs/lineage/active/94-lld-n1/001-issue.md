@@ -1,4 +1,11 @@
-# Issue #94: The Janitor: Automated Repository Hygiene Workflow
+---
+repo: martymcenroe/AssemblyZero
+issue: 94
+url: https://github.com/martymcenroe/AssemblyZero/issues/94
+fetched: 2026-03-01T13:11:14.706219Z
+---
+
+# Issue #94: Lu-Tze: The Janitor - Automated Repository Hygiene Workflow
 
 # The Janitor: Automated Repository Hygiene Workflow
 
@@ -44,12 +51,12 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 ### Probe System (N0_Sweeper)
 1. Each probe returns structured JSON: `{status, findings[], fixable}`
 2. Probes run in parallel where possible
-3. Probe failures are isolatedâ€”a probe *crash* (uncaught exception) does not stop other probes; a probe that *finds issues* continues normally and reports findings
+3. Probe failures are isolated—a probe *crash* (uncaught exception) does not stop other probes; a probe that *finds issues* continues normally and reports findings
 4. Built-in probes:
-   - `probe_links` â€” Broken internal markdown links
-   - `probe_worktrees` â€” Stale/detached git worktrees
-   - `probe_harvest` â€” Cross-project drift via `agentos-harvest.py`
-   - `probe_todo` â€” TODO comments older than 30 days
+   - `probe_links` — Broken internal markdown links
+   - `probe_worktrees` — Stale/detached git worktrees
+   - `probe_harvest` — Cross-project drift via `assemblyzero-harvest.py`
+   - `probe_todo` — TODO comments older than 30 days
 
 ### Fixer System (N1_Fixer)
 1. Only acts on `fixable: true` findings
@@ -64,21 +71,21 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 3. Updates existing "Janitor Report" issue if one exists
 4. Includes severity levels: `info`, `warning`, `critical`
 5. Implements `ReporterInterface` abstraction supporting:
-   - `GitHubReporter` â€” Production reporter using `gh` CLI
-   - `LocalFileReporter` â€” Testing reporter that writes to local files (no API calls)
+   - `GitHubReporter` — Production reporter using `gh` CLI
+   - `LocalFileReporter` — Testing reporter that writes to local files (no API calls)
 
 ### CLI Interface
-1. `--scope {all|links|worktrees|harvest|todo}` â€” Run specific probes only
-2. `--auto-fix {true|false}` â€” Enable/disable automatic fixing (default: true)
-3. `--dry-run` â€” Show what would be fixed without making changes
-4. `--silent` â€” Suppress output except errors
-5. `--create-pr` â€” Create PR instead of direct commits
-6. `--reporter {github|local}` â€” Select reporter backend (default: github, use local for testing)
+1. `--scope {all|links|worktrees|harvest|todo}` — Run specific probes only
+2. `--auto-fix {true|false}` — Enable/disable automatic fixing (default: true)
+3. `--dry-run` — Show what would be fixed without making changes
+4. `--silent` — Suppress output except errors
+5. `--create-pr` — Create PR instead of direct commits
+6. `--reporter {github|local}` — Select reporter backend (default: github, use local for testing)
 
 ## Technical Approach
-- **State Graph:** LangGraph workflow in `agentos/workflows/janitor/graph.py` with three nodes (Sweeper â†’ Fixer â†’ Reporter). LangGraph is used for its state management, conditional routing, and parallel execution capabilitiesâ€”not for LLM orchestration.
+- **State Graph:** LangGraph workflow in `assemblyzero/workflows/janitor/graph.py` with three nodes (Sweeper → Fixer → Reporter). LangGraph is used for its state management, conditional routing, and parallel execution capabilities—not for LLM orchestration.
 - **No LLM Usage:** This workflow is purely deterministic. Commit messages are generated from templates. No external API calls for text generation.
-- **State Management:** TypedDict-based state in `agentos/workflows/janitor/state.py` tracking probes run, failures found, and actions taken
+- **State Management:** TypedDict-based state in `assemblyzero/workflows/janitor/state.py` tracking probes run, failures found, and actions taken
 - **Probe Registry:** Pluggable probe system allowing new probes to be added without modifying core workflow
 - **GitHub Integration:** Uses `gh` CLI for issue creation/updates and PR creation
 - **Reporter Abstraction:** `ReporterInterface` base class allows swapping `GitHubReporter` for `LocalFileReporter` during testing
@@ -95,31 +102,31 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 - All fixes create git commits (fully reversible via `git revert`)
 
 ## Files to Create/Modify
-- `tools/run_janitor_workflow.py` â€” CLI entry point
-- `agentos/workflows/janitor/__init__.py` â€” Package init
-- `agentos/workflows/janitor/graph.py` â€” LangGraph state graph definition
-- `agentos/workflows/janitor/state.py` â€” JanitorState TypedDict
-- `agentos/workflows/janitor/probes/` â€” Probe implementations directory
-- `agentos/workflows/janitor/probes/links.py` â€” Broken link detection
-- `agentos/workflows/janitor/probes/worktrees.py` â€” Worktree hygiene
-- `agentos/workflows/janitor/probes/harvest.py` â€” Cross-project drift
-- `agentos/workflows/janitor/probes/todo.py` â€” Stale TODO scanner
-- `agentos/workflows/janitor/fixers.py` â€” Auto-fix implementations
-- `agentos/workflows/janitor/reporter.py` â€” Reporter interface and implementations (GitHubReporter, LocalFileReporter)
-- `docs/audits/083x/` â€” Archive superseded manual audits
+- `tools/run_janitor_workflow.py` — CLI entry point
+- `assemblyzero/workflows/janitor/__init__.py` — Package init
+- `assemblyzero/workflows/janitor/graph.py` — LangGraph state graph definition
+- `assemblyzero/workflows/janitor/state.py` — JanitorState TypedDict
+- `assemblyzero/workflows/janitor/probes/` — Probe implementations directory
+- `assemblyzero/workflows/janitor/probes/links.py` — Broken link detection
+- `assemblyzero/workflows/janitor/probes/worktrees.py` — Worktree hygiene
+- `assemblyzero/workflows/janitor/probes/harvest.py` — Cross-project drift
+- `assemblyzero/workflows/janitor/probes/todo.py` — Stale TODO scanner
+- `assemblyzero/workflows/janitor/fixers.py` — Auto-fix implementations
+- `assemblyzero/workflows/janitor/reporter.py` — Reporter interface and implementations (GitHubReporter, LocalFileReporter)
+- `docs/audits/083x/` — Archive superseded manual audits
 
 ## Dependencies
 - LangGraph installed and configured
 - `gh` CLI authenticated for issue/PR operations (or `GITHUB_TOKEN` env var for CI)
-- Existing `agentos-harvest.py` script (for harvest probe)
+- Existing `assemblyzero-harvest.py` script (for harvest probe)
 
 ## Out of Scope (Future)
-- **Real-time file watching** â€” Polling/scheduled runs only for MVP
-- **Slack/Discord notifications** â€” GitHub issues are the notification layer
-- **Cross-repository scanning** â€” Single repository scope for MVP
-- **Custom probe plugins** â€” Future: allow `.janitor/probes/` directory for project-specific probes
-- **Metrics dashboard** â€” Future: track "days since last broken link" over time
-- **LLM-powered commit messages** â€” Future enhancement; MVP uses templates
+- **Real-time file watching** — Polling/scheduled runs only for MVP
+- **Slack/Discord notifications** — GitHub issues are the notification layer
+- **Cross-repository scanning** — Single repository scope for MVP
+- **Custom probe plugins** — Future: allow `.janitor/probes/` directory for project-specific probes
+- **Metrics dashboard** — Future: track "days since last broken link" over time
+- **LLM-powered commit messages** — Future enhancement; MVP uses templates
 
 ## Acceptance Criteria
 - [ ] `python tools/run_janitor_workflow.py` runs all probes and reports findings
@@ -200,4 +207,4 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 `maintenance`, `automation`, `langgraph`
 
 ## Effort Estimate
-Large (5-8 points) â€” State graph complexity, multiple probe implementations, reporter abstraction layer
+Large (5-8 points) — State graph complexity, multiple probe implementations, reporter abstraction layer
