@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+
+from assemblyzero.core.text_sanitizer import strip_emoji
 from typing import Optional
 
 from google import genai
@@ -502,9 +504,10 @@ class GeminiClient:
 
                             duration_ms = int((time.time() - start_time) * 1000)
 
+                            # Issue #527: Strip emojis (preserve raw)
                             return GeminiCallResult(
                                 success=True,
-                                response=response_text,
+                                response=strip_emoji(response_text),
                                 raw_response=response_text,
                                 error_type=None,
                                 error_message=None,
@@ -550,9 +553,10 @@ class GeminiClient:
 
                             duration_ms = int((time.time() - start_time) * 1000)
 
+                            # Issue #527: Strip emojis (preserve raw)
                             return GeminiCallResult(
                                 success=True,
-                                response=response.text,
+                                response=strip_emoji(response.text),
                                 raw_response=str(response),
                                 error_type=None,
                                 error_message=None,

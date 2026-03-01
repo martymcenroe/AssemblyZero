@@ -12,6 +12,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.text_sanitizer import strip_emoji
+
 from assemblyzero.workflows.issue.audit import (
     get_repo_root,
     next_file_number,
@@ -130,10 +132,11 @@ def call_claude_headless(prompt: str, system_prompt: str | None = None) -> str:
         # Parse JSON response
         try:
             response = json.loads(result.stdout)
-            return response.get("result", "")
+            # Issue #527: Strip emojis from LLM response
+            return strip_emoji(response.get("result", ""))
         except json.JSONDecodeError:
             # Fall back to raw stdout if not valid JSON
-            return result.stdout.strip()
+            return strip_emoji(result.stdout.strip())
 
     except subprocess.TimeoutExpired:
         raise RuntimeError("claude -p timed out after 5 minutes")
