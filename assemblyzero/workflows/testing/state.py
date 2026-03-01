@@ -166,6 +166,9 @@ class TestingWorkflowState(TypedDict, total=False):
     e2e_output: str
     previous_e2e_passed: int  # Previous E2E pass count for stagnation detection
     previous_e2e_failures: list[str]  # Issue #504: Previous E2E failed test names for identity comparison
+    previous_green_failures: list[str]  # Issue #501: Previous green phase failed test names for identity comparison
+    test_failure_summary: str  # Issue #498: Structured test failure feedback for N4
+    e2e_failure_summary: str  # Issue #498: Structured E2E failure feedback for N4
 
     # Review artifacts
     test_plan_review_prompt: str

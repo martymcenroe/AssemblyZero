@@ -432,6 +432,10 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
     )
 
+    # Issue #517: Global workflow timeout
+    from assemblyzero.utils.workflow_timeout import add_timeout_argument
+    add_timeout_argument(parser)
+
     return parser
 
 
@@ -660,6 +664,8 @@ def main():
         print(f"[implement] Mode: DRY RUN")
     if args.token_budget > 0:
         print(f"[implement] Token budget: {args.token_budget:,}")
+    if args.timeout > 0:
+        print(f"[implement] Timeout: {args.timeout} minutes")
     print()
 
     # Issue #290: Dry-run — preview execution plan and exit
@@ -737,7 +743,11 @@ def main():
             db_path.unlink()
             print(f"[implement] Cleared stale checkpoint DB: {db_path}")
 
+    # Issue #517: Global workflow timeout
+    from assemblyzero.utils.workflow_timeout import WorkflowTimeout
+
     try:
+      with WorkflowTimeout(minutes=args.timeout):
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
             app = workflow.compile(checkpointer=memory)
 

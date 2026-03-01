@@ -60,6 +60,54 @@ def _extract_failed_test_names(output: str) -> list[str]:
     return sorted(set(failures))
 
 
+# Issue #498: Max chars for E2E failure summary
+MAX_E2E_FAILURE_SUMMARY_CHARS = 2000
+
+
+def _build_e2e_failure_summary(output: str) -> str:
+    """Extract a concise failure summary from E2E pytest output.
+
+    Issue #498: Mirrors _build_failure_summary from verify_phases.py
+    but for E2E test output. Feeds N4 targeted error context.
+
+    Args:
+        output: Combined stdout + stderr from E2E pytest run.
+
+    Returns:
+        Concise failure summary, truncated to MAX_E2E_FAILURE_SUMMARY_CHARS.
+        Empty string if no failures found.
+    """
+    lines = output.split("\n")
+    summary_lines: list[str] = []
+
+    # Extract "short test summary info" section
+    in_summary = False
+    for line in lines:
+        if "short test summary info" in line:
+            in_summary = True
+            continue
+        if in_summary:
+            if line.startswith("=" * 10):
+                summary_lines.append(line.strip("= \n"))
+                break
+            if line.strip():
+                summary_lines.append(line.strip())
+
+    if not summary_lines:
+        # Fallback: extract FAILED lines from anywhere
+        for line in lines:
+            if re.match(r"FAILED\s+", line):
+                summary_lines.append(line.strip())
+
+    if not summary_lines:
+        return ""
+
+    result = "\n".join(summary_lines)
+    if len(result) > MAX_E2E_FAILURE_SUMMARY_CHARS:
+        result = result[:MAX_E2E_FAILURE_SUMMARY_CHARS] + "\n... (truncated)"
+    return result
+
+
 def run_e2e_tests(
     test_files: list[str],
     sandbox_repo: str | None,
@@ -282,6 +330,9 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
         current_failures = _extract_failed_test_names(output)
         previous_failures = state.get("previous_e2e_failures", [])
 
+        # Issue #498: Build concise failure summary for N4 feedback
+        e2e_failure_summary = _build_e2e_failure_summary(output)
+
         print(f"    E2E tests failed - iteration {iteration_count} | passed: {e2e_passed}")
 
         log_workflow_execution(
@@ -314,6 +365,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
                 "previous_e2e_failures": current_failures,
+                "e2e_failure_summary": e2e_failure_summary,
                 "error_message": stagnant_msg,
             }
 
@@ -326,6 +378,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
                 "previous_e2e_failures": current_failures,
+                "e2e_failure_summary": e2e_failure_summary,
                 "error_message": trip_reason,
             }
 
@@ -337,6 +390,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
                 "previous_e2e_failures": current_failures,
+                "e2e_failure_summary": e2e_failure_summary,
                 "iteration_count": iteration_count + 1,
                 "next_node": "N4_implement_code",
                 "error_message": "",
@@ -347,6 +401,7 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
                 "file_counter": file_num,
                 "previous_e2e_passed": e2e_passed,
                 "previous_e2e_failures": current_failures,
+                "e2e_failure_summary": e2e_failure_summary,
                 "error_message": f"E2E failed after {max_iterations} iterations",
             }
 

@@ -811,15 +811,15 @@ Modify this file according to the LLD specification.
     # Include previous error if this is a retry... wait, no retries!
     # Actually we might loop back from green phase failure, so include error context
     if previous_error:
-        prompt += f"""## Previous Attempt Failed
+        prompt += f"""## Previous Attempt Failed — Fix These Specific Errors
 
-The previous implementation had this error:
+The previous implementation failed these tests:
 
 ```
 {previous_error}
 ```
 
-Fix the issue in your implementation.
+Read the error messages carefully and fix the root cause in your implementation.
 
 """
 
@@ -1213,6 +1213,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     files_to_modify = state.get("files_to_modify", [])
     test_files = state.get("test_files", [])
     green_phase_output = state.get("green_phase_output", "")
+    # Issue #498: Prefer structured failure summaries over raw pytest output
+    test_failure_summary = state.get("test_failure_summary", "")
+    e2e_failure_summary = state.get("e2e_failure_summary", "")
     audit_dir = Path(state.get("audit_dir", ""))
 
     if not files_to_modify:
@@ -1344,7 +1347,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             completed_files=completed_files,
             repo_root=repo_root,
             test_content=test_content,
-            previous_error=green_phase_output if iteration_count > 0 else "",
+            # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
+            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
+            if iteration_count > 0 else "",
             path_enforcement_section=path_enforcement_section,
             context_content=state.get("context_content", ""),
             repo_structure=repo_structure,
@@ -1535,11 +1540,16 @@ def build_implementation_prompt(state: TestingWorkflowState) -> str:
                     except Exception:
                         pass
 
-    if iteration_count > 0 and green_phase_output:
+    # Issue #498: Use structured failure summary when available
+    test_failure_summary = state.get("test_failure_summary", "")
+    e2e_failure_summary = state.get("e2e_failure_summary", "")
+    error_feedback = test_failure_summary or e2e_failure_summary or green_phase_output
+
+    if iteration_count > 0 and error_feedback:
         prompt += f"""## Previous Test Run (FAILED)
 
 ```
-{green_phase_output}
+{error_feedback}
 ```
 
 Fix the issues and regenerate the implementation.
