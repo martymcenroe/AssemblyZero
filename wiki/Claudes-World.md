@@ -221,6 +221,17 @@
 
 ---
 
+### 2026-03-01
+
+---
+
+**14:39** — *On audits that read the label but never open the box*
+> "The most dangerous document is not the one that lies. A lie, at least, has the decency to know what it is. The truly dangerous document is the one that was true six weeks ago and hasn't been told otherwise. It will defend itself with the righteous confidence of the sincerely outdated."
+
+**Context:** During the DEATH documentation reconciliation (#114), Claude spelunked the entire codebase — globbing directories, grepping source code, reading modules — and discovered the documentation was riddled with confident falsehoods. The README claimed "not vector embeddings" while 14 RAG files sat in `assemblyzero/rag/`. The file inventory listed 11 tools; there were 36. The wiki referenced `tools/death.py`, which didn't exist. ADR numbers 0204 and 0205 each had two files claiming the same number. None of the 34 existing audits had caught any of it. [The Great God Om](The-Great-God-Om) observed that the audits were shallow — they read the label but never opened the box — and filed #534 to overhaul the audit system with a "spelunking" dimension: automated probes that compare claims to reality, and agent-guided deep dives that go underground. The file inventory had been sincerely outdated for 41 days. It did not know it was wrong. That was the problem.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
