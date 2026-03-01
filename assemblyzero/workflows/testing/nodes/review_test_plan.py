@@ -8,6 +8,10 @@ Submits the test plan to Gemini for coverage analysis:
 Issue #166: Requirement coverage utilities moved to shared module
 at assemblyzero.core.validation. Legacy functions preserved as
 thin wrappers for backward compatibility.
+
+Issue #496: Mechanical gates before Gemini calls — fail fast on
+structural issues (missing scenarios, requirements, duplicate names,
+insufficient LLD content) to avoid wasting Gemini API calls.
 """
 
 import re
@@ -265,6 +269,80 @@ def build_review_context(state: TestingWorkflowState) -> str:
     return context
 
 
+def _run_mechanical_gates(state: TestingWorkflowState) -> list[str]:
+    """Run mechanical pre-checks before Gemini review.
+
+    Issue #496: Fail fast on structural issues to avoid wasting Gemini
+    API calls (~$0.05-0.10 each). Each gate is independent — all errors
+    are collected and returned together.
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        List of error messages. Empty list means all gates passed.
+    """
+    errors: list[str] = []
+
+    # Gate 1: Test scenarios exist
+    test_scenarios = state.get("test_scenarios", [])
+    if not test_scenarios:
+        errors.append(
+            "No test scenarios found — LLD Section 10 may be missing or malformed"
+        )
+        return errors  # Nothing else to check without scenarios
+
+    # Gate 2: Requirements exist
+    requirements = state.get("requirements", [])
+    if not requirements:
+        errors.append(
+            "No requirements extracted from LLD — cannot verify coverage"
+        )
+
+    # Gate 3: Scenario-to-requirement coverage ratio
+    # Each requirement should have at least one scenario covering it
+    if requirements and test_scenarios:
+        scenario_count = len(test_scenarios)
+        req_count = len(requirements)
+        if scenario_count < req_count:
+            errors.append(
+                f"Only {scenario_count} scenario(s) for {req_count} requirement(s) "
+                f"— coverage ratio {scenario_count/req_count:.0%} is below 100%"
+            )
+
+    # Gate 4: No duplicate scenario names
+    if test_scenarios:
+        scenario_names = []
+        for s in test_scenarios:
+            name = s.get("name", "") if isinstance(s, dict) else str(s)
+            if name:
+                scenario_names.append(name.strip().lower())
+        seen = set()
+        dupes = set()
+        for name in scenario_names:
+            if name in seen:
+                dupes.add(name)
+            seen.add(name)
+        if dupes:
+            errors.append(
+                f"Duplicate scenario name(s): {', '.join(sorted(dupes))}"
+            )
+
+    # Gate 5: LLD content has minimum substance
+    lld_content = state.get("lld_content", "")
+    MIN_LLD_WORDS = 50
+    if lld_content:
+        word_count = len(lld_content.split())
+        if word_count < MIN_LLD_WORDS:
+            errors.append(
+                f"LLD content too short ({word_count} words, minimum {MIN_LLD_WORDS})"
+            )
+    else:
+        errors.append("No LLD content available for review")
+
+    return errors
+
+
 def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     """N1: Submit test plan to Gemini for review.
 
@@ -305,22 +383,75 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    Requirements: {len(state.get('requirements', []))}")
 
     # --------------------------------------------------------------------------
-    # GUARD: Pre-LLM validation
+    # GUARD: Pre-LLM mechanical gates (Issue #496)
+    # Fail fast before expensive Gemini calls
     # --------------------------------------------------------------------------
-    test_scenarios = state.get("test_scenarios", [])
-    if not test_scenarios:
-        print("    [GUARD] BLOCKED: No test scenarios found in test plan")
+    guard_errors = _run_mechanical_gates(state)
+    if guard_errors:
+        reason = "; ".join(guard_errors)
+        print(f"    [GUARD] BLOCKED: {reason}")
         log_workflow_execution(
             target_repo=repo_root,
             issue_number=state.get("issue_number", 0),
             workflow_type="testing",
             event="guard_block",
-            details={"reason": "no_test_scenarios", "node": "N1_review_test_plan"},
+            details={
+                "reason": "mechanical_gate_failure",
+                "errors": guard_errors,
+                "node": "N1_review_test_plan",
+            },
         )
         return {
             "test_plan_status": "BLOCKED",
-            "error_message": "GUARD: No test scenarios found - LLD Section 10 may be missing or malformed",
-            "gemini_feedback": "No test scenarios were found in the LLD. Please add Section 10 (Test Plan) with specific test scenarios.",
+            "error_message": f"GUARD: Mechanical pre-checks failed — {reason}",
+            "gemini_feedback": "\n".join(f"- {e}" for e in guard_errors),
+        }
+    # --------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------
+    # Issue #509: Pre-flight fast-path — skip Gemini when mechanical checks
+    # pass at 100% coverage. Saves ~$0.05-0.10 per call.
+    # --------------------------------------------------------------------------
+    test_scenarios = state.get("test_scenarios", [])
+    requirements = state.get("requirements", [])
+    coverage_result = check_requirement_coverage(requirements, test_scenarios)
+
+    if coverage_result["passed"]:
+        print(f"    [FAST-PATH] 100% requirement coverage ({coverage_result['covered']}/{coverage_result['total']}) — skipping Gemini review")
+        fast_verdict = (
+            f"## Mechanical Review (auto-approved)\n\n"
+            f"- Requirements covered: {coverage_result['covered']}/{coverage_result['total']} "
+            f"({coverage_result['coverage_pct']}%)\n"
+            f"- Scenarios: {len(test_scenarios)}\n"
+            f"- Gate: All mechanical pre-checks passed\n\n"
+            f"## Verdict\n[x] **APPROVED** — 100% coverage, mechanical gates passed\n"
+        )
+
+        if audit_dir.exists():
+            file_num = next_file_number(audit_dir)
+            save_audit_file(audit_dir, file_num, "verdict-mechanical.md", fast_verdict)
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="test_plan_reviewed",
+            details={
+                "status": "APPROVED",
+                "method": "mechanical_fast_path",
+                "scenario_count": len(test_scenarios),
+                "coverage_pct": coverage_result["coverage_pct"],
+            },
+        )
+
+        return {
+            "test_plan_status": "APPROVED",
+            "test_plan_verdict": fast_verdict,
+            "test_plan_review_prompt": full_prompt,
+            "file_counter": file_num,
+            "error_message": "",
+            "node_costs": dict(state.get("node_costs", {})),
+            "node_tokens": dict(state.get("node_tokens", {})),
         }
     # --------------------------------------------------------------------------
 
