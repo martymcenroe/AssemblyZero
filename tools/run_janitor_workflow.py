@@ -111,7 +111,7 @@ def _print_summary(state: JanitorState) -> None:
     unfixable_count = len(state.get("unfixable_findings", []))
     report_url = state.get("report_url")
 
-    print(f"\n🧹 Janitor Summary:")
+    print("\nJanitor Summary:")
     print(f"   Findings:  {findings_count}")
     print(f"   Fixed:     {fix_count}")
     print(f"   Unfixable: {unfixable_count}")
@@ -121,9 +121,9 @@ def _print_summary(state: JanitorState) -> None:
 
     exit_code = state.get("exit_code", 0)
     if exit_code == 0:
-        print("   Status:    ✅ All clean")
+        print("   Status:    All clean")
     else:
-        print("   Status:    ⚠️ Unfixable issues remain")
+        print("   Status:    Unfixable issues remain")
 
 
 def main(argv: list[str] | None = None) -> int:

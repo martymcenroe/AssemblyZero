@@ -284,16 +284,15 @@ class TestClaudeCLIProvider:
         assert result.success is False
         assert "claude command not found" in result.error_message
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_invoke_success(self, mock_find_cli, mock_run):
+    def test_invoke_success(self, mock_find_cli, mock_popen):
         """Test successful invocation."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='{"result": "Generated content"}',
-            stderr="",
-        )
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "Generated content"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
         result = provider.invoke(
@@ -305,16 +304,15 @@ class TestClaudeCLIProvider:
         assert result.response == "Generated content"
         assert result.provider == "claude"
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_invoke_failure(self, mock_find_cli, mock_run):
+    def test_invoke_failure(self, mock_find_cli, mock_popen):
         """Test invocation failure."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_run.return_value = Mock(
-            returncode=1,
-            stdout="",
-            stderr="Authentication failed",
-        )
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ("", "Authentication failed")
+        mock_proc.returncode = 1
+        mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
         result = provider.invoke(
@@ -325,12 +323,19 @@ class TestClaudeCLIProvider:
         assert result.success is False
         assert "failed" in result.error_message.lower()
 
-    @patch("subprocess.run")
+    @patch("assemblyzero.core.llm_provider._kill_process_tree")
+    @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_invoke_timeout(self, mock_find_cli, mock_run):
-        """Test invocation timeout."""
+    def test_invoke_timeout(self, mock_find_cli, mock_popen, mock_kill):
+        """Test invocation timeout — process tree killed on Windows."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="claude", timeout=300)
+        mock_proc = Mock()
+        mock_proc.pid = 12345
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="claude", timeout=300),
+            ("", ""),  # drain call after kill
+        ]
+        mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
         result = provider.invoke(
@@ -341,6 +346,7 @@ class TestClaudeCLIProvider:
 
         assert result.success is False
         assert "timed out" in result.error_message.lower()
+        mock_kill.assert_called_once_with(12345)
 
 
 class TestAnthropicProvider:
@@ -935,25 +941,25 @@ class TestTokenLogging:
         assert result.output_tokens == 0
         assert result.cost_usd == 0.0
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_claude_parses_usage_from_json(self, mock_find_cli, mock_run):
+    def test_claude_parses_usage_from_json(self, mock_find_cli, mock_popen):
         """Claude provider extracts token counts from JSON response."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout=json.dumps({
-                "result": "Generated content",
-                "total_cost_usd": 0.089,
-                "usage": {
-                    "input_tokens": 1500,
-                    "output_tokens": 800,
-                    "cache_read_input_tokens": 5000,
-                    "cache_creation_input_tokens": 3000,
-                },
-            }),
-            stderr="",
-        )
+        json_stdout = json.dumps({
+            "result": "Generated content",
+            "total_cost_usd": 0.089,
+            "usage": {
+                "input_tokens": 1500,
+                "output_tokens": 800,
+                "cache_read_input_tokens": 5000,
+                "cache_creation_input_tokens": 3000,
+            },
+        })
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = (json_stdout, "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
         result = provider.invoke("system", "content")
@@ -965,16 +971,15 @@ class TestTokenLogging:
         assert result.cache_creation_tokens == 3000
         assert result.cost_usd == 0.089
 
-    @patch("subprocess.run")
+    @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_claude_handles_missing_usage(self, mock_find_cli, mock_run):
+    def test_claude_handles_missing_usage(self, mock_find_cli, mock_popen):
         """Claude provider handles JSON without usage field."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_run.return_value = Mock(
-            returncode=0,
-            stdout='{"result": "content"}',
-            stderr="",
-        )
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "content"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
         result = provider.invoke("system", "content")

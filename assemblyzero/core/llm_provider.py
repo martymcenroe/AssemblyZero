@@ -17,8 +17,10 @@ falls back to the Anthropic API if an API key is configured in .env.
 """
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -194,6 +196,28 @@ class LLMProvider(ABC):
         pass
 
 
+def _kill_process_tree(pid: int) -> None:
+    """Kill a process and all its children.
+
+    On Windows, uses taskkill /T (tree-kill) to terminate the entire
+    process group.  On Unix, kills the process group via os.killpg.
+    Issue #526: subprocess.run timeout on Windows only kills the root
+    process — grandchildren keep pipes open for hundreds of seconds.
+    """
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=10,
+            )
+        else:
+            os.killpg(os.getpgid(pid), 9)
+    except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
+        # Process already dead — that's fine
+        pass
+
+
 class ClaudeCLIProvider(LLMProvider):
     """Claude provider using claude -p CLI (Max subscription).
 
@@ -330,23 +354,58 @@ class ClaudeCLIProvider(LLMProvider):
             cmd.extend(["--system-prompt", system_prompt])
 
         try:
-            result = subprocess.run(
+            # Use Popen instead of subprocess.run so we can kill the entire
+            # process tree on timeout.  subprocess.run + timeout on Windows
+            # only kills the root process; grandchild processes keep the
+            # pipes open, blocking for 200-400s after the timeout fires.
+            # See issue #526.
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+            proc = subprocess.Popen(
                 cmd,
-                input=content,
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
-                timeout=timeout_seconds,
+                creationflags=creation_flags,
             )
-
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout or "Unknown error"
+            try:
+                stdout, stderr = proc.communicate(
+                    input=content, timeout=timeout_seconds
+                )
+            except subprocess.TimeoutExpired:
+                # Kill the entire process tree so pipes close immediately
+                _kill_process_tree(proc.pid)
+                # Drain any remaining pipe data
+                try:
+                    proc.communicate(timeout=5)
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+                duration_ms = int((time.time() - start_time) * 1000)
                 call_result = LLMCallResult(
                     success=False,
                     response=None,
-                    raw_response=result.stdout,
+                    raw_response=None,
+                    error_message=f"claude -p timed out after {timeout_seconds}s",
+                    provider=self.provider_name,
+                    model_used=self._model,
+                    duration_ms=duration_ms,
+                    attempts=1,
+                )
+                log_llm_call(call_result)
+                return call_result
+
+            duration_ms = int((time.time() - start_time) * 1000)
+
+            if proc.returncode != 0:
+                error_msg = stderr or stdout or "Unknown error"
+                call_result = LLMCallResult(
+                    success=False,
+                    response=None,
+                    raw_response=stdout,
                     error_message=f"claude -p failed: {error_msg}",
                     provider=self.provider_name,
                     model_used=self._model,
@@ -364,7 +423,7 @@ class ClaudeCLIProvider(LLMProvider):
             cost_usd = 0.0
 
             try:
-                response_data = json.loads(result.stdout)
+                response_data = json.loads(stdout)
                 response_text = response_data.get("result", "")
 
                 # Extract usage from claude -p JSON
@@ -377,12 +436,12 @@ class ClaudeCLIProvider(LLMProvider):
 
             except json.JSONDecodeError:
                 # Fall back to raw stdout if not valid JSON
-                response_text = result.stdout.strip()
+                response_text = stdout.strip()
 
             call_result = LLMCallResult(
                 success=True,
                 response=response_text,
-                raw_response=result.stdout,
+                raw_response=stdout,
                 error_message=None,
                 provider=self.provider_name,
                 model_used=self._model,
@@ -397,20 +456,6 @@ class ClaudeCLIProvider(LLMProvider):
             log_llm_call(call_result)
             return call_result
 
-        except subprocess.TimeoutExpired:
-            duration_ms = int((time.time() - start_time) * 1000)
-            call_result = LLMCallResult(
-                success=False,
-                response=None,
-                raw_response=None,
-                error_message=f"claude -p timed out after {timeout_seconds}s",
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=1,
-            )
-            log_llm_call(call_result)
-            return call_result
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             call_result = LLMCallResult(

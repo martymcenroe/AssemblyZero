@@ -84,7 +84,7 @@ class TestFullWorkflowIntegration:
         assert final["exit_code"] == 1
         assert final["report_url"] is not None
         assert Path(final["report_url"]).exists()
-        report_content = Path(final["report_url"]).read_text()
+        report_content = Path(final["report_url"]).read_text(encoding="utf-8")
         assert "Janitor Report" in report_content
         assert "stale_todo" in report_content
 
