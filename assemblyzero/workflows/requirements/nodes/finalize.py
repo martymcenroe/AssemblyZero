@@ -2,6 +2,8 @@
 
 Updates GitHub issue with final draft, commits artifacts to git, and closes workflow.
 For LLD workflows, saves LLD file with embedded review evidence.
+
+Issue #513: First-pass acceptance rate tracking.
 """
 
 import re
@@ -17,6 +19,7 @@ from assemblyzero.workflows.requirements.audit import (
     save_audit_file,
     update_lld_status,
 )
+from assemblyzero.workflows.testing.audit import log_workflow_execution
 from ..git_operations import commit_and_push, GitOperationError
 
 # Constants
@@ -391,6 +394,49 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
         # _finalize_issue returns only updates, merge them into state
         updates = _finalize_issue(state)
         state.update(updates)
+
+    # Issue #513: Log workflow completion with first-pass tracking
+    if not state.get("error_message"):
+        verdict_count = state.get("verdict_count", 0)
+        draft_count = state.get("draft_count", 0)
+        lld_status = state.get("lld_status", "")
+        target_repo = Path(state.get("target_repo", "."))
+        issue_number = state.get("issue_number", 0)
+
+        # First-pass = approved on the very first review (one draft, one verdict)
+        first_pass = (
+            verdict_count == 1
+            and draft_count <= 1
+            and lld_status == "APPROVED"
+        )
+
+        completion_details: Dict[str, Any] = {
+            "first_pass": first_pass,
+            "verdict_count": verdict_count,
+            "draft_count": draft_count,
+            "final_verdict": lld_status,
+        }
+
+        # Include cost info if available
+        node_costs = state.get("node_costs")
+        if node_costs:
+            completion_details["total_cost_usd"] = round(
+                sum(node_costs.values()), 6
+            )
+            completion_details["cost_by_node"] = {
+                k: round(v, 6) for k, v in node_costs.items()
+            }
+
+        if state.get("final_lld_path"):
+            completion_details["final_lld_path"] = state["final_lld_path"]
+
+        log_workflow_execution(
+            target_repo=target_repo,
+            issue_number=issue_number,
+            workflow_type=workflow_type,
+            event="complete",
+            details=completion_details,
+        )
 
     # Then, commit and push artifacts to git
     state = _commit_and_push_files(state)
