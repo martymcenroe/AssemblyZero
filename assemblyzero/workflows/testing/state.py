@@ -76,7 +76,7 @@ class TestingWorkflowState(TypedDict, total=False):
 
         # Review artifacts
         test_plan_review_prompt: Prompt sent to Gemini for test plan review.
-        test_plan_verdict: Gemini's verdict on test plan.
+        test_plan_verdict: Extracted verdict summary (not raw prose). Full response in audit trail.
         test_plan_status: APPROVED or BLOCKED.
         gemini_feedback: Feedback from Gemini if BLOCKED.
 

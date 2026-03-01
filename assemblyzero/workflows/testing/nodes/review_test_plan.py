@@ -583,7 +583,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
             gemini_feedback = _extract_feedback(verdict_content)
         return {
             "test_plan_status": "BLOCKED",
-            "test_plan_verdict": verdict_content,
+            "test_plan_verdict": f"BLOCKED: {gemini_feedback[:200]}",
             "gemini_feedback": gemini_feedback,
             "file_counter": file_num,
             "error_message": "Test plan review BLOCKED - requires LLD revision",
@@ -593,7 +593,11 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         "test_plan_status": "APPROVED",
-        "test_plan_verdict": verdict_content,
+        "test_plan_verdict": (
+            f"APPROVED: {structured.get('summary', 'Test plan approved')[:200]}"
+            if structured
+            else "APPROVED"
+        ),
         "test_plan_review_prompt": full_prompt,
         "file_counter": file_num,
         "error_message": "",
@@ -740,7 +744,7 @@ def _mock_review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         "test_plan_status": test_plan_status,
-        "test_plan_verdict": verdict_content,
+        "test_plan_verdict": f"{test_plan_status}: {gemini_feedback[:200]}" if gemini_feedback else test_plan_status,
         "gemini_feedback": gemini_feedback,
         "file_counter": file_num,
         "error_message": "" if test_plan_status == "APPROVED" else "Test plan review BLOCKED",
