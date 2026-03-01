@@ -339,7 +339,36 @@ CRITICAL REVISION INSTRUCTIONS:
 Revise the draft to address ALL feedback above.
 START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
         else:
-            prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+            # Issue #499: On iteration 3+, replace static sections with
+            # skeleton references to reduce token waste. The current draft
+            # already contains the full structure from the template + input.
+            draft_count_now = state.get("draft_count", 0) + 1
+            if draft_count_now >= 3:
+                # Skeleton: just the issue reference, not full body
+                skeleton_input = f"[See {input_label} — unchanged from iteration 1. Issue #{state.get('issue_number', 0)}: {state.get('issue_title', '')}]"
+                skeleton_template = "[Template structure unchanged — already embedded in the current draft. Preserve all section headings.]"
+                prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
+
+{revision_context}## Current Draft (to revise)
+{current_draft}
+
+## Original {input_label}
+{skeleton_input}
+
+## Template (REQUIRED STRUCTURE)
+{skeleton_template}
+
+CRITICAL REVISION INSTRUCTIONS:
+1. Fix ALL mechanical validation errors FIRST (invalid file paths, missing sections)
+2. Implement EVERY change requested by Gemini feedback
+3. PRESERVE sections that weren't flagged
+4. ONLY modify sections that need changes
+5. Keep ALL template sections intact — the draft already has the correct structure
+
+Revise the draft to address ALL feedback above.
+START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."""
+            else:
+                prompt = f"""IMPORTANT: Output ONLY the markdown content. Start with # title. No preamble.
 
 {revision_context}## Current Draft (to revise)
 {current_draft}
