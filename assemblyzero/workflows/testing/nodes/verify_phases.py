@@ -21,6 +21,7 @@ from assemblyzero.workflows.testing.audit import (
     save_audit_file,
 )
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
+from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
 from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_INTERRUPTED,
     EXIT_INTERNALERROR,
@@ -36,6 +37,58 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 # Timeout for pytest execution
 PYTEST_TIMEOUT_SECONDS = 300
+
+# Issue #498: Max chars for failure summary fed back to N4
+MAX_FAILURE_SUMMARY_CHARS = 2000
+
+
+def _build_failure_summary(output: str) -> str:
+    """Extract a concise failure summary from pytest output.
+
+    Issue #498: Instead of feeding N4 the entire pytest output, extract
+    only the "short test summary info" section which contains test names
+    and one-line error messages. This tells N4 exactly what to fix.
+
+    Args:
+        output: Combined stdout + stderr from pytest.
+
+    Returns:
+        Concise failure summary, truncated to MAX_FAILURE_SUMMARY_CHARS.
+        Empty string if no failures found.
+    """
+    import re
+
+    lines = output.split("\n")
+    summary_lines: list[str] = []
+
+    # Extract "short test summary info" section
+    in_summary = False
+    for line in lines:
+        if "short test summary info" in line:
+            in_summary = True
+            continue
+        if in_summary:
+            # Section ends at the next separator line (====)
+            if line.startswith("=" * 10):
+                # Capture the final summary (e.g., "2 failed, 1 passed in 0.15s")
+                summary_lines.append(line.strip("= \n"))
+                break
+            if line.strip():
+                summary_lines.append(line.strip())
+
+    if not summary_lines:
+        # Fallback: extract FAILED lines from anywhere in output
+        for line in lines:
+            if re.match(r"FAILED\s+", line):
+                summary_lines.append(line.strip())
+
+    if not summary_lines:
+        return ""
+
+    result = "\n".join(summary_lines)
+    if len(result) > MAX_FAILURE_SUMMARY_CHARS:
+        result = result[:MAX_FAILURE_SUMMARY_CHARS] + "\n... (truncated)"
+    return result
 
 
 def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
@@ -499,6 +552,12 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     previous_coverage = state.get("previous_coverage", -1.0)
     max_iterations = state.get("max_iterations", 5)
 
+    # Issue #498: Build concise failure summary for N4 feedback
+    failure_summary = _build_failure_summary(output)
+
+    # Issue #501: Extract failed test names for identity-based stagnation
+    current_green_failures = _extract_failed_test_names(output)
+
     # Check for failures
     if failed_count > 0 or error_count > 0:
         # Check if we've exhausted iterations
@@ -510,6 +569,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -531,6 +592,36 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": stagnant_msg,
+            }
+
+        # Issue #501: Identity-based stagnation — same tests failing across iterations.
+        # Catches cases where pass count fluctuates but the SAME tests keep failing.
+        previous_green_failures = state.get("previous_green_failures", [])
+        identity_stagnant = (
+            bool(current_green_failures)
+            and bool(previous_green_failures)
+            and current_green_failures == sorted(previous_green_failures)
+        )
+        if identity_stagnant:
+            stagnant_msg = (
+                f"Test identity stagnant: same {len(current_green_failures)} test(s) failing "
+                f"across iterations. Halting to prevent token waste."
+            )
+            print(f"    [STAGNANT] {stagnant_msg}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -552,6 +643,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -568,6 +661,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -593,12 +688,14 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             },
         )
 
-        # Loop back to implementation
+        # Loop back to implementation with failure feedback
         return {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
             "previous_passed": passed_count,
+            "previous_green_failures": current_green_failures,
+            "test_failure_summary": failure_summary,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -616,6 +713,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -635,6 +734,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -651,6 +752,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "coverage_achieved": coverage_achieved,
                 "previous_coverage": coverage_achieved,
                 "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
@@ -681,6 +784,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
             "previous_passed": passed_count,
+            "previous_green_failures": current_green_failures,
+            "test_failure_summary": failure_summary,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
@@ -710,6 +815,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
             "previous_passed": passed_count,
+            "previous_green_failures": [],
+            "test_failure_summary": "",
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "next_node": "N7_finalize",  # Skip E2E
@@ -721,6 +828,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "coverage_achieved": coverage_achieved,
         "previous_coverage": coverage_achieved,
         "previous_passed": passed_count,
+        "previous_green_failures": [],
+        "test_failure_summary": "",
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
         "next_node": "N6_e2e_validation",

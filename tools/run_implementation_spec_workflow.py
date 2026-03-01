@@ -217,6 +217,10 @@ Examples:
         help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
     )
 
+    # Issue #517: Global workflow timeout
+    from assemblyzero.utils.workflow_timeout import add_timeout_argument
+    add_timeout_argument(parser)
+
     return parser
 
 
@@ -548,7 +552,11 @@ def run_workflow(
         print(f"DEBUG: repo_root = {state.get('repo_root', '')}")
 
     # Create and run graph
+    # Issue #517: Global workflow timeout
+    from assemblyzero.utils.workflow_timeout import WorkflowTimeout
+
     try:
+      with WorkflowTimeout(minutes=args.timeout):
         graph = create_implementation_spec_graph()
 
         # Calculate recursion limit: each iteration can touch N2->N3->N5 (3 nodes)
