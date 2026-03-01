@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.workflows.testing.audit import (
     gate_log,
@@ -471,9 +472,11 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         result = None
 
         for attempt in range(1, max_attempts + 1):
+            # Issue #494: Request structured JSON verdict from Gemini
             result = client.invoke(
                 system_instruction="You are a senior QA engineer reviewing a test plan for coverage and quality.",
                 content=full_prompt,
+                response_schema=VERDICT_SCHEMA,
             )
 
             if result.success:
@@ -527,9 +530,19 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "verdict.md", verdict_content)
 
-    # Parse verdict
-    test_plan_status = _parse_verdict(verdict_content)
-    print(f"    Verdict: {test_plan_status}")
+    # Issue #494: Parse verdict — structured JSON first, regex fallback
+    structured = parse_structured_verdict(verdict_content)
+    verdict_method = "regex"
+    if structured:
+        test_plan_status = structured["verdict"]
+        # Map REVISE -> BLOCKED for workflow purposes
+        if test_plan_status == "REVISE":
+            test_plan_status = "BLOCKED"
+        verdict_method = "structured"
+        print(f"    Verdict: {test_plan_status} (structured JSON)")
+    else:
+        test_plan_status = _parse_verdict(verdict_content)
+        print(f"    Verdict: {test_plan_status} (regex fallback)")
 
     # Log review result
     log_workflow_execution(
@@ -540,6 +553,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         details={
             "status": test_plan_status,
             "scenario_count": len(test_scenarios),
+            "verdict_method": verdict_method,
         },
     )
 
@@ -555,7 +569,18 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     )
 
     if test_plan_status == "BLOCKED":
-        gemini_feedback = _extract_feedback(verdict_content)
+        # Issue #494: Extract feedback from structured data if available
+        if structured:
+            feedback_parts = []
+            if structured.get("summary"):
+                feedback_parts.append(structured["summary"])
+            for issue in structured.get("blocking_issues", []):
+                feedback_parts.append(
+                    f"[{issue.get('severity', 'BLOCKING')}] {issue.get('section', '?')}: {issue.get('issue', '?')}"
+                )
+            gemini_feedback = "\n".join(feedback_parts) if feedback_parts else _extract_feedback(verdict_content)
+        else:
+            gemini_feedback = _extract_feedback(verdict_content)
         return {
             "test_plan_status": "BLOCKED",
             "test_plan_verdict": verdict_content,
