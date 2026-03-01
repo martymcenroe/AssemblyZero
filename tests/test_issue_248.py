@@ -227,9 +227,9 @@ def test_t010(draft_with_open_questions, mock_state_base):
     assert result_after_validation == "N1b_validate_test_plan", \
         "After mechanical validation passes, should proceed to test plan validation"
 
-    # Step 3: After test plan validation passes, proceed to review
-    assert result_after_test_plan == "N3_review", \
-        "After test plan validation passes with gates disabled, should proceed to review"
+    # Step 3: After test plan validation passes, proceed through Ponder (Issue #307)
+    assert result_after_test_plan == "N_ponder_stibbons", \
+        "After test plan validation passes, should proceed to Ponder auto-fix"
 
 
 def test_t020(draft_with_open_questions, verdict_with_resolved_questions):
@@ -396,9 +396,9 @@ def test_010(draft_with_open_questions, mock_state_base):
     # Issue #166: Then N1b test plan validation
     assert route_after_validation == "N1b_validate_test_plan", \
         "After mechanical validation passes, go to test plan validation"
-    # Then to review
-    assert route_after_test_plan == "N3_review", \
-        "Should proceed to review despite open questions (after test plan validation passes)"
+    # Issue #307: Then through Ponder auto-fix before review
+    assert route_after_test_plan == "N_ponder_stibbons", \
+        "Should proceed to Ponder auto-fix after test plan validation passes"
 
 
 def test_020(draft_with_open_questions, verdict_with_resolved_questions):

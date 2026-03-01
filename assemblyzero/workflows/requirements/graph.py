@@ -55,6 +55,7 @@ from assemblyzero.workflows.requirements.nodes import (
     human_gate_draft,
     human_gate_verdict,
     load_input,
+    ponder_stibbons_node,
     review,
     validate_lld_mechanical,
     validate_test_plan_node,
@@ -75,6 +76,7 @@ N0B_ANALYZE_CODEBASE = "N0b_analyze_codebase"  # Issue #401
 N1_GENERATE_DRAFT = "N1_generate_draft"
 N1_5_VALIDATE_MECHANICAL = "N1_5_validate_mechanical"  # Issue #277
 N1B_VALIDATE_TEST_PLAN = "N1b_validate_test_plan"  # Issue #166
+N_PONDER = "N_ponder_stibbons"  # Issue #307
 N2_HUMAN_GATE_DRAFT = "N2_human_gate_draft"
 N3_REVIEW = "N3_review"
 N4_HUMAN_GATE_VERDICT = "N4_human_gate_verdict"
@@ -193,15 +195,15 @@ def route_after_validate_mechanical(
 
 def route_after_validate_test_plan(
     state: RequirementsWorkflowState,
-) -> Literal["N2_human_gate_draft", "N3_review", "N1_generate_draft", "HALT"]:
+) -> Literal["N_ponder_stibbons", "N1_generate_draft", "HALT"]:
     """Route after validate_test_plan node.
 
     Issue #166: Routes based on test plan validation result.
+    Issue #307: Pass now routes to Ponder (auto-fix) before N2/N3.
     Issue #486: Error/max-iteration routes to HALT.
 
     Routes to:
-    - N2_human_gate_draft: Validation passed, gate enabled
-    - N3_review: Validation passed, gate disabled
+    - N_ponder_stibbons: Validation passed, apply auto-fixes
     - N1_generate_draft: Validation failed, return to drafter
     - HALT: Error or max iterations reached
 
@@ -226,7 +228,24 @@ def route_after_validate_test_plan(
         print("    [ROUTING] Test plan validation failed - returning to drafter")
         return "N1_generate_draft"
 
-    # Validation passed - proceed to human gate or review
+    # Validation passed - route through Ponder for auto-fixes (Issue #307)
+    return "N_ponder_stibbons"
+
+
+def route_after_ponder(
+    state: RequirementsWorkflowState,
+) -> Literal["N2_human_gate_draft", "N3_review"]:
+    """Route after Ponder Stibbons auto-fix node.
+
+    Issue #307: After auto-fixes, proceed to human gate or review.
+    Ponder never routes back to drafter — it only fixes mechanical issues.
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name.
+    """
     if state.get("config_gates_draft", True):
         return "N2_human_gate_draft"
     else:
@@ -434,6 +453,7 @@ def create_requirements_graph() -> StateGraph:
     graph.add_node(N1_GENERATE_DRAFT, generate_draft)
     graph.add_node(N1_5_VALIDATE_MECHANICAL, validate_lld_mechanical)  # Issue #277
     graph.add_node(N1B_VALIDATE_TEST_PLAN, validate_test_plan_node)  # Issue #166
+    graph.add_node(N_PONDER, ponder_stibbons_node)  # Issue #307
     graph.add_node(N2_HUMAN_GATE_DRAFT, human_gate_draft)
     graph.add_node(N3_REVIEW, review)
     graph.add_node(N4_HUMAN_GATE_VERDICT, human_gate_verdict)
@@ -488,16 +508,26 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N1b -> N2 or N3 or N1 or HALT (based on test plan validation)
+    # N1b -> Ponder or N1 or HALT (based on test plan validation)
     # Issue #166: Test plan validation routes
+    # Issue #307: Pass goes through Ponder before N2/N3
     graph.add_conditional_edges(
         N1B_VALIDATE_TEST_PLAN,
         route_after_validate_test_plan,
         {
-            "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
-            "N3_review": N3_REVIEW,
+            "N_ponder_stibbons": N_PONDER,
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "HALT": HALT,
+        },
+    )
+
+    # Ponder -> N2 or N3 (Issue #307: always proceeds after auto-fix)
+    graph.add_conditional_edges(
+        N_PONDER,
+        route_after_ponder,
+        {
+            "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
+            "N3_review": N3_REVIEW,
         },
     )
 

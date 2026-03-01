@@ -94,8 +94,8 @@ class TestNodeRoutesToGeminiOnPass:
         assert result["error_message"] == ""
         assert result["test_plan_validation_attempts"] == 1
 
-    def test_routing_passes_to_human_gate(self):
-        """T110: Route function sends to N2 on pass (gates enabled)."""
+    def test_routing_passes_to_ponder(self):
+        """T110: Route function sends to Ponder on pass (Issue #307)."""
         state = _make_state(
             current_draft=LLD_PASSING,
             test_plan_validation_result={"passed": True},
@@ -103,17 +103,17 @@ class TestNodeRoutesToGeminiOnPass:
             error_message="",
         )
         route = route_after_validate_test_plan(state)
-        assert route == "N2_human_gate_draft"
+        assert route == "N_ponder_stibbons"
 
-    def test_routing_passes_to_review(self):
-        """Routing sends to N3 on pass (gates disabled)."""
+    def test_routing_passes_to_ponder_gates_disabled(self):
+        """Routing sends to Ponder on pass regardless of gate config (Issue #307)."""
         state = _make_state(
             test_plan_validation_result={"passed": True},
             config_gates_draft=False,
             error_message="",
         )
         route = route_after_validate_test_plan(state)
-        assert route == "N3_review"
+        assert route == "N_ponder_stibbons"
 
 
 # =============================================================================
