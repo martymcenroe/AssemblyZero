@@ -84,7 +84,7 @@ class TestFullWorkflowIntegration:
         assert final["exit_code"] == 1
         assert final["report_url"] is not None
         assert Path(final["report_url"]).exists()
-        report_content = Path(final["report_url"]).read_text(encoding="utf-8")
+        report_content = Path(final["report_url"]).read_text()
         assert "Janitor Report" in report_content
         assert "stale_todo" in report_content
 
@@ -166,7 +166,7 @@ class TestFullWorkflowIntegration:
         assert final["fix_actions"][0].applied is False
 
     def test_mixed_findings_fix_then_report(self, tmp_path):
-        """T330: Mixed fixable/unfixable → fix, then report unfixable."""
+        """T330: Mixed fixable/unfixable -> fix, then report unfixable."""
         readme = tmp_path / "README.md"
         readme.write_text("[guide](./docs/old-guide.md)\n")
         docs = tmp_path / "docs"

@@ -8,11 +8,11 @@ Graph nodes:
   n2_reporter - Report unfixable findings via selected backend
 
 Conditional edges:
-  n0_sweeper → END          if no findings
-  n0_sweeper → n1_fixer     if fixable findings exist and auto_fix=True
-  n0_sweeper → n2_reporter  if only unfixable findings
-  n1_fixer   → n2_reporter  if unfixable findings remain
-  n1_fixer   → END          if all findings fixed
+  n0_sweeper -> END          if no findings
+  n0_sweeper -> n1_fixer     if fixable findings exist and auto_fix=True
+  n0_sweeper -> n2_reporter  if only unfixable findings
+  n1_fixer   -> n2_reporter  if unfixable findings remain
+  n1_fixer   -> END          if all findings fixed
 """
 
 from __future__ import annotations
@@ -22,13 +22,7 @@ from datetime import datetime
 
 from langgraph.graph import END, StateGraph
 
-from assemblyzero.workflows.janitor.fixers import (
-    create_fix_commit,
-    create_fix_pr,
-    fix_broken_links,
-    fix_stale_worktrees,
-    generate_commit_message,
-)
+from assemblyzero.workflows.janitor import fixers as _fixers
 from assemblyzero.workflows.janitor.probes import get_probes, run_probe_safe
 from assemblyzero.workflows.janitor.reporter import (
     build_report_body,
@@ -55,13 +49,9 @@ def n0_sweeper(state: JanitorState) -> dict:
     for pr in probe_results:
         all_findings.extend(pr.findings)
 
-    # Pre-populate unfixable_findings so reporter works even when fixer is skipped
-    unfixable = [f for f in all_findings if not f.fixable]
-
     return {
         "probe_results": probe_results,
         "all_findings": all_findings,
-        "unfixable_findings": unfixable,
     }
 
 
@@ -83,10 +73,10 @@ def n1_fixer(state: JanitorState) -> dict:
 
     for category, findings in by_category.items():
         if category == "broken_link":
-            actions = fix_broken_links(findings, repo_root, dry_run)
+            actions = _fixers.fix_broken_links(findings, repo_root, dry_run)
             fix_actions.extend(actions)
         elif category == "stale_worktree":
-            actions = fix_stale_worktrees(findings, repo_root, dry_run)
+            actions = _fixers.fix_stale_worktrees(findings, repo_root, dry_run)
             fix_actions.extend(actions)
 
     # Create commits for file-modifying fixes (not worktree prunes)
@@ -98,15 +88,15 @@ def n1_fixer(state: JanitorState) -> dict:
                     {f.file_path for f in findings if f.file_path}
                 )
                 if files:
-                    msg = generate_commit_message(
+                    msg = _fixers.generate_commit_message(
                         category, len(findings), files
                     )
-                    create_fix_commit(repo_root, category, files, msg)
+                    _fixers.create_fix_commit(repo_root, category, files, msg)
 
     if not dry_run and create_pr:
         branch_name = f"janitor/fixes-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}"
         msg = "chore: janitor auto-fixes (ref #94)"
-        pr_url = create_fix_pr(repo_root, branch_name, msg)
+        pr_url = _fixers.create_fix_pr(repo_root, branch_name, msg)
         if pr_url:
             # Add PR URL info (will be picked up by reporter if needed)
             pass
@@ -120,15 +110,22 @@ def n1_fixer(state: JanitorState) -> dict:
 def n2_reporter(state: JanitorState) -> dict:
     """Report unfixable findings via the configured reporter backend."""
     reporter = get_reporter(state["reporter_type"], state["repo_root"])
+
+    # When routing skips fixer (sweep → reporter), unfixable_findings
+    # won't be populated.  Fall back to extracting from all_findings.
+    unfixable = state.get("unfixable_findings") or []
+    if not unfixable:
+        unfixable = [f for f in state.get("all_findings", []) if not f.fixable]
+
     body = build_report_body(
-        state["unfixable_findings"],
-        state["fix_actions"],
-        state["probe_results"],
+        unfixable,
+        state.get("fix_actions") or [],
+        state.get("probe_results") or [],
     )
 
     # Determine max severity
     max_severity = "info"
-    for f in state["unfixable_findings"]:
+    for f in unfixable:
         if f.severity == "critical":
             max_severity = "critical"
             break

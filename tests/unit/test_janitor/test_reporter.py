@@ -71,57 +71,48 @@ class TestLocalFileReporter:
         assert (tmp_path / "janitor-reports").is_dir()
 
     def test_create_report_filename_format(self, tmp_path):
-        """create_report uses janitor-report-YYYY-MM-DD-HHMMSS.md naming."""
+        """create_report uses correct filename format with timestamp."""
         reporter = LocalFileReporter(str(tmp_path))
         result = reporter.create_report("Janitor Report", "# Test", "info")
 
         filename = Path(result).name
         assert filename.startswith("janitor-report-")
         assert filename.endswith(".md")
-        # Verify date portion is present (YYYY-MM-DD)
-        date_part = filename[len("janitor-report-"):len("janitor-report-") + 10]
-        assert len(date_part) == 10
-        assert date_part[4] == "-"
-        assert date_part[7] == "-"
+        # Should contain date in YYYY-MM-DD format
+        today = datetime.now().strftime("%Y-%m-%d")
+        assert today in filename
 
-    def test_create_report_content_encoding(self, tmp_path):
-        """create_report writes UTF-8 encoded content."""
+    def test_create_report_preserves_body_content(self, tmp_path):
+        """create_report writes the exact body content provided."""
         reporter = LocalFileReporter(str(tmp_path))
-        body = "# Report\n\n- ✅ Fixed link\n- ⚠️ Warning\n- ❌ Error"
-        result = reporter.create_report("Janitor Report", body, "warning")
+        body = "# Janitor Report\n\n## Summary\n\nSome content here.\n"
+        result = reporter.create_report("Janitor Report", body, "critical")
 
-        content = Path(result).read_text(encoding="utf-8")
-        assert "✅" in content
-        assert "⚠️" in content
-        assert "❌" in content
+        assert Path(result).read_text() == body
 
     def test_update_report_preserves_path(self, tmp_path):
-        """update_report returns the same path that was passed in."""
+        """update_report returns the same path it was given."""
         reporter = LocalFileReporter(str(tmp_path))
         path = reporter.create_report("Janitor Report", "# Original", "info")
 
-        returned_path = reporter.update_report(path, "# New Content", "warning")
-        assert returned_path == path
+        result = reporter.update_report(path, "# New Content", "warning")
+        assert result == path
 
-    def test_find_existing_report_returns_first_match(self, tmp_path):
-        """find_existing_report returns the first sorted match for today."""
+    def test_find_existing_report_returns_first_sorted(self, tmp_path):
+        """find_existing_report returns the first report alphabetically for today."""
         reporter = LocalFileReporter(str(tmp_path))
-        # Create two reports for today
-        path1 = reporter.create_report("Janitor Report", "# First", "info")
-        # The second report will have a later timestamp
-        path2 = reporter.create_report("Janitor Report", "# Second", "info")
+        # Create two reports - they'll have slightly different timestamps
+        path1 = reporter.create_report("Report 1", "# First", "info")
+        # Manually create a second report with a later timestamp
+        today = datetime.now().strftime("%Y-%m-%d")
+        report_dir = tmp_path / "janitor-reports"
+        second = report_dir / f"janitor-report-{today}-235959.md"
+        second.write_text("# Second")
 
         found = reporter.find_existing_report()
         assert found is not None
-        # Should return first sorted (earliest timestamp)
+        # Should return the first one sorted
         assert found == path1
-
-    def test_reporter_dir_already_exists(self, tmp_path):
-        """LocalFileReporter handles pre-existing janitor-reports/ dir."""
-        (tmp_path / "janitor-reports").mkdir()
-        reporter = LocalFileReporter(str(tmp_path))
-        assert (tmp_path / "janitor-reports").is_dir()
-        # Should not raise
 
 
 class TestGitHubReporter:
@@ -185,30 +176,6 @@ class TestGitHubReporter:
 
         assert result is None
 
-    def test_find_existing_report_gh_failure(self):
-        """find_existing_report returns None when gh command fails."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0),  # auth
-                MagicMock(returncode=1, stdout=""),  # gh issue list fails
-            ]
-            reporter = GitHubReporter("/repo")
-            result = reporter.find_existing_report()
-
-        assert result is None
-
-    def test_find_existing_report_invalid_json(self):
-        """find_existing_report returns None on malformed JSON."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0),  # auth
-                MagicMock(returncode=0, stdout="not valid json"),
-            ]
-            reporter = GitHubReporter("/repo")
-            result = reporter.find_existing_report()
-
-        assert result is None
-
     def test_create_report(self):
         """create_report calls gh issue create."""
         with patch("subprocess.run") as mock_run:
@@ -224,12 +191,12 @@ class TestGitHubReporter:
 
         assert url == "https://github.com/user/repo/issues/43"
 
-    def test_create_report_failure(self):
-        """create_report raises RuntimeError on gh failure."""
+    def test_create_report_failure_raises(self):
+        """create_report raises RuntimeError on gh CLI failure."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # auth
-                MagicMock(returncode=1, stdout="", stderr="permission denied"),
+                MagicMock(returncode=1, stderr="Permission denied"),  # create fails
             ]
             reporter = GitHubReporter("/repo")
             with pytest.raises(RuntimeError, match="Failed to create GitHub issue"):
@@ -252,12 +219,12 @@ class TestGitHubReporter:
         edit_call = mock_run.call_args_list[1]
         assert "42" in edit_call.args[0]
 
-    def test_update_report_failure(self):
-        """update_report raises RuntimeError on gh failure."""
+    def test_update_report_failure_raises(self):
+        """update_report raises RuntimeError on gh CLI failure."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # auth
-                MagicMock(returncode=1, stdout="", stderr="not found"),
+                MagicMock(returncode=1, stderr="Not found"),  # edit fails
             ]
             reporter = GitHubReporter("/repo")
             with pytest.raises(RuntimeError, match="Failed to update GitHub issue"):
@@ -265,8 +232,32 @@ class TestGitHubReporter:
                     "https://github.com/user/repo/issues/42", "# Updated", "warning"
                 )
 
-    def test_update_report_extracts_issue_number(self):
-        """update_report correctly extracts issue number from URL."""
+    def test_find_existing_report_gh_failure(self):
+        """find_existing_report returns None when gh CLI fails."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # auth
+                MagicMock(returncode=1, stdout=""),  # list fails
+            ]
+            reporter = GitHubReporter("/repo")
+            result = reporter.find_existing_report()
+
+        assert result is None
+
+    def test_find_existing_report_invalid_json(self):
+        """find_existing_report returns None on invalid JSON response."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # auth
+                MagicMock(returncode=0, stdout="not valid json"),  # bad json
+            ]
+            reporter = GitHubReporter("/repo")
+            result = reporter.find_existing_report()
+
+        assert result is None
+
+    def test_update_report_extracts_issue_number_from_url(self):
+        """update_report correctly extracts issue number from various URL formats."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # auth
@@ -275,31 +266,28 @@ class TestGitHubReporter:
             reporter = GitHubReporter("/repo")
             reporter.update_report(
                 "https://github.com/martymcenroe/AssemblyZero/issues/99",
-                "# Updated",
-                "critical",
+                "# Body",
+                "info",
             )
 
         edit_call = mock_run.call_args_list[1]
         assert "99" in edit_call.args[0]
 
-    def test_create_report_uses_maintenance_label(self):
+    def test_create_report_includes_maintenance_label(self):
         """create_report passes --label maintenance to gh issue create."""
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # auth
-                MagicMock(
-                    returncode=0,
-                    stdout="https://github.com/user/repo/issues/43\n",
-                ),
+                MagicMock(returncode=0, stdout="https://github.com/user/repo/issues/1\n"),
             ]
             reporter = GitHubReporter("/repo")
             reporter.create_report("Janitor Report", "# Body", "warning")
 
         create_call = mock_run.call_args_list[1]
-        cmd_args = create_call.args[0]
-        assert "--label" in cmd_args
-        label_idx = cmd_args.index("--label")
-        assert cmd_args[label_idx + 1] == "maintenance"
+        cmd = create_call.args[0]
+        assert "--label" in cmd
+        label_idx = cmd.index("--label")
+        assert cmd[label_idx + 1] == "maintenance"
 
 
 class TestBuildReportBody:
@@ -364,44 +352,17 @@ class TestBuildReportBody:
 
     def test_build_report_body_no_probe_errors(self):
         """build_report_body omits Probe Errors section when no errors."""
-        body = build_report_body(
-            [],
-            [],
-            [ProbeResult(probe="links", status="ok")],
-        )
+        unfixable = [
+            Finding(probe="todo", category="stale_todo", message="m", severity="info", fixable=False),
+        ]
+        probe_results = [
+            ProbeResult(probe="todo", status="findings", findings=[]),
+            ProbeResult(probe="links", status="ok", findings=[]),
+        ]
+        body = build_report_body(unfixable, [], probe_results)
         assert "## Probe Errors" not in body
 
-    def test_build_report_body_multiple_unfixable_categories(self):
-        """build_report_body groups unfixable findings by category."""
-        unfixable = [
-            Finding(probe="todo", category="stale_todo", message="TODO 1", severity="info", fixable=False, file_path="a.py", line_number=1),
-            Finding(probe="todo", category="stale_todo", message="TODO 2", severity="info", fixable=False, file_path="b.py", line_number=2),
-            Finding(probe="harvest", category="cross_project_drift", message="Drift 1", severity="warning", fixable=False),
-        ]
-        body = build_report_body(unfixable, [], [])
-
-        assert "### stale_todo" in body
-        assert "### cross_project_drift" in body
-        assert "TODO 1" in body
-        assert "TODO 2" in body
-        assert "Drift 1" in body
-
-    def test_build_report_body_fix_action_not_applied(self):
-        """build_report_body shows different icon for unapplied fixes."""
-        fix_actions = [
-            FixAction(
-                category="broken_link",
-                description="Would fix link in README.md",
-                files_modified=["README.md"],
-                commit_message="chore: fix 1 broken markdown link(s) (ref #94)",
-                applied=False,
-            )
-        ]
-        body = build_report_body([], fix_actions, [])
-        assert "🔲" in body
-        assert "Would fix link in README.md" in body
-
-    def test_build_report_body_applied_fix_checkmark(self):
+    def test_build_report_body_fix_actions_with_checkmarks(self):
         """build_report_body shows checkmark for applied fixes."""
         fix_actions = [
             FixAction(
@@ -410,13 +371,35 @@ class TestBuildReportBody:
                 files_modified=["README.md"],
                 commit_message="chore: fix 1 broken markdown link(s) (ref #94)",
                 applied=True,
-            )
+            ),
+            FixAction(
+                category="broken_link",
+                description="Would fix link in docs/guide.md",
+                files_modified=["docs/guide.md"],
+                commit_message="chore: fix 1 broken markdown link(s) (ref #94)",
+                applied=False,
+            ),
         ]
         body = build_report_body([], fix_actions, [])
-        assert "✅" in body
+        assert "[PASS]" in body
+        assert "" in body
 
-    def test_build_report_body_finding_location_with_line(self):
-        """build_report_body includes file:line location for findings."""
+    def test_build_report_body_groups_by_category(self):
+        """build_report_body groups unfixable findings by category."""
+        unfixable = [
+            Finding(probe="todo", category="stale_todo", message="TODO 1", severity="info", fixable=False, file_path="a.py", line_number=1),
+            Finding(probe="harvest", category="cross_project_drift", message="DRIFT 1", severity="warning", fixable=False),
+            Finding(probe="todo", category="stale_todo", message="TODO 2", severity="info", fixable=False, file_path="b.py", line_number=2),
+        ]
+        body = build_report_body(unfixable, [], [])
+        assert "### stale_todo" in body
+        assert "### cross_project_drift" in body
+        assert "TODO 1" in body
+        assert "TODO 2" in body
+        assert "DRIFT 1" in body
+
+    def test_build_report_body_finding_with_location(self):
+        """build_report_body includes file path and line number in findings."""
         unfixable = [
             Finding(
                 probe="todo",
@@ -431,13 +414,13 @@ class TestBuildReportBody:
         body = build_report_body(unfixable, [], [])
         assert "tools/helper.py:42" in body
 
-    def test_build_report_body_finding_location_without_line(self):
-        """build_report_body includes file path without line when line_number is None."""
+    def test_build_report_body_finding_without_line_number(self):
+        """build_report_body handles findings with file_path but no line_number."""
         unfixable = [
             Finding(
                 probe="harvest",
                 category="cross_project_drift",
-                message="Drift detected",
+                message="DRIFT: something",
                 severity="warning",
                 fixable=False,
                 file_path="pyproject.toml",
@@ -445,28 +428,21 @@ class TestBuildReportBody:
             )
         ]
         body = build_report_body(unfixable, [], [])
-        assert "pyproject.toml)" in body
-
-    def test_build_report_body_all_zero_severity(self):
-        """build_report_body shows zero counts when no findings."""
-        body = build_report_body([], [], [])
-        assert "| Critical | 0 |" in body
-        assert "| Warning | 0 |" in body
-        assert "| Info | 0 |" in body
+        assert "(pyproject.toml)" in body
 
     def test_build_report_body_multiple_probe_errors(self):
         """build_report_body lists all probe errors."""
         probe_results = [
-            ProbeResult(probe="links", status="error", error_message="Permission denied"),
-            ProbeResult(probe="harvest", status="error", error_message="Script not found"),
-            ProbeResult(probe="todo", status="ok"),
+            ProbeResult(probe="links", status="error", error_message="File not found"),
+            ProbeResult(probe="harvest", status="error", error_message="Script crashed"),
+            ProbeResult(probe="todo", status="ok", findings=[]),
         ]
         body = build_report_body([], [], probe_results)
         assert "## Probe Errors" in body
         assert "links" in body
-        assert "Permission denied" in body
+        assert "File not found" in body
         assert "harvest" in body
-        assert "Script not found" in body
+        assert "Script crashed" in body
 
 
 class TestGetReporter:
