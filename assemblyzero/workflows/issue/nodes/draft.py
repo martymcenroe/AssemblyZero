@@ -168,6 +168,7 @@ def draft(state: IssueWorkflowState) -> dict[str, Any]:
     verdict_history = state.get("verdict_history", [])
     file_counter = state.get("file_counter", 0)
     draft_count = state.get("draft_count", 0)
+    history_context = state.get("history_context", "")
 
     if not audit_dir or not audit_dir.exists():
         return {"error_message": "Audit directory not set or doesn't exist"}
@@ -245,12 +246,18 @@ Revise the draft to address ALL feedback above while KEEPING all template sectio
 START YOUR RESPONSE WITH THE # HEADING. DO NOT WRITE "I'll revise" OR ANY PREAMBLE."""
     else:
         # Initial draft mode
+        # Issue #91: Inject history context from the Historian if available
+        history_section = ""
+        if history_context:
+            history_section = f"""
+{history_context}
+
+"""
         user_content = f"""IMPORTANT: Output ONLY the markdown issue content. Start with # title. No preamble.
 
 ## Brief (user's ideation notes)
 {brief_content}
-
-## Issue Template (follow this structure)
+{history_section}## Issue Template (follow this structure)
 {template}
 
 Create a complete GitHub issue following the template structure. START YOUR RESPONSE WITH THE # HEADING. DO NOT WRITE "I'll create" OR ANY PREAMBLE."""

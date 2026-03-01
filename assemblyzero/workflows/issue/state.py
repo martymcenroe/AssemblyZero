@@ -103,5 +103,11 @@ class IssueWorkflowState(TypedDict, total=False):
     issue_number: int
     issue_url: str
 
+    # History (RAG) — Issue #91
+    history_matches: list[dict]
+    history_status: str  # "high_similarity", "medium_similarity", "low_similarity", "unavailable"
+    history_context: str  # Formatted past-work context for injection into draft prompt
+    historian_decision: str  # "abort", "link", "ignore" (human decision on high similarity)
+
     # Error handling
     error_message: str

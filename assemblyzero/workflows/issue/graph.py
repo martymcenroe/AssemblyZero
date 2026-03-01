@@ -15,6 +15,7 @@ from langgraph.graph import END, StateGraph
 from assemblyzero.workflows.issue.nodes import (
     draft,
     file_issue,
+    historian,
     human_edit_draft,
     human_edit_verdict,
     load_brief,
@@ -110,6 +111,27 @@ def route_after_file(
         return "end"
 
 
+def route_after_historian(
+    state: IssueWorkflowState,
+) -> Literal["N1_sandbox", "end"]:
+    """Conditional routing after N0b (historian).
+
+    Routes based on history_status and historian_decision:
+    - If high_similarity + abort → END
+    - Otherwise → N1_sandbox (continue workflow)
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name or END.
+    """
+    error = state.get("error_message", "")
+    if error and "HISTORIAN_ABORT" in error:
+        return "end"
+    return "N1_sandbox"
+
+
 def check_error(state: IssueWorkflowState) -> Literal["continue", "end"]:
     """Check if workflow should continue or end due to error.
 
@@ -132,21 +154,22 @@ def build_issue_workflow() -> StateGraph:
         Compiled StateGraph ready for execution.
 
     Graph structure:
-        N0_load_brief -> N1_sandbox -> N2_draft -> N3_human_edit_draft
-                                          ^              |
-                                          |              v
-                                          +---- N4_review -> N5_human_edit_verdict
-                                          |                        |
-                                          +------------------------+
-                                                                   |
-                                                                   v
-                                                             N6_file -> END
+        N0_load_brief -> N0b_historian -> N1_sandbox -> N2_draft -> N3_human_edit_draft
+                                                            ^              |
+                                                            |              v
+                                                            +---- N4_review -> N5_human_edit_verdict
+                                                            |                        |
+                                                            +------------------------+
+                                                                                     |
+                                                                                     v
+                                                                               N6_file -> END
     """
     # Create graph with state type
     workflow = StateGraph(IssueWorkflowState)
 
     # Add nodes
     workflow.add_node("N0_load_brief", load_brief)
+    workflow.add_node("N0b_historian", historian)
     workflow.add_node("N1_sandbox", sandbox)
     workflow.add_node("N2_draft", draft)
     workflow.add_node("N3_human_edit_draft", human_edit_draft)
@@ -157,12 +180,22 @@ def build_issue_workflow() -> StateGraph:
     # Set entry point
     workflow.set_entry_point("N0_load_brief")
 
-    # Add edges: N0 -> N1 (with error check)
+    # Add edges: N0 -> N0b (with error check)
     workflow.add_conditional_edges(
         "N0_load_brief",
         check_error,
         {
-            "continue": "N1_sandbox",
+            "continue": "N0b_historian",
+            "end": END,
+        },
+    )
+
+    # N0b -> N1 (with historian routing: abort on high similarity if user says so)
+    workflow.add_conditional_edges(
+        "N0b_historian",
+        route_after_historian,
+        {
+            "N1_sandbox": "N1_sandbox",
             "end": END,
         },
     )
