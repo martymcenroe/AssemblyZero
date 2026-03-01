@@ -216,7 +216,9 @@ def route_after_review(
         current_feedback = state.get("review_feedback", "")
         previous_feedback = state.get("previous_review_feedback", "")
         if previous_feedback and current_feedback:
-            if _same_review_feedback(current_feedback, previous_feedback):
+            # Issue #503: Structured two-strike comparison
+            from assemblyzero.core.verdict_schema import same_blocking_issues
+            if same_blocking_issues(current_feedback, previous_feedback):
                 print("    [HALT] Two consecutive REVISE verdicts with same feedback. Halting.")
                 return "HALT"
 
