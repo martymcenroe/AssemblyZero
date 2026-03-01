@@ -351,12 +351,18 @@ def build_initial_state(
         if found:
             lld_path = str(found)
 
+    # Issue #525: Create lineage dir so drafts are persisted (survives crashes)
+    lineage_base = target_repo / "docs" / "lineage" / "active"
+    audit_dir = lineage_base / f"{args.issue}-implspec"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+
     state: ImplementationSpecState = {
         # Input
         "issue_number": args.issue,
         "lld_path": lld_path,
         "repo_root": str(target_repo),
         "assemblyzero_root": str(assemblyzero_root),
+        "audit_dir": str(audit_dir),  # Issue #525: persist drafts
         # Loaded content
         "lld_content": "",
         "files_to_modify": [],

@@ -143,6 +143,27 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         existing_draft and (review_feedback or completeness_issues)
     )
 
+    # Issue #525: Resume from persisted draft if available (skip expensive LLM call)
+    if not is_revision and not existing_draft:
+        audit_dir_str = state.get("audit_dir", "")
+        if audit_dir_str:
+            audit_dir = Path(audit_dir_str)
+            if audit_dir.exists():
+                # Find most recent spec-draft in lineage
+                drafts = sorted(audit_dir.glob("*-spec-draft.md"), reverse=True)
+                if drafts:
+                    recovered = drafts[0].read_text(encoding="utf-8")
+                    if recovered.strip():
+                        lines = len(recovered.splitlines())
+                        print(f"\n[N2] Recovered existing draft from {drafts[0].name} ({lines} lines) — skipping LLM call")
+                        return {
+                            "spec_draft": recovered,
+                            "spec_path": str(drafts[0]),
+                            "review_iteration": review_iteration,
+                            "completeness_issues": [],
+                            "error_message": "",
+                        }
+
     if is_revision:
         review_iteration += 1
         print(
