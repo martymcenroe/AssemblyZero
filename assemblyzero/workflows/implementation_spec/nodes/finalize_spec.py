@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.workflows.requirements.audit import (
+    move_lineage_to_done,
     next_file_number,
     save_audit_file,
 )
@@ -214,6 +215,10 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
             audit_dir, file_num, "final-spec.md", finalized_content
         )
         print(f"    Audit trail: {audit_path.name}")
+
+    # Issue #100: Move lineage from active/ to done/
+    if audit_dir and audit_dir.exists():
+        move_lineage_to_done(audit_dir, repo_root)
 
     # -------------------------------------------------------------------------
     # Return state updates

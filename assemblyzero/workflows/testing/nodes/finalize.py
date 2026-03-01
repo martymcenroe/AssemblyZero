@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.requirements.audit import move_lineage_to_done
 from assemblyzero.workflows.testing.audit import (
     TestReportMetadata,
     gate_log,
@@ -213,11 +214,15 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     # Archive workflow artifacts (LLD and reports)
     archival_result = _archive_workflow_artifacts(state)
     archived_files = archival_result["archived"]
-    
+
     if archived_files:
         print(f"\n    Archived artifacts:")
         for file_path in archived_files:
             print(f"      - {file_path}")
+
+    # Issue #100: Move lineage from active/ to done/
+    if audit_dir.exists():
+        move_lineage_to_done(audit_dir, repo_root)
 
     # Issue #511: Include cost data in completion event
     # Issue #513: First-pass = all tests pass on iteration 1
