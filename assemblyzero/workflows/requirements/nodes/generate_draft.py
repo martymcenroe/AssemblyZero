@@ -3,6 +3,7 @@
 Issue #101: Unified Requirements Workflow
 Issue #248: Remove pre-review validation gate - Gemini answers open questions
 Issue #497: Bounded Verdict History in LLD Revision Loop
+Issue #508: Prompt-size awareness — cap total prompt chars
 
 Uses the configured drafter LLM to generate a draft based on:
 - Issue workflow: brief content + template
@@ -11,9 +12,17 @@ Uses the configured drafter LLM to generate a draft based on:
 Supports revision mode with bounded verdict feedback window.
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Issue #508: Maximum total prompt content chars (to avoid token limits)
+MAX_TOTAL_PROMPT_CHARS = 120_000
+# Warn at 80% of the cap
+PROMPT_SIZE_WARNING_THRESHOLD = 0.8
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
@@ -88,6 +97,19 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
 
     # Build prompt
     prompt = _build_prompt(state, template, workflow_type)
+
+    # Issue #508: Prompt-size awareness
+    prompt_len = len(prompt)
+    if prompt_len > MAX_TOTAL_PROMPT_CHARS:
+        logger.warning(
+            "[N1] Prompt exceeds cap: %d > %d chars. Truncating.",
+            prompt_len, MAX_TOTAL_PROMPT_CHARS,
+        )
+        print(f"    [WARN] Prompt {prompt_len:,} chars exceeds {MAX_TOTAL_PROMPT_CHARS:,} cap — truncating")
+        prompt = _truncate_prompt(prompt)
+    elif prompt_len > MAX_TOTAL_PROMPT_CHARS * PROMPT_SIZE_WARNING_THRESHOLD:
+        pct = prompt_len / MAX_TOTAL_PROMPT_CHARS * 100
+        print(f"    [WARN] Prompt at {pct:.0f}% of cap ({prompt_len:,} / {MAX_TOTAL_PROMPT_CHARS:,} chars)")
 
     # Issue #486: Pre-flight check — verify Gemini available before expensive Claude call
     if not mock_mode:
@@ -428,6 +450,78 @@ def _format_codebase_context(ctx: dict) -> str:
         return ""
 
     return "\n\n".join(parts)
+
+
+def _truncate_prompt(prompt: str) -> str:
+    """Truncate an oversized prompt by dropping lowest-priority sections.
+
+    Issue #508: Mirrors the pattern from generate_spec.py. Splits on ## headings,
+    drops sections by priority (context/codebase first, then repo structure),
+    and hard-truncates as a last resort.
+
+    Args:
+        prompt: Oversized prompt string.
+
+    Returns:
+        Truncated prompt within MAX_TOTAL_PROMPT_CHARS.
+    """
+    if len(prompt) <= MAX_TOTAL_PROMPT_CHARS:
+        return prompt
+
+    # Split into sections by ## headings
+    sections: list[tuple[str, str]] = []
+    current_heading = ""
+    current_lines: list[str] = []
+
+    for line in prompt.split("\n"):
+        if line.startswith("## "):
+            if current_lines:
+                sections.append((current_heading, "\n".join(current_lines)))
+            current_heading = line
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+    if current_lines:
+        sections.append((current_heading, "\n".join(current_lines)))
+
+    # Drop sections by priority (lowest value = drop first)
+    drop_order = [
+        "Codebase Analysis",
+        "Related Code",
+        "Key File Excerpts",
+        "Dependencies",
+        "Coding Conventions",
+        "Frameworks",
+        "Module Structure",
+        "TARGET REPOSITORY STRUCTURE",
+        "ACTUAL REPOSITORY STRUCTURE",
+        "Context",
+    ]
+
+    dropped: list[str] = []
+    for keyword in drop_order:
+        if len("\n\n".join(s[1] for s in sections)) <= MAX_TOTAL_PROMPT_CHARS:
+            break
+        sections_new = []
+        for heading, body in sections:
+            if keyword.lower() in heading.lower():
+                dropped.append(heading or keyword)
+            else:
+                sections_new.append((heading, body))
+        sections = sections_new
+
+    result = "\n\n".join(s[1] for s in sections)
+
+    if dropped:
+        logger.warning("[N1] Dropped sections to fit cap: %s", dropped)
+        print(f"    [WARN] Dropped {len(dropped)} section(s): {', '.join(dropped)}")
+
+    # Hard truncate as last resort
+    if len(result) > MAX_TOTAL_PROMPT_CHARS:
+        result = result[:MAX_TOTAL_PROMPT_CHARS]
+        logger.warning("[N1] Hard-truncated prompt to %d chars", MAX_TOTAL_PROMPT_CHARS)
+
+    return result
 
 
 def validate_draft_structure(content: str) -> str | None:

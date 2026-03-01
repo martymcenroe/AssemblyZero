@@ -220,8 +220,11 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"      - {file_path}")
 
     # Issue #511: Include cost data in completion event
+    # Issue #513: First-pass = all tests pass on iteration 1
+    first_pass = iteration_count <= 1 and passed_count == test_count and test_count > 0
     node_costs = dict(state.get("node_costs", {}))
     cost_details: dict = {
+        "first_pass": first_pass,
         "test_count": test_count,
         "passed_count": passed_count,
         "coverage": coverage_achieved,
