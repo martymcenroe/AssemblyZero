@@ -1,8 +1,8 @@
 # AssemblyZero - File Inventory & Status Map
 
 **Document:** 0003
-**Version:** 1.2
-**Last Updated:** 2026-01-21
+**Version:** 2.0
+**Last Updated:** 2026-03-01
 
 ## 1. Status Taxonomy
 
@@ -18,7 +18,7 @@
 
 ## 2. Documentation Inventory
 
-### Standards (00xx) - 9 files
+### Standards (00xx) - 14 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -31,6 +31,11 @@
 | `0007-testing-strategy.md` | Stable | Test-first philosophy |
 | `0008-documentation-convention.md` | Stable | c/p pattern for CLI vs Prompt docs |
 | `0009-canonical-project-structure.md` | Stable | Standard project layout |
+| `0010-prompt-schema.md` | Stable | Prompt template schema |
+| `0011-audit-decisions.md` | Stable | Audit decision format |
+| `0012-lineage-versioning.md` | Stable | Lineage file versioning |
+| `0013-operational-dashboard-reference-architecture.md` | Stable | Dashboard reference architecture |
+| `0014-extract-and-discard-pattern.md` | Stable | Extract-and-discard pattern |
 
 ### Templates (01xx) - 10 files
 
@@ -47,16 +52,24 @@
 | `0108-test-report-template.md` | Stable | Test results format |
 | `0109-runbook-template.md` | Stable | Operational procedures |
 
-### ADRs (02xx) - 6 files
+### ADRs (02xx) - 14 files (12 active, 2 superseded)
 
 | File | Status | Description |
 |------|--------|-------------|
 | `0201-adversarial-audit-philosophy.md` | Stable | Security mindset |
 | `0202-claude-staging-pattern.md` | Stable | Safe deployment |
 | `0203-git-worktree-isolation.md` | Stable | Multi-agent safety |
-| `0204-single-identity-orchestration.md` | Stable | Agent identity |
-| `0205-test-first-philosophy.md` | Stable | Quality approach |
+| `0204-janitor-probe-plugin-system.md` | Stable | Janitor probe registry pattern |
+| `0204-single-identity-orchestration-superseded.md` | Legacy | Agent identity (superseded by 0204-janitor) |
+| `0205-rag-librarian.md` | Stable | RAG retrieval for LLD context |
+| `0205-test-first-philosophy-superseded.md` | Legacy | Quality approach (superseded by 0205-rag) |
 | `0206-bidirectional-sync-architecture.md` | Stable | Cross-project propagation |
+| `0207-llm-team-coverage-targets.md` | Stable | LLM team coverage targets |
+| `0208-llm-invocation-strategy.md` | Stable | LLM invocation patterns |
+| `0209-playwright-persistent-context-for-extensions.md` | Stable | Playwright browser context |
+| `0210-discworld-persona-convention.md` | Stable | Persona naming rules |
+| `0211-rag-architecture.md` | Stable | RAG architecture (Brutha foundation) |
+| `0212-local-only-embeddings.md` | Stable | Local-only embeddings policy |
 
 ### Skills (06xx) - 28 files
 
@@ -138,7 +151,20 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 
 ---
 
-## 3. Tools Inventory (11 files)
+## 3. Tools Inventory (36 files)
+
+### Workflow Runners
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/run_requirements_workflow.py` | Stable | LLD workflow orchestration |
+| `tools/run_implement_from_lld.py` | Stable | TDD implementation workflow |
+| `tools/run_implementation_spec_workflow.py` | Stable | Implementation spec workflow |
+| `tools/run_issue_workflow.py` | Stable | Issue analysis workflow |
+| `tools/run_scout_workflow.py` | Stable | Scout (Angua) intelligence workflow |
+| `tools/run_janitor_workflow.py` | Stable | Janitor (Lu-Tze) hygiene workflow |
+| `tools/run_audit.py` | Stable | Audit execution runner |
+| `tools/orchestrate.py` | Stable | End-to-end pipeline orchestration (Moist) |
 
 ### Core Tools
 
@@ -149,6 +175,16 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/assemblyzero_config.py` | Stable | Config loader for path parameterization |
 | `tools/assemblyzero_credentials.py` | Stable | Credential management utilities |
 | `tools/assemblyzero-harvest.py` | Beta | Pattern harvester for permission discovery |
+| `tools/archive_worktree_lineage.py` | Stable | Post-merge lineage archival |
+| `tools/new_repo_setup.py` | Stable | New repository initialization |
+
+### RAG & Knowledge Base
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/rebuild_knowledge_base.py` | Stable | Rebuild ChromaDB vector store from source docs |
+| `tools/mine_verdict_patterns.py` | Stable | Analyze Gemini verdicts for template improvement |
+| `tools/modernize_dependencies.py` | Stable | Dependency modernization tool |
 
 ### Gemini Integration
 
@@ -157,6 +193,18 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/gemini-retry.py` | Stable | Exponential backoff for MODEL_CAPACITY_EXHAUSTED |
 | `tools/gemini-rotate.py` | Stable | Credential rotation for quota management |
 | `tools/gemini-test-credentials.py` | Stable | Credential validation tool |
+| `tools/gemini-test-credentials-v2.py` | Stable | Credential validation (v2) |
+
+### Analysis & Reporting
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/verdict-analyzer.py` | Stable | Parse and analyze Gemini verdicts |
+| `tools/view_audit.py` | Stable | Display audit results |
+| `tools/collect_cross_project_metrics.py` | Stable | Multi-repo analytics |
+| `tools/collect-cross-project-metrics.py` | Stable | Multi-repo analytics (alt) |
+| `tools/audit_schedule_check.py` | Stable | Audit scheduling verification |
+| `tools/test-gate.py` | Stable | Test gate enforcement |
 
 ### Utilities
 
@@ -165,19 +213,72 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/append_session_log.py` | Stable | Session tracking |
 | `tools/update-doc-refs.py` | Beta | Documentation reference updater |
 | `tools/claude-usage-scraper.py` | Stable | Quota visibility via TUI scraping |
+| `tools/consolidate_logs.py` | Stable | Merge session logs |
+| `tools/clean_transcript.py` | Stable | Session transcript sanitization |
+| `tools/transcript_filters.py` | Stable | Transcript filter utilities |
+| `tools/backfill_issue_audit.py` | Stable | Bulk audit backfill |
+| `tools/backfill_telemetry.py` | Stable | Historical telemetry backfill |
 
 ---
 
-## 4. Configuration Inventory
+## 4. RAG Subsystem (`assemblyzero/rag/`) - 14 files
+
+| File | Status | Description |
+|------|--------|-------------|
+| `__init__.py` | Stable | Public API, singleton factories (`get_store`, `get_query_engine`) |
+| `config.py` | Stable | Immutable `RAGConfig` dataclass |
+| `models.py` | Stable | `ChunkMetadata`, `RetrievedDocument`, `IngestionSummary` |
+| `errors.py` | Stable | `RAGError` hierarchy |
+| `store.py` | Stable | VectorStore lifecycle management |
+| `vector_store.py` | Stable | VectorStoreManager (low-level ChromaDB ops) |
+| `embeddings.py` | Stable | `LocalEmbeddingProvider` (all-MiniLM-L6-v2) |
+| `collections.py` | Stable | Collection CRUD operations |
+| `chunking.py` | Stable | `TextChunk`, `TextChunker` |
+| `chunker.py` | Stable | Chunking algorithm implementation |
+| `query.py` | Stable | `QueryEngine`, `QueryResult`, `QueryResponse` |
+| `librarian.py` | Stable | LibrarianNode (document retrieval) |
+| `codebase_retrieval.py` | Stable | Hex: AST-based code indexing and retrieval |
+| `dependencies.py` | Stable | Optional dependency checking |
+
+---
+
+## 5. Janitor Workflow (`assemblyzero/workflows/janitor/`) - 10 files
+
+| File | Status | Description |
+|------|--------|-------------|
+| `__init__.py` | Stable | Package init |
+| `state.py` | Stable | `JanitorState`, `ProbeResult`, `ProbeScope` |
+| `graph.py` | Stable | LangGraph state machine |
+| `fixers.py` | Stable | Auto-fix implementations |
+| `reporter.py` | Stable | Hygiene report generation |
+| `probes/__init__.py` | Stable | Probe registry (`PROBE_REGISTRY`) |
+| `probes/links.py` | Stable | Broken link detection |
+| `probes/worktrees.py` | Stable | Stale worktree detection |
+| `probes/harvest.py` | Stable | Pattern harvest probe |
+| `probes/todo.py` | Stable | TODO archaeology probe |
+
+---
+
+## 6. Architecture Diagrams (`docs/architecture/`) - 3 files
+
+| File | Status | Description |
+|------|--------|-------------|
+| `system-overview.md` | Stable | Persona map with layer diagram |
+| `data-flow.md` | Stable | Pipeline and RAG data flows |
+| `workflow-interactions.md` | Stable | Workflow chaining and human gates |
+
+---
+
+## 7. Configuration Inventory
 
 | File | Status | Description |
 |------|--------|-------------|
 | `CLAUDE.md` | Stable | Core agent rules |
 | `.claude/project.json.example` | Stable | Project config template |
-| `.claude/commands/*.md` | Stable | 8 skill definitions (see below) |
+| `.claude/commands/*.md` | Stable | 9 skill definitions (see below) |
 | `.claude/templates/*.template` | Stable | Config templates |
 
-### Skills/Commands (8 files)
+### Skills/Commands (9 files)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -189,32 +290,38 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `.claude/commands/onboard.md` | Stable | Agent onboarding |
 | `.claude/commands/promote.md` | Stable | Pattern promotion to AssemblyZero |
 | `.claude/commands/test-gaps.md` | Stable | Test gap mining |
+| `.claude/commands/checkpoint.md` | Stable | Session state checkpoint |
 
 ---
 
-## 5. Summary Statistics
+## 8. Summary Statistics
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Standards | 9 | All stable |
+| Standards | 14 | All stable |
 | Templates | 10 | All stable |
-| ADRs | 6 | All stable |
-| Skills | 28 | All stable |
+| ADRs | 14 | 12 active, 2 superseded |
+| Skills docs | 28 | All stable |
 | Audits | 34 | 28 stable, 6 stubs |
 | Runbooks | 5 | All stable |
-| Tools | 11 | 9 stable, 2 beta |
-| Commands | 8 | All stable |
-| **Total Docs** | **91** | |
-| **Total Tools** | **11** | |
+| Architecture | 3 | All stable |
+| RAG subsystem | 14 | All stable |
+| Janitor workflow | 10 | All stable |
+| Tools | 36 | 34 stable, 2 beta |
+| Commands | 9 | All stable |
+| **Total Docs** | **132** | |
+| **Total Tools** | **36** | |
+| **Total Code (RAG + Janitor)** | **24** | |
 
 ---
 
-## 6. Maintenance Notes
+## 9. Maintenance Notes
 
 - Review this inventory during `/cleanup --full`
 - Update when adding new files
 - Run numbering audit if files added without numbers
+- RAG and janitor subsystems are part of the `assemblyzero` package, not standalone docs
 
 ---
 
-*Last audit: 2026-01-21*
+*Last audit: 2026-03-01*

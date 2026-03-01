@@ -172,15 +172,16 @@ All workflows are LangGraph `StateGraph` instances with typed state and SQLite c
 | **TDD Implementation** | 13 | Spec → code + tests + PR |
 | **Scout** | Variable | External intelligence gathering |
 
-### Codebase Intelligence (RAG-Like)
+### Codebase & Document Intelligence (RAG)
 
-AssemblyZero uses deterministic RAG-like techniques — **not vector embeddings** — for codebase understanding:
-- **AST summarization** extracts function signatures and class hierarchies
-- **Pattern scanning** finds similar implementations by structure
-- **Token budget management** trims context to ~60KB
-- **Section-aware truncation** preserves important sections
+AssemblyZero uses a local RAG system built on ChromaDB and `all-MiniLM-L6-v2` embeddings:
+- **Document retrieval** (The Librarian) — injects relevant ADRs, standards, and past LLDs into design prompts
+- **Codebase retrieval** (Hex) — AST-based Python indexing with vector search for implementation context
+- **Duplicate detection** (The Historian) — checks for similar past issues before drafting
+- **Token budget management** — trims context to fit LLM prompt limits
+- **Local-only** — no data leaves the developer machine (see [ADR-0212](docs/adrs/0212-local-only-embeddings.md))
 
-**[Full Technical Architecture →](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture)**
+**[Full Technical Architecture →](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture)** | **[RAG Architecture →](docs/architecture/data-flow.md)**
 
 ---
 
@@ -448,17 +449,53 @@ The code in this repo is the same code that:
 
 ## The Discworld Personas
 
-Workflows are named after **Terry Pratchett's Discworld** characters — intuitive metaphors that make system behavior memorable:
+Workflows are named after **Terry Pratchett's Discworld** characters. Each persona defines the agent's operational philosophy — making system behavior intuitive and memorable.
 
-| Persona | Function |
-|---------|----------|
-| **Vimes** | Regression guard — deep suspicion of everything |
-| **Hex** | Codebase intelligence — AST parsing, pattern matching |
-| **Ponder** | Mechanical validation — auto-fix before review |
-| **Lu-Tze** | Maintenance — constant sweeping prevents disasters |
-| **DEATH** | Documentation reconciliation — INEVITABLE. THOROUGH. |
+```mermaid
+graph TB
+    subgraph Orch["ORCHESTRATION"]
+        Om["Om<br/><i>Human</i>"]
+        Moist["Moist<br/><i>Pipeline</i>"]
+    end
 
-**[Full Cast →](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)**
+    subgraph Intel["INTELLIGENCE"]
+        Lib["Librarian<br/><i>Doc Retrieval</i>"]
+        Hex["Hex<br/><i>Code RAG</i>"]
+        Hist["Historian<br/><i>Duplicates</i>"]
+        Angua["Angua<br/><i>Scout</i>"]
+    end
+
+    subgraph Found["FOUNDATION"]
+        Brutha["Brutha<br/><i>Vector Store</i>"]
+    end
+
+    subgraph Maint["MAINTENANCE"]
+        LuTze["Lu-Tze<br/><i>Janitor</i>"]
+        DEATH["DEATH<br/><i>Reconciliation</i>"]
+    end
+
+    Om --> Moist
+    Moist --> Intel
+    Lib --> Brutha
+    Hex --> Brutha
+    Hist --> Brutha
+```
+
+| Persona | Function | Status | Issue |
+|---------|----------|--------|-------|
+| **Om** | Human orchestrator — pure intent | Active | — |
+| **Moist von Lipwig** | Pipeline orchestration (Issue → PR) | Implemented | #305 |
+| **Brutha** | RAG vector store — perfect recall | Implemented | #113 |
+| **The Librarian** | Document retrieval for LLDs | Implemented | #88 |
+| **Hex** | Codebase intelligence — AST indexing | Implemented | #92 |
+| **The Historian** | Duplicate detection before drafting | Implemented | #91 |
+| **Captain Angua** | External intelligence scout | Implemented | #93 |
+| **Lu-Tze** | Repository hygiene — constant sweeping | Implemented | #94 |
+| **DEATH** | Documentation reconciliation | Manual | #114 |
+| **Vimes** | Regression guardian — deep suspicion | Planned | — |
+| **Ponder Stibbons** | Auto-fix compositor | Planned | #307 |
+
+**[Full Cast & Architecture →](https://github.com/martymcenroe/AssemblyZero/wiki/Dramatis-Personae)** | **[Architecture Diagrams →](docs/architecture/system-overview.md)**
 
 *"A man is not dead while his name is still spoken."*
 **GNU Terry Pratchett**

@@ -149,10 +149,14 @@ In AssemblyZero, Drumknott is the indexing and retrieval subsystem that powers V
 Brutha was a simple novice in the Omnian church with an eidetic memory—he could recall every word he'd ever read or heard. In AssemblyZero, Brutha is the RAG (Retrieval Augmented Generation) layer that stores and retrieves context with perfect fidelity.
 
 **Responsibilities:**
-- Vector embeddings of documentation and code
+- Vector embeddings of documentation and code (ChromaDB + all-MiniLM-L6-v2)
 - Semantic search across the knowledge base
 - Context injection into LLM prompts
 - Never invents—only recalls what was stored
+
+**Issue:** [#113 - Vector Database Foundation](../issues/113) ✓ Implemented
+
+**Architecture:** [ADR-0211: RAG Architecture](../docs/adrs/0211-rag-architecture.md) | [ADR-0212: Local-Only Embeddings](../docs/adrs/0212-local-only-embeddings.md)
 
 ---
 
@@ -175,7 +179,7 @@ Lu-Tze appears to be a humble sweeper at the Monastery of Oi Dong, but he's actu
 - Cross-project drift correction
 - TODO archaeology (finding forgotten tasks)
 
-**Issue:** [#94 - The Janitor](../issues/94)
+**Issue:** [#94 - The Janitor](../issues/94) ✓ Implemented
 
 ---
 
@@ -245,7 +249,7 @@ The Librarian of Unseen University was transformed into an orangutan by a magica
 - Cross-reference management
 - Knowledge graph maintenance
 
-**Issue:** [#88 - The Librarian (RAG Injection)](../issues/88)
+**Issue:** [#88 - The Librarian (RAG Injection)](../issues/88) ✓ Implemented
 
 ---
 
@@ -268,7 +272,7 @@ Hex is Unseen University's thinking engine—a computer made of ants, beehives, 
 - Codebase RAG queries
 - "Smart Engineer" context injection
 
-**Issue:** [#92 - Hex (Codebase Retrieval)](../issues/92)
+**Issue:** [#92 - Hex (Codebase Retrieval)](../issues/92) ✓ Implemented
 
 ---
 
@@ -291,7 +295,7 @@ The History Monks of Oi Dong monastery manage the flow of time itself, storing i
 - "Have we solved this before?" queries
 - Lessons learned integration
 
-**Issue:** [#91 - The Historian](../issues/91)
+**Issue:** [#91 - The Historian](../issues/91) ✓ Implemented
 
 ---
 

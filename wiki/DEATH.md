@@ -190,15 +190,26 @@ DEATH has delivered many memorable lines:
 
 ## Invocation
 
-To summon DEATH in AssemblyZero:
+DEATH's reconciliation is currently a manual process (issue #114). After merge:
 
 ```bash
-# After merge, DEATH arrives automatically
-gh pr merge 123 --squash --delete-branch
+# 1. Merge the PR
+gh pr merge 123 --squash --repo martymcenroe/AssemblyZero
 
-# Or invoke manually
-python tools/death.py reconcile --issue 123
+# 2. Archive lineage
+poetry run python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-123 --issue 123
+
+# 3. Remove worktree
+git worktree remove ../AssemblyZero-123
+
+# 4. Clean up branch
+git branch -d issue-123-feature-name
+
+# 5. Pull merged changes
+git checkout main && git pull
 ```
+
+DEATH's checklist items (wiki updates, inventory updates, ADR creation) are performed as part of the documentation reconciliation process described in [ADR-0210](../docs/adrs/0210-discworld-persona-convention.md).
 
 DEATH always comes. The only question is whether you're ready.
 

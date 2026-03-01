@@ -249,17 +249,36 @@ Every workflow has a [Discworld character](Dramatis-Personae) defining its philo
 
 ---
 
+## Architecture
+
+Detailed architecture documentation with Mermaid diagrams:
+
+| Document | Content |
+|----------|---------|
+| **[System Overview](../docs/architecture/system-overview.md)** | Persona map, layer diagram, implementation status |
+| **[Data Flow](../docs/architecture/data-flow.md)** | Pipeline flow (Brief → PR), RAG indexing/retrieval |
+| **[Workflow Interactions](../docs/architecture/workflow-interactions.md)** | Workflow chaining, checkpointing, human gates |
+| **[ADR-0210: Persona Convention](../docs/adrs/0210-discworld-persona-convention.md)** | Naming rules, when to create new personas |
+| **[ADR-0211: RAG Architecture](../docs/adrs/0211-rag-architecture.md)** | Brutha foundation, Librarian/Hex/Historian consumers |
+| **[ADR-0212: Local-Only Embeddings](../docs/adrs/0212-local-only-embeddings.md)** | Privacy rationale, model choice |
+
+---
+
 ## The Cast
 
-| Persona | Function | Philosophy |
-|---------|----------|------------|
-| **[The Great God Om](The-Great-God-Om)** | Human Orchestrator | Pure Intent |
-| **Moist von Lipwig** | Pipeline Orchestration | Keep messages moving |
-| **Lord Vetinari** | Work Visibility | Information is power |
-| **Commander Vimes** | Regression Tests | Deep suspicion |
-| **Captain Angua** | External Intelligence | Sensory awareness |
-| **Brutha** | RAG Memory | Perfect recall |
-| **Lu-Tze** | Maintenance | Constant sweeping |
+| Persona | Function | Philosophy | Status |
+|---------|----------|------------|--------|
+| **[The Great God Om](The-Great-God-Om)** | Human Orchestrator | Pure Intent | Active |
+| **Moist von Lipwig** | Pipeline Orchestration | Keep messages moving | Implemented |
+| **Lord Vetinari** | Work Visibility | Information is power | Planned |
+| **Brutha** | RAG Vector Store | Perfect recall | Implemented |
+| **The Librarian** | Document Retrieval | Protect the books | Implemented |
+| **Hex** | Codebase Intelligence | Process. Compute. Return. | Implemented |
+| **The Historian** | Duplicate Detection | History is a responsibility | Implemented |
+| **Captain Angua** | External Intelligence | Sensory awareness | Implemented |
+| **Lu-Tze** | Repository Hygiene | Constant sweeping | Implemented |
+| **DEATH** | Doc Reconciliation | INEVITABLE. THOROUGH. | Manual |
+| **Commander Vimes** | Regression Tests | Deep suspicion | Planned |
 
 [Full cast →](Dramatis-Personae)
 
