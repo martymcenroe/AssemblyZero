@@ -2,10 +2,21 @@
 
 <!-- Template Metadata
 Last Updated: 2026-02-17
-Updated By: Issue #94 LLD revision
-Update Reason: Revised to achieve 100% test coverage for all 12 requirements. Added missing REQ references to test scenarios.
+Updated By: Issue #94 LLD creation
+Update Reason: Initial Low-Level Design for automated repository hygiene workflow
 -->
 
+## 1. Context & Goal
+* **Issue:** #94
+* **Objective:** Create an automated LangGraph-based maintenance workflow that detects and fixes repository hygiene issues (broken links, stale worktrees, TODO drift, cross-project drift) replacing manual audit checklists with enforced automation.
+* **Status:** Draft
+* **Related Issues:** None
+
+### Open Questions
+
+- [x] Should worktree pruning require a confirmation step even in non-dry-run mode? **Decision: No — stale worktree criteria are strict enough (14+ days inactive AND branch merged/deleted) to be safe for automated pruning.**
+- [x] Should the harvest probe shell out to `assemblyzero-harvest.py` or import it as a module? **Decision: Shell out via subprocess — maintains loose coupling and allows the harvest script to evolve independently.**
+- [x] What is the `janitor-reports/` output directory for `LocalFileReporter`? **Decision: `./janitor-reports/` relative to repository root, gitignored.**
 
 ## 2. Proposed Changes
 
@@ -588,11 +599,10 @@ def main(argv: list[str] | None = None) -> int:
 
 1. Parse CLI arguments
 2. Validate repo_root is a git repository
-   - IF NOT a git repo: print error (unless --silent), return exit code 2
 3. Build initial JanitorState from arguments
 4. Build and compile janitor graph
 5. Execute graph with initial state
-6. IF NOT silent: print summary to stdout
+6. IF NOT silent: print summary
 7. Return exit_code from final state
 
 === N0_Sweeper Node ===
@@ -679,7 +689,6 @@ def main(argv: list[str] | None = None) -> int:
 - Must support both interactive and CI/headless execution modes
 - All repository modifications must be reversible via `git revert`
 
-
 ## 3. Requirements
 
 1. `python tools/run_janitor_workflow.py` runs all probes and reports findings
@@ -695,7 +704,6 @@ def main(argv: list[str] | None = None) -> int:
 11. A probe crash (uncaught exception) does not stop other probes from executing
 12. All auto-fix commits use deterministic template-based commit messages (no LLM)
 
-
 ## 4. Alternatives Considered
 
 | Option | Pros | Cons | Decision |
@@ -706,7 +714,6 @@ def main(argv: list[str] | None = None) -> int:
 | **D: GitHub Actions workflow only** | Native CI integration, no local tooling needed | Can't run locally, vendor lock-in, can't test without pushing | Rejected |
 
 **Rationale:** Option A was selected because AssemblyZero is standardized on LangGraph for all workflows. The state management and conditional routing capabilities directly support the Sweeper → Fixer → Reporter pipeline with its branching logic (skip fixer if no fixable issues, skip reporter if all fixed). Using LangGraph also makes future enhancements (parallel probe execution, checkpointing) straightforward.
-
 
 ## 5. Data & Fixtures
 
@@ -758,7 +765,6 @@ No separate deployment pipeline. The janitor runs locally or in CI:
 - **Local:** `python tools/run_janitor_workflow.py`
 - **CI (GitHub Actions):** Add step in existing CI workflow or scheduled job
 - **Cron (local):** Standard OS scheduler (cron on Linux/macOS, Task Scheduler on Windows)
-
 
 ## 6. Diagram
 
@@ -814,7 +820,6 @@ graph TD
     end
 ```
 
-
 ## 7. Security & Safety Considerations
 
 ### 7.1 Security
@@ -842,7 +847,6 @@ graph TD
 **Fail Mode:** Fail Closed — If any critical error occurs (not a git repo, git commands fail), the janitor exits with code 2 without modifying anything.
 
 **Recovery Strategy:** All auto-fixes create standard git commits. Recovery is `git revert <commit-sha>`. Worktree pruning is recoverable via `git worktree add` with the original branch (if branch still exists).
-
 
 ## 8. Performance & Cost Considerations
 
@@ -875,7 +879,6 @@ graph TD
 
 **Worst-Case Scenario:** A repository with 10,000 files and 1,000 TODOs would cause the TODO probe to run ~1,000 `git blame` invocations, taking ~5 minutes. This is acceptable for a scheduled overnight run. If needed, the TODO probe can be excluded via `--scope`.
 
-
 ## 9. Legal & Compliance
 
 | Concern | Applies? | Mitigation |
@@ -893,7 +896,6 @@ graph TD
 - [x] All third-party licenses compatible with project license
 - [x] External API usage compliant with provider ToS
 - [x] Data retention policy documented (local reports are ephemeral, gitignored)
-
 
 ## 10. Verification & Testing
 
@@ -930,15 +932,6 @@ graph TD
 | T270 | Exit code 0 on clean run | Full workflow with no findings returns exit_code 0 | RED |
 | T280 | Exit code 1 on unfixable findings | Full workflow with unfixable findings returns exit_code 1 | RED |
 | T290 | Integration: full workflow with LocalFileReporter | End-to-end workflow using mock repo fixtures | RED |
-| T300 | Full pipeline: CLI runs all probes and reports | `main()` with mocked probes runs sweeper, fixer, reporter and produces output | RED |
-| T310 | Dry-run prevents file modification | Full pipeline with `--dry-run` produces FixActions with `applied=False` and no file changes | RED |
-| T320 | Broken link auto-fix with unique target | End-to-end: broken link → probe detects → fixer corrects file → commit created | RED |
-| T330 | Stale worktree auto-prune | End-to-end: stale worktree finding → `git worktree remove` called → FixAction recorded | RED |
-| T340 | Silent mode suppresses stdout | `main(["--silent"])` produces no stdout when no errors occur | RED |
-| T350 | Exit code 2 on fatal error | `main()` in non-git directory returns exit_code 2 | RED |
-| T360 | GITHUB_TOKEN env var authentication | `GitHubReporter.__init__` uses GITHUB_TOKEN when `gh auth status` fails interactively | RED |
-| T370 | Reporter deduplication: update existing issue | `GitHubReporter.find_existing_report` returns existing URL; `update_report` called instead of `create_report` | RED |
-| T380 | Local reporter writes to janitor-reports/ | `LocalFileReporter.create_report` creates file under `janitor-reports/` directory | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -952,46 +945,35 @@ graph TD
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | CLI runs all probes and reports findings (REQ-1) | Auto | `main([])` with mocked probes returning mixed findings | Sweeper runs all 4 probes, fixer processes fixable items, reporter generates output | All probes executed, findings aggregated, report produced |
-| 020 | Dry-run shows pending fixes without modifying files (REQ-2) | Auto | `main(["--dry-run"])` with mock repo containing broken link | FixAction with `applied=False`, original files unchanged, no git commits, no issues created | Files unmodified, FixAction.applied is False, no subprocess calls for commit/issue |
-| 030 | Broken link auto-fix with unique target (REQ-3) | Auto | Mock README.md with `[guide](./docs/old-guide.md)` where `old-guide.md` doesn't exist but `guide.md` does, `auto_fix=True` | File updated with correct link, FixAction with `applied=True` | File content contains new link, Finding had `fixable=True`, fix applied |
-| 040 | Stale worktree auto-prune (REQ-4) | Auto | Mocked `git worktree list` showing worktree with branch merged 15 days ago | `git worktree remove` called, FixAction recorded | Subprocess called with correct args, FixAction.applied is True |
-| 050 | Unfixable issues create GitHub issue (REQ-5) | Auto | State with unfixable findings, `reporter_type="github"`, mocked `gh` CLI | `gh issue create` called with structured body | Subprocess args contain issue title and body with findings |
-| 060 | Existing Janitor Report updated not duplicated (REQ-6) | Auto | `GitHubReporter.find_existing_report` returns existing URL, then `update_report` called | `gh issue edit` called instead of `gh issue create` | `update_report` invoked, `create_report` NOT invoked |
-| 070 | Silent mode suppresses stdout (REQ-7) | Auto | `main(["--silent"])` with mocked probes returning no findings | No stdout output, clean exit | Captured stdout is empty, exit code is 0 |
-| 080 | Exit code 0 on clean run (REQ-8) | Auto | Mocked probes returning no findings | `exit_code=0` | Return value is 0 |
-| 090 | Exit code 1 on unfixable findings (REQ-8) | Auto | Mocked probe returning unfixable finding | `exit_code=1` | Return value is 1 |
-| 100 | Exit code 2 on fatal error (REQ-8) | Auto | `main()` run in non-git directory (mocked) | `exit_code=2` | Return value is 2 |
-| 110 | Local reporter writes to janitor-reports/ (REQ-9) | Auto | Title, body, severity with `reporter_type="local"` | Markdown file created in `janitor-reports/` directory, no `gh` CLI calls | File exists at expected path, no subprocess calls to `gh` |
-| 120 | GITHUB_TOKEN env var authentication (REQ-10) | Auto | `GITHUB_TOKEN` set in env, `gh auth status` mocked to fail interactively | `GitHubReporter` initializes successfully using token-based auth | No exception raised, reporter functional |
-| 130 | Probe crash isolation (REQ-11) | Auto | Probe function that raises `RuntimeError`, plus a healthy probe | Crashed probe returns `ProbeResult(status="error")`, healthy probe returns normally | Both ProbeResults present, healthy probe findings intact |
-| 140 | Deterministic commit messages (REQ-12) | Auto | `category="links"`, `count=3` | `"chore: fix 3 broken markdown link(s) (ref #94)"` | Exact string match, no LLM calls |
-| 150 | Link probe detects broken internal link | Auto | Mock README.md with `[guide](./docs/old-guide.md)` where `old-guide.md` doesn't exist but `guide.md` does | Finding with `fixable=True`, `fix_data={"old": "./docs/old-guide.md", "new": "./docs/guide.md"}` | Finding correctly identifies broken link and suggests fix |
-| 160 | Link probe ignores external URLs | Auto | Mock README.md with `[link](https://example.com)` | No findings | External links not reported |
-| 170 | Link probe handles all valid links | Auto | Mock README.md with `[guide](./docs/guide.md)` where `guide.md` exists | ProbeResult with `status="ok"`, empty findings | No false positives |
-| 180 | Worktree probe detects stale worktree | Auto | Mocked `git worktree list` showing worktree with branch merged 15 days ago | Finding with `fixable=True` | Worktree correctly identified as stale |
-| 190 | Worktree probe ignores active worktrees | Auto | Mocked `git worktree list` showing worktree with commit 1 day ago | No findings | Active worktrees not flagged |
-| 200 | Stale TODO found | Auto | Mocked `git blame` showing TODO line added 45 days ago | Finding with `fixable=False` | TODO correctly identified as stale |
-| 210 | Recent TODO ignored | Auto | Mocked `git blame` showing TODO line added today | No findings | Recent TODOs not flagged |
-| 220 | Harvest script missing | Auto | No `assemblyzero-harvest.py` in repo | ProbeResult with single info finding | Graceful handling of missing script |
-| 230 | Link fix applied | Auto | Finding with `fix_data={"old": "old.md", "new": "new.md"}`, mock file content | File content updated with new link | File correctly modified |
-| 240 | Dry-run link fix | Auto | Same as 230 but `dry_run=True` | FixAction with `applied=False`, file unchanged | No file modifications |
-| 250 | Worktree prune | Auto | Finding for stale worktree, mocked subprocess | `git worktree remove` called with correct path | Subprocess invoked correctly |
-| 260 | Commit message template | Auto | `category="links"`, `count=3` | `"chore: fix 3 broken markdown link(s) (ref #94)"` | Exact string match |
-| 270 | Local reporter create | Auto | Title, body, severity | Markdown file in `janitor-reports/` | File exists with correct content |
-| 280 | Local reporter update | Auto | Existing report file, new body | File overwritten | Content matches new body |
-| 290 | Local reporter find existing | Auto | Existing report file from today | Returns file path | Correct path returned |
-| 300 | Report body structure | Auto | Mix of findings and fix actions | Markdown with Summary, Auto-Fixed, Human Attention sections | All sections present |
-| 310 | Route: no findings | Auto | State with empty `all_findings` | `"__end__"` | Correct routing |
-| 320 | Route: fixable, auto_fix=True | Auto | State with fixable finding, `auto_fix=True` | `"n1_fixer"` | Correct routing |
-| 330 | Route: unfixable only | Auto | State with only unfixable finding | `"n2_reporter"` | Correct routing |
-| 340 | Route: all fixed | Auto | State with empty `unfixable_findings` | `"__end__"` | Correct routing |
-| 350 | Route: unfixable remain | Auto | State with non-empty `unfixable_findings` | `"n2_reporter"` | Correct routing |
-| 360 | CLI defaults | Auto | `[]` (no args) | scope=all, auto_fix=True, dry_run=False, silent=False, reporter=github | All defaults correct |
-| 370 | CLI all flags | Auto | `["--scope", "links", "--dry-run", "--silent", "--create-pr", "--reporter", "local"]` | All flags parsed correctly | Arg values match |
-| 380 | CLI invalid scope | Auto | `["--scope", "invalid"]` | `SystemExit` raised | argparse error handling |
-| 390 | State initialization | Auto | CLI args `--scope links --dry-run` | JanitorState with `scope=["links"]`, `dry_run=True` | All fields correctly set |
-| 400 | Integration: full workflow with LocalFileReporter | Auto | Mock repo fixtures, LocalFileReporter | Report file created, exit_code reflects findings | End-to-end correctness |
+| 010 | State initialization | Auto | CLI args `--scope links --dry-run` | JanitorState with `scope=["links"]`, `dry_run=True` | All fields correctly set |
+| 020 | Broken link detection | Auto | Mock README.md with `[guide](./docs/old-guide.md)` where `old-guide.md` doesn't exist but `guide.md` does | Finding with `fixable=True`, `fix_data={"old": "./docs/old-guide.md", "new": "./docs/guide.md"}` | Finding correctly identifies broken link and suggests fix |
+| 030 | External URL ignored | Auto | Mock README.md with `[link](https://example.com)` | No findings | External links not reported |
+| 040 | All valid links | Auto | Mock README.md with `[guide](./docs/guide.md)` where `guide.md` exists | ProbeResult with `status="ok"`, empty findings | No false positives |
+| 050 | Stale worktree detected | Auto | Mocked `git worktree list` showing worktree with branch merged 15 days ago | Finding with `fixable=True` | Worktree correctly identified as stale |
+| 060 | Active worktree ignored | Auto | Mocked `git worktree list` showing worktree with commit 1 day ago | No findings | Active worktrees not flagged |
+| 070 | Stale TODO found | Auto | Mocked `git blame` showing TODO line added 45 days ago | Finding with `fixable=False` | TODO correctly identified as stale |
+| 080 | Recent TODO ignored | Auto | Mocked `git blame` showing TODO line added today | No findings | Recent TODOs not flagged |
+| 090 | Harvest script missing | Auto | No `assemblyzero-harvest.py` in repo | ProbeResult with single info finding | Graceful handling of missing script |
+| 100 | Probe crash isolation | Auto | Probe function that raises `RuntimeError` | ProbeResult with `status="error"`, `error_message` set | Exception caught, other probes unaffected |
+| 110 | Link fix applied | Auto | Finding with `fix_data={"old": "old.md", "new": "new.md"}`, mock file content | File content updated with new link | File correctly modified |
+| 120 | Dry-run link fix | Auto | Same as 110 but `dry_run=True` | FixAction with `applied=False`, file unchanged | No file modifications |
+| 130 | Worktree prune | Auto | Finding for stale worktree, mocked subprocess | `git worktree remove` called with correct path | Subprocess invoked correctly |
+| 140 | Commit message template | Auto | `category="links"`, `count=3` | `"chore: fix 3 broken markdown link(s) (ref #94)"` | Exact string match |
+| 150 | Local reporter create | Auto | Title, body, severity | Markdown file in `janitor-reports/` | File exists with correct content |
+| 160 | Local reporter update | Auto | Existing report file, new body | File overwritten | Content matches new body |
+| 170 | Local reporter find existing | Auto | Existing report file from today | Returns file path | Correct path returned |
+| 180 | Report body structure | Auto | Mix of findings and fix actions | Markdown with Summary, Auto-Fixed, Human Attention sections | All sections present |
+| 190 | Route: no findings | Auto | State with empty `all_findings` | `"__end__"` | Correct routing |
+| 200 | Route: fixable, auto_fix=True | Auto | State with fixable finding, `auto_fix=True` | `"n1_fixer"` | Correct routing |
+| 210 | Route: unfixable only | Auto | State with only unfixable finding | `"n2_reporter"` | Correct routing |
+| 220 | Route: all fixed | Auto | State with empty `unfixable_findings` | `"__end__"` | Correct routing |
+| 230 | Route: unfixable remain | Auto | State with non-empty `unfixable_findings` | `"n2_reporter"` | Correct routing |
+| 240 | CLI defaults | Auto | `[]` (no args) | scope=all, auto_fix=True, dry_run=False, silent=False, reporter=github | All defaults correct |
+| 250 | CLI all flags | Auto | `["--scope", "links", "--dry-run", "--silent", "--create-pr", "--reporter", "local"]` | All flags parsed correctly | Arg values match |
+| 260 | CLI invalid scope | Auto | `["--scope", "invalid"]` | `SystemExit` raised | argparse error handling |
+| 270 | Exit code 0 clean | Auto | Mocked probes returning no findings | `exit_code=0` | Clean exit |
+| 280 | Exit code 1 unfixable | Auto | Mocked probe returning unfixable finding | `exit_code=1` | Indicates action needed |
+| 290 | Integration: full workflow | Auto | Mock repo fixtures, LocalFileReporter | Report file created, exit_code reflects findings | End-to-end correctness |
 
 ### 10.2 Test Commands
 
@@ -1022,7 +1004,6 @@ poetry run pytest tests/unit/test_janitor/ tests/integration/test_janitor_workfl
 
 **Justification:** These scenarios require real git state manipulation (worktrees), authenticated GitHub API access, or CI environment configuration that cannot be fully simulated in unit tests.
 
-
 ## 11. Risks & Mitigations
 
 | Risk | Impact | Likelihood | Mitigation |
@@ -1035,7 +1016,6 @@ poetry run pytest tests/unit/test_janitor/ tests/integration/test_janitor_workfl
 | Windows path separator issues | Med | Med | Use `pathlib.Path` and `os.path` throughout; test on Windows path formats |
 | Race condition with concurrent janitor runs | Low | Low | MVP has no locking; git's own index lock prevents conflicting commits; documented as limitation |
 
-
 ## 12. Definition of Done
 
 ### Code
@@ -1046,7 +1026,7 @@ poetry run pytest tests/unit/test_janitor/ tests/integration/test_janitor_workfl
 - [ ] Code comments reference this LLD (#94)
 
 ### Tests
-- [ ] All 40 test scenarios pass (T010–T400)
+- [ ] All 29 test scenarios pass (T010–T290)
 - [ ] Test coverage ≥95% for `assemblyzero/workflows/janitor/`
 - [ ] Integration test passes with `LocalFileReporter`
 - [ ] No existing tests broken
@@ -1078,20 +1058,6 @@ Every file in Section 2.1:
 - `assemblyzero/workflows/janitor/reporter.py` → `ReporterInterface`, `GitHubReporter`, `LocalFileReporter`, `build_report_body`, `get_reporter` (Section 2.4)
 - `tools/run_janitor_workflow.py` → `parse_args`, `build_initial_state`, `main` (Section 2.4)
 
-Requirements traceability to test scenarios:
-- REQ-1 → Scenario 010
-- REQ-2 → Scenario 020
-- REQ-3 → Scenario 030
-- REQ-4 → Scenario 040
-- REQ-5 → Scenario 050
-- REQ-6 → Scenario 060
-- REQ-7 → Scenario 070
-- REQ-8 → Scenarios 080, 090, 100
-- REQ-9 → Scenario 110
-- REQ-10 → Scenario 120
-- REQ-11 → Scenario 130
-- REQ-12 → Scenario 140
-
 Risk mitigations traceability:
 - "Link fixer false positive" → `find_likely_target` returns `None` for ambiguous matches (Section 2.4, links.py)
 - "Worktree prune WIP" → `probe_worktrees` checks both age and merge status (Section 2.4, worktrees.py)
@@ -1101,14 +1067,12 @@ Risk mitigations traceability:
 
 ---
 
-
 ## Appendix: Review Log
 
 ### Review Summary
 
 | Review | Date | Verdict | Key Issue |
 |--------|------|---------|-----------|
-| Mechanical Test Validation | 2026-02-17 | FAIL | 50% coverage — REQ-1,2,3,4,7,10 had no test scenarios |
-| Revision 1 | 2026-02-17 | PENDING | Added scenarios 010-140 mapping all 12 requirements; renumbered existing scenarios |
+| — | — | — | — |
 
 **Final Status:** PENDING

@@ -1,8 +1,8 @@
 ---
-repo: martymcenroe/AgentOS
+repo: martymcenroe/AssemblyZero
 issue: 94
-url: https://github.com/martymcenroe/AgentOS/issues/94
-fetched: 2026-02-04T07:57:04.775433Z
+url: https://github.com/martymcenroe/AssemblyZero/issues/94
+fetched: 2026-03-01T13:21:40.967329Z
 ---
 
 # Issue #94: Lu-Tze: The Janitor - Automated Repository Hygiene Workflow
@@ -55,7 +55,7 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 4. Built-in probes:
    - `probe_links` — Broken internal markdown links
    - `probe_worktrees` — Stale/detached git worktrees
-   - `probe_harvest` — Cross-project drift via `agentos-harvest.py`
+   - `probe_harvest` — Cross-project drift via `assemblyzero-harvest.py`
    - `probe_todo` — TODO comments older than 30 days
 
 ### Fixer System (N1_Fixer)
@@ -83,9 +83,9 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 6. `--reporter {github|local}` — Select reporter backend (default: github, use local for testing)
 
 ## Technical Approach
-- **State Graph:** LangGraph workflow in `agentos/workflows/janitor/graph.py` with three nodes (Sweeper → Fixer → Reporter). LangGraph is used for its state management, conditional routing, and parallel execution capabilities—not for LLM orchestration.
+- **State Graph:** LangGraph workflow in `assemblyzero/workflows/janitor/graph.py` with three nodes (Sweeper → Fixer → Reporter). LangGraph is used for its state management, conditional routing, and parallel execution capabilities—not for LLM orchestration.
 - **No LLM Usage:** This workflow is purely deterministic. Commit messages are generated from templates. No external API calls for text generation.
-- **State Management:** TypedDict-based state in `agentos/workflows/janitor/state.py` tracking probes run, failures found, and actions taken
+- **State Management:** TypedDict-based state in `assemblyzero/workflows/janitor/state.py` tracking probes run, failures found, and actions taken
 - **Probe Registry:** Pluggable probe system allowing new probes to be added without modifying core workflow
 - **GitHub Integration:** Uses `gh` CLI for issue creation/updates and PR creation
 - **Reporter Abstraction:** `ReporterInterface` base class allows swapping `GitHubReporter` for `LocalFileReporter` during testing
@@ -103,22 +103,22 @@ Create `tools/run_janitor_workflow.py`, a LangGraph-based maintenance workflow t
 
 ## Files to Create/Modify
 - `tools/run_janitor_workflow.py` — CLI entry point
-- `agentos/workflows/janitor/__init__.py` — Package init
-- `agentos/workflows/janitor/graph.py` — LangGraph state graph definition
-- `agentos/workflows/janitor/state.py` — JanitorState TypedDict
-- `agentos/workflows/janitor/probes/` — Probe implementations directory
-- `agentos/workflows/janitor/probes/links.py` — Broken link detection
-- `agentos/workflows/janitor/probes/worktrees.py` — Worktree hygiene
-- `agentos/workflows/janitor/probes/harvest.py` — Cross-project drift
-- `agentos/workflows/janitor/probes/todo.py` — Stale TODO scanner
-- `agentos/workflows/janitor/fixers.py` — Auto-fix implementations
-- `agentos/workflows/janitor/reporter.py` — Reporter interface and implementations (GitHubReporter, LocalFileReporter)
+- `assemblyzero/workflows/janitor/__init__.py` — Package init
+- `assemblyzero/workflows/janitor/graph.py` — LangGraph state graph definition
+- `assemblyzero/workflows/janitor/state.py` — JanitorState TypedDict
+- `assemblyzero/workflows/janitor/probes/` — Probe implementations directory
+- `assemblyzero/workflows/janitor/probes/links.py` — Broken link detection
+- `assemblyzero/workflows/janitor/probes/worktrees.py` — Worktree hygiene
+- `assemblyzero/workflows/janitor/probes/harvest.py` — Cross-project drift
+- `assemblyzero/workflows/janitor/probes/todo.py` — Stale TODO scanner
+- `assemblyzero/workflows/janitor/fixers.py` — Auto-fix implementations
+- `assemblyzero/workflows/janitor/reporter.py` — Reporter interface and implementations (GitHubReporter, LocalFileReporter)
 - `docs/audits/083x/` — Archive superseded manual audits
 
 ## Dependencies
 - LangGraph installed and configured
 - `gh` CLI authenticated for issue/PR operations (or `GITHUB_TOKEN` env var for CI)
-- Existing `agentos-harvest.py` script (for harvest probe)
+- Existing `assemblyzero-harvest.py` script (for harvest probe)
 
 ## Out of Scope (Future)
 - **Real-time file watching** — Polling/scheduled runs only for MVP
