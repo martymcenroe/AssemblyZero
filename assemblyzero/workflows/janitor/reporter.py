@@ -224,7 +224,7 @@ def build_report_body(
     lines.append("")
     if fix_actions:
         for action in fix_actions:
-            status = "\u2705" if action.applied else "\U0001f532"
+            status = "[PASS]" if action.applied else ""
             lines.append(f"- {status} {action.description}")
     else:
         lines.append("No auto-fixes applied.")
@@ -249,7 +249,7 @@ def build_report_body(
                     if f.line_number:
                         location += f":{f.line_number}"
                     location += ")"
-                lines.append(f"- \u26a0\ufe0f {f.message}{location}")
+                lines.append(f"- [!] {f.message}{location}")
             lines.append("")
     else:
         lines.append("No issues require human attention.")
@@ -261,7 +261,7 @@ def build_report_body(
         lines.append("## Probe Errors")
         lines.append("")
         for pr in error_probes:
-            lines.append(f"- \u274c **{pr.probe}**: {pr.error_message}")
+            lines.append(f"- [X] **{pr.probe}**: {pr.error_message}")
         lines.append("")
 
     return "\n".join(lines)

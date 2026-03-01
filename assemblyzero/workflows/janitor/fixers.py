@@ -40,6 +40,8 @@ def fix_broken_links(
         ):
             by_file[f.file_path].append(f)
 
+    files_modified: list[str] = []
+
     for rel_path, file_findings in by_file.items():
         abs_path = os.path.join(repo_root, rel_path)
         try:
@@ -58,6 +60,7 @@ def fix_broken_links(
             if not dry_run:
                 with open(abs_path, "w", encoding="utf-8") as fh:
                     fh.write(content)
+            files_modified.append(rel_path)
 
             for finding in file_findings:
                 old_link = finding.fix_data["old_link"]  # type: ignore[index]
@@ -65,10 +68,7 @@ def fix_broken_links(
                 actions.append(
                     FixAction(
                         category="broken_link",
-                        description=(
-                            f"Fixed broken link in {rel_path}: "
-                            f"{old_link} \u2192 {new_link}"
-                        ),
+                        description=f"Fixed broken link in {rel_path}: {old_link} \u2192 {new_link}",
                         files_modified=[rel_path],
                         commit_message=generate_commit_message(
                             "broken_link", len(file_findings), [rel_path]
@@ -85,7 +85,7 @@ def fix_stale_worktrees(
 ) -> list[FixAction]:
     """Prune stale git worktrees.
 
-    Runs ``git worktree remove <path>`` for each stale worktree.
+    Runs `git worktree remove <path>` for each stale worktree.
     In dry-run mode, returns actions without executing.
     """
     actions: list[FixAction] = []
@@ -128,30 +128,22 @@ def create_fix_commit(
 ) -> None:
     """Stage modified files and create a git commit.
 
-    Uses ``git add`` for specific files and ``git commit -m``.
+    Uses `git add` for specific files and `git commit -m`.
     Does nothing if no files are provided (idempotent).
-
-    Per LLD section 10.1, CalledProcessError from git operations
-    is caught and logged rather than propagated.
     """
     if not files:
         return
 
-    try:
-        subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
-        result = subprocess.run(
-            ["git", "commit", "-m", message],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-        )
-        # Ignore "nothing to commit" errors
-        if result.returncode != 0 and "nothing to commit" not in result.stdout:
-            result.check_returncode()
-    except subprocess.CalledProcessError:
-        # Git operations may fail (e.g., not in a git repo, nothing staged).
-        # The fixer workflow continues — file modifications are already applied.
-        pass
+    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
+    result = subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    # Ignore "nothing to commit" errors
+    if result.returncode != 0 and "nothing to commit" not in result.stdout:
+        result.check_returncode()
 
 
 def generate_commit_message(
@@ -172,7 +164,7 @@ def create_fix_pr(
 ) -> str | None:
     """Create a PR from the current fix branch.
 
-    Creates a new branch, pushes, and uses ``gh pr create``.
+    Creates a new branch, pushes, and uses `gh pr create`.
     Returns the PR URL or None if creation fails.
     """
     try:

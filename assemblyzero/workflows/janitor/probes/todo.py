@@ -120,7 +120,7 @@ def get_line_date(
     for line in result.stdout.splitlines():
         if line.startswith("author-time "):
             try:
-                timestamp = int(line[len("author-time "):])
+                timestamp = int(line[len("author-time ") :])
                 return datetime.fromtimestamp(timestamp, tz=timezone.utc)
             except (ValueError, OSError):
                 return None

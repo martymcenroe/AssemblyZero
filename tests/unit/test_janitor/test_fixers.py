@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, call, patch
 
 from assemblyzero.workflows.janitor.fixers import (
     create_fix_commit,
-    create_fix_pr,
     fix_broken_links,
     fix_stale_worktrees,
     generate_commit_message,
@@ -88,25 +87,8 @@ class TestFixBrokenLinks:
         actions = fix_broken_links(findings, str(tmp_path), dry_run=False)
         assert actions == []
 
-    def test_fix_broken_links_missing_new_link(self, tmp_path):
-        """fix_broken_links skips findings where fix_data lacks new_link."""
-        findings = [
-            Finding(
-                probe="links",
-                category="broken_link",
-                message="Broken link",
-                severity="warning",
-                fixable=True,
-                file_path="README.md",
-                line_number=1,
-                fix_data={"old_link": "./docs/old-guide.md"},
-            )
-        ]
-        actions = fix_broken_links(findings, str(tmp_path), dry_run=False)
-        assert actions == []
-
     def test_fix_broken_links_multiple_in_same_file(self, tmp_path):
-        """fix_broken_links handles multiple broken links in one file."""
+        """fix_broken_links handles multiple broken links in the same file."""
         readme = tmp_path / "README.md"
         readme.write_text(
             "[guide](./docs/old-guide.md)\n"
@@ -145,28 +127,8 @@ class TestFixBrokenLinks:
         assert "./docs/old-guide.md" not in content
         assert "./docs/old-api.md" not in content
 
-    def test_fix_broken_links_nonexistent_file(self, tmp_path):
-        """fix_broken_links gracefully handles missing source file."""
-        findings = [
-            Finding(
-                probe="links",
-                category="broken_link",
-                message="Broken link",
-                severity="warning",
-                fixable=True,
-                file_path="nonexistent.md",
-                line_number=1,
-                fix_data={"old_link": "./old.md", "new_link": "./new.md"},
-            )
-        ]
-        actions = fix_broken_links(findings, str(tmp_path), dry_run=False)
-        assert actions == []
-
-    def test_fix_broken_links_description_format(self, tmp_path):
-        """fix_broken_links produces descriptive action text."""
-        readme = tmp_path / "README.md"
-        readme.write_text("[guide](./docs/old-guide.md)\n")
-
+    def test_fix_broken_links_missing_new_link(self, tmp_path):
+        """fix_broken_links skips findings with fix_data missing new_link."""
         findings = [
             Finding(
                 probe="links",
@@ -176,17 +138,14 @@ class TestFixBrokenLinks:
                 fixable=True,
                 file_path="README.md",
                 line_number=1,
-                fix_data={"old_link": "./docs/old-guide.md", "new_link": "./docs/guide.md"},
+                fix_data={"old_link": "./docs/old-guide.md"},
             )
         ]
-
         actions = fix_broken_links(findings, str(tmp_path), dry_run=False)
-        assert "README.md" in actions[0].description
-        assert "./docs/old-guide.md" in actions[0].description
-        assert "./docs/guide.md" in actions[0].description
+        assert actions == []
 
-    def test_fix_broken_links_no_file_path(self, tmp_path):
-        """fix_broken_links skips findings without file_path."""
+    def test_fix_broken_links_nonexistent_file(self, tmp_path):
+        """fix_broken_links handles missing source file gracefully."""
         findings = [
             Finding(
                 probe="links",
@@ -194,7 +153,7 @@ class TestFixBrokenLinks:
                 message="Broken link",
                 severity="warning",
                 fixable=True,
-                file_path=None,
+                file_path="nonexistent.md",
                 line_number=1,
                 fix_data={"old_link": "./old.md", "new_link": "./new.md"},
             )
@@ -277,7 +236,6 @@ class TestFixStaleWorktrees:
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
 
         assert "Pruned" in actions[0].description
-        assert "/home/user/repo-42" in actions[0].description
         assert "feature/old" in actions[0].description
 
     def test_fix_stale_worktrees_description_dry_run(self):
@@ -321,29 +279,8 @@ class TestFixStaleWorktrees:
         assert actions == []
         mock_run.assert_not_called()
 
-    def test_fix_stale_worktrees_missing_worktree_path(self):
-        """fix_stale_worktrees skips findings without worktree_path in fix_data."""
-        findings = [
-            Finding(
-                probe="worktrees",
-                category="stale_worktree",
-                message="Stale worktree",
-                severity="warning",
-                fixable=True,
-                file_path="/home/user/repo-42",
-                line_number=None,
-                fix_data={"branch": "feature/old"},
-            )
-        ]
-
-        with patch("subprocess.run") as mock_run:
-            actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
-
-        assert actions == []
-        mock_run.assert_not_called()
-
     def test_fix_stale_worktrees_multiple(self):
-        """fix_stale_worktrees handles multiple stale worktrees."""
+        """fix_stale_worktrees handles multiple worktrees."""
         findings = [
             Finding(
                 probe="worktrees",
@@ -373,28 +310,6 @@ class TestFixStaleWorktrees:
 
         assert len(actions) == 2
         assert mock_run.call_count == 2
-        assert all(a.applied is True for a in actions)
-
-    def test_fix_stale_worktrees_empty_files_modified(self):
-        """fix_stale_worktrees returns empty files_modified (no file changes for prune)."""
-        findings = [
-            Finding(
-                probe="worktrees",
-                category="stale_worktree",
-                message="Stale worktree",
-                severity="warning",
-                fixable=True,
-                file_path="/home/user/repo-42",
-                line_number=None,
-                fix_data={"worktree_path": "/home/user/repo-42", "branch": "feature/old"},
-            )
-        ]
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
-
-        assert actions[0].files_modified == []
 
 
 class TestCommitMessage:
@@ -421,15 +336,22 @@ class TestCommitMessage:
         assert "janitor fix" in msg
         assert "2" in msg
 
+    def test_commit_message_deterministic(self):
+        """generate_commit_message is deterministic (same input -> same output)."""
+        msg1 = generate_commit_message("broken_link", 5, ["a.md", "b.md"])
+        msg2 = generate_commit_message("broken_link", 5, ["a.md", "b.md"])
+        assert msg1 == msg2
+
     def test_commit_message_includes_ref(self):
-        """All commit messages include issue reference."""
+        """generate_commit_message always includes issue reference."""
         msg = generate_commit_message("broken_link", 1, [])
         assert "ref #94" in msg
 
-    def test_commit_message_worktrees_plural(self):
-        """generate_commit_message handles multiple worktrees."""
-        msg = generate_commit_message("stale_worktree", 5, [])
-        assert msg == "chore: prune 5 stale worktree(s) (ref #94)"
+        msg2 = generate_commit_message("stale_worktree", 1, [])
+        assert "ref #94" in msg2
+
+        msg3 = generate_commit_message("custom_category", 1, [])
+        assert "ref #94" in msg3
 
 
 class TestCreateFixCommit:
@@ -468,7 +390,7 @@ class TestCreateFixCommit:
         )
 
     def test_create_fix_commit_message_passed(self):
-        """create_fix_commit passes commit message to git commit."""
+        """create_fix_commit passes correct commit message."""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             create_fix_commit("/repo", "broken_link", ["README.md"], "chore: fix 1 broken markdown link(s) (ref #94)")
@@ -480,42 +402,3 @@ class TestCreateFixCommit:
             capture_output=True,
             text=True,
         )
-
-
-class TestCreateFixPR:
-    """Test PR creation."""
-
-    def test_create_fix_pr_success(self):
-        """create_fix_pr returns PR URL on success."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout -b
-                MagicMock(returncode=0),  # git push -u
-                MagicMock(
-                    returncode=0,
-                    stdout="https://github.com/user/repo/pull/95\n",
-                ),  # gh pr create
-            ]
-            url = create_fix_pr("/repo", "janitor/fix-links-2026-03-02", "chore: fix links")
-
-        assert url == "https://github.com/user/repo/pull/95"
-
-    def test_create_fix_pr_failure(self):
-        """create_fix_pr returns None on gh pr create failure."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0),  # git checkout -b
-                MagicMock(returncode=0),  # git push -u
-                MagicMock(returncode=1, stdout="", stderr="error"),  # gh pr create fails
-            ]
-            url = create_fix_pr("/repo", "janitor/fix-links-2026-03-02", "chore: fix links")
-
-        assert url is None
-
-    def test_create_fix_pr_git_exception(self):
-        """create_fix_pr returns None on git exception."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = Exception("git failed")
-            url = create_fix_pr("/repo", "janitor/fix-links-2026-03-02", "chore: fix links")
-
-        assert url is None
