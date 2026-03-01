@@ -202,13 +202,6 @@ Examples:
         help="Path to checkpoint database (overrides default per-issue partitioning)",
     )
 
-    # Resume
-    parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="Resume from checkpoint",
-    )
-
     # Issue #476: Cost budget
     parser.add_argument(
         "--budget",
@@ -604,7 +597,7 @@ def run_workflow(
         return 0
 
     except KeyboardInterrupt:
-        print("\n\nWorkflow interrupted. Use --resume to continue.")
+        print("\n\nWorkflow interrupted. Re-run the same command to auto-recover.")
         return 130
 
     except Exception as e:

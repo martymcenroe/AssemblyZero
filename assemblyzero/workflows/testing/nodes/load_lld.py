@@ -4,7 +4,8 @@ Issue #384: The TDD workflow now requires an Implementation Spec (produced
 by the #304 spec workflow), not a raw LLD. If no spec exists, the workflow
 exits with a specific command to generate one.
 
-Reads the spec from docs/lld/drafts/spec-{N}.md and extracts:
+Reads the spec from docs/lineage/active/{N}-implspec/ (preferred) or
+docs/lld/drafts/spec-{N}.md (fallback) and extracts:
 - Full spec content (used as LLD content downstream)
 - Test plan from Section 10 (LLD format) or Section 9 (impl spec format)
 - Test scenarios with metadata (from tables, headings, bold, or code blocks)
@@ -34,8 +35,9 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState, TestScena
 # LLD directory relative to repo root (kept for backward-compatible helpers)
 LLD_ACTIVE_DIR = Path("docs/lld/active")
 
-# Implementation Spec directory (Issue #384)
+# Implementation Spec directories (Issue #384, #525)
 SPEC_DRAFTS_DIR = Path("docs/lld/drafts")
+LINEAGE_ACTIVE_DIR = Path("docs/lineage/active")
 
 
 def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
@@ -76,6 +78,7 @@ def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:
     """Find the Implementation Spec file for an issue number.
 
     Issue #384: TDD workflow requires an implementation spec, not a raw LLD.
+    Issue #525: Search lineage directory first, fall back to drafts.
 
     Args:
         issue_number: GitHub issue number.
@@ -84,8 +87,22 @@ def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:
     Returns:
         Path to spec file if found, None otherwise.
     """
-    spec_dir = repo_root / SPEC_DRAFTS_DIR
+    # Search lineage directory first (Issue #525)
+    lineage_dir = repo_root / LINEAGE_ACTIVE_DIR / f"{issue_number}-implspec"
+    if lineage_dir.exists():
+        lineage_patterns = [
+            "*-final-spec.md",   # 003-final-spec.md
+            "*-spec.md",         # any numbered spec
+        ]
+        for pattern in lineage_patterns:
+            matches = list(lineage_dir.glob(pattern))
+            if matches:
+                if len(matches) > 1:
+                    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                return matches[0]
 
+    # Fall back to drafts directory
+    spec_dir = repo_root / SPEC_DRAFTS_DIR
     if not spec_dir.exists():
         return None
 
