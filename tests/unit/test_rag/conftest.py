@@ -8,10 +8,10 @@ The fakes implement the subset of APIs used by the RAG module.
 """
 from __future__ import annotations
 
+import random
 import sys
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
 
@@ -129,6 +129,36 @@ class FakeClient:
         return list(self._collections.keys())
 
 
+class FakeEmbeddingRow(list):
+    """A list that also supports .tolist() like a numpy array row."""
+
+    def tolist(self) -> list[float]:
+        return list(self)
+
+
+class FakeEmbeddingMatrix(list):
+    """A list-of-lists that supports [i].tolist() and .shape like a numpy 2D array."""
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        rows = len(self)
+        cols = len(self[0]) if rows else 0
+        return (rows, cols)
+
+    def __getitem__(self, idx):
+        val = super().__getitem__(idx)
+        if isinstance(val, list) and not isinstance(val, FakeEmbeddingRow):
+            return FakeEmbeddingRow(val)
+        return val
+
+    def __iter__(self):
+        for val in super().__iter__():
+            if isinstance(val, list) and not isinstance(val, FakeEmbeddingRow):
+                yield FakeEmbeddingRow(val)
+            else:
+                yield val
+
+
 class FakeSentenceTransformer:
     """Fake SentenceTransformer that returns random 384-d vectors."""
 
@@ -137,9 +167,11 @@ class FakeSentenceTransformer:
 
     def encode(
         self, texts: list[str], convert_to_numpy: bool = False
-    ) -> np.ndarray:
+    ) -> FakeEmbeddingMatrix:
         n = len(texts) if isinstance(texts, list) else 1
-        return np.random.rand(n, 384).astype(np.float32)
+        return FakeEmbeddingMatrix(
+            [random.random() for _ in range(384)] for _ in range(n)
+        )
 
 
 @pytest.fixture(autouse=True)
