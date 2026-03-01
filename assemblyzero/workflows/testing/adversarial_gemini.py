@@ -10,6 +10,8 @@ provider infrastructure.
 import logging
 from typing import Any
 
+from assemblyzero.core.text_sanitizer import strip_emoji
+
 from assemblyzero.workflows.testing.adversarial_prompts import (
     build_adversarial_analysis_prompt,
     build_adversarial_system_prompt,
@@ -243,6 +245,8 @@ class AdversarialGeminiClient:
                 },
             )
             text = response.text if hasattr(response, "text") else str(response)
+            # Issue #527: Strip emojis from Gemini response
+            text = strip_emoji(text)
             metadata: dict[str, Any] = {}
             if hasattr(response, "model"):
                 metadata["model"] = response.model
@@ -264,6 +268,8 @@ class AdversarialGeminiClient:
             ]
             response = provider.invoke(messages)
             text = response.content if hasattr(response, "content") else str(response)
+            # Issue #527: Strip emojis from Gemini response
+            text = strip_emoji(text)
             metadata = getattr(response, "response_metadata", {})
             return text, metadata
 

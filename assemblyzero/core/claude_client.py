@@ -13,6 +13,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from assemblyzero.core.text_sanitizer import strip_emoji
+
 # Configuration
 MAX_RETRIES = 5
 BASE_DELAY = 1.0  # seconds
@@ -67,7 +69,8 @@ def invoke_claude(
             )
 
             if result.returncode == 0:
-                return result.stdout
+                # Issue #527: Strip emojis from CLI output
+                return strip_emoji(result.stdout)
 
             # Check for rate limit (429)
             if _is_rate_limit_error(result):

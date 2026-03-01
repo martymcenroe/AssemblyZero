@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from assemblyzero.core.text_sanitizer import strip_emoji
+
 
 @dataclass
 class LLMCallResult:
@@ -438,6 +440,9 @@ class ClaudeCLIProvider(LLMProvider):
                 # Fall back to raw stdout if not valid JSON
                 response_text = stdout.strip()
 
+            # Issue #527: Strip emojis from response (preserve raw_response)
+            response_text = strip_emoji(response_text)
+
             call_result = LLMCallResult(
                 success=True,
                 response=response_text,
@@ -617,6 +622,9 @@ class AnthropicProvider(LLMProvider):
             for block in response.content:
                 if hasattr(block, "text"):
                     response_text += block.text
+
+            # Issue #527: Strip emojis from response (preserve raw_response)
+            response_text = strip_emoji(response_text)
 
             # Extract usage
             input_tokens = response.usage.input_tokens
@@ -919,9 +927,12 @@ class GeminiProvider(LLMProvider):
                 and str(result.error_type) == "GeminiErrorType.QUOTA_EXHAUSTED"
             ) if hasattr(result, "error_type") else False
 
+            # Issue #527: Strip emojis from response (preserve raw_response)
+            sanitized_response = strip_emoji(result.response) if result.response else result.response
+
             call_result = LLMCallResult(
                 success=result.success,
-                response=result.response,
+                response=sanitized_response,
                 raw_response=result.raw_response,
                 error_message=result.error_message,
                 provider=self.provider_name,

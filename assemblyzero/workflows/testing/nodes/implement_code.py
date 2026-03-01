@@ -18,6 +18,8 @@ import os
 import re
 import random
 import shutil
+
+from assemblyzero.core.text_sanitizer import strip_emoji
 import subprocess
 import sys
 import threading
@@ -930,7 +932,8 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
             )
 
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout, ""
+                # Issue #527: Strip emojis from code gen response
+                return strip_emoji(result.stdout), ""
             else:
                 stderr = result.stderr[:200] if result.stderr else "no stderr"
                 # Fall through to SDK
@@ -962,7 +965,8 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
             if hasattr(block, "text"):
                 response_text += block.text
 
-        return response_text, ""
+        # Issue #527: Strip emojis from code gen response
+        return strip_emoji(response_text), ""
 
     except ImportError:
         return "", "Neither Claude CLI nor Anthropic SDK available"
