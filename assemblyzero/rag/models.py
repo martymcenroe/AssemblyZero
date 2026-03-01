@@ -56,7 +56,7 @@ class RAGConfig:
     top_k_candidates: int = 5
     top_n_results: int = 3
     source_directories: list[str] = field(
-        default_factory=lambda: ["docs/adrs", "docs/standards", "docs/LLDs/done"]
+        default_factory=lambda: ["docs/adrs", "docs/standards", "docs/LLDs/done", "docs/lineage/done"]
     )
     chunk_max_tokens: int = 512
     embedding_provider: str = "local"
