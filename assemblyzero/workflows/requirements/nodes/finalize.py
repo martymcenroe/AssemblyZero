@@ -15,6 +15,7 @@ from typing import Any, Dict
 
 from assemblyzero.workflows.requirements.audit import (
     embed_review_evidence,
+    move_lineage_to_done,
     next_file_number,
     save_audit_file,
     update_lld_status,
@@ -440,6 +441,13 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Then, commit and push artifacts to git
     state = _commit_and_push_files(state)
+
+    # Issue #100: Move lineage from active/ to done/ on successful completion
+    if not state.get("error_message"):
+        audit_dir = Path(state.get("audit_dir", ""))
+        target_repo = Path(state.get("target_repo", "."))
+        if audit_dir.exists():
+            move_lineage_to_done(audit_dir, target_repo)
 
     # Cleanup source idea after successful issue creation
     if workflow_type == "issue" and not state.get("error_message"):

@@ -18,12 +18,16 @@ CRITICAL PATH RULES:
 """
 
 import json
+import logging
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
 from assemblyzero.core.config import REVIEWER_MODEL
+
+logger = logging.getLogger(__name__)
 
 
 # Base directories relative to repo root
@@ -254,6 +258,46 @@ def create_audit_dir(
 
     audit_dir.mkdir(parents=True, exist_ok=True)
     return audit_dir
+
+
+# =============================================================================
+# Lineage Active → Done
+# =============================================================================
+
+
+def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path | None:
+    """Move a lineage directory from active/ to done/ on workflow completion.
+
+    Issue #100: All 4 workflows create docs/lineage/active/{id}/ and save
+    artifacts there, but none moved to done/ on completion.
+
+    Args:
+        audit_dir: The active lineage directory (e.g., target_repo/docs/lineage/active/42-lld).
+        target_repo: Target repository root (used for log messages).
+
+    Returns:
+        Path to the done/ directory if moved successfully, None on failure or skip.
+    """
+    if not audit_dir.exists():
+        logger.info("Lineage dir not found, skipping move: %s", audit_dir)
+        return None
+
+    # Build destination: swap active/ for done/ in the path
+    done_dir = target_repo / AUDIT_DONE_DIR / audit_dir.name
+    done_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    # Idempotent: if done/ target already exists, skip
+    if done_dir.exists():
+        logger.info("Lineage already in done/, skipping: %s", done_dir)
+        return done_dir
+
+    try:
+        shutil.move(str(audit_dir), str(done_dir))
+        logger.info("Moved lineage to done: %s -> %s", audit_dir.name, done_dir)
+        return done_dir
+    except OSError as e:
+        logger.error("Failed to move lineage to done: %s", e)
+        return None
 
 
 # =============================================================================
