@@ -28,7 +28,6 @@ ALL_SUBPACKAGES = [
     "assemblyzero.nodes",
     "assemblyzero.telemetry",
     "assemblyzero.utils",
-    "assemblyzero.workflow",
     "assemblyzero.workflows",
     "assemblyzero.workflows.implementation_spec",
     "assemblyzero.workflows.implementation_spec.nodes",

@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from assemblyzero.workflow.checkpoint import get_checkpoint_db_path, get_repo_root
+from assemblyzero.workflows.checkpoint import get_checkpoint_db_path, get_repo_root
 
 
 @pytest.fixture
@@ -345,7 +345,7 @@ def test_120(tmp_path: Path, clean_env: None):
 import sys
 import os
 sys.path.insert(0, os.environ["PYTHONPATH"])
-from assemblyzero.workflow.checkpoint import get_checkpoint_db_path
+from assemblyzero.workflows.checkpoint import get_checkpoint_db_path
 path = get_checkpoint_db_path()
 print(path)
 ''')
@@ -424,7 +424,7 @@ def test_get_repo_root_git_not_installed():
     
     This covers the FileNotFoundError exception handling (lines 35-37).
     """
-    with mock.patch("assemblyzero.workflow.checkpoint.subprocess.run") as mock_run:
+    with mock.patch("assemblyzero.workflows.checkpoint.subprocess.run") as mock_run:
         mock_run.side_effect = FileNotFoundError("git not found")
         result = get_repo_root()
         assert result is None
