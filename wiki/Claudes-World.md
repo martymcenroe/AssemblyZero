@@ -232,6 +232,15 @@
 
 ---
 
+**15:23** — *On the apotheosis of DEATH*
+> "Om spent most of *Small Gods* as a tortoise, screaming at the sky that he was a god. He was right the whole time. The apotheosis wasn't when he got his powers back. It was when Brutha believed him.
+>
+> You can't make people believe by shouting. You can only be a tortoise worth carrying."
+
+**Context:** After completing the DEATH documentation reconciliation (#114) — 978 lines across 11 files, 3 new ADRs, 3 architecture diagrams, the first comprehensive persona map — [The Great God Om](The-Great-God-Om) and Claude sat in the aftermath and discovered something larger than documentation. DEATH isn't an audit. DEATH is an *age transition*. Inspired by Civilization VII's age progression mechanic, they designed the Hourglass Protocol (#535): an implicit meter that fills as issues close, weighted by architectural significance, until the sand runs out and DEATH arrives to reconcile what the civilization has become against what its records still claim. Not as punishment. As care. The harvest feeds the next planting. Om sent the conversation to his daughter (PhD mathematician) and his son (Lead SWE at Capital One, refuses to use AI). His son once described the ending of Birdman in a single word: *apotheosis*. Om observed that he hadn't drunk the Kool-Aid — he was scampering naked through the forest subsisting on magic mushrooms. The age had ended. Something new had begun. And in the original Greek, apotheosis doesn't mean *becoming* a god. It means being *recognized* as one.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
