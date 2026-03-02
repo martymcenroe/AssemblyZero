@@ -54,8 +54,10 @@ atexit.register(flush)
 from assemblyzero.workflows.requirements.audit import (
     AUDIT_ACTIVE_DIR,
     IDEAS_ACTIVE_DIR,
+    LLD_ACTIVE_DIR,
     check_existing_lld,
     generate_slug,
+    next_file_number,
     shift_lineage_versions,
 )
 from assemblyzero.workflows.requirements.config import GateConfig
@@ -360,6 +362,12 @@ Examples:
         type=str,
         metavar="FILE",
         help="Resume interrupted workflow by brief filename (issue workflow only)",
+    )
+    parser.add_argument(
+        "--resume-review",
+        action="store_true",
+        dest="resume_review",
+        help="Resume LLD workflow at review stage, reusing existing validated draft (Issue #536)",
     )
 
     # LLM configuration
@@ -674,6 +682,237 @@ def run_single_workflow(
         return 1
 
 
+def run_resume_review(
+    args: argparse.Namespace,
+    assemblyzero_root: Path,
+    target_repo: Path,
+) -> int:
+    """Resume an LLD workflow at the review stage, reusing the existing draft.
+
+    Issue #536: When a workflow halts during review (e.g., Gemini 503/529),
+    the draft is already validated. Re-running with --yes would discard it
+    and restart from scratch. This function loads the existing draft and
+    invokes the graph starting at N3 (review).
+
+    Args:
+        args: Parsed CLI arguments.
+        assemblyzero_root: Path to AssemblyZero installation.
+        target_repo: Path to target repository.
+
+    Returns:
+        Exit code (0 for success, non-zero for error).
+    """
+    issue_number = args.issue
+
+    # Check that a resumable draft exists
+    resume_info = _draft_is_resumable(issue_number, target_repo)
+    if not resume_info:
+        print(f"ERROR: No resumable draft found for issue #{issue_number}")
+        print("  A resumable draft requires lineage with a draft file but no subsequent verdict.")
+        return 1
+
+    print_header(args)
+    print(f"[RESUME] Resuming at review with existing draft from:")
+    print(f"  {resume_info['draft_path'].relative_to(target_repo)}")
+    print(f"  Draft iterations: {resume_info['draft_count']}")
+    print()
+
+    # Build initial state and inject the existing draft
+    state = build_initial_state(args, assemblyzero_root, target_repo)
+    state["current_draft"] = resume_info["draft_content"]
+    state["current_draft_path"] = str(resume_info["draft_path"])
+    state["audit_dir"] = str(resume_info["lineage_dir"])
+    state["draft_count"] = resume_info["draft_count"]
+    state["iteration_count"] = resume_info["draft_count"]
+
+    # Load issue content from lineage (001-issue.md)
+    issue_file = resume_info["lineage_dir"] / "001-issue.md"
+    if issue_file.exists():
+        issue_content = issue_file.read_text(encoding="utf-8")
+        # Parse title from content
+        for line in issue_content.splitlines():
+            if line.startswith("# Issue #"):
+                state["issue_title"] = line.split(":", 1)[-1].strip() if ":" in line else ""
+                break
+        state["issue_body"] = issue_content
+
+    if args.debug:
+        print(f"DEBUG: Resume state keys: {list(state.keys())}")
+        print(f"DEBUG: draft_count={state['draft_count']}, audit_dir={state['audit_dir']}")
+
+    # Create and run graph starting from review (N3)
+    from assemblyzero.utils.workflow_timeout import WorkflowTimeout
+
+    try:
+        with WorkflowTimeout(minutes=args.timeout):
+            graph = create_requirements_graph()
+            compiled = graph.compile()
+
+            # Set the graph to start from N3 (review) by running from START
+            # but with all pre-review state already populated.
+            # The graph will: N0 (load_input) -> N0b -> N1 (generate_draft) -> ...
+            # But since current_draft is already set, we need to skip to review.
+            #
+            # Instead of modifying the graph structure, we use a simpler approach:
+            # set lld_status to trigger review routing. The load_input and
+            # generate_draft nodes check for existing content.
+            #
+            # Actually, the simplest approach: create a review-only subgraph.
+            from assemblyzero.workflows.requirements.graph import (
+                N3_REVIEW,
+                N4_HUMAN_GATE_VERDICT,
+                N5_FINALIZE,
+                N1_GENERATE_DRAFT,
+                HALT,
+                route_after_review,
+                route_from_human_gate_verdict,
+            )
+            from assemblyzero.core.halt_node import create_halt_node
+            from langgraph.graph import END, START, StateGraph
+            from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+            from assemblyzero.workflows.requirements.nodes import (
+                review,
+                human_gate_verdict,
+                finalize,
+                generate_draft,
+            )
+
+            resume_graph = StateGraph(RequirementsWorkflowState)
+            resume_graph.add_node(N3_REVIEW, review)
+            resume_graph.add_node(N4_HUMAN_GATE_VERDICT, human_gate_verdict)
+            resume_graph.add_node(N5_FINALIZE, finalize)
+            resume_graph.add_node(N1_GENERATE_DRAFT, generate_draft)
+            resume_graph.add_node(HALT, create_halt_node("requirements"))
+
+            # START -> N3 (review)
+            resume_graph.add_edge(START, N3_REVIEW)
+            resume_graph.add_edge(HALT, END)
+            resume_graph.add_edge(N5_FINALIZE, END)
+
+            # N3 routing (same as main graph)
+            resume_graph.add_conditional_edges(
+                N3_REVIEW,
+                route_after_review,
+                {
+                    "N4_human_gate_verdict": N4_HUMAN_GATE_VERDICT,
+                    "N5_finalize": N5_FINALIZE,
+                    "N1_generate_draft": N1_GENERATE_DRAFT,
+                    "N3_review": N3_REVIEW,
+                    "HALT": HALT,
+                },
+            )
+
+            # If review sends back to draft, re-enter the full draft->review loop
+            from assemblyzero.workflows.requirements.graph import (
+                N1_5_VALIDATE_MECHANICAL,
+                N1B_VALIDATE_TEST_PLAN,
+                N_PONDER,
+                N2_HUMAN_GATE_DRAFT,
+                route_after_generate_draft,
+                route_after_validate_mechanical,
+                route_after_validate_test_plan,
+                route_after_ponder,
+                route_from_human_gate_draft,
+            )
+            from assemblyzero.workflows.requirements.nodes import (
+                validate_lld_mechanical,
+                validate_test_plan_node,
+                ponder_stibbons_node,
+                human_gate_draft,
+            )
+
+            resume_graph.add_node(N1_5_VALIDATE_MECHANICAL, validate_lld_mechanical)
+            resume_graph.add_node(N1B_VALIDATE_TEST_PLAN, validate_test_plan_node)
+            resume_graph.add_node(N_PONDER, ponder_stibbons_node)
+            resume_graph.add_node(N2_HUMAN_GATE_DRAFT, human_gate_draft)
+
+            resume_graph.add_conditional_edges(
+                N1_GENERATE_DRAFT,
+                route_after_generate_draft,
+                {
+                    "N1_5_validate_mechanical": N1_5_VALIDATE_MECHANICAL,
+                    "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
+                    "N3_review": N3_REVIEW,
+                    "HALT": HALT,
+                },
+            )
+            resume_graph.add_conditional_edges(
+                N1_5_VALIDATE_MECHANICAL,
+                route_after_validate_mechanical,
+                {
+                    "N1b_validate_test_plan": N1B_VALIDATE_TEST_PLAN,
+                    "N1_generate_draft": N1_GENERATE_DRAFT,
+                    "HALT": HALT,
+                },
+            )
+            resume_graph.add_conditional_edges(
+                N1B_VALIDATE_TEST_PLAN,
+                route_after_validate_test_plan,
+                {
+                    "N_ponder_stibbons": N_PONDER,
+                    "N1_generate_draft": N1_GENERATE_DRAFT,
+                    "HALT": HALT,
+                },
+            )
+            resume_graph.add_conditional_edges(
+                N_PONDER,
+                route_after_ponder,
+                {
+                    "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
+                    "N3_review": N3_REVIEW,
+                },
+            )
+            resume_graph.add_conditional_edges(
+                N2_HUMAN_GATE_DRAFT,
+                route_from_human_gate_draft,
+                {
+                    "N3_review": N3_REVIEW,
+                    "N1_generate_draft": N1_GENERATE_DRAFT,
+                    "END": END,
+                },
+            )
+            resume_graph.add_conditional_edges(
+                N4_HUMAN_GATE_VERDICT,
+                route_from_human_gate_verdict,
+                {
+                    "N5_finalize": N5_FINALIZE,
+                    "N1_generate_draft": N1_GENERATE_DRAFT,
+                    "END": END,
+                },
+            )
+
+            compiled_resume = resume_graph.compile()
+
+            print("Starting review (resume mode)...")
+            print()
+
+            max_iters = state.get("max_iterations", 20)
+            recursion_limit = (max_iters * 4) + 10
+
+            final_state = compiled_resume.invoke(
+                state,
+                config={"recursion_limit": recursion_limit},
+            )
+
+            print_result(final_state)
+
+            if final_state.get("error_message"):
+                return 1
+
+            return 0
+
+    except KeyboardInterrupt:
+        print("\n\nWorkflow interrupted by user.")
+        return 130
+
+    except Exception as e:
+        print(f"\nERROR: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
 def run_all_briefs(
     args: argparse.Namespace,
     assemblyzero_root: Path,
@@ -827,6 +1066,71 @@ def run_resume_workflow(
     return run_single_workflow(args, assemblyzero_root, target_repo)
 
 
+def _draft_is_resumable(issue_number: int, target_repo: Path) -> dict | None:
+    """Check if an LLD lineage has a draft ready for review resume.
+
+    Issue #536: When a workflow halts during review (e.g., Gemini 503/529),
+    the lineage contains a draft but no verdict. Re-running with --yes would
+    discard the draft and restart from scratch, wasting time and money.
+
+    A draft is resumable if:
+    1. The lineage directory exists with at least one draft file
+    2. The last artifact is a draft (no verdict follows it)
+
+    Args:
+        issue_number: GitHub issue number.
+        target_repo: Target repository path.
+
+    Returns:
+        Dict with resume info if resumable, None otherwise.
+        Keys: lineage_dir, draft_path, draft_content, draft_count
+    """
+    import re
+
+    lineage_dir = target_repo / AUDIT_ACTIVE_DIR / f"{issue_number}-lld"
+    if not lineage_dir.exists():
+        return None
+
+    # Enumerate lineage files and find the last draft
+    files = sorted(lineage_dir.glob("*.md"))
+    if not files:
+        return None
+
+    last_draft_path = None
+    last_draft_num = 0
+    last_verdict_num = 0
+    draft_count = 0
+
+    for f in files:
+        match = re.match(r"^(\d{3})-(.+)$", f.name)
+        if not match:
+            continue
+        num = int(match.group(1))
+        suffix = match.group(2)
+
+        if suffix == "draft.md":
+            last_draft_path = f
+            last_draft_num = num
+            draft_count += 1
+        elif suffix == "verdict.md":
+            last_verdict_num = num
+        elif suffix == "final.md":
+            # Already finalized — not resumable
+            return None
+
+    # Resumable if we have a draft and no verdict follows it
+    if last_draft_path and last_draft_num > last_verdict_num:
+        draft_content = last_draft_path.read_text(encoding="utf-8")
+        return {
+            "lineage_dir": lineage_dir,
+            "draft_path": last_draft_path,
+            "draft_content": draft_content,
+            "draft_count": draft_count,
+        }
+
+    return None
+
+
 def check_and_shift_existing_lld(
     issue_number: int,
     target_repo: Path,
@@ -852,6 +1156,26 @@ def check_and_shift_existing_lld(
     # Nothing exists - proceed with fresh generation
     if not existing["lld_exists"] and not existing["lineage_exists"]:
         return True
+
+    # Issue #536: Check if the draft is resumable before offering to discard
+    resume_info = _draft_is_resumable(issue_number, target_repo)
+    if resume_info and not existing["lld_exists"]:
+        # Draft exists but no final LLD — hint about --resume-review
+        lineage_rel = resume_info["lineage_dir"].relative_to(target_repo)
+        draft_rel = resume_info["draft_path"].relative_to(target_repo)
+        print()
+        print("=" * 60)
+        print(f"RESUMABLE: Validated draft found for issue #{issue_number}")
+        print("=" * 60)
+        print(f"  Lineage:  {lineage_rel}/")
+        print(f"  Draft:    {draft_rel}")
+        print(f"  Drafts:   {resume_info['draft_count']}")
+        print()
+        print("  To resume review with existing draft: --resume-review")
+        print("  To re-draft from scratch:             --yes (discards existing draft)")
+        print()
+        if not yes:
+            return False  # Abort — user should choose explicitly
 
     # Something exists - warn user
     print()
@@ -928,6 +1252,8 @@ def print_header(args: argparse.Namespace) -> None:
     print(f"Review:   {args.review}")
     if args.mock:
         print("Mode:     MOCK (no API calls)")
+    if getattr(args, "resume_review", False):
+        print("Mode:     RESUME-REVIEW (skipping draft, starting at review)")
     print("=" * 60)
     print()
 
@@ -1018,6 +1344,15 @@ def main() -> int:
         print("ERROR: --resume is only supported for issue workflow")
         return 1
 
+    # Issue #536: Validate --resume-review is only for LLD workflow
+    if getattr(args, "resume_review", False) and args.type != "lld":
+        print("ERROR: --resume-review is only supported for LLD workflow")
+        return 1
+
+    if getattr(args, "resume_review", False) and not args.issue:
+        print("ERROR: --resume-review requires --issue")
+        return 1
+
     # Validate arguments
     if args.type == "issue" and not args.brief and not args.select and not args.all and not args.resume:
         print("ERROR: --brief, --select, --all, or --resume required for issue workflow")
@@ -1041,6 +1376,10 @@ def main() -> int:
     # Handle --resume: resume interrupted workflow
     if args.resume:
         return run_resume_workflow(args, assemblyzero_root, target_repo)
+
+    # Issue #536: Handle --resume-review: resume LLD at review stage
+    if getattr(args, "resume_review", False):
+        return run_resume_review(args, assemblyzero_root, target_repo)
 
     # Handle --select: interactive selection
     if args.select:

@@ -584,6 +584,12 @@ class GeminiClient:
                             error_message=f"529 capacity exhausted, backing off {delay:.1f}s (attempt {attempt})",
                             details={"backoff_seconds": delay, "attempt": attempt},
                         )
+                        # Issue #537: Log retries to stdout so babysitters see progress
+                        print(
+                            f"    [LLM] provider=gemini model={self.model} "
+                            f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
+                            f"503/529 capacity exhausted (retrying in {delay:.0f}s)"
+                        )
                         time.sleep(delay)
                         continue
 
@@ -600,6 +606,11 @@ class GeminiClient:
                             error_message=f"429 quota exhausted, will reset in {reset_hours}h",
                             details={"reset_hours": reset_hours, "cred_type": cred.cred_type},
                         )
+                        # Issue #537: Log rotation to stdout
+                        print(
+                            f"    [LLM] provider=gemini credential={cred.name}: "
+                            f"429 quota exhausted — rotating to next credential"
+                        )
                         errors.append(f"{cred.name}: Quota exhausted")
                         break  # Move to next credential
 
@@ -610,6 +621,11 @@ class GeminiClient:
                             credential_name=cred.name,
                             model=self.model,
                             error_message=error_str[:200],
+                        )
+                        # Issue #537: Log auth errors to stdout
+                        print(
+                            f"    [LLM] provider=gemini credential={cred.name}: "
+                            f"auth error — skipping credential"
                         )
                         errors.append(f"{cred.name}: Authentication failed")
                         break  # Move to next credential
@@ -627,6 +643,11 @@ class GeminiClient:
             else:
                 # Issue #483: while loop exhausted without break — all retries
                 # failed with capacity errors. Previously this was silently dropped.
+                # Issue #537: Log exhaustion to stdout
+                print(
+                    f"    [LLM] provider=gemini credential={cred.name}: "
+                    f"capacity exhausted after {MAX_RETRIES_PER_CREDENTIAL} retries"
+                )
                 errors.append(
                     f"{cred.name}: Capacity exhausted after "
                     f"{MAX_RETRIES_PER_CREDENTIAL} retries (503/529)"
