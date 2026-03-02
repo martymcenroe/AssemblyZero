@@ -178,7 +178,7 @@ def extract_code_block(response: str, file_path: str = "") -> str | None:
             content = "\n".join(lines[1:]).strip()
 
         # Must have actual content
-        if not content or len(content) <= 10:
+        if not content:
             continue
 
         # Prefer block matching expected tag
