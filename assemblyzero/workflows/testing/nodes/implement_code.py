@@ -1319,6 +1319,25 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             written_paths.append(str(target_path))
             continue
 
+        # Issue #549: Fast-path for trivial data files — skip Claude entirely
+        _trivial_extensions = (".json", ".yaml", ".yml", ".toml", ".txt", ".csv")
+        _fname = Path(filepath).name
+        _desc = file_spec.get("description", "")
+        if (
+            (_fname == "__init__.py" or filepath.endswith(_trivial_extensions))
+            and change_type.lower() == "add"
+            and len(_desc) < 50
+        ):
+            # __init__.py → empty; data files → use description as content
+            content = "" if _fname == "__init__.py" else _desc
+            target_path = repo_root / filepath
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content + "\n" if content else "", encoding="utf-8")
+            print(f"        Written (fast-path): {target_path}")
+            completed_files.append((filepath, content))
+            written_paths.append(str(target_path))
+            continue
+
         # Validate change type
         target_path = repo_root / filepath
         if change_type.lower() == "modify" and not target_path.exists():
