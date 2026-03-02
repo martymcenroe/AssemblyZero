@@ -10,6 +10,11 @@ provider infrastructure.
 import logging
 from typing import Any
 
+from assemblyzero.core.errors import (
+    RateLimitError,
+    TimeoutError_ as TypedTimeoutError,
+    classify_gemini_error,
+)
 from assemblyzero.core.text_sanitizer import strip_emoji
 
 from assemblyzero.workflows.testing.adversarial_prompts import (
@@ -23,20 +28,15 @@ from assemblyzero.workflows.testing.knowledge.adversarial_patterns import (
 logger = logging.getLogger(__name__)
 
 
-class GeminiQuotaExhaustedError(Exception):
-    """Raised when Gemini API quota is exhausted (HTTP 429)."""
-
-    pass
+# Issue #546: GeminiQuotaExhaustedError and GeminiTimeoutError are now
+# aliases for the unified error hierarchy.  Kept as names for backward
+# compatibility with existing except-clauses in callers.
+GeminiQuotaExhaustedError = RateLimitError
+GeminiTimeoutError = TypedTimeoutError
 
 
 class GeminiModelDowngradeError(Exception):
     """Raised when Gemini silently downgrades from Pro to Flash."""
-
-    pass
-
-
-class GeminiTimeoutError(Exception):
-    """Raised when Gemini API response exceeds timeout."""
 
     pass
 
@@ -198,16 +198,22 @@ class AdversarialGeminiClient:
             )
         except TimeoutError as e:
             raise GeminiTimeoutError(
-                f"Gemini API response exceeded {timeout}s timeout"
+                f"Gemini API response exceeded {timeout}s timeout",
+                provider="gemini",
             ) from e
         except TypeError:
             raise  # Unsupported provider type — propagate as-is
         except Exception as e:
-            # Classify common Gemini errors rather than swallowing them
-            err_msg = str(e).lower()
-            if "429" in str(e) or "quota" in err_msg or "resource_exhausted" in err_msg:
-                raise GeminiQuotaExhaustedError(f"Gemini quota exhausted: {e}") from e
-            raise GeminiTimeoutError(f"Gemini API error: {e}") from e
+            # Issue #546: Classify through the typed error hierarchy
+            classified = classify_gemini_error(e)
+            if isinstance(classified, RateLimitError):
+                raise GeminiQuotaExhaustedError(
+                    f"Gemini quota exhausted: {e}", provider="gemini",
+                ) from e
+            raise GeminiTimeoutError(
+                f"Gemini API error (status={classified.status_code}): {e}",
+                provider="gemini",
+            ) from e
 
         # Check for quota exhaustion in response or exception
         if self._is_quota_error(raw_response, metadata):

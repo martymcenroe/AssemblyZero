@@ -78,6 +78,9 @@ class LLMCallResult:
     cache_creation_tokens: int = 0
     cost_usd: float = 0.0
     rate_limited: bool = False
+    status_code: Optional[int] = None
+    retry_after: Optional[float] = None
+    retryable: bool = True
 
 
 # =============================================================================
@@ -143,8 +146,14 @@ def log_llm_call(result: LLMCallResult) -> None:
     parts.append(f"duration={duration_s:.1f}s")
     if not result.success:
         parts.append(f"ERROR={result.error_message or 'unknown'}")
+    if result.status_code is not None:
+        parts.append(f"status={result.status_code}")
     if result.rate_limited:
         parts.append("RATE_LIMITED=true")
+    if result.retry_after is not None:
+        parts.append(f"retry_after={result.retry_after:.1f}")
+    if not result.retryable:
+        parts.append("retryable=false")
 
     print("    " + " ".join(parts))
 
@@ -715,14 +724,21 @@ class AnthropicProvider(LLMProvider):
 
             duration_ms = int((time.time() - start_time) * 1000)
 
-            # Issue #542: Classify through the typed error hierarchy
+            # Issue #542/#546: Classify through the typed error hierarchy
+            # and propagate status_code, retry_after, retryable to LLMCallResult
             if isinstance(e, (anthropic.APIError, anthropic.APITimeoutError)):
                 classified = classify_anthropic_error(e)
                 rate_limited = isinstance(classified, RateLimitError)
                 error_msg = str(classified)
+                status_code = classified.status_code
+                retry_after = classified.retry_after
+                retryable = classified.retryable
             else:
                 rate_limited = False
                 error_msg = f"Anthropic API error: {e}"
+                status_code = None
+                retry_after = None
+                retryable = False
 
             call_result = LLMCallResult(
                 success=False,
@@ -734,6 +750,9 @@ class AnthropicProvider(LLMProvider):
                 duration_ms=duration_ms,
                 attempts=1,
                 rate_limited=rate_limited,
+                status_code=status_code,
+                retry_after=retry_after,
+                retryable=retryable,
             )
             log_llm_call(call_result)
             return call_result
@@ -1008,8 +1027,11 @@ class GeminiProvider(LLMProvider):
             return call_result
 
         except Exception as e:
-            # Issue #399: detect 429 in credential pool exhaustion
-            is_rate_limit = "quota" in str(e).lower() or "429" in str(e)
+            # Issue #546: Classify through the typed error hierarchy
+            from assemblyzero.core.errors import classify_gemini_error
+
+            classified = classify_gemini_error(e)
+            is_rate_limit = isinstance(classified, RateLimitError)
             if is_rate_limit:
                 print(f"    [LLM] RATE LIMITED: provider=gemini model={self._model} error={str(e)[:100]}")
 
@@ -1017,12 +1039,15 @@ class GeminiProvider(LLMProvider):
                 success=False,
                 response=None,
                 raw_response=None,
-                error_message=str(e),
+                error_message=str(classified),
                 provider=self.provider_name,
                 model_used=self._model,
                 duration_ms=0,
                 attempts=0,
                 rate_limited=is_rate_limit,
+                status_code=classified.status_code,
+                retry_after=classified.retry_after,
+                retryable=classified.retryable,
             )
             log_llm_call(call_result)
             return call_result
