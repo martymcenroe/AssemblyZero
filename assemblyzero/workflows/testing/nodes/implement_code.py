@@ -978,14 +978,16 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
         return "", f"SDK timeout after {timeout}s waiting for response"
     except TimeoutError:
         return "", f"SDK timeout after {timeout}s waiting for response"
-    except anthropic.AuthenticationError as e:
-        return "", f"SDK auth error (check API key): {e}"
-    except anthropic.RateLimitError as e:
-        return "", f"SDK rate limited: {e}"
-    except anthropic.APIStatusError as e:
-        return "", f"SDK API error (status {e.status_code}): {e}"
-    except anthropic.APIError as e:
-        return "", f"SDK error: {e}"
+    except Exception as e:
+        # Issue #546: Classify through the typed error hierarchy
+        try:
+            from assemblyzero.core.errors import classify_anthropic_error
+            classified = classify_anthropic_error(e)
+            status_code = classified.status_code
+            prefix = "[NON-RETRYABLE] " if not classified.retryable else ""
+            return "", f"{prefix}SDK error (status={status_code}): {e}"
+        except Exception:
+            return "", f"SDK error: {e}"
 
 
 # =============================================================================
@@ -1079,6 +1081,13 @@ def generate_file_with_retry(
         # Check for API error
         if api_error:
             last_error = f"API error: {api_error}"
+            # Issue #546: Non-retryable errors (auth, billing) skip retry loop
+            if "[NON-RETRYABLE]" in api_error:
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"Non-retryable API error: {api_error}",
+                    response_preview=None
+                )
             if attempt < max_retries - 1:
                 print(f"        [RETRY {attempt_num}/{max_retries}] {last_error}")
                 continue

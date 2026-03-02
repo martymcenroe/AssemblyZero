@@ -12,12 +12,22 @@ Creates a LangGraph-compatible node that:
 
 from pathlib import Path
 
+from assemblyzero.core.errors import (
+    AuthenticationError,
+    CapacityError,
+    RateLimitError,
+    classify_http_status,
+)
 from assemblyzero.core.recovery_plan import generate_recovery_plan
 from assemblyzero.core.state_persistence import STATE_DIR, save_state_snapshot
 
 
 def classify_error(error_message: str) -> str:
     """Classify error type from the error_message string.
+
+    Issue #546: Delegates to errors.py for HTTP-related classifications,
+    preserving domain-specific patterns (stagnation, budget, preflight)
+    that have no HTTP equivalent.
 
     Args:
         error_message: The error message from the workflow state.
@@ -27,23 +37,38 @@ def classify_error(error_message: str) -> str:
     """
     msg_lower = error_message.lower()
 
-    if any(p in msg_lower for p in ("capacity exhausted", "503", "529", "overloaded")):
-        return "capacity_exhausted"
-    elif any(p in msg_lower for p in ("quota exhausted", "429", "all credentials exhausted")):
-        return "quota_exhausted"
-    elif any(p in msg_lower for p in ("stagnation", "same issues", "same blocking", "two consecutive")):
+    # Domain-specific classifications first (no HTTP equivalent)
+    if any(p in msg_lower for p in ("stagnation", "same issues", "same blocking", "two consecutive")):
         return "stagnation"
-    elif any(p in msg_lower for p in ("budget", "cost budget exceeded")):
+    if any(p in msg_lower for p in ("budget", "cost budget exceeded")):
         return "budget"
-    elif any(p in msg_lower for p in ("auth", "api_key_invalid", "permission_denied", "unauthenticated")):
-        return "auth"
-    elif "preflight" in msg_lower:
-        # Pre-flight failures inherit the underlying type
+    if "preflight" in msg_lower:
         if "unavailable" in msg_lower or "exhausted" in msg_lower:
             return "quota_exhausted"
         return "preflight"
-    else:
-        return "unknown"
+
+    # Try to extract an HTTP status code and delegate to errors.py
+    import re
+    status_match = re.search(r'\bstatus[=: ]*(\d{3})\b', msg_lower)
+    if status_match:
+        status_code = int(status_match.group(1))
+        classified = classify_http_status(status_code, error_message)
+        if isinstance(classified, CapacityError):
+            return "capacity_exhausted"
+        if isinstance(classified, RateLimitError):
+            return "quota_exhausted"
+        if isinstance(classified, AuthenticationError):
+            return "auth"
+
+    # Fallback: pattern matching for messages without status codes
+    if any(p in msg_lower for p in ("capacity exhausted", "503", "529", "overloaded")):
+        return "capacity_exhausted"
+    if any(p in msg_lower for p in ("quota exhausted", "429", "all credentials exhausted")):
+        return "quota_exhausted"
+    if any(p in msg_lower for p in ("auth", "api_key_invalid", "permission_denied", "unauthenticated")):
+        return "auth"
+
+    return "unknown"
 
 
 def create_halt_node(workflow_name: str):

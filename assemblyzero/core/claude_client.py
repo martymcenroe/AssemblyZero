@@ -2,6 +2,13 @@
 
 Issue #138: Add retry/backoff handling for Claude CLI invocations.
 
+.. deprecated::
+    This module has zero production callers as of issue #546.
+    Use ``assemblyzero.core.llm_provider.ClaudeCLIProvider`` (for CLI access)
+    or ``assemblyzero.core.llm_provider.AnthropicProvider`` (for API access)
+    instead.  ``ClaudeRateLimitError`` maps to ``assemblyzero.core.errors.RateLimitError``.
+    ``ClaudeClientError`` has no direct equivalent — use ``errors.APIError``.
+
 This module provides a robust interface to the Claude CLI with:
 - Exponential backoff on rate limit errors (429)
 - Configurable retry attempts

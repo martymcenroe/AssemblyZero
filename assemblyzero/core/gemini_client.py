@@ -35,6 +35,13 @@ from assemblyzero.core.config import (
     MAX_RETRIES_PER_CREDENTIAL,
     ROTATION_STATE_FILE,
 )
+from assemblyzero.core.errors import (
+    AuthenticationError as TypedAuthError,
+    CapacityError as TypedCapacityError,
+    RateLimitError as TypedRateLimitError,
+    TimeoutError_ as TypedTimeoutError,
+    classify_gemini_error,
+)
 
 
 # =============================================================================
@@ -572,7 +579,10 @@ class GeminiClient:
 
                 except Exception as e:
                     error_str = str(e)
-                    error_type = self._classify_error(error_str)
+                    # Issue #546: Classify through the typed error hierarchy
+                    classified = classify_gemini_error(e)
+                    status_code = classified.status_code
+                    error_type = self._error_type_from_classified(classified)
 
                     if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
                         # 529/503: Backoff and retry same credential
@@ -581,14 +591,14 @@ class GeminiClient:
                             event_type="capacity_exhausted",
                             credential_name=cred.name,
                             model=self.model,
-                            error_message=f"529 capacity exhausted, backing off {delay:.1f}s (attempt {attempt})",
-                            details={"backoff_seconds": delay, "attempt": attempt},
+                            error_message=f"{status_code or 503} capacity exhausted, backing off {delay:.1f}s (attempt {attempt})",
+                            details={"backoff_seconds": delay, "attempt": attempt, "status_code": status_code},
                         )
                         # Issue #537: Log retries to stdout so babysitters see progress
                         print(
                             f"    [LLM] provider=gemini model={self.model} "
                             f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
-                            f"503/529 capacity exhausted (retrying in {delay:.0f}s)"
+                            f"{status_code or 503} capacity exhausted (retrying in {delay:.0f}s)"
                         )
                         time.sleep(delay)
                         continue
@@ -604,7 +614,7 @@ class GeminiClient:
                             model=self.model,
                             reset_time=reset_time,
                             error_message=f"429 quota exhausted, will reset in {reset_hours}h",
-                            details={"reset_hours": reset_hours, "cred_type": cred.cred_type},
+                            details={"reset_hours": reset_hours, "cred_type": cred.cred_type, "status_code": status_code},
                         )
                         # Issue #537: Log rotation to stdout
                         print(
@@ -621,22 +631,42 @@ class GeminiClient:
                             credential_name=cred.name,
                             model=self.model,
                             error_message=error_str[:200],
+                            details={"status_code": status_code},
                         )
                         # Issue #537: Log auth errors to stdout
                         print(
                             f"    [LLM] provider=gemini credential={cred.name}: "
-                            f"auth error — skipping credential"
+                            f"auth error (status={status_code}) — skipping credential"
                         )
                         errors.append(f"{cred.name}: Authentication failed")
                         break  # Move to next credential
 
                     else:
-                        # Unknown error: Log and try next credential
+                        # Unknown/retryable transient error: retry if classified as retryable
+                        if classified.retryable and attempt < MAX_RETRIES_PER_CREDENTIAL - 1:
+                            delay = self._backoff_delay(attempt)
+                            log_gemini_event(
+                                event_type="api_error",
+                                credential_name=cred.name,
+                                model=self.model,
+                                error_message=error_str[:200],
+                                details={"status_code": status_code, "retryable": True, "backoff_seconds": delay},
+                            )
+                            print(
+                                f"    [LLM] provider=gemini model={self.model} "
+                                f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
+                                f"transient error (status={status_code}), retrying in {delay:.0f}s"
+                            )
+                            time.sleep(delay)
+                            continue
+
+                        # Non-retryable or last attempt: Log and try next credential
                         log_gemini_event(
                             event_type="api_error",
                             credential_name=cred.name,
                             model=self.model,
                             error_message=error_str[:200],
+                            details={"status_code": status_code, "retryable": classified.retryable},
                         )
                         errors.append(f"{cred.name}: {error_str[:100]}")
                         break  # Move to next credential
@@ -818,7 +848,11 @@ class GeminiClient:
         self._save_state(state)
 
     def _classify_error(self, error_output: str) -> GeminiErrorType:
-        """Classify error type from API response."""
+        """Classify error type from API response string.
+
+        Deprecated: Use classify_gemini_error() + _error_type_from_classified()
+        for new code paths. Kept for backward compatibility.
+        """
         error_lower = error_output.lower()
 
         # Check quota patterns first
@@ -836,6 +870,23 @@ class GeminiClient:
             if pattern.lower() in error_lower:
                 return GeminiErrorType.AUTH_ERROR
 
+        return GeminiErrorType.UNKNOWN
+
+    @staticmethod
+    def _error_type_from_classified(classified) -> GeminiErrorType:
+        """Derive GeminiErrorType from a typed errors.py exception.
+
+        Issue #546: Bridge between the unified error hierarchy and the
+        GeminiErrorType enum used by the rotation/retry logic.
+        """
+        if isinstance(classified, TypedRateLimitError):
+            return GeminiErrorType.QUOTA_EXHAUSTED
+        if isinstance(classified, TypedCapacityError):
+            return GeminiErrorType.CAPACITY_EXHAUSTED
+        if isinstance(classified, TypedAuthError):
+            return GeminiErrorType.AUTH_ERROR
+        if isinstance(classified, TypedTimeoutError):
+            return GeminiErrorType.CAPACITY_EXHAUSTED  # Treat timeout as capacity for retry
         return GeminiErrorType.UNKNOWN
 
     def _backoff_delay(self, attempt: int) -> float:

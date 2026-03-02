@@ -269,7 +269,7 @@ Please also identify GAPS between our implementation and the external best pract
         if result.success:
             analysis = result.response or "No response received."
         else:
-            raise RuntimeError(result.error or "Unknown error")
+            raise RuntimeError(result.error_message or "Unknown error")
     except ImportError:
         # Fallback to direct API if client not available
         try:
