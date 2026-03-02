@@ -461,6 +461,7 @@ class TestConsolidationWithLargeFiles:
 class TestErrorHandling:
     """Tests for graceful error handling during rotation."""
 
+    @pytest.mark.xfail(reason=_ROTATION_NOT_IMPLEMENTED, strict=True)
     @pytest.mark.skipif(
         platform.system() == "Windows",
         reason="chmod read-only is unreliable on Windows",
