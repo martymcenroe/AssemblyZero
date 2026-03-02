@@ -32,9 +32,9 @@ class AdversarialNodeState(TypedDict, total=False):
     """State extension for the adversarial testing node."""
 
     # Inputs (populated by prior nodes)
-    implementation_files: dict[str, str]
+    implementation_files: list[str]
     lld_content: str
-    existing_tests: dict[str, str]
+    test_files: list[str]
     issue_id: int
 
     # Outputs (populated by adversarial node)

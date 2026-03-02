@@ -366,7 +366,6 @@ def build_initial_state(
         "spec_draft": "",
         "spec_path": "",
         # Validation
-        "completeness_checks": [],
         "completeness_issues": [],
         "validation_passed": False,
         # Review
@@ -386,6 +385,9 @@ def build_initial_state(
         "config_reviewer": args.reviewer,
         "config_drafter": args.drafter,
         "config_mock_mode": args.mock,
+        # Issue #511: Per-node LLM cost tracking
+        "node_costs": {},
+        "node_tokens": {},
     }
 
     return state
