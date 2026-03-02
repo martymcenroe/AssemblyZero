@@ -1,0 +1,123 @@
+# Test Report: Issue #535
+
+**Generated:** 2026-03-02 00:07:12
+**LLD:** C:\Users\mcwiz\Projects\AssemblyZero\docs\lineage\active\535-implspec\003-spec.md
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Total Tests | 49 |
+| Passed | 49 |
+| Failed | 0 |
+| Coverage | 100.0% |
+| Target | 95% |
+| E2E Passed | No |
+| Iterations | 0 |
+
+## Test Files
+
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_models.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_age_meter.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_drift_scorer.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_reconciler.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_hourglass.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_skill.py`
+
+## Implementation Files
+
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\__init__.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\constants.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\models.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\age_meter.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\drift_scorer.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\reconciler.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\hourglass.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\death\skill.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\janitor\probes\drift.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\janitor\probes\__init__.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\assemblyzero\workflows\janitor\state.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\.gitignore`
+- `C:\Users\mcwiz\Projects\AssemblyZero\.claude\commands\death.md`
+- `C:\Users\mcwiz\Projects\AssemblyZero\docs\standards\0015-age-transition-protocol.md`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\__init__.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_models.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_age_meter.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_drift_scorer.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_reconciler.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_hourglass.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\unit\test_death\test_skill.py`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\fixtures\death\mock_issues.json`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\fixtures\death\mock_codebase_snapshot.json`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\fixtures\death\mock_drift_findings.json`
+- `C:\Users\mcwiz\Projects\AssemblyZero\tests\fixtures\death\mock_adr_output.md`
+
+## Test Output
+
+```
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 49 items
+
+tests/unit/test_death/test_models.py::test_age_meter_state_fields PASSED [  2%]
+tests/unit/test_death/test_models.py::test_drift_finding_all_categories PASSED [  4%]
+tests/unit/test_death/test_models.py::test_issue_weight_fields PASSED    [  6%]
+tests/unit/test_death/test_age_meter.py::test_bug_label_weight PASSED    [  8%]
+tests/unit/test_death/test_age_meter.py::test_architecture_label_weight PASSED [ 10%]
+tests/unit/test_death/test_age_meter.py::test_no_matching_labels_default PASSED [ 12%]
+tests/unit/test_death/test_age_meter.py::test_multiple_labels_highest_wins PASSED [ 14%]
+tests/unit/test_death/test_age_meter.py::test_empty_labels_default PASSED [ 16%]
+tests/unit/test_death/test_age_meter.py::test_incremental_meter_computation PASSED [ 18%]
+tests/unit/test_death/test_age_meter.py::test_meter_threshold_below PASSED [ 20%]
+tests/unit/test_death/test_age_meter.py::test_meter_threshold_at PASSED  [ 22%]
+tests/unit/test_death/test_age_meter.py::test_state_persistence_roundtrip PASSED [ 24%]
+tests/unit/test_death/test_age_meter.py::test_load_nonexistent_state PASSED [ 26%]
+tests/unit/test_death/test_drift_scorer.py::test_numeric_claim_mismatch PASSED [ 28%]
+tests/unit/test_death/test_drift_scorer.py::test_accurate_readme_no_findings PASSED [ 30%]
+tests/unit/test_death/test_drift_scorer.py::test_inventory_missing_file PASSED [ 32%]
+tests/unit/test_death/test_drift_scorer.py::test_inventory_file_exists PASSED [ 34%]
+tests/unit/test_death/test_drift_scorer.py::test_drift_score_computation PASSED [ 36%]
+tests/unit/test_death/test_drift_scorer.py::test_critical_drift_threshold PASSED [ 38%]
+tests/unit/test_death/test_drift_scorer.py::test_critical_drift_below_threshold PASSED [ 40%]
+tests/unit/test_death/test_reconciler.py::test_action_generation_from_count_mismatch PASSED [ 42%]
+tests/unit/test_death/test_reconciler.py::test_report_mode_no_writes PASSED [ 44%]
+tests/unit/test_death/test_reconciler.py::test_generate_adr_architecture_drift PASSED [ 46%]
+tests/unit/test_death/test_reconciler.py::test_generate_adr_non_qualifying PASSED [ 48%]
+tests/unit/test_death/test_reconciler.py::test_generate_adr_reaper_writes_file PASSED [ 51%]
+tests/unit/test_death/test_reconciler.py::test_generate_adr_report_no_write PASSED [ 53%]
+tests/unit/test_death/test_hourglass.py::test_report_flow_completes PASSED [ 55%]
+tests/unit/test_death/test_hourglass.py::test_route_after_harvest_report_mode PASSED [ 57%]
+tests/unit/test_death/test_hourglass.py::test_route_after_harvest_reaper_confirmed PASSED [ 59%]
+tests/unit/test_death/test_hourglass.py::test_route_after_harvest_reaper_declined PASSED [ 61%]
+tests/unit/test_death/test_hourglass.py::test_node_rest_resets_meter PASSED [ 63%]
+tests/unit/test_death/test_hourglass.py::test_node_rest_appends_history PASSED [ 65%]
+tests/unit/test_death/test_hourglass.py::test_should_death_arrive_no_triggers PASSED [ 67%]
+tests/unit/test_death/test_hourglass.py::test_should_death_arrive_meter_trigger PASSED [ 69%]
+tests/unit/test_death/test_hourglass.py::test_should_death_arrive_critical_drift PASSED [ 71%]
+tests/unit/test_death/test_skill.py::test_parse_report_mode PASSED       [ 73%]
+tests/unit/test_death/test_skill.py::test_parse_reaper_mode PASSED       [ 75%]
+tests/unit/test_death/test_skill.py::test_parse_reaper_force PASSED      [ 77%]
+tests/unit/test_death/test_skill.py::test_parse_invalid_mode PASSED      [ 79%]
+tests/unit/test_death/test_skill.py::test_parse_default_mode PASSED      [ 81%]
+tests/unit/test_death/test_skill.py::test_invoke_report_mode PASSED      [ 83%]
+tests/unit/test_death/test_skill.py::test_invoke_reaper_no_force PASSED  [ 85%]
+tests/unit/test_death/test_skill.py::test_format_report_output PASSED    [ 87%]
+tests/unit/test_death/test_skill.py::test_drift_probe_interface PASSED   [ 89%]
+tests/unit/test_death/test_skill.py::test_format_report_output_no_findings PASSED [ 91%]
+tests/unit/test_death/test_skill.py::test_parse_unknown_flag PASSED      [ 93%]
+tests/unit/test_death/test_skill.py::test_invoke_reaper_with_force PASSED [ 95%]
+tests/unit/test_death/test_skill.py::test_invoke_with_github_token PASSED [ 97%]
+tests/unit/test_death/test_skill.py::test_format_report_reaper_mode PASSED [100%]
+
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\la...
+```
+
+---
+
+Generated by AssemblyZero Testing Workflow

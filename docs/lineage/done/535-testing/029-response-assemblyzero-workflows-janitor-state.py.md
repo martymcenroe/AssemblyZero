@@ -1,3 +1,6 @@
+
+
+```python
 """State definitions for the Janitor workflow.
 
 Issue #94: Lu-Tze: The Janitor
@@ -72,3 +75,4 @@ class JanitorState(TypedDict):
     # Reporter results (populated by N2_Reporter)
     report_url: str | None
     exit_code: int
+```

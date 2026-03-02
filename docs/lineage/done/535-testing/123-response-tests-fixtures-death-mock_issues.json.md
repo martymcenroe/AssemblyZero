@@ -1,0 +1,14 @@
+
+
+```json
+[
+    {"number": 500, "title": "Add RAG pipeline v2", "labels": ["rag", "infrastructure"], "closed_at": "2026-01-15T10:00:00Z", "body": null},
+    {"number": 510, "title": "Fix broken link in README", "labels": ["bug"], "closed_at": "2026-01-20T16:00:00Z", "body": null},
+    {"number": 515, "title": "New workflow: audit pipeline", "labels": ["new-workflow"], "closed_at": "2026-01-22T09:00:00Z", "body": null},
+    {"number": 520, "title": "New persona: Spelunker", "labels": ["persona"], "closed_at": "2026-02-01T11:00:00Z", "body": null},
+    {"number": 525, "title": "Add Claude Code command: /spelunk", "labels": ["enhancement"], "closed_at": "2026-02-05T14:00:00Z", "body": null},
+    {"number": 530, "title": "Fix typo in architecture doc", "labels": ["bug", "documentation"], "closed_at": "2026-02-10T08:00:00Z", "body": null},
+    {"number": 534, "title": "Spelunking Audits — DEATH's methodology", "labels": ["architecture", "documentation"], "closed_at": "2026-02-15T14:30:00Z", "body": null},
+    {"number": 535, "title": "DEATH as Age Transition", "labels": ["architecture", "cross-cutting"], "closed_at": "2026-02-17T12:00:00Z", "body": null}
+]
+```

@@ -1,0 +1,10 @@
+
+
+```json
+{
+    "personas": ["persona_1.toml", "persona_2.toml", "persona_3.toml"],
+    "workflows": ["death", "janitor", "issue", "requirements"],
+    "tools": ["run_janitor_workflow.py", "batch-workflow.sh"],
+    "docs": ["README.md", "docs/architecture.md", "docs/inventory.md"]
+}
+```

@@ -1,3 +1,4 @@
+```
 # AssemblyZero-specific gitignore
 # Note: Parent Projects/.gitignore covers common patterns
 
@@ -58,3 +59,4 @@ transcripts/
 
 # Hourglass Protocol local state (Issue #535 — age meter is per-developer)
 data/hourglass/age_meter.json
+```

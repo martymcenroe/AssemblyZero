@@ -1,3 +1,6 @@
+
+
+```python
 """Probe registry and execution utilities.
 
 Issue #94: Lu-Tze: The Janitor
@@ -61,3 +64,4 @@ def run_probe_safe(
             findings=[],
             error_message=f"{type(e).__name__}: {e}",
         )
+```
