@@ -219,9 +219,9 @@ When multiple agents evolve process simultaneously:
 ### 5.2 Resolution Protocol
 
 1. **Additive changes:** Auto-merge via standard git
-2. **Modifications to same section:** Create issue, assign to orchestrator
+2. **Modifications to same section:** Create issue, assign to user
 3. **Deletions:** Require explicit approval before propagation
-4. **Semantic conflicts:** Orchestrator decides canonical approach
+4. **Semantic conflicts:** User decides canonical approach
 
 ### 5.3 Timestamp Precedence
 
@@ -319,7 +319,7 @@ The full cleanup mode will include:
 |------|------------|
 | **Malicious content promotion** | Human review required before merge to AssemblyZero |
 | **Permission escalation** | Promoted permissions reviewed before adding to base set |
-| **Cross-project leakage** | Registry only includes orchestrator-approved projects |
+| **Cross-project leakage** | Registry only includes user-approved projects |
 | **Automated propagation failures** | Post-commit hook has error handling, logs failures |
 
 ## 10. Consequences

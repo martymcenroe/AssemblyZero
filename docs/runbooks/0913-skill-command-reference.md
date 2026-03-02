@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Quick reference for the orchestrator (Marty) on all available `/skill` commands. This is the runbook version - for detailed CLI/prompt documentation, see `docs/skills/`.
+Quick reference for the user (Marty) on all available `/skill` commands. This is the runbook version - for detailed CLI/prompt documentation, see `docs/skills/`.
 
 ---
 

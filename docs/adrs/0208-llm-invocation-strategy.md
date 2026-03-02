@@ -80,7 +80,7 @@ Gemini is used exclusively for review, never for drafting or implementation:
 
 ### MCP in Workflow Context
 
-MCP (Model Context Protocol) is **explicitly disabled** in all workflow subprocesses via `--strict-mcp-config`. MCP tools remain active only in interactive Claude Code sessions where the human orchestrator is present. This prevents:
+MCP (Model Context Protocol) is **explicitly disabled** in all workflow subprocesses via `--strict-mcp-config`. MCP tools remain active only in interactive Claude Code sessions where the human user is present. This prevents:
 - Unintended file modifications during drafting
 - Network calls during review
 - Non-deterministic behavior in governance workflows

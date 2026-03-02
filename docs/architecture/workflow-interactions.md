@@ -164,7 +164,7 @@ graph TD
 
 ## Human Gates
 
-Every workflow has at least one human gate. These are explicit pause points where the human orchestrator (Om) reviews and approves before the system proceeds.
+Every workflow has at least one human gate. These are explicit pause points where the human user (Om) reviews and approves before the system proceeds.
 
 | Workflow | Gate Location | What Human Reviews |
 |----------|--------------|-------------------|

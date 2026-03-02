@@ -6,7 +6,7 @@ Related: #181 (Implementation Report)
 Generates implementation verification reports that include:
 - LLD requirement verification table (parsed from Section 3)
 - Completeness analysis summary (from AST Layer 1)
-- Review materials preparation for Gemini Layer 2 (orchestrator-controlled)
+- Review materials preparation for Gemini Layer 2 (user-controlled)
 
 Reports are written to docs/reports/active/{issue}-implementation-report.md.
 """
@@ -138,13 +138,13 @@ def prepare_review_materials(
     lld_path: Path,
     implementation_files: list[Path],
 ) -> ReviewMaterials:
-    """Prepare materials for Gemini semantic review submission by orchestrator.
+    """Prepare materials for Gemini semantic review submission by user.
 
     Issue #147, Requirement 13: Prepares structured review materials
-    containing LLD requirements and code snippets for the orchestrator
+    containing LLD requirements and code snippets for the user
     to submit to Gemini for Layer 2 semantic review.
 
-    The orchestrator controls Gemini submission per WORKFLOW.md — this
+    The user controls Gemini submission per WORKFLOW.md — this
     function only prepares the materials, it does not call Gemini directly.
 
     Args:
@@ -265,7 +265,7 @@ def _format_requirements_table(
     """Format LLD requirements as a verification table.
 
     Since we only have AST-level analysis (not semantic verification),
-    requirements are listed with PENDING status for the orchestrator/Gemini
+    requirements are listed with PENDING status for the user/Gemini
     to verify at Layer 2.
 
     Args:

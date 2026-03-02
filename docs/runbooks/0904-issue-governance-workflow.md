@@ -82,7 +82,7 @@ sequenceDiagram
         Note over Python,Claude: N2: THE DRAFT
         Python->>Claude: 6. brief + template + ALL verdicts → generate structured issue
         Note over Claude: MUST comply with EVERY Gemini item
-        Note over Claude: OR ask orchestrator for clarification
+        Note over Claude: OR ask user for clarification
         Claude-->>Python: 7. draft-issue.md
     end
 
@@ -232,7 +232,7 @@ Claude expands your brief into a full GitHub issue with:
 
 **Claude MUST:**
 1. Implement EVERY change Gemini requested (including suggestions)
-2. OR explicitly ask orchestrator for clarification using: `"ORCHESTRATOR CLARIFICATION NEEDED: [describe conflict]"`
+2. OR explicitly ask user for clarification using: `"USER CLARIFICATION NEEDED: [describe conflict]"`
 
 **You don't interact here** - the draft is saved to the audit trail.
 
@@ -240,7 +240,7 @@ Claude expands your brief into a full GitHub issue with:
 
 VS Code opens with the draft. This is your chance to:
 1. **Review** Claude's expansion of your idea
-2. **Check** if Claude asked for orchestrator clarification
+2. **Check** if Claude asked for user clarification
 3. **Edit** anything - title, description, approach, labels
 4. **Save and close** VS Code when done
 
@@ -401,7 +401,7 @@ Then re-run the workflow.
 
 ### "Gemini quota exhausted"
 
-The workflow will pause. Wait for quota reset (~24h) or the orchestrator will rotate credentials automatically.
+The workflow will pause. Wait for quota reset (~24h) or credentials will rotate automatically.
 
 ### "Workflow stuck in revision loop"
 
@@ -413,7 +413,7 @@ The workflow will pause. Wait for quota reset (~24h) or the orchestrator will ro
 
 **Solutions:**
 1. Review verdict history in audit trail - identify the conflict
-2. Use `[R]evise` at N3 to provide orchestrator guidance
+2. Use `[R]evise` at N3 to provide user guidance
 3. If truly stuck, use `[S]ave and exit` to pause, then file manually via `gh issue create`
 
 ---
@@ -422,7 +422,7 @@ The workflow will pause. Wait for quota reset (~24h) or the orchestrator will ro
 
 - [Issue #62](https://github.com/martymcenroe/AssemblyZero/issues/62) - Governance Workflow StateGraph
 - [0701c-Issue-Review-Prompt.md](../skills/0701c-Issue-Review-Prompt.md) - Gemini's review prompt
-- [CLAUDE.md](../../CLAUDE.md) - Core rules including Gemini orchestrator protocol
+- [CLAUDE.md](../../CLAUDE.md) - Core rules including Gemini review protocol
 - [workflow-lessons-learned-1.md](../workflow-lessons-learned-1.md) - Testing lessons from initial implementation
 
 ---

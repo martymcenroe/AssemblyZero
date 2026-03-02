@@ -43,5 +43,41 @@
     "findings_count": 0,
     "actions_count": 0,
     "mode": "report"
+  },
+  {
+    "age_number": 1,
+    "trigger": "summon",
+    "trigger_details": "DEATH triggered by summon",
+    "timestamp": "2026-03-02T06:57:35.758094+00:00",
+    "findings_count": 0,
+    "actions_count": 0,
+    "mode": "report"
+  },
+  {
+    "age_number": 1,
+    "trigger": "summon",
+    "trigger_details": "DEATH triggered by summon",
+    "timestamp": "2026-03-02T07:01:16.200059+00:00",
+    "findings_count": 0,
+    "actions_count": 0,
+    "mode": "report"
+  },
+  {
+    "age_number": 1,
+    "trigger": "summon",
+    "trigger_details": "DEATH triggered by summon",
+    "timestamp": "2026-03-02T13:44:31.804013+00:00",
+    "findings_count": 0,
+    "actions_count": 0,
+    "mode": "report"
+  },
+  {
+    "age_number": 1,
+    "trigger": "summon",
+    "trigger_details": "DEATH triggered by summon",
+    "timestamp": "2026-03-02T13:45:58.672386+00:00",
+    "findings_count": 0,
+    "actions_count": 0,
+    "mode": "report"
   }
 ]

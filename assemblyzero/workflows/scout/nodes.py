@@ -270,26 +270,7 @@ Please also identify GAPS between our implementation and the external best pract
             analysis = result.response or "No response received."
         else:
             raise RuntimeError(result.error_message or "Unknown error")
-    except ImportError:
-        # Fallback to direct API if client not available
-        try:
-            from google import genai
-
-            api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if not api_key:
-                raise RuntimeError("No API key found in GEMINI_API_KEY or GOOGLE_API_KEY")
-
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt,
-            )
-            analysis = response.text
-        except RuntimeError:
-            raise
-        except Exception as e2:
-            raise RuntimeError(f"Fallback also failed: {e2}") from e2
-    except (RuntimeError, Exception) as e:
+    except Exception as e:
         # Return error info but don't fail the workflow
         analysis = f"## Analysis Error\n\nCould not complete analysis: {e}\n\n"
         analysis += "## Repositories Found\n\n"

@@ -5,7 +5,7 @@
 | Status | Accepted |
 | Issue | #535 |
 | Date | 2026-02-17 |
-| Deciders | Handsome Monkey King (orchestrator) |
+| Deciders | Handsome Monkey King (user) |
 
 ## Context
 
@@ -28,13 +28,13 @@ Implement DEATH as an age transition mechanism using the **Hourglass Protocol** 
 **Three Triggers.** DEATH arrives through three independent paths:
 
 1. **Meter threshold** — accumulated issue weight crosses the configured threshold
-2. **Summon** — orchestrator invokes `/death` directly
+2. **Summon** — user invokes `/death` directly
 3. **Critical drift** — drift score exceeds 30.0 (approximately 3 critical findings)
 
 **Two Modes.** The protocol operates in two modes:
 
 - **Report** (default) — walk the field, produce a reconciliation report, change nothing
-- **Reaper** — walk the field, apply fixes with orchestrator confirmation gate
+- **Reaper** — walk the field, apply fixes with user confirmation gate
 
 ### State Machine Phases
 
@@ -65,7 +65,7 @@ The Hourglass Protocol executes five phases as a LangGraph StateGraph:
 ### Integration Points
 
 - **Janitor probe** — `drift` probe registered in the Janitor's probe registry, enabling drift detection during routine sweeps
-- **Skill interface** — `/death` command provides orchestrator access to report and reaper modes
+- **Skill interface** — `/death` command provides user access to report and reaper modes
 
 ## Alternatives Considered
 
@@ -75,7 +75,7 @@ Trigger reconciliation on a fixed schedule (e.g., every 2 weeks). Rejected becau
 
 ### 2. Manual Documentation Reviews
 
-Rely on the orchestrator to periodically review documentation. Rejected because this is exactly the status quo that produced the drift problem. Humans forget. Mechanisms don't.
+Rely on the user to periodically review documentation. Rejected because this is exactly the status quo that produced the drift problem. Humans forget. Mechanisms don't.
 
 ### 3. LLM-Based Semantic Comparison
 

@@ -53,7 +53,7 @@ After `gh pr merge` succeeds, execute this sequence **immediately**. Do not star
 
 **Step 6 Rationale:** Worktrees provide complete isolation without affecting main. Never use `git checkout -b` in the main folder. Only create worktree AFTER Step 5 approval.
 
-**Step 9 Rationale:** Remote branches provide backup, enable collaboration between agents, and give the orchestrator visibility into active work. Local-only branches violate team collaboration principles.
+**Step 9 Rationale:** Remote branches provide backup, enable collaboration between agents, and give the user visibility into active work. Local-only branches violate team collaboration principles.
 
 **Step 11 Rationale (CRITICAL):** Reports capture institutional knowledge. Without them, the "why" behind implementation decisions is lost forever. See §8.6 for requirements.
 

@@ -78,7 +78,7 @@ These items are ALWAYS required and cannot be exempted:
 When a legitimate exception is needed:
 
 1. **Create an issue** explaining why the exception is needed
-2. **Get orchestrator approval**
+2. **Get user approval**
 3. **Update this file** with the exception and rationale
 4. **Add tests** to verify the audit correctly handles the exception
 

@@ -27,7 +27,7 @@ Every workflow or agent subsystem in AssemblyZero **should** be mapped to a Disc
 
 | Persona | Domain | Workflow / Module | Issue |
 |---------|--------|-------------------|-------|
-| Om | Human orchestrator | (human-in-the-loop) | — |
+| Om | Human user | (human-in-the-loop) | — |
 | Moist von Lipwig | Pipeline orchestration | End-to-end pipeline | #305 |
 | Lord Vetinari | Work visibility | GitHub Projects (planned) | — |
 | Commander Vimes | Regression testing | (planned) | — |

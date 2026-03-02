@@ -5,14 +5,14 @@ Related: #181 (Implementation Report), #335 (N2.5 precedent)
 
 Two-layer validation between N4 (implement_code) and N5 (verify_green):
 - Layer 1: AST-based deterministic analysis (fast, free)
-- Layer 2: Gemini semantic review materials preparation (orchestrator-controlled)
+- Layer 2: Gemini semantic review materials preparation (user-controlled)
 
 Fail Mode: Fail Open — if AST analysis fails unexpectedly, proceed to N5
 with a warning rather than blocking indefinitely.
 
 Architectural Constraints:
 - Cannot modify N4 or N5 node logic (only add N4b between them)
-- Gemini calls go through orchestrator (not direct from node)
+- Gemini calls go through user (not direct from node)
 - Hard iteration limit of 3 prevents infinite N4<->N4b loops
 """
 
@@ -64,7 +64,7 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
 
     Layer 1 (AST analysis) runs first as a fast, deterministic check.
     If Layer 1 has BLOCK-level issues, Layer 2 is skipped (cost control).
-    If Layer 1 passes, Layer 2 materials are prepared for the orchestrator
+    If Layer 1 passes, Layer 2 materials are prepared for the user
     to submit to Gemini.
 
     Fail Mode: If AST analysis raises an unexpected exception, the node
@@ -160,7 +160,7 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     review_materials = None
 
     if verdict != "BLOCK" and lld_path and lld_path.exists():
-        # Layer 1 passed — prepare materials for orchestrator to submit to Gemini
+        # Layer 1 passed — prepare materials for user to submit to Gemini
         print("    Layer 2: Preparing review materials for Gemini...")
         try:
             review_materials = prepare_review_materials(
@@ -253,7 +253,7 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
         "error_message": "",
     }
 
-    # Include review materials if prepared (for orchestrator to submit to Gemini)
+    # Include review materials if prepared (for user to submit to Gemini)
     if review_materials is not None:
         result["review_materials"] = review_materials
 

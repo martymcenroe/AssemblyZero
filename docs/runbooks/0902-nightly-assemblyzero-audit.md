@@ -12,10 +12,10 @@ Comprehensive self-audit of the AssemblyZero documentation system using extended
 
 ## Invocation
 
-**PowerShell command (orchestrator runs this):**
+**PowerShell command (user runs this):**
 
 ```powershell
-# Ultrathink mode invocation - specifics provided by orchestrator
+# Ultrathink mode invocation - specifics provided by user
 # This triggers Claude Code with extended thinking enabled
 ```
 

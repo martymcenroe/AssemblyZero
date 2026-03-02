@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Quick reference for the orchestrator (Marty) on how to run tools, commands, agents, audits, and prompts. Runbooks are "how to run X" documents, distinct from audits (what to check) and standards (what rules to follow).
+Quick reference for the user (Marty) on how to run tools, commands, agents, audits, and prompts. Runbooks are "how to run X" documents, distinct from audits (what to check) and standards (what rules to follow).
 
 **Supersedes:** `0008-orchestrator-instructions.md` (deprecated)
 
@@ -57,7 +57,7 @@ See `docs/0800-common-audits.md` for per-audit model recommendations.
 
 ## Ultrathink Mode
 
-"Ultrathink" is the term we use to invoke extended thinking. This is done via PowerShell by the orchestrator and provides deeper analysis for complex audits.
+"Ultrathink" is the term we use to invoke extended thinking. This is done via PowerShell by the user and provides deeper analysis for complex audits.
 
 **When to use ultrathink:**
 - Nightly AssemblyZero self-audits

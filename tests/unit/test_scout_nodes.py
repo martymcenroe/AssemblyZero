@@ -679,27 +679,6 @@ class TestGapAnalystNode:
 
         assert "Error" in result["gap_analysis"]
 
-    def test_fallback_to_direct_api(self):
-        """Test fallback to direct Gemini API when client not available."""
-        state = create_initial_state("topic", offline_mode=False)
-        state["found_repos"] = []
-
-        # Simulate ImportError for GeminiClient
-        with patch.dict("sys.modules", {"assemblyzero.core.gemini_client": None}):
-            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
-                with patch("google.genai.Client") as MockClient:
-                    mock_response = MagicMock()
-                    mock_response.text = "Fallback analysis"
-                    mock_client = MagicMock()
-                    mock_client.models.generate_content.return_value = mock_response
-                    MockClient.return_value = mock_client
-
-                    # This will raise ImportError internally and use fallback
-                    result = gap_analyst_node(state)
-
-        # Should have some analysis (either from fallback or error handling)
-        assert "gap_analysis" in result
-
     def test_offline_mode_returns_mock_analysis(self):
         """Test offline mode returns mock analysis."""
         state = create_initial_state("topic", offline_mode=True)

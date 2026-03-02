@@ -208,7 +208,7 @@ def human_edit_verdict(state: IssueWorkflowState) -> dict[str, Any]:
     Auto-routing logic:
     1. Parse verdict: if PASSED + no suggestions → auto-file (N6)
     2. If verdict has feedback → auto-revise (N2)
-    3. Only prompt human if Claude explicitly asks for orchestrator clarification
+    3. Only prompt human if Claude explicitly asks for user clarification
 
     Steps:
     1. Read verdict

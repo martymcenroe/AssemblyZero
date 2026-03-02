@@ -231,16 +231,16 @@ CRITICAL REVISION INSTRUCTIONS:
    - ANY item mentioned in the feedback, no matter how small
 
 2. If ANY Gemini feedback conflicts or is unclear, you MUST:
-   - Stop and ask the orchestrator for clarification
+   - Stop and ask the user for clarification
    - Do NOT guess or skip conflicting items
-   - Use this exact format: "ORCHESTRATOR CLARIFICATION NEEDED: [describe conflict]"
+   - Use this exact format: "USER CLARIFICATION NEEDED: [describe conflict]"
 
 3. Template compliance:
    - ALL sections from template MUST be present
    - PRESERVE sections that Gemini didn't flag
    - ONLY modify sections Gemini specifically mentioned
 
-4. If you cannot fully comply with all feedback, STOP and ask orchestrator
+4. If you cannot fully comply with all feedback, STOP and ask user
 
 Revise the draft to address ALL feedback above while KEEPING all template sections intact.
 START YOUR RESPONSE WITH THE # HEADING. DO NOT WRITE "I'll revise" OR ANY PREAMBLE."""
