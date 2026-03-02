@@ -226,6 +226,11 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
     """
     gate_log("[N8] Generating documentation...")
 
+    # Issue #547: Skip-on-resume — don't re-call Claude if docs already generated
+    if state.get("doc_lessons_path"):
+        gate_log("[N8] Documentation already generated — skipping")
+        return {}
+
     issue_number = state.get("issue_number", 0)
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()

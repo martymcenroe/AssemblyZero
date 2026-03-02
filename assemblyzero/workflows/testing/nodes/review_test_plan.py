@@ -359,6 +359,11 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("mock_mode"):
         return _mock_review_test_plan(state)
 
+    # Issue #547: Skip-on-resume — don't re-call Gemini if already approved
+    if state.get("test_plan_status") == "APPROVED":
+        gate_log("[N1] Test plan already approved — skipping Gemini review")
+        return {}
+
     # Get repo root
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()

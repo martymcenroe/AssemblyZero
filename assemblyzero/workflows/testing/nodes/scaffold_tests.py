@@ -867,6 +867,12 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
     if state.get("mock_mode"):
         return _mock_scaffold_tests(state)
 
+    # Issue #547: Skip-on-resume — don't re-call Claude if tests already scaffolded
+    existing_test_files = state.get("test_files", [])
+    if existing_test_files and all(Path(f).exists() for f in existing_test_files):
+        gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
+        return {}
+
     # Issue #381: Framework-aware scaffolding
     framework_config = state.get("framework_config")
 

@@ -67,6 +67,11 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     """
     logger.info("[ADV] Starting adversarial test generation node")
 
+    # Issue #547: Skip-on-resume — don't re-call Gemini if verdict already exists
+    if state.get("adversarial_verdict") in ("success", "error") and state.get("adversarial_test_count", 0) > 0:
+        logger.info("[ADV] Adversarial analysis already complete — skipping")
+        return state
+
     # Check for implementation files
     impl_files = state.get("implementation_files", [])
     if not impl_files:

@@ -1338,8 +1338,16 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             written_paths.append(str(target_path))
             continue
 
-        # Validate change type
+        # Issue #547: Skip-on-resume — don't re-call Claude for files already on disk
         target_path = repo_root / filepath
+        if change_type.lower() == "add" and target_path.exists() and target_path.stat().st_size > 0:
+            existing_content = target_path.read_text(encoding="utf-8")
+            print(f"        Skipped (already exists): {target_path}")
+            completed_files.append((filepath, existing_content))
+            written_paths.append(str(target_path))
+            continue
+
+        # Validate change type
         if change_type.lower() == "modify" and not target_path.exists():
             raise ImplementationError(
                 filepath=filepath,
