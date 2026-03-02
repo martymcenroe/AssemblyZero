@@ -29,7 +29,13 @@ class TestAnthropicCacheControl:
         mock_response.usage.output_tokens = 50
         mock_response.usage.cache_read_input_tokens = 0
         mock_response.usage.cache_creation_input_tokens = 0
-        mock_client.messages.create.return_value = mock_response
+        # Issue #541: mock streaming context manager
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+        mock_stream.__exit__ = MagicMock(return_value=False)
+        mock_stream.text_stream = ["response text"]
+        mock_stream.get_final_message.return_value = mock_response
+        mock_client.messages.stream.return_value = mock_stream
         provider._client = mock_client
 
         provider.invoke(
@@ -38,7 +44,7 @@ class TestAnthropicCacheControl:
         )
 
         # Verify the system prompt was sent as structured block
-        call_kwargs = mock_client.messages.create.call_args
+        call_kwargs = mock_client.messages.stream.call_args
         system_arg = call_kwargs.kwargs.get("system") or call_kwargs[1].get("system")
 
         assert isinstance(system_arg, list), "system should be a list of blocks"
@@ -63,7 +69,13 @@ class TestAnthropicCacheControl:
         mock_response.usage.output_tokens = 50
         mock_response.usage.cache_read_input_tokens = 0
         mock_response.usage.cache_creation_input_tokens = 0
-        mock_client.messages.create.return_value = mock_response
+        # Issue #541: mock streaming context manager
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+        mock_stream.__exit__ = MagicMock(return_value=False)
+        mock_stream.text_stream = ["response text"]
+        mock_stream.get_final_message.return_value = mock_response
+        mock_client.messages.stream.return_value = mock_stream
         provider._client = mock_client
 
         provider.invoke(
@@ -71,7 +83,7 @@ class TestAnthropicCacheControl:
             content="User content here",
         )
 
-        call_kwargs = mock_client.messages.create.call_args
+        call_kwargs = mock_client.messages.stream.call_args
         messages_arg = call_kwargs.kwargs.get("messages") or call_kwargs[1].get("messages")
 
         assert len(messages_arg) == 1
@@ -99,7 +111,13 @@ class TestAnthropicCacheControl:
         mock_response.usage.output_tokens = 50
         mock_response.usage.cache_read_input_tokens = 800
         mock_response.usage.cache_creation_input_tokens = 200
-        mock_client.messages.create.return_value = mock_response
+        # Issue #541: mock streaming context manager
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
+        mock_stream.__exit__ = MagicMock(return_value=False)
+        mock_stream.text_stream = ["response text"]
+        mock_stream.get_final_message.return_value = mock_response
+        mock_client.messages.stream.return_value = mock_stream
         provider._client = mock_client
 
         result = provider.invoke(

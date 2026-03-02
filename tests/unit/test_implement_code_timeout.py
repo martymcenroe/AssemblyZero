@@ -37,7 +37,8 @@ class TestSDKTimeout:
             mock_anthropic.Anthropic.return_value = mock_client
 
             # Simulate timeout by raising httpx.TimeoutException
-            mock_client.messages.create.side_effect = httpx.TimeoutException(
+            # Issue #541: now uses messages.stream instead of messages.create
+            mock_client.messages.stream.side_effect = httpx.TimeoutException(
                 "Connection timed out"
             )
 
@@ -118,7 +119,7 @@ class TestErrorPropagation:
             mock_anthropic = MagicMock()
             mock_client = MagicMock()
             mock_anthropic.Anthropic.return_value = mock_client
-            mock_client.messages.create.side_effect = httpx.TimeoutException("timed out")
+            mock_client.messages.stream.side_effect = httpx.TimeoutException("timed out")
 
             with patch.dict(
                 "sys.modules",

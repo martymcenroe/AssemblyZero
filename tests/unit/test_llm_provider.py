@@ -415,7 +415,13 @@ class TestAnthropicProvider:
         mock_response.usage = mock_usage
 
         mock_client = Mock()
-        mock_client.messages.create.return_value = mock_response
+        # Issue #541: mock streaming context manager
+        mock_stream = MagicMock()
+        mock_stream.__enter__ = Mock(return_value=mock_stream)
+        mock_stream.__exit__ = Mock(return_value=False)
+        mock_stream.text_stream = ["Hello from API!"]
+        mock_stream.get_final_message.return_value = mock_response
+        mock_client.messages.stream.return_value = mock_stream
 
         provider = AnthropicProvider(model="haiku")
 
@@ -446,7 +452,7 @@ class TestAnthropicProvider:
             response=mock_response,
             body={"error": {"message": "Rate limited", "type": "rate_limit_error"}},
         )
-        mock_client.messages.create.side_effect = rate_limit_error
+        mock_client.messages.stream.side_effect = rate_limit_error
 
         provider = AnthropicProvider(model="haiku")
 
@@ -465,7 +471,7 @@ class TestAnthropicProvider:
         mock_load_key.return_value = "sk-ant-test-key"
 
         mock_client = Mock()
-        mock_client.messages.create.side_effect = anthropic.APITimeoutError(
+        mock_client.messages.stream.side_effect = anthropic.APITimeoutError(
             request=Mock()
         )
 
@@ -488,7 +494,7 @@ class TestAnthropicProvider:
         mock_response = Mock()
         mock_response.status_code = 401
         mock_response.headers = {}
-        mock_client.messages.create.side_effect = anthropic.AuthenticationError(
+        mock_client.messages.stream.side_effect = anthropic.AuthenticationError(
             message="Invalid API key",
             response=mock_response,
             body={"error": {"message": "Invalid API key", "type": "authentication_error"}},

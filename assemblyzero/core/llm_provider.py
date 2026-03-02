@@ -596,10 +596,16 @@ class AnthropicProvider(LLMProvider):
 
             client = self._get_client()
 
-            # Issue #488: Send cache_control directives for prompt caching.
-            # System prompt and user content are marked as cacheable so that
-            # repeated calls (revision cycles) can read from cache at 10% cost.
-            response = client.messages.create(
+            # Issue #541: Use streaming to eliminate timeout blindness.
+            # client.messages.create() blocks until the entire response is
+            # ready — on Windows/MSYS2 the httpx read timeout never fires,
+            # so calls hang indefinitely.  Streaming gets chunks as they're
+            # generated: the connection stays active, and any real stall
+            # surfaces as a read-timeout on a per-chunk basis.
+            # Issue #488: cache_control directives still work with streaming.
+            response_text = ""
+            last_progress = time.time()
+            with client.messages.stream(
                 model=self._model_id,
                 max_tokens=self.MAX_TOKENS,
                 system=[{
@@ -613,15 +619,23 @@ class AnthropicProvider(LLMProvider):
                     "cache_control": {"type": "ephemeral"},
                 }]}],
                 timeout=httpx.Timeout(timeout_seconds, connect=30.0),
-            )
+            ) as stream:
+                for text in stream.text_stream:
+                    response_text += text
+                    # Progress indicator every 30s
+                    now = time.time()
+                    if now - last_progress >= 30:
+                        chars = len(response_text)
+                        elapsed = int(now - start_time)
+                        print(
+                            f"    [STREAM] {chars:,} chars received "
+                            f"({elapsed}s elapsed)",
+                            flush=True,
+                        )
+                        last_progress = now
+                response = stream.get_final_message()
 
             duration_ms = int((time.time() - start_time) * 1000)
-
-            # Extract text from content blocks
-            response_text = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    response_text += block.text
 
             # Issue #527: Strip emojis from response (preserve raw_response)
             response_text = strip_emoji(response_text)
@@ -802,19 +816,29 @@ class FallbackProvider(LLMProvider):
                 attempts=0,
             )
 
-        # Try primary with shorter timeout
-        effective_timeout = min(timeout_seconds, self._primary_timeout)
-        result = self._primary.invoke(system_prompt, content, effective_timeout)
-        if result.success:
-            self._consecutive_failures = 0
-            return result
+        # Issue #539: Skip CLI for large prompts — they always time out.
+        # LLD/spec prompts are 100K+ chars; the CLI subprocess overhead
+        # guarantees a 180s timeout.  Go straight to the API.
+        prompt_size = len(system_prompt) + len(content)
+        if prompt_size > 50_000:
+            print(
+                f"    [LLM] Prompt {prompt_size:,} chars — "
+                f"skipping CLI, using {self._fallback.provider_name} directly"
+            )
+        else:
+            # Try primary with shorter timeout
+            effective_timeout = min(timeout_seconds, self._primary_timeout)
+            result = self._primary.invoke(system_prompt, content, effective_timeout)
+            if result.success:
+                self._consecutive_failures = 0
+                return result
 
-        # Primary failed — try fallback with full timeout
-        print(
-            f"    [LLM] {self._primary.provider_name} failed "
-            f"({result.error_message[:80] if result.error_message else 'unknown'}), "
-            f"falling back to {self._fallback.provider_name}..."
-        )
+            # Primary failed — try fallback with full timeout
+            print(
+                f"    [LLM] {self._primary.provider_name} failed "
+                f"({result.error_message[:80] if result.error_message else 'unknown'}), "
+                f"falling back to {self._fallback.provider_name}..."
+            )
         fallback_result = self._fallback.invoke(system_prompt, content, timeout_seconds)
         if fallback_result.success:
             self._consecutive_failures = 0

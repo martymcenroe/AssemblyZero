@@ -944,7 +944,7 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
         except Exception as e:
             print(f"    [WARN] CLI error: {e}")
 
-    # Fallback to SDK
+    # Fallback to SDK with streaming (Issue #541)
     try:
         import anthropic
         import httpx
@@ -954,16 +954,18 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
             timeout=httpx.Timeout(timeout, connect=30.0)
         )
 
-        message = client.messages.create(
-            model="claude-opus-4-5-20250514",
-            max_tokens=32768,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
+        # Issue #541: Streaming eliminates timeout blindness — chunks
+        # arrive incrementally so the connection stays active.  The old
+        # client.messages.create() blocked for the entire generation
+        # and httpx timeouts never fired on Windows/MSYS2.
         response_text = ""
-        for block in message.content:
-            if hasattr(block, "text"):
-                response_text += block.text
+        with client.messages.stream(
+            model="claude-opus-4-6",
+            max_tokens=32768,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                response_text += text
 
         # Issue #527: Strip emojis from code gen response
         return strip_emoji(response_text), ""
