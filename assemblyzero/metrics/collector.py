@@ -44,10 +44,10 @@ def collect_repo_metrics(
     """
     try:
         if github_token:
-            gh = Github(github_token)
+            gh = Github(github_token, timeout=30)
         else:
             logger.warning("No GitHub token provided. Only public repos accessible.")
-            gh = Github()
+            gh = Github(timeout=30)
 
         repo = gh.get_repo(repo_full_name)
     except UnknownObjectException as exc:

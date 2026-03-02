@@ -473,10 +473,14 @@ class TestExplorerNode:
 
     def test_handles_api_errors_gracefully(self):
         """Test that API errors return empty list."""
+        from github import GithubException
+
         state = create_initial_state("topic", offline_mode=False)
 
         with patch("assemblyzero.workflows.scout.nodes._get_github_client") as mock_client:
-            mock_client.return_value.search_repositories.side_effect = Exception("API Error")
+            mock_client.return_value.search_repositories.side_effect = GithubException(
+                500, {"message": "API Error"}, {}
+            )
             result = explorer_node(state)
 
         assert result["found_repos"] == []

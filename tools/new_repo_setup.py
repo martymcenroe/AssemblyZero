@@ -314,7 +314,8 @@ def get_github_username() -> str:
         ["gh", "api", "user", "-q", ".login"],
         capture_output=True,
         text=True,
-        check=True
+        check=True,
+        timeout=60,
     )
     return result.stdout.strip()
 
@@ -331,7 +332,7 @@ def run_command(cmd: list[str], cwd: Path | None = None, check: bool = True) -> 
     Returns:
         CompletedProcess result
     """
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=check)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=check, timeout=60)
 
 
 def create_directory_structure(project_path: Path) -> list[str]:

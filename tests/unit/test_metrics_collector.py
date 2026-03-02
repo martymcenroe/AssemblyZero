@@ -374,7 +374,7 @@ class TestCollectRepoMetrics:
         mock_repo.full_name = "martymcenroe/AssemblyZero"
 
         collect_repo_metrics("martymcenroe/AssemblyZero", "ghp_real_token", period_days=30)
-        mock_github_cls.assert_called_once_with("ghp_real_token")
+        mock_github_cls.assert_called_once_with("ghp_real_token", timeout=30)
 
     @patch("assemblyzero.metrics.collector.Github")
     def test_empty_token_no_auth(self, mock_github_cls: MagicMock) -> None:
@@ -390,7 +390,7 @@ class TestCollectRepoMetrics:
         mock_repo.full_name = "martymcenroe/PublicRepo"
 
         collect_repo_metrics("martymcenroe/PublicRepo", "", period_days=30)
-        mock_github_cls.assert_called_once_with()
+        mock_github_cls.assert_called_once_with(timeout=30)
 
     @patch("assemblyzero.metrics.collector.Github")
     def test_returns_repo_metrics_dict(self, mock_github_cls: MagicMock) -> None:

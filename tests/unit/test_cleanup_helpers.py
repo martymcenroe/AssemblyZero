@@ -51,7 +51,6 @@ class TestCheckPrMerged:
             ],
             capture_output=True,
             text=True,
-            check=True,
             timeout=SUBPROCESS_TIMEOUT,
         )
 
@@ -107,7 +106,6 @@ class TestRemoveWorktree:
             ["git", "worktree", "remove", str(worktree_dir)],
             capture_output=True,
             text=True,
-            check=True,
             timeout=SUBPROCESS_TIMEOUT,
         )
 

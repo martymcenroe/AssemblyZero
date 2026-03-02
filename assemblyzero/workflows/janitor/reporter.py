@@ -55,12 +55,16 @@ class GitHubReporter(ReporterInterface):
 
         Falls back to GITHUB_TOKEN env var if interactive auth fails.
         """
-        result = subprocess.run(
-            ["gh", "auth", "status"],
-            capture_output=True,
-            text=True,
-            cwd=self.repo_root,
-        )
+        try:
+            result = subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True,
+                text=True,
+                cwd=self.repo_root,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("gh auth status timed out after 30s")
         if result.returncode != 0:
             token = os.environ.get("GITHUB_TOKEN")
             if not token:
@@ -71,24 +75,28 @@ class GitHubReporter(ReporterInterface):
 
     def find_existing_report(self) -> str | None:
         """Search for open issues with title matching 'Janitor Report'."""
-        result = subprocess.run(
-            [
-                "gh",
-                "issue",
-                "list",
-                "--search",
-                "Janitor Report in:title",
-                "--state",
-                "open",
-                "--json",
-                "url",
-                "--limit",
-                "1",
-            ],
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "issue",
+                    "list",
+                    "--search",
+                    "Janitor Report in:title",
+                    "--state",
+                    "open",
+                    "--json",
+                    "url",
+                    "--limit",
+                    "1",
+                ],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            return None
         if result.returncode != 0:
             return None
 
@@ -104,22 +112,26 @@ class GitHubReporter(ReporterInterface):
         self, title: str, body: str, severity: Severity
     ) -> str:
         """Create a new GitHub issue."""
-        result = subprocess.run(
-            [
-                "gh",
-                "issue",
-                "create",
-                "--title",
-                title,
-                "--body",
-                body,
-                "--label",
-                "maintenance",
-            ],
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "issue",
+                    "create",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
+                    "--label",
+                    "maintenance",
+                ],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("gh issue create timed out after 30s")
         if result.returncode != 0:
             raise RuntimeError(f"Failed to create GitHub issue: {result.stderr}")
         return result.stdout.strip()
@@ -133,19 +145,23 @@ class GitHubReporter(ReporterInterface):
         """
         # Extract issue number from URL like https://github.com/user/repo/issues/42
         issue_number = identifier.rstrip("/").split("/")[-1]
-        result = subprocess.run(
-            [
-                "gh",
-                "issue",
-                "edit",
-                issue_number,
-                "--body",
-                body,
-            ],
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "issue",
+                    "edit",
+                    issue_number,
+                    "--body",
+                    body,
+                ],
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("gh issue edit timed out after 30s")
         if result.returncode != 0:
             raise RuntimeError(f"Failed to update GitHub issue: {result.stderr}")
         return identifier

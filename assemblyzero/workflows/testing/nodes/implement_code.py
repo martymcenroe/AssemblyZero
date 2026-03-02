@@ -941,7 +941,9 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
 
         except subprocess.TimeoutExpired:
             return "", f"CLI timeout after {timeout}s waiting for response"
-        except Exception as e:
+        except FileNotFoundError:
+            print("    [WARN] Claude CLI not found, falling back to SDK")
+        except OSError as e:
             print(f"    [WARN] CLI error: {e}")
 
     # Fallback to SDK with streaming (Issue #541)
@@ -976,7 +978,13 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
         return "", f"SDK timeout after {timeout}s waiting for response"
     except TimeoutError:
         return "", f"SDK timeout after {timeout}s waiting for response"
-    except Exception as e:
+    except anthropic.AuthenticationError as e:
+        return "", f"SDK auth error (check API key): {e}"
+    except anthropic.RateLimitError as e:
+        return "", f"SDK rate limited: {e}"
+    except anthropic.APIStatusError as e:
+        return "", f"SDK API error (status {e.status_code}): {e}"
+    except anthropic.APIError as e:
         return "", f"SDK error: {e}"
 
 
