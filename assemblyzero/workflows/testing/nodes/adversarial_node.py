@@ -68,7 +68,7 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     logger.info("[ADV] Starting adversarial test generation node")
 
     # Check for implementation files
-    impl_files = state.get("implementation_files", {})
+    impl_files = state.get("implementation_files", [])
     if not impl_files:
         logger.info("[ADV] No implementation files in state — skipping")
         return {
@@ -223,19 +223,23 @@ def _collect_context(state: AdversarialNodeState) -> tuple[str, str, str]:
     Returns:
         Tuple of (implementation_context, lld_context, existing_test_context).
     """
-    impl_files = state.get("implementation_files", {})
+    impl_files = state.get("implementation_files", [])
     lld_content = state.get("lld_content", "")
-    existing_tests = state.get("existing_tests", {})
+    test_files = state.get("test_files", [])
 
-    # Build raw context strings
+    # Build raw context strings by reading files from disk
     impl_parts: list[str] = []
-    for filepath, content in impl_files.items():
-        impl_parts.append(f"# {filepath}\n{content}")
+    for filepath in impl_files:
+        content = _read_file_safe(filepath)
+        if content:
+            impl_parts.append(f"# {filepath}\n{content}")
     impl_raw = "\n\n".join(impl_parts)
 
     test_parts: list[str] = []
-    for filepath, content in existing_tests.items():
-        test_parts.append(f"# {filepath}\n{content}")
+    for filepath in test_files:
+        content = _read_file_safe(filepath)
+        if content:
+            test_parts.append(f"# {filepath}\n{content}")
     test_raw = "\n\n".join(test_parts)
 
     # Apply budget
@@ -295,6 +299,23 @@ def _trim_to_budget(text: str, max_bytes: int) -> str:
             truncated = truncated[:last_newline]
 
     return truncated + "\n\n... [TRUNCATED - token budget exceeded] ..."
+
+
+def _read_file_safe(filepath: str) -> str:
+    """Read a file from disk, returning empty string on failure.
+
+    Args:
+        filepath: Path to the file to read.
+
+    Returns:
+        File contents, or empty string if the file cannot be read.
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("[ADV] Could not read file %s: %s", filepath, e)
+        return ""
 
 
 def _parse_gemini_response(raw_response: str) -> AdversarialAnalysis:

@@ -81,11 +81,9 @@ class TestRunAdversarialNode:
         }
 
         state = {
-            "implementation_files": {
-                "module.py": "def function(x):\n    return x"
-            },
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# Feature\n## Requirements\n1. Handles all inputs",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -108,9 +106,9 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": {"module.py": "def f(): pass"},
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -132,9 +130,9 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": {"module.py": "def f(): pass"},
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -146,9 +144,9 @@ class TestRunAdversarialNode:
     def test_empty_implementation_skip(self):
         """T040: With no implementation files, skips gracefully."""
         state = {
-            "implementation_files": {},
+            "implementation_files": [],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -168,9 +166,9 @@ class TestRunAdversarialNode:
         mock_client.generate_adversarial_tests.return_value = "{broken json"
 
         state = {
-            "implementation_files": {"module.py": "def f(): pass"},
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -191,9 +189,9 @@ class TestRunAdversarialNode:
         )
 
         state = {
-            "implementation_files": {"module.py": "def f(): pass"},
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -243,9 +241,9 @@ class TestRunAdversarialNode:
         }
 
         state = {
-            "implementation_files": {"module.py": "def f(): pass"},
+            "implementation_files": ["/fake/module.py"],
             "lld_content": "# LLD",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -437,16 +435,17 @@ class TestParseGeminiResponse:
 class TestCollectContext:
     """Tests for _collect_context (T190)."""
 
-    def test_token_budget_trimming(self):
+    def test_token_budget_trimming(self, tmp_path):
         """T190: With oversized input, output fits within 60KB."""
+        big_file = tmp_path / "big_file.py"
+        big_file.write_text("x" * 200_000, encoding="utf-8")
+        test_file = tmp_path / "test.py"
+        test_file.write_text("z" * 50_000, encoding="utf-8")
+
         state = {
-            "implementation_files": {
-                "big_file.py": "x" * 200_000,
-            },
+            "implementation_files": [str(big_file)],
             "lld_content": "y" * 100_000,
-            "existing_tests": {
-                "test.py": "z" * 50_000,
-            },
+            "test_files": [str(test_file)],
             "issue_id": 352,
         }
 
@@ -463,9 +462,9 @@ class TestCollectContext:
     def test_empty_state(self):
         """Handles empty state gracefully."""
         state = {
-            "implementation_files": {},
+            "implementation_files": [],
             "lld_content": "",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -474,16 +473,17 @@ class TestCollectContext:
         assert lld == ""
         assert tests == ""
 
-    def test_small_input_not_truncated(self):
+    def test_small_input_not_truncated(self, tmp_path):
         """Small inputs are returned without truncation."""
+        small_file = tmp_path / "small.py"
+        small_file.write_text("def foo():\n    return 42\n", encoding="utf-8")
+        test_file = tmp_path / "test_small.py"
+        test_file.write_text("def test_foo():\n    assert foo() == 42\n", encoding="utf-8")
+
         state = {
-            "implementation_files": {
-                "small.py": "def foo():\n    return 42\n",
-            },
+            "implementation_files": [str(small_file)],
             "lld_content": "# Small LLD\n## Requirements\n1. foo returns 42",
-            "existing_tests": {
-                "test_small.py": "def test_foo():\n    assert foo() == 42\n",
-            },
+            "test_files": [str(test_file)],
             "issue_id": 352,
         }
 
@@ -497,15 +497,17 @@ class TestCollectContext:
         assert "TRUNCATED" not in lld
         assert "TRUNCATED" not in tests
 
-    def test_multiple_impl_files_concatenated(self):
+    def test_multiple_impl_files_concatenated(self, tmp_path):
         """Multiple implementation files are concatenated with headers."""
+        file1 = tmp_path / "file1.py"
+        file1.write_text("def foo(): pass", encoding="utf-8")
+        file2 = tmp_path / "file2.py"
+        file2.write_text("def bar(): pass", encoding="utf-8")
+
         state = {
-            "implementation_files": {
-                "file1.py": "def foo(): pass",
-                "file2.py": "def bar(): pass",
-            },
+            "implementation_files": [str(file1), str(file2)],
             "lld_content": "",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
@@ -516,14 +518,15 @@ class TestCollectContext:
         assert "def foo():" in impl
         assert "def bar():" in impl
 
-    def test_oversized_impl_truncated_with_marker(self):
+    def test_oversized_impl_truncated_with_marker(self, tmp_path):
         """Implementation exceeding budget gets truncation marker."""
+        big_file = tmp_path / "big.py"
+        big_file.write_text("x" * 200_000, encoding="utf-8")
+
         state = {
-            "implementation_files": {
-                "big.py": "x" * 200_000,
-            },
+            "implementation_files": [str(big_file)],
             "lld_content": "",
-            "existing_tests": {},
+            "test_files": [],
             "issue_id": 352,
         }
 
