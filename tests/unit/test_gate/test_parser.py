@@ -271,7 +271,7 @@ class TestRunPytest:
         import subprocess as sp
 
         mock_proc = MagicMock()
-        mock_proc.communicate.side_effect = sp.TimeoutExpired(cmd="pytest", timeout=5)
+        mock_proc.communicate.side_effect = [sp.TimeoutExpired(cmd="pytest", timeout=5), ("", "")]
         mock_proc.poll.return_value = None
         mock_popen.return_value = mock_proc
 
