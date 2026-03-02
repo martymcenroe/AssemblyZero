@@ -88,6 +88,10 @@ def invoke_claude(
 
         except subprocess.TimeoutExpired:
             raise ClaudeClientError(f"Claude CLI timed out after {timeout}s")
+        except FileNotFoundError:
+            raise ClaudeClientError(
+                "Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+            )
 
     # Exhausted retries
     raise last_error or ClaudeRateLimitError("Rate limited after max retries")

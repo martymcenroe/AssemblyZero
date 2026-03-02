@@ -245,12 +245,15 @@ def create_issue(
     for label in labels:
         cmd.extend(["--label", label])
 
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return (False, 0, "", "gh issue create timed out after 60s")
 
     if result.returncode != 0:
         return (False, 0, "", result.stderr)

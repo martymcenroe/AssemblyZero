@@ -73,9 +73,12 @@ def check_pr_merged(pr_url: str) -> bool:
         ["gh", "pr", "view", pr_url, "--json", "state", "--jq", ".state"],
         capture_output=True,
         text=True,
-        check=True,
         timeout=SUBPROCESS_TIMEOUT,
     )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
     return result.stdout.strip() == "MERGED"
 
 
@@ -98,13 +101,16 @@ def remove_worktree(worktree_path: str | Path) -> bool:
         logger.info("[N9] Worktree path does not exist: %s", worktree_path)
         return False
 
-    subprocess.run(
+    result = subprocess.run(
         ["git", "worktree", "remove", str(worktree_path)],
         capture_output=True,
         text=True,
-        check=True,
         timeout=SUBPROCESS_TIMEOUT,
     )
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
     logger.info("[N9] Worktree removed: %s", worktree_path)
     return True
 

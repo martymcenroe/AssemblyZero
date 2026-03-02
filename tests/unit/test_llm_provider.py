@@ -29,11 +29,14 @@ from assemblyzero.core.llm_provider import (
     FallbackProvider,
     GeminiProvider,
     MockProvider,
+    _circuit_breaker_registry,
+    _CIRCUIT_BREAKER_MAX,
     get_cumulative_cost,
     get_provider,
     is_non_retryable_error,
     log_llm_call,
     parse_provider_spec,
+    reset_circuit_breakers,
     reset_cumulative_cost,
     _load_anthropic_api_key,
 )
@@ -506,7 +509,7 @@ class TestAnthropicProvider:
             result = provider.invoke("system", "content")
 
         assert result.success is False
-        assert "authentication failed" in result.error_message.lower()
+        assert "invalid api key" in result.error_message.lower() or "authentication" in result.error_message.lower()
 
     def test_cost_calculation_haiku(self):
         """Test cost calculation for haiku model."""
@@ -1104,6 +1107,8 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_trips_after_consecutive_failures(self):
         """Circuit breaker trips after 2 consecutive both-fail calls."""
+        reset_circuit_breakers()
+
         primary = Mock(spec=LLMProvider)
         primary.provider_name = "claude"
         primary.model = "opus"
@@ -1132,8 +1137,12 @@ class TestCircuitBreaker:
         primary.invoke.assert_not_called()
         fallback.invoke.assert_not_called()
 
+        reset_circuit_breakers()
+
     def test_circuit_breaker_resets_on_success(self):
         """Circuit breaker resets when a call succeeds."""
+        reset_circuit_breakers()
+
         primary = Mock(spec=LLMProvider)
         primary.provider_name = "claude"
         primary.model = "opus"
@@ -1142,28 +1151,31 @@ class TestCircuitBreaker:
         fallback.provider_name = "anthropic"
 
         fb = FallbackProvider(primary=primary, fallback=fallback)
+        key = f"{primary.provider_name}:{primary.model}"
 
         # Call 1: both fail → counter=1
         primary.invoke.return_value = self._make_result(False, "claude", "error")
         fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
         fb.invoke("system", "content")
-        assert fb._consecutive_failures == 1
+        assert _circuit_breaker_registry.get(key, 0) == 1
 
         # Call 2: primary succeeds → counter resets to 0
         primary.invoke.return_value = self._make_result(True, "claude")
         fb.invoke("system", "content")
-        assert fb._consecutive_failures == 0
+        assert _circuit_breaker_registry.get(key, 0) == 0
 
         # Call 3+4: both fail again → counter goes to 2
         primary.invoke.return_value = self._make_result(False, "claude", "error")
         fallback.invoke.return_value = self._make_result(False, "anthropic", "error")
         fb.invoke("system", "content")
         fb.invoke("system", "content")
-        assert fb._consecutive_failures == 2
+        assert _circuit_breaker_registry.get(key, 0) == 2
 
         # Call 5: would trip, but verify it does
         r = fb.invoke("system", "content")
         assert "CIRCUIT BREAKER" in r.error_message
+
+        reset_circuit_breakers()
 
 
 class TestIsNonRetryableError:
@@ -1227,6 +1239,8 @@ class TestNonRetryableCircuitBreaker:
 
     def test_billing_error_trips_breaker_immediately(self):
         """Billing error on fallback trips circuit breaker on first call."""
+        reset_circuit_breakers()
+
         primary = Mock(spec=LLMProvider)
         primary.provider_name = "claude"
         primary.model = "opus"
@@ -1241,11 +1255,12 @@ class TestNonRetryableCircuitBreaker:
         )
 
         fb = FallbackProvider(primary=primary, fallback=fallback)
+        key = f"{primary.provider_name}:{primary.model}"
 
         # Call 1: billing error → breaker trips immediately
         r1 = fb.invoke("system", "content")
         assert r1.success is False
-        assert fb._consecutive_failures == fb._max_consecutive_failures
+        assert _circuit_breaker_registry.get(key, 0) == _CIRCUIT_BREAKER_MAX
 
         # Call 2: circuit breaker blocks — neither provider called
         primary.invoke.reset_mock()
@@ -1256,8 +1271,12 @@ class TestNonRetryableCircuitBreaker:
         primary.invoke.assert_not_called()
         fallback.invoke.assert_not_called()
 
+        reset_circuit_breakers()
+
     def test_auth_error_trips_breaker_immediately(self):
         """Auth error on fallback trips circuit breaker on first call."""
+        reset_circuit_breakers()
+
         primary = Mock(spec=LLMProvider)
         primary.provider_name = "claude"
         primary.model = "opus"
@@ -1272,12 +1291,17 @@ class TestNonRetryableCircuitBreaker:
         )
 
         fb = FallbackProvider(primary=primary, fallback=fallback)
+        key = f"{primary.provider_name}:{primary.model}"
         r1 = fb.invoke("system", "content")
         assert r1.success is False
-        assert fb._consecutive_failures == fb._max_consecutive_failures
+        assert _circuit_breaker_registry.get(key, 0) == _CIRCUIT_BREAKER_MAX
+
+        reset_circuit_breakers()
 
     def test_transient_error_does_not_trip_immediately(self):
         """Transient error increments normally, does not trip immediately."""
+        reset_circuit_breakers()
+
         primary = Mock(spec=LLMProvider)
         primary.provider_name = "claude"
         primary.model = "opus"
@@ -1292,9 +1316,12 @@ class TestNonRetryableCircuitBreaker:
         )
 
         fb = FallbackProvider(primary=primary, fallback=fallback)
+        key = f"{primary.provider_name}:{primary.model}"
         r1 = fb.invoke("system", "content")
         assert r1.success is False
-        assert fb._consecutive_failures == 1  # Incremented, NOT tripped
+        assert _circuit_breaker_registry.get(key, 0) == 1  # Incremented, NOT tripped
+
+        reset_circuit_breakers()
 
 
 class TestCumulativeCost:

@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from github import Github
+from github import Github, GithubException
 
 from assemblyzero.workflows.scout.budget import adaptive_truncate, check_and_update_budget
 from assemblyzero.workflows.scout.graph import ExternalRepo, ScoutState
@@ -123,8 +123,8 @@ def explorer_node(state: ScoutState) -> dict[str, Any]:
                     )
                 )
                 count += 1
-        except Exception as e:
-            # Return empty list on error, let downstream handle it
+        except GithubException:
+            # Return empty list on GitHub API error, let downstream handle it
             repos = []
 
     # CRITICAL: Bound the results immediately
@@ -269,7 +269,7 @@ Please also identify GAPS between our implementation and the external best pract
         if result.success:
             analysis = result.response or "No response received."
         else:
-            raise Exception(result.error or "Unknown error")
+            raise RuntimeError(result.error or "Unknown error")
     except ImportError:
         # Fallback to direct API if client not available
         try:
@@ -277,7 +277,7 @@ Please also identify GAPS between our implementation and the external best pract
 
             api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             if not api_key:
-                raise Exception("No API key found in GEMINI_API_KEY or GOOGLE_API_KEY")
+                raise RuntimeError("No API key found in GEMINI_API_KEY or GOOGLE_API_KEY")
 
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
@@ -285,10 +285,12 @@ Please also identify GAPS between our implementation and the external best pract
                 contents=prompt,
             )
             analysis = response.text
+        except RuntimeError:
+            raise
         except Exception as e2:
-            raise Exception(f"Fallback also failed: {e2}")
-    except Exception as e:
-        # Return error info but don't fail
+            raise RuntimeError(f"Fallback also failed: {e2}") from e2
+    except (RuntimeError, Exception) as e:
+        # Return error info but don't fail the workflow
         analysis = f"## Analysis Error\n\nCould not complete analysis: {e}\n\n"
         analysis += "## Repositories Found\n\n"
         for repo in found_repos:

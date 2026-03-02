@@ -15,9 +15,20 @@ from datetime import datetime, timezone
 from typing import Any
 
 from github import Github, GithubException, UnknownObjectException
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable_github_error(exc: BaseException) -> bool:
+    """Return True if the GithubException should be retried (not 404/401/403)."""
+    if isinstance(exc, UnknownObjectException):
+        return False
+    if isinstance(exc, GithubException):
+        status = getattr(exc, "status", None)
+        if status in (401, 403, 404):
+            return False
+    return True
 
 
 class GitHubMetricsClient:
@@ -36,16 +47,20 @@ class GitHubMetricsClient:
         self._cache: dict[str, tuple[float, Any]] = {}
 
         if self._token:
-            self._github = Github(login_or_token=self._token)
+            self._github = Github(login_or_token=self._token, timeout=30)
             logger.debug("GitHub client initialized in authenticated mode")
         else:
-            self._github = Github()
+            self._github = Github(timeout=30)
             logger.debug(
                 "GitHub client initialized in unauthenticated mode "
                 "(60 requests/hour limit)"
             )
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=30))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, max=30),
+        retry=retry_if_exception(_is_retryable_github_error),
+    )
     def fetch_issues(
         self,
         repo_full_name: str,
@@ -103,7 +118,11 @@ class GitHubMetricsClient:
         self._cache[cache_key] = (time.time(), filtered)
         return filtered
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, max=30))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, max=30),
+        retry=retry_if_exception(_is_retryable_github_error),
+    )
     def fetch_repo_contents(
         self,
         repo_full_name: str,

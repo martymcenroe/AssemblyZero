@@ -153,6 +153,7 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
         cwd=str(worktree_path),
         capture_output=True,
         text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         # Non-fatal - might be offline or remote doesn't accept

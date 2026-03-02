@@ -27,6 +27,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from assemblyzero.core.errors import (
+    APIError,
+    AuthenticationError,
+    BillingError,
+    RateLimitError,
+    ServerError,
+    TimeoutError_,
+    classify_anthropic_error,
+)
 from assemblyzero.core.text_sanitizer import strip_emoji
 
 
@@ -87,6 +96,22 @@ def reset_cumulative_cost() -> None:
     """Reset the cumulative cost counter to zero."""
     global _cumulative_cost_usd
     _cumulative_cost_usd = 0.0
+
+
+# =============================================================================
+# Issue #542: Module-level circuit breaker registry
+# =============================================================================
+# FallbackProvider._consecutive_failures was per-instance, but get_provider()
+# creates a fresh instance each LangGraph iteration — resetting the counter.
+# This module-level dict persists across all instances for the process lifetime.
+
+_circuit_breaker_registry: dict[str, int] = {}
+_CIRCUIT_BREAKER_MAX = 2
+
+
+def reset_circuit_breakers() -> None:
+    """Reset all circuit breaker counters (for testing)."""
+    _circuit_breaker_registry.clear()
 
 
 def log_llm_call(result: LLMCallResult) -> None:
@@ -690,14 +715,13 @@ class AnthropicProvider(LLMProvider):
 
             duration_ms = int((time.time() - start_time) * 1000)
 
-            rate_limited = isinstance(e, anthropic.RateLimitError)
-            if isinstance(e, anthropic.APITimeoutError):
-                error_msg = f"Anthropic API timed out after {timeout_seconds}s"
-            elif isinstance(e, anthropic.AuthenticationError):
-                error_msg = "Anthropic API authentication failed. Check your API key."
-            elif rate_limited:
-                error_msg = f"Anthropic API rate limited: {e}"
+            # Issue #542: Classify through the typed error hierarchy
+            if isinstance(e, (anthropic.APIError, anthropic.APITimeoutError)):
+                classified = classify_anthropic_error(e)
+                rate_limited = isinstance(classified, RateLimitError)
+                error_msg = str(classified)
             else:
+                rate_limited = False
                 error_msg = f"Anthropic API error: {e}"
 
             call_result = LLMCallResult(
@@ -721,6 +745,10 @@ def is_non_retryable_error(error_msg: str | None) -> bool:
     Issue #516: Billing, auth, and permission errors should halt immediately
     instead of entering the retry loop. Retrying these is guaranteed to fail.
 
+    Issue #542: Now delegates to the typed error hierarchy.  We construct a
+    synthetic exception and attempt classification; if the result maps to a
+    non-retryable type (BillingError, AuthenticationError), we return True.
+
     Args:
         error_msg: Error message string from a failed LLM call.
 
@@ -729,19 +757,25 @@ def is_non_retryable_error(error_msg: str | None) -> bool:
     """
     if not error_msg:
         return False
+
+    # Try to classify through the hierarchy
+    from assemblyzero.core.errors import _is_billing_message
+
+    if _is_billing_message(error_msg):
+        return True
+
+    # Pattern match for auth errors (kept for backward compat with string messages)
     msg = error_msg.lower()
-    non_retryable = [
-        "credit balance is too low",
+    auth_patterns = [
         "invalid_api_key",
         "invalid api key",
         "authentication_error",
         "authentication failed",
         "permission_denied",
         "permission denied",
-        "account has been disabled",
         "account is not authorized",
     ]
-    return any(pattern in msg for pattern in non_retryable)
+    return any(pattern in msg for pattern in auth_patterns)
 
 
 class FallbackProvider(LLMProvider):
@@ -767,9 +801,10 @@ class FallbackProvider(LLMProvider):
         self._primary = primary
         self._fallback = fallback
         self._primary_timeout = primary_timeout
-        # Issue #476: Circuit breaker — stop after consecutive both-fail calls
-        self._consecutive_failures = 0
-        self._max_consecutive_failures = 2
+        # Issue #542: Circuit breaker uses module-level registry so failures
+        # persist across instances (get_provider() creates fresh instances
+        # each LangGraph iteration).
+        self._breaker_key = f"{primary.provider_name}:{primary.model}"
 
     @property
     def provider_name(self) -> str:
@@ -797,9 +832,10 @@ class FallbackProvider(LLMProvider):
         Returns:
             LLMCallResult from whichever provider succeeded (or last failure).
         """
-        # Issue #476: Circuit breaker — refuse if too many consecutive failures
-        if self._consecutive_failures >= self._max_consecutive_failures:
-            n = self._consecutive_failures
+        # Issue #476/#542: Circuit breaker — module-level registry
+        failures = _circuit_breaker_registry.get(self._breaker_key, 0)
+        if failures >= _CIRCUIT_BREAKER_MAX:
+            n = failures
             msg = (
                 f"[CIRCUIT BREAKER] {n} consecutive failures. "
                 f"Use --resume after API recovers."
@@ -830,7 +866,7 @@ class FallbackProvider(LLMProvider):
             effective_timeout = min(timeout_seconds, self._primary_timeout)
             result = self._primary.invoke(system_prompt, content, effective_timeout)
             if result.success:
-                self._consecutive_failures = 0
+                _circuit_breaker_registry[self._breaker_key] = 0
                 return result
 
             # Primary failed — try fallback with full timeout
@@ -841,20 +877,21 @@ class FallbackProvider(LLMProvider):
             )
         fallback_result = self._fallback.invoke(system_prompt, content, timeout_seconds)
         if fallback_result.success:
-            self._consecutive_failures = 0
+            _circuit_breaker_registry[self._breaker_key] = 0
         else:
             # Issue #516: Non-retryable errors trip breaker immediately
             if is_non_retryable_error(fallback_result.error_message):
-                self._consecutive_failures = self._max_consecutive_failures
+                _circuit_breaker_registry[self._breaker_key] = _CIRCUIT_BREAKER_MAX
                 print(
                     f"    [CIRCUIT BREAKER] Non-retryable error detected: "
                     f"{fallback_result.error_message[:100]}"
                 )
             else:
-                self._consecutive_failures += 1
+                current = _circuit_breaker_registry.get(self._breaker_key, 0)
+                _circuit_breaker_registry[self._breaker_key] = current + 1
                 print(
-                    f"    [CIRCUIT] {self._consecutive_failures}/"
-                    f"{self._max_consecutive_failures} consecutive failures"
+                    f"    [CIRCUIT] {current + 1}/"
+                    f"{_CIRCUIT_BREAKER_MAX} consecutive failures"
                 )
         return fallback_result
 

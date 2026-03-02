@@ -383,7 +383,9 @@ class GeminiClient:
 
         except subprocess.TimeoutExpired:
             return False, "", "CLI timeout (120s)"
-        except Exception as e:
+        except FileNotFoundError:
+            return False, "", f"Gemini CLI not found: {self._gemini_cli}"
+        except OSError as e:
             return False, "", str(e)
         finally:
             # Restore GEMINI.md
@@ -533,6 +535,7 @@ class GeminiClient:
                             config_kwargs["response_schema"] = response_schema
 
                         # Make the API call with system instruction in config
+                        config_kwargs["http_options"] = {"timeout": 300_000}
                         response = client.models.generate_content(
                             model=self.model,
                             contents=content,

@@ -383,7 +383,9 @@ def invoke_gemini(
 
     except subprocess.TimeoutExpired:
         return False, "", "Timeout after 300 seconds"
-    except Exception as e:
+    except FileNotFoundError:
+        return False, "", f"CLI not found: {cmd[0]}"
+    except OSError as e:
         return False, "", str(e)
 
 

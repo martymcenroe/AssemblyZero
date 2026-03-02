@@ -200,6 +200,14 @@ class AdversarialGeminiClient:
             raise GeminiTimeoutError(
                 f"Gemini API response exceeded {timeout}s timeout"
             ) from e
+        except TypeError:
+            raise  # Unsupported provider type — propagate as-is
+        except Exception as e:
+            # Classify common Gemini errors rather than swallowing them
+            err_msg = str(e).lower()
+            if "429" in str(e) or "quota" in err_msg or "resource_exhausted" in err_msg:
+                raise GeminiQuotaExhaustedError(f"Gemini quota exhausted: {e}") from e
+            raise GeminiTimeoutError(f"Gemini API error: {e}") from e
 
         # Check for quota exhaustion in response or exception
         if self._is_quota_error(raw_response, metadata):
