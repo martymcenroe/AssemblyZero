@@ -39,19 +39,19 @@ def get_default_config() -> OrchestratorConfig:
         stages={
             "triage": StageConfig(
                 drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
                 drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
                 drafter="claude:opus-4.5",
-                reviewer="gemini:3-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=3,
                 timeout_seconds=600,
             ),

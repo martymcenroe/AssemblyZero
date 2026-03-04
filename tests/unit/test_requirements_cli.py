@@ -148,7 +148,7 @@ class TestArgumentParsing:
         ])
 
         assert args.drafter == "claude:opus"
-        assert args.reviewer == "gemini:3-pro-preview"
+        assert args.reviewer == "gemini:3.1-pro-preview"
         assert args.review == "none"
         assert args.mock is False
         assert args.max_iterations == 20

@@ -106,7 +106,7 @@ def check_gemini_available(
 
 
 def check_gemini_reachable(
-    model: str = "gemini-3-pro-preview",
+    model: str = "gemini-3.1-pro-preview",
     credentials_file: Optional[Path] = None,
     state_file: Optional[Path] = None,
 ) -> PreflightResult:

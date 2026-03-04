@@ -127,7 +127,7 @@ class TestCreateInitialState:
         )
 
         assert state["config_drafter"] == "claude:opus"
-        assert state["config_reviewer"] == "gemini:3-pro-preview"
+        assert state["config_reviewer"] == "gemini:3.1-pro-preview"
         assert state["config_gates_draft"] is True
         assert state["config_gates_verdict"] is True
         assert state["config_auto_mode"] is False
