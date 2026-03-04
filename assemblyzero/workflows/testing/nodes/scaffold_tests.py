@@ -868,10 +868,17 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
         return _mock_scaffold_tests(state)
 
     # Issue #547: Skip-on-resume — don't re-call Claude if tests already scaffolded
+    # Issue #571: BUT if validation errors exist, this is a regeneration loop,
+    # not a resume. Delete stale files so scaffold can regenerate.
     existing_test_files = state.get("test_files", [])
     if existing_test_files and all(Path(f).exists() for f in existing_test_files):
-        gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
-        return {}
+        if state.get("scaffold_validation_errors"):
+            gate_log(f"[N2] Regeneration: deleting {len(existing_test_files)} stale test files")
+            for f in existing_test_files:
+                Path(f).unlink(missing_ok=True)
+        else:
+            gate_log(f"[N2] {len(existing_test_files)} test files already exist — skipping scaffold")
+            return {}
 
     # Issue #381: Framework-aware scaffolding
     framework_config = state.get("framework_config")
