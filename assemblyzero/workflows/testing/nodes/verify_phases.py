@@ -8,6 +8,7 @@ errors) route back to N2_scaffold_tests instead of endlessly looping through
 N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 """
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,47 @@ PYTEST_TIMEOUT_SECONDS = 300
 
 # Issue #498: Max chars for failure summary fed back to N4
 MAX_FAILURE_SUMMARY_CHARS = 2000
+
+# Issue #562: Critical skip keywords (aligned with tools/test-gate.py)
+_CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
+
+# Regex for verbose pytest skip lines: "test_name SKIPPED"
+_SKIP_PATTERN = re.compile(r"([\w/\\.\-]+::[\w\[\]\-]+)\s+SKIPPED")
+
+
+def _validate_skip_audit(output: str) -> dict[str, Any]:
+    """Post-run validation of skipped tests (Issue #562).
+
+    Parses pytest verbose output for SKIPPED tests, checks for critical
+    keywords. Returns audit info for state tracking and logging.
+
+    Args:
+        output: Combined stdout+stderr from pytest.
+
+    Returns:
+        Dict with skip_count, critical_count, critical_tests, gate_passed.
+    """
+    skipped_names = _SKIP_PATTERN.findall(output)
+    if not skipped_names:
+        return {
+            "skip_count": 0,
+            "critical_count": 0,
+            "critical_tests": [],
+            "gate_passed": True,
+        }
+
+    critical = []
+    for name in skipped_names:
+        name_lower = name.lower()
+        if any(kw in name_lower for kw in _CRITICAL_SKIP_KEYWORDS):
+            critical.append(name)
+
+    return {
+        "skip_count": len(skipped_names),
+        "critical_count": len(critical),
+        "critical_tests": critical,
+        "gate_passed": len(critical) == 0,
+    }
 
 
 def _build_failure_summary(output: str) -> str:
@@ -796,6 +838,32 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # Success: all tests pass and coverage meets target
     print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
 
+    # --------------------------------------------------------------------------
+    # Issue #562: Skip audit gate — validate skipped tests post-run
+    # --------------------------------------------------------------------------
+    skipped_count = parsed.get("skipped", 0)
+    skip_audit = _validate_skip_audit(output)
+    if skip_audit["skip_count"] > 0:
+        if skip_audit["critical_count"] > 0:
+            print(f"    [SKIP-GATE] WARNING: {skip_audit['critical_count']} critical skipped test(s): "
+                  f"{', '.join(skip_audit['critical_tests'])}")
+        else:
+            print(f"    [SKIP-GATE] {skip_audit['skip_count']} skipped test(s) (none critical)")
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="skip_audit",
+            details={
+                "skip_count": skip_audit["skip_count"],
+                "critical_count": skip_audit["critical_count"],
+                "critical_tests": skip_audit["critical_tests"],
+                "gate_passed": skip_audit["gate_passed"],
+            },
+        )
+    # --------------------------------------------------------------------------
+
     log_workflow_execution(
         target_repo=repo_root,
         issue_number=state.get("issue_number", 0),
@@ -805,6 +873,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "passed": passed_count,
             "coverage": coverage_achieved,
             "iterations": iteration_count,
+            "skipped": skipped_count,
         },
     )
 
@@ -819,6 +888,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "test_failure_summary": "",
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
+            "skip_audit": skip_audit,
             "next_node": "N7_finalize",  # Skip E2E
             "error_message": "",
         }
@@ -832,6 +902,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "test_failure_summary": "",
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
+        "skip_audit": skip_audit,
         "next_node": "N6_e2e_validation",
         "error_message": "",
     }

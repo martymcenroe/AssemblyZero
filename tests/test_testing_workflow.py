@@ -5870,5 +5870,59 @@ Verify logout clears session.
         assert "Appendix" not in result
 
 
+class TestSkipAuditGate:
+    """Tests for _validate_skip_audit (Issue #562)."""
+
+    def test_no_skips(self):
+        """No skipped tests returns clean audit."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import _validate_skip_audit
+
+        result = _validate_skip_audit("5 passed in 1.23s")
+        assert result["skip_count"] == 0
+        assert result["gate_passed"] is True
+
+    def test_non_critical_skips(self):
+        """Non-critical skips pass the gate."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import _validate_skip_audit
+
+        output = (
+            "tests/test_foo.py::test_bar SKIPPED (no reason)\n"
+            "tests/test_baz.py::test_qux SKIPPED (platform)\n"
+            "2 skipped, 5 passed"
+        )
+        result = _validate_skip_audit(output)
+        assert result["skip_count"] == 2
+        assert result["critical_count"] == 0
+        assert result["gate_passed"] is True
+
+    def test_critical_skip_detected(self):
+        """Critical skip keyword triggers gate failure."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import _validate_skip_audit
+
+        output = (
+            "tests/test_auth.py::test_auth_login SKIPPED (needs credentials)\n"
+            "1 skipped, 5 passed"
+        )
+        result = _validate_skip_audit(output)
+        assert result["skip_count"] == 1
+        assert result["critical_count"] == 1
+        assert result["gate_passed"] is False
+        assert "test_auth_login" in result["critical_tests"][0]
+
+    def test_mixed_critical_and_non_critical(self):
+        """Mix of critical and non-critical skips."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import _validate_skip_audit
+
+        output = (
+            "tests/test_utils.py::test_helper SKIPPED (optional)\n"
+            "tests/test_security.py::test_security_check SKIPPED (needs env)\n"
+            "2 skipped, 10 passed"
+        )
+        result = _validate_skip_audit(output)
+        assert result["skip_count"] == 2
+        assert result["critical_count"] == 1
+        assert result["gate_passed"] is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
