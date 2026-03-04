@@ -81,7 +81,7 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     if mock_mode:
         drafter_spec = "mock:draft"
     else:
-        drafter_spec = state.get("config_drafter", "claude:opus")
+        drafter_spec = state.get("config_drafter", "claude:sonnet")
 
     # Determine template path based on workflow type
     if workflow_type == "issue":
