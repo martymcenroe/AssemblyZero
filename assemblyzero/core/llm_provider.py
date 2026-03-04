@@ -924,7 +924,8 @@ class GeminiProvider(LLMProvider):
     Supported models:
     - 2.5-pro (alias: pro) - Pro-tier governance model
     - 2.5-flash (alias: flash) - Fast Flash model
-    - 3-pro-preview - Latest Pro preview
+    - 3.1-pro-preview - Latest Pro preview
+    - 3-pro-preview - Previous Pro preview (EOL soon)
     - 3-pro - Production Pro model
     - 3-flash-preview - Latest Flash preview
     """
@@ -940,7 +941,7 @@ class GeminiProvider(LLMProvider):
         "3-flash-preview": "gemini-3-flash-preview",
     }
 
-    def __init__(self, model: str = "3-pro-preview"):
+    def __init__(self, model: str = "3.1-pro-preview"):
         """Initialize Gemini provider.
 
         Args:

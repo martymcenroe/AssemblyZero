@@ -22,7 +22,7 @@ set -euo pipefail
 
 # Parse arguments
 PROMPT="$1"
-REQUIRED_MODEL="${2:-gemini-3-pro-preview}"
+REQUIRED_MODEL="${2:-gemini-3.1-pro-preview}"
 
 # Get the directory of this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,7 +86,7 @@ while IFS= read -r model; do
 
   # Check if this model is NOT one of the allowed models
   # Allow: gemini-3-pro-preview or the explicitly required model
-  if [[ "$model" != "$REQUIRED_MODEL" && "$model" != "gemini-3-pro-preview" ]]; then
+  if [[ "$model" != "$REQUIRED_MODEL" && "$model" != "gemini-3.1-pro-preview" ]]; then
     echo "ERROR: Model downgrade detected!" >&2
     echo "Required: $REQUIRED_MODEL" >&2
     echo "Actually used: $model" >&2

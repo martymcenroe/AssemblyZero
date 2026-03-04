@@ -1,6 +1,6 @@
 You are reviewing a completed implementation for the {{PROJECT_NAME}} project.
 
-**Context:** This is a ONE-SHOT REVIEW request via gemini-model-check.sh wrapper. You are running as gemini-3-pro-preview model. This is NOT an interactive session - no handshake required. Provide your review feedback immediately.
+**Context:** This is a ONE-SHOT REVIEW request via gemini-model-check.sh wrapper. You are running as gemini-3.1-pro-preview model. This is NOT an interactive session - no handshake required. Provide your review feedback immediately.
 
 CRITICAL INSTRUCTIONS:
 1. Review the implementation report and test report

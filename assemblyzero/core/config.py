@@ -12,10 +12,10 @@ from pathlib import Path
 # =============================================================================
 
 # Primary review model - highest reasoning tier available
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3-pro-preview")
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-preview")
 
 # Acceptable fallback models (Pro-tier only)
-REVIEWER_MODEL_FALLBACKS = ["gemini-3.1-pro-preview"]
+REVIEWER_MODEL_FALLBACKS = ["gemini-3-pro-preview"]
 
 # Forbidden models - fail closed rather than use these
 FORBIDDEN_MODELS = [
