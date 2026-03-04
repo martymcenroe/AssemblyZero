@@ -198,6 +198,7 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         "error_message": "",
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
+        "test_plan_validation_attempts": 0,  # Issue #567: reset after review
     }
 
 

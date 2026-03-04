@@ -169,12 +169,113 @@ def fix_missing_blank_before_heading(
     return "\n".join(result), fixes
 
 
+def fix_directory_ordering(
+    draft: str, ctx: dict[str, Any]
+) -> tuple[str, list[AutoFix]]:
+    """Sort directory entries before file entries in Section 2.1 table.
+
+    Issue #566: LLD Section 2.1 (Proposed Changes) tables should list
+    directory entries before file entries so the structure reads top-down.
+    Only applies to LLD workflows.
+    """
+    if ctx.get("workflow_type") != "lld":
+        return draft, []
+
+    # Find Section 2.1
+    section_match = re.search(
+        r"(###\s*2\.1[^\n]*\n)(.*?)(?=###|\Z)", draft, re.DOTALL
+    )
+    if not section_match:
+        return draft, []
+
+    header = section_match.group(1)
+    body = section_match.group(2)
+
+    # Parse table rows (skip header row and separator)
+    lines = body.split("\n")
+    table_header_lines: list[str] = []
+    data_rows: list[str] = []
+    post_table: list[str] = []
+    in_table = False
+    past_table = False
+
+    for line in lines:
+        if past_table:
+            post_table.append(line)
+        elif line.strip().startswith("|") and not in_table:
+            in_table = True
+            table_header_lines.append(line)
+        elif in_table and line.strip().startswith("|"):
+            # Check if separator row
+            if re.match(r"^\s*\|[-| :]+\|\s*$", line):
+                table_header_lines.append(line)
+            else:
+                data_rows.append(line)
+        elif in_table and not line.strip().startswith("|"):
+            past_table = True
+            post_table.append(line)
+        else:
+            table_header_lines.append(line)
+
+    if not data_rows:
+        return draft, []
+
+    # Detect directory rows by checking the change type column
+    def _is_directory_row(row: str) -> bool:
+        cells = [c.strip() for c in row.split("|")]
+        # cells[0] is empty (before first |), cells[-1] is empty (after last |)
+        for cell in cells:
+            if "directory" in cell.lower():
+                return True
+        return False
+
+    has_directory = any(_is_directory_row(r) for r in data_rows)
+    if not has_directory:
+        return draft, []
+
+    # Check if any directory appears after a file
+    seen_file = False
+    needs_sort = False
+    for row in data_rows:
+        if _is_directory_row(row):
+            if seen_file:
+                needs_sort = True
+                break
+        else:
+            seen_file = True
+
+    if not needs_sort:
+        return draft, []
+
+    # Stable sort: directories first
+    dir_rows = [r for r in data_rows if _is_directory_row(r)]
+    file_rows = [r for r in data_rows if not _is_directory_row(r)]
+    sorted_rows = dir_rows + file_rows
+
+    # Reconstruct section body
+    new_body = "\n".join(table_header_lines + sorted_rows + post_table)
+
+    # Replace in draft
+    start = section_match.start(2)
+    end = section_match.end(2)
+    fixed = draft[:start] + new_body + draft[end:]
+
+    return fixed, [
+        AutoFix(
+            rule="directory_ordering",
+            description=f"Moved {len(dir_rows)} directory entries before {len(file_rows)} file entries in Section 2.1",
+            section="2.1",
+        )
+    ]
+
+
 # Registry of all auto-fix rules, applied in order
 PONDER_RULES = [
     fix_title_issue_number,
     fix_section_heading_format,
     fix_trailing_whitespace,
     fix_missing_blank_before_heading,
+    fix_directory_ordering,
 ]
 
 

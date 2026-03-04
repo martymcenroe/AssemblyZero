@@ -19,10 +19,10 @@ Creates a LangGraph StateGraph that connects:
 - N5: finalize (issue filing or LLD saving)
 
 Graph structure (LLD workflow):
-    START -> N0 -> N0b -> N1 -> N1.5 -> N1b -> N2 -> N3 -> N4 -> N5 -> END
-                          ^                          |         |
-                          |                          v         |
-                          +----------<---------------+---------+
+    START -> N0 -> N0b -> N1 -> Ponder -> N1.5 -> N1b -> N2 -> N3 -> N4 -> N5 -> END
+                          ^                                    |         |
+                          |                                    v         |
+                          +----------------<-------------------+---------+
 
 Issue #248 addition: After N3 (review), if open questions are UNANSWERED,
 loop back to N3 with a followup prompt. If HUMAN_REQUIRED, force N4.
@@ -118,19 +118,17 @@ def route_after_load_input(
 
 def route_after_generate_draft(
     state: RequirementsWorkflowState,
-) -> Literal["N1_5_validate_mechanical", "N2_human_gate_draft", "N3_review", "HALT"]:
+) -> Literal["N_ponder_stibbons", "N2_human_gate_draft", "N3_review", "HALT"]:
     """Route after generate_draft node.
 
     Routes to:
-    - N1_5_validate_mechanical: LLD workflow (Issue #277)
+    - N_ponder_stibbons: LLD workflow — auto-fix before validation (#565)
     - N2_human_gate_draft: Issue workflow with gate enabled
     - N3_review: Issue workflow with gate disabled
     - HALT: Error generating draft (Issue #486)
 
-    Issue #248: Pre-review validation gate removed. Drafts with open
-    questions now proceed to review where Gemini can answer them.
-
-    Issue #277: LLD workflows now go through mechanical validation first.
+    Issue #565: LLD workflows now route through Ponder (auto-fix) BEFORE
+    mechanical validation, so fixes apply before validation loops back.
 
     Args:
         state: Current workflow state.
@@ -141,9 +139,9 @@ def route_after_generate_draft(
     if state.get("error_message"):
         return "HALT"
 
-    # Issue #277: LLD workflows go through mechanical validation
+    # Issue #565: LLD workflows go through Ponder auto-fix first
     if state.get("workflow_type") == "lld":
-        return "N1_5_validate_mechanical"
+        return "N_ponder_stibbons"
 
     # Issue workflows skip mechanical validation
     if state.get("config_gates_draft", True):
@@ -195,15 +193,16 @@ def route_after_validate_mechanical(
 
 def route_after_validate_test_plan(
     state: RequirementsWorkflowState,
-) -> Literal["N_ponder_stibbons", "N1_generate_draft", "HALT"]:
+) -> Literal["N2_human_gate_draft", "N3_review", "N1_generate_draft", "HALT"]:
     """Route after validate_test_plan node.
 
     Issue #166: Routes based on test plan validation result.
-    Issue #307: Pass now routes to Ponder (auto-fix) before N2/N3.
+    Issue #565: Pass now routes to N2/N3 (Ponder already ran before validation).
     Issue #486: Error/max-iteration routes to HALT.
 
     Routes to:
-    - N_ponder_stibbons: Validation passed, apply auto-fixes
+    - N2_human_gate_draft: Validation passed, gate enabled
+    - N3_review: Validation passed, gate disabled
     - N1_generate_draft: Validation failed, return to drafter
     - HALT: Error or max iterations reached
 
@@ -228,17 +227,20 @@ def route_after_validate_test_plan(
         print("    [ROUTING] Test plan validation failed - returning to drafter")
         return "N1_generate_draft"
 
-    # Validation passed - route through Ponder for auto-fixes (Issue #307)
-    return "N_ponder_stibbons"
+    # Issue #565: Validation passed — proceed to human gate or review
+    if state.get("config_gates_draft", True):
+        return "N2_human_gate_draft"
+    else:
+        return "N3_review"
 
 
 def route_after_ponder(
     state: RequirementsWorkflowState,
-) -> Literal["N2_human_gate_draft", "N3_review"]:
+) -> Literal["N1_5_validate_mechanical"]:
     """Route after Ponder Stibbons auto-fix node.
 
-    Issue #307: After auto-fixes, proceed to human gate or review.
-    Ponder never routes back to drafter — it only fixes mechanical issues.
+    Issue #565: Ponder now runs BEFORE validation. Always proceeds to
+    mechanical validation (N1.5) so fixes are validated immediately.
 
     Args:
         state: Current workflow state.
@@ -246,10 +248,7 @@ def route_after_ponder(
     Returns:
         Next node name.
     """
-    if state.get("config_gates_draft", True):
-        return "N2_human_gate_draft"
-    else:
-        return "N3_review"
+    return "N1_5_validate_mechanical"
 
 
 def route_from_human_gate_draft(
@@ -482,13 +481,13 @@ def create_requirements_graph() -> StateGraph:
     # N0b -> N1 (always proceeds to draft generation)
     graph.add_edge(N0B_ANALYZE_CODEBASE, N1_GENERATE_DRAFT)
 
-    # N1 -> N1.5 (LLD) or N2 or N3 or HALT (based on workflow type, gates, error)
-    # Issue #277: LLD workflows go through mechanical validation
+    # N1 -> Ponder (LLD) or N2 or N3 or HALT (based on workflow type, gates, error)
+    # Issue #565: LLD workflows go through Ponder auto-fix first
     graph.add_conditional_edges(
         N1_GENERATE_DRAFT,
         route_after_generate_draft,
         {
-            "N1_5_validate_mechanical": N1_5_VALIDATE_MECHANICAL,
+            "N_ponder_stibbons": N_PONDER,
             "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
             "N3_review": N3_REVIEW,
             "HALT": HALT,
@@ -508,26 +507,25 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N1b -> Ponder or N1 or HALT (based on test plan validation)
-    # Issue #166: Test plan validation routes
-    # Issue #307: Pass goes through Ponder before N2/N3
+    # N1b -> N2 or N3 or N1 or HALT (based on test plan validation)
+    # Issue #565: Pass goes to N2/N3 (Ponder already ran before validation)
     graph.add_conditional_edges(
         N1B_VALIDATE_TEST_PLAN,
         route_after_validate_test_plan,
         {
-            "N_ponder_stibbons": N_PONDER,
+            "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
+            "N3_review": N3_REVIEW,
             "N1_generate_draft": N1_GENERATE_DRAFT,
             "HALT": HALT,
         },
     )
 
-    # Ponder -> N2 or N3 (Issue #307: always proceeds after auto-fix)
+    # Ponder -> N1.5 (Issue #565: auto-fix before validation)
     graph.add_conditional_edges(
         N_PONDER,
         route_after_ponder,
         {
-            "N2_human_gate_draft": N2_HUMAN_GATE_DRAFT,
-            "N3_review": N3_REVIEW,
+            "N1_5_validate_mechanical": N1_5_VALIDATE_MECHANICAL,
         },
     )
 

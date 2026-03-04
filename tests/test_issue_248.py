@@ -30,6 +30,7 @@ from assemblyzero.workflows.requirements.graph import (
     route_after_generate_draft,
     route_after_validate_mechanical,
     route_after_validate_test_plan,
+    route_after_ponder,
     route_after_review,
 )
 
@@ -219,17 +220,17 @@ def test_t010(draft_with_open_questions, mock_state_base):
     result_after_test_plan = route_after_validate_test_plan(state)
 
     # TDD: Assert
-    # Step 1: After draft, LLD workflows go to mechanical validation
-    assert result_after_draft == "N1_5_validate_mechanical", \
-        "LLD workflows should go to mechanical validation after draft (Issue #277)"
+    # Step 1: After draft, LLD workflows go to Ponder auto-fix (#565)
+    assert result_after_draft == "N_ponder_stibbons", \
+        "LLD workflows should go to Ponder after draft (#565)"
 
     # Step 2: After mechanical validation passes, go to test plan validation (Issue #166)
     assert result_after_validation == "N1b_validate_test_plan", \
         "After mechanical validation passes, should proceed to test plan validation"
 
-    # Step 3: After test plan validation passes, proceed through Ponder (Issue #307)
-    assert result_after_test_plan == "N_ponder_stibbons", \
-        "After test plan validation passes, should proceed to Ponder auto-fix"
+    # Step 3: After test plan validation passes, proceed to review (#565, gates disabled)
+    assert result_after_test_plan == "N3_review", \
+        "After test plan validation passes, should proceed to review (#565)"
 
 
 def test_t020(draft_with_open_questions, verdict_with_resolved_questions):
@@ -390,15 +391,15 @@ def test_010(draft_with_open_questions, mock_state_base):
 
     # TDD: Assert
     assert has_questions, "Draft should have unchecked open questions"
-    # Issue #277: LLD workflows go to N1.5 first
-    assert route_after_draft == "N1_5_validate_mechanical", \
-        "LLD workflows go to mechanical validation after draft"
+    # Issue #565: LLD workflows go to Ponder first
+    assert route_after_draft == "N_ponder_stibbons", \
+        "LLD workflows go to Ponder after draft (#565)"
     # Issue #166: Then N1b test plan validation
     assert route_after_validation == "N1b_validate_test_plan", \
         "After mechanical validation passes, go to test plan validation"
-    # Issue #307: Then through Ponder auto-fix before review
-    assert route_after_test_plan == "N_ponder_stibbons", \
-        "Should proceed to Ponder auto-fix after test plan validation passes"
+    # Issue #565: Then to review (gates disabled)
+    assert route_after_test_plan == "N3_review", \
+        "Should proceed to review after test plan validation passes (#565)"
 
 
 def test_020(draft_with_open_questions, verdict_with_resolved_questions):
@@ -522,3 +523,19 @@ def test_070():
     else:
         # File not found at test location - skip
         pytest.skip("Prompt file not found in expected location")
+
+
+def test_lld_routes_through_ponder_before_validation(mock_state_base):
+    """Issue #565: LLD draft routes to Ponder first, then to N1.5."""
+    state = mock_state_base.copy()
+    state["workflow_type"] = "lld"
+
+    # After draft, LLD goes to Ponder
+    result = route_after_generate_draft(state)
+    assert result == "N_ponder_stibbons", \
+        "LLD should route to Ponder after draft (#565)"
+
+    # After Ponder, always goes to mechanical validation
+    result = route_after_ponder(state)
+    assert result == "N1_5_validate_mechanical", \
+        "Ponder should always route to mechanical validation (#565)"
