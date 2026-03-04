@@ -32,6 +32,31 @@ def pytest_configure(config):
     )
 
 
+_MODULE_SNAPSHOT_KEYS = [
+    "assemblyzero.workflows.testing.nodes.review_test_plan",
+    "assemblyzero.core.config",
+    "assemblyzero.core.gemini_client",
+]
+
+
+@pytest.fixture(autouse=True)
+def _restore_review_test_plan_module():
+    """Prevent module-replacement pollution across test files.
+
+    Some tests (test_testing_workflow.py) delete and reimport
+    review_test_plan under mocked conditions. Without cleanup the
+    stale module stays in sys.modules, breaking @patch targets in
+    later test files.
+    """
+    saved = {k: sys.modules.get(k) for k in _MODULE_SNAPSHOT_KEYS}
+    yield
+    for key, mod in saved.items():
+        if mod is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = mod
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.
