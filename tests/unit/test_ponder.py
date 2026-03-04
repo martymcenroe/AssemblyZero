@@ -13,6 +13,7 @@ from assemblyzero.workflows.requirements.nodes.ponder_rules import (
     fix_section_heading_format,
     fix_trailing_whitespace,
     fix_missing_blank_before_heading,
+    fix_directory_ordering,
 )
 from assemblyzero.workflows.requirements.nodes.ponder import (
     ponder_stibbons_node,
@@ -224,3 +225,72 @@ class TestPonderStibbonsNode:
         saved = draft_file.read_text(encoding="utf-8")
         assert "# 99 -" in saved
         assert saved == result["current_draft"]
+
+
+class TestFixDirectoryOrdering:
+    """Tests for directory ordering auto-fix rule (Issue #566)."""
+
+    def test_moves_directories_before_files(self):
+        draft = (
+            "### 2.1 Proposed Changes\n"
+            "| Path | Change Type |\n"
+            "|------|-------------|\n"
+            "| src/foo.py | Modify file |\n"
+            "| src/bar/ | Create directory |\n"
+            "| src/baz.py | Create file |\n"
+        )
+        fixed, fixes = fix_directory_ordering(draft, {"workflow_type": "lld"})
+        assert len(fixes) == 1
+        assert fixes[0].rule == "directory_ordering"
+        # Directory row should come before file rows
+        dir_pos = fixed.index("directory")
+        file_pos = fixed.index("foo.py")
+        assert dir_pos < file_pos
+
+    def test_no_change_when_already_ordered(self):
+        draft = (
+            "### 2.1 Proposed Changes\n"
+            "| Path | Change Type |\n"
+            "|------|-------------|\n"
+            "| src/bar/ | Create directory |\n"
+            "| src/foo.py | Modify file |\n"
+            "| src/baz.py | Create file |\n"
+        )
+        fixed, fixes = fix_directory_ordering(draft, {"workflow_type": "lld"})
+        assert fixed == draft
+        assert len(fixes) == 0
+
+    def test_no_change_for_issue_workflow(self):
+        draft = (
+            "### 2.1 Proposed Changes\n"
+            "| Path | Change Type |\n"
+            "|------|-------------|\n"
+            "| src/foo.py | Modify file |\n"
+            "| src/bar/ | Create directory |\n"
+        )
+        fixed, fixes = fix_directory_ordering(draft, {"workflow_type": "issue"})
+        assert fixed == draft
+        assert len(fixes) == 0
+
+    def test_no_change_without_section_21(self):
+        draft = (
+            "### 2.2 Other Section\n"
+            "| Path | Change Type |\n"
+            "|------|-------------|\n"
+            "| src/foo.py | Modify file |\n"
+        )
+        fixed, fixes = fix_directory_ordering(draft, {"workflow_type": "lld"})
+        assert fixed == draft
+        assert len(fixes) == 0
+
+    def test_no_change_when_no_directories(self):
+        draft = (
+            "### 2.1 Proposed Changes\n"
+            "| Path | Change Type |\n"
+            "|------|-------------|\n"
+            "| src/foo.py | Modify file |\n"
+            "| src/bar.py | Create file |\n"
+        )
+        fixed, fixes = fix_directory_ordering(draft, {"workflow_type": "lld"})
+        assert fixed == draft
+        assert len(fixes) == 0

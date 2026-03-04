@@ -3,6 +3,8 @@
 Issue #166: Test IDs match LLD Section 10.0 (T110-T130).
 """
 
+from pathlib import Path
+
 import pytest
 
 from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
@@ -94,8 +96,8 @@ class TestNodeRoutesToGeminiOnPass:
         assert result["error_message"] == ""
         assert result["test_plan_validation_attempts"] == 1
 
-    def test_routing_passes_to_ponder(self):
-        """T110: Route function sends to Ponder on pass (Issue #307)."""
+    def test_routing_passes_to_human_gate(self):
+        """T110: Route function sends to N2 on pass with gates enabled (#565)."""
         state = _make_state(
             current_draft=LLD_PASSING,
             test_plan_validation_result={"passed": True},
@@ -103,17 +105,17 @@ class TestNodeRoutesToGeminiOnPass:
             error_message="",
         )
         route = route_after_validate_test_plan(state)
-        assert route == "N_ponder_stibbons"
+        assert route == "N2_human_gate_draft"
 
-    def test_routing_passes_to_ponder_gates_disabled(self):
-        """Routing sends to Ponder on pass regardless of gate config (Issue #307)."""
+    def test_routing_passes_to_review_gates_disabled(self):
+        """Routing sends to N3 on pass with gates disabled (#565)."""
         state = _make_state(
             test_plan_validation_result={"passed": True},
             config_gates_draft=False,
             error_message="",
         )
         route = route_after_validate_test_plan(state)
-        assert route == "N_ponder_stibbons"
+        assert route == "N3_review"
 
 
 # =============================================================================
@@ -202,6 +204,36 @@ class TestNodeEdgeCases:
         state = _make_state(iteration_count=5, current_draft=LLD_PASSING)
         result = validate_test_plan_node(state)
         assert result["iteration_count"] == 6
+
+
+class TestCounterResetAfterReview:
+    """Issue #567: test_plan_validation_attempts resets after Gemini review."""
+
+    def test_review_resets_counter(self):
+        """Review node return dict includes test_plan_validation_attempts: 0."""
+        from assemblyzero.workflows.requirements.nodes.review import review
+
+        state = {
+            "workflow_type": "lld",
+            "assemblyzero_root": str(Path(__file__).parent.parent.parent),
+            "target_repo": "/fake/repo",
+            "config_mock_mode": True,
+            "config_reviewer": "mock:review",
+            "config_gates_draft": True,
+            "config_gates_verdict": True,
+            "audit_dir": "/tmp/fake_audit",
+            "current_draft": "# 99 - Feature\n\n## 1. Context\n\nContent.\n",
+            "verdict_history": [],
+            "verdict_count": 0,
+            "iteration_count": 1,
+            "max_iterations": 20,
+            "test_plan_validation_attempts": 2,
+            "cost_budget_usd": 0.0,
+            "node_costs": {},
+            "node_tokens": {},
+        }
+        result = review(state)
+        assert result["test_plan_validation_attempts"] == 0
 
 
 class TestBuildValidationFeedback:
