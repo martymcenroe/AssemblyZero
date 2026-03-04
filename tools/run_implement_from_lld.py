@@ -772,8 +772,8 @@ def main():
                     if node_name == "__end__":
                         continue
 
-                    # Check for errors
-                    error = node_output.get("error_message", "")
+                    # Check for errors (node_output may be None/empty)
+                    error = (node_output or {}).get("error_message", "")
                     if error:
                         print(f"\n[ERROR] {error}")
                         if "GUARD" in error or "BLOCKED" in error:

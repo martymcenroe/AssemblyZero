@@ -435,3 +435,86 @@ class TestScaffoldIntegration:
             ast.parse(content)
         except SyntaxError as e:
             pytest.fail(f"Generated test is not valid Python: {e}")
+
+
+# =============================================================================
+# Test: Issue #571 — Regeneration vs resume
+# =============================================================================
+
+
+class TestRegenerationDeletesStaleFiles:
+    """Issue #571: Scaffold must delete stale files on regeneration."""
+
+    def test_regeneration_deletes_stale_files(self, tmp_path):
+        """When scaffold_validation_errors exist, stale files are deleted and re-scaffolded."""
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
+
+        # First scaffold to create a file
+        state = {
+            "issue_number": 571,
+            "test_scenarios": [
+                {
+                    "name": "test_example",
+                    "description": "Example test",
+                    "requirement_ref": "R001",
+                    "test_type": "unit",
+                    "mock_needed": False,
+                    "assertions": ["result equals expected"],
+                }
+            ],
+            "files_to_modify": [{"path": "mymodule.py", "change_type": "Add"}],
+            "repo_root": str(tmp_path),
+            "audit_dir": str(tmp_path / "audit"),
+        }
+        (tmp_path / "audit").mkdir()
+
+        result1 = scaffold_tests(state)
+        assert result1.get("test_files")
+        test_file = Path(result1["test_files"][0])
+        assert test_file.exists()
+
+        # Write known content to detect if file gets regenerated
+        test_file.write_text("# STALE CONTENT", encoding="utf-8")
+
+        # Simulate regeneration: validation errors present, files exist
+        state["test_files"] = result1["test_files"]
+        state["scaffold_validation_errors"] = ["Empty test file"]
+
+        result2 = scaffold_tests(state)
+
+        # Should have regenerated (not skipped)
+        assert result2.get("test_files")
+        content = test_file.read_text(encoding="utf-8")
+        assert "STALE CONTENT" not in content
+
+    def test_resume_skips_when_no_errors(self, tmp_path):
+        """Without validation errors, existing files cause skip (resume behavior)."""
+        from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
+
+        # Create a test file
+        test_file = tmp_path / "tests" / "test_issue_571.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("# EXISTING", encoding="utf-8")
+
+        state = {
+            "issue_number": 571,
+            "test_files": [str(test_file)],
+            "test_scenarios": [
+                {
+                    "name": "test_example",
+                    "description": "Example",
+                    "requirement_ref": "R001",
+                    "test_type": "unit",
+                    "mock_needed": False,
+                    "assertions": ["passes"],
+                }
+            ],
+            "repo_root": str(tmp_path),
+        }
+
+        result = scaffold_tests(state)
+
+        # Should skip (return empty dict)
+        assert result == {}
+        # File should be untouched
+        assert test_file.read_text(encoding="utf-8") == "# EXISTING"

@@ -362,7 +362,7 @@ def run_new_workflow(
                         # Process each node's output
                         for node_name, node_output in event.items():
                             print(f"\n>>> Executing: {node_name}")
-                            if node_output.get("error_message"):
+                            if (node_output or {}).get("error_message"):
                                 error = node_output["error_message"]
                                 if error.startswith("SLUG_COLLISION:"):
                                     # Handle collision mid-stream (shouldn't happen, but safety)
@@ -530,7 +530,7 @@ def run_resume_workflow(brief_file: str, repo_root: Path | None = None) -> int:
                     for event in app.stream(None, config):
                         for node_name, node_output in event.items():
                             print(f"\n>>> Executing: {node_name}")
-                            if node_output.get("error_message"):
+                            if (node_output or {}).get("error_message"):
                                 error = node_output["error_message"]
                                 if "ABORTED" in error or "MANUAL" in error:
                                     print(f"\n>>> Workflow stopped: {error}")

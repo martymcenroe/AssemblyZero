@@ -583,11 +583,12 @@ def run_workflow(
                 if node_name == "__end__":
                     continue
 
-                # Accumulate state updates from each node
-                final_state.update(node_output)
+                # Accumulate state updates from each node (Issue #571)
+                if node_output:
+                    final_state.update(node_output)
 
-                # Check for errors from nodes
-                error = node_output.get("error_message", "")
+                # Check for errors from nodes (node_output may be None)
+                error = (node_output or {}).get("error_message", "")
                 if error:
                     print(f"\n[ERROR] {error}")
 
