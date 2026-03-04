@@ -16,6 +16,10 @@ Worktree isolation: required
 - `tools/` — Shared tooling (merge, batch-workflow, gemini-model-check)
 - `docs/standards/` — Engineering standards (0001–0999)
 
+## Cascade Prevention
+
+After completing a task, ask "What would you like to work on next?" as an open-ended question. Never offer numbered yes/no options or suggest continuing to the next issue unprompted.
+
 ## Merging PRs
 
 NEVER use `gh pr merge` directly. Always follow post-merge cleanup:
