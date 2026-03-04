@@ -147,7 +147,7 @@ class TestArgumentParsing:
             "--issue", "42",
         ])
 
-        assert args.drafter == "claude:opus"
+        assert args.drafter == "claude:sonnet"
         assert args.reviewer == "gemini:3.1-pro-preview"
         assert args.review == "none"
         assert args.mock is False
