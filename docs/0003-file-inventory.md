@@ -71,6 +71,12 @@
 | `0211-rag-architecture.md` | Stable | RAG architecture (Brutha foundation) |
 | `0212-local-only-embeddings.md` | Stable | Local-only embeddings policy |
 
+### Research (02xx-R) - 1 file
+
+| File | Status | Description |
+|------|--------|-------------|
+| `research/0258-mcp-openclaw-investigation.md` | Stable | MCP and OpenClaw for coordination |
+
 ### Skills (06xx) - 28 files
 
 Skill documentation uses the c/p convention (CLI + Prompt pairs).
