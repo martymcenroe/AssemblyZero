@@ -47,6 +47,7 @@ Routing is controlled by:
 from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
+from assemblyzero.telemetry import emit
 
 from assemblyzero.workflows.requirements.nodes import (
     analyze_codebase,
@@ -180,9 +181,10 @@ def route_after_validate_mechanical(
 
         # Check max iterations before looping back
         iteration_count = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 20)
+        max_iterations = state.get("max_iterations", 3)
         if iteration_count >= max_iterations:
             print(f"    [ROUTING] Max iterations ({max_iterations}) reached with validation errors - halting")
+            emit("workflow.halt_and_plan", repo=state.get("repo_root", ""), metadata={"reason": "max_iterations_mechanical", "issue": state.get("issue_number")})
             return "HALT"
         print("    [ROUTING] Mechanical validation failed - returning to drafter")
         return "N1_generate_draft"
@@ -220,7 +222,7 @@ def route_after_validate_test_plan(
     if result and not result.get("passed", False):
         # Check max iterations before looping back
         iteration_count = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 20)
+        max_iterations = state.get("max_iterations", 3)
         if iteration_count >= max_iterations:
             print(f"    [ROUTING] Max iterations ({max_iterations}) reached with test plan errors - halting")
             return "HALT"
@@ -313,7 +315,7 @@ def route_after_review(
     # But respect max_iterations to prevent infinite loops
     if open_questions_status == "UNANSWERED":
         iteration_count = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 20)
+        max_iterations = state.get("max_iterations", 3)
         if iteration_count >= max_iterations:
             print(f"    [ROUTING] Max iterations ({max_iterations}) reached with unanswered questions - going to human gate")
             return "N4_human_gate_verdict"
@@ -337,11 +339,12 @@ def route_after_review(
                 from assemblyzero.core.verdict_schema import same_blocking_issues
                 if same_blocking_issues(current_feedback, previous_feedback):
                     print("    [HALT] Two consecutive BLOCKED verdicts with same issues. Halting.")
+                    emit("workflow.halt_and_plan", repo=state.get("repo_root", ""), metadata={"reason": "stagnation", "issue": state.get("issue_number")})
                     return "HALT"
 
             # Check max iterations before looping back
             iteration_count = state.get("iteration_count", 0)
-            max_iterations = state.get("max_iterations", 20)
+            max_iterations = state.get("max_iterations", 3)
             if iteration_count >= max_iterations:
                 # Max iterations reached - finalize with current status
                 return "N5_finalize"

@@ -261,7 +261,7 @@ def create_initial_state(
     gates_verdict: bool = True,
     auto_mode: bool = False,
     mock_mode: bool = False,
-    max_iterations: int = 20,
+    max_iterations: int = 3,
     # Issue-specific
     brief_file: str = "",
     source_idea: str = "",

@@ -380,4 +380,4 @@ class TestGraphRoutingExtended:
             # max_iterations not set - should default to 20
         }
         result = route_after_review(state)
-        assert result == "N1_generate_draft"  # Under default max of 20
+        assert result == "N5_finalize"  # Over default max of 3

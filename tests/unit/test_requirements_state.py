@@ -169,7 +169,7 @@ class TestCreateInitialState:
         assert state["iteration_count"] == 0
         assert state["draft_count"] == 0
         assert state["verdict_count"] == 0
-        assert state["max_iterations"] == 20
+        assert state["max_iterations"] == 3
 
     def test_artifact_defaults(self):
         """Test artifact defaults."""

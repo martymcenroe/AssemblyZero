@@ -95,7 +95,7 @@ class WorkflowConfig:
     draft_template_path: Path = field(default_factory=lambda: Path(""))
     review_prompt_path: Path = field(default_factory=lambda: Path(""))
     gates: GateConfig = field(default_factory=GateConfig)
-    max_iterations: int = 20
+    max_iterations: int = 3
     auto_mode: bool = False
     mock_mode: bool = False
     debug_mode: bool = False
@@ -161,7 +161,7 @@ def create_issue_config(
     drafter: str = "claude:sonnet",
     reviewer: str = "gemini:3.1-pro-preview",
     gates: str = "none",
-    max_iterations: int = 20,
+    max_iterations: int = 3,
     auto_mode: bool = False,
     mock_mode: bool = False,
     debug_mode: bool = False,
@@ -201,7 +201,7 @@ def create_lld_config(
     drafter: str = "claude:sonnet",
     reviewer: str = "gemini:3.1-pro-preview",
     gates: str = "none",
-    max_iterations: int = 20,
+    max_iterations: int = 3,
     auto_mode: bool = False,
     mock_mode: bool = False,
     debug_mode: bool = False,
