@@ -66,7 +66,23 @@ When proposing a **NEW MAJOR TASK** (e.g., starting a new Issue worktree, mergin
 2.  **Format:** "To proceed, please type: **'EXECUTE <TASK_ID>'**."
 3.  **Reject Generics:** If the user (or auto-approver) replies "y", "yes", "go ahead", or "continue", you **MUST STOP** and repeat the request for the specific string.
 
-**Example:**
-> Agent: "Ready to start Issue #99. To confirm, please type: **'START 99'**."
-> User: "y"
-> Agent: "STOP. Auto-approval detected. Please type **'START 99'** to confirm."
+---
+
+## 8. The Perdita Protocol (Babysit Mode)
+
+**Shorthand:** "Babysit <IssueID>"
+
+When this command is issued, the agent operates in a high-autonomy, low-intervention mode governed by **Perdita X. Dream** (the watchful inner mind).
+
+### 8.1 Core Principles
+1.  **Isolation:** Always create a worktree `../AssemblyZero-{ID}` and branch `{ID}-fix`.
+2.  **Two-Strike Rule:** Enforce `MAX_FILE_RETRIES=2` and `max_iterations=3` globally. No "trying one more time."
+3.  **Mechanical Guardrails:** Every turn must be validated by non-LLM logic (e.g., File Size Safety Gate #587).
+4.  **Surgical Context:** For retries, prune context to only the LLD + the failing file's current content to save tokens.
+5.  **Halt-on-Stagnation:** If the same error occurs twice, or if `iteration_count` exceeds limits, the agent must **Halt and Plan**, saving a `recovery_plan.md` in the worktree.
+
+### 8.2 Operational Steps
+1.  **Initialize:** Create worktree and isolated branch.
+2.  **Execute:** Run the relevant workflow tools (TDD, LLD, or Issue).
+3.  **Monitor:** Watch the audit log (`workflow-audit.jsonl`) and cost budget.
+4.  **Cleanup:** Finalize the issue only when tests are Green, LLD is moved to `done/`, and the worktree is deleted.
