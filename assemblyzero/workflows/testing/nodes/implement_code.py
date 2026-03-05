@@ -51,7 +51,7 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 
 # Issue #309: Maximum retry attempts per file
-MAX_FILE_RETRIES = 3
+MAX_FILE_RETRIES = 2
 
 # Issue #324: Large file thresholds for diff-based generation
 LARGE_FILE_LINE_THRESHOLD = 500  # Lines
@@ -190,7 +190,7 @@ def extract_code_block(response: str, file_path: str = "") -> str | None:
     return best_match or fallback_match
 
 
-def validate_code_response(code: str, filepath: str) -> tuple[bool, str]:
+def validate_code_response(code: str, filepath: str, existing_content: str = "") -> tuple[bool, str]:
     """Mechanically validate code. No LLM judgment.
 
     Returns (valid, error_message).
@@ -212,6 +212,15 @@ def validate_code_response(code: str, filepath: str) -> tuple[bool, str]:
         )
         if not short_ok and len(lines) < 2:
             return False, f"Code too short ({len(lines)} lines)"
+
+    # Issue #587: Mechanical File Size Safety Gate
+    if existing_content:
+        existing_lines = existing_content.strip().split("\n")
+        # Only apply check if existing file is non-trivial (>10 lines)
+        if len(existing_lines) > 10:
+            new_lines = len(lines)
+            if new_lines < len(existing_lines) * 0.5:
+                return False, f"Mechanical Size Gate: File shrank drastically from {len(existing_lines)} lines to {new_lines} lines. You must output the ENTIRE file without using placeholders."
 
     # Python syntax validation
     if filepath.endswith(".py"):
@@ -1035,6 +1044,8 @@ def generate_file_with_retry(
     base_prompt: str,
     audit_dir: Path | None = None,
     max_retries: int = MAX_FILE_RETRIES,
+    pruned_prompt: str = "",
+    existing_content: str = "",
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure.
 
@@ -1061,7 +1072,7 @@ def generate_file_with_retry(
 
         # Build retry prompt if this isn't the first attempt
         if attempt > 0:
-            prompt = build_retry_prompt(base_prompt, last_error, attempt_num)
+            prompt = build_retry_prompt(pruned_prompt or base_prompt, last_error, attempt_num)
             print(f"        [RETRY {attempt_num}/{max_retries}] {last_error[:80]}...")
 
         # Save prompt to audit
@@ -1136,7 +1147,7 @@ def generate_file_with_retry(
                 )
 
         # Validate code mechanically
-        valid, validation_error = validate_code_response(code, filepath)
+        valid, validation_error = validate_code_response(code, filepath, existing_content)
 
         if not valid:
             last_error = f"Validation failed: {validation_error}"
@@ -1306,6 +1317,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     for i, file_spec in enumerate(files_to_modify):
         filepath = file_spec["path"]
         change_type = file_spec.get("change_type", "Add")
+        
+        existing_content = ""
+        target_path = repo_root / filepath
+        if change_type.lower() == "modify" and target_path.exists():
+            try:
+                existing_content = target_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
 
         print(f"\n    [{i+1}/{len(files_to_modify)}] {filepath} ({change_type})...")
 
@@ -1405,6 +1424,21 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             repo_structure=repo_structure,
         )
 
+        # Issue #588: Pruned prompt for retries (no completed_files context)
+        pruned_prompt = build_single_file_prompt(
+            filepath=filepath,
+            file_spec=file_spec,
+            lld_content=lld_content,
+            completed_files=[],  # <-- PRUNED
+            repo_root=repo_root,
+            test_content=test_content,
+            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
+            if iteration_count > 0 else "",
+            path_enforcement_section=path_enforcement_section,
+            context_content=state.get("context_content", ""),
+            repo_structure=repo_structure,
+        )
+
         # Call Claude with retry logic (Issue #309)
         # Issue #267: Progress feedback during long API calls
         with ProgressReporter("Calling Claude", interval=15):
@@ -1413,6 +1447,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 base_prompt=prompt,
                 audit_dir=audit_dir if audit_dir.exists() else None,
                 max_retries=MAX_FILE_RETRIES,
+                pruned_prompt=pruned_prompt,
+                existing_content=existing_content,
             )
         # Note: generate_file_with_retry raises ImplementationError on failure,
         # so if we get here, code is valid

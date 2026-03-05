@@ -309,7 +309,7 @@ class TestEdgeCases:
 
     def test_max_file_retries_constant(self):
         """MAX_FILE_RETRIES constant is set correctly."""
-        assert MAX_FILE_RETRIES == 3
+        assert MAX_FILE_RETRIES == 2
 
     def test_no_code_block_triggers_retry(self, base_prompt, valid_python_code):
         """Missing code block triggers retry."""
