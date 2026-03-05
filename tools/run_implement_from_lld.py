@@ -381,7 +381,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-iterations",
         type=int,
-        default=5,
+        default=3,
         help="Maximum implementation iterations (default: 5)",
     )
     parser.add_argument(
