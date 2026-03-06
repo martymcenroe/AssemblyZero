@@ -1,3 +1,4 @@
+```python
 """LLM Provider abstraction for pluggable model support.
 
 Issue #101: Unified Governance Workflow
@@ -1224,3 +1225,4 @@ def get_provider(spec: str) -> LLMProvider:
             f"Unknown provider '{provider}'. "
             f"Supported: claude, anthropic, gemini, mock"
         )
+```

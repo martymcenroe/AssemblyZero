@@ -1,0 +1,86 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-605
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 41 items
+
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_loads_defaults_when_no_file PASSED [  2%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_loads_custom_values PASSED [  4%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_handles_invalid_json PASSED [  7%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_auto_format_selection_windows PASSED [  9%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_auto_format_selection_unix PASSED [ 12%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_missing_key_falls_back_to_defaults PASSED [ 14%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_path_traversal_sanitized PASSED [ 17%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_unix_format_explicit PASSED [ 19%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_windows_format_explicit PASSED [ 21%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_reload_picks_up_changes PASSED [ 24%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_missing_version_uses_defaults PASSED [ 26%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_empty_file_uses_defaults PASSED [ 29%]
+tests/test_assemblyzero_config.py::TestAssemblyZeroConfig::test_convenience_methods PASSED [ 31%]
+tests/test_assemblyzero_config.py::TestValidateSchema::test_valid_schema PASSED [ 34%]
+tests/test_assemblyzero_config.py::TestValidateSchema::test_missing_paths_key PASSED [ 36%]
+tests/test_assemblyzero_config.py::TestSanitizePath::test_removes_forward_slash_traversal PASSED [ 39%]
+tests/test_assemblyzero_config.py::TestSanitizePath::test_removes_backslash_traversal PASSED [ 41%]
+tests/test_assemblyzero_config.py::TestSanitizePath::test_clean_path_unchanged PASSED [ 43%]
+tests/test_assemblyzero_config.py::TestSanitizePath::test_bypass_attempt_blocked PASSED [ 46%]
+tests/test_assemblyzero_config.py::TestSanitizePath::test_multiple_traversal_layers PASSED [ 48%]
+tests/test_assemblyzero_config.py::TestModelIdVerification::test_t010_gemini_model_id_is_3_1 PASSED [ 51%]
+tests/test_assemblyzero_config.py::TestModelIdVerification::test_t020_claude_model_id_is_4_6 FAILED [ 53%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_130_forbidden_model_rejected_flash PASSED [ 56%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_130_forbidden_model_rejected_lite PASSED [ 58%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_130_forbidden_model_rejected_old_3_pro PASSED [ 60%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_130_forbidden_model_rejected_old_3_pro_ga PASSED [ 63%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_valid_pro_model_accepted PASSED [ 65%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_non_gemini_model_rejected PASSED [ 68%]
+tests/test_gemini_client.py::TestGeminiClientModelValidation::test_120_model_id_is_gemini_3_1 PASSED [ 70%]
+tests/test_gemini_client.py::TestCredentialLoading::test_loads_credentials_from_file PASSED [ 73%]
+tests/test_gemini_client.py::TestCredentialLoading::test_missing_credentials_file_raises PASSED [ 75%]
+tests/test_gemini_client.py::TestErrorClassification::test_quota_exhausted_detection PASSED [ 78%]
+tests/test_gemini_client.py::TestErrorClassification::test_capacity_exhausted_detection PASSED [ 80%]
+tests/test_gemini_client.py::TestErrorClassification::test_auth_error_detection PASSED [ 82%]
+tests/test_gemini_client.py::TestRotationLogic::test_090_429_triggers_rotation PASSED [ 85%]
+tests/test_gemini_client.py::TestRotationLogic::test_100_529_triggers_backoff PASSED [ 87%]
+tests/test_gemini_client.py::TestRotationLogic::test_110_all_credentials_exhausted PASSED [ 90%]
+tests/test_gemini_client.py::TestBackoffDelay::test_exponential_backoff PASSED [ 92%]
+tests/test_gemini_client.py::TestBackoffDelay::test_backoff_max_cap PASSED [ 95%]
+tests/test_gemini_client.py::TestResetTimeParsing::test_parses_reset_time PASSED [ 97%]
+tests/test_gemini_client.py::TestResetTimeParsing::test_returns_none_for_unparseable PASSED [100%]
+
+================================== FAILURES ===================================
+__________ TestModelIdVerification.test_t020_claude_model_id_is_4_6 ___________
+tests\test_assemblyzero_config.py:450: in test_t020_claude_model_id_is_4_6
+    assert 'claude-4.6' in provider_source, (
+E   AssertionError: llm_provider.py must reference claude-4.6 model
+E   assert 'claude-4.6' in '"""LLM Provider abstraction for pluggable model support.\n\nIssue #101: Unified Governance Workflow\nIssue #395: Anthropic API provider with CLI->API fallback\nIssue #605: Systemic Model Refresh � Gemini 3.1, Claude 4.6\n\nProvides a unified interface for calling different LLM providers:\n- Claude CLI (via claude -p CLI, uses Max subscription)\n- Anthropic API (direct API calls, requires ANTHROPIC_API_KEY in .env)\n- Gemini (via GeminiClient with credential rotation)\n- OpenAI (future)\n- Ollama (future)\n\nSpec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:3.1-pro-preview")\n\nThe "claude:" prefix uses CLI first (free via Max subscription), and automatically\nfalls back to the Anthropic API if an API key is configured in .env.\n"""\n\nimport json\nimport os\nimport shutil\nimport subprocess\nimport sys\nimport time\nfrom abc import ABC, abstractmethod\nfrom dataclasses import dataclass, field\nfrom pathlib import Path\nfrom typing import Optional\n\nfrom assemblyzero.core.errors import (\n    APIError,\n    AuthenticationError,\n    BillingError,\n    RateLimitError,\n    ServerError,\n    TimeoutError_,\n    classify_anthropic_error,\n)\nfrom assemblyz...haiku",\n              or "gemini:3.1-pro-preview".\n\n    Returns:\n        Configured LLMProvider instance.\n\n    Raises:\n        ValueError: If provider or model is not recognized.\n\n    Examples:\n        >>> drafter = get_provider("claude:opus")\n        >>> direct = get_provider("anthropic:haiku")\n        >>> reviewer = get_provider("gemini:3.1-pro-preview")\n        >>> mock = get_provider("mock:test")\n    """\n    provider, model = parse_provider_spec(spec)\n\n    if provider == "claude":\n        cli = ClaudeCLIProvider(model=model)\n        # If API key available, wrap with automatic fallback\n        if _load_anthropic_api_key():\n            api = AnthropicProvider(model=model)\n            return FallbackProvider(primary=cli, fallback=api, primary_timeout=180)\n        return cli\n    elif provider == "anthropic":\n        return AnthropicProvider(model=model)\n    elif provider == "gemini":\n        return GeminiProvider(model=model)\n    elif provider == "mock":\n        return MockProvider(model=model)\n    else:\n        raise ValueError(\n            f"Unknown provider \'{provider}\'. "\n            f"Supported: claude, anthropic, gemini, mock"\n        )\n'
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                          Stmts   Miss  Cover   Missing
+-----------------------------------------------------------
+assemblyzero\core\config.py      17      0   100%
+-----------------------------------------------------------
+TOTAL                            17      0   100%
+Required test coverage of 95% reached. Total coverage: 100.00%
+=========================== short test summary info ===========================
+FAILED tests/test_assemblyzero_config.py::TestModelIdVerification::test_t020_claude_model_id_is_4_6
+================== 1 failed, 40 passed, 8 warnings in 2.21s ===================
+

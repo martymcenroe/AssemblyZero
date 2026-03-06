@@ -1,0 +1,75 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 31 items
+
+tests/tools/test_mine_quality_patterns.py::TestT010ScriptImportable::test_import_succeeds PASSED [  3%]
+tests/tools/test_mine_quality_patterns.py::TestT020EventTypes::test_all_three_event_types_returned PASSED [  6%]
+tests/tools/test_mine_quality_patterns.py::TestT030PatternGrouping::test_counts_aggregated_correctly PASSED [  9%]
+tests/tools/test_mine_quality_patterns.py::TestT030PatternGrouping::test_top_n_limits_results PASSED [ 12%]
+tests/tools/test_mine_quality_patterns.py::TestT030PatternGrouping::test_example_workflow_ids_capped_at_3 PASSED [ 16%]
+tests/tools/test_mine_quality_patterns.py::TestT040CLIParsing::test_all_five_flags_parsed PASSED [ 19%]
+tests/tools/test_mine_quality_patterns.py::TestT040CLIParsing::test_default_values PASSED [ 22%]
+tests/tools/test_mine_quality_patterns.py::TestExitCodes::test_exit_0_clean_run PASSED [ 25%]
+tests/tools/test_mine_quality_patterns.py::TestExitCodes::test_exit_1_missing_db PASSED [ 29%]
+tests/tools/test_mine_quality_patterns.py::TestExitCodes::test_exit_2_threshold_breach PASSED [ 32%]
+tests/tools/test_mine_quality_patterns.py::TestT080ConsoleReport::test_contains_event_type_and_count PASSED [ 35%]
+tests/tools/test_mine_quality_patterns.py::TestT080ConsoleReport::test_contains_pattern_node PASSED [ 38%]
+tests/tools/test_mine_quality_patterns.py::TestT080ConsoleReport::test_empty_patterns_shows_none PASSED [ 41%]
+tests/tools/test_mine_quality_patterns.py::TestT090JSONReport::test_json_roundtrip_valid PASSED [ 45%]
+tests/tools/test_mine_quality_patterns.py::TestT090JSONReport::test_creates_parent_directories PASSED [ 48%]
+tests/tools/test_mine_quality_patterns.py::TestT100ReadOnly::test_db_opened_read_only FAILED [ 51%]
+tests/tools/test_mine_quality_patterns.py::TestT100ReadOnly::test_write_attempt_raises_error PASSED [ 54%]
+tests/tools/test_mine_quality_patterns.py::TestT120PatternKeyStability::test_stable_key_for_same_event PASSED [ 58%]
+tests/tools/test_mine_quality_patterns.py::TestT130MalformedJSON::test_malformed_json_falls_back PASSED [ 61%]
+tests/tools/test_mine_quality_patterns.py::TestT130MalformedJSON::test_json_without_reason_key_falls_back PASSED [ 64%]
+tests/tools/test_mine_quality_patterns.py::TestT130MalformedJSON::test_long_detail_truncated_at_64 PASSED [ 67%]
+tests/tools/test_mine_quality_patterns.py::TestT130MalformedJSON::test_empty_detail PASSED [ 70%]
+tests/tools/test_mine_quality_patterns.py::TestT140EmptyEvents::test_empty_events_exit_0 PASSED [ 74%]
+tests/tools/test_mine_quality_patterns.py::TestT150MissingDB::test_file_not_found_error_raised PASSED [ 77%]
+tests/tools/test_mine_quality_patterns.py::TestBuildReportThreshold::test_threshold_triggered_when_count_gte PASSED [ 80%]
+tests/tools/test_mine_quality_patterns.py::TestBuildReportThreshold::test_threshold_not_triggered_when_below PASSED [ 83%]
+tests/tools/test_mine_quality_patterns.py::TestBuildReportThreshold::test_empty_events_no_threshold PASSED [ 87%]
+tests/tools/test_mine_quality_patterns.py::TestMainWithJSON::test_json_output_written_on_flag PASSED [ 90%]
+tests/tools/test_mine_quality_patterns.py::TestMinePatterns::test_empty_events_returns_empty PASSED [ 93%]
+tests/tools/test_mine_quality_patterns.py::TestMinePatterns::test_first_seen_last_seen_correct PASSED [ 96%]
+tests/tools/test_mine_quality_patterns.py::TestConstants::test_watched_event_types_has_three_entries PASSED [100%]
+WARNING: Failed to generate report: No data to report.
+
+
+ERROR: Coverage failure: total of 0 is less than fail-under=95
+
+
+================================== FAILURES ===================================
+__________________ TestT100ReadOnly.test_db_opened_read_only __________________
+tests\tools\test_mine_quality_patterns.py:467: in test_db_opened_read_only
+    mine_quality_patterns.load_telemetry_events(
+tools\mine_quality_patterns.py:143: in load_telemetry_events
+    conn = sqlite3.connect(db_path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+tests\tools\test_mine_quality_patterns.py:462: in capturing_connect
+    conn.execute = tracking_execute  # type: ignore[assignment]
+    ^^^^^^^^^^^^
+E   AttributeError: 'sqlite3.Connection' object attribute 'execute' is read-only
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+FAIL Required test coverage of 95% not reached. Total coverage: 0.00%
+=========================== short test summary info ===========================
+FAILED tests/tools/test_mine_quality_patterns.py::TestT100ReadOnly::test_db_opened_read_only
+======================== 1 failed, 30 passed in 0.33s =========================
+
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\inorout.py:561: CoverageWarning: Module tools/mine_quality_patterns.py was never imported. (module-not-imported); see https://coverage.readthedocs.io/en/7.13.4/messages.html#warning-module-not-imported
+  self.warn(f"Module {pkg} was never imported.", slug="module-not-imported")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.13.4/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\pytest_cov\plugin.py:363: CovReportWarning: Failed to generate report: No data to report.
+
+  warnings.warn(CovReportWarning(message), stacklevel=1)
+C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\_pytest\unraisableexception.py:33: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000001E9FA7B1A80>
+  gc.collect()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback

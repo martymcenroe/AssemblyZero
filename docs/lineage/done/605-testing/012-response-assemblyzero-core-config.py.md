@@ -1,3 +1,4 @@
+```python
 """Configuration constants for AssemblyZero LLD review.
 
 This module defines constants that control LLD review behavior,
@@ -72,3 +73,4 @@ LLD_GENERATOR_PROMPT_PATH = Path("docs/skills/0705-lld-generator.md")
 # =============================================================================
 
 LLD_DRAFTS_DIR = Path("docs/llds/drafts")
+```

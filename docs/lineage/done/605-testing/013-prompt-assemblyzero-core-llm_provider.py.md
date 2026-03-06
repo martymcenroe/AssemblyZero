@@ -1,8 +1,167 @@
+# Implementation Request: assemblyzero/core/llm_provider.py
+
+## Task
+
+Write the complete contents of `assemblyzero/core/llm_provider.py`.
+
+Change type: Modify
+Description: Mapping update
+
+## LLD Specification
+
+# Implementation Spec: 0605 - Systemic Model Refresh
+
+<!-- Metadata -->
+| Field | Value |
+|-------|-------|
+| Issue | #605 |
+| LLD | `docs/lld/active/LLD-605.md` |
+| Generated | 2026-03-06 |
+| Status | APPROVED |
+
+## 1. Overview
+Align models with Gemini 3.1.
+
+## 2. Files to Implement
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `assemblyzero/core/config.py` | Modify | Default update |
+| 2 | `assemblyzero/core/llm_provider.py` | Modify | Mapping update |
+| 3 | `tools/gemini-rotate.py` | Modify | String update |
+| 4 | `tools/gemini-model-check.sh` | Add | Check script |
+| 5 | `tests/test_assemblyzero_config.py` | Modify | Test update |
+| 6 | `tests/test_gemini_client.py` | Modify | Test update |
+
+## 3. Requirements
+1. Use Gemini 3.1.
+2. Update Claude 4.6.
+
+## 10. Test Mapping
+| Test ID | Scenario | Expected |
+|---------|----------|----------|
+| T010 | Model ID verification (REQ-1) | Success |
+| T020 | Claude mapping verification (REQ-2) | Success |
+
+## 10. Implementation Notes
+None.
+
+
+## Required File Paths (from LLD - do not deviate)
+
+The following paths are specified in the LLD. Write ONLY to these paths:
+
+
+Any files written to other paths will be rejected.
+
+## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+tests/
+  accessibility/
+  adversarial/
+  benchmark/
+  compliance/
+  contract/
+  e2e/
+  fixtures/
+    death/
+    issue_workflow/
+    janitor/
+      mock_repo/
+    lld_tracking/
+    metrics/
+    mock_lineage/
+    mock_repo/
+      src/
+    rag/
+    scout/
+    scraper/
+    spelunking/
+    verdict_analyzer/
+  harness/
+  integration/
+  security/
+  tools/
+  unit/
+    test_death/
+    test_gate/
+    test_janitor/
+    test_rag/
+    test_spelunking/
+  visual/
+  __init__.py
+  conftest.py
+  test_assemblyzero_config.py
+  test_audit.py
+  test_audit_sharding.py
+  test_credentials.py
+  test_designer.py
+  test_gemini_client.py
+  test_gemini_credentials_v2.py
+  test_integration_workflow.py
+  ... and 14 more files
+assemblyzero/
+  core/
+    validation/
+  graphs/
+  hooks/
+  metrics/
+  nodes/
+  rag/
+  spelunking/
+  telemetry/
+  utils/
+  workflows/
+    death/
+    implementation_spec/
+      nodes/
+    issue/
+      nodes/
+    janitor/
+      probes/
+    lld/
+    orchestrator/
+    parallel/
+    requirements/
+      nodes/
+      parsers/
+    scout/
+    testing/
+      completeness/
+      knowledge/
+      nodes/
+      runners/
+      templates/
+  __init__.py
+  tracing.py
+dashboard/
+  src/
+    client/
+      components/
+      pages/
+  package.json
+  tsconfig.client.json
+  tsconfig.json
+  tsconfig.worker.json
+  wrangler.toml
+data/
+  hourglass/
+  unleashed/
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+## Existing File Contents
+
+The file currently contains:
+
+```python
 """LLM Provider abstraction for pluggable model support.
 
 Issue #101: Unified Governance Workflow
-Issue #395: Anthropic API provider with CLI->API fallback
-Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
+Issue #395: Anthropic API provider with CLI→API fallback
 
 Provides a unified interface for calling different LLM providers:
 - Claude CLI (via claude -p CLI, uses Max subscription)
@@ -11,7 +170,7 @@ Provides a unified interface for calling different LLM providers:
 - OpenAI (future)
 - Ollama (future)
 
-Spec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:3.1-pro-preview")
+Spec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:2.5-pro")
 
 The "claude:" prefix uses CLI first (free via Max subscription), and automatically
 falls back to the Anthropic API if an API key is configured in .env.
@@ -261,20 +420,17 @@ class ClaudeCLIProvider(LLMProvider):
     Uses the user's logged-in Claude Code session, which works with
     Max subscription without requiring API credits.
 
-    Issue #605: Updated to Claude 4.6 model IDs (REQ-2).
-
     Supported models:
-    - opus (claude-4.6-opus)
-    - sonnet (claude-4.6-sonnet)
-    - haiku (claude-4.5-haiku)
+    - opus (default for governance)
+    - sonnet (faster, lower quality)
+    - haiku (fastest, lowest quality)
     """
 
     # Model mapping from friendly names to actual model specs
-    # Issue #605: Claude 4.6 (REQ-2)
     MODEL_MAP = {
-        "opus": "claude-4.6-opus",
-        "sonnet": "claude-4.6-sonnet",
-        "haiku": "claude-4.5-haiku",
+        "opus": "claude-opus-4-6",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
     }
 
     def __init__(self, model: str = "opus"):
@@ -292,7 +448,7 @@ class ClaudeCLIProvider(LLMProvider):
             self._model = model_lower
             self._model_id = self.MODEL_MAP[model_lower]
         elif model_lower.startswith("claude-"):
-            # Passthrough: accept full model IDs like claude-4.6-opus-20260415
+            # Passthrough: accept full model IDs like claude-opus-4-7-20260415
             self._model = model_lower
             self._model_id = model_lower
         else:
@@ -387,7 +543,7 @@ class ClaudeCLIProvider(LLMProvider):
             "--setting-sources", "user",  # Skip project CLAUDE.md context
             "--tools", "",  # Disable built-in tools
             "--strict-mcp-config",  # Disable MCP tools (issue #157)
-            "--model", self._model_id,  # Use full model ID (e.g., claude-4.6-opus)
+            "--model", self._model_id,  # Use full model ID (e.g., claude-opus-4-5-20251101)
         ]
 
         if system_prompt:
@@ -525,29 +681,26 @@ class AnthropicProvider(LLMProvider):
     Issue #395: Provides direct API access with proper token tracking,
     cost calculation, and error handling. Requires ANTHROPIC_API_KEY in .env.
 
-    Issue #605: Updated to Claude 4.6 model IDs (REQ-2).
-
     Supported models:
-    - opus (claude-4.6-opus)
-    - sonnet (claude-4.6-sonnet)
-    - haiku (claude-4.5-haiku)
-    - Any full model ID as passthrough (e.g. claude-4.6-opus-20260415)
+    - opus (claude-opus-4-6)
+    - sonnet (claude-sonnet-4-6)
+    - haiku (claude-haiku-4-5)
+    - Any full model ID as passthrough (e.g. claude-opus-4-7-20260415)
     """
 
-    # Issue #605: Claude 4.6 (REQ-2)
     MODEL_MAP = {
-        "opus": "claude-4.6-opus",
-        "sonnet": "claude-4.6-sonnet",
-        "haiku": "claude-4.5-haiku",
+        "opus": "claude-opus-4-6",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
     }
 
     MAX_TOKENS = 65536
 
     # Pricing per million tokens (input, output)
     _PRICING: dict[str, tuple[float, float]] = {
-        "claude-4.6-opus": (5.0, 25.0),
-        "claude-4.6-sonnet": (3.0, 15.0),
-        "claude-4.5-haiku": (1.0, 5.0),
+        "claude-opus-4-6": (5.0, 25.0),
+        "claude-sonnet-4-6": (3.0, 15.0),
+        "claude-haiku-4-5": (1.0, 5.0),
     }
 
     def __init__(self, model: str = "opus"):
@@ -932,34 +1085,31 @@ class GeminiProvider(LLMProvider):
     Wraps the existing GeminiClient to provide the unified LLMProvider interface.
     Inherits all rotation and retry logic from GeminiClient.
 
-    Issue #605: Updated to Gemini 3.1 models (REQ-1). Removed deprecated
-    3-pro-preview and 3-flash-preview entries superseded by 3.1 equivalents.
-
     Supported models:
-    - 2.5-pro (alias: pro) - Pro-tier governance model (legacy)
-    - 2.5-flash (alias: flash) - Fast Flash model (legacy)
-    - 3.1-pro-preview - Latest Pro preview (default)
-    - 3.1-pro - Production Pro model
-    - 3.1-flash-preview - Latest Flash preview
+    - 2.5-pro (alias: pro) - Pro-tier governance model
+    - 2.5-flash (alias: flash) - Fast Flash model
+    - 3.1-pro-preview - Latest Pro preview
+    - 3-pro-preview - Previous Pro preview (EOL soon)
+    - 3-pro - Production Pro model
+    - 3-flash-preview - Latest Flash preview
     """
 
     # Model mapping from friendly names to actual model IDs
-    # Issue #605: Gemini 3.1 (REQ-1) — removed deprecated 3.0 entries
     MODEL_MAP = {
         "2.5-pro": "gemini-2.5-pro",
         "pro": "gemini-2.5-pro",
         "2.5-flash": "gemini-2.5-flash",
         "flash": "gemini-2.5-flash",
+        "3-pro-preview": "gemini-3-pro-preview",
         "3.1-pro-preview": "gemini-3.1-pro-preview",
-        "3.1-pro": "gemini-3.1-pro",
-        "3.1-flash-preview": "gemini-3.1-flash-preview",
+        "3-flash-preview": "gemini-3-flash-preview",
     }
 
     def __init__(self, model: str = "3.1-pro-preview"):
         """Initialize Gemini provider.
 
         Args:
-            model: Model identifier (2.5-pro, flash, 3.1-pro-preview, etc.).
+            model: Model identifier (2.5-pro, flash, 3-pro-preview, etc.).
 
         Raises:
             ValueError: If model is not recognized.
@@ -1164,7 +1314,7 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
     """Parse provider:model specification.
 
     Args:
-        spec: Provider spec like "claude:opus" or "gemini:3.1-pro-preview".
+        spec: Provider spec like "claude:opus" or "gemini:2.5-pro".
 
     Returns:
         Tuple of (provider_name, model_name).
@@ -1175,7 +1325,7 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
     if ":" not in spec:
         raise ValueError(
             f"Invalid provider spec '{spec}'. Expected format: provider:model "
-            f"(e.g., 'claude:opus', 'gemini:3.1-pro-preview')"
+            f"(e.g., 'claude:opus', 'gemini:2.5-pro')"
         )
 
     parts = spec.split(":", 1)
@@ -1190,7 +1340,7 @@ def get_provider(spec: str) -> LLMProvider:
 
     Args:
         spec: Provider specification like "claude:opus", "anthropic:haiku",
-              or "gemini:3.1-pro-preview".
+              or "gemini:2.5-pro".
 
     Returns:
         Configured LLMProvider instance.
@@ -1201,7 +1351,7 @@ def get_provider(spec: str) -> LLMProvider:
     Examples:
         >>> drafter = get_provider("claude:opus")
         >>> direct = get_provider("anthropic:haiku")
-        >>> reviewer = get_provider("gemini:3.1-pro-preview")
+        >>> reviewer = get_provider("gemini:2.5-pro")
         >>> mock = get_provider("mock:test")
     """
     provider, model = parse_provider_spec(spec)
@@ -1224,3 +1374,158 @@ def get_provider(spec: str) -> LLMProvider:
             f"Unknown provider '{provider}'. "
             f"Supported: claude, anthropic, gemini, mock"
         )
+
+```
+
+Modify this file according to the LLD specification.
+
+## Tests That Must Pass
+
+```python
+# From C:\Users\mcwiz\Projects\AssemblyZero-605\tests\test_issue_605.py
+"""Test file for Issue #605.
+
+Generated by AssemblyZero TDD Testing Workflow.
+Tests will fail with ImportError until implementation exists (TDD RED phase).
+"""
+
+import pytest
+
+# TDD: This import fails until implementation exists (RED phase)
+# Once implemented, tests can run (GREEN phase)
+from assemblyzero.core.config import *  # noqa: F401, F403
+
+
+# Unit Tests
+# -----------
+
+def test_t010():
+    """
+    Model ID verification (REQ-1) | Success
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t010 works correctly
+    assert False, 'TDD RED: test_t010 not implemented'
+
+
+def test_t020():
+    """
+    Claude mapping verification (REQ-2) | Success
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t020 works correctly
+    assert False, 'TDD RED: test_t020 not implemented'
+
+
+
+
+```
+
+## Previously Implemented Files
+
+These files have already been implemented. Use them for imports and references:
+
+### assemblyzero/core/config.py (full)
+
+```python
+"""Configuration constants for AssemblyZero LLD review.
+
+This module defines constants that control LLD review behavior,
+including model hierarchy and credential paths.
+"""
+
+import os
+from pathlib import Path
+
+# =============================================================================
+# Model Hierarchy (NEVER downgrade for reviews)
+# =============================================================================
+
+# Primary review model - highest reasoning tier available
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-preview")
+
+# Acceptable fallback models (Pro-tier only)
+REVIEWER_MODEL_FALLBACKS = ["gemini-3.1-pro"]
+
+# Forbidden models - fail closed rather than use these
+FORBIDDEN_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-flash",
+    "gemini-2.5-lite",
+    "gemini-lite",
+    "gemini-3-pro-preview",
+    "gemini-3-pro",
+]
+
+# =============================================================================
+# Claude Model (REQ-2: Claude 4.6)
+# =============================================================================
+
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-4.6-sonnet")
+
+# =============================================================================
+# Credential Paths
+# =============================================================================
+
+CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
+ROTATION_STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
+GEMINI_API_LOG_FILE = Path.home() / ".assemblyzero" / "gemini-api.jsonl"
+
+# =============================================================================
+# Retry Configuration
+# =============================================================================
+
+MAX_RETRIES_PER_CREDENTIAL = 3
+BACKOFF_BASE_SECONDS = 2.0
+BACKOFF_MAX_SECONDS = 60.0
+
+# =============================================================================
+# Logging Paths (Issue #57: Session-Sharded Logging)
+# =============================================================================
+
+# Permanent audit trail (consolidated from shards)
+DEFAULT_AUDIT_LOG_PATH = Path("logs/review_history.jsonl")
+
+# Active session shards directory (gitignored, ephemeral)
+LOGS_ACTIVE_DIR = Path("logs/active")
+
+# =============================================================================
+# Prompt Paths
+# =============================================================================
+
+LLD_REVIEW_PROMPT_PATH = Path("docs/skills/0702c-LLD-Review-Prompt.md")
+LLD_GENERATOR_PROMPT_PATH = Path("docs/skills/0705-lld-generator.md")
+
+# =============================================================================
+# Output Paths
+# =============================================================================
+
+LLD_DRAFTS_DIR = Path("docs/llds/drafts")
+```
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block

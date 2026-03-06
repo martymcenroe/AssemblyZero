@@ -1,3 +1,4 @@
+```python
 """
 Unit tests for assemblyzero_config.py
 
@@ -466,3 +467,4 @@ class TestModelIdVerification:
         assert 'gemini-3.1' in provider_source, (
             "llm_provider.py must reference gemini-3.1 model"
         )
+```
