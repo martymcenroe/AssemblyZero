@@ -1,68 +1,46 @@
-"""Tests for extract_test_plan_section — code-fence false-positive fix (#455)."""
+"""Tests for extracting the test plan section from LLD/Spec (Issue #608)."""
 
-from assemblyzero.workflows.testing.nodes.load_lld import extract_test_plan_section
+import pytest
+from assemblyzero.workflows.testing.nodes.load_lld import (
+    extract_test_plan_section,
+    WorkflowParsingError
+)
 
+SECTION_10_STANDARD = """
+## 10. Test Mapping
 
-def test_skips_heading_inside_code_fence():
-    """A ## 10. heading inside a code block must not match."""
-    content = '''\
-Some intro text.
+### 10.1 Test Scenarios
+| ID | Scenario | Expected |
+|----|----------|----------|
+| 010 | Happy path | Success |
+"""
 
-```python
-example = """
+SECTION_10_ALT = """
 ## 10. Verification & Testing
 
-This is inside a code fence and should be ignored.
+Tests:
+- Case 1
 """
-```
 
-## 10. Verification & Testing
+def test_extract_test_plan_section_success():
+    """T010: Successfully extracts Section 10 content."""
+    result = extract_test_plan_section(SECTION_10_STANDARD)
+    assert "### 10.1 Test Scenarios" in result
+    assert "Happy path" in result
 
-Real test plan content here.
+def test_extract_test_plan_section_alt_header():
+    """T010: Successfully extracts Section 10 with alternative header."""
+    result = extract_test_plan_section(SECTION_10_ALT)
+    assert "Tests:" in result
 
-| ID | Test |
-|----|------|
-| T1 | Check something |
-
-## 11. Next Section
-'''
-    result = extract_test_plan_section(content)
-    assert "Real test plan content here." in result
-    assert "inside a code fence" not in result
-
-
-def test_matches_normal_heading():
-    """Standard heading outside code fences works as before."""
-    content = """\
-## 10. Test Plan
-
-| ID | Scenario |
-|----|----------|
-| T1 | Basic check |
-
-## 11. Appendix
-"""
-    result = extract_test_plan_section(content)
-    assert "Basic check" in result
-
-
-def test_section_9_test_mapping():
-    """Implementation spec Section 9 format still works."""
-    content = """\
-## 9. Test Mapping
-
-| Test ID | Tests Function |
-|---------|---------------|
-| T010 | detect_cascade_risk() |
-
-## 10. Dependencies
-"""
-    result = extract_test_plan_section(content)
-    assert "detect_cascade_risk" in result
-
-
-def test_no_match_returns_empty():
-    """Returns empty string when no test section found."""
+def test_no_match_returns_error():
+    """T020: Raises WorkflowParsingError when no test section found."""
     content = "# Just a README\n\nNo test section here.\n"
-    result = extract_test_plan_section(content)
-    assert result == ""
+    with pytest.raises(WorkflowParsingError, match="Expected: ## 10. Test Mapping"):
+        extract_test_plan_section(content)
+
+def test_legacy_section_9_rejected():
+    """T030: Explicitly rejects legacy Section 9."""
+    content = "## 9. Test Mapping\n\nSome tests here."
+    with pytest.raises(WorkflowParsingError, match="Legacy Section 9 test mapping detected"):
+        extract_test_plan_section(content)

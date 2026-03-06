@@ -3,7 +3,7 @@
 Encapsulates subprocess calls to git for committing and pushing files.
 """
 
-import subprocess
+from assemblyzero.utils.shell import run_command
 from pathlib import Path
 from typing import Optional
 
@@ -59,7 +59,7 @@ def commit_and_push(
     
     # Stage each file individually
     for file_path in created_files:
-        result = subprocess.run(
+        result = run_command(
             ["git", "add", file_path],
             cwd=str(target_repo),
             capture_output=True,
@@ -70,7 +70,7 @@ def commit_and_push(
     
     # Commit with formatted message
     commit_message = format_commit_message(workflow_type, issue_number=issue_number, slug=slug)
-    result = subprocess.run(
+    result = run_command(
         ["git", "commit", "-m", commit_message],
         cwd=str(target_repo),
         capture_output=True,
@@ -88,7 +88,7 @@ def commit_and_push(
             commit_sha = parts[1].rstrip("]")
     
     # Push to remote
-    result = subprocess.run(
+    result = run_command(
         ["git", "push"],
         cwd=str(target_repo),
         capture_output=True,

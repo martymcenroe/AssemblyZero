@@ -79,7 +79,7 @@ class TestCapacity503Fix:
     def test_503_appears_in_errors(self, creds_dir: Path) -> None:
         """After retries exhaust on 503, the error appears in the result."""
         client = GeminiClient(
-            model="gemini-3-pro-preview",
+            model="gemini-3.1-pro-preview",
             credentials_file=creds_dir / "gemini-credentials.json",
             state_file=creds_dir / "gemini-rotation-state.json",
         )
@@ -106,7 +106,7 @@ class TestCapacity503Fix:
     def test_all_capacity_returns_capacity_type(self, multi_creds_dir: Path) -> None:
         """When all credentials fail with 503, error_type is CAPACITY_EXHAUSTED."""
         client = GeminiClient(
-            model="gemini-3-pro-preview",
+            model="gemini-3.1-pro-preview",
             credentials_file=multi_creds_dir / "gemini-credentials.json",
             state_file=multi_creds_dir / "gemini-rotation-state.json",
         )
@@ -135,7 +135,7 @@ class TestCapacity503Fix:
         the error was silently dropped.
         """
         client = GeminiClient(
-            model="gemini-3-pro-preview",
+            model="gemini-3.1-pro-preview",
             credentials_file=creds_dir / "gemini-credentials.json",
             state_file=creds_dir / "gemini-rotation-state.json",
         )

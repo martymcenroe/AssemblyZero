@@ -9,6 +9,7 @@ to prevent hanging.
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import logging
 import re
 import shutil
@@ -69,7 +70,7 @@ def check_pr_merged(pr_url: str) -> bool:
     if "github.com" not in pr_url:
         raise ValueError(f"Malformed PR URL: {pr_url}")
 
-    result = subprocess.run(
+    result = run_command(
         ["gh", "pr", "view", pr_url, "--json", "state", "--jq", ".state"],
         capture_output=True,
         text=True,
@@ -101,7 +102,7 @@ def remove_worktree(worktree_path: str | Path) -> bool:
         logger.info("[N9] Worktree path does not exist: %s", worktree_path)
         return False
 
-    result = subprocess.run(
+    result = run_command(
         ["git", "worktree", "remove", str(worktree_path)],
         capture_output=True,
         text=True,
@@ -132,7 +133,7 @@ def get_worktree_branch(worktree_path: str | Path) -> str | None:
     # from porcelain output into Windows paths, breaking the comparison.
     worktree_str = str(worktree_path)
 
-    result = subprocess.run(
+    result = run_command(
         ["git", "worktree", "list", "--porcelain"],
         capture_output=True,
         text=True,
@@ -174,8 +175,8 @@ def delete_local_branch(branch_name: str) -> bool:
         subprocess.TimeoutExpired: If git CLI exceeds SUBPROCESS_TIMEOUT.
     """
     try:
-        subprocess.run(
-            ["git", "branch", "-D", branch_name],
+        run_command(
+            ["git", "branch", "-d", branch_name],
             capture_output=True,
             text=True,
             check=True,

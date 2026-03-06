@@ -7,6 +7,7 @@ This is the second human gate - Gemini output can be sanitized before
 it reaches Claude (on revision) or before filing.
 """
 
+from assemblyzero.utils.shell import run_command
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ def open_vscode_non_blocking(file1: str, file2: str) -> tuple[bool, str]:
         if file1.endswith(".md") or file2.endswith(".md"):
             cmd.extend(["--command", "markdown.showPreviewToSide"])
 
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,
@@ -121,7 +122,7 @@ def open_vscode_split_and_wait(file1: str, file2: str) -> tuple[bool, str]:
         if file1.endswith(".md") or file2.endswith(".md"):
             cmd.extend(["--command", "markdown.showPreviewToSide"])
 
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,

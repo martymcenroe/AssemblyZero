@@ -15,6 +15,7 @@ docs/lld/drafts/spec-{N}.md (fallback) and extracts:
 - Requirements for coverage tracking
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import re
 import subprocess
@@ -681,7 +682,7 @@ def _load_from_issue(  # pragma: no cover
     gate_log(f"[N0] Issue-only mode: fetching issue #{issue_number} body...")
 
     try:
-        result = subprocess.run(
+        result = run_command(
             ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
             capture_output=True,
             text=True,

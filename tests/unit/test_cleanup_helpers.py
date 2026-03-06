@@ -33,7 +33,7 @@ from assemblyzero.workflows.testing.nodes.cleanup_helpers import (
 
 # === T070: check_pr_merged returns True ===
 class TestCheckPrMerged:
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_check_pr_merged_returns_true(self, mock_run: MagicMock) -> None:
         """T070: gh returns MERGED state."""
         mock_run.return_value = MagicMock(
@@ -55,7 +55,7 @@ class TestCheckPrMerged:
         )
 
     # === T080: check_pr_merged returns False for OPEN ===
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_check_pr_merged_returns_false_open(self, mock_run: MagicMock) -> None:
         """T080: gh returns OPEN state."""
         mock_run.return_value = MagicMock(
@@ -78,7 +78,7 @@ class TestCheckPrMerged:
             check_pr_merged("not-a-url")
 
     # === T095: check_pr_merged timeout ===
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_check_pr_merged_timeout(self, mock_run: MagicMock) -> None:
         """T095: TimeoutExpired raised after 10s."""
         mock_run.side_effect = subprocess.TimeoutExpired(
@@ -92,7 +92,7 @@ class TestCheckPrMerged:
 
 # === T100/T110: remove_worktree ===
 class TestRemoveWorktree:
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_remove_worktree_success(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
@@ -117,7 +117,7 @@ class TestRemoveWorktree:
 
 # === T120/T130: get_worktree_branch ===
 class TestGetWorktreeBranch:
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_get_worktree_branch_found(
         self, mock_run: MagicMock, tmp_path: Path
     ) -> None:
@@ -147,7 +147,7 @@ class TestGetWorktreeBranch:
         result = get_worktree_branch(str(worktree_dir))
         assert result == "issue-180-cleanup"
 
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_get_worktree_branch_not_found(self, mock_run: MagicMock) -> None:
         """T130: Returns None for unknown path."""
         porcelain_output = (
@@ -165,26 +165,26 @@ class TestGetWorktreeBranch:
 
 # === T140/T150: delete_local_branch ===
 class TestDeleteLocalBranch:
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_delete_local_branch_success(self, mock_run: MagicMock) -> None:
         """T140: git branch -D succeeds, returns True."""
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         result = delete_local_branch("issue-180-cleanup")
         assert result is True
         mock_run.assert_called_once_with(
-            ["git", "branch", "-D", "issue-180-cleanup"],
+            ["git", "branch", "-d", "issue-180-cleanup"],
             capture_output=True,
             text=True,
             check=True,
             timeout=SUBPROCESS_TIMEOUT,
         )
 
-    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.subprocess.run")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.run_command")
     def test_delete_local_branch_not_found(self, mock_run: MagicMock) -> None:
         """T150: Branch doesn't exist, returns False."""
         mock_run.side_effect = subprocess.CalledProcessError(
             returncode=1,
-            cmd=["git", "branch", "-D", "nonexistent"],
+            cmd=["git", "branch", "-d", "nonexistent"],
             stderr="error: branch 'nonexistent' not found.",
         )
         result = delete_local_branch("nonexistent")

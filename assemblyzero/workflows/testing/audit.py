@@ -10,10 +10,10 @@ Provides functions for:
 - Workflow audit logging
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import logging
 import re
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
@@ -68,7 +68,7 @@ def get_repo_root() -> Path:
     Raises:
         RuntimeError: If not in a git repository.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,

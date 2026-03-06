@@ -3,6 +3,7 @@
 Implements Explorer, Extractor, Analyst, and Scribe nodes.
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import os
 import subprocess
@@ -24,7 +25,7 @@ def _get_github_client() -> Github:
     """
     # Try to get token from gh CLI
     try:
-        result = subprocess.run(
+        result = run_command(
             ["gh", "auth", "token"],
             capture_output=True,
             text=True,

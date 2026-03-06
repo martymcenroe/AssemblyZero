@@ -11,6 +11,7 @@ Creates audit directory and saves initial input to audit trail.
 Issue files now include YAML frontmatter with repo provenance.
 """
 
+from assemblyzero.utils.shell import run_command
 import datetime
 import json
 import subprocess
@@ -148,7 +149,7 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
 
     for attempt in range(1, GH_MAX_RETRIES + 1):
         try:
-            result = subprocess.run(
+            result = run_command(
                 ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
                 capture_output=True,
                 text=True,
@@ -302,7 +303,7 @@ def _get_repo_name(target_repo: str) -> str:
         Repository name in format 'owner/repo', or 'unknown/unknown' on failure.
     """
     try:
-        result = subprocess.run(
+        result = run_command(
             ["git", "-C", target_repo, "remote", "get-url", "origin"],
             capture_output=True,
             text=True,

@@ -7,9 +7,9 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import os
 import re
-import subprocess
 from datetime import datetime, timedelta, timezone
 
 from assemblyzero.workflows.janitor.state import Finding, ProbeResult
@@ -66,7 +66,7 @@ def find_source_files(repo_root: str) -> list[str]:
 
     Uses `git ls-files` to respect .gitignore.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "ls-files", "*.py", "*.md", "*.ts", "*.js"],
         cwd=repo_root,
         capture_output=True,
@@ -101,7 +101,7 @@ def get_line_date(
 
     Returns None if file is not tracked or blame fails.
     """
-    result = subprocess.run(
+    result = run_command(
         [
             "git",
             "blame",

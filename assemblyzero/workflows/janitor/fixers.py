@@ -5,8 +5,8 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import os
-import subprocess
 from collections import defaultdict
 from datetime import datetime
 
@@ -98,7 +98,7 @@ def fix_stale_worktrees(
         branch = finding.fix_data.get("branch", "unknown")
 
         if not dry_run:
-            subprocess.run(
+            run_command(
                 ["git", "worktree", "remove", wt_path],
                 cwd=repo_root,
                 capture_output=True,
@@ -134,8 +134,8 @@ def create_fix_commit(
     if not files:
         return
 
-    subprocess.run(["git", "add"] + files, cwd=repo_root, check=True)
-    result = subprocess.run(
+    run_command(["git", "add"] + files, cwd=repo_root, check=True)
+    result = run_command(
         ["git", "commit", "-m", message],
         cwd=repo_root,
         capture_output=True,
@@ -168,21 +168,21 @@ def create_fix_pr(
     Returns the PR URL or None if creation fails.
     """
     try:
-        subprocess.run(
+        run_command(
             ["git", "checkout", "-b", branch_name],
             cwd=repo_root,
             check=True,
             capture_output=True,
             text=True,
         )
-        subprocess.run(
+        run_command(
             ["git", "push", "-u", "origin", branch_name],
             cwd=repo_root,
             check=True,
             capture_output=True,
             text=True,
         )
-        result = subprocess.run(
+        result = run_command(
             [
                 "gh",
                 "pr",

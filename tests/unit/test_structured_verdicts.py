@@ -96,7 +96,7 @@ class TestGeminiPassesResponseSchema:
         mock_client_instance.models.generate_content.return_value = mock_response
 
         client = GeminiClient.__new__(GeminiClient)
-        client.model = "gemini-3-pro-preview"
+        client.model = "gemini-3.1-pro-preview"
         client.credentials_file = MagicMock()
         client.state_file = MagicMock()
         client._credentials = None
@@ -135,7 +135,7 @@ class TestGeminiPassesResponseSchema:
         """GeminiProvider.invoke() should forward response_schema to client."""
         from assemblyzero.core.llm_provider import GeminiProvider
 
-        provider = GeminiProvider(model="3-pro-preview")
+        provider = GeminiProvider(model="3.1-pro-preview")
 
         mock_client = MagicMock()
         mock_result = MagicMock()
@@ -148,7 +148,7 @@ class TestGeminiPassesResponseSchema:
         mock_result.rotation_occurred = False
         mock_result.attempts = 1
         mock_result.duration_ms = 100
-        mock_result.model_verified = "gemini-3-pro-preview"
+        mock_result.model_verified = "gemini-3.1-pro-preview"
         mock_client.invoke.return_value = mock_result
         provider._client = mock_client
 

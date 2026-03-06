@@ -10,6 +10,7 @@ Each stage function:
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import time
 from pathlib import Path
 
@@ -304,7 +305,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     try:
         # Ensure worktree exists
         if not worktree_path.is_dir():
-            subprocess.run(
+            run_command(
                 ["git", "worktree", "add", str(worktree_path), "-b", branch_name],
                 check=True,
                 capture_output=True,
@@ -380,7 +381,7 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
             return update_stage_result(state, stage, result)
 
         # Push branch
-        subprocess.run(
+        run_command(
             ["git", "push", "--set-upstream", "origin", f"issue-{issue_number}"],
             check=True,
             capture_output=True,
@@ -389,7 +390,7 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
         )
 
         # Create PR
-        pr_result = subprocess.run(
+        pr_result = run_command(
             [
                 "gh", "pr", "create",
                 "--title", f"Issue #{issue_number}: Automated implementation",

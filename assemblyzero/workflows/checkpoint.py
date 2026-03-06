@@ -6,8 +6,8 @@ supporting per-repo isolation for safe concurrent workflow execution.
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -20,7 +20,7 @@ def get_repo_root() -> Path | None:
         or if git is not installed.
     """
     try:
-        result = subprocess.run(
+        result = run_command(
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,

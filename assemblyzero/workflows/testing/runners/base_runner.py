@@ -3,6 +3,7 @@
 Issue #381: Defines the interface all test runners must implement.
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import logging
 import subprocess
@@ -87,7 +88,7 @@ class BaseTestRunner(ABC):
         logger.info("Running command: %s in %s", " ".join(command), working_dir)
 
         try:
-            result = subprocess.run(
+            result = run_command(
                 command,
                 capture_output=True,
                 text=True,

@@ -5,6 +5,7 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import os
 import subprocess
 
@@ -35,7 +36,7 @@ def probe_harvest(repo_root: str) -> ProbeResult:
         )
 
     try:
-        result = subprocess.run(
+        result = run_command(
             ["python", script_path],
             cwd=repo_root,
             capture_output=True,
