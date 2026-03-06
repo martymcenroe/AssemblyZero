@@ -84,6 +84,7 @@
 - [Tools Reference](Tools-Reference)
 
 ---
+- [Implementation Spec Feature Inventory as Code Node](Implementation-Spec-Feature-Inventory-as-Code-Node)
 
 ### Reflections
 
