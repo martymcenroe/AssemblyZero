@@ -1,0 +1,21 @@
+{
+  "issue_number": 599,
+  "lld_path": "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\docs\\lld\\drafts\\spec-0599-implementation-readiness.md",
+  "completed_at": "2026-03-06T08:01:06.314439",
+  "test_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\tests\\unit\\test_inventory_node.py"
+  ],
+  "implementation_files": [
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\assemblyzero\\utils\\markdown_inventory.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\assemblyzero\\nodes\\inventory.py",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\tests\\fixtures\\mock_repo\\docs\\0003-file-inventory.md",
+    "C:\\Users\\mcwiz\\Projects\\AssemblyZero-599\\tests\\unit\\test_inventory_node.py"
+  ],
+  "coverage_achieved": 96.0,
+  "coverage_target": 95,
+  "total_iterations": 0,
+  "test_count": 25,
+  "passed_count": 25,
+  "failed_count": 0,
+  "e2e_passed": false
+}
