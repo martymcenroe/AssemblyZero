@@ -1,3 +1,6 @@
+
+
+```markdown
 # Implementation Spec Template
 
 <!-- Standard: 0701 -->
@@ -352,3 +355,4 @@ def similar_function(state: SomeState) -> dict[str, Any]:
 | Date | {YYYY-MM-DD} |
 | Iterations | {N} |
 | Finalized | {ISO 8601 timestamp} |
+```

@@ -1,3 +1,6 @@
+
+
+```python
 """N0: Load Implementation Spec node for TDD Testing Workflow.
 
 Issue #384: The TDD workflow now requires an Implementation Spec (produced
@@ -52,6 +55,108 @@ _LEGACY_SECTION_9_PATTERN = re.compile(
     r"^##\s*9\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)",
     re.MULTILINE | re.IGNORECASE,
 )
+
+
+def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
+    """Find the LLD file for an issue number.
+
+    Args:
+        issue_number: GitHub issue number.
+        repo_root: Repository root path.
+
+    Returns:
+        Path to LLD file if found, None otherwise.
+    """
+    lld_dir = repo_root / LLD_ACTIVE_DIR
+
+    if not lld_dir.exists():
+        return None
+
+    # Search patterns in priority order
+    patterns = [
+        f"LLD-{issue_number:03d}.md",  # LLD-086.md
+        f"LLD-{issue_number:03d}-*.md",  # LLD-086-desc.md
+        f"LLD-{issue_number}.md",  # LLD-86.md (unpadded)
+        f"LLD-{issue_number}-*.md",  # LLD-86-desc.md
+    ]
+
+    for pattern in patterns:
+        matches = list(lld_dir.glob(pattern))
+        if matches:
+            # Return most recently modified if multiple
+            if len(matches) > 1:
+                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return matches[0]
+
+    return None
+
+
+def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:
+    """Find the Implementation Spec file for an issue number.
+
+    Issue #384: TDD workflow requires an implementation spec, not a raw LLD.
+    Issue #525: Search lineage directory first, fall back to drafts.
+
+    Args:
+        issue_number: GitHub issue number.
+        repo_root: Repository root path.
+
+    Returns:
+        Path to spec file if found, None otherwise.
+    """
+    # Search lineage directory first (Issue #525)
+    lineage_dir = repo_root / LINEAGE_ACTIVE_DIR / f"{issue_number}-implspec"
+    if lineage_dir.exists():
+        lineage_patterns = [
+            "*-final-spec.md",   # 003-final-spec.md
+            "*-spec.md",         # any numbered spec
+        ]
+        for pattern in lineage_patterns:
+            matches = list(lineage_dir.glob(pattern))
+            if matches:
+                if len(matches) > 1:
+                    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                return matches[0]
+
+    # Fall back to drafts directory
+    spec_dir = repo_root / SPEC_DRAFTS_DIR
+    if not spec_dir.exists():
+        return None
+
+    # Search patterns in priority order
+    patterns = [
+        f"spec-{issue_number:04d}.md",   # spec-0305.md (4-digit padded)
+        f"spec-{issue_number:04d}-*.md",  # spec-0305-desc.md
+        f"spec-{issue_number:03d}.md",    # spec-305.md (3-digit padded)
+        f"spec-{issue_number:03d}-*.md",  # spec-305-desc.md
+        f"spec-{issue_number}.md",        # spec-305.md (unpadded)
+        f"spec-{issue_number}-*.md",      # spec-305-desc.md
+    ]
+
+    for pattern in patterns:
+        matches = list(spec_dir.glob(pattern))
+        if matches:
+            if len(matches) > 1:
+                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            return matches[0]
+
+    return None
+
+
+def build_spec_command(issue_number: int, repo_root: Path) -> str:
+    """Build the exact command to generate a missing implementation spec.
+
+    Args:
+        issue_number: GitHub issue number.
+        repo_root: Repository root path.
+
+    Returns:
+        Full command string the user can copy-paste.
+    """
+    return (
+        f"poetry run python tools/run_implementation_spec_workflow.py "
+        f"--issue {issue_number} --repo {repo_root}"
+    )
 
 
 def validate_spec_structure(content: str) -> None:
@@ -124,109 +229,7 @@ def extract_test_plan_section(lld_content: str) -> str:
     raise WorkflowParsingError("Expected: ## 10. Test Mapping")
 
 
-def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
-    """Find the LLD file for an issue number.
-
-    Args:
-        issue_number: GitHub issue number.
-        repo_root: Repository root path.
-
-    Returns:
-        Path to LLD file if found, None otherwise.
-    """
-    lld_dir = repo_root / LLD_ACTIVE_DIR
-
-    if not lld_dir.exists():
-        return None
-
-    # Search patterns in priority order
-    patterns = [
-        f"LLD-{issue_number:03d}.md",  # LLD-086.md
-        f"LLD-{issue_number:03d}-*.md",  # LLD-086-desc.md
-        f"LLD-{issue_number}.md",  # LLD-86.md (unpadded)
-        f"LLD-{issue_number}-*.md",  # LLD-86-desc.md
-    ]
-
-    for pattern in patterns:
-        matches = list(lld_dir.glob(pattern))
-        if matches:
-            # Return most recently modified if multiple
-            if len(matches) > 1:
-                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            return matches[0]
-
-    return None
-
-
-def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
-    """Find the Implementation Spec file for an issue number.
-
-    Issue #384: TDD workflow requires an implementation spec, not a raw LLD.
-    Issue #525: Search lineage directory first, fall back to drafts.
-
-    Args:
-        issue_number: GitHub issue number.
-        repo_root: Repository root path.
-
-    Returns:
-        Path to spec file if found, None otherwise.
-    """
-    # Search lineage directory first (Issue #525)
-    lineage_dir = repo_root / LINEAGE_ACTIVE_DIR / f"{issue_number}-implspec"
-    if lineage_dir.exists():
-        lineage_patterns = [
-            "*-final-spec.md",   # 003-final-spec.md
-            "*-spec.md",         # any numbered spec
-        ]
-        for pattern in lineage_patterns:
-            matches = list(lineage_dir.glob(pattern))
-            if matches:
-                if len(matches) > 1:
-                    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                return matches[0]
-
-    # Fall back to drafts directory
-    spec_dir = repo_root / SPEC_DRAFTS_DIR
-    if not spec_dir.exists():
-        return None
-
-    # Search patterns in priority order
-    patterns = [
-        f"spec-{issue_number:04d}.md",   # spec-0305.md (4-digit padded)
-        f"spec-{issue_number:04d}-*.md",  # spec-0305-desc.md
-        f"spec-{issue_number:03d}.md",    # spec-305.md (3-digit padded)
-        f"spec-{issue_number:03d}-*.md",  # spec-305-desc.md
-        f"spec-{issue_number}.md",        # spec-305.md (unpadded)
-        f"spec-{issue_number}-*.md",      # spec-305-desc.md
-    ]
-
-    for pattern in patterns:
-        matches = list(spec_dir.glob(pattern))
-        if matches:
-            if len(matches) > 1:
-                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            return matches[0]
-
-    return None
-
-
-def build_spec_command(issue_number: int, repo_root: Path) -> str:  # pragma: no cover
-    """Build the exact command to generate a missing implementation spec.
-
-    Args:
-        issue_number: GitHub issue number.
-        repo_root: Repository root path.
-
-    Returns:
-        Full command string the user can copy-paste.
-    """
-    return (
-        f"poetry run python tools/run_implementation_spec_workflow.py "
-        f"--issue {issue_number} --repo {repo_root}"
-    )
-
-
-def _extract_test_scenarios_from_code_blocks(content: str) -> str:  # pragma: no cover
+def _extract_test_scenarios_from_code_blocks(content: str) -> str:
     """Extract test scenario information from Python test code blocks.
 
     Implementation specs include complete test file contents in code blocks
@@ -285,7 +288,7 @@ def _extract_test_scenarios_from_code_blocks(content: str) -> str:  # pragma: no
     return header + "\n".join(rows)
 
 
-def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
+def extract_requirements(lld_content: str) -> list[str]:
     """Extract requirements from LLD content.
 
     Looks for patterns like:
@@ -350,7 +353,7 @@ def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
     return requirements
 
 
-def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no cover
+def parse_test_scenarios(test_plan: str) -> list[TestScenario]:
     """Parse test scenarios from test plan section.
 
     Looks for patterns like:
@@ -469,13 +472,13 @@ def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no co
     return scenarios
 
 
-def _extract_requirement_ref(content: str) -> str:  # pragma: no cover
+def _extract_requirement_ref(content: str) -> str:
     """Extract requirement reference from content."""
     match = re.search(r"REQ-[\d.]+", content)
     return match.group(0) if match else ""
 
 
-def _infer_test_type(name: str, content: str) -> str:  # pragma: no cover
+def _infer_test_type(name: str, content: str) -> str:
     """Infer test type from name and content."""
     name_lower = name.lower()
     content_lower = content.lower()
@@ -492,7 +495,7 @@ def _infer_test_type(name: str, content: str) -> str:  # pragma: no cover
     return "unit"
 
 
-def _needs_mock(content: str) -> bool:  # pragma: no cover
+def _needs_mock(content: str) -> bool:
     """Determine if mocking is needed based on content."""
     mock_indicators = [
         "mock",
@@ -508,7 +511,7 @@ def _needs_mock(content: str) -> bool:  # pragma: no cover
     return any(indicator in content_lower for indicator in mock_indicators)
 
 
-def _extract_assertions(content: str) -> list[str]:  # pragma: no cover
+def _extract_assertions(content: str) -> list[str]:
     """Extract assertion descriptions from content."""
     assertions = []
 
@@ -529,7 +532,7 @@ def _extract_assertions(content: str) -> list[str]:  # pragma: no cover
     return assertions[:5]  # Limit to 5 assertions
 
 
-def extract_coverage_target(lld_content: str) -> int:  # pragma: no cover
+def extract_coverage_target(lld_content: str) -> int:
     """Extract coverage target from LLD.
 
     Looks for patterns like:
@@ -558,7 +561,7 @@ def extract_coverage_target(lld_content: str) -> int:  # pragma: no cover
     return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
 
 
-def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
+def extract_files_to_modify(lld_content: str) -> list[dict]:
     """Extract files to modify from LLD or Implementation Spec.
 
     Supports two table formats:
@@ -661,7 +664,7 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
     return files
 
 
-def _load_from_issue(  # pragma: no cover
+def _load_from_issue(
     state: TestingWorkflowState,
     issue_number: int,
     repo_root: Path,
@@ -775,7 +778,7 @@ def _load_from_issue(  # pragma: no cover
     }
 
 
-def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
+def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """N0: Load LLD and extract test plan.
 
     Args:
@@ -945,7 +948,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     }
 
 
-def _mock_load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
+def _mock_load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """Mock implementation for testing."""
     issue_number = state.get("issue_number", 42)
 
@@ -1037,3 +1040,4 @@ Requirement: REQ-2
         "framework_config": dict(fw_config),
         "total_scenarios": len(mock_scenarios),
     }
+```

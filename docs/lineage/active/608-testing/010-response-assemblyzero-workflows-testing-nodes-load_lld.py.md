@@ -1,3 +1,6 @@
+
+
+```python
 """N0: Load Implementation Spec node for TDD Testing Workflow.
 
 Issue #384: The TDD workflow now requires an Implementation Spec (produced
@@ -47,84 +50,8 @@ LLD_ACTIVE_DIR = Path("docs/lld/active")
 SPEC_DRAFTS_DIR = Path("docs/lld/drafts")
 LINEAGE_ACTIVE_DIR = Path("docs/lineage/active")
 
-# Legacy Section 9 test headings (Issue #608: rejected with clear error)
-_LEGACY_SECTION_9_PATTERN = re.compile(
-    r"^##\s*9\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)",
-    re.MULTILINE | re.IGNORECASE,
-)
 
-
-def validate_spec_structure(content: str) -> None:
-    """Validate the Implementation Spec structural requirements.
-
-    Issue #608: Require Section 10 for test plan / test mapping heading.
-    Tolerate whitespace around the number and period (e.g., '## 10 . Test Mapping').
-    Explicitly reject Section 9 with a clear error message directing migration
-    to Section 10.
-
-    Args:
-        content: Full spec or LLD markdown content.
-
-    Raises:
-        WorkflowParsingError: If Section 10 heading is not found, or if
-            legacy Section 9 test mapping is detected.
-    """
-    # Issue #608: Explicitly reject legacy Section 9 test mapping headings.
-    # This gives a clear migration message rather than the generic "Expected
-    # Section 10" error, so authors know *what* to change.
-    if _LEGACY_SECTION_9_PATTERN.search(content):
-        raise WorkflowParsingError(
-            "Legacy Section 9 test mapping detected. "
-            "Migrate to Section 10 per standard 0701 v1.1. "
-            "Expected: ## 10. Test Mapping"
-        )
-
-    # Require Section 10, tolerate whitespace around the number and period
-    pattern = r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)"
-    if not re.search(pattern, content, re.MULTILINE | re.IGNORECASE):
-        raise WorkflowParsingError("Expected: ## 10. Test Mapping")
-
-
-def extract_test_plan_section(lld_content: str) -> str:
-    """Extract test plan section strictly from Section 10.
-
-    Issue #608: Hard-cutover to Section 10 only. Section 9 is rejected
-    via WorkflowParsingError. Whitespace variations around the period
-    are tolerated (e.g., '## 10 . Test Mapping').
-
-    Args:
-        lld_content: Full LLD or Implementation Spec markdown content.
-
-    Returns:
-        Test plan section content.
-
-    Raises:
-        WorkflowParsingError: If content does not contain a Section 10 heading,
-            or if legacy Section 9 test mapping is detected.
-    """
-    # Validate structure first — this rejects Section 9 and missing Section 10
-    validate_spec_structure(lld_content)
-
-    # Pre-compute code fence regions to skip false-positive matches
-    # inside ```...``` blocks (e.g., headings embedded in string literals).
-    fence_regions = [
-        (m.start(), m.end())
-        for m in re.finditer(r"```.*?```", lld_content, re.DOTALL)
-    ]
-
-    # Extract content under Section 10 until the next H2 or EOF
-    pattern = r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)[^\n]*\n(.*?)(?=^##\s|\Z)"
-
-    for match in re.finditer(pattern, lld_content, re.MULTILINE | re.DOTALL | re.IGNORECASE):
-        if not any(s <= match.start() < e for s, e in fence_regions):
-            return match.group(1).strip()
-
-    # If validation passed but regex extraction didn't match (shouldn't happen),
-    # raise the error
-    raise WorkflowParsingError("Expected: ## 10. Test Mapping")
-
-
-def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
+def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
     """Find the LLD file for an issue number.
 
     Args:
@@ -158,7 +85,7 @@ def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma:
     return None
 
 
-def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
+def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:
     """Find the Implementation Spec file for an issue number.
 
     Issue #384: TDD workflow requires an implementation spec, not a raw LLD.
@@ -210,7 +137,7 @@ def find_spec_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma
     return None
 
 
-def build_spec_command(issue_number: int, repo_root: Path) -> str:  # pragma: no cover
+def build_spec_command(issue_number: int, repo_root: Path) -> str:
     """Build the exact command to generate a missing implementation spec.
 
     Args:
@@ -226,7 +153,64 @@ def build_spec_command(issue_number: int, repo_root: Path) -> str:  # pragma: no
     )
 
 
-def _extract_test_scenarios_from_code_blocks(content: str) -> str:  # pragma: no cover
+def validate_spec_structure(content: str) -> None:
+    """Validate the Implementation Spec structural requirements.
+
+    Issue #608: Require Section 10 for test plan / test mapping heading.
+    Tolerate whitespace around the number and period (e.g., '## 10 . Test Mapping').
+    Explicitly reject Section 9 with a clear error message.
+
+    Args:
+        content: Full spec or LLD markdown content.
+
+    Raises:
+        WorkflowParsingError: If Section 10 heading is not found.
+    """
+    # Require Section 10, tolerate whitespace around the number and period
+    pattern = r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)"
+    if not re.search(pattern, content, re.MULTILINE | re.IGNORECASE):
+        raise WorkflowParsingError("Expected: ## 10. Test Mapping")
+
+
+def extract_test_plan_section(lld_content: str) -> str:
+    """Extract test plan section strictly from Section 10.
+
+    Issue #608: Hard-cutover to Section 10 only. Section 9 is rejected
+    via WorkflowParsingError. Whitespace variations around the period
+    are tolerated (e.g., '## 10 . Test Mapping').
+
+    Args:
+        lld_content: Full LLD or Implementation Spec markdown content.
+
+    Returns:
+        Test plan section content.
+
+    Raises:
+        WorkflowParsingError: If content does not contain a Section 10 heading.
+    """
+    # Validate structure first — this rejects Section 9 and missing Section 10
+    validate_spec_structure(lld_content)
+
+    # Pre-compute code fence regions to skip false-positive matches
+    # inside ```...``` blocks (e.g., headings embedded in string literals).
+    fence_regions = [
+        (m.start(), m.end())
+        for m in re.finditer(r"```.*?```", lld_content, re.DOTALL)
+    ]
+
+    # Extract content under Section 10 until the next H2 or EOF
+    pattern = r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|Test\s*Plan|Testing)[^\n]*\n(.*?)(?=^##\s|\Z)"
+
+    for match in re.finditer(pattern, lld_content, re.MULTILINE | re.DOTALL | re.IGNORECASE):
+        if not any(s <= match.start() < e for s, e in fence_regions):
+            return match.group(1).strip()
+
+    # If validation passed but regex extraction didn't match (shouldn't happen),
+    # raise the error
+    raise WorkflowParsingError("Expected: ## 10. Test Mapping")
+
+
+def _extract_test_scenarios_from_code_blocks(content: str) -> str:
     """Extract test scenario information from Python test code blocks.
 
     Implementation specs include complete test file contents in code blocks
@@ -285,7 +269,7 @@ def _extract_test_scenarios_from_code_blocks(content: str) -> str:  # pragma: no
     return header + "\n".join(rows)
 
 
-def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
+def extract_requirements(lld_content: str) -> list[str]:
     """Extract requirements from LLD content.
 
     Looks for patterns like:
@@ -350,7 +334,7 @@ def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
     return requirements
 
 
-def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no cover
+def parse_test_scenarios(test_plan: str) -> list[TestScenario]:
     """Parse test scenarios from test plan section.
 
     Looks for patterns like:
@@ -469,13 +453,13 @@ def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no co
     return scenarios
 
 
-def _extract_requirement_ref(content: str) -> str:  # pragma: no cover
+def _extract_requirement_ref(content: str) -> str:
     """Extract requirement reference from content."""
     match = re.search(r"REQ-[\d.]+", content)
     return match.group(0) if match else ""
 
 
-def _infer_test_type(name: str, content: str) -> str:  # pragma: no cover
+def _infer_test_type(name: str, content: str) -> str:
     """Infer test type from name and content."""
     name_lower = name.lower()
     content_lower = content.lower()
@@ -492,7 +476,7 @@ def _infer_test_type(name: str, content: str) -> str:  # pragma: no cover
     return "unit"
 
 
-def _needs_mock(content: str) -> bool:  # pragma: no cover
+def _needs_mock(content: str) -> bool:
     """Determine if mocking is needed based on content."""
     mock_indicators = [
         "mock",
@@ -508,7 +492,7 @@ def _needs_mock(content: str) -> bool:  # pragma: no cover
     return any(indicator in content_lower for indicator in mock_indicators)
 
 
-def _extract_assertions(content: str) -> list[str]:  # pragma: no cover
+def _extract_assertions(content: str) -> list[str]:
     """Extract assertion descriptions from content."""
     assertions = []
 
@@ -529,7 +513,7 @@ def _extract_assertions(content: str) -> list[str]:  # pragma: no cover
     return assertions[:5]  # Limit to 5 assertions
 
 
-def extract_coverage_target(lld_content: str) -> int:  # pragma: no cover
+def extract_coverage_target(lld_content: str) -> int:
     """Extract coverage target from LLD.
 
     Looks for patterns like:
@@ -558,7 +542,7 @@ def extract_coverage_target(lld_content: str) -> int:  # pragma: no cover
     return 95  # Default (see ADR 0207: LLM Team Coverage Targets)
 
 
-def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
+def extract_files_to_modify(lld_content: str) -> list[dict]:
     """Extract files to modify from LLD or Implementation Spec.
 
     Supports two table formats:
@@ -661,7 +645,7 @@ def extract_files_to_modify(lld_content: str) -> list[dict]:  # pragma: no cover
     return files
 
 
-def _load_from_issue(  # pragma: no cover
+def _load_from_issue(
     state: TestingWorkflowState,
     issue_number: int,
     repo_root: Path,
@@ -775,7 +759,7 @@ def _load_from_issue(  # pragma: no cover
     }
 
 
-def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
+def load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """N0: Load LLD and extract test plan.
 
     Args:
@@ -945,7 +929,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     }
 
 
-def _mock_load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
+def _mock_load_lld(state: TestingWorkflowState) -> dict[str, Any]:
     """Mock implementation for testing."""
     issue_number = state.get("issue_number", 42)
 
@@ -1037,3 +1021,4 @@ Requirement: REQ-2
         "framework_config": dict(fw_config),
         "total_scenarios": len(mock_scenarios),
     }
+```
