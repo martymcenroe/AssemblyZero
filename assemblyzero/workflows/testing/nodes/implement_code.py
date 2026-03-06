@@ -221,7 +221,8 @@ def validate_code_response(code: str, filepath: str, existing_content: str = "")
         if len(existing_lines) > 10:
             new_lines = len(lines)
             if new_lines < len(existing_lines) * 0.5:
-                emit("quality.gate_rejected", repo="", metadata={"filepath": filepath, "type": "size_gate", "error": "drastic_shrink"}); return False, f"Mechanical Size Gate: File shrank drastically from {len(existing_lines)} lines to {new_lines} lines. You must output the ENTIRE file without using placeholders."
+                emit("quality.gate_rejected", repo="", metadata={"filepath": filepath, "type": "size_gate", "error": "drastic_shrink"})
+                return False, f"Mechanical Size Gate: File shrank drastically from {len(existing_lines)} lines to {new_lines} lines. You must output the ENTIRE file without using placeholders."
 
     # Python syntax validation
     if filepath.endswith(".py"):
@@ -1097,7 +1098,8 @@ def generate_file_with_retry(
             last_error = f"API error: {api_error}"
             # Issue #546: Non-retryable errors (auth, billing) skip retry loop
             if "[NON-RETRYABLE]" in api_error:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"Non-retryable API error: {api_error}",
                     response_preview=None
@@ -1106,7 +1108,8 @@ def generate_file_with_retry(
                 print(f"        [RETRY {attempt_num}/{max_retries}] {last_error}")
                 continue
             else:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"API error after {max_retries} attempts: {api_error}",
                     response_preview=None
@@ -1129,7 +1132,8 @@ def generate_file_with_retry(
             if attempt < max_retries - 1:
                 continue
             else:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"Summary response after {max_retries} attempts",
                     response_preview=response[:500]
@@ -1143,7 +1147,8 @@ def generate_file_with_retry(
             if attempt < max_retries - 1:
                 continue
             else:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"No code block after {max_retries} attempts",
                     response_preview=response[:500]
@@ -1157,7 +1162,8 @@ def generate_file_with_retry(
             if attempt < max_retries - 1:
                 continue
             else:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"Validation failed after {max_retries} attempts: {validation_error}",
                     response_preview=code[:500]
@@ -1169,7 +1175,8 @@ def generate_file_with_retry(
         return code, True
 
     # Should not reach here, but just in case
-    emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+    emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+    raise ImplementationError(
         filepath=filepath,
         reason=f"Failed after {max_retries} attempts: {last_error}",
         response_preview=None
@@ -1380,7 +1387,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Validate change type
         if change_type.lower() == "modify" and not target_path.exists():
-            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
                 filepath=filepath,
                 reason=f"File marked as 'Modify' but does not exist at {target_path}",
                 response_preview=None
@@ -1392,7 +1400,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         # Check context size
         token_estimate = estimate_context_tokens(lld_content, completed_files)
         if token_estimate > 180000:
-            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
                 filepath=filepath,
                 reason=f"Context too large ({token_estimate} tokens > 180K limit)",
                 response_preview=None
@@ -1405,7 +1414,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             validation = validate_file_write(filepath, path_spec["all_allowed_paths"])
             if not validation["allowed"]:
                 print(f"        [PATH] REJECTED: {validation['reason']}")
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
                     filepath=filepath,
                     reason=f"Path not in LLD: {validation['reason']}",
                     response_preview=None,
@@ -1462,7 +1472,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             temp_path.write_text(code, encoding="utf-8")
             temp_path.replace(target_path)
         except Exception as e:
-            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"}); raise ImplementationError(
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
                 filepath=filepath,
                 reason=f"Failed to write file: {e}",
                 response_preview=None
