@@ -356,6 +356,9 @@ _BILLING_PATTERNS = (
     "insufficient_quota",
     "billing",
     "account has been disabled",
+    "usage limit",
+    "usage has been exhausted",
+    "wait until",
 )
 
 

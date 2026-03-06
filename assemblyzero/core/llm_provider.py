@@ -438,6 +438,9 @@ class ClaudeCLIProvider(LLMProvider):
 
             if proc.returncode != 0:
                 error_msg = stderr or stdout or "Unknown error"
+                # Check for non-retryable errors (like usage limits)
+                retryable = not is_non_retryable_error(error_msg)
+                
                 call_result = LLMCallResult(
                     success=False,
                     response=None,
@@ -447,6 +450,7 @@ class ClaudeCLIProvider(LLMProvider):
                     model_used=self._model,
                     duration_ms=duration_ms,
                     attempts=1,
+                    retryable=retryable,
                 )
                 log_llm_call(call_result)
                 return call_result
