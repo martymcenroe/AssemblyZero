@@ -1,0 +1,25 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-598
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/unit/test_shell_security.py ______________
+ImportError while importing test module 'C:\Users\mcwiz\Projects\AssemblyZero-598\tests\unit\test_shell_security.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python314\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\unit\test_shell_security.py:8: in <module>
+    from assemblyzero.utils.shell import validate_shell_command, SecurityException
+E   ImportError: cannot import name 'validate_shell_command' from 'assemblyzero.utils.shell' (C:\Users\mcwiz\Projects\AssemblyZero-598\assemblyzero\utils\shell.py)
+=========================== short test summary info ===========================
+ERROR tests/unit/test_shell_security.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.16s ===============================
+
