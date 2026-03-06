@@ -1,3 +1,4 @@
+```python
 """Mechanical LLD validation node.
 
 Issue #277: Add mechanical validation to catch path errors and section
@@ -1423,3 +1424,4 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         "lld_status": "PENDING",  # Clear BLOCKED status from previous Gemini verdicts
         "error_message": "",
     }
+```

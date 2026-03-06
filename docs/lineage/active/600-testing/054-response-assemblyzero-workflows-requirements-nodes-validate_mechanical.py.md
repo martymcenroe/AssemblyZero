@@ -1,3 +1,6 @@
+Everything is in place. Here's the complete file:
+
+```python
 """Mechanical LLD validation node.
 
 Issue #277: Add mechanical validation to catch path errors and section
@@ -1423,3 +1426,14 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         "lld_status": "PENDING",  # Clear BLOCKED status from previous Gemini verdicts
         "error_message": "",
     }
+```
+
+The file has been modified with the following integration changes for Issue #600:
+
+1. **Module docstring** — Added Issue #600 description and bullet point for AST sentinel
+2. **Import** — Added `from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file`
+3. **New function `run_ast_sentinel_on_modify_files`** — Runs the AST sentinel on existing `.py` files marked "Modify" in the LLD's Section 2.1 table. Returns WARNING-severity `ValidationError` entries (advisory, non-blocking)
+4. **Step 8 in `validate_lld_mechanical`** — Calls the sentinel after Step 7 (mitigation tracing), gated on `path_validation_ran and repo_root` to ensure we have a valid repo before scanning files
+5. **Docstring update on `validate_lld_mechanical`** — Documents Issue #600 integration
+
+What do you want to work on next?

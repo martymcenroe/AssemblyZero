@@ -1,3 +1,194 @@
+# Implementation Request: assemblyzero/workflows/requirements/nodes/validate_mechanical.py
+
+## Task
+
+Write the complete contents of `assemblyzero/workflows/requirements/nodes/validate_mechanical.py`.
+
+Change type: Modify
+Description: Integrate the new AST Sentinel check.
+
+## LLD Specification
+
+# Implementation Spec: 0600 - AST-Based Import Sentinel
+
+<!-- Metadata -->
+| Field | Value |
+|-------|-------|
+| Issue | #600 |
+| LLD | `docs/lld/active/LLD-600.md` |
+| Generated | 2026-03-05 |
+| Status | APPROVED |
+
+## 1. Overview
+Enhance mechanical validation to strictly catch "Lingering Symbols" (missing imports or undefined variables) before execution using AST analysis.
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `assemblyzero/utils/ast_sentinel.py` | Add | Core AST parsing logic and visitor. |
+| 2 | `tests/unit/test_ast_sentinel.py` | Add | Unit tests for AST Sentinel logic. |
+| 3 | `assemblyzero/workflows/requirements/nodes/validate_mechanical.py` | Modify | Integrate the new AST Sentinel check. |
+
+## 3. Current State (for Modify/Delete files)
+
+### 3.1 assemblyzero/workflows/requirements/nodes/validate_mechanical.py
+```python
+def validate_mechanical(state: RequirementsWorkflowState) -> dict:
+    # ... existing validation logic ...
+    return {"validation_errors": errors}
+```
+
+## 4. Technical Strategy
+1. **ast_sentinel.py:** Implement `SymbolSentinel` using `ast.NodeVisitor`.
+   - Maintain a `scope_stack` (list of sets) to track definitions.
+   - `visit_Import`/`visit_ImportFrom`: Register aliases in the current scope. Reject `*`.
+   - `visit_FunctionDef`/`visit_ClassDef`: Push new scope, register args/name, pop on exit.
+   - `visit_Name(ctx=ast.Load)`: Check if name exists in any scope in the stack or `builtins`.
+2. **Integration:** Update `validate_mechanical.py` to call `ast_sentinel.analyze_file(path)`.
+
+## 5. Requirements Mapping (from LLD)
+- REQ-1: Parse using `ast.parse` and `NodeVisitor`.
+- REQ-2: Detect `ast.Load` without corresponding definition.
+- REQ-3: State specific error: "Symbol '{name}' used on line {line} but not imported."
+- REQ-4: Strictly fail gate (`exit 1`) on un-ignored errors.
+- REQ-5: Recursive stack-based scope tracking (nested scopes, comprehensions, walrus).
+- REQ-6: Ban star imports explicitly.
+- REQ-7: Support `if TYPE_CHECKING:` blocks.
+- REQ-8: Support `# sentinel: disable-line`.
+
+## 9. Test Mapping
+
+### 9.1 Test Scenarios
+| ID | Scenario | Input | Expected | Pass Criteria |
+|----|----------|-------|----------|---------------|
+| 010 | Happy path valid AST Analysis (REQ-1) | `import os; os.path.join()` | No errors | No errors emitted |
+| 020 | Missing import verified (REQ-2) | `json.dumps({})` | `SentinelError` | Error for 'json' |
+| 030 | Feedback to stderr (REQ-3) | `json.dumps({})` | Error in stderr | Exact string in stderr |
+| 040 | Mechanical validation fail (REQ-4) | Bad file | `sys.exit(1)` | Exit code 1 |
+| 050 | Local scope resilience (REQ-5) | `def foo(a): b = a; return b` | No errors | Args/locals recognized |
+| 060 | Comprehensions (REQ-5) | `[x for x in y]` | No errors | 'x' isolated |
+| 070 | Walrus Operators (REQ-5) | `if (n := len(a)) > 1: print(n)` | No errors | 'n' recognized |
+| 080 | Star imports banned (REQ-6) | `from typing import *` | "Star imports are not allowed" | REQ-6 failure |
+| 090 | Global/Nonlocal tracking (REQ-5) | `global x; x = 1` | No errors | No false positives |
+| 100 | TYPE_CHECKING support (REQ-7) | `if TYPE_CHECKING: from x import y` | No errors | 'y' registered |
+| 110 | Ignore comments (REQ-8) | `var # sentinel: disable-line` | No errors | Symbol ignored |
+
+**Final Status:** APPROVED (Manually Patched)
+
+
+## Required File Paths (from LLD - do not deviate)
+
+The following paths are specified in the LLD. Write ONLY to these paths:
+
+
+Any files written to other paths will be rejected.
+
+## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+tests/
+  accessibility/
+  adversarial/
+  benchmark/
+  compliance/
+  contract/
+  e2e/
+  fixtures/
+    death/
+    issue_workflow/
+    janitor/
+      mock_repo/
+    lld_tracking/
+    metrics/
+    mock_lineage/
+    mock_repo/
+      src/
+    rag/
+    scout/
+    scraper/
+    spelunking/
+    verdict_analyzer/
+  harness/
+  integration/
+  security/
+  tools/
+  unit/
+    test_death/
+    test_gate/
+    test_janitor/
+    test_rag/
+    test_spelunking/
+  visual/
+  __init__.py
+  conftest.py
+  test_assemblyzero_config.py
+  test_audit.py
+  test_audit_sharding.py
+  test_credentials.py
+  test_designer.py
+  test_gemini_client.py
+  test_gemini_credentials_v2.py
+  test_integration_workflow.py
+  ... and 14 more files
+assemblyzero/
+  core/
+    validation/
+  graphs/
+  hooks/
+  metrics/
+  nodes/
+  rag/
+  spelunking/
+  telemetry/
+  utils/
+  workflows/
+    death/
+    implementation_spec/
+      nodes/
+    issue/
+      nodes/
+    janitor/
+      probes/
+    lld/
+    orchestrator/
+    parallel/
+    requirements/
+      nodes/
+      parsers/
+    scout/
+    testing/
+      completeness/
+      knowledge/
+      nodes/
+      runners/
+      templates/
+  __init__.py
+  tracing.py
+dashboard/
+  src/
+    client/
+      components/
+      pages/
+  package.json
+  tsconfig.client.json
+  tsconfig.json
+  tsconfig.worker.json
+  wrangler.toml
+data/
+  hourglass/
+  unleashed/
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+## Existing File Contents
+
+The file currently contains:
+
+```python
 """Mechanical LLD validation node.
 
 Issue #277: Add mechanical validation to catch path errors and section
@@ -15,9 +206,6 @@ error instead of silent skip.
 Issue #334: Normalize change types with parenthetical suffixes (e.g., "Add (Directory)")
 and save validation errors to lineage for audit trail.
 
-Issue #600: Integrate AST-based import sentinel to catch missing imports in
-existing Python files referenced by the LLD before Gemini review.
-
 This node validates LLD content deterministically without LLM calls:
 - Mandatory sections exist (2.1, 11, 12)
 - File paths are valid (Modify/Delete exist, Add parents exist)
@@ -27,7 +215,6 @@ This node validates LLD content deterministically without LLM calls:
 - LLD title issue number matches workflow issue number
 - Target repo validation (None, empty, non-existent paths are blocking errors)
 - Change type normalization (handles parenthetical suffixes like "Add (Directory)")
-- AST-based import sentinel on existing Python files (warning only)
 """
 
 import logging
@@ -38,7 +225,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict
 
-from assemblyzero.utils.ast_sentinel import analyze_file as ast_analyze_file
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 
 logger = logging.getLogger(__name__)
@@ -1130,68 +1316,6 @@ def trace_mitigations_to_functions(
 
 
 # =============================================================================
-# Issue #600: AST Import Sentinel Integration
-# =============================================================================
-
-
-def run_ast_sentinel_on_modify_files(
-    files: list[dict],
-    repo_root: Path,
-) -> list[ValidationError]:
-    """Run AST-based import sentinel on existing Python files marked Modify.
-
-    Issue #600: Catches missing imports in files that already exist on disk.
-    Only runs on .py files with change_type "Modify" (files that must exist).
-    Returns warnings (not errors) since sentinel findings are advisory and
-    should not block the LLD workflow.
-
-    Args:
-        files: List of file dicts with path and change_type.
-        repo_root: Path to repository root.
-
-    Returns:
-        List of WARNING-severity ValidationErrors for sentinel findings.
-    """
-    warnings: list[ValidationError] = []
-
-    for file_info in files:
-        # Only check existing Python files marked Modify
-        if file_info.get("change_type") != "Modify":
-            continue
-
-        path = file_info["path"]
-        if not path.endswith(".py"):
-            continue
-
-        full_path = repo_root / path
-        if not full_path.exists():
-            # validate_file_paths already handles missing Modify files
-            continue
-
-        try:
-            result = ast_analyze_file(full_path)
-        except Exception as e:
-            logger.debug(f"AST sentinel failed on {path}: {e}")
-            continue
-
-        if not result.ok:
-            for err in result.errors:
-                warnings.append(
-                    ValidationError(
-                        severity=ValidationSeverity.WARNING,
-                        section="2.1",
-                        message=(
-                            f"AST sentinel: {path} line {err.line} — "
-                            f"symbol '{err.name}' may not be imported"
-                        ),
-                        file_path=path,
-                    )
-                )
-
-    return warnings
-
-
-# =============================================================================
 # Main Validation Node
 # =============================================================================
 
@@ -1215,9 +1339,6 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
 
     Issue #334: Normalize change types with parenthetical suffixes and
     save validation errors to lineage for audit trail.
-
-    Issue #600: Run AST-based import sentinel on existing Python files
-    to catch missing imports early (warnings only).
 
     Args:
         state: Workflow state with current_draft and target_repo.
@@ -1378,11 +1499,6 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
     mitigation_warnings = trace_mitigations_to_functions(mitigations, functions)
     all_warnings.extend(mitigation_warnings)
 
-    # Step 8: Issue #600 - Run AST sentinel on existing Modify Python files
-    if path_validation_ran and repo_root:
-        sentinel_warnings = run_ast_sentinel_on_modify_files(files, repo_root)
-        all_warnings.extend(sentinel_warnings)
-
     # Aggregate results
     error_messages = [e.message for e in all_errors]
     warning_messages = [w.message for w in all_warnings]
@@ -1423,3 +1539,1056 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         "lld_status": "PENDING",  # Clear BLOCKED status from previous Gemini verdicts
         "error_message": "",
     }
+```
+
+Modify this file according to the LLD specification.
+
+## Tests That Must Pass
+
+```python
+# From C:\Users\mcwiz\Projects\AssemblyZero-600\tests\test_issue_600.py
+"""Test file for Issue #600.
+
+Generated by AssemblyZero TDD Testing Workflow.
+Tests will fail with ImportError until implementation exists (TDD RED phase).
+"""
+
+import pytest
+
+# TDD: This import fails until implementation exists (RED phase)
+# Once implemented, tests can run (GREEN phase)
+from assemblyzero.utils.ast_sentinel import *  # noqa: F401, F403
+
+
+# Unit Tests
+# -----------
+
+def test_010():
+    """
+    Happy path valid AST Analysis (REQ-1) | `import os; os.path.join()` |
+    No errors | No errors emitted
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_010 works correctly
+    assert False, 'TDD RED: test_010 not implemented'
+
+
+def test_020():
+    """
+    Missing import verified (REQ-2) | `json.dumps({})` | `SentinelError`
+    | Error for 'json'
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_020 works correctly
+    assert False, 'TDD RED: test_020 not implemented'
+
+
+def test_030():
+    """
+    Feedback to stderr (REQ-3) | `json.dumps({})` | Error in stderr |
+    Exact string in stderr
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_030 works correctly
+    assert False, 'TDD RED: test_030 not implemented'
+
+
+def test_040():
+    """
+    Mechanical validation fail (REQ-4) | Bad file | `sys.exit(1)` | Exit
+    code 1
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_040 works correctly
+    assert False, 'TDD RED: test_040 not implemented'
+
+
+def test_050():
+    """
+    Local scope resilience (REQ-5) | `def foo(a): b = a; return b` | No
+    errors | Args/locals recognized
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_050 works correctly
+    assert False, 'TDD RED: test_050 not implemented'
+
+
+def test_060():
+    """
+    Comprehensions (REQ-5) | `[x for x in y]` | No errors | 'x' isolated
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_060 works correctly
+    assert False, 'TDD RED: test_060 not implemented'
+
+
+def test_070():
+    """
+    Walrus Operators (REQ-5) | `if (n := len(a)) > 1: print(n)` | No
+    errors | 'n' recognized
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_070 works correctly
+    assert False, 'TDD RED: test_070 not implemented'
+
+
+def test_080():
+    """
+    Star imports banned (REQ-6) | `from typing import *` | "Star imports
+    are not allowed" | REQ-6 failure
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_080 works correctly
+    assert False, 'TDD RED: test_080 not implemented'
+
+
+def test_090():
+    """
+    Global/Nonlocal tracking (REQ-5) | `global x; x = 1` | No errors | No
+    false positives
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_090 works correctly
+    assert False, 'TDD RED: test_090 not implemented'
+
+
+def test_100():
+    """
+    TYPE_CHECKING support (REQ-7) | `if TYPE_CHECKING: from x import y` |
+    No errors | 'y' registered
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_100 works correctly
+    assert False, 'TDD RED: test_100 not implemented'
+
+
+def test_110():
+    """
+    Ignore comments (REQ-8) | `var # sentinel: disable-line` | No errors
+    | Symbol ignored
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_110 works correctly
+    assert False, 'TDD RED: test_110 not implemented'
+
+
+
+
+```
+
+## Previously Implemented Files
+
+These files have already been implemented. Use them for imports and references:
+
+### assemblyzero/utils/ast_sentinel.py (signatures)
+
+```python
+"""AST-based Import Sentinel for detecting lingering symbols.
+
+Issue #600: Detect missing imports and undefined variables before execution
+using static AST analysis.
+
+Provides:
+- SymbolSentinel: AST NodeVisitor that tracks scopes and detects undefined names.
+- SentinelError: Structured error for undefined symbol usage.
+- analyze_source: Analyze a source string for undefined symbols.
+- analyze_file: Analyze a file path for undefined symbols.
+"""
+
+from __future__ import annotations
+
+import ast
+
+import builtins
+
+import logging
+
+import sys
+
+from dataclasses import dataclass, field
+
+from pathlib import Path
+
+from typing import TYPE_CHECKING
+
+class SentinelError:
+
+    """A single undefined-symbol error found by the sentinel."""
+
+    def __str__(self) -> str:
+    ...
+
+class SentinelResult:
+
+    """Result of analyzing a source file."""
+
+    def ok(self) -> bool:
+    ...
+
+    def format_errors(self) -> str:
+    """Format all errors for stderr output."""
+    ...
+
+class SymbolSentinel(ast.NodeVisitor):
+
+    """AST visitor that tracks symbol definitions across scopes.
+
+Maintains a scope stack to detect uses of undefined names."""
+
+    def __init__(self, source_lines: list[str] | None = None) -> None:
+    ...
+
+    def _current_scope(self) -> set[str]:
+    ...
+
+    def _define(self, name: str) -> None:
+    """Register a name in the current scope."""
+    ...
+
+    def _is_defined(self, name: str) -> bool:
+    """Check if a name is defined in any enclosing scope, builtins, or implicit globals."""
+    ...
+
+    def _push_scope(self) -> None:
+    ...
+
+    def _pop_scope(self) -> None:
+    ...
+
+    def _is_disabled(self, line: int) -> bool:
+    """Check if a line has a sentinel: disable-line comment."""
+    ...
+
+    def visit_Import(self, node: ast.Import) -> None:
+    ...
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+    ...
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    ...
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+    ...
+
+    def _visit_function_body(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+    """Push scope, register args, visit body, pop scope."""
+    ...
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+    ...
+
+    def _visit_comprehension(self, node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp) -> None:
+    """Handle comprehensions with their own scope."""
+    ...
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+    ...
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+    ...
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+    ...
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+    ...
+
+    def _visit_target(self, target: ast.AST) -> None:
+    """Register names from assignment targets (handles tuples, stars, etc.)."""
+    ...
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+    ...
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+    ...
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+    ...
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+    """Walrus operator := defines in enclosing scope."""
+    ...
+
+    def visit_Global(self, node: ast.Global) -> None:
+    ...
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+    ...
+
+    def visit_For(self, node: ast.For) -> None:
+    ...
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+    ...
+
+    def visit_With(self, node: ast.With) -> None:
+    ...
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+    ...
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+    ...
+
+    def visit_If(self, node: ast.If) -> None:
+    """Handle if TYPE_CHECKING blocks."""
+    ...
+
+    def _is_type_checking_guard(self, test: ast.AST) -> bool:
+    """Check if a test node is `TYPE_CHECKING`."""
+    ...
+
+    def visit_Name(self, node: ast.Name) -> None:
+    ...
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+    """Visit attribute access — only check the root object."""
+    ...
+
+    def visit_Match(self, node: ast.Match) -> None:
+    ...
+
+    def _visit_pattern(self, pattern: ast.AST) -> None:
+    """Register names from match patterns."""
+    ...
+
+def analyze_source(source: str, filename: str = "<string>") -> SentinelResult:
+    """Analyze a source string for undefined symbols.
+
+Args:"""
+    ...
+
+def analyze_file(path: str | Path) -> SentinelResult:
+    """Analyze a file for undefined symbols.
+
+Args:"""
+    ...
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: analyze files and report errors to stderr.
+
+Returns 1 if any errors found, 0 otherwise."""
+    ...
+
+logger = logging.getLogger(__name__)
+
+DISABLE_COMMENT = "sentinel: disable-line"
+```
+
+### tests/unit/test_ast_sentinel.py (full)
+
+```python
+"""Unit tests for AST Sentinel logic (Issue #600).
+
+Tests cover all scenarios from LLD-600 verification matrix:
+- REQ-1: AST parsing via ast.parse and NodeVisitor
+- REQ-2: Detect ast.Load without corresponding definition
+- REQ-3: Structured error messages
+- REQ-4: Fail gate on errors
+- REQ-5: Recursive scope tracking (locals, comprehensions, walrus, global/nonlocal)
+- REQ-6: Ban star imports
+- REQ-7: TYPE_CHECKING block support
+- REQ-8: sentinel: disable-line comment support
+"""
+
+from __future__ import annotations
+
+import sys
+import textwrap
+from io import StringIO
+from unittest.mock import patch
+
+import pytest
+
+from assemblyzero.utils.ast_sentinel import (
+    SentinelError,
+    SentinelResult,
+    SymbolSentinel,
+    analyze_file,
+    analyze_source,
+    main,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _analyze(code: str) -> SentinelResult:
+    """Analyze dedented source code and return the result."""
+    return analyze_source(textwrap.dedent(code))
+
+
+def _error_names(result: SentinelResult) -> list[str]:
+    """Extract just the symbol names from a result's errors."""
+    return [e.name for e in result.errors]
+
+
+# ---------------------------------------------------------------------------
+# test_010 — Happy path valid AST Analysis (REQ-1)
+# ---------------------------------------------------------------------------
+
+
+class TestHappyPath:
+    """REQ-1: Parse using ast.parse and NodeVisitor with no errors."""
+
+    def test_010_import_and_use(self):
+        """import os; os.path.join() produces no errors."""
+        result = _analyze("""\
+            import os
+            os.path.join("a", "b")
+        """)
+        assert result.ok
+        assert result.errors == []
+
+    def test_010_from_import(self):
+        """from os.path import join produces no errors."""
+        result = _analyze("""\
+            from os.path import join
+            join("a", "b")
+        """)
+        assert result.ok
+
+    def test_010_aliased_import(self):
+        """import numpy as np — alias is the defined name."""
+        result = _analyze("""\
+            import numpy as np
+            np.array([1, 2, 3])
+        """)
+        assert result.ok
+
+    def test_010_builtins_always_available(self):
+        """Built-in names like print, len, dict need no import."""
+        result = _analyze("""\
+            x = len([1, 2, 3])
+            print(x)
+            d = dict(a=1)
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_020 — Missing import verified (REQ-2)
+# ---------------------------------------------------------------------------
+
+
+class TestMissingImport:
+    """REQ-2: Detect ast.Load without corresponding definition."""
+
+    def test_020_missing_import(self):
+        """json.dumps({}) without import produces error for 'json'."""
+        result = _analyze("""\
+            json.dumps({})
+        """)
+        assert not result.ok
+        assert "json" in _error_names(result)
+
+    def test_020_multiple_missing(self):
+        """Multiple undefined symbols each produce errors."""
+        result = _analyze("""\
+            foo(bar, baz)
+        """)
+        names = _error_names(result)
+        assert "foo" in names
+        assert "bar" in names
+        assert "baz" in names
+
+    def test_020_attribute_only_checks_root(self):
+        """Only the root object needs to be defined, not attributes."""
+        result = _analyze("""\
+            import os
+            os.path.join("a", "b")
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_030 — Feedback to stderr (REQ-3)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorMessages:
+    """REQ-3: State specific error with symbol name and line number."""
+
+    def test_030_error_message_format(self):
+        """Error message includes symbol name and line number."""
+        result = _analyze("""\
+            json.dumps({})
+        """)
+        assert len(result.errors) >= 1
+        err = result.errors[0]
+        assert err.name == "json"
+        assert err.line == 1
+        assert "json" in err.message
+        assert "1" in err.message
+        assert "not imported" in err.message
+
+    def test_030_format_errors_output(self):
+        """format_errors() produces multi-line string for stderr."""
+        result = _analyze("""\
+            json.dumps({})
+        """)
+        formatted = result.format_errors()
+        assert "Symbol 'json' used on line 1 but not imported." in formatted
+
+    def test_030_sentinel_error_str(self):
+        """SentinelError.__str__ returns the message."""
+        err = SentinelError(name="foo", line=5, message="Symbol 'foo' used on line 5 but not imported.")
+        assert str(err) == "Symbol 'foo' used on line 5 but not imported."
+
+
+# ---------------------------------------------------------------------------
+# test_040 — Mechanical validation fail (REQ-4)
+# ---------------------------------------------------------------------------
+
+
+class TestFailGate:
+    """REQ-4: CLI exits 1 on errors, 0 on clean."""
+
+    def test_040_exit_1_on_errors(self, tmp_path):
+        """Bad file causes main() to return 1."""
+        bad_file = tmp_path / "bad.py"
+        bad_file.write_text("json.dumps({})\n", encoding="utf-8")
+
+        stderr_capture = StringIO()
+        with patch("sys.stderr", stderr_capture):
+            exit_code = main([str(bad_file)])
+
+        assert exit_code == 1
+        assert "json" in stderr_capture.getvalue()
+
+    def test_040_exit_0_on_clean(self, tmp_path):
+        """Clean file causes main() to return 0."""
+        good_file = tmp_path / "good.py"
+        good_file.write_text("import os\nos.getcwd()\n", encoding="utf-8")
+
+        exit_code = main([str(good_file)])
+        assert exit_code == 0
+
+    def test_040_syntax_error_returns_1(self, tmp_path):
+        """Syntax error in file causes main() to return 1."""
+        bad_file = tmp_path / "syntax.py"
+        bad_file.write_text("def foo(\n", encoding="utf-8")
+
+        stderr_capture = StringIO()
+        with patch("sys.stderr", stderr_capture):
+            exit_code = main([str(bad_file)])
+
+        assert exit_code == 1
+
+    def test_040_unreadable_file_returns_1(self, tmp_path):
+        """Non-existent file causes main() to return 1."""
+        stderr_capture = StringIO()
+        with patch("sys.stderr", stderr_capture):
+            exit_code = main([str(tmp_path / "nonexistent.py")])
+
+        assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# test_050 — Local scope resilience (REQ-5)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalScope:
+    """REQ-5: Args and locals recognized within function scope."""
+
+    def test_050_function_args_and_locals(self):
+        """def foo(a): b = a; return b — no errors."""
+        result = _analyze("""\
+            def foo(a):
+                b = a
+                return b
+        """)
+        assert result.ok
+
+    def test_050_nested_functions(self):
+        """Nested function args don't leak to outer scope."""
+        result = _analyze("""\
+            def outer():
+                x = 1
+                def inner(y):
+                    return x + y
+                return inner
+        """)
+        assert result.ok
+
+    def test_050_class_scope(self):
+        """Class body defines names in its own scope."""
+        result = _analyze("""\
+            class Foo:
+                x = 1
+                y = x + 1
+        """)
+        assert result.ok
+
+    def test_050_for_loop_target(self):
+        """For-loop target variable is defined."""
+        result = _analyze("""\
+            items = [1, 2, 3]
+            for item in items:
+                print(item)
+        """)
+        assert result.ok
+
+    def test_050_with_statement(self):
+        """With-statement optional_vars defines name."""
+        result = _analyze("""\
+            import io
+            with io.StringIO() as f:
+                print(f)
+        """)
+        assert result.ok
+
+    def test_050_except_handler(self):
+        """Exception handler name is defined."""
+        result = _analyze("""\
+            try:
+                pass
+            except Exception as e:
+                print(e)
+        """)
+        assert result.ok
+
+    def test_050_tuple_unpacking(self):
+        """Tuple unpacking defines all target names."""
+        result = _analyze("""\
+            a, b, c = 1, 2, 3
+            print(a, b, c)
+        """)
+        assert result.ok
+
+    def test_050_starred_assignment(self):
+        """Starred assignment defines the starred name."""
+        result = _analyze("""\
+            first, *rest = [1, 2, 3, 4]
+            print(first, rest)
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_060 — Comprehensions (REQ-5)
+# ---------------------------------------------------------------------------
+
+
+class TestComprehensions:
+    """REQ-5: Comprehension variables isolated in their own scope."""
+
+    def test_060_list_comprehension(self):
+        """[x for x in y] — 'x' defined inside comprehension scope."""
+        result = _analyze("""\
+            y = [1, 2, 3]
+            result = [x for x in y]
+        """)
+        assert result.ok
+
+    def test_060_nested_comprehension(self):
+        """Nested comprehension variables are scoped."""
+        result = _analyze("""\
+            matrix = [[1, 2], [3, 4]]
+            flat = [x for row in matrix for x in row]
+        """)
+        assert result.ok
+
+    def test_060_dict_comprehension(self):
+        """Dict comprehension defines key/value vars."""
+        result = _analyze("""\
+            items = [(1, 'a'), (2, 'b')]
+            d = {k: v for k, v in items}
+        """)
+        assert result.ok
+
+    def test_060_set_comprehension(self):
+        """Set comprehension variables are scoped."""
+        result = _analyze("""\
+            items = [1, 2, 3]
+            s = {x * 2 for x in items}
+        """)
+        assert result.ok
+
+    def test_060_generator_expression(self):
+        """Generator expression variables are scoped."""
+        result = _analyze("""\
+            items = [1, 2, 3]
+            total = sum(x for x in items)
+        """)
+        assert result.ok
+
+    def test_060_comprehension_with_filter(self):
+        """Comprehension if-clause can reference the loop variable."""
+        result = _analyze("""\
+            items = [1, 2, 3, 4, 5]
+            evens = [x for x in items if x % 2 == 0]
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_070 — Walrus Operators (REQ-5)
+# ---------------------------------------------------------------------------
+
+
+class TestWalrusOperator:
+    """REQ-5: Walrus operator := defines name in enclosing scope."""
+
+    def test_070_walrus_in_if(self):
+        """if (n := len(a)) > 1: print(n) — 'n' recognized."""
+        result = _analyze("""\
+            a = [1, 2, 3]
+            if (n := len(a)) > 1:
+                print(n)
+        """)
+        assert result.ok
+
+    def test_070_walrus_in_while(self):
+        """Walrus in while condition defines the name for the body."""
+        result = _analyze("""\
+            import io
+            data = io.BytesIO(b"hello")
+            while (chunk := data.read(2)):
+                print(chunk)
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_080 — Star imports banned (REQ-6)
+# ---------------------------------------------------------------------------
+
+
+class TestStarImports:
+    """REQ-6: Star imports produce an explicit error."""
+
+    def test_080_from_star_import(self):
+        """from typing import * produces 'Star imports are not allowed'."""
+        result = _analyze("""\
+            from typing import *
+        """)
+        assert not result.ok
+        assert any("Star imports are not allowed" in str(e) for e in result.errors)
+
+    def test_080_star_import_error_details(self):
+        """Star import error has correct name and line."""
+        result = _analyze("""\
+            from os.path import *
+        """)
+        star_errors = [e for e in result.errors if e.name == "*"]
+        assert len(star_errors) == 1
+        assert star_errors[0].line == 1
+
+
+# ---------------------------------------------------------------------------
+# test_090 — Global/Nonlocal tracking (REQ-5)
+# ---------------------------------------------------------------------------
+
+
+class TestGlobalNonlocal:
+    """REQ-5: global/nonlocal statements don't produce false positives."""
+
+    def test_090_global_declaration(self):
+        """global x; x = 1 — no errors."""
+        result = _analyze("""\
+            def foo():
+                global x
+                x = 1
+        """)
+        assert result.ok
+
+    def test_090_nonlocal_declaration(self):
+        """nonlocal references enclosing scope without error."""
+        result = _analyze("""\
+            def outer():
+                x = 0
+                def inner():
+                    nonlocal x
+                    x = 1
+                inner()
+                return x
+        """)
+        assert result.ok
+
+    def test_090_global_used_after_declaration(self):
+        """Global var usable after declaration."""
+        result = _analyze("""\
+            x = 10
+            def foo():
+                global x
+                print(x)
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_100 — TYPE_CHECKING support (REQ-7)
+# ---------------------------------------------------------------------------
+
+
+class TestTypeChecking:
+    """REQ-7: if TYPE_CHECKING: imports register symbols."""
+
+    def test_100_type_checking_import(self):
+        """if TYPE_CHECKING: from x import y — 'y' is registered."""
+        result = _analyze("""\
+            from __future__ import annotations
+            from typing import TYPE_CHECKING
+            if TYPE_CHECKING:
+                from collections import OrderedDict
+            def foo() -> OrderedDict:
+                pass
+        """)
+        assert result.ok
+
+    def test_100_type_checking_multiple_imports(self):
+        """Multiple imports under TYPE_CHECKING are all registered."""
+        result = _analyze("""\
+            from __future__ import annotations
+            from typing import TYPE_CHECKING
+            if TYPE_CHECKING:
+                from pathlib import Path
+                from typing import Any
+            def bar(x: Path) -> Any:
+                pass
+        """)
+        assert result.ok
+
+
+# ---------------------------------------------------------------------------
+# test_110 — Ignore comments (REQ-8)
+# ---------------------------------------------------------------------------
+
+
+class TestDisableComment:
+    """REQ-8: sentinel: disable-line suppresses errors on that line."""
+
+    def test_110_disable_line_suppresses(self):
+        """var # sentinel: disable-line — no error for undefined var."""
+        result = _analyze("""\
+            undefined_var  # sentinel: disable-line
+        """)
+        assert result.ok
+
+    def test_110_disable_only_affects_that_line(self):
+        """Disable comment only suppresses the specific line."""
+        result = _analyze("""\
+            foo  # sentinel: disable-line
+            bar
+        """)
+        # foo should be suppressed, bar should still error
+        names = _error_names(result)
+        assert "foo" not in names
+        assert "bar" in names
+
+
+# ---------------------------------------------------------------------------
+# Additional edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyzeFile:
+    """Tests for analyze_file function."""
+
+    def test_analyze_file_valid(self, tmp_path):
+        """analyze_file works on a real file."""
+        f = tmp_path / "test.py"
+        f.write_text("import os\nos.getcwd()\n", encoding="utf-8")
+        result = analyze_file(f)
+        assert result.ok
+
+    def test_analyze_file_errors(self, tmp_path):
+        """analyze_file detects errors in a real file."""
+        f = tmp_path / "test.py"
+        f.write_text("json.dumps({})\n", encoding="utf-8")
+        result = analyze_file(f)
+        assert not result.ok
+        assert "json" in _error_names(result)
+
+    def test_analyze_file_not_found(self, tmp_path):
+        """analyze_file returns error for non-existent file."""
+        result = analyze_file(tmp_path / "nope.py")
+        assert not result.ok
+        assert result.errors[0].name == "<io>"
+
+
+class TestSentinelResult:
+    """Tests for SentinelResult data class."""
+
+    def test_ok_when_empty(self):
+        """SentinelResult.ok is True when no errors."""
+        assert SentinelResult().ok
+
+    def test_not_ok_with_errors(self):
+        """SentinelResult.ok is False when errors exist."""
+        result = SentinelResult(errors=[
+            SentinelError(name="x", line=1, message="test"),
+        ])
+        assert not result.ok
+
+
+class TestEdgeCases:
+    """Additional edge-case coverage."""
+
+    def test_decorator_usage(self):
+        """Decorators are checked in the enclosing scope."""
+        result = _analyze("""\
+            import functools
+            @functools.wraps
+            def foo():
+                pass
+        """)
+        assert result.ok
+
+    def test_augmented_assignment(self):
+        """Augmented assignment (+=) recognizes existing var."""
+        result = _analyze("""\
+            x = 0
+            x += 1
+        """)
+        assert result.ok
+
+    def test_annotated_assignment(self):
+        """Annotated assignment defines the name."""
+        result = _analyze("""\
+            x: int = 5
+            print(x)
+        """)
+        assert result.ok
+
+    def test_async_function(self):
+        """Async function definitions are handled."""
+        result = _analyze("""\
+            async def foo(x):
+                return x
+        """)
+        assert result.ok
+
+    def test_multiple_files_cli(self, tmp_path):
+        """CLI handles multiple files."""
+        good = tmp_path / "good.py"
+        good.write_text("import os\nos.getcwd()\n", encoding="utf-8")
+        bad = tmp_path / "bad.py"
+        bad.write_text("undefined_thing\n", encoding="utf-8")
+
+        stderr_capture = StringIO()
+        with patch("sys.stderr", stderr_capture):
+            exit_code = main([str(good), str(bad)])
+
+        assert exit_code == 1
+        assert "undefined_thing" in stderr_capture.getvalue()
+
+    def test_syntax_error_handled(self):
+        """Syntax errors produce a SentinelError, not an exception."""
+        result = _analyze("""\
+            def foo(
+        """)
+        assert not result.ok
+        assert result.errors[0].name == "<syntax>"
+
+    def test_implicit_globals_no_errors(self):
+        """__name__, __file__ etc. are always available."""
+        result = _analyze("""\
+            if __name__ == "__main__":
+                print(__file__)
+        """)
+        assert result.ok
+
+    def test_class_bases_checked(self):
+        """Class bases are checked in enclosing scope."""
+        result = _analyze("""\
+            class Foo(UndefinedBase):
+                pass
+        """)
+        assert not result.ok
+        assert "UndefinedBase" in _error_names(result)
+
+    def test_delete_no_false_positive(self):
+        """del statement doesn't produce false positive."""
+        result = _analyze("""\
+            x = 1
+            del x
+        """)
+        assert result.ok
+```
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block
