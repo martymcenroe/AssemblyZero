@@ -147,6 +147,20 @@ class CLINotFoundError(APIError):
         )
 
 
+class SecurityException(Exception):
+    """Raised when a command fails security validation in shell.py middleware.
+
+    Attributes:
+        command: The full command string that triggered the violation.
+        flag: The specific flag that was blocked.
+    """
+
+    def __init__(self, message: str, *, command: str = "", flag: str = ""):
+        super().__init__(message)
+        self.command = command
+        self.flag = flag
+
+
 # ---------------------------------------------------------------------------
 # Classifier: Anthropic SDK
 # ---------------------------------------------------------------------------
