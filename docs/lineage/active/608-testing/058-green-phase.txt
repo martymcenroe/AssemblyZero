@@ -1,0 +1,56 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.0.2, pluggy-1.6.0 -- C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Scripts\python.exe
+cachedir: .pytest_cache
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\mcwiz\Projects\AssemblyZero-608
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.6.9, benchmark-5.2.3, cov-7.0.0
+collecting ... collected 19 items
+
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_t010_standard_section_10 PASSED [  5%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_section_10_verification_testing PASSED [ 10%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_section_10_test_plan PASSED [ 15%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_section_10_whitespace_around_period PASSED [ 21%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_section_10_extra_whitespace PASSED [ 26%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_legacy_section_9_rejected PASSED [ 31%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_legacy_section_9_verification_rejected PASSED [ 36%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_legacy_section_9_error_mentions_section_10 PASSED [ 42%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_no_test_section_rejected PASSED [ 47%]
+tests/unit/test_load_lld_v2.py::TestValidateSpecStructure::test_both_sections_9_and_10_rejects_section_9 PASSED [ 52%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_t010_extracts_standard_section_10 PASSED [ 57%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_extracts_until_next_h2 PASSED [ 63%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_extracts_verification_testing PASSED [ 68%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_extracts_test_plan_heading PASSED [ 73%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_extracts_with_whitespace_variation PASSED [ 78%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_rejects_legacy_section_9 PASSED [ 84%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_rejects_missing_section PASSED [ 89%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_ignores_section_10_inside_code_fence PASSED [ 94%]
+tests/unit/test_load_lld_v2.py::TestExtractTestPlanSection::test_extracted_content_is_stripped PASSED [100%]
+ERROR: Coverage failure: total of 12 is less than fail-under=95
+
+
+============================== warnings summary ===============================
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\langchain_core\_api\deprecation.py:25: UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.
+    from pydantic.v1.fields import FieldInfo as FieldInfoV1
+
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+..\..\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43
+  C:\Users\mcwiz\AppData\Local\pypoetry\Cache\virtualenvs\unleashed-Zukdy2xA-py3.14\Lib\site-packages\google\genai\types.py:43: DeprecationWarning: '_UnionGenericAlias' is deprecated and slated for removal in Python 3.17
+    VersionedUnionType = Union[builtin_types.UnionType, _UnionGenericAlias]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.14.0-final-0 _______________
+
+Name                                               Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------------
+assemblyzero\workflows\testing\nodes\load_lld.py     360    316    12%   67-88, 105-140, 153, 226, 245-285, 302-350, 367-469, 474-475, 480-492, 497-508, 513-529, 546-558, 574-661, 681-762, 787-930, 950-1025
+--------------------------------------------------------------------------------
+TOTAL                                                360    316    12%
+FAIL Required test coverage of 95% not reached. Total coverage: 12.22%
+======================= 19 passed, 6 warnings in 2.29s ========================
+
