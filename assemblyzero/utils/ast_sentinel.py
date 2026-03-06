@@ -159,7 +159,6 @@ class SymbolSentinel(ast.NodeVisitor):
         self._visit_function_body(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        print('DEBUG: VISITING ASYNC FN')
         self._define(node.name)
         self._visit_function_body(node)
 
