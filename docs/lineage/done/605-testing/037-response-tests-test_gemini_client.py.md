@@ -1,3 +1,4 @@
+```python
 """Tests for the Gemini client with rotation logic.
 
 Test Scenarios from LLD:
@@ -356,3 +357,4 @@ class TestResetTimeParsing:
 
         result = client._parse_reset_time("Some random error message")
         assert result is None
+```

@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 """
 gemini-rotate.py - Gemini CLI wrapper with automatic credential rotation.
@@ -572,3 +573,4 @@ Credentials: ~/.assemblyzero/gemini-credentials.json
 
 if __name__ == "__main__":
     main()
+```

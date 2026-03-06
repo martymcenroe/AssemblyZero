@@ -1,3 +1,4 @@
+```python
 #!/usr/bin/env python3
 """
 gemini-rotate.py - Gemini CLI wrapper with automatic credential rotation.
@@ -18,8 +19,6 @@ Usage:
 Credentials are stored in: ~/.assemblyzero/gemini-credentials.json
 
 See that file for instructions on adding new API keys.
-
-Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
 """
 
 import json
@@ -49,7 +48,6 @@ OAUTH_CREDS_BACKUP = Path.home() / ".gemini" / "oauth_creds.json.bak"
 OAUTH_CREDS_DISABLED = Path.home() / ".gemini" / "oauth_creds.json.disabled"
 STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
 
-# Issue #605: Updated to Gemini 3.1 (REQ-1)
 DEFAULT_MODEL = "gemini-3.1-pro-preview"
 
 # Patterns that indicate quota exhaustion (non-retryable)
@@ -372,7 +370,6 @@ def invoke_gemini(
                 response = data.get("response", "")
 
                 # Verify model used
-                # Issue #605: Updated model verification to gemini-3.1-pro (REQ-1)
                 models_used = list(data.get("stats", {}).get("models", {}).keys())
                 if models_used:
                     model_ok = any(m.startswith("gemini-3.1-pro") for m in models_used)
@@ -514,7 +511,7 @@ Examples:
   # Simple prompt
   python gemini-rotate.py --prompt "Hello"
 
-  # With specific model (Issue #605: Gemini 3.1)
+  # With specific model
   python gemini-rotate.py --prompt "Review this" --model gemini-3.1-pro-preview
 
   # Long prompt via stdin
@@ -572,3 +569,4 @@ Credentials: ~/.assemblyzero/gemini-credentials.json
 
 if __name__ == "__main__":
     main()
+```

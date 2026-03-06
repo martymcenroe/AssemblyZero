@@ -1,3 +1,4 @@
+```python
 """LLM Provider abstraction for pluggable model support.
 
 Issue #101: Unified Governance Workflow
@@ -261,20 +262,20 @@ class ClaudeCLIProvider(LLMProvider):
     Uses the user's logged-in Claude Code session, which works with
     Max subscription without requiring API credits.
 
-    Issue #605: Updated to Claude 4.6 model IDs (REQ-2).
+    Issue #605: Updated to Claude 4.6 model IDs.
 
     Supported models:
-    - opus (claude-4.6-opus)
-    - sonnet (claude-4.6-sonnet)
-    - haiku (claude-4.5-haiku)
+    - opus (claude-opus-4-6)
+    - sonnet (claude-sonnet-4-6)
+    - haiku (claude-haiku-4-5)
     """
 
     # Model mapping from friendly names to actual model specs
     # Issue #605: Claude 4.6 (REQ-2)
     MODEL_MAP = {
-        "opus": "claude-4.6-opus",
-        "sonnet": "claude-4.6-sonnet",
-        "haiku": "claude-4.5-haiku",
+        "opus": "claude-opus-4-6",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
     }
 
     def __init__(self, model: str = "opus"):
@@ -292,7 +293,7 @@ class ClaudeCLIProvider(LLMProvider):
             self._model = model_lower
             self._model_id = self.MODEL_MAP[model_lower]
         elif model_lower.startswith("claude-"):
-            # Passthrough: accept full model IDs like claude-4.6-opus-20260415
+            # Passthrough: accept full model IDs like claude-opus-4-7-20260415
             self._model = model_lower
             self._model_id = model_lower
         else:
@@ -387,7 +388,7 @@ class ClaudeCLIProvider(LLMProvider):
             "--setting-sources", "user",  # Skip project CLAUDE.md context
             "--tools", "",  # Disable built-in tools
             "--strict-mcp-config",  # Disable MCP tools (issue #157)
-            "--model", self._model_id,  # Use full model ID (e.g., claude-4.6-opus)
+            "--model", self._model_id,  # Use full model ID (e.g., claude-opus-4-6)
         ]
 
         if system_prompt:
@@ -528,26 +529,26 @@ class AnthropicProvider(LLMProvider):
     Issue #605: Updated to Claude 4.6 model IDs (REQ-2).
 
     Supported models:
-    - opus (claude-4.6-opus)
-    - sonnet (claude-4.6-sonnet)
-    - haiku (claude-4.5-haiku)
-    - Any full model ID as passthrough (e.g. claude-4.6-opus-20260415)
+    - opus (claude-opus-4-6)
+    - sonnet (claude-sonnet-4-6)
+    - haiku (claude-haiku-4-5)
+    - Any full model ID as passthrough (e.g. claude-opus-4-7-20260415)
     """
 
     # Issue #605: Claude 4.6 (REQ-2)
     MODEL_MAP = {
-        "opus": "claude-4.6-opus",
-        "sonnet": "claude-4.6-sonnet",
-        "haiku": "claude-4.5-haiku",
+        "opus": "claude-opus-4-6",
+        "sonnet": "claude-sonnet-4-6",
+        "haiku": "claude-haiku-4-5",
     }
 
     MAX_TOKENS = 65536
 
     # Pricing per million tokens (input, output)
     _PRICING: dict[str, tuple[float, float]] = {
-        "claude-4.6-opus": (5.0, 25.0),
-        "claude-4.6-sonnet": (3.0, 15.0),
-        "claude-4.5-haiku": (1.0, 5.0),
+        "claude-opus-4-6": (5.0, 25.0),
+        "claude-sonnet-4-6": (3.0, 15.0),
+        "claude-haiku-4-5": (1.0, 5.0),
     }
 
     def __init__(self, model: str = "opus"):
@@ -1224,3 +1225,4 @@ def get_provider(spec: str) -> LLMProvider:
             f"Unknown provider '{provider}'. "
             f"Supported: claude, anthropic, gemini, mock"
         )
+```
