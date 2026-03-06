@@ -5,6 +5,7 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import abc
 import json
 import os
@@ -56,7 +57,7 @@ class GitHubReporter(ReporterInterface):
         Falls back to GITHUB_TOKEN env var if interactive auth fails.
         """
         try:
-            result = subprocess.run(
+            result = run_command(
                 ["gh", "auth", "status"],
                 capture_output=True,
                 text=True,
@@ -76,7 +77,7 @@ class GitHubReporter(ReporterInterface):
     def find_existing_report(self) -> str | None:
         """Search for open issues with title matching 'Janitor Report'."""
         try:
-            result = subprocess.run(
+            result = run_command(
                 [
                     "gh",
                     "issue",
@@ -113,7 +114,7 @@ class GitHubReporter(ReporterInterface):
     ) -> str:
         """Create a new GitHub issue."""
         try:
-            result = subprocess.run(
+            result = run_command(
                 [
                     "gh",
                     "issue",
@@ -146,7 +147,7 @@ class GitHubReporter(ReporterInterface):
         # Extract issue number from URL like https://github.com/user/repo/issues/42
         issue_number = identifier.rstrip("/").split("/")[-1]
         try:
-            result = subprocess.run(
+            result = run_command(
                 [
                     "gh",
                     "issue",

@@ -6,6 +6,7 @@ Opens VS Code with draft, waits for user to close, then prompts S/R/M.
 This is the first human gate - no LLM output reaches Gemini without review.
 """
 
+from assemblyzero.utils.shell import run_command
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ def open_vscode_non_blocking(file_path: str) -> tuple[bool, str]:
         if file_path.endswith(".md"):
             cmd.extend(["--command", "markdown.showPreviewToSide"])
 
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,
@@ -92,7 +93,7 @@ def open_vscode_and_wait(file_path: str) -> tuple[bool, str]:
         if file_path.endswith(".md"):
             cmd.extend(["--command", "markdown.showPreviewToSide"])
 
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,

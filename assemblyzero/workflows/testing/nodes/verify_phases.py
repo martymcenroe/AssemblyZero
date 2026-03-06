@@ -8,6 +8,7 @@ errors) route back to N2_scaffold_tests instead of endlessly looping through
 N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 """
 
+from assemblyzero.utils.shell import run_command
 import re
 import subprocess
 from pathlib import Path
@@ -191,7 +192,7 @@ def run_pytest(
             cmd.append(f"--cov-fail-under={coverage_target}")
 
     try:
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,

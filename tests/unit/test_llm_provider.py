@@ -263,9 +263,9 @@ class TestClaudeCLIProvider:
 
     def test_model_maps_to_current_ids(self):
         """Verify MODEL_MAP uses current model IDs."""
-        assert ClaudeCLIProvider.MODEL_MAP["opus"] == "claude-opus-4-6"
-        assert ClaudeCLIProvider.MODEL_MAP["sonnet"] == "claude-sonnet-4-6"
-        assert ClaudeCLIProvider.MODEL_MAP["haiku"] == "claude-haiku-4-5"
+        assert ClaudeCLIProvider.MODEL_MAP["opus"] == "claude-4.6-opus"
+        assert ClaudeCLIProvider.MODEL_MAP["sonnet"] == "claude-4.6-sonnet"
+        assert ClaudeCLIProvider.MODEL_MAP["haiku"] == "claude-4.5-haiku"
 
     @patch("shutil.which")
     def test_find_cli_in_path(self, mock_which):
@@ -360,19 +360,19 @@ class TestAnthropicProvider:
         provider = AnthropicProvider(model="opus")
         assert provider.provider_name == "anthropic"
         assert provider.model == "opus"
-        assert provider._model_id == "claude-opus-4-6"
+        assert provider._model_id == "claude-4.6-opus"
 
     def test_init_sonnet(self):
         """Test creating provider with sonnet model."""
         provider = AnthropicProvider(model="sonnet")
         assert provider.model == "sonnet"
-        assert provider._model_id == "claude-sonnet-4-6"
+        assert provider._model_id == "claude-4.6-sonnet"
 
     def test_init_haiku(self):
         """Test creating provider with haiku model."""
         provider = AnthropicProvider(model="haiku")
         assert provider.model == "haiku"
-        assert provider._model_id == "claude-haiku-4-5"
+        assert provider._model_id == "claude-4.5-haiku"
 
     def test_passthrough_full_model_id(self):
         """Accept full model IDs as passthrough."""
@@ -384,7 +384,7 @@ class TestAnthropicProvider:
         """Model names are case-insensitive."""
         provider = AnthropicProvider(model="HAIKU")
         assert provider.model == "haiku"
-        assert provider._model_id == "claude-haiku-4-5"
+        assert provider._model_id == "claude-4.5-haiku"
 
     def test_no_api_key_returns_error(self):
         """Return error result when API key not found."""
@@ -702,14 +702,14 @@ class TestGeminiProvider:
         assert provider.model == "flash"
 
     def test_valid_model_3_pro_preview(self):
-        """Test creating provider with 3-pro-preview model."""
-        provider = GeminiProvider(model="3-pro-preview")
-        assert provider.model == "3-pro-preview"
+        """Test creating provider with 3.1-pro-preview model."""
+        provider = GeminiProvider(model="3.1-pro-preview")
+        assert provider.model == "3.1-pro-preview"
 
     def test_valid_model_3_flash_preview(self):
-        """Test creating provider with 3-flash-preview model."""
-        provider = GeminiProvider(model="3-flash-preview")
-        assert provider.model == "3-flash-preview"
+        """Test creating provider with 3.1-flash-preview model."""
+        provider = GeminiProvider(model="3.1-flash-preview")
+        assert provider.model == "3.1-flash-preview"
 
     def test_invalid_model(self):
         """Test that invalid model raises ValueError."""
@@ -1049,7 +1049,7 @@ class TestRateLimitLogging:
             raw_response=None,
             error_message="429 quota exhausted",
             provider="gemini",
-            model_used="3-pro-preview",
+            model_used="3.1-pro-preview",
             duration_ms=500,
             attempts=1,
             rate_limited=True,
@@ -1078,7 +1078,7 @@ class TestRateLimitLogging:
             raw_response=None,
             error_message="429",
             provider="gemini",
-            model_used="3-pro-preview",
+            model_used="3.1-pro-preview",
             duration_ms=500,
             attempts=1,
             rate_limited=True,

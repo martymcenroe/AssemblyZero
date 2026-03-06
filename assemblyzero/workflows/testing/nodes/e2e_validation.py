@@ -6,6 +6,7 @@ Runs E2E tests in a sandbox environment:
 - Auto-cleanup after each E2E run
 """
 
+from assemblyzero.utils.shell import run_command
 import re
 import subprocess
 from pathlib import Path
@@ -144,7 +145,7 @@ def run_e2e_tests(
         env["E2E_SANDBOX_REPO"] = sandbox_repo
 
     try:
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,

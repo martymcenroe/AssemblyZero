@@ -9,11 +9,11 @@ Provides functions for:
 - Batch git commit of audit trail
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import logging
 import re
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
@@ -53,7 +53,7 @@ def get_repo_root() -> Path:
     Raises:
         RuntimeError: If not in a git repository.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
@@ -90,7 +90,7 @@ def get_repo_short_id(repo_root: Path | None = None) -> str:
 
     # 2. Check Git Remote
     try:
-        result = subprocess.run(
+        result = run_command(
             ["git", "-C", str(root), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
@@ -351,7 +351,7 @@ def batch_commit(audit_dir: Path, issue_number: int, repo_root: Path | None = No
     root = repo_root or get_repo_root()
 
     # Stage all files in audit_dir
-    subprocess.run(
+    run_command(
         ["git", "-C", str(root), "add", str(audit_dir)],
         check=True,
         timeout=30,
@@ -359,7 +359,7 @@ def batch_commit(audit_dir: Path, issue_number: int, repo_root: Path | None = No
 
     # Commit
     commit_msg = f"docs(audit): add audit trail for issue #{issue_number}"
-    subprocess.run(
+    run_command(
         ["git", "-C", str(root), "commit", "-m", commit_msg],
         check=True,
         timeout=30,

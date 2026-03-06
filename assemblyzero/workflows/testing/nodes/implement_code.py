@@ -13,6 +13,7 @@ Key changes from original:
 - Issue #188: Prompt includes allowed paths; writes validated against LLD
 """
 
+from assemblyzero.utils.shell import run_command
 import ast
 import os
 import re
@@ -932,7 +933,7 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
                 "--system-prompt", system_prompt,
             ]
 
-            result = subprocess.run(
+            result = run_command(
                 cmd,
                 input=prompt,
                 capture_output=True,

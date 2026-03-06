@@ -1,3 +1,4 @@
+from assemblyzero.utils.shell import run_command
 """Tests for janitor fixers.
 
 Issue #94: Lu-Tze: The Janitor
@@ -180,7 +181,7 @@ class TestFixStaleWorktrees:
             )
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
 
@@ -209,7 +210,7 @@ class TestFixStaleWorktrees:
             )
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=True)
 
         assert len(actions) == 1
@@ -231,7 +232,7 @@ class TestFixStaleWorktrees:
             )
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
 
@@ -253,7 +254,7 @@ class TestFixStaleWorktrees:
             )
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=True)
 
         assert "Would prune" in actions[0].description
@@ -273,7 +274,7 @@ class TestFixStaleWorktrees:
             )
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
 
         assert actions == []
@@ -304,7 +305,7 @@ class TestFixStaleWorktrees:
             ),
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             actions = fix_stale_worktrees(findings, "/home/user/repo", dry_run=False)
 
@@ -359,7 +360,7 @@ class TestCreateFixCommit:
 
     def test_create_fix_commit_stages_and_commits(self):
         """create_fix_commit calls git add and git commit."""
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             create_fix_commit("/repo", "broken_link", ["README.md"], "chore: fix links")
 
@@ -370,13 +371,13 @@ class TestCreateFixCommit:
 
     def test_create_fix_commit_empty_files_noop(self):
         """create_fix_commit does nothing with empty files list."""
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             create_fix_commit("/repo", "broken_link", [], "chore: fix links")
         mock_run.assert_not_called()
 
     def test_create_fix_commit_multiple_files(self):
         """create_fix_commit stages multiple files in single git add."""
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             create_fix_commit(
                 "/repo", "broken_link",
@@ -391,7 +392,7 @@ class TestCreateFixCommit:
 
     def test_create_fix_commit_message_passed(self):
         """create_fix_commit passes correct commit message."""
-        with patch("subprocess.run") as mock_run:
+        with patch("assemblyzero.workflows.janitor.fixers.run_command") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             create_fix_commit("/repo", "broken_link", ["README.md"], "chore: fix 1 broken markdown link(s) (ref #94)")
 

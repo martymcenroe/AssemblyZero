@@ -6,6 +6,7 @@ Executes gh issue create - ONLY this node can file issues.
 The agent never has access to gh; only Python can execute it.
 """
 
+from assemblyzero.utils.shell import run_command
 import datetime
 import os
 import re
@@ -65,7 +66,7 @@ def open_vscode_folder(folder_path: str) -> tuple[bool, str]:
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] Launching VS Code: code {folder_path}")
 
-        result = subprocess.run(
+        result = run_command(
             ["code", folder_path],
             capture_output=True,
             text=True,
@@ -101,7 +102,7 @@ def get_repo_name(repo_root: str | None = None) -> str:
         RuntimeError: If not in a git repository or no remote.
     """
     cmd = ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]
-    result = subprocess.run(
+    result = run_command(
         cmd,
         capture_output=True,
         text=True,
@@ -166,7 +167,7 @@ def check_label_exists(label: str, repo: str) -> bool:
     Returns:
         True if label exists, False otherwise.
     """
-    result = subprocess.run(
+    result = run_command(
         ["gh", "label", "list", "--repo", repo, "--json", "name", "-q", f'.[].name'],
         capture_output=True,
         text=True,
@@ -189,7 +190,7 @@ def create_label(label: str, repo: str) -> bool:
     Returns:
         True if created successfully, False otherwise.
     """
-    result = subprocess.run(
+    result = run_command(
         ["gh", "label", "create", label, "--repo", repo],
         capture_output=True,
         text=True,
@@ -246,7 +247,7 @@ def create_issue(
         cmd.extend(["--label", label])
 
     try:
-        result = subprocess.run(
+        result = run_command(
             cmd,
             capture_output=True,
             text=True,

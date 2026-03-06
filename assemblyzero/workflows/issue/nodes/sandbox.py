@@ -8,6 +8,7 @@ Performs pre-flight checks:
 3. (Future: Create worktree sandbox, strip permissions)
 """
 
+from assemblyzero.utils.shell import run_command
 import shutil
 import subprocess
 from typing import Any
@@ -54,7 +55,7 @@ def check_gh_authenticated() -> tuple[bool, str]:
 
     # Check authentication status
     try:
-        result = subprocess.run(
+        result = run_command(
             ["gh", "auth", "status"],
             capture_output=True,
             text=True,

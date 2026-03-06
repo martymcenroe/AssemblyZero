@@ -5,7 +5,7 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
-import subprocess
+from assemblyzero.utils.shell import run_command
 from datetime import datetime, timedelta, timezone
 
 from assemblyzero.workflows.janitor.state import Finding, ProbeResult
@@ -97,7 +97,7 @@ def list_worktrees(repo_root: str) -> list[dict]:
 
     Returns list of dicts with keys: path, HEAD, branch, bare, detached.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "worktree", "list", "--porcelain"],
         cwd=repo_root,
         capture_output=True,
@@ -146,7 +146,7 @@ def get_branch_last_commit_date(
 
     Returns None if the branch doesn't exist.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "log", "-1", "--format=%aI", branch],
         cwd=repo_root,
         capture_output=True,
@@ -169,7 +169,7 @@ def is_branch_merged(
     repo_root: str, branch: str, target: str = "main"
 ) -> bool:
     """Check if branch has been merged into target branch."""
-    result = subprocess.run(
+    result = run_command(
         ["git", "branch", "--merged", target],
         cwd=repo_root,
         capture_output=True,

@@ -6,6 +6,7 @@ For LLD workflows, saves LLD file with embedded review evidence.
 Issue #513: First-pass acceptance rate tracking.
 """
 
+from assemblyzero.utils.shell import run_command
 import re
 import shutil
 import subprocess
@@ -100,7 +101,7 @@ def _finalize_issue(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # File issue using gh CLI
     try:
-        result = subprocess.run(
+        result = run_command(
             ["gh", "issue", "create", "--title", title, "--body", body],
             capture_output=True,
             text=True,

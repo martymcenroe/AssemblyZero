@@ -5,9 +5,9 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.shell import run_command
 import os
 import re
-import subprocess
 from pathlib import Path
 
 from assemblyzero.workflows.janitor.state import Finding, ProbeResult
@@ -56,7 +56,7 @@ def find_markdown_files(repo_root: str) -> list[str]:
 
     Uses git ls-files to only return tracked files.
     """
-    result = subprocess.run(
+    result = run_command(
         ["git", "ls-files", "*.md"],
         cwd=repo_root,
         capture_output=True,
@@ -134,7 +134,7 @@ def find_likely_target(broken_target: str, repo_root: str) -> str | None:
         return None
 
     # Search for files with same basename
-    result = subprocess.run(
+    result = run_command(
         ["git", "ls-files"],
         cwd=repo_root,
         capture_output=True,

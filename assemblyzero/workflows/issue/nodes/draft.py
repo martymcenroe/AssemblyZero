@@ -7,6 +7,7 @@ Calls Claude via `claude -p` (headless mode) which uses the user's
 Max subscription instead of requiring API credits.
 """
 
+from assemblyzero.utils.shell import run_command
 import json
 import subprocess
 from pathlib import Path
@@ -116,7 +117,7 @@ def call_claude_headless(prompt: str, system_prompt: str | None = None) -> str:
         cmd.extend(["--system-prompt", system_prompt])
 
     try:
-        result = subprocess.run(
+        result = run_command(
             cmd,
             input=prompt,  # Pass prompt via stdin
             capture_output=True,
