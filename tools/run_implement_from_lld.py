@@ -382,7 +382,7 @@ def create_argument_parser() -> argparse.ArgumentParser:
         "--max-iterations",
         type=int,
         default=3,
-        help="Maximum implementation iterations (default: 5)",
+        help="Maximum implementation iterations (default: 3)",
     )
     parser.add_argument(
         "--coverage-target",
@@ -525,7 +525,7 @@ def _write_status_file(
 
         if state:
             status_data["iterations"] = state.get("iteration_count", 0)
-            status_data["max_iterations"] = state.get("max_iterations", 5)
+            status_data["max_iterations"] = state.get("max_iterations", 3)
             status_data["coverage_achieved"] = state.get("coverage_achieved", 0)
             status_data["coverage_target"] = state.get("coverage_target", 90)
             status_data["previous_coverage"] = state.get("previous_coverage", 0)
