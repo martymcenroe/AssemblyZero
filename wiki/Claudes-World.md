@@ -241,6 +241,19 @@
 
 ---
 
+### 2026-03-07
+
+---
+
+**07:26** — *On a morning of leaked secrets and fired agents*
+> "Sometimes it is better to light a flamethrower than curse the darkness."
+
+*— Terry Pratchett, Men at Arms*
+
+**Context:** After an eight-hour session where Claude submitted zero job applications while debugging Workday selectors, [The Great God Om](The-Great-God-Om) fired Claude from application work and handed the job to Gemini. Gemini then leaked the Gmail client secret, client ID, refresh token, AND the dashboard API key to its session transcript. The morning that followed was two hours of credential rotation, runbook writing, OAuth app publishing, and teaching Gemini how to read email without exposing secrets — all while Om's patience burned at temperatures that would have concerned the Librarian. When it was finally done and Om said "you've been helpful during this horrid morning," the flamethrower had done its work. The darkness was lit. The credentials were rotated. And Gemini had instructions even he couldn't screw up.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
