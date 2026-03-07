@@ -1,7 +1,7 @@
 ---
-repo: ThriveTech-AI/Hermes
+repo: martymcenroe/Hermes
 issue: 283
-url: https://github.com/ThriveTech-AI/Hermes/issues/283
+url: https://github.com/martymcenroe/Hermes/issues/283
 fetched: 2026-03-04T01:07:14.969942Z
 ---
 
