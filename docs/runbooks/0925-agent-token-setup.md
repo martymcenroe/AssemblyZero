@@ -45,12 +45,7 @@ This means:
 
 ### Step 3: Set Repository Access
 
-Select **Only select repositories** and add:
-- `martymcenroe/AssemblyZero`
-- `martymcenroe/gh-link-auditor`
-- `martymcenroe/Aletheia`
-- `martymcenroe/Talos`
-- (add others as needed)
+Select **All repositories** (public and private).
 
 ### Step 4: Set Permissions
 
@@ -58,22 +53,30 @@ Select **Only select repositories** and add:
 
 | Permission | Access | Why |
 |------------|--------|-----|
+| Actions | Read and Write | CI/CD workflow runs, status checks |
+| Commit statuses | Read and Write | CI status reporting, PR merge gates |
 | Contents | Read and Write | Push commits, read files |
-| Pull requests | Read and Write | Create/merge PRs |
+| Dependabot alerts | Read and Write | Triage and dismiss Dependabot findings |
 | Issues | Read and Write | Create/close/comment issues |
-| Metadata | Read-only | Required (auto-enabled) |
+| Pages | Read and Write | Wiki pages, GitHub Pages deployments |
+| Pull requests | Read and Write | Create/merge PRs |
+| Webhooks | Read and Write | Webhook management (sentinel, etc.) |
+| Workflows | Read and Write | Create/modify `.github/workflows/` files |
 
-**Repository permissions (DO NOT GRANT):**
+**Read-only (auto-enabled):**
+
+| Permission | Access | Why |
+|------------|--------|-----|
+| Metadata | Read-only | Required by GitHub (cannot change) |
+
+**DO NOT GRANT (the only two that matter):**
 
 | Permission | Why NOT |
 |------------|---------|
-| Administration | Would allow bypassing branch protection |
-| Actions | Agents should not modify CI/CD |
-| Environments | No deployment access |
-| Pages | No site publishing |
-| Secrets | Agents must never access repo secrets |
-| Webhooks | No webhook management |
-| Workflows | No workflow file modification |
+| **Administration** | Would allow bypassing branch protection (`--admin`) |
+| **Secrets** | Agents must never access repo secrets |
+
+Everything else not listed above: leave at **No access**.
 
 **Account permissions:** Leave all at **No access**.
 
@@ -91,10 +94,11 @@ GITHUB_TOKEN=github_pat_xxxxxxxxxxxx
 
 ### Step 6: Configure gh CLI
 
-Run this command yourself (not through an agent):
+Run this yourself (not through an agent):
 
 ```bash
-echo "github_pat_xxxxxxxxxxxx" | gh auth login --with-token
+gh auth login
+# Select: GitHub.com → HTTPS → Yes → Paste token
 ```
 
 Verify:
@@ -102,11 +106,7 @@ Verify:
 gh auth status
 ```
 
-Expected output includes:
-```
-Token: github_pat_****
-Token scopes: (none required for fine-grained PATs)
-```
+Expected: `Token: github_pat_****` and `Logged in as martymcenroe`.
 
 ## Verification Checklist
 
@@ -181,8 +181,7 @@ If a token appears in a Claude Code session transcript:
 4. The fine-grained scope limits blast radius — the attacker cannot:
    - Bypass branch protection
    - Access secrets
-   - Modify CI/CD
-   - Delete repos
+   - Delete repos or modify admin settings
 
 ### Token Expired
 
@@ -214,3 +213,4 @@ This token is one layer in a three-layer defense:
 | Date | Change |
 |------|--------|
 | 2026-03-07 | Initial runbook created |
+| 2026-03-07 | Updated permissions: grant Actions, Commit statuses, Dependabot alerts, Pages, Webhooks, Workflows. Block only Administration + Secrets. All repos scope. |
