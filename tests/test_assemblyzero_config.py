@@ -431,7 +431,7 @@ class TestModelIdVerification:
         )
 
     def test_t020_claude_model_id_is_4_6(self):
-        """T020: CLAUDE_MODEL defaults to claude-4.6-sonnet (REQ-2).
+        """T020: CLAUDE_MODEL defaults to claude-sonnet-4-6 (REQ-2).
 
         Verifies the default Claude model in config.py has been updated
         to Claude 4.6 as part of the systemic model refresh.
@@ -443,8 +443,8 @@ class TestModelIdVerification:
         import assemblyzero.core.config as config_module
         importlib.reload(config_module)
         source = inspect.getsource(config_module)
-        assert 'claude-4.6-sonnet' in source, (
-            "config.py source must reference claude-4.6-sonnet as default"
+        assert 'claude-sonnet-4-6' in source, (
+            "config.py source must reference claude-sonnet-4-6 as default"
         )
 
         # Force-reload llm_provider to get fresh source
@@ -452,15 +452,8 @@ class TestModelIdVerification:
         importlib.reload(llm_module)
         provider_source = inspect.getsource(llm_module)
 
-        # llm_provider may use either naming convention:
-        # - Friendly: claude-4.6-sonnet, claude-4.6-opus
-        # - Official: claude-sonnet-4-6, claude-opus-4-6
-        # Both indicate Claude 4.6 models are configured
-        has_friendly_claude = 'claude-4.6' in provider_source
-        has_official_claude = 'claude-sonnet-4-6' in provider_source or 'claude-opus-4-6' in provider_source
-        assert has_friendly_claude or has_official_claude, (
-            "llm_provider.py must reference claude 4.6 model "
-            "(as claude-4.6-* or claude-*-4-6)"
+        assert 'claude-sonnet-4-6' in provider_source and 'claude-opus-4-6' in provider_source, (
+            "llm_provider.py must reference claude-sonnet-4-6 and claude-opus-4-6"
         )
 
         assert 'gemini-3.1' in provider_source, (

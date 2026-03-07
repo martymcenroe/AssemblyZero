@@ -32,7 +32,7 @@ FORBIDDEN_MODELS = [
 # Claude Model (REQ-2: Claude 4.6)
 # =============================================================================
 
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-4.6-sonnet")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # =============================================================================
 # Credential Paths
