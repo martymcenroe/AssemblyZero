@@ -1,3 +1,6 @@
+Now I can see the real `call_claude_for_file` signature in `claude_client.py` — it doesn't have a `model` param and returns `tuple[str, str]`. The test mocks return a dict as second element. Let me trace the failures and fix.
+
+```python
 """Main implementation orchestrator — the LangGraph node and retry logic.
 
 Contains implement_code() (the N4 node entry point) and supporting functions.
@@ -591,3 +594,4 @@ def example_function():
         "error_message": "",
         "test_files": state.get("test_files", []),
     }
+```
