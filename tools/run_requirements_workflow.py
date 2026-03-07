@@ -440,8 +440,8 @@ Examples:
     parser.add_argument(
         "--budget",
         type=float,
-        default=5.0,
-        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
+        default=3.0,
+        help="Max API cost in USD before halting (default $3.00, 0=unlimited)",
     )
 
     # Issue #517: Global workflow timeout

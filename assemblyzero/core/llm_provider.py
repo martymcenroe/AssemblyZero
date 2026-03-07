@@ -648,6 +648,12 @@ class AnthropicProvider(LLMProvider):
             # generated: the connection stays active, and any real stall
             # surfaces as a read-timeout on a per-chunk basis.
             # Issue #488: cache_control directives still work with streaming.
+            # Issue #645: Pre-call cost estimate
+            est_input_tokens = (len(system_prompt) + len(content)) // 4
+            pricing = self._PRICING.get(self._model_id)
+            if pricing:
+                est_cost = est_input_tokens * pricing[0] / 1_000_000
+                print(f"    [COST EST] ~${est_cost:.2f} input ({est_input_tokens:,} tokens, {self._model_id})")
             response_text = ""
             last_progress = time.time()
             with client.messages.stream(
@@ -819,14 +825,14 @@ class FallbackProvider(LLMProvider):
         self,
         primary: LLMProvider,
         fallback: LLMProvider,
-        primary_timeout: int = 180,
+        primary_timeout: int = 300,
     ):
         """Initialize fallback provider.
 
         Args:
             primary: First provider to try.
             fallback: Provider to use if primary fails.
-            primary_timeout: Max timeout for primary (default 180s).
+            primary_timeout: Max timeout for primary (default 300s).
         """
         self._primary = primary
         self._fallback = fallback
@@ -884,7 +890,7 @@ class FallbackProvider(LLMProvider):
 
         # Issue #539: Skip CLI for large prompts — they always time out.
         # LLD/spec prompts are 100K+ chars; the CLI subprocess overhead
-        # guarantees a 180s timeout.  Go straight to the API.
+        # guarantees a timeout.  Go straight to the API.
         prompt_size = len(system_prompt) + len(content)
         if prompt_size > 50_000:
             print(
@@ -1211,7 +1217,7 @@ def get_provider(spec: str) -> LLMProvider:
         # If API key available, wrap with automatic fallback
         if _load_anthropic_api_key():
             api = AnthropicProvider(model=model)
-            return FallbackProvider(primary=cli, fallback=api, primary_timeout=180)
+            return FallbackProvider(primary=cli, fallback=api, primary_timeout=300)
         return cli
     elif provider == "anthropic":
         return AnthropicProvider(model=model)

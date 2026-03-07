@@ -88,6 +88,7 @@ from assemblyzero.workflows.testing.nodes.adversarial_node import (
     run_adversarial_node,
 )
 from assemblyzero.core.halt_node import create_halt_node
+from assemblyzero.core.llm_provider import get_cumulative_cost
 
 
 def route_after_load(
@@ -277,6 +278,13 @@ def route_after_green(
         max_iterations = state.get("max_iterations", 3)
         if iteration >= max_iterations:
             return "end"
+        # Issue #640: Budget check before looping back
+        budget = state.get("cost_budget_usd", 0.0)
+        if budget > 0:
+            cumulative = get_cumulative_cost()
+            if cumulative > budget:
+                print(f"    [BUDGET] ${cumulative:.2f} exceeds ${budget:.2f} budget. Halting.")
+                return "end"
         return "N4_implement_code"
 
     if next_node == "N6_e2e_validation":
