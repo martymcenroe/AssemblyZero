@@ -1,3 +1,4 @@
+```python
 """Main implementation orchestrator — the LangGraph node and retry logic.
 
 Contains implement_code() (the N4 node entry point) and supporting functions.
@@ -111,17 +112,7 @@ def generate_file_with_retry(
 
         # Call Claude (Issue #447: pass filepath for file-type-aware system prompt)
         # Issue #641: pass routed model
-        result = call_claude_for_file(prompt, file_path=filepath, model=model)
-
-        # Unpack result — call_claude_for_file returns (response, error_str)
-        # but callers may mock with (response, usage_dict); only treat str as error
-        if isinstance(result, tuple) and len(result) == 2:
-            response, api_error_raw = result
-        else:
-            response, api_error_raw = result, ""
-
-        # Only string values are error indicators; dicts (e.g. usage stats) are not
-        api_error = api_error_raw if isinstance(api_error_raw, str) else ""
+        response, api_error = call_claude_for_file(prompt, file_path=filepath, model=model)
 
         # Check for API error
         if api_error:
@@ -185,14 +176,7 @@ def generate_file_with_retry(
                 )
 
         # Validate code mechanically
-        validation_result = validate_code_response(code, filepath, existing_content)
-
-        # Handle both tuple (valid, error_msg) and bare bool returns
-        if isinstance(validation_result, tuple):
-            valid, validation_error = validation_result
-        else:
-            valid = bool(validation_result)
-            validation_error = "" if valid else "Unknown validation error"
+        valid, validation_error = validate_code_response(code, filepath, existing_content)
 
         if not valid:
             last_error = f"Validation failed: {validation_error}"
@@ -591,3 +575,4 @@ def example_function():
         "error_message": "",
         "test_files": state.get("test_files", []),
     }
+```

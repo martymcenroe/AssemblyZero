@@ -1,3 +1,4 @@
+```python
 """N4: Implement Code node for TDD Testing Workflow.
 
 This module is a backward-compatibility shim. The implementation has been
@@ -49,3 +50,4 @@ from assemblyzero.workflows.testing.nodes.implementation import (  # noqa: F811
     HAIKU_MODEL,
     SMALL_FILE_LINE_THRESHOLD,
 )
+```

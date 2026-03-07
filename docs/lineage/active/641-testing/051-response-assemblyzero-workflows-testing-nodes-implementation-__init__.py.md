@@ -1,3 +1,4 @@
+```python
 """Implementation code generation package.
 
 Split from implement_code.py (1814 lines) into focused modules.
@@ -119,3 +120,4 @@ __all__ = [
     "parse_implementation_response",
     "write_implementation_files",
 ]
+```
