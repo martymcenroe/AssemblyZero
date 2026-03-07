@@ -67,10 +67,18 @@ git push -u origin HEAD
 
 ### Step 5: Create Pull Request
 
+**MANDATORY: Every PR must reference a GitHub issue.**
+- No issue exists? Create one first: `gh issue create --title "..." --body "..."`
+- Issue already closed? Create a new one.
+- PR title MUST end with `(#N)` where N is the issue number.
+- PR body MUST contain `Closes #N`.
+
 ```bash
-gh pr create --title "type: brief description" --body "$(cat <<'EOF'
+gh pr create --title "type: brief description (#N)" --body "$(cat <<'EOF'
 ## Summary
 - Bullet points describing changes
+
+Closes #N
 
 ## Test plan
 - [ ] How to verify the changes
@@ -83,7 +91,7 @@ EOF
 
 If `--draft` flag was provided:
 ```bash
-gh pr create --draft --title "..." --body "..."
+gh pr create --draft --title "type: brief description (#N)" --body "..."
 ```
 
 ### Step 6: Report
