@@ -108,6 +108,76 @@ if [[ -z "$violations" ]] && [[ "$command" =~ ^cd[[:space:]] ]]; then
     suggested_fix="[USE absolute paths or git -C /path instead]"
 fi
 
+# ---------------------------------------------------------------------------
+# Destructive git operations (require explicit user approval)
+# ---------------------------------------------------------------------------
+
+# git push --force or --force-with-lease (any position in args)
+if [[ "$command" =~ git[[:space:]].*push[[:space:]] ]] &&
+   [[ "$command" =~ --force(-with-lease)?([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Destructive Git Operation" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "Force-push rewrites remote history." >&2
+    echo "Ask the user for explicit approval before force-pushing." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# git reset --hard
+if [[ "$command" =~ git[[:space:]].*reset[[:space:]] ]] &&
+   [[ "$command" =~ --hard([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Destructive Git Operation" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "git reset --hard destroys uncommitted work." >&2
+    echo "Use 'git stash' or 'git revert' instead." >&2
+    echo "If you truly need --hard, ask the user for explicit approval." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# git branch -D (force delete)
+if [[ "$command" =~ git[[:space:]].*branch[[:space:]] ]] &&
+   [[ "$command" =~ [[:space:]]-D([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Destructive Git Operation" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "git branch -D force-deletes without merge check." >&2
+    echo "Use 'git branch -d' (safe delete) instead." >&2
+    echo "If the branch is truly unmerged and disposable, ask the user." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# git clean -f (force clean untracked files)
+if [[ "$command" =~ git[[:space:]].*clean[[:space:]] ]] &&
+   [[ "$command" =~ -[a-zA-Z]*f ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Destructive Git Operation" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "git clean -f permanently deletes untracked files." >&2
+    echo "Use 'git clean -n' (dry run) first, then ask the user." >&2
+    echo "" >&2
+    exit 1
+fi
+
 # If violations found, block the command and suggest fix
 if [ -n "$violations" ]; then
     echo "" >&2
