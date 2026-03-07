@@ -141,11 +141,19 @@ RULES:
 If you output anything other than a fenced code block, the build will fail."""
 
 
-def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = None) -> tuple[str, str]:
+def call_claude_for_file(
+    prompt: str,
+    file_path: str = "",
+    model: str | None = None,
+    system_prompt: str = "",
+) -> tuple[str, str]:
     """Call Claude for a single file implementation.
 
     Issue #447: Added file_path parameter for file-type-aware system prompt.
     Issue #641: Added model parameter for Haiku routing.
+    Issue #643: Added system_prompt parameter. When provided, this stable
+    system prompt is used instead of the per-file build_system_prompt().
+    For SDK path, it's passed as the ``system=`` kwarg to enable caching.
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
@@ -157,16 +165,17 @@ def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = N
     # Issue #641: Resolve model — CLI uses short names, SDK uses full model IDs
     cli_model = model or "opus"
 
+    # Issue #643: Use provided stable system prompt, fall back to per-file prompt
+    effective_system_prompt = system_prompt or build_system_prompt(file_path)
+
     if claude_cli:
         try:
-            system_prompt = build_system_prompt(file_path)
-
             cmd = [
                 claude_cli,
                 "--print",
                 "--dangerously-skip-permissions",
                 "--model", cli_model,
-                "--system-prompt", system_prompt,
+                "--system-prompt", effective_system_prompt,
             ]
 
             result = run_command(
@@ -204,6 +213,13 @@ def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = N
             timeout=httpx.Timeout(timeout, connect=30.0)
         )
 
+        # Issue #643: Pass system prompt as structured block for caching.
+        # When system_prompt is provided, use it directly as the system= kwarg.
+        # The per-file build_system_prompt() output format instructions are
+        # redundant with ## Output Format in the user message (prompts.py),
+        # so we skip it for the SDK path when a stable prompt is provided.
+        sdk_system = effective_system_prompt
+
         # Issue #541: Streaming eliminates timeout blindness — chunks
         # arrive incrementally so the connection stays active.  The old
         # client.messages.create() blocked for the entire generation
@@ -212,6 +228,7 @@ def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = N
         with client.messages.stream(
             model=model or CLAUDE_MODEL,
             max_tokens=32768,
+            system=sdk_system,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
             for text in stream.text_stream:
