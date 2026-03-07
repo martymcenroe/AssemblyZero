@@ -201,7 +201,7 @@ class TestBuildInitialState:
         args.type = "issue"
         args.brief = "ideas/active/feature.md"
         args.drafter = "claude:opus"
-        args.reviewer = "gemini:3-pro-preview"
+        args.reviewer = "gemini:3.1-pro-preview"
         args.review = "all"
         args.mock = False
         args.max_iterations = 20
