@@ -14,6 +14,72 @@ from .context import summarize_file_for_context
 MAX_FILE_RETRIES = 2
 
 
+def build_stable_system_prompt(
+    lld_content: str,
+    repo_structure: str = "",
+    path_enforcement_section: str = "",
+    test_content: str = "",
+    context_content: str = "",
+) -> str:
+    """Build the stable system prompt that is identical across all files.
+
+    Issue #643: Content that doesn't change per-file goes here so Anthropic's
+    prompt caching can reuse it. The system prompt is sent once and cached;
+    files 2+ read from cache at 10% cost.
+
+    Args:
+        lld_content: The full LLD specification.
+        repo_structure: Repository directory tree for path grounding.
+        path_enforcement_section: Allowed-paths prompt section.
+        test_content: Test file content that must pass.
+        context_content: Injected architectural context.
+
+    Returns:
+        System prompt string containing all stable content.
+    """
+    prompt = f"""You are a file generator. You will be given a file to implement from an LLD specification.
+
+## LLD Specification
+
+{lld_content}
+
+"""
+
+    if path_enforcement_section:
+        prompt += path_enforcement_section + "\n"
+
+    if repo_structure:
+        prompt += f"""## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+{repo_structure}
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+"""
+
+    if context_content:
+        prompt += f"""## Additional Context
+
+{context_content}
+
+"""
+
+    if test_content:
+        prompt += f"""## Tests That Must Pass
+
+```python
+{test_content}
+```
+
+"""
+
+    return prompt
+
+
 def build_single_file_prompt(
     filepath: str,
     file_spec: dict,
@@ -26,7 +92,12 @@ def build_single_file_prompt(
     context_content: str = "",
     repo_structure: str = "",
 ) -> str:
-    """Build prompt for a single file with accumulated context.
+    """Build per-file user message prompt.
+
+    Issue #643: Stable content (LLD, repo structure, path enforcement, tests,
+    context) has been moved to build_stable_system_prompt(). This function now
+    only builds per-file content. The old parameters are kept for backward
+    compatibility but ignored when a system prompt is used.
 
     Issue #188: Added path_enforcement_section parameter to inject allowed paths.
     Issue #288: Added context_content parameter for injected architectural context.
@@ -44,36 +115,6 @@ Write the complete contents of `{filepath}`.
 
 Change type: {change_type}
 Description: {description}
-
-## LLD Specification
-
-{lld_content}
-
-"""
-
-    # Issue #188: Add path enforcement section
-    if path_enforcement_section:
-        prompt += path_enforcement_section + "\n"
-
-    # Issue #445: Add repo structure to ground Claude in actual layout
-    if repo_structure:
-        prompt += f"""## Repository Structure
-
-The actual directory layout of this repository:
-
-```
-{repo_structure}
-```
-
-Use these real paths — do NOT invent paths that don't exist.
-
-"""
-
-    # Issue #288: Add injected context
-    if context_content:
-        prompt += f"""## Additional Context
-
-{context_content}
 
 """
 
@@ -96,16 +137,6 @@ Modify this file according to the LLD specification.
 """
             except Exception:
                 pass
-
-    # Include test content if available
-    if test_content:
-        prompt += f"""## Tests That Must Pass
-
-```python
-{test_content}
-```
-
-"""
 
     # Issue #373: Include previously completed files with trimmed context.
     # Only the most recent file (N-1) gets full content for continuity.

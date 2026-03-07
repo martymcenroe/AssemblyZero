@@ -41,6 +41,7 @@ from .prompts import (
     MAX_FILE_RETRIES,
     build_retry_prompt,
     build_single_file_prompt,
+    build_stable_system_prompt,
 )
 from .routing import select_model_for_file
 
@@ -57,6 +58,7 @@ def generate_file_with_retry(
     existing_content: str = "",
     estimated_line_count: int = 0,
     is_test_scaffold: bool = False,
+    system_prompt: str = "",
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure and model routing.
 
@@ -75,6 +77,7 @@ def generate_file_with_retry(
         existing_content: Existing file content for modify operations.
         estimated_line_count: Expected line count; 0 = unknown.
         is_test_scaffold: True when generating a test scaffold (N2 node).
+        system_prompt: Stable system prompt for caching (Issue #643).
 
     Returns:
         Tuple of (generated_code, success_flag).
@@ -111,7 +114,8 @@ def generate_file_with_retry(
 
         # Call Claude (Issue #447: pass filepath for file-type-aware system prompt)
         # Issue #641: pass routed model
-        result = call_claude_for_file(prompt, file_path=filepath, model=model)
+        # Issue #643: pass stable system prompt for caching
+        result = call_claude_for_file(prompt, file_path=filepath, model=model, system_prompt=system_prompt)
 
         # Unpack result — call_claude_for_file returns (response, error_str)
         # but callers may mock with (response, usage_dict); only treat str as error
@@ -348,6 +352,16 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Issue #445: Get repo structure once for prompt grounding
     repo_structure = get_repo_structure(repo_root, max_depth=3)
 
+    # Issue #643: Build stable system prompt ONCE before the file loop.
+    # This content is identical for every file and will be cached by Anthropic.
+    stable_system_prompt = build_stable_system_prompt(
+        lld_content=lld_content,
+        repo_structure=repo_structure,
+        path_enforcement_section=path_enforcement_section,
+        test_content=test_content,
+        context_content=state.get("context_content", ""),
+    )
+
     # Accumulated context
     completed_files: list[tuple[str, str]] = []
     written_paths: list[str] = []
@@ -495,6 +509,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 max_retries=MAX_FILE_RETRIES,
                 pruned_prompt=pruned_prompt,
                 existing_content=existing_content,
+                system_prompt=stable_system_prompt,
             )
         # Note: generate_file_with_retry raises ImplementationError on failure,
         # so if we get here, code is valid
