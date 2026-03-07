@@ -322,3 +322,48 @@ IMPORTANT: Output the ENTIRE file, not just the fix.
         return parts[0] + error_section + "\n## Output Format" + parts[1]
     else:
         return base_prompt + error_section
+
+
+def build_batch_file_prompt(file_specs: list[dict]) -> str:
+    """Build a prompt requesting multiple small files in a single call.
+
+    Issue #647: Batch small/boilerplate files to reduce API call overhead.
+    Each file is delimited by ``=== FILE: path ===`` markers.
+
+    Args:
+        file_specs: List of file spec dicts with 'path', 'change_type', 'description'.
+
+    Returns:
+        Prompt string requesting all files with clear delimiters.
+    """
+    prompt = "# Batch Implementation Request\n\n"
+    prompt += "Generate the following files. Separate each file with the exact marker shown.\n\n"
+
+    for spec in file_specs:
+        path = spec["path"]
+        change_type = spec.get("change_type", "Add")
+        description = spec.get("description", "")
+        info = get_file_type_info(path)
+        tag = info["language_tag"]
+        block_tag = tag if tag else ""
+
+        prompt += f"=== FILE: {path} ===\n"
+        prompt += f"Change type: {change_type}\n"
+        prompt += f"Description: {description}\n\n"
+
+    prompt += """## Output Format
+
+For EACH file, output the marker line followed by a fenced code block:
+
+=== FILE: path/to/file.py ===
+```python
+# file contents here
+```
+
+IMPORTANT:
+- Use the EXACT marker format: === FILE: <path> ===
+- Output COMPLETE file contents in each code block
+- No explanations between files
+"""
+
+    return prompt

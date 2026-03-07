@@ -272,6 +272,37 @@ def apply_diff_changes(
     return result, errors
 
 
+def parse_batch_response(response: str, expected_paths: list[str]) -> dict[str, str | None]:
+    """Parse a multi-file batch response into individual file contents.
+
+    Issue #647: Split response by ``=== FILE: path ===`` markers and extract
+    code blocks for each file.
+
+    Args:
+        response: Claude's raw response containing multiple file markers.
+        expected_paths: List of file paths we expect to find in the response.
+
+    Returns:
+        Dict mapping filepath -> extracted code (or None if not found/parsed).
+    """
+    results: dict[str, str | None] = {p: None for p in expected_paths}
+
+    # Split on file markers
+    marker_pattern = re.compile(r"^=== FILE:\s*(.+?)\s*===$", re.MULTILINE)
+    parts = marker_pattern.split(response)
+
+    # parts alternates: [preamble, path1, content1, path2, content2, ...]
+    for i in range(1, len(parts) - 1, 2):
+        path = parts[i].strip()
+        content_block = parts[i + 1]
+
+        if path in results:
+            code = extract_code_block(content_block, file_path=path)
+            results[path] = code
+
+    return results
+
+
 def _normalize_whitespace(text: str) -> str:
     """Normalize whitespace for fuzzy matching.
 
