@@ -13,7 +13,7 @@ from assemblyzero.workflows.testing.nodes.implement_code import (
 class TestSizeGateTelemetry:
     """Verify quality.gate_rejected fires on drastic file shrink."""
 
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.emit")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.parsers.emit")
     def test_drastic_shrink_emits_quality_gate_rejected(self, mock_emit):
         existing = "line\n" * 270
         new_code = "line\n" * 56
@@ -27,7 +27,7 @@ class TestSizeGateTelemetry:
             metadata={"filepath": "src/foo.py", "type": "size_gate", "error": "drastic_shrink"},
         )
 
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.emit")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.parsers.emit")
     def test_no_shrink_does_not_emit(self, mock_emit):
         existing = "line\n" * 20
         new_code = "line\n" * 20
@@ -41,8 +41,8 @@ class TestSizeGateTelemetry:
 class TestRetryStrikeOneTelemetry:
     """Verify retry.strike_one fires on second retry attempt."""
 
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.emit")
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.emit")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file")
     def test_strike_one_emits_on_second_attempt(self, mock_claude, mock_emit):
         # First attempt: API error. Second attempt: API error (triggers strike_one). Both fail.
         mock_claude.return_value = (None, "API error: quota exceeded")
@@ -67,8 +67,8 @@ class TestRetryStrikeOneTelemetry:
 class TestHaltAndPlanTelemetry:
     """Verify workflow.halt_and_plan fires when retries are exhausted."""
 
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.emit")
-    @patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.emit")
+    @patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file")
     def test_halt_and_plan_emits_on_max_retries(self, mock_claude, mock_emit):
         mock_claude.return_value = (None, "API error: timeout")
 

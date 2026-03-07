@@ -28,7 +28,7 @@ class TestSDKTimeout:
 
         # Mock the CLI to not exist, forcing SDK fallback
         with patch(
-            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
             return_value=None,
         ):
             # Mock anthropic module at import time
@@ -87,7 +87,7 @@ class TestErrorPropagation:
 
         # Mock call_claude_for_file to always return error
         with patch(
-            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file"
         ) as mock_call:
             mock_call.return_value = ("", "API timeout after 300s")
 
@@ -113,7 +113,7 @@ class TestErrorPropagation:
         expected_timeout = compute_dynamic_timeout(prompt)
 
         with patch(
-            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
             return_value=None,
         ):
             mock_anthropic = MagicMock()
@@ -148,11 +148,11 @@ class TestCLITimeout:
         import subprocess
 
         with patch(
-            "assemblyzero.workflows.testing.nodes.implement_code._find_claude_cli",
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
             return_value="/usr/bin/claude",
         ):
             with patch(
-                "assemblyzero.workflows.testing.nodes.implement_code.subprocess.run"
+                "assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command"
             ) as mock_run:
                 mock_run.side_effect = subprocess.TimeoutExpired(
                     cmd="claude", timeout=300
@@ -209,7 +209,7 @@ class TestWorkflowExitCode:
         }
 
         with patch(
-            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file"
+            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file"
         ) as mock_call:
             # Return timeout error
             mock_call.return_value = ("", "SDK timeout after 300s")
