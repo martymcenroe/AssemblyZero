@@ -6,6 +6,7 @@
 # Category A: Reading secret files (cat .env, less .aws/credentials, etc.)
 # Category B: Environment dumps (printenv, env, set, export -p)
 # Category C: Secret variable dereference (echo $GITHUB_TOKEN, etc.)
+# Category D: CLI credential dump commands (gh auth token, aws configure get, etc.)
 #
 # Environment: $CLAUDE_TOOL_INPUT_COMMAND contains the bash command
 
@@ -149,6 +150,90 @@ if [[ "$command" =~ \$(${secret_vars})([^a-zA-Z_]|$) ]] ||
     echo "Session transcripts capture all output in plaintext." >&2
     echo "" >&2
     echo "Use os.environ.get() in Python to access secrets internally." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Category D: CLI credential dump commands
+# Blocks: gh auth token, aws configure get <secret>, etc.
+# These tools have built-in "print my credential" subcommands that bypass
+# env-var and file-read guards.
+# ---------------------------------------------------------------------------
+
+# gh auth token — prints active PAT to stdout
+if [[ "$command" =~ (^|[;&|])[[:space:]]*gh[[:space:]]+auth[[:space:]]+token([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - CLI Credential Dump" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "'gh auth token' prints your GitHub PAT to stdout." >&2
+    echo "Use resolve_github_token() in Python or gh auth login interactively." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# gh auth status --show-token — token embedded in status output
+if [[ "$command" =~ (^|[;&|])[[:space:]]*gh[[:space:]]+auth[[:space:]]+status ]] &&
+   [[ "$command" =~ --show-token ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - CLI Credential Dump" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "'gh auth status --show-token' prints your GitHub PAT to stdout." >&2
+    echo "Use 'gh auth status' without --show-token for safe status checks." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# aws configure get <secret-key> — dumps individual AWS secrets
+if [[ "$command" =~ (^|[;&|])[[:space:]]*aws[[:space:]]+configure[[:space:]]+get[[:space:]]+(aws_secret_access_key|aws_session_token|aws_access_key_id)([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - CLI Credential Dump" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "This prints an AWS credential to stdout." >&2
+    echo "Use os.environ.get() or boto3 in Python instead." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# aws sts get-session-token — dumps temporary credentials
+if [[ "$command" =~ (^|[;&|])[[:space:]]*aws[[:space:]]+sts[[:space:]]+get-session-token([[:space:]]|$) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - CLI Credential Dump" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "'aws sts get-session-token' dumps temporary credentials to stdout." >&2
+    echo "Use boto3.client('sts') in Python instead." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# aws ssm get-parameter --with-decryption — dumps secrets from Parameter Store
+if [[ "$command" =~ (^|[;&|])[[:space:]]*aws[[:space:]]+ssm[[:space:]]+get-parameter ]] &&
+   [[ "$command" =~ --with-decryption ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - CLI Credential Dump" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "'aws ssm get-parameter --with-decryption' dumps secrets to stdout." >&2
+    echo "Use boto3.client('ssm') in Python instead." >&2
     echo "" >&2
     exit 1
 fi
