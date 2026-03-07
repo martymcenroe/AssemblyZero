@@ -35,18 +35,23 @@ from .context import estimate_context_tokens
 from .parsers import (
     detect_summary_response,
     extract_code_block,
+    parse_batch_response,
     validate_code_response,
 )
 from .prompts import (
     MAX_FILE_RETRIES,
+    build_batch_file_prompt,
     build_retry_prompt,
     build_single_file_prompt,
     build_stable_system_prompt,
 )
-from .routing import select_model_for_file
+from .routing import HAIKU_MODEL, select_model_for_file
 
 # Issue #644: Prompt size cap for code generation (chars)
 CODE_GEN_PROMPT_CAP = 60_000
+
+# Issue #647: Maximum files per batch call
+BATCH_SIZE = 5
 
 
 def generate_file_with_retry(
@@ -365,6 +370,104 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Accumulated context
     completed_files: list[tuple[str, str]] = []
     written_paths: list[str] = []
+
+    # Issue #647: Batch small Haiku-routed files to reduce API calls.
+    # Partition files: batchable (Haiku-routed Add files that aren't fast-pathed)
+    # vs regular (everything else).
+    _trivial_extensions = (".json", ".yaml", ".yml", ".toml", ".txt", ".csv")
+    _placeholder_names = {".gitkeep", ".gitignore_placeholder", ".keep"}
+    batch_specs: list[dict] = []
+    regular_specs: list[dict] = []
+
+    for file_spec in files_to_modify:
+        fp = file_spec["path"]
+        ct = file_spec.get("change_type", "Add")
+        fname = Path(fp).name
+        desc = file_spec.get("description", "")
+        target = repo_root / fp
+
+        # Skip files that have fast paths (handled without Claude)
+        is_fast_path = (
+            ct.lower() == "delete"
+            or fname in _placeholder_names
+            or (
+                (fname == "__init__.py" or fp.endswith(_trivial_extensions))
+                and ct.lower() == "add"
+                and len(desc) < 50
+            )
+            or (ct.lower() == "add" and target.exists() and target.stat().st_size > 0)
+        )
+
+        if is_fast_path:
+            regular_specs.append(file_spec)
+            continue
+
+        # Only batch Add files routed to Haiku
+        model = select_model_for_file(fp, file_spec.get("estimated_line_count", 0))
+        if ct.lower() == "add" and model == HAIKU_MODEL:
+            batch_specs.append(file_spec)
+        else:
+            regular_specs.append(file_spec)
+
+    # Process batches
+    batch_failed_specs: list[dict] = []
+    if batch_specs:
+        print(f"\n    [BATCH] {len(batch_specs)} small files eligible for batching")
+        for batch_start in range(0, len(batch_specs), BATCH_SIZE):
+            batch = batch_specs[batch_start:batch_start + BATCH_SIZE]
+            batch_paths = [s["path"] for s in batch]
+            print(f"    [BATCH] Processing {len(batch)} files: {', '.join(batch_paths)}")
+
+            batch_prompt = build_batch_file_prompt(batch)
+
+            with ProgressReporter("Batch generating", interval=15):
+                response, api_error = call_claude_for_file(
+                    prompt=batch_prompt,
+                    file_path=batch_paths[0],
+                    model=HAIKU_MODEL,
+                    system_prompt=stable_system_prompt,
+                )
+
+            if api_error:
+                print(f"    [BATCH] API error, falling back to individual: {api_error[:80]}")
+                batch_failed_specs.extend(batch)
+                continue
+
+            parsed = parse_batch_response(response, batch_paths)
+
+            for spec in batch:
+                fp = spec["path"]
+                code = parsed.get(fp)
+
+                if code is None:
+                    print(f"        [BATCH] Failed to parse {fp}, will retry individually")
+                    batch_failed_specs.append(spec)
+                    continue
+
+                # Validate
+                valid, val_error = validate_code_response(code, fp)
+                if not valid:
+                    print(f"        [BATCH] Validation failed for {fp}: {val_error}")
+                    batch_failed_specs.append(spec)
+                    continue
+
+                # Write file
+                target_path = repo_root / fp
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+                temp_path.write_text(code, encoding="utf-8")
+                temp_path.replace(target_path)
+                print(f"        Written (batch): {target_path}")
+                completed_files.append((fp, code))
+                written_paths.append(str(target_path))
+
+    # Merge batch failures back into regular for individual processing
+    if batch_failed_specs:
+        print(f"    [BATCH] {len(batch_failed_specs)} files falling back to individual generation")
+        regular_specs.extend(batch_failed_specs)
+
+    # Replace files_to_modify with regular_specs for the main loop
+    files_to_modify = regular_specs
 
     for i, file_spec in enumerate(files_to_modify):
         filepath = file_spec["path"]

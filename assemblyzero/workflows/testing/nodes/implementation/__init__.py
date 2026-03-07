@@ -10,6 +10,7 @@ from .parsers import (
     detect_summary_response,
     detect_truncation,
     extract_code_block,
+    parse_batch_response,
     parse_diff_response,
     validate_code_response,
     _normalize_whitespace,
@@ -30,6 +31,7 @@ from .context import (
 # --- prompts.py ---
 from .prompts import (
     MAX_FILE_RETRIES,
+    build_batch_file_prompt,
     build_diff_prompt,
     build_retry_prompt,
     build_single_file_prompt,
@@ -50,6 +52,7 @@ from .claude_client import (
 
 # --- orchestrator.py ---
 from .orchestrator import (
+    BATCH_SIZE,
     CODE_GEN_PROMPT_CAP,
     generate_file_with_retry,
     implement_code,
@@ -78,6 +81,7 @@ __all__ = [
     "detect_summary_response",
     "detect_truncation",
     "extract_code_block",
+    "parse_batch_response",
     "parse_diff_response",
     "validate_code_response",
     "_normalize_whitespace",
@@ -92,6 +96,7 @@ __all__ = [
     "_summarize_function",
     # prompts
     "MAX_FILE_RETRIES",
+    "build_batch_file_prompt",
     "build_diff_prompt",
     "build_retry_prompt",
     "build_single_file_prompt",
