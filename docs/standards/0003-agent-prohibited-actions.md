@@ -114,7 +114,19 @@ Agents MUST use Fine-Grained PATs, not classic tokens. The following flags are p
 
 See `docs/runbooks/0925-agent-token-setup.md` for token creation and rotation.
 
-## 6. Rationale
+## 6. Quota Exhaustion: Fail Fast
+
+When Claude Max quota is exhausted or Anthropic API returns billing errors (402, 429 with billing context), agents MUST:
+
+1. **Stop immediately** — do not retry, do not fall back to other models
+2. **Report the error** — include the `[NON-RETRYABLE]` prefix so the user knows
+3. **Suggest `--resume`** — the workflow can continue after the cooldown window
+
+Errors matching `is_non_retryable_error()` patterns (`"usage limit"`, `"usage has been exhausted"`, `"wait until"`) are classified as billing errors and bypass all retry logic.
+
+See [Cost Management](../wiki/Cost-Management.md) for the full quota detection flow.
+
+## 7. Rationale
 
 ### Why These Rules?
 
