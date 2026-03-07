@@ -187,7 +187,7 @@ Following SPDX 3.0 AI Profile concepts:
 # Aletheia AI Bill of Materials
 aibom_version: "1.0"
 generated: "2026-01-06"
-organization: "ThriveTech.ai"
+organization: "martymcenroe"
 project: "Aletheia"
 
 models:

@@ -217,7 +217,7 @@ All `flowchart LR` / `graph LR` diagrams checked for backward edges:
 
 | Repo | Reason |
 |------|--------|
-| ThriveTech-AI/Hermes wiki | 404 — wiki not published on GitHub |
+| martymcenroe/Hermes wiki | 404 — wiki not published on GitHub |
 | Talos, career, dispatch, maintenance | Private repos — not authenticated in Playwright |
 | GentlePersuader, CS512_link_predictor | Private repos — not authenticated |
 | Aletheia docs/ (65 files) | Source-audited only (too many for individual Playwright screenshots) |
@@ -254,7 +254,7 @@ All unleashed wiki custom fills use saturated mid-tones per §8.6 guidance. No �
 | 4 | Fix AZ wiki Implementation-Workflow.md diagram 2 — backward LR edge | AssemblyZero wiki | P2 |
 | 5 | Investigate unleashed README oversized canvas | unleashed | P3 |
 | 6 | Closer inspection of unleashed wiki Architecture three-thread diagram | unleashed wiki | P3 |
-| 7 | Publish Hermes wiki or document as intentionally unpublished | ThriveTech-AI/Hermes | P3 |
+| 7 | Publish Hermes wiki or document as intentionally unpublished | martymcenroe/Hermes | P3 |
 
 ---
 
