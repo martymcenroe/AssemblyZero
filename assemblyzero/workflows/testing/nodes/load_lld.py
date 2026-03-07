@@ -840,7 +840,7 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     print(f"    Spec path: {lld_path_obj}")
 
-    # Read LLD content
+    # Read spec content
     try:
         lld_content = lld_path_obj.read_text(encoding="utf-8")
     except OSError as e:
@@ -857,18 +857,38 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         print("    [GUARD] WARNING: LLD may not be approved (no APPROVED marker)")
     # --------------------------------------------------------------------------
 
-    # Extract test plan section
-    # Issue #608: Now enforces Section 10 and raises WorkflowParsingError on failure
-    try:
-        test_plan_section = extract_test_plan_section(lld_content)
-    except WorkflowParsingError:
-        # For the main workflow, gracefully degrade to empty test plan
-        # rather than crashing the entire workflow
-        test_plan_section = ""
-        print("    [GUARD] WARNING: No Section 10 test plan found in spec")
+    # Issue #656: Also load the original LLD if we loaded an impl spec.
+    # The impl spec's Section 3 is "Current State", not "Requirements",
+    # and its Section 10 may use a different format. The original LLD
+    # has the canonical Section 3 (Requirements) and Section 10.1 (Test Scenarios).
+    original_lld_content = lld_content  # default: use spec content
+    original_lld_path = find_lld_path(issue_number, repo_root)
+    if not original_lld_path and state.get("original_repo_root"):
+        original_lld_path = find_lld_path(issue_number, Path(state["original_repo_root"]))
+    if original_lld_path and original_lld_path.exists():
+        try:
+            original_lld_content = original_lld_path.read_text(encoding="utf-8")
+            print(f"    Original LLD: {original_lld_path}")
+        except OSError:
+            print("    [WARN] Could not read original LLD, using spec content")
+    else:
+        print("    [INFO] No separate LLD found, using spec content for parsing")
 
+    # Extract test plan section — try original LLD first, fall back to spec
+    # Issue #608: Now enforces Section 10 and raises WorkflowParsingError on failure
+    test_plan_section = ""
+    for content_source, label in [
+        (original_lld_content, "original LLD"),
+        (lld_content, "spec"),
+    ]:
+        try:
+            test_plan_section = extract_test_plan_section(content_source)
+            if test_plan_section:
+                break
+        except WorkflowParsingError:
+            continue
     if not test_plan_section:
-        print("    [GUARD] WARNING: No test plan section found in LLD")
+        print("    [GUARD] WARNING: No Section 10 test plan found in LLD or spec")
 
     # Parse test scenarios
     test_scenarios = parse_test_scenarios(test_plan_section)
@@ -878,9 +898,17 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     detected_types = detect_test_types(lld_content)
     print(f"    Detected test types: {detected_types}")
 
-    # Extract requirements
-    requirements = extract_requirements(lld_content)
-    print(f"    Found {len(requirements)} requirements")
+    # Extract requirements — use original LLD (has Section 3: Requirements)
+    requirements = extract_requirements(original_lld_content)
+    if not requirements:
+        # Diagnostic: try spec content as fallback
+        requirements = extract_requirements(lld_content)
+        if requirements:
+            print(f"    Found {len(requirements)} requirements (from spec)")
+        else:
+            print("    [WARN] No requirements found in LLD or spec content")
+    else:
+        print(f"    Found {len(requirements)} requirements (from LLD)")
 
     # Extract coverage target
     coverage_target = extract_coverage_target(lld_content)
