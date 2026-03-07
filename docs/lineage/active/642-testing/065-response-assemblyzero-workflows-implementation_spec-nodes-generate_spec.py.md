@@ -1,3 +1,4 @@
+```python
 """N2: Generate Implementation Spec node for Implementation Spec Workflow.
 
 Issue #304: Implementation Readiness Review Workflow (LLD -> Implementation Spec)
@@ -205,12 +206,12 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             previous_attempt_snippet=state.get("previous_attempt_snippet", None),
             completed_files=state.get("completed_files", []),
         )
-        pruned = build_retry_prompt(retry_ctx)
-        prompt = pruned["prompt_text"]
+        result = build_retry_prompt(retry_ctx)
+        prompt = result["prompt_text"]
         logger.info(
             "Retry prompt built: tier=%d, tokens=%d, file=%s",
-            pruned["tier"],
-            pruned["estimated_tokens"],
+            result["tier"],
+            result["estimated_tokens"],
             state.get("target_file", ""),
         )
     else:
@@ -891,3 +892,4 @@ def _split_into_sections(prompt: str) -> list[dict]:
         })
 
     return sections
+```
