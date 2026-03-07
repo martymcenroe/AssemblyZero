@@ -89,15 +89,19 @@ def extract_lld_requirements(lld_path: Path) -> list[tuple[int, str]]:
         logger.warning("Cannot read LLD file %s: %s", lld_path, e)
         return []
 
-    # Find Section 3 (Requirements)
-    # Match patterns: "## 3. Requirements", "## 3 Requirements", "## 3. Requirements\n"
+    # Find Section 3 (Requirements) — flexible: H1-H3, optional period, case-insensitive
+    # Matches: "## 3. Requirements", "## 3 Requirements", "### 3. Requirements\n"
     section_3_pattern = re.compile(
-        r"^##\s+3\.?\s+Requirements\s*$",
+        r"^#{1,3}\s*3\.?\s+Requirements\b.*$",
         re.MULTILINE | re.IGNORECASE,
     )
     match = section_3_pattern.search(content)
     if not match:
-        logger.warning("Section 3 (Requirements) not found in %s", lld_path)
+        logger.warning(
+            "Section 3 (Requirements) not found in %s (%d chars). "
+            "Expected heading like '## 3. Requirements'",
+            lld_path, len(content),
+        )
         return []
 
     # Extract content from Section 3 until the next section (## N.)
