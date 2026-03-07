@@ -84,10 +84,12 @@ def parse_lld_test_section(lld_content: str) -> ParsedLLDTests:
         "imports_needed": [],
     }
 
-    # Find Section 10.0 Test Plan
+    # Find Section 10 test plan — search 10.0, 10.1, or the parent Section 10
+    # Issue #656: unified patterns to match all known LLD section formats
     section_patterns = [
         r"###?\s*10\.0[^\n]*Test\s*Plan[^\n]*\n(.*?)(?=###?\s*\d|##\s*\d|\Z)",
-        r"###?\s*10[^\n]*Verification[^\n]*\n(.*?)(?=###?\s*\d|##\s*\d|\Z)",
+        r"###?\s*10\.1[^\n]*Test\s*Scenario[^\n]*\n(.*?)(?=###?\s*10\.\d|##\s*\d|\Z)",
+        r"##\s*10\.?\s*(?:Verification|Test|Testing)\b[^\n]*\n(.*?)(?=##\s*(?:11|[A-Z])|\Z)",
     ]
 
     section_content = None

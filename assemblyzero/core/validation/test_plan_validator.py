@@ -110,13 +110,19 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
     Returns:
         List of Requirement objects with id and text.
     """
-    # Find Section 3
+    # Find Section 3 — case-insensitive, H1-H3, optional period after "3"
     section_pattern = re.compile(
-        r"^#{1,3}\s*3\.\s*Requirements\b.*?\n(.*?)(?=^#{1,3}\s*\d|^#{1,3}\s*[A-Z]|\Z)",
-        re.MULTILINE | re.DOTALL,
+        r"^#{1,3}\s*3\.?\s*Requirements\b.*?\n(.*?)(?=^#{1,3}\s*\d|^#{1,3}\s*[A-Z]|\Z)",
+        re.MULTILINE | re.DOTALL | re.IGNORECASE,
     )
     match = section_pattern.search(lld_content)
     if not match:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Section 3 (Requirements) heading not found in LLD content "
+            "(%d chars). Expected: ## 3. Requirements",
+            len(lld_content),
+        )
         return []
 
     section_content = match.group(1)
@@ -165,9 +171,10 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
 
 
 def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
-    """Extract test scenarios from LLD Section 10.1.
+    """Extract test scenarios from LLD Section 10 (any subsection with tables).
 
-    Parses the markdown table in Section 10.1 with columns:
+    Searches Section 10.1 first, then falls back to the entire Section 10
+    (including 10.0 Test Plan tables). Parses markdown tables with columns:
     | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 
     Args:
@@ -176,13 +183,30 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
     Returns:
         List of TestScenario objects.
     """
-    # Find Section 10.1
+    # Try Section 10.1 first (preferred location for test scenarios)
     section_pattern = re.compile(
         r"#{2,4}\s*10\.1\b.*?\n(.*?)(?=#{2,4}\s*10\.\d|\Z)",
         re.DOTALL,
     )
     match = section_pattern.search(lld_content)
+
+    # Fall back to entire Section 10 if 10.1 not found or has no tables
+    if not match or "|" not in match.group(1):
+        section_10_pattern = re.compile(
+            r"^#{1,3}\s*10\.?\s*(?:Verification|Test|Testing)\b.*?\n(.*?)(?=^#{1,3}\s*(?:11|[A-Z])|\Z)",
+            re.MULTILINE | re.DOTALL | re.IGNORECASE,
+        )
+        match_10 = section_10_pattern.search(lld_content)
+        if match_10 and "|" in match_10.group(1):
+            match = match_10
+
     if not match:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Section 10 / 10.1 (Test Scenarios) not found in LLD content "
+            "(%d chars). Expected: ## 10. Verification & Testing or ### 10.1 Test Scenarios",
+            len(lld_content),
+        )
         return []
 
     section_content = match.group(1)

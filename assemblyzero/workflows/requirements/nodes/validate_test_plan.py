@@ -51,6 +51,26 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
             "error_message": "No draft content for test plan validation",
         }
 
+    # Issue #656: Mechanical format check — call actual parsers and report
+    # diagnostics before running the full validation. This catches format
+    # mismatches early with clear error messages.
+    from assemblyzero.core.validation.test_plan_validator import (
+        extract_requirements as _extract_reqs,
+        extract_test_scenarios as _extract_tests,
+    )
+    _reqs = _extract_reqs(lld_content)
+    _tests = _extract_tests(lld_content)
+    if not _reqs:
+        print("    [DIAG] extract_requirements() returned 0 items — "
+              "Section 3 heading may be missing or format mismatch")
+    else:
+        print(f"    [DIAG] extract_requirements() found {len(_reqs)} items")
+    if not _tests:
+        print("    [DIAG] extract_test_scenarios() returned 0 items — "
+              "Section 10/10.1 heading may be missing or no table rows parsed")
+    else:
+        print(f"    [DIAG] extract_test_scenarios() found {len(_tests)} items")
+
     # Run validation
     result = validate_test_plan(lld_content)
 
