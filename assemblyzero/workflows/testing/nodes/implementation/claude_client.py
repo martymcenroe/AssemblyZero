@@ -213,12 +213,16 @@ def call_claude_for_file(
             timeout=httpx.Timeout(timeout, connect=30.0)
         )
 
-        # Issue #643: Pass system prompt as structured block for caching.
-        # When system_prompt is provided, use it directly as the system= kwarg.
-        # The per-file build_system_prompt() output format instructions are
-        # redundant with ## Output Format in the user message (prompts.py),
-        # so we skip it for the SDK path when a stable prompt is provided.
-        sdk_system = effective_system_prompt
+        # Issue #625: Pass system prompt as structured block with cache_control.
+        # Mirrors the pattern in AnthropicProvider (llm_provider.py:662-670).
+        # First file pays 125% (cache write), files 2+ pay 10% (cache read).
+        sdk_system = [
+            {
+                "type": "text",
+                "text": effective_system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
         # Issue #541: Streaming eliminates timeout blindness — chunks
         # arrive incrementally so the connection stays active.  The old
@@ -233,6 +237,14 @@ def call_claude_for_file(
         ) as stream:
             for text in stream.text_stream:
                 response_text += text
+
+        # Issue #625: Log cache metrics for cost visibility
+        final_msg = stream.get_final_message()
+        usage = final_msg.usage
+        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        if cache_read or cache_create:
+            print(f"        [CACHE] read={cache_read} create={cache_create}")
 
         # Issue #527: Strip emojis from code gen response
         return strip_emoji(response_text), ""
