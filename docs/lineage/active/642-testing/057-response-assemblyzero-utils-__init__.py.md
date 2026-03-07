@@ -1,3 +1,4 @@
+```python
 """Utility modules for AssemblyZero."""
 
 from assemblyzero.utils.codebase_reader import (
@@ -53,3 +54,4 @@ __all__ = [
     "ExtractedSection",
     "extract_file_spec_section",
 ]
+```

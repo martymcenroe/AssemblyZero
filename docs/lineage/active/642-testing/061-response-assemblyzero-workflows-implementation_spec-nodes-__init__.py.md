@@ -1,3 +1,4 @@
+```python
 """Nodes package for Implementation Spec workflow.
 
 Issue #304: Implementation Readiness Review Workflow (LLD -> Implementation Spec)
@@ -75,3 +76,4 @@ __all__ = [
     "finalize_spec",
     "generate_spec_filename",
 ]
+```
