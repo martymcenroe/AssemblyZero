@@ -9,6 +9,12 @@
             "command": "bash /c/Users/mcwiz/Projects/AssemblyZero/.claude/hooks/bash-gate.sh",
             "timeout": 5,
             "description": "Bash Command Gate (blocks &&, |, ;)"
+          },
+          {
+            "type": "command",
+            "command": "bash /c/Users/mcwiz/Projects/AssemblyZero/.claude/hooks/secret-guard.sh",
+            "timeout": 5,
+            "description": "Secret Guard (blocks secret leaks to stdout)"
           }
         ]
       }
