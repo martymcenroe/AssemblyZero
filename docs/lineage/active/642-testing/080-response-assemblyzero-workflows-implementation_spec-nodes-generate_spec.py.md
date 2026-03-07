@@ -1,3 +1,4 @@
+```python
 """N2: Generate Implementation Spec node for Implementation Spec Workflow.
 
 Issue #304: Implementation Readiness Review Workflow (LLD -> Implementation Spec)
@@ -891,3 +892,4 @@ def _split_into_sections(prompt: str) -> list[dict]:
         })
 
     return sections
+```
