@@ -42,6 +42,7 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0921 | [Cross-Project Metrics Aggregation](0921-implementation-spec-cross-project-metrics-aggregation-for-assemblyzero-usage-tracking.md) | Manual | Weekly | - |
 | 0922 | [N9 Cleanup Node](0922-implementation-spec-n9-cleanup-node---worktree-removal-lineage-archival-and-learning-summary.md) | Manual | Post-merge | - |
 | 0923 | [Workflow Recovery and --resume](0923-workflow-recovery.md) | Manual | On interruption | - |
+| 0925 | [Agent Token Setup](0925-agent-token-setup.md) | Manual | Quarterly (rotation) | - |
 
 ## Model Selection Guide
 

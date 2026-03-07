@@ -102,6 +102,18 @@ Agents should operate within:
 - Documented permission patterns
 - Approved tool configurations
 
+### 5.3 Token Restrictions
+
+Agents MUST use Fine-Grained PATs, not classic tokens. The following flags are prohibited because the restricted token will reject them:
+
+| Command | Why Prohibited |
+|---------|----------------|
+| `gh pr merge --admin` | Bypasses branch protection |
+| `gh api -X DELETE .../protection` | Removes branch rules |
+| `gh api .../actions/secrets` | Accesses repo secrets |
+
+See `docs/runbooks/0925-agent-token-setup.md` for token creation and rotation.
+
 ## 6. Rationale
 
 ### Why These Rules?

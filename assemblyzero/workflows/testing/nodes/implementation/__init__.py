@@ -33,6 +33,7 @@ from .prompts import (
     build_diff_prompt,
     build_retry_prompt,
     build_single_file_prompt,
+    build_stable_system_prompt,
 )
 
 # --- claude_client.py ---
@@ -94,6 +95,7 @@ __all__ = [
     "build_diff_prompt",
     "build_retry_prompt",
     "build_single_file_prompt",
+    "build_stable_system_prompt",
     # claude_client
     "CLI_TIMEOUT",
     "SDK_TIMEOUT",
