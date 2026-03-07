@@ -86,3 +86,56 @@ When this command is issued, the agent operates in a high-autonomy, low-interven
 2.  **Execute:** Run the relevant workflow tools (TDD, LLD, or Issue).
 3.  **Monitor:** Watch the audit log (`workflow-audit.jsonl`) and cost budget.
 4.  **Cleanup:** Finalize the issue only when tests are Green, LLD is moved to `done/`, and the worktree is deleted.
+
+---
+
+## 9. Secret Protection (Mandatory)
+
+**Session transcripts capture all stdout in plaintext.** Secrets printed during a session are irrevocably exposed. The following categories are NEVER permitted.
+
+### Category A: Secret File Reads
+
+**NEVER** run `cat`, `head`, `tail`, `less`, `more`, `bat`, `view`, `vim`, or `python -c "open(...)"` on:
+- `.env`, `.env.*`, `.dev.vars`
+- `~/.aws/credentials`, `~/.aws/config`
+- Any file matching `*secret*`, `*credential*`, `*token*`, `*.pem`, `*.key`
+
+**Safe alternative:** Use `os.environ.get('VAR_NAME')` in Python to access secrets programmatically without printing them.
+
+### Category B: Environment Dumps
+
+**NEVER** run these commands standalone:
+- `env`, `printenv`, `set` (no args), `export -p`
+- `printenv GITHUB_TOKEN` (or any secret variable name)
+
+**Allowed:** `env VAR=val cmd`, `set -e`, `set -x`, `export MY_VAR=hello`, `printenv PATH`
+
+### Category C: Secret Variable Dereference
+
+**NEVER** output or dereference these variables in commands:
+- `$GITHUB_TOKEN`, `$GH_TOKEN`
+- `$AWS_SECRET_ACCESS_KEY`, `$AWS_SESSION_TOKEN`, `$AWS_ACCESS_KEY_ID`
+- `$OPENAI_API_KEY`, `$ANTHROPIC_API_KEY`
+- `$CLOUDFLARE_API_TOKEN`, `$CF_API_TOKEN`
+- `$NPM_TOKEN`, `$DOCKER_PASSWORD`
+- `$DATABASE_URL`, `$DB_PASSWORD`
+- `$SECRET_KEY`, `$PRIVATE_KEY`
+
+**Example violations:** `echo $GITHUB_TOKEN`, `curl -H "Authorization: $AWS_SECRET_ACCESS_KEY"`
+
+### Category D: CLI Credential Dumps
+
+**NEVER** run these commands:
+- `gh auth token` — prints GitHub PAT to stdout
+- `gh auth status --show-token` — embeds token in status output
+- `aws configure get aws_secret_access_key` (or `aws_session_token`, `aws_access_key_id`)
+- `aws sts get-session-token` — dumps temporary credentials
+- `aws ssm get-parameter --with-decryption` — dumps secrets from Parameter Store
+
+**Safe alternatives:** Use `boto3.client('sts')` or `os.environ.get()` in Python. Use `gh auth status` without `--show-token`.
+
+### If You Need a Secret Value
+
+1. Ask the user to provide it in their own terminal
+2. Use `os.environ.get()` in a Python script (value stays in-process, never hits stdout)
+3. **NEVER** print, echo, or cat a secret — even "just to check"
