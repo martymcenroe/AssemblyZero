@@ -20,6 +20,7 @@ import re
 import random
 import shutil
 
+from assemblyzero.core.config import CLAUDE_MODEL
 from assemblyzero.core.text_sanitizer import strip_emoji
 import subprocess
 import sys
@@ -63,6 +64,9 @@ LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
 # Issue #373: Increased from 300s — large test file prompts need more time
 CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
 SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+
+# Issue #644: Prompt size cap for code generation (chars)
+CODE_GEN_PROMPT_CAP = 60_000
 
 
 class ProgressReporter:
@@ -974,7 +978,7 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
         # and httpx timeouts never fired on Windows/MSYS2.
         response_text = ""
         with client.messages.stream(
-            model="claude-opus-4-6",
+            model=CLAUDE_MODEL,
             max_tokens=32768,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
@@ -1452,6 +1456,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             context_content=state.get("context_content", ""),
             repo_structure=repo_structure,
         )
+
+        # Issue #644: Enforce prompt size cap — use pruned prompt if full exceeds cap
+        if len(prompt) > CODE_GEN_PROMPT_CAP:
+            print(f"        [PRUNE] Prompt {len(prompt):,} → {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
+            prompt = pruned_prompt
 
         # Call Claude with retry logic (Issue #309)
         # Issue #267: Progress feedback during long API calls

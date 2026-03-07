@@ -56,7 +56,8 @@ from assemblyzero.tracing import configure_langsmith
 configure_langsmith()
 
 # Issue #424: Telemetry instrumentation
-from assemblyzero.telemetry import flush, track_tool
+from assemblyzero.telemetry import emit, flush, track_tool
+from assemblyzero.core.llm_provider import get_cumulative_cost
 atexit.register(flush)
 
 
@@ -423,8 +424,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--budget",
         type=float,
-        default=5.0,
-        help="Max API cost in USD before halting (default $5.00, 0=unlimited)",
+        default=3.0,
+        help="Max API cost in USD before halting (default $3.00, 0=unlimited)",
     )
     parser.add_argument(
         "--token-budget",
@@ -801,10 +802,37 @@ def main():
 
                 if values.get("error_message"):
                     print(f"Status: {values['error_message']}")
+                    # Issue #646: Emit per-issue cost even on failure
+                    total_cost = get_cumulative_cost()
+                    if total_cost > 0:
+                        print(f"Cost:   ${total_cost:.4f}")
+                        emit(
+                            "workflow.cost",
+                            repo="AssemblyZero",
+                            metadata={
+                                "workflow_type": "implementation",
+                                "issue_number": args.issue,
+                                "total_cost_usd": round(total_cost, 6),
+                                "status": "failed",
+                            },
+                        )
                     _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""), state=values)
                     return 1
                 else:
                     print("Status: SUCCESS")
+                    # Issue #646: Emit per-issue cost summary
+                    total_cost = get_cumulative_cost()
+                    if total_cost > 0:
+                        print(f"Cost:   ${total_cost:.4f}")
+                        emit(
+                            "workflow.cost",
+                            repo="AssemblyZero",
+                            metadata={
+                                "workflow_type": "implementation",
+                                "issue_number": args.issue,
+                                "total_cost_usd": round(total_cost, 6),
+                            },
+                        )
                     _write_status_file(repo_root, args.issue, "SUCCESS", state=values)
 
                     # Show next steps for worktree workflow
