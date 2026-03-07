@@ -1468,7 +1468,7 @@ __pycache__/
         }
 
         # Mock call_claude_for_file to return error - should raise ImplementationError
-        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file") as mock_call:
             mock_call.return_value = ("", "Claude not available")
 
             with pytest.raises(ImplementationError) as exc_info:
@@ -3102,7 +3102,7 @@ def example():
     return True
 ```
 """
-        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file") as mock_call:
             mock_call.return_value = (mock_response, "")
 
             result = implement_code(state)
@@ -3139,7 +3139,7 @@ def example():
         }
 
         # Mock empty response (no code blocks) - should raise ImplementationError
-        with patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file") as mock_call:
+        with patch("assemblyzero.workflows.testing.nodes.implementation.orchestrator.call_claude_for_file") as mock_call:
             mock_call.return_value = ("I cannot help with that.", "")
 
             with pytest.raises(ImplementationError) as exc_info:
@@ -3694,7 +3694,7 @@ class TestImplementCodeCLIPaths:
 
         # Mock successful CLI call
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
                 mock_run.return_value.returncode = 0
                 mock_run.return_value.stdout = "```python\n# File: test.py\npass\n```"
                 mock_run.return_value.stderr = ""
@@ -3709,7 +3709,7 @@ class TestImplementCodeCLIPaths:
         from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
                 mock_run.return_value.returncode = 1
                 mock_run.return_value.stdout = ""
                 mock_run.return_value.stderr = "Error"
@@ -3726,7 +3726,7 @@ class TestImplementCodeCLIPaths:
         from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
                 mock_run.side_effect = subprocess.TimeoutExpired("claude", 600)
 
                 response, error = call_claude_headless("test prompt")
@@ -3739,7 +3739,7 @@ class TestImplementCodeCLIPaths:
         from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implement_code.subprocess.run") as mock_run:
+            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
                 mock_run.return_value.returncode = 0
                 mock_run.return_value.stdout = ""
                 mock_run.return_value.stderr = ""
