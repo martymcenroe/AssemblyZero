@@ -141,10 +141,11 @@ RULES:
 If you output anything other than a fenced code block, the build will fail."""
 
 
-def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
+def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = None) -> tuple[str, str]:
     """Call Claude for a single file implementation.
 
     Issue #447: Added file_path parameter for file-type-aware system prompt.
+    Issue #641: Added model parameter for Haiku routing.
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
@@ -152,6 +153,9 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
     claude_cli = _find_claude_cli()
     # Issue #373: Dynamic timeout based on prompt size
     timeout = compute_dynamic_timeout(prompt)
+
+    # Issue #641: Resolve model — CLI uses short names, SDK uses full model IDs
+    cli_model = model or "opus"
 
     if claude_cli:
         try:
@@ -161,7 +165,7 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
                 claude_cli,
                 "--print",
                 "--dangerously-skip-permissions",
-                "--model", "opus",  # Opus 4.5 for code quality
+                "--model", cli_model,
                 "--system-prompt", system_prompt,
             ]
 
@@ -206,7 +210,7 @@ def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
         # and httpx timeouts never fired on Windows/MSYS2.
         response_text = ""
         with client.messages.stream(
-            model=CLAUDE_MODEL,
+            model=model or CLAUDE_MODEL,
             max_tokens=32768,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:

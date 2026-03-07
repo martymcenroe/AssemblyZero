@@ -1,0 +1,3411 @@
+# Implementation Request: assemblyzero/workflows/testing/nodes/implement_code.py
+
+## Task
+
+Write the complete contents of `assemblyzero/workflows/testing/nodes/implement_code.py`.
+
+Change type: Modify
+Description: Add `HAIKU_MODEL` and `SMALL_FILE_LINE_THRESHOLD` constants; add `select_model_for_file()` routing function; update `call_claude_for_file()` to accept `model` param; update `generate_file_with_retry()` to call routing
+
+## LLD Specification
+
+# Implementation Spec: Route Scaffolding/Boilerplate Files to Haiku
+
+| Field | Value |
+|-------|-------|
+| Issue | #641 |
+| LLD | `docs/lld/active/641-route-scaffolding-boilerplate-files-to-haiku.md` |
+| Generated | 2026-03-06 |
+| Status | DRAFT |
+
+## 1. Overview
+
+Add model selection routing logic to `implement_code.py` so that simple/boilerplate files (`__init__.py`, `conftest.py`, test scaffolds, and small files under 50 lines) use `claude-3-haiku-20240307` while complex files continue using the configured default (Sonnet). This reduces API spend by an estimated 20–30%.
+
+**Objective:** Route scaffolding/boilerplate file generation to Haiku to cut costs without degrading quality on complex files.
+
+**Success Criteria:** `select_model_for_file()` correctly routes files per the 4 routing rules; `call_claude_for_file()` backward-compatible; all 16 test scenarios pass with ≥95% coverage.
+
+## 2. Files to Implement
+
+| Order | File | Change Type | Description |
+|-------|------|-------------|-------------|
+| 1 | `assemblyzero/workflows/testing/nodes/implement_code.py` | Modify | Add `HAIKU_MODEL` and `SMALL_FILE_LINE_THRESHOLD` constants; add `select_model_for_file()` routing function; update `call_claude_for_file()` to accept `model` param; update `generate_file_with_retry()` to call routing |
+| 2 | `tests/unit/test_implement_code_routing.py` | Add | Unit tests for model routing logic (all 16 test scenarios) |
+
+**Implementation Order Rationale:** The production code must exist before tests can import from it. However, per TDD, the test file will be written to exercise the *interface* first (tests will fail), then the production code is implemented to make them pass. Order 1 is listed first because it contains the module-level constants that tests import.
+
+## 3. Current State (for Modify/Delete files)
+
+### 3.1 `assemblyzero/workflows/testing/nodes/implement_code.py`
+
+**Relevant excerpt — Module-level imports and constants** (top of file, lines ~1–50):
+
+```python
+"""N4: Implement Code node for TDD Testing Workflow.
+
+Issue #272: File-by-file prompting with mechanical validation.
+Issue #309: Add retry logic on validation failure (up to 3 attempts).
+Issue #188: LLD path enforcement in prompts and write validation.
+
+Key changes from original:
+- Iterate through files_to_modify one at a time (not batch)
+- Accumulate context: each file sees LLD + previously completed files
+- Mechanical validation: code block exists, not empty, parses
+- RETRY on validation failure: up to 3 attempts with error feedback
+- WE control the file path, not Claude
+- Issue #188: Prompt includes allowed paths; writes validated against LLD
+"""
+
+from assemblyzero.utils.shell import run_command
+
+import ast
+
+import os
+
+import re
+
+import random
+
+import shutil
+
+from assemblyzero.core.config import CLAUDE_MODEL
+
+from assemblyzero.core.text_sanitizer import strip_emoji
+
+import subprocess
+
+import sys
+
+from assemblyzero.telemetry import emit
+
+import threading
+
+import time
+
+from pathlib import Path
+
+from typing import Any
+
+from assemblyzero.core.llm_provider import get_cumulative_cost
+
+from assemblyzero.hooks.file_write_validator import validate_file_write
+
+from assemblyzero.utils.cost_tracker import accumulate_node_cost
+
+from assemblyzero.utils.file_type import get_file_type_info, get_language_tag
+
+from assemblyzero.utils.lld_path_enforcer import (
+    build_implementation_prompt_section,
+    detect_scaffolded_test_files,
+    extract_paths_from_lld,
+)
+
+from assemblyzero.workflows.requirements.audit import (
+    get_repo_structure,
+)
+
+from assemblyzero.workflows.testing.audit import (
+    gate_log,
+    get_repo_root,
+    log_workflow_execution,
+    next_file_number,
+    save_audit_file,
+)
+
+from assemblyzero.workflows.testing.circuit_breaker import record_iteration_cost
+
+from assemblyzero.workflows.testing.state import TestingWorkflowState
+```
+
+**What changes:** Add `import logging` and two new module-level constants (`HAIKU_MODEL`, `SMALL_FILE_LINE_THRESHOLD`) after existing constants. Add a module-level logger instance.
+
+---
+
+**Relevant excerpt — Module-level constants** (bottom of file):
+
+```python
+MAX_FILE_RETRIES = 2
+
+LARGE_FILE_LINE_THRESHOLD = 500  # Lines
+
+LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
+
+CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
+
+SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+
+CODE_GEN_PROMPT_CAP = 60_000
+```
+
+**What changes:** Add `HAIKU_MODEL` and `SMALL_FILE_LINE_THRESHOLD` constants alongside these existing constants.
+
+---
+
+**Relevant excerpt — `call_claude_for_file()` current signature:**
+
+```python
+def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
+    """Call Claude for a single file implementation.
+
+    Issue #447: Added file_path parameter for file-type-aware system prompt."""
+    ...
+```
+
+**What changes:** Add `model: str | None = None` parameter. When not `None`, use it as the model instead of the default `CLAUDE_MODEL`. The return type stays `tuple[str, str]`.
+
+---
+
+**Relevant excerpt — `generate_file_with_retry()` current signature:**
+
+```python
+def generate_file_with_retry(
+    filepath: str,
+    base_prompt: str,
+    audit_dir: Path | None = None,
+    max_retries: int = MAX_FILE_RETRIES,
+    pruned_prompt: str = "",
+    existing_content: str = "",
+) -> tuple[str, bool]:
+    """Generate code for a single file with retry on validation failure.
+
+    Issue #309: Retry up to max_retries times on API or validation errors,"""
+    ...
+```
+
+**What changes:** Add `estimated_line_count: int = 0` and `is_test_scaffold: bool = False` parameters. Call `select_model_for_file()` at the top and pass the result to `call_claude_for_file()` via the new `model` parameter.
+
+## 4. Data Structures
+
+### 4.1 Module-Level Constants
+
+**Definition:**
+
+```python
+HAIKU_MODEL: str = "claude-3-haiku-20240307"
+SMALL_FILE_LINE_THRESHOLD: int = 50
+```
+
+**Concrete Example (usage context):**
+
+```json
+{
+    "HAIKU_MODEL": "claude-3-haiku-20240307",
+    "SMALL_FILE_LINE_THRESHOLD": 50,
+    "DEFAULT_MODEL_from_config": "claude-sonnet-4-20250514"
+}
+```
+
+### 4.2 FileRoutingContext (Conceptual — Not a Class)
+
+This is the conceptual data that flows through routing. It is **not** implemented as a class; the values are passed as individual function arguments.
+
+**Definition (conceptual):**
+
+```python
+class FileRoutingContext(TypedDict):
+    file_path: str
+    estimated_line_count: int
+    is_test_scaffold: bool
+```
+
+**Concrete Example:**
+
+```json
+{
+    "file_path": "assemblyzero/workflows/testing/nodes/__init__.py",
+    "estimated_line_count": 0,
+    "is_test_scaffold": false
+}
+```
+
+```json
+{
+    "file_path": "tests/unit/test_foo.py",
+    "estimated_line_count": 200,
+    "is_test_scaffold": true
+}
+```
+
+```json
+{
+    "file_path": "assemblyzero/utils/helper.py",
+    "estimated_line_count": 35,
+    "is_test_scaffold": false
+}
+```
+
+```json
+{
+    "file_path": "assemblyzero/core/engine.py",
+    "estimated_line_count": 450,
+    "is_test_scaffold": false
+}
+```
+
+## 5. Function Specifications
+
+### 5.1 `select_model_for_file()`
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py`
+
+**Signature:**
+
+```python
+def select_model_for_file(
+    file_path: str,
+    estimated_line_count: int = 0,
+    is_test_scaffold: bool = False,
+) -> str:
+    """Return the model ID to use for generating the given file.
+
+    Routing rules (evaluated in order):
+      1. is_test_scaffold=True  -> HAIKU_MODEL
+      2. basename is __init__.py or conftest.py -> HAIKU_MODEL
+      3. estimated_line_count > 0 and < SMALL_FILE_LINE_THRESHOLD -> HAIKU_MODEL
+      4. Otherwise -> configured default (Sonnet via CLAUDE_MODEL)
+
+    Issue #641: Route scaffolding/boilerplate files to Haiku.
+    """
+    ...
+```
+
+**Input Example 1 (test scaffold):**
+
+```python
+file_path = "tests/unit/test_foo.py"
+estimated_line_count = 200
+is_test_scaffold = True
+```
+
+**Output Example 1:**
+
+```python
+"claude-3-haiku-20240307"
+```
+
+**Input Example 2 (boilerplate filename):**
+
+```python
+file_path = "assemblyzero/workflows/testing/nodes/__init__.py"
+estimated_line_count = 0
+is_test_scaffold = False
+```
+
+**Output Example 2:**
+
+```python
+"claude-3-haiku-20240307"
+```
+
+**Input Example 3 (small file by line count):**
+
+```python
+file_path = "assemblyzero/utils/helper.py"
+estimated_line_count = 35
+is_test_scaffold = False
+```
+
+**Output Example 3:**
+
+```python
+"claude-3-haiku-20240307"
+```
+
+**Input Example 4 (complex file, default routing):**
+
+```python
+file_path = "assemblyzero/core/engine.py"
+estimated_line_count = 450
+is_test_scaffold = False
+```
+
+**Output Example 4:**
+
+```python
+# Value of CLAUDE_MODEL from assemblyzero.core.config, e.g.:
+"claude-sonnet-4-20250514"
+```
+
+**Input Example 5 (boundary — exactly 50 lines):**
+
+```python
+file_path = "assemblyzero/utils/helper.py"
+estimated_line_count = 50
+is_test_scaffold = False
+```
+
+**Output Example 5:**
+
+```python
+# Returns default model — 50 is NOT < 50
+"claude-sonnet-4-20250514"
+```
+
+**Input Example 6 (negative line count):**
+
+```python
+file_path = "assemblyzero/utils/helper.py"
+estimated_line_count = -1
+is_test_scaffold = False
+```
+
+**Output Example 6:**
+
+```python
+# Negative treated as unknown; falls through to default
+"claude-sonnet-4-20250514"
+```
+
+**Edge Cases:**
+- `estimated_line_count = 0` -> unknown, skip line-count rule, fall through to default
+- `estimated_line_count = -1` -> treated as unknown (same as 0)
+- `estimated_line_count = 1` -> routes to Haiku (1 > 0 and 1 < 50)
+- `estimated_line_count = 49` -> routes to Haiku (49 > 0 and 49 < 50)
+- `estimated_line_count = 50` -> falls through to default (50 is NOT < 50)
+- Deeply nested `__init__.py` -> basename match, routes to Haiku
+- `conftest.py` in any directory -> basename match, routes to Haiku
+- `is_test_scaffold=True` with `conftest.py` -> Haiku (scaffold rule fires first, same result)
+
+### 5.2 `call_claude_for_file()` (Modified)
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py`
+
+**Updated Signature:**
+
+```python
+def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = None) -> tuple[str, str]:
+    """Call Claude for a single file implementation.
+
+    Issue #447: Added file_path parameter for file-type-aware system prompt.
+    Issue #641: Added model parameter for routing to different models.
+
+    Args:
+        prompt: The full generation prompt.
+        file_path: Path for file-type-aware system prompt.
+        model: Override model; if None, uses CLAUDE_MODEL from config.
+
+    Returns:
+        Tuple of (response_text, stop_reason).
+    """
+    ...
+```
+
+**Input Example (explicit model):**
+
+```python
+prompt = "Generate an __init__.py file..."
+file_path = "assemblyzero/__init__.py"
+model = "claude-3-haiku-20240307"
+```
+
+**Output Example:**
+
+```python
+('"""AssemblyZero package."""\n', "end_turn")
+```
+
+**Input Example (default model, backward-compatible):**
+
+```python
+prompt = "Generate the engine module..."
+file_path = "assemblyzero/core/engine.py"
+model = None
+```
+
+**Output Example:**
+
+```python
+('"""Engine module."""\n\nclass Engine:\n    ...', "end_turn")
+```
+
+**Edge Cases:**
+- `model=None` -> uses `CLAUDE_MODEL` from config (backward-compatible with all existing callers)
+- `model=""` -> would be truthy empty string; not expected usage, but would pass empty string to API (API will reject it). This is acceptable — callers should pass `None` for default.
+
+### 5.3 `generate_file_with_retry()` (Modified)
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py`
+
+**Updated Signature:**
+
+```python
+def generate_file_with_retry(
+    filepath: str,
+    base_prompt: str,
+    audit_dir: Path | None = None,
+    max_retries: int = MAX_FILE_RETRIES,
+    pruned_prompt: str = "",
+    existing_content: str = "",
+    estimated_line_count: int = 0,
+    is_test_scaffold: bool = False,
+) -> tuple[str, bool]:
+    """Generate code for a single file with retry on validation failure.
+
+    Issue #309: Retry up to max_retries times on API or validation errors.
+    Issue #641: Routes to appropriate model via select_model_for_file().
+    """
+    ...
+```
+
+**Input Example:**
+
+```python
+filepath = "tests/__init__.py"
+base_prompt = "Generate an empty __init__.py..."
+audit_dir = Path("/tmp/audit")
+max_retries = 2
+pruned_prompt = ""
+existing_content = ""
+estimated_line_count = 0
+is_test_scaffold = False
+```
+
+**Output Example:**
+
+```python
+('"""Tests package."""\n', True)  # (content, success)
+```
+
+**Edge Cases:**
+- New parameters have defaults that preserve existing behavior (0 and False)
+- All existing callers that don't pass the new parameters continue working unchanged
+
+## 6. Change Instructions
+
+### 6.1 `assemblyzero/workflows/testing/nodes/implement_code.py` (Modify)
+
+**Change 1:** Add `logging` import — insert after existing imports, near `import os`
+
+```diff
+ import os
+ 
+ import re
+ 
+ import random
++
++import logging
+```
+
+**Change 2:** Add module-level logger and new constants — insert after the existing module-level constants block (after `CODE_GEN_PROMPT_CAP = 60_000`). Place them together as a group.
+
+```diff
+ CODE_GEN_PROMPT_CAP = 60_000
++
++# Issue #641: Model routing constants
++logger = logging.getLogger(__name__)
++HAIKU_MODEL = "claude-3-haiku-20240307"
++SMALL_FILE_LINE_THRESHOLD = 50  # Files under this line count route to Haiku
+```
+
+**Change 3:** Add `select_model_for_file()` function — insert immediately before the existing `call_claude_for_file()` function definition.
+
+```python
+def select_model_for_file(
+    file_path: str,
+    estimated_line_count: int = 0,
+    is_test_scaffold: bool = False,
+) -> str:
+    """Return the model ID to use for generating the given file.
+
+    Routing rules (evaluated in order):
+      1. is_test_scaffold=True  -> HAIKU_MODEL
+      2. basename is __init__.py or conftest.py -> HAIKU_MODEL
+      3. estimated_line_count > 0 and < SMALL_FILE_LINE_THRESHOLD -> HAIKU_MODEL
+      4. Otherwise -> configured default (Sonnet via CLAUDE_MODEL)
+
+    Issue #641: Route scaffolding/boilerplate files to Haiku.
+
+    Args:
+        file_path: Relative or absolute path to the file being generated.
+            Only the basename is used for filename-based routing rules.
+        estimated_line_count: Expected line count of the generated file.
+            Pass 0 (default) when unknown; 0 disables line-count routing.
+            Negative values are treated as unknown (same as 0).
+        is_test_scaffold: True when this file is being generated as a test
+            scaffold by the N2 node; overrides all other routing rules.
+
+    Returns:
+        Model identifier string suitable for passing to the Anthropic client.
+    """
+    basename = Path(file_path).name
+
+    if is_test_scaffold:
+        logger.info(
+            "Routing %s -> %s (reason: test scaffold)", file_path, HAIKU_MODEL
+        )
+        return HAIKU_MODEL
+
+    if basename in {"__init__.py", "conftest.py"}:
+        logger.info(
+            "Routing %s -> %s (reason: boilerplate filename)", file_path, HAIKU_MODEL
+        )
+        return HAIKU_MODEL
+
+    if estimated_line_count > 0 and estimated_line_count < SMALL_FILE_LINE_THRESHOLD:
+        logger.info(
+            "Routing %s -> %s (reason: small file, lines=%d)",
+            file_path,
+            HAIKU_MODEL,
+            estimated_line_count,
+        )
+        return HAIKU_MODEL
+
+    default_model = CLAUDE_MODEL
+    logger.info("Routing %s -> %s (reason: default)", file_path, default_model)
+    return default_model
+```
+
+**Change 4:** Modify `call_claude_for_file()` signature — add `model` parameter
+
+Locate the existing `call_claude_for_file` function definition and modify:
+
+```diff
+-def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
++def call_claude_for_file(prompt: str, file_path: str = "", model: str | None = None) -> tuple[str, str]:
+     """Call Claude for a single file implementation.
+ 
+-    Issue #447: Added file_path parameter for file-type-aware system prompt."""
++    Issue #447: Added file_path parameter for file-type-aware system prompt.
++    Issue #641: Added model parameter for routing to different models."""
+```
+
+**Change 5:** Inside `call_claude_for_file()` body — use the `model` parameter when resolving which model to call.
+
+Find the location in the function body where `CLAUDE_MODEL` is referenced for the API call. Add model resolution logic at the top of the function body:
+
+```diff
++    resolved_model = model if model is not None else CLAUDE_MODEL
+```
+
+Then replace all references to `CLAUDE_MODEL` within this function's API call with `resolved_model`. The exact location depends on the function body, but the pattern is:
+
+```diff
+-        model=CLAUDE_MODEL,
++        model=resolved_model,
+```
+
+If the function uses `CLAUDE_MODEL` in multiple places (e.g., logging, the API call itself), replace all of them with `resolved_model`.
+
+**Change 6:** Modify `generate_file_with_retry()` signature — add routing parameters
+
+```diff
+ def generate_file_with_retry(
+     filepath: str,
+     base_prompt: str,
+     audit_dir: Path | None = None,
+     max_retries: int = MAX_FILE_RETRIES,
+     pruned_prompt: str = "",
+     existing_content: str = "",
++    estimated_line_count: int = 0,
++    is_test_scaffold: bool = False,
+ ) -> tuple[str, bool]:
+     """Generate code for a single file with retry on validation failure.
+ 
+-    Issue #309: Retry up to max_retries times on API or validation errors,"""
++    Issue #309: Retry up to max_retries times on API or validation errors.
++    Issue #641: Routes to appropriate model via select_model_for_file()."""
+```
+
+**Change 7:** Inside `generate_file_with_retry()` body — call routing and pass model
+
+Add the routing call at the very beginning of the function body (before the retry loop):
+
+```diff
++    model = select_model_for_file(filepath, estimated_line_count, is_test_scaffold)
+```
+
+Then find where `call_claude_for_file()` is invoked inside this function and add the `model=model` keyword argument:
+
+```diff
+-            response_text, stop_reason = call_claude_for_file(prompt, filepath)
++            response_text, stop_reason = call_claude_for_file(prompt, filepath, model=model)
+```
+
+Note: The exact variable names and call pattern depend on the function body. The key is that every call to `call_claude_for_file` within `generate_file_with_retry` must pass `model=model`. If there are multiple call sites (e.g., initial attempt + retry with modified prompt), all must include the `model` parameter.
+
+### 6.2 `tests/unit/test_implement_code_routing.py` (Add)
+
+**Complete file contents:**
+
+```python
+"""Unit tests for Issue #641: Model routing for scaffolding/boilerplate files.
+
+Tests the select_model_for_file() routing function and integration with
+call_claude_for_file() and generate_file_with_retry().
+"""
+
+import logging
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from assemblyzero.workflows.testing.nodes.implement_code import (
+    HAIKU_MODEL,
+    SMALL_FILE_LINE_THRESHOLD,
+    call_claude_for_file,
+    generate_file_with_retry,
+    select_model_for_file,
+)
+from assemblyzero.core.config import CLAUDE_MODEL
+
+
+# ---------------------------------------------------------------------------
+# T010: __init__.py routes to Haiku (REQ-1)
+# ---------------------------------------------------------------------------
+class TestSelectModelForFile:
+    """Tests for select_model_for_file() routing logic."""
+
+    def test_init_py_routes_to_haiku(self):
+        """T010: __init__.py in root routes to Haiku."""
+        result = select_model_for_file(
+            file_path="assemblyzero/__init__.py",
+            estimated_line_count=0,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_conftest_py_routes_to_haiku(self):
+        """T020: conftest.py routes to Haiku (REQ-2)."""
+        result = select_model_for_file(
+            file_path="tests/conftest.py",
+            estimated_line_count=0,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_test_scaffold_routes_to_haiku(self):
+        """T030: is_test_scaffold=True overrides everything (REQ-3)."""
+        result = select_model_for_file(
+            file_path="tests/unit/test_foo.py",
+            estimated_line_count=200,
+            is_test_scaffold=True,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_49_line_file_routes_to_haiku(self):
+        """T040: 49-line file routes to Haiku (REQ-4)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/utils/helper.py",
+            estimated_line_count=49,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_50_line_file_routes_to_default(self):
+        """T050: Exactly 50 lines routes to Sonnet — boundary (REQ-5)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/utils/helper.py",
+            estimated_line_count=50,
+            is_test_scaffold=False,
+        )
+        assert result == CLAUDE_MODEL
+
+    def test_unknown_size_complex_file_routes_to_default(self):
+        """T060/T070: Unknown size (0) complex file routes to Sonnet (REQ-5)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/core/engine.py",
+            estimated_line_count=0,
+            is_test_scaffold=False,
+        )
+        assert result == CLAUDE_MODEL
+
+    def test_deeply_nested_init_py_routes_to_haiku(self):
+        """T080: Deeply nested __init__.py routes to Haiku (REQ-1)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/workflows/testing/nodes/__init__.py",
+            estimated_line_count=0,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_1_line_file_routes_to_haiku(self):
+        """T130: 1-line file routes to Haiku — lower boundary (REQ-4)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/utils/tiny.py",
+            estimated_line_count=1,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_negative_line_count_routes_to_default(self):
+        """T120/T140 partial: Negative line count treated as unknown (REQ-6)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/utils/helper.py",
+            estimated_line_count=-1,
+            is_test_scaffold=False,
+        )
+        assert result == CLAUDE_MODEL
+
+    def test_51_line_file_routes_to_default(self):
+        """T140: 51-line file routes to Sonnet — just above threshold (REQ-5)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/utils/helper.py",
+            estimated_line_count=51,
+            is_test_scaffold=False,
+        )
+        assert result == CLAUDE_MODEL
+
+    def test_200_line_complex_file_routes_to_default(self):
+        """Additional: 200-line complex file routes to Sonnet (REQ-5)."""
+        result = select_model_for_file(
+            file_path="assemblyzero/core/engine.py",
+            estimated_line_count=200,
+            is_test_scaffold=False,
+        )
+        assert result == CLAUDE_MODEL
+
+    def test_conftest_deeply_nested_routes_to_haiku(self):
+        """Additional: Deeply nested conftest.py routes to Haiku (REQ-2)."""
+        result = select_model_for_file(
+            file_path="tests/integration/fixtures/conftest.py",
+            estimated_line_count=0,
+            is_test_scaffold=False,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_scaffold_overrides_conftest(self):
+        """Additional: is_test_scaffold=True with conftest -> Haiku (REQ-3)."""
+        result = select_model_for_file(
+            file_path="tests/conftest.py",
+            estimated_line_count=0,
+            is_test_scaffold=True,
+        )
+        assert result == HAIKU_MODEL
+
+    def test_threshold_constant_is_50(self):
+        """Sanity: SMALL_FILE_LINE_THRESHOLD is 50."""
+        assert SMALL_FILE_LINE_THRESHOLD == 50
+
+
+# ---------------------------------------------------------------------------
+# T110: Routing log emission (REQ-9)
+# ---------------------------------------------------------------------------
+class TestSelectModelLogging:
+    """Tests that routing decisions are logged at INFO level."""
+
+    def test_routing_logged_with_reason_scaffold(self, caplog):
+        """T110a: Scaffold routing logged with reason."""
+        with caplog.at_level(logging.INFO):
+            select_model_for_file(
+                file_path="tests/unit/test_x.py",
+                estimated_line_count=0,
+                is_test_scaffold=True,
+            )
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert record.levelno == logging.INFO
+        assert "tests/unit/test_x.py" in record.message
+        assert HAIKU_MODEL in record.message
+        assert "test scaffold" in record.message
+
+    def test_routing_logged_with_reason_boilerplate(self, caplog):
+        """T110b: Boilerplate filename routing logged with reason."""
+        with caplog.at_level(logging.INFO):
+            select_model_for_file(
+                file_path="pkg/__init__.py",
+                estimated_line_count=0,
+                is_test_scaffold=False,
+            )
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert "boilerplate filename" in record.message
+        assert "pkg/__init__.py" in record.message
+        assert HAIKU_MODEL in record.message
+
+    def test_routing_logged_with_reason_small_file(self, caplog):
+        """T110c: Small file routing logged with reason and line count."""
+        with caplog.at_level(logging.INFO):
+            select_model_for_file(
+                file_path="pkg/small.py",
+                estimated_line_count=30,
+                is_test_scaffold=False,
+            )
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert "small file" in record.message
+        assert "30" in record.message
+
+    def test_routing_logged_with_reason_default(self, caplog):
+        """T110d: Default routing logged with reason."""
+        with caplog.at_level(logging.INFO):
+            select_model_for_file(
+                file_path="pkg/big.py",
+                estimated_line_count=500,
+                is_test_scaffold=False,
+            )
+        assert len(caplog.records) == 1
+        record = caplog.records[0]
+        assert "default" in record.message
+        assert "pkg/big.py" in record.message
+        assert CLAUDE_MODEL in record.message
+
+
+# ---------------------------------------------------------------------------
+# T090/T100: call_claude_for_file model parameter (REQ-7)
+# ---------------------------------------------------------------------------
+class TestCallClaudeForFileModel:
+    """Tests for the model parameter on call_claude_for_file()."""
+
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.emit")
+    def test_explicit_model_passed_to_api(self, mock_emit):
+        """T090: Explicit model is used in the API call (REQ-7).
+
+        We patch the underlying API client to verify the model string
+        that gets passed through.
+        """
+        # This test needs to mock the actual API client used inside
+        # call_claude_for_file. The exact mock target depends on the
+        # implementation (SDK client or CLI). We patch at the highest
+        # level that captures the model parameter.
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file",
+            wraps=None,
+        ) as mock_call:
+            # Since we're wrapping, we need a different approach.
+            # Instead, directly test that the function accepts the param
+            # without error by mocking the internals.
+            pass
+
+        # Simplified: verify function signature accepts model param
+        # Full integration tested in T100
+        import inspect
+        sig = inspect.signature(call_claude_for_file)
+        assert "model" in sig.parameters
+        param = sig.parameters["model"]
+        assert param.default is None
+
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file")
+    def test_default_model_when_none(self, mock_call):
+        """T100: model=None preserves backward compatibility (REQ-7).
+
+        Verified by checking function signature default.
+        """
+        import inspect
+        sig = inspect.signature(call_claude_for_file)
+        assert sig.parameters["model"].default is None
+
+
+# ---------------------------------------------------------------------------
+# T100: generate_file_with_retry routing integration (REQ-8)
+# ---------------------------------------------------------------------------
+class TestGenerateFileWithRetryRouting:
+    """Tests that generate_file_with_retry() integrates routing correctly."""
+
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file")
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.select_model_for_file")
+    def test_routes_init_py_to_haiku_and_passes_model(
+        self, mock_select, mock_call_claude
+    ):
+        """T110: generate_file_with_retry calls routing and passes model (REQ-8)."""
+        mock_select.return_value = HAIKU_MODEL
+        mock_call_claude.return_value = ('"""Init."""\n', "end_turn")
+
+        # Mock validate_code_response to always pass
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implement_code.validate_code_response",
+            return_value=(True, ""),
+        ), patch(
+            "assemblyzero.workflows.testing.nodes.implement_code.extract_code_block",
+            return_value='"""Init."""\n',
+        ):
+            result, success = generate_file_with_retry(
+                filepath="tests/__init__.py",
+                base_prompt="Generate __init__.py",
+                estimated_line_count=0,
+                is_test_scaffold=False,
+            )
+
+        # Verify routing was called with correct args
+        mock_select.assert_called_once_with("tests/__init__.py", 0, False)
+
+        # Verify call_claude_for_file received the model
+        call_args = mock_call_claude.call_args
+        assert call_args is not None
+        # model should be passed as keyword argument
+        if call_args.kwargs.get("model") is not None:
+            assert call_args.kwargs["model"] == HAIKU_MODEL
+        else:
+            # Or as positional — check the third arg
+            assert len(call_args.args) >= 3 or "model" in call_args.kwargs
+
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.call_claude_for_file")
+    @patch("assemblyzero.workflows.testing.nodes.implement_code.select_model_for_file")
+    def test_passes_scaffold_flag_to_routing(
+        self, mock_select, mock_call_claude
+    ):
+        """generate_file_with_retry passes is_test_scaffold to routing."""
+        mock_select.return_value = HAIKU_MODEL
+        mock_call_claude.return_value = ("test content", "end_turn")
+
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implement_code.validate_code_response",
+            return_value=(True, ""),
+        ), patch(
+            "assemblyzero.workflows.testing.nodes.implement_code.extract_code_block",
+            return_value="test content",
+        ):
+            generate_file_with_retry(
+                filepath="tests/unit/test_foo.py",
+                base_prompt="Generate test scaffold",
+                estimated_line_count=45,
+                is_test_scaffold=True,
+            )
+
+        mock_select.assert_called_once_with("tests/unit/test_foo.py", 45, True)
+
+    def test_new_params_have_safe_defaults(self):
+        """Existing callers without new params still work (signature check)."""
+        import inspect
+        sig = inspect.signature(generate_file_with_retry)
+        params = sig.parameters
+
+        assert "estimated_line_count" in params
+        assert params["estimated_line_count"].default == 0
+
+        assert "is_test_scaffold" in params
+        assert params["is_test_scaffold"].default is False
+```
+
+## 7. Pattern References
+
+### 7.1 Existing Constants Pattern
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py` (bottom of file — module-level constants)
+
+```python
+MAX_FILE_RETRIES = 2
+
+LARGE_FILE_LINE_THRESHOLD = 500  # Lines
+
+LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
+
+CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
+
+SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+
+CODE_GEN_PROMPT_CAP = 60_000
+```
+
+**Relevance:** New constants `HAIKU_MODEL` and `SMALL_FILE_LINE_THRESHOLD` follow the same pattern — module-level, UPPER_SNAKE_CASE, with inline comments. Place them in this same constants block.
+
+### 7.2 CLAUDE_MODEL Config Import Pattern
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py` (imports section)
+
+```python
+from assemblyzero.core.config import CLAUDE_MODEL
+```
+
+**Relevance:** The default model is already imported as `CLAUDE_MODEL`. The `select_model_for_file()` function uses this as its fallback/default model. No new config import needed — just reference `CLAUDE_MODEL` directly.
+
+### 7.3 Existing `call_claude_for_file()` Pattern
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py` (function definition)
+
+```python
+def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
+    """Call Claude for a single file implementation.
+
+    Issue #447: Added file_path parameter for file-type-aware system prompt."""
+    ...
+```
+
+**Relevance:** Shows the existing signature pattern. The `model` parameter is added as a third keyword argument with `None` default, following the same optional-parameter-with-default pattern as `file_path=""`. The return type `tuple[str, str]` is unchanged.
+
+### 7.4 Existing `generate_file_with_retry()` Pattern
+
+**File:** `assemblyzero/workflows/testing/nodes/implement_code.py` (function definition)
+
+```python
+def generate_file_with_retry(
+    filepath: str,
+    base_prompt: str,
+    audit_dir: Path | None = None,
+    max_retries: int = MAX_FILE_RETRIES,
+    pruned_prompt: str = "",
+    existing_content: str = "",
+) -> tuple[str, bool]:
+    """Generate code for a single file with retry on validation failure.
+
+    Issue #309: Retry up to max_retries times on API or validation errors,"""
+    ...
+```
+
+**Relevance:** Shows the existing parameter pattern. New parameters `estimated_line_count` and `is_test_scaffold` are appended at the end with safe defaults, following the same convention of keyword arguments with defaults.
+
+### 7.5 Existing Test Pattern
+
+**File:** `tests/e2e/test_issue_workflow_mock.py` (lines 1–80)
+
+**Relevance:** Shows the project's test style — `pytest` with `unittest.mock.patch`, class-based grouping, descriptive docstrings. The new test file follows this same pattern.
+
+## 8. Dependencies & Imports
+
+| Import | Source | Used In |
+|--------|--------|---------|
+| `import logging` | stdlib | `implement_code.py` (new) |
+| `from pathlib import Path` | stdlib | `implement_code.py` (already imported) |
+| `from assemblyzero.core.config import CLAUDE_MODEL` | internal | `implement_code.py` (already imported) |
+| `import inspect` | stdlib | `test_implement_code_routing.py` |
+| `import logging` | stdlib | `test_implement_code_routing.py` |
+| `from unittest.mock import MagicMock, patch` | stdlib | `test_implement_code_routing.py` |
+| `import pytest` | third-party (already installed) | `test_implement_code_routing.py` |
+| `from assemblyzero.workflows.testing.nodes.implement_code import (HAIKU_MODEL, SMALL_FILE_LINE_THRESHOLD, select_model_for_file, call_claude_for_file, generate_file_with_retry)` | internal | `test_implement_code_routing.py` |
+| `from assemblyzero.core.config import CLAUDE_MODEL` | internal | `test_implement_code_routing.py` |
+
+**New Dependencies:** None. Only `logging` from stdlib is newly imported in the production module.
+
+## 9. Placeholder
+
+*Reserved for future use to maintain alignment with LLD section numbering.*
+
+## 10. Test Mapping
+
+| Test ID | Tests Function | Input | Expected Output |
+|---------|---------------|-------|-----------------|
+| T010 | `select_model_for_file()` | `file_path="assemblyzero/__init__.py", estimated_line_count=0, is_test_scaffold=False` | `HAIKU_MODEL` (`"claude-3-haiku-20240307"`) |
+| T020 | `select_model_for_file()` | `file_path="tests/conftest.py", estimated_line_count=0, is_test_scaffold=False` | `HAIKU_MODEL` |
+| T030 | `select_model_for_file()` | `file_path="tests/unit/test_foo.py", estimated_line_count=200, is_test_scaffold=True` | `HAIKU_MODEL` |
+| T040 | `select_model_for_file()` | `file_path="assemblyzero/utils/helper.py", estimated_line_count=49, is_test_scaffold=False` | `HAIKU_MODEL` |
+| T050 | `select_model_for_file()` | `file_path="assemblyzero/utils/helper.py", estimated_line_count=50, is_test_scaffold=False` | `CLAUDE_MODEL` (default) |
+| T060 | `select_model_for_file()` | `file_path="assemblyzero/core/engine.py", estimated_line_count=200, is_test_scaffold=False` | `CLAUDE_MODEL` |
+| T070 | `select_model_for_file()` | `file_path="assemblyzero/core/engine.py", estimated_line_count=0, is_test_scaffold=False` | `CLAUDE_MODEL` |
+| T080 | `select_model_for_file()` | `file_path="assemblyzero/workflows/testing/nodes/__init__.py"` | `HAIKU_MODEL` |
+| T090 | `call_claude_for_file()` | Signature inspection: `model` param exists with default `None` | Parameter present |
+| T100 | `call_claude_for_file()` | Signature inspection: `model` default is `None` | Backward-compatible |
+| T110 | `generate_file_with_retry()` | `filepath="tests/__init__.py"`, mocked routing/call | `select_model_for_file` called; model passed to `call_claude_for_file` |
+| T120 | `select_model_for_file()` | `estimated_line_count=-1` | `CLAUDE_MODEL` |
+| T130 | `select_model_for_file()` | `estimated_line_count=1` | `HAIKU_MODEL` |
+| T140 | `select_model_for_file()` | `estimated_line_count=51` | `CLAUDE_MODEL` |
+| T150 | Coverage check | `pytest --cov --cov-fail-under=95` | Exit code 0 |
+| T160 | Regression check | `pytest tests/unit/ -m "not integration"` | Exit code 0 |
+
+## 11. Implementation Notes
+
+### 11.1 Error Handling Convention
+
+The `select_model_for_file()` function does not raise exceptions for any valid input combination. If `file_path` is any string (including empty), it will work — `Path("").name` returns `""`, which won't match any boilerplate filename, so it falls through to default. This is intentional: the routing function should never be a source of errors.
+
+The `call_claude_for_file()` function's existing error handling (whatever exception types it raises today) remains unchanged. The new `model` parameter simply changes which model string is passed to the API.
+
+### 11.2 Logging Convention
+
+Use Python's `logging` module at `INFO` level for routing decisions. The logger is named after the module (`__name__`). Log format: `"Routing {file_path} -> {model} (reason: {reason})"`. This provides:
+- Which file triggered the decision
+- Which model was selected
+- Why that model was selected
+
+Example log output:
+```
+INFO:assemblyzero.workflows.testing.nodes.implement_code:Routing tests/__init__.py -> claude-3-haiku-20240307 (reason: boilerplate filename)
+INFO:assemblyzero.workflows.testing.nodes.implement_code:Routing assemblyzero/core/engine.py -> claude-sonnet-4-20250514 (reason: default)
+```
+
+### 11.3 Constants
+
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| `HAIKU_MODEL` | `"claude-3-haiku-20240307"` | Cheapest Claude model suitable for boilerplate generation. Model string from Anthropic API docs. |
+| `SMALL_FILE_LINE_THRESHOLD` | `50` | Files under 50 lines are simple enough for Haiku. Per LLD issue #641 specification. |
+
+### 11.4 Backward Compatibility
+
+All changes are strictly backward-compatible:
+
+1. **`call_claude_for_file()`**: New `model` parameter defaults to `None`. When `None`, the function resolves to `CLAUDE_MODEL` exactly as before. All existing callers that don't pass `model` continue working unchanged.
+
+2. **`generate_file_with_retry()`**: New `estimated_line_count` and `is_test_scaffold` parameters default to `0` and `False`. When both are default, and the file is not an `__init__.py` or `conftest.py`, the routing returns `CLAUDE_MODEL` — identical to pre-change behavior.
+
+3. **No import changes for callers**: The new function `select_model_for_file()` only needs to be imported by callers that want to use it directly. The automatic routing happens inside `generate_file_with_retry()`.
+
+### 11.5 Important: Discovering the Actual Function Body
+
+The current state excerpt shows only function signatures (the full body is truncated with `...`). The implementer **must read the actual file** to:
+
+1. Find where `CLAUDE_MODEL` is referenced inside `call_claude_for_file()` to know where to insert `resolved_model`.
+2. Find where `call_claude_for_file()` is invoked inside `generate_file_with_retry()` to add the `model=model` keyword argument.
+3. Determine if there are multiple call paths within `generate_file_with_retry()` (e.g., initial attempt vs retry) that each need the `model` parameter.
+
+The diffs in Section 6 provide the pattern, but exact line numbers will need to be verified against the actual file.
+
+---
+
+## Completeness Checklist
+
+- [x] Every "Modify" file has a current state excerpt (Section 3)
+- [x] Every data structure has a concrete JSON/YAML example (Section 4)
+- [x] Every function has input/output examples with realistic values (Section 5)
+- [x] Change instructions are diff-level specific (Section 6)
+- [x] Pattern references include file:line and are verified to exist (Section 7)
+- [x] All imports are listed and verified (Section 8)
+- [x] Test mapping covers all LLD test scenarios (Section 10)
+
+---
+
+## Review Log
+
+| Field | Value |
+|-------|-------|
+| Issue | #641 |
+| Verdict | DRAFT |
+| Date | 2026-03-06 |
+| Iterations | 1 |
+| Finalized | — |
+
+---
+
+## Review Log
+
+| Field | Value |
+|-------|-------|
+| Issue | #641 |
+| Verdict | APPROVED |
+| Date | 2026-03-07 |
+| Iterations | 0 |
+| Finalized | 2026-03-07T02:02:26Z |
+
+### Review Feedback Summary
+
+The Implementation Spec is exceptionally well-crafted, providing explicit line-by-line diffs, concrete input/output examples, and the complete source code for the test file. The step-by-step instructions perfectly align with the provided current state code excerpts, eliminating ambiguity and ensuring a high probability of first-try success for an autonomous AI agent.
+
+## Suggestions
+- In Change 5, consider explicitly showing the Anthropic SDK call signature in the diff to ensure the agent replac...
+
+
+## Required File Paths (from LLD - do not deviate)
+
+The following paths are specified in the LLD. Write ONLY to these paths:
+
+
+Any files written to other paths will be rejected.
+
+## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+tests/
+  accessibility/
+  adversarial/
+  benchmark/
+  compliance/
+  contract/
+  e2e/
+  fixtures/
+    death/
+    issue_workflow/
+    janitor/
+      mock_repo/
+    lld_tracking/
+    metrics/
+    mock_lineage/
+    mock_repo/
+      docs/
+      src/
+    rag/
+    scout/
+    scraper/
+    spelunking/
+    verdict_analyzer/
+  harness/
+  integration/
+  security/
+  tools/
+  unit/
+    test_death/
+    test_gate/
+    test_janitor/
+    test_metrics/
+    test_rag/
+    test_spelunking/
+  visual/
+  __init__.py
+  conftest.py
+  test_assemblyzero_config.py
+  test_audit.py
+  test_audit_sharding.py
+  test_credentials.py
+  test_designer.py
+  test_gemini_client.py
+  test_gemini_credentials_v2.py
+  test_integration_workflow.py
+  ... and 14 more files
+assemblyzero/
+  core/
+    validation/
+  graphs/
+  hooks/
+  metrics/
+  nodes/
+  rag/
+  spelunking/
+  telemetry/
+  utils/
+  workflows/
+    death/
+    implementation_spec/
+      nodes/
+    issue/
+      nodes/
+    janitor/
+      probes/
+    lld/
+      nodes/
+    orchestrator/
+    parallel/
+    requirements/
+      nodes/
+      parsers/
+    scout/
+    testing/
+      completeness/
+      knowledge/
+      nodes/
+      runners/
+      templates/
+  __init__.py
+  tracing.py
+dashboard/
+  src/
+    client/
+      components/
+      pages/
+  package.json
+  tsconfig.client.json
+  tsconfig.json
+  tsconfig.worker.json
+  wrangler.toml
+data/
+  hourglass/
+  unleashed/
+  handoff-log.md
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+## Existing File Contents
+
+The file currently contains:
+
+```python
+"""N4: Implement Code node for TDD Testing Workflow.
+
+Issue #272: File-by-file prompting with mechanical validation.
+Issue #309: Add retry logic on validation failure (up to 3 attempts).
+Issue #188: LLD path enforcement in prompts and write validation.
+
+Key changes from original:
+- Iterate through files_to_modify one at a time (not batch)
+- Accumulate context: each file sees LLD + previously completed files
+- Mechanical validation: code block exists, not empty, parses
+- RETRY on validation failure: up to 3 attempts with error feedback
+- WE control the file path, not Claude
+- Issue #188: Prompt includes allowed paths; writes validated against LLD
+"""
+
+from assemblyzero.utils.shell import run_command
+import ast
+import os
+import re
+import random
+import shutil
+
+from assemblyzero.core.config import CLAUDE_MODEL
+from assemblyzero.core.text_sanitizer import strip_emoji
+import subprocess
+import sys
+from assemblyzero.telemetry import emit
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.hooks.file_write_validator import validate_file_write
+from assemblyzero.utils.cost_tracker import accumulate_node_cost
+from assemblyzero.utils.file_type import get_file_type_info, get_language_tag
+from assemblyzero.utils.lld_path_enforcer import (
+    build_implementation_prompt_section,
+    detect_scaffolded_test_files,
+    extract_paths_from_lld,
+)
+from assemblyzero.workflows.requirements.audit import (
+    get_repo_structure,
+)
+from assemblyzero.workflows.testing.audit import (
+    gate_log,
+    get_repo_root,
+    log_workflow_execution,
+    next_file_number,
+    save_audit_file,
+)
+from assemblyzero.workflows.testing.circuit_breaker import record_iteration_cost
+from assemblyzero.workflows.testing.state import TestingWorkflowState
+
+
+# Issue #309: Maximum retry attempts per file
+MAX_FILE_RETRIES = 2
+
+# Issue #324: Large file thresholds for diff-based generation
+LARGE_FILE_LINE_THRESHOLD = 500  # Lines
+LARGE_FILE_BYTE_THRESHOLD = 15000  # Bytes (~15KB)
+
+# Issue #321: Timeout constants
+# Issue #373: Increased from 300s — large test file prompts need more time
+CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
+SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+
+# Issue #644: Prompt size cap for code generation (chars)
+CODE_GEN_PROMPT_CAP = 60_000
+
+
+class ProgressReporter:
+    """Print elapsed time periodically during long operations.
+
+    Issue #267: Prevents the workflow from appearing frozen during
+    long Claude API calls. Prints every `interval` seconds.
+
+    Usage:
+        with ProgressReporter("Calling Claude", interval=15):
+            response = call_claude_for_file(prompt)
+    """
+
+    def __init__(self, label: str = "Waiting", interval: int = 15):
+        self.label = label
+        self.interval = interval
+        self._start: float = 0
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self):
+        self._start = time.monotonic()
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+        elapsed = int(time.monotonic() - self._start)
+        status = "done" if not exc[0] else "error"
+        print(f"        {self.label}... {status} ({elapsed}s)")
+        return False
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            self._stop_event.wait(self.interval)
+            if not self._stop_event.is_set():
+                elapsed = int(time.monotonic() - self._start)
+                print(f"        {self.label}... ({elapsed}s)", flush=True)
+
+
+class ImplementationError(Exception):
+    """Raised when implementation fails mechanically.
+
+    Graph runner should catch this and exit non-zero.
+    """
+    def __init__(self, filepath: str, reason: str, response_preview: str | None = None):
+        self.filepath = filepath
+        self.reason = reason
+        self.response_preview = response_preview
+        super().__init__(f"FATAL: Failed to implement {filepath}: {reason}")
+
+
+def _find_claude_cli() -> str | None:
+    """Find the Claude CLI executable."""
+    cli = shutil.which("claude")
+    if cli:
+        return cli
+
+    npm_paths = [
+        Path.home() / "AppData" / "Roaming" / "npm" / "claude.cmd",
+        Path.home() / "AppData" / "Roaming" / "npm" / "claude",
+        Path.home() / ".npm-global" / "bin" / "claude",
+        Path("/c/Users") / os.environ.get("USERNAME", "") / "AppData" / "Roaming" / "npm" / "claude.cmd",
+    ]
+
+    for path in npm_paths:
+        if path.exists():
+            return str(path)
+
+    return None
+
+
+# =============================================================================
+# Mechanical Validation (no LLM judgment)
+# =============================================================================
+
+def extract_code_block(response: str, file_path: str = "") -> str | None:
+    """Extract code block content from response.
+
+    Issue #447: File-type-aware extraction. Prefers blocks matching the
+    expected language tag, falls back to any fenced block.
+
+    Args:
+        response: Claude's raw response text.
+        file_path: File path to determine expected language tag.
+            Empty string accepts any fenced block (backward compat).
+
+    Returns:
+        The content of the best-matching code block, or None if no valid block found.
+        Does NOT trust any file path Claude puts in the response.
+    """
+    # Issue #310: Use greedy line-anchored pattern to handle nested code blocks correctly.
+    # Captures (language_tag, content) pairs.
+    pattern = re.compile(r"^```(\w*)\s*\n(.*)^```", re.DOTALL | re.MULTILINE)
+
+    expected_tag = get_language_tag(file_path) if file_path else ""
+    best_match: str | None = None
+    fallback_match: str | None = None
+
+    for match in pattern.finditer(response):
+        tag = match.group(1).lower()
+        content = match.group(2).strip()
+
+        # Skip empty blocks
+        if not content:
+            continue
+
+        # If first line is a # File: comment, strip it (we don't trust it)
+        lines = content.split("\n")
+        if lines[0].strip().startswith("# File:"):
+            content = "\n".join(lines[1:]).strip()
+
+        # Must have actual content
+        if not content:
+            continue
+
+        # Prefer block matching expected tag
+        if expected_tag and tag == expected_tag and best_match is None:
+            best_match = content
+        elif fallback_match is None:
+            fallback_match = content
+
+    return best_match or fallback_match
+
+
+def validate_code_response(code: str, filepath: str, existing_content: str = "") -> tuple[bool, str]:
+    """Mechanically validate code. No LLM judgment.
+
+    Returns (valid, error_message).
+    """
+    if not code:
+        return False, "Code is empty"
+
+    if not code.strip():
+        return False, "Code is only whitespace"
+
+    # Minimum line threshold (5 lines for non-trivial files)
+    lines = code.strip().split("\n")
+    if len(lines) < 5:
+        # Issue #473: allow short files for __init__.py, fixtures, configs, data
+        short_ok = (
+            filepath.endswith("__init__.py")
+            or "/fixtures/" in filepath.replace("\\", "/")
+            or filepath.endswith((".json", ".yaml", ".yml", ".toml", ".txt", ".csv"))
+        )
+        if not short_ok and len(lines) < 2:
+            return False, f"Code too short ({len(lines)} lines)"
+
+    # Issue #587: Mechanical File Size Safety Gate
+    if existing_content:
+        existing_lines = existing_content.strip().split("\n")
+        # Only apply check if existing file is non-trivial (>10 lines)
+        if len(existing_lines) > 10:
+            new_lines = len(lines)
+            if new_lines < len(existing_lines) * 0.5:
+                emit("quality.gate_rejected", repo="", metadata={"filepath": filepath, "type": "size_gate", "error": "drastic_shrink"})
+                return False, f"Mechanical Size Gate: File shrank drastically from {len(existing_lines)} lines to {new_lines} lines. You must output the ENTIRE file without using placeholders."
+
+    # Python syntax validation
+    if filepath.endswith(".py"):
+        try:
+            ast.parse(code)
+        except SyntaxError as e:
+            return False, f"Python syntax error: {e}"
+
+    return True, ""
+
+
+def detect_summary_response(response: str) -> bool:
+    """Detect if Claude gave a summary instead of code.
+
+    Fast rejection before trying to parse.
+    """
+    blacklist = [
+        "here's a summary",
+        "here is a summary",
+        "i've created",
+        "i have created",
+        "i've implemented",
+        "i have implemented",
+        "summary of",
+        "the following files",
+    ]
+
+    response_lower = response.lower()[:500]  # Only check start
+
+    for phrase in blacklist:
+        if phrase in response_lower:
+            # Check if there's also a code block (might be legit)
+            if "```" not in response[:1000]:
+                return True
+
+    return False
+
+
+def estimate_context_tokens(lld_content: str, completed_files: list[tuple[str, str]]) -> int:
+    """Estimate token count for context.
+
+    Uses simple heuristic: ~4 chars per token.
+    """
+    total_chars = len(lld_content)
+    for filepath, content in completed_files:
+        total_chars += len(filepath) + len(content) + 50  # 50 for formatting
+
+    return total_chars // 4
+
+
+def summarize_file_for_context(content: str) -> str:
+    """Extract imports and signatures from a Python file for compact context.
+
+    Issue #373: Instead of embedding full file bodies (~20KB+) in accumulated
+    context, extract only what subsequent files need: imports, class/function
+    signatures, and their docstrings. Reduces context from ~20KB to ~2-3KB.
+
+    Args:
+        content: Full Python file content.
+
+    Returns:
+        Compact summary with imports and signatures.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        # If we can't parse it, return first 50 lines as fallback
+        lines = content.split("\n")
+        return "\n".join(lines[:50]) + "\n# ... (truncated, syntax error in original)\n"
+
+    parts: list[str] = []
+
+    # Extract module docstring
+    if (tree.body and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+            and isinstance(tree.body[0].value.value, str)):
+        docstring = tree.body[0].value.value
+        parts.append(f'"""{docstring}"""')
+
+    # Extract all imports
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            # Get the source lines for this import
+            start = node.lineno - 1
+            end = node.end_lineno if node.end_lineno else start + 1
+            source_lines = content.split("\n")[start:end]
+            parts.append("\n".join(source_lines))
+
+    # Extract class and function signatures
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.ClassDef):
+            parts.append(_summarize_class(node, content))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parts.append(_summarize_function(node, content))
+
+    # Extract module-level constants/type aliases (simple assignments)
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Assign):
+            start = node.lineno - 1
+            end = node.end_lineno if node.end_lineno else start + 1
+            source_lines = content.split("\n")[start:end]
+            line_text = "\n".join(source_lines)
+            # Only include short assignments (constants, not large data structures)
+            if len(line_text) < 200:
+                parts.append(line_text)
+
+    return "\n\n".join(parts)
+
+
+def _summarize_function(node: ast.FunctionDef | ast.AsyncFunctionDef, source: str) -> str:
+    """Extract function signature and docstring."""
+    # Get the def line from source
+    start = node.lineno - 1
+    source_lines = source.split("\n")
+
+    # Find the end of the signature (the line with the colon)
+    sig_lines = []
+    for i in range(start, min(start + 10, len(source_lines))):
+        sig_lines.append(source_lines[i])
+        if source_lines[i].rstrip().endswith(":"):
+            break
+
+    sig = "\n".join(sig_lines)
+
+    # Get docstring if present
+    docstring = ast.get_docstring(node)
+    if docstring:
+        # Use only first 3 lines of docstring
+        doc_lines = docstring.split("\n")[:3]
+        indent = "    "
+        sig += f'\n{indent}"""{chr(10).join(doc_lines)}"""'
+
+    sig += "\n    ..."
+    return sig
+
+
+def _summarize_class(node: ast.ClassDef, source: str) -> str:
+    """Extract class signature, docstring, and method signatures."""
+    source_lines = source.split("\n")
+    start = node.lineno - 1
+
+    # Get class def line
+    class_lines = []
+    for i in range(start, min(start + 5, len(source_lines))):
+        class_lines.append(source_lines[i])
+        if source_lines[i].rstrip().endswith(":"):
+            break
+
+    parts = ["\n".join(class_lines)]
+
+    # Get class docstring
+    docstring = ast.get_docstring(node)
+    if docstring:
+        doc_lines = docstring.split("\n")[:3]
+        parts.append(f'    """{chr(10).join(doc_lines)}"""')
+
+    # Get method signatures
+    for item in node.body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            method_sig = _summarize_function(item, source)
+            parts.append(method_sig)
+
+    return "\n\n".join(parts)
+
+
+# =============================================================================
+# Issue #324: Diff-Based Generation for Large Files
+# =============================================================================
+
+
+def is_large_file(content: str) -> bool:
+    """Check if file content exceeds size thresholds.
+
+    Issue #324: Large files (500+ lines OR 15KB+) should use diff mode
+    instead of full file regeneration.
+
+    Args:
+        content: The file content to check.
+
+    Returns:
+        True if file exceeds either threshold.
+    """
+    if not content:
+        return False
+
+    # Check line count (500+ lines = large)
+    line_count = len(content.split("\n"))
+    if line_count > LARGE_FILE_LINE_THRESHOLD:
+        return True
+
+    # Check byte size (15KB+ = large)
+    byte_count = len(content.encode("utf-8"))
+    if byte_count > LARGE_FILE_BYTE_THRESHOLD:
+        return True
+
+    return False
+
+
+def select_generation_strategy(change_type: str, existing_content: str | None) -> str:
+    """Select code generation strategy based on change type and file size.
+
+    Issue #324: Use diff mode for large file modifications.
+
+    Args:
+        change_type: "Add", "Modify", or "Delete".
+        existing_content: Current file content (None for new files).
+
+    Returns:
+        "standard" or "diff".
+    """
+    # Add and Delete always use standard mode
+    if change_type.lower() in ("add", "delete"):
+        return "standard"
+
+    # Modify: check file size
+    if existing_content and is_large_file(existing_content):
+        return "diff"
+
+    return "standard"
+
+
+def build_diff_prompt(
+    lld_content: str,
+    existing_content: str,
+    test_content: str,
+    file_path: str,
+) -> str:
+    """Build prompt requesting FIND/REPLACE diff format.
+
+    Issue #324: For large files, request targeted changes instead of
+    full file regeneration.
+
+    Args:
+        lld_content: The LLD specification.
+        existing_content: Current file content.
+        test_content: Test code that must pass.
+        file_path: Path to the file being modified.
+
+    Returns:
+        Prompt string for diff-based generation.
+    """
+    prompt = f"""# Modification Request: {file_path}
+
+## Task
+
+Modify the existing file using FIND/REPLACE blocks. Do NOT output the entire file.
+
+## LLD Specification
+
+{lld_content}
+
+## Current File Content
+
+```python
+{existing_content}
+```
+
+"""
+
+    if test_content:
+        prompt += f"""## Tests That Must Pass
+
+```python
+{test_content}
+```
+
+"""
+
+    prompt += """## Output Format
+
+Output ONLY the changes using this FIND/REPLACE format:
+
+### CHANGE 1: Brief description of what this change does
+FIND:
+```python
+exact code to find
+```
+
+REPLACE WITH:
+```python
+replacement code
+```
+
+### CHANGE 2: Next change description
+FIND:
+```python
+...
+```
+
+REPLACE WITH:
+```python
+...
+```
+
+CRITICAL RULES:
+1. Do NOT output the entire file - only the FIND/REPLACE blocks
+2. Each FIND block must match EXACTLY in the current file
+3. Include enough context in FIND to be unambiguous (unique match)
+4. Number your changes: CHANGE 1, CHANGE 2, etc.
+5. Describe what each change does in the header
+"""
+
+    return prompt
+
+
+def parse_diff_response(response: str) -> dict:
+    """Parse FIND/REPLACE diff response from Claude.
+
+    Issue #324: Extract change blocks from diff-format response.
+
+    Args:
+        response: Claude's response with FIND/REPLACE blocks.
+
+    Returns:
+        Dict with keys:
+        - success: bool
+        - error: str | None
+        - changes: list[dict] with keys: description, find_block, replace_block
+    """
+    changes = []
+
+    # Pattern to match CHANGE headers
+    # Matches: ### CHANGE N: description
+    change_pattern = re.compile(
+        r"###\s*CHANGE\s*\d+\s*:\s*(.+?)(?=\n)",
+        re.IGNORECASE
+    )
+
+    # Pattern to match FIND/REPLACE blocks
+    # FIND: ```...``` REPLACE WITH: ```...```
+    find_replace_pattern = re.compile(
+        r"FIND:\s*```\w*\s*\n(.*?)```\s*\n+REPLACE\s+WITH:\s*```\w*\s*\n(.*?)```",
+        re.DOTALL | re.IGNORECASE
+    )
+
+    # Split response into change sections
+    sections = re.split(r"(###\s*CHANGE\s*\d+\s*:)", response, flags=re.IGNORECASE)
+
+    # Process pairs: (header_marker, content)
+    i = 1  # Skip text before first CHANGE
+    while i < len(sections) - 1:
+        header_marker = sections[i]  # "### CHANGE N:"
+        content = sections[i + 1] if i + 1 < len(sections) else ""
+
+        # Extract description from the content (first line after header)
+        desc_match = re.match(r"\s*(.+?)(?=\n)", content)
+        description = desc_match.group(1).strip() if desc_match else "Unknown change"
+
+        # Find the FIND/REPLACE block in this section
+        fr_match = find_replace_pattern.search(content)
+
+        if not fr_match:
+            return {
+                "success": False,
+                "error": f"CHANGE missing REPLACE WITH section: {description[:50]}",
+                "changes": [],
+            }
+
+        find_block = fr_match.group(1).strip()
+        replace_block = fr_match.group(2).strip()
+
+        changes.append({
+            "description": description,
+            "find_block": find_block,
+            "replace_block": replace_block,
+        })
+
+        i += 2
+
+    if not changes:
+        return {
+            "success": False,
+            "error": "No FIND/REPLACE changes found in response",
+            "changes": [],
+        }
+
+    return {
+        "success": True,
+        "error": None,
+        "changes": changes,
+    }
+
+
+def apply_diff_changes(
+    content: str,
+    changes: list[dict],
+) -> tuple[str, list[str]]:
+    """Apply FIND/REPLACE changes to file content.
+
+    Issue #324: Apply each change sequentially, with error detection.
+
+    Args:
+        content: Original file content.
+        changes: List of change dicts with find_block/replace_block.
+
+    Returns:
+        Tuple of (modified_content, error_list).
+    """
+    errors = []
+    result = content
+
+    for change in changes:
+        find_block = change.get("find_block", "")
+        replace_block = change.get("replace_block", "")
+        description = change.get("description", "")
+
+        if not find_block:
+            errors.append(f"Empty FIND block for change: {description}")
+            continue
+
+        # Count occurrences
+        count = result.count(find_block)
+
+        if count == 0:
+            # Try whitespace-normalized matching
+            normalized_result = _normalize_whitespace(result)
+            normalized_find = _normalize_whitespace(find_block)
+
+            if normalized_find in normalized_result:
+                # Found with normalization - but we can't reliably replace
+                # so we report a whitespace-specific error
+                errors.append(
+                    f"FIND block has whitespace mismatch for: {description[:50]}. "
+                    f"Exact match not found but similar code exists."
+                )
+            else:
+                errors.append(f"FIND block not found in file: {description[:50]}")
+            continue
+
+        if count > 1:
+            errors.append(
+                f"Ambiguous FIND block (matches {count} locations): {description[:50]}"
+            )
+            continue
+
+        # Single match - safe to replace
+        result = result.replace(find_block, replace_block, 1)
+
+    return result, errors
+
+
+def _normalize_whitespace(text: str) -> str:
+    """Normalize whitespace for fuzzy matching.
+
+    Collapses multiple spaces and normalizes indentation.
+    """
+    # Replace tabs with spaces
+    text = text.replace("\t", "    ")
+    # Collapse multiple spaces (but preserve newlines)
+    lines = text.split("\n")
+    normalized_lines = []
+    for line in lines:
+        # Strip trailing whitespace, normalize internal spaces
+        line = line.rstrip()
+        normalized_lines.append(line)
+    return "\n".join(normalized_lines)
+
+
+def detect_truncation(response: object) -> bool:
+    """Detect if response was truncated due to max_tokens.
+
+    Issue #324: Check stop_reason to detect truncation.
+
+    Args:
+        response: Claude API response object with stop_reason attribute.
+
+    Returns:
+        True if response was truncated.
+    """
+    stop_reason = getattr(response, "stop_reason", None)
+    return stop_reason == "max_tokens"
+
+
+# =============================================================================
+# Prompt Building
+# =============================================================================
+
+def build_single_file_prompt(
+    filepath: str,
+    file_spec: dict,
+    lld_content: str,
+    completed_files: list[tuple[str, str]],
+    repo_root: Path,
+    test_content: str = "",
+    previous_error: str = "",
+    path_enforcement_section: str = "",
+    context_content: str = "",
+    repo_structure: str = "",
+) -> str:
+    """Build prompt for a single file with accumulated context.
+
+    Issue #188: Added path_enforcement_section parameter to inject allowed paths.
+    Issue #288: Added context_content parameter for injected architectural context.
+    Issue #445: Added repo_structure parameter to ground Claude in actual layout.
+    """
+
+    change_type = file_spec.get("change_type", "Add")
+    description = file_spec.get("description", "")
+
+    prompt = f"""# Implementation Request: {filepath}
+
+## Task
+
+Write the complete contents of `{filepath}`.
+
+Change type: {change_type}
+Description: {description}
+
+## LLD Specification
+
+{lld_content}
+
+"""
+
+    # Issue #188: Add path enforcement section
+    if path_enforcement_section:
+        prompt += path_enforcement_section + "\n"
+
+    # Issue #445: Add repo structure to ground Claude in actual layout
+    if repo_structure:
+        prompt += f"""## Repository Structure
+
+The actual directory layout of this repository:
+
+```
+{repo_structure}
+```
+
+Use these real paths — do NOT invent paths that don't exist.
+
+"""
+
+    # Issue #288: Add injected context
+    if context_content:
+        prompt += f"""## Additional Context
+
+{context_content}
+
+"""
+
+    # Include existing file content if modifying
+    if change_type.lower() == "modify":
+        existing_path = repo_root / filepath
+        if existing_path.exists():
+            try:
+                existing_content = existing_path.read_text(encoding="utf-8")
+                prompt += f"""## Existing File Contents
+
+The file currently contains:
+
+```python
+{existing_content}
+```
+
+Modify this file according to the LLD specification.
+
+"""
+            except Exception:
+                pass
+
+    # Include test content if available
+    if test_content:
+        prompt += f"""## Tests That Must Pass
+
+```python
+{test_content}
+```
+
+"""
+
+    # Issue #373: Include previously completed files with trimmed context.
+    # Only the most recent file (N-1) gets full content for continuity.
+    # All earlier files get signature-only summaries to reduce prompt size.
+    if completed_files:
+        prompt += "## Previously Implemented Files\n\n"
+        prompt += "These files have already been implemented. Use them for imports and references:\n\n"
+        for idx, (prev_path, prev_content) in enumerate(completed_files):
+            is_most_recent = (idx == len(completed_files) - 1)
+            if is_most_recent:
+                # Most recent file: full content for continuity
+                prompt += f"""### {prev_path} (full)
+
+```python
+{prev_content}
+```
+
+"""
+            else:
+                # Earlier files: signatures only to save context
+                summary = summarize_file_for_context(prev_content)
+                prompt += f"""### {prev_path} (signatures)
+
+```python
+{summary}
+```
+
+"""
+
+    # Include previous error if this is a retry... wait, no retries!
+    # Actually we might loop back from green phase failure, so include error context
+    if previous_error:
+        prompt += f"""## Previous Attempt Failed — Fix These Specific Errors
+
+The previous implementation failed these tests:
+
+```
+{previous_error}
+```
+
+Read the error messages carefully and fix the root cause in your implementation.
+
+"""
+
+    # Issue #447: File-type-aware output format
+    info = get_file_type_info(filepath)
+    tag = info["language_tag"]
+    descriptor = info["content_descriptor"]
+    block_tag = tag if tag else ""
+
+    prompt += f"""## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the {descriptor}.
+
+```{block_tag}
+# Your {descriptor} here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the {descriptor} in a single fenced code block
+"""
+
+    return prompt
+
+
+# =============================================================================
+# Claude API Call
+# =============================================================================
+
+def compute_dynamic_timeout(prompt: str) -> int:
+    """Compute timeout based on prompt size.
+
+    Issue #373: Larger prompts need more time for Claude to generate
+    correspondingly large responses. Scale linearly with a floor and cap.
+
+    Args:
+        prompt: The prompt string.
+
+    Returns:
+        Timeout in seconds (300-600 range).
+    """
+    base = 300
+    # Add 1 second per 1000 characters of prompt
+    scaled = base + len(prompt) // 1000
+    return min(scaled, CLI_TIMEOUT)
+
+
+def build_system_prompt(file_path: str) -> str:
+    """Build a file-type-aware system prompt for Claude.
+
+    Issue #447: Adjusts the language tag and framing based on file type.
+    """
+    info = get_file_type_info(file_path)
+    tag = info["language_tag"]
+    descriptor = info["content_descriptor"]
+
+    if tag:
+        block_instruction = f"Just the {descriptor} in a ```{tag} block"
+    else:
+        block_instruction = f"Just the {descriptor} in a fenced code block"
+
+    return f"""You are a file generator. Output ONLY the complete file contents.
+
+RULES:
+1. Output a single fenced code block with the complete file contents
+2. No explanations before or after the content
+3. No summaries
+4. No "I've implemented..." statements
+5. {block_instruction}
+
+If you output anything other than a fenced code block, the build will fail."""
+
+
+def call_claude_for_file(prompt: str, file_path: str = "") -> tuple[str, str]:
+    """Call Claude for a single file implementation.
+
+    Issue #447: Added file_path parameter for file-type-aware system prompt.
+
+    Returns (response, error).
+    NO RETRIES - if it fails, it fails.
+    """
+    claude_cli = _find_claude_cli()
+    # Issue #373: Dynamic timeout based on prompt size
+    timeout = compute_dynamic_timeout(prompt)
+
+    if claude_cli:
+        try:
+            system_prompt = build_system_prompt(file_path)
+
+            cmd = [
+                claude_cli,
+                "--print",
+                "--dangerously-skip-permissions",
+                "--model", "opus",  # Opus 4.5 for code quality
+                "--system-prompt", system_prompt,
+            ]
+
+            result = run_command(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,  # Issue #373: Dynamic timeout
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                # Issue #527: Strip emojis from code gen response
+                return strip_emoji(result.stdout), ""
+            else:
+                stderr = result.stderr[:200] if result.stderr else "no stderr"
+                # Fall through to SDK
+                print(f"    [WARN] CLI failed (exit {result.returncode}): {stderr}")
+
+        except subprocess.TimeoutExpired:
+            return "", f"CLI timeout after {timeout}s waiting for response"
+        except FileNotFoundError:
+            print("    [WARN] Claude CLI not found, falling back to SDK")
+        except OSError as e:
+            print(f"    [WARN] CLI error: {e}")
+
+    # Fallback to SDK with streaming (Issue #541)
+    try:
+        import anthropic
+        import httpx
+
+        # Issue #373: Dynamic timeout for SDK too
+        client = anthropic.Anthropic(
+            timeout=httpx.Timeout(timeout, connect=30.0)
+        )
+
+        # Issue #541: Streaming eliminates timeout blindness — chunks
+        # arrive incrementally so the connection stays active.  The old
+        # client.messages.create() blocked for the entire generation
+        # and httpx timeouts never fired on Windows/MSYS2.
+        response_text = ""
+        with client.messages.stream(
+            model=CLAUDE_MODEL,
+            max_tokens=32768,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                response_text += text
+
+        # Issue #527: Strip emojis from code gen response
+        return strip_emoji(response_text), ""
+
+    except ImportError:
+        return "", "Neither Claude CLI nor Anthropic SDK available"
+    except httpx.TimeoutException:
+        return "", f"SDK timeout after {timeout}s waiting for response"
+    except TimeoutError:
+        return "", f"SDK timeout after {timeout}s waiting for response"
+    except Exception as e:
+        # Issue #546: Classify through the typed error hierarchy
+        try:
+            from assemblyzero.core.errors import classify_anthropic_error
+            classified = classify_anthropic_error(e)
+            status_code = classified.status_code
+            prefix = "[NON-RETRYABLE] " if not classified.retryable else ""
+            return "", f"{prefix}SDK error (status={status_code}): {e}"
+        except Exception:
+            return "", f"SDK error: {e}"
+
+
+# =============================================================================
+# Issue #309: Retry Logic
+# =============================================================================
+
+
+def build_retry_prompt(base_prompt: str, validation_error: str, attempt: int) -> str:
+    """Augment the base prompt with error context from previous attempt.
+
+    Issue #309: Include validation error to help Claude self-correct.
+
+    Args:
+        base_prompt: The original prompt for this file.
+        validation_error: Error message from the failed attempt.
+        attempt: Current attempt number (1-indexed for display).
+
+    Returns:
+        Modified prompt with error feedback section.
+    """
+    error_section = f"""
+
+## Previous Attempt Failed (Attempt {attempt}/{MAX_FILE_RETRIES})
+
+Your previous response had an error:
+
+```
+{validation_error}
+```
+
+Please fix this issue and provide the corrected, complete file contents.
+IMPORTANT: Output the ENTIRE file, not just the fix.
+"""
+
+    # Insert error section before the Output Format section
+    if "## Output Format" in base_prompt:
+        parts = base_prompt.split("## Output Format")
+        return parts[0] + error_section + "\n## Output Format" + parts[1]
+    else:
+        return base_prompt + error_section
+
+
+def generate_file_with_retry(
+    filepath: str,
+    base_prompt: str,
+    audit_dir: Path | None = None,
+    max_retries: int = MAX_FILE_RETRIES,
+    pruned_prompt: str = "",
+    existing_content: str = "",
+) -> tuple[str, bool]:
+    """Generate code for a single file with retry on validation failure.
+
+    Issue #309: Retry up to max_retries times on API or validation errors,
+    including error context in subsequent prompts.
+
+    Args:
+        filepath: Path to the file being generated.
+        base_prompt: The initial prompt for code generation.
+        audit_dir: Optional directory for audit logs.
+        max_retries: Maximum number of attempts (default: 3).
+
+    Returns:
+        Tuple of (generated_code, success_flag).
+
+    Raises:
+        ImplementationError: Only after exhausting all retry attempts.
+    """
+    last_error = ""
+    prompt = base_prompt
+
+    for attempt in range(max_retries):
+        attempt_num = attempt + 1  # 1-indexed for display
+
+        # Build retry prompt if this isn't the first attempt
+        if attempt > 0:
+            prompt = build_retry_prompt(pruned_prompt or base_prompt, last_error, attempt_num)
+            print(f"        [RETRY {attempt_num}/{max_retries}] {last_error[:80]}...")
+            if attempt_num == 2:
+                emit("retry.strike_one", repo=str(audit_dir.parent.parent.parent.parent) if audit_dir else "", metadata={"filepath": filepath, "error": last_error[:200]})
+
+        # Save prompt to audit
+        if audit_dir and audit_dir.exists():
+            file_num = next_file_number(audit_dir)
+            suffix = f"-retry{attempt_num}" if attempt > 0 else ""
+            save_audit_file(
+                audit_dir,
+                file_num,
+                f"prompt-{filepath.replace('/', '-')}{suffix}.md",
+                prompt
+            )
+
+        # Call Claude (Issue #447: pass filepath for file-type-aware system prompt)
+        response, api_error = call_claude_for_file(prompt, file_path=filepath)
+
+        # Check for API error
+        if api_error:
+            last_error = f"API error: {api_error}"
+            # Issue #546: Non-retryable errors (auth, billing) skip retry loop
+            if "[NON-RETRYABLE]" in api_error:
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"Non-retryable API error: {api_error}",
+                    response_preview=None
+                )
+            if attempt < max_retries - 1:
+                print(f"        [RETRY {attempt_num}/{max_retries}] {last_error}")
+                continue
+            else:
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"API error after {max_retries} attempts: {api_error}",
+                    response_preview=None
+                )
+
+        # Save response to audit
+        if audit_dir and audit_dir.exists():
+            file_num = next_file_number(audit_dir)
+            suffix = f"-retry{attempt_num}" if attempt > 0 else ""
+            save_audit_file(
+                audit_dir,
+                file_num,
+                f"response-{filepath.replace('/', '-')}{suffix}.md",
+                response
+            )
+
+        # Detect summary response (fast rejection)
+        if detect_summary_response(response):
+            last_error = "Claude gave a summary instead of code"
+            if attempt < max_retries - 1:
+                continue
+            else:
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"Summary response after {max_retries} attempts",
+                    response_preview=response[:500]
+                )
+
+        # Extract code block (Issue #447: file-type-aware extraction)
+        code = extract_code_block(response, file_path=filepath)
+
+        if code is None:
+            last_error = "No code block found in response"
+            if attempt < max_retries - 1:
+                continue
+            else:
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"No code block after {max_retries} attempts",
+                    response_preview=response[:500]
+                )
+
+        # Validate code mechanically
+        valid, validation_error = validate_code_response(code, filepath, existing_content)
+
+        if not valid:
+            last_error = f"Validation failed: {validation_error}"
+            if attempt < max_retries - 1:
+                continue
+            else:
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"Validation failed after {max_retries} attempts: {validation_error}",
+                    response_preview=code[:500]
+                )
+
+        # Success!
+        if attempt > 0:
+            print(f"        [SUCCESS] Retry {attempt_num} succeeded")
+        return code, True
+
+    # Should not reach here, but just in case
+    emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+    raise ImplementationError(
+        filepath=filepath,
+        reason=f"Failed after {max_retries} attempts: {last_error}",
+        response_preview=None
+    )
+
+
+# =============================================================================
+# Issue #445: Path Pre-Flight Validation
+# =============================================================================
+
+
+def validate_files_to_modify(
+    files_to_modify: list[dict], repo_root: Path
+) -> list[str]:
+    """Validate that LLD file paths match the real repository structure.
+
+    Issue #445: Pre-flight check before calling Claude — catches stale LLD
+    paths immediately so we don't waste tokens on invalid paths.
+
+    Rules:
+    - Modify/Delete: file must exist on disk (hard fail)
+    - Add: auto-create parent directory if missing (Issue #468)
+
+    Args:
+        files_to_modify: List of file spec dicts with 'path' and 'change_type'.
+        repo_root: Path to the repository root.
+
+    Returns:
+        List of error strings. Empty list means all paths valid.
+    """
+    errors: list[str] = []
+
+    for file_spec in files_to_modify:
+        file_path = file_spec.get("path", "")
+        change_type = file_spec.get("change_type", "Add")
+        full_path = repo_root / file_path
+
+        if change_type.lower() in ("modify", "delete"):
+            if not full_path.exists():
+                errors.append(
+                    f"{change_type} target does not exist: {file_path}"
+                )
+        elif change_type.lower() == "add":
+            # Issue #468: auto-create parent dirs for new files
+            if not full_path.parent.exists():
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+
+    return errors
+
+
+# =============================================================================
+# Main Implementation Loop
+# =============================================================================
+
+def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
+    """N4: Generate implementation code file-by-file.
+
+    Issue #272: File-by-file prompting with mechanical validation.
+    """
+    iteration_count = state.get("iteration_count", 0)
+    gate_log(f"[N4] Implementing code file-by-file (iteration {iteration_count})...")
+
+    if state.get("mock_mode"):
+        return _mock_implement_code(state)
+
+    # Issue #511: Cost tracking — note: call_claude_for_file() bypasses
+    # provider abstraction (uses subprocess/SDK directly), so
+    # get_cumulative_cost() may not capture all costs here yet.
+    cost_before = get_cumulative_cost()
+
+    # Track estimated token cost for this iteration
+    estimated_tokens_used = record_iteration_cost(state)
+
+    # Get required state
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+    lld_content = state.get("lld_content", "")
+    files_to_modify = state.get("files_to_modify", [])
+    test_files = state.get("test_files", [])
+    green_phase_output = state.get("green_phase_output", "")
+    # Issue #498: Prefer structured failure summaries over raw pytest output
+    test_failure_summary = state.get("test_failure_summary", "")
+    e2e_failure_summary = state.get("e2e_failure_summary", "")
+    audit_dir = Path(state.get("audit_dir", ""))
+
+    if not files_to_modify:
+        print("    [ERROR] No files_to_modify in state - LLD Section 2.1 not parsed?")
+        return {
+            "error_message": "Implementation failed: No files to implement - check LLD Section 2.1",
+            "implementation_files": [],
+        }
+
+    # Issue #445: Pre-flight path validation — catch stale LLD paths before
+    # calling Claude. Zero tokens wasted on bad paths.
+    path_errors = validate_files_to_modify(files_to_modify, repo_root)
+    if path_errors:
+        for err in path_errors:
+            print(f"    [GUARD] {err}")
+        repo_tree = get_repo_structure(repo_root, max_depth=3)
+        print(f"\n    Actual repository structure:\n{repo_tree}")
+        return {
+            "error_message": (
+                f"GUARD: {len(path_errors)} file path(s) in LLD do not match "
+                f"the repository structure. Errors:\n"
+                + "\n".join(f"  - {e}" for e in path_errors)
+            ),
+            "implementation_files": [],
+        }
+
+    # Read test content for context
+    test_content = ""
+    for tf in test_files:
+        tf_path = Path(tf)
+        if tf_path.exists():
+            try:
+                test_content += f"# From {tf}\n"
+                test_content += tf_path.read_text(encoding="utf-8")
+                test_content += "\n\n"
+            except Exception:
+                pass
+
+    # Limit files to prevent runaway
+    files_to_modify = files_to_modify[:50]
+
+    print(f"    Files to implement: {len(files_to_modify)}")
+    for f in files_to_modify:
+        print(f"      - {f['path']} ({f.get('change_type', 'Add')})")
+
+    # Issue #188: Extract allowed paths from LLD and build prompt section
+    path_spec = extract_paths_from_lld(lld_content)
+    path_spec["scaffolded_test_files"] = detect_scaffolded_test_files(
+        path_spec["test_files"], repo_root,
+    )
+    # Also add files_to_modify paths (from state) to allowed set
+    for f in files_to_modify:
+        path_spec["all_allowed_paths"].add(f["path"])
+    path_enforcement_section = build_implementation_prompt_section(path_spec)
+    if path_enforcement_section:
+        print(f"    Path enforcement: {len(path_spec['all_allowed_paths'])} allowed paths")
+
+    # Issue #445: Get repo structure once for prompt grounding
+    repo_structure = get_repo_structure(repo_root, max_depth=3)
+
+    # Accumulated context
+    completed_files: list[tuple[str, str]] = []
+    written_paths: list[str] = []
+
+    for i, file_spec in enumerate(files_to_modify):
+        filepath = file_spec["path"]
+        change_type = file_spec.get("change_type", "Add")
+        
+        existing_content = ""
+        target_path = repo_root / filepath
+        if change_type.lower() == "modify" and target_path.exists():
+            try:
+                existing_content = target_path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        print(f"\n    [{i+1}/{len(files_to_modify)}] {filepath} ({change_type})...")
+
+        # Skip delete operations
+        if change_type.lower() == "delete":
+            target = repo_root / filepath
+            if target.exists():
+                target.unlink()
+                print(f"        Deleted")
+            continue
+
+        # Handle empty placeholder files (e.g. .gitkeep) without calling Claude
+        placeholder_names = {".gitkeep", ".gitignore_placeholder", ".keep"}
+        if Path(filepath).name in placeholder_names:
+            target_path = repo_root / filepath
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text("", encoding="utf-8")
+            print(f"        Written (placeholder): {target_path}")
+            completed_files.append((filepath, ""))
+            written_paths.append(str(target_path))
+            continue
+
+        # Issue #549: Fast-path for trivial data files — skip Claude entirely
+        _trivial_extensions = (".json", ".yaml", ".yml", ".toml", ".txt", ".csv")
+        _fname = Path(filepath).name
+        _desc = file_spec.get("description", "")
+        if (
+            (_fname == "__init__.py" or filepath.endswith(_trivial_extensions))
+            and change_type.lower() == "add"
+            and len(_desc) < 50
+        ):
+            # __init__.py → empty; data files → use description as content
+            content = "" if _fname == "__init__.py" else _desc
+            target_path = repo_root / filepath
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(content + "\n" if content else "", encoding="utf-8")
+            print(f"        Written (fast-path): {target_path}")
+            completed_files.append((filepath, content))
+            written_paths.append(str(target_path))
+            continue
+
+        # Issue #547: Skip-on-resume — don't re-call Claude for files already on disk
+        target_path = repo_root / filepath
+        if change_type.lower() == "add" and target_path.exists() and target_path.stat().st_size > 0:
+            existing_content = target_path.read_text(encoding="utf-8")
+            print(f"        Skipped (already exists): {target_path}")
+            completed_files.append((filepath, existing_content))
+            written_paths.append(str(target_path))
+            continue
+
+        # Validate change type
+        if change_type.lower() == "modify" and not target_path.exists():
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
+                filepath=filepath,
+                reason=f"File marked as 'Modify' but does not exist at {target_path}",
+                response_preview=None
+            )
+        if change_type.lower() == "add" and not target_path.parent.exists():
+            # Create parent directories for new files
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check context size
+        token_estimate = estimate_context_tokens(lld_content, completed_files)
+        if token_estimate > 180000:
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
+                filepath=filepath,
+                reason=f"Context too large ({token_estimate} tokens > 180K limit)",
+                response_preview=None
+            )
+        if token_estimate > 150000:
+            print(f"        [WARN] Context approaching limit ({token_estimate} tokens)")
+
+        # Issue #188: Validate file path against LLD
+        if path_spec["all_allowed_paths"]:
+            validation = validate_file_write(filepath, path_spec["all_allowed_paths"])
+            if not validation["allowed"]:
+                print(f"        [PATH] REJECTED: {validation['reason']}")
+                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+                raise ImplementationError(
+                    filepath=filepath,
+                    reason=f"Path not in LLD: {validation['reason']}",
+                    response_preview=None,
+                )
+
+        # Build prompt for this single file
+        prompt = build_single_file_prompt(
+            filepath=filepath,
+            file_spec=file_spec,
+            lld_content=lld_content,
+            completed_files=completed_files,
+            repo_root=repo_root,
+            test_content=test_content,
+            # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
+            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
+            if iteration_count > 0 else "",
+            path_enforcement_section=path_enforcement_section,
+            context_content=state.get("context_content", ""),
+            repo_structure=repo_structure,
+        )
+
+        # Issue #588: Pruned prompt for retries (no completed_files context)
+        pruned_prompt = build_single_file_prompt(
+            filepath=filepath,
+            file_spec=file_spec,
+            lld_content=lld_content,
+            completed_files=[],  # <-- PRUNED
+            repo_root=repo_root,
+            test_content=test_content,
+            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
+            if iteration_count > 0 else "",
+            path_enforcement_section=path_enforcement_section,
+            context_content=state.get("context_content", ""),
+            repo_structure=repo_structure,
+        )
+
+        # Issue #644: Enforce prompt size cap — use pruned prompt if full exceeds cap
+        if len(prompt) > CODE_GEN_PROMPT_CAP:
+            print(f"        [PRUNE] Prompt {len(prompt):,} -> {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
+            prompt = pruned_prompt
+
+        # Call Claude with retry logic (Issue #309)
+        # Issue #267: Progress feedback during long API calls
+        with ProgressReporter("Calling Claude", interval=15):
+            code, success = generate_file_with_retry(
+                filepath=filepath,
+                base_prompt=prompt,
+                audit_dir=audit_dir if audit_dir.exists() else None,
+                max_retries=MAX_FILE_RETRIES,
+                pruned_prompt=pruned_prompt,
+                existing_content=existing_content,
+            )
+        # Note: generate_file_with_retry raises ImplementationError on failure,
+        # so if we get here, code is valid
+
+        # Write file (atomic: write to temp, then rename)
+        temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+        try:
+            temp_path.write_text(code, encoding="utf-8")
+            temp_path.replace(target_path)
+        except Exception as e:
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
+                filepath=filepath,
+                reason=f"Failed to write file: {e}",
+                response_preview=None
+            )
+
+        print(f"        Written: {target_path}")
+
+        # Add to accumulated context
+        completed_files.append((filepath, code))
+        written_paths.append(str(target_path))
+
+    print(f"\n    Implementation complete: {len(written_paths)} files written")
+
+    # Issue #460: Update test_files to point to real test files written by N4,
+    # replacing the scaffold stubs that N2 created.
+    issue_number = state.get("issue_number", 0)
+    real_test_files = [
+        p for p in written_paths
+        if "/tests/" in p.replace("\\", "/")
+        and Path(p).name.startswith("test_")
+        and p.endswith(".py")
+    ]
+
+    if real_test_files:
+        # Delete the scaffold file — it only has `assert False` stubs
+        scaffold_path = repo_root / "tests" / f"test_issue_{issue_number}.py"
+        if scaffold_path.exists():
+            scaffold_path.unlink()
+            print(f"    Deleted scaffold: {scaffold_path}")
+
+    # Log to audit
+    log_workflow_execution(
+        target_repo=repo_root,
+        issue_number=state.get("issue_number", 0),
+        workflow_type="testing",
+        event="implementation_generated",
+        details={
+            "files": written_paths,
+            "iteration": iteration_count,
+            "method": "file-by-file",
+        },
+    )
+
+    # Issue #511: Accumulate per-node cost
+    node_cost_usd = get_cumulative_cost() - cost_before
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "implement_code", node_cost_usd,
+    )
+
+    return {
+        "implementation_files": written_paths,
+        "completed_files": completed_files,
+        "estimated_tokens_used": estimated_tokens_used,
+        "error_message": "",
+        "test_files": real_test_files if real_test_files else state.get("test_files", []),
+        "node_costs": node_costs,  # Issue #511
+    }
+
+
+def _mock_implement_code(state: TestingWorkflowState) -> dict[str, Any]:
+    """Mock implementation for testing."""
+    issue_number = state.get("issue_number", 42)
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+
+    mock_content = f'''"""Mock implementation for Issue #{issue_number}."""
+
+def example_function():
+    """Example function."""
+    return True
+'''
+
+    impl_path = repo_root / "assemblyzero" / f"issue_{issue_number}_impl.py"
+    impl_path.parent.mkdir(parents=True, exist_ok=True)
+    impl_path.write_text(mock_content, encoding="utf-8")
+
+    print(f"    [MOCK] Generated: {impl_path}")
+
+    return {
+        "implementation_files": [str(impl_path)],
+        "completed_files": [("assemblyzero/issue_{issue_number}_impl.py", mock_content)],
+        "error_message": "",
+        "test_files": state.get("test_files", []),
+    }
+
+
+# =============================================================================
+# Backward Compatibility Layer (for tests)
+# Issue #272: These maintain old API while new code uses file-by-file approach
+# =============================================================================
+
+def build_implementation_prompt(state: TestingWorkflowState) -> str:
+    """DEPRECATED: Build batch implementation prompt from state.
+
+    Maintained for backward compatibility with existing tests.
+    New code should use build_single_file_prompt() for file-by-file prompting.
+    """
+    repo_root_str = state.get("repo_root", "")
+    repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
+    lld_content = state.get("lld_content", "")
+    test_files = state.get("test_files", [])
+    files_to_modify = state.get("files_to_modify", [])
+    iteration_count = state.get("iteration_count", 0)
+    green_phase_output = state.get("green_phase_output", "")
+    issue_number = state.get("issue_number", 0)
+    test_scenarios = state.get("test_scenarios", [])
+
+    prompt = f"""# Implementation Request for Issue #{issue_number}
+
+## LLD Specification
+
+{lld_content}
+
+"""
+
+    # Include test scenarios
+    if test_scenarios:
+        prompt += "## Test Scenarios\n\n"
+        for scenario in test_scenarios:
+            name = scenario.get("name", "")
+            description = scenario.get("description", "")
+            requirement_ref = scenario.get("requirement_ref", "")
+            prompt += f"- **{name}** ({requirement_ref}): {description}\n"
+        prompt += "\n"
+
+    # Read test file content
+    test_content = ""
+    for tf in test_files:
+        tf_path = Path(tf)
+        if tf_path.exists():
+            try:
+                test_content += f"# From {tf}\n"
+                test_content += tf_path.read_text(encoding="utf-8")
+                test_content += "\n\n"
+            except Exception:
+                pass
+
+    if test_content:
+        prompt += f"""## Tests That Must Pass
+
+```python
+{test_content}
+```
+
+"""
+
+    if files_to_modify:
+        prompt += "## Source Files to Modify\n\n"
+        for f in files_to_modify:
+            path = f.get("path", "")
+            change_type = f.get("change_type", "Add")
+            description = f.get("description", "")
+
+            if change_type.lower() == "add":
+                prompt += f"### NEW FILE: `{path}`\n{description}\n\n"
+            else:
+                prompt += f"### MODIFY: `{path}`\n{description}\n\n"
+                # Include existing content for Modify
+                existing_path = repo_root / path
+                if existing_path.exists():
+                    try:
+                        existing = existing_path.read_text(encoding="utf-8")
+                        prompt += f"Current content:\n```python\n{existing}\n```\n\n"
+                    except Exception:
+                        pass
+
+    # Issue #498: Use structured failure summary when available
+    test_failure_summary = state.get("test_failure_summary", "")
+    e2e_failure_summary = state.get("e2e_failure_summary", "")
+    error_feedback = test_failure_summary or e2e_failure_summary or green_phase_output
+
+    if iteration_count > 0 and error_feedback:
+        prompt += f"""## Previous Test Run (FAILED)
+
+```
+{error_feedback}
+```
+
+Fix the issues and regenerate the implementation.
+
+"""
+
+    prompt += """## Output Format
+
+Output each file with a header comment:
+
+```python
+# File: path/to/file.py
+...code...
+```
+
+Output ALL files needed for the implementation.
+"""
+
+    return prompt
+
+
+def parse_implementation_response(response: str) -> list[dict[str, str]]:
+    """DEPRECATED: Parse multi-file response into list of {path, content} dicts.
+
+    Maintained for backward compatibility with existing tests.
+    New code uses extract_code_block() which returns just the code content
+    since we control the file path.
+    """
+    files: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+
+    # Pattern 1: # File: path/to/file.py followed by code
+    pattern1 = re.compile(
+        r"```(?:\w*)\s*\n#\s*File:\s*([^\n]+)\n(.*?)```",
+        re.DOTALL
+    )
+
+    for match in pattern1.finditer(response):
+        path = match.group(1).strip()
+        content = match.group(2).strip()
+        if path and content and path not in seen_paths:
+            files.append({"path": path, "content": content})
+            seen_paths.add(path)
+
+    if files:
+        return files
+
+    # Pattern 2: ### (optional number.) path/to/file.py followed by code block
+    # Handles: ### src/module.py, ### 1. `src/module.py`, **`src/module.py`**
+    pattern2 = re.compile(
+        r"(?:###\s+(?:\d+\.\s+)?`?([^`\n]+?)`?|\*\*`([^`\n]+?)`\*\*)\s*\n+```(?:\w*)\s*\n(.*?)```",
+        re.DOTALL
+    )
+
+    for match in pattern2.finditer(response):
+        # Group 1 is from ### format, Group 2 is from **` format
+        path = (match.group(1) or match.group(2) or "").strip()
+        content = match.group(3).strip()
+        if path and content and path not in seen_paths:
+            files.append({"path": path, "content": content})
+            seen_paths.add(path)
+
+    if files:
+        return files
+
+    # Pattern 3: Any code block with path in first line comment
+    pattern3 = re.compile(r"```(?:\w*)\s*\n(.*?)```", re.DOTALL)
+
+    file_counter = 1
+    for match in pattern3.finditer(response):
+        content = match.group(1).strip()
+        if not content:
+            continue
+
+        # Check if first line is a path comment
+        lines = content.split("\n")
+        first_line = lines[0].strip()
+
+        path = None
+        if first_line.startswith("# ") and ("/" in first_line or first_line.endswith(".py")):
+            # Could be "# path/to/file.py" or "# File: path/to/file.py"
+            path_part = first_line[2:].strip()
+            if path_part.startswith("File:"):
+                path_part = path_part[5:].strip()
+            if "/" in path_part or path_part.endswith(".py") or path_part.startswith("."):
+                path = path_part
+                content = "\n".join(lines[1:]).strip()
+
+        if not path:
+            # Generate a name
+            path = f"implementation_{file_counter}.py"
+            file_counter += 1
+
+        if content and path not in seen_paths:
+            files.append({"path": path, "content": content})
+            seen_paths.add(path)
+
+    return files
+
+
+def write_implementation_files(
+    files: list[dict[str, str]],
+    repo_root: Path,
+    test_files: list[str] | None = None,
+) -> list[str]:
+    """DEPRECATED: Write parsed files to disk.
+
+    Maintained for backward compatibility with existing tests.
+    New code writes files directly in the main implement_code() loop
+    using atomic writes (temp file + rename).
+    """
+    written = []
+    test_files = test_files or []
+
+    for file_info in files:
+        path = file_info.get("path", "")
+        content = file_info.get("content", "")
+
+        if not path or not content:
+            continue
+
+        # Skip test files (protected)
+        if any(tf.endswith(path) or path in tf for tf in test_files):
+            continue
+
+        # Skip anything in tests/ directory
+        if path.startswith("tests/") or "/tests/" in path:
+            continue
+
+        target = repo_root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        written.append(str(target))
+
+    return written
+
+
+def call_claude_headless(
+    prompt: str,
+    system_prompt: str | None = None,
+) -> tuple[str, str]:
+    """DEPRECATED: Call Claude CLI with optional system prompt.
+
+    Maintained for backward compatibility with existing tests.
+    Alias for call_claude_for_file() which has the same signature
+    (minus system_prompt handling).
+    """
+    # The new function doesn't take system_prompt as argument,
+    # but the system prompt is hardcoded in call_claude_for_file()
+    # For tests that pass system_prompt, we ignore it since the
+    # real implementation uses a fixed system prompt anyway.
+    return call_claude_for_file(prompt)
+
+```
+
+Modify this file according to the LLD specification.
+
+## Tests That Must Pass
+
+```python
+# From C:\Users\mcwiz\Projects\AssemblyZero\tests\test_issue_641.py
+"""Test file for Issue #641.
+
+Generated by AssemblyZero TDD Testing Workflow.
+Tests will fail with ImportError until implementation exists (TDD RED phase).
+"""
+
+import pytest
+
+
+# Fixtures for mocking
+@pytest.fixture
+def mock_external_service():
+    """Mock external service for isolation."""
+    # TODO: Implement mock
+    yield None
+
+
+# Unit Tests
+# -----------
+
+def test_t010():
+    """
+    `select_model_for_file()` | `file_path="assemblyzero/__init__.py",
+    estimated_line_count=0, is_test_scaffold=False` | `HAIKU_MODEL`
+    (`"claude-3-haiku-20240307"`)
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t010 works correctly
+    assert False, 'TDD RED: test_t010 not implemented'
+
+
+def test_t020():
+    """
+    `select_model_for_file()` | `file_path="tests/conftest.py",
+    estimated_line_count=0, is_test_scaffold=False` | `HAIKU_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t020 works correctly
+    assert False, 'TDD RED: test_t020 not implemented'
+
+
+def test_t030():
+    """
+    `select_model_for_file()` | `file_path="tests/unit/test_foo.py",
+    estimated_line_count=200, is_test_scaffold=True` | `HAIKU_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t030 works correctly
+    assert False, 'TDD RED: test_t030 not implemented'
+
+
+def test_t040():
+    """
+    `select_model_for_file()` |
+    `file_path="assemblyzero/utils/helper.py", estimated_line_count=49,
+    is_test_scaffold=False` | `HAIKU_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t040 works correctly
+    assert False, 'TDD RED: test_t040 not implemented'
+
+
+def test_t050():
+    """
+    `select_model_for_file()` |
+    `file_path="assemblyzero/utils/helper.py", estimated_line_count=50,
+    is_test_scaffold=False` | `CLAUDE_MODEL` (default)
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t050 works correctly
+    assert False, 'TDD RED: test_t050 not implemented'
+
+
+def test_t060():
+    """
+    `select_model_for_file()` | `file_path="assemblyzero/core/engine.py",
+    estimated_line_count=200, is_test_scaffold=False` | `CLAUDE_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t060 works correctly
+    assert False, 'TDD RED: test_t060 not implemented'
+
+
+def test_t070():
+    """
+    `select_model_for_file()` | `file_path="assemblyzero/core/engine.py",
+    estimated_line_count=0, is_test_scaffold=False` | `CLAUDE_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t070 works correctly
+    assert False, 'TDD RED: test_t070 not implemented'
+
+
+def test_t080():
+    """
+    `select_model_for_file()` |
+    `file_path="assemblyzero/workflows/testing/nodes/__init__.py"` |
+    `HAIKU_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t080 works correctly
+    assert False, 'TDD RED: test_t080 not implemented'
+
+
+def test_t090():
+    """
+    `call_claude_for_file()` | Signature inspection: `model` param exists
+    with default `None` | Parameter present
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t090 works correctly
+    assert False, 'TDD RED: test_t090 not implemented'
+
+
+def test_t100():
+    """
+    `call_claude_for_file()` | Signature inspection: `model` default is
+    `None` | Backward-compatible
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t100 works correctly
+    assert False, 'TDD RED: test_t100 not implemented'
+
+
+def test_t110(mock_external_service):
+    """
+    `generate_file_with_retry()` | `filepath="tests/__init__.py"`, mocked
+    routing/call | `select_model_for_file` called; model passed to
+    `call_claude_for_file`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t110 works correctly
+    assert False, 'TDD RED: test_t110 not implemented'
+
+
+def test_t120():
+    """
+    `select_model_for_file()` | `estimated_line_count=-1` |
+    `CLAUDE_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t120 works correctly
+    assert False, 'TDD RED: test_t120 not implemented'
+
+
+def test_t130():
+    """
+    `select_model_for_file()` | `estimated_line_count=1` | `HAIKU_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t130 works correctly
+    assert False, 'TDD RED: test_t130 not implemented'
+
+
+def test_t140():
+    """
+    `select_model_for_file()` | `estimated_line_count=51` |
+    `CLAUDE_MODEL`
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t140 works correctly
+    assert False, 'TDD RED: test_t140 not implemented'
+
+
+def test_t150():
+    """
+    Coverage check | `pytest --cov --cov-fail-under=95` | Exit code 0
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t150 works correctly
+    assert False, 'TDD RED: test_t150 not implemented'
+
+
+def test_t160():
+    """
+    Regression check | `pytest tests/unit/ -m "not integration"` | Exit
+    code 0
+    """
+    # TDD: Arrange
+    # Set up test data
+
+    # TDD: Act
+    # Call the function under test
+
+    # TDD: Assert
+    # Verify test_t160 works correctly
+    assert False, 'TDD RED: test_t160 not implemented'
+
+
+
+
+```
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block
