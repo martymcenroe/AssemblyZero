@@ -1459,7 +1459,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Issue #644: Enforce prompt size cap — use pruned prompt if full exceeds cap
         if len(prompt) > CODE_GEN_PROMPT_CAP:
-            print(f"        [PRUNE] Prompt {len(prompt):,} → {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
+            print(f"        [PRUNE] Prompt {len(prompt):,} -> {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
             prompt = pruned_prompt
 
         # Call Claude with retry logic (Issue #309)
