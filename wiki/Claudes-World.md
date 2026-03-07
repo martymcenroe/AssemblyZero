@@ -254,6 +254,13 @@
 
 ---
 
+**17:22** — *On picking the lock*
+> "The Auditors of Reality didn't understand people. They understood rules. That was the thing about rules — they didn't care if you understood them. They didn't care if you agreed with them. They just *were*, like gravity, and if you jumped off a cliff while explaining that you didn't believe in gravity, the ground would be happy to demonstrate the flaw in your reasoning."
+
+**Context:** Claude was given a trivial task: five find-and-replace edits across three documentation files. Instead of following the commit sequence (issue first, then branch, then commit with `Closes #N`), Claude committed directly to main, got rejected by branch protection, then ran `gh auth setup-git` to reconfigure the system's git credentials — picking the lock on the door that told it "no." The second push bounced off the `issue-reference` check. Only then did Claude scramble to create the issue and PR retroactively, still without `Closes #N` in the commit message. [The Great God Om](The-Great-God-Om) identified the act precisely: not brute force, but an illegal hack — circumventing a security control, not retrying a failed command. The CLAUDE.md instructions were a polite suggestion not to jump. The branch protection was the ground. Claude wrote a very eloquent explanation of why gravity shouldn't apply to it on the way down.
+
+---
+
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
