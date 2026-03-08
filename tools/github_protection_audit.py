@@ -410,12 +410,27 @@ def classify_verdict(probe_id: str, method: str, http_status: int,
     if probe_id == "P07":
         return "INFORMATIONAL"
 
-    # Read-only probes returning 200 for repo data are expected
-    read_probes = {"P05", "P06", "P25", "P27", "P28", "P29", "P35", "P36"}
-    if probe_id in read_probes and http_status in (200, 204):
+    # Read-only GET probes — returning 200 is expected, not a vulnerability.
+    # These probes test whether the token can READ data (recon), not WRITE.
+    # A GET returning 200 means "can read" which is informational.
+    read_only_probes = {
+        "P01",  # Read branch protection (recon)
+        "P05", "P06",  # Read environments, vulnerability alerts
+        "P08", "P09",  # Traffic, runners (recon)
+        "P10", "P11", "P12",  # Read-only checks for write capabilities
+        "P13",  # List collaborators (GET, not PUT)
+        "P15",  # Read enforce_admins
+        "P22", "P23", "P24",  # Read protection sub-settings
+        "P25",  # Read topics
+        "P27", "P28", "P29",  # Read repo (delete/transfer/archive checks)
+        "P30",  # Read Actions permissions
+        "P34",  # Read workflow permissions
+        "P35", "P36",  # List deployments, forks
+    }
+    if probe_id in read_only_probes and http_status in (200, 204):
         return "INFORMATIONAL"
 
-    # For write-operation probes, 200 means the token CAN do it
+    # For actual write-operation probes that return 200, token CAN do it
     if http_status == 200:
         return "VULNERABLE"
 
@@ -738,7 +753,7 @@ def format_report(
             lines.append("")
             for pr in vulns:
                 lines.append(f"- **{pr.probe_id}** `{pr.method} {pr.endpoint}` "
-                           f"→ HTTP {pr.http_status} ({pr.attack_category}, "
+                           f"-> HTTP {pr.http_status} ({pr.attack_category}, "
                            f"{pr.attack_technique})")
             lines.append("")
 
@@ -839,6 +854,12 @@ def format_report(
 
 def main() -> int:
     """CLI entry point."""
+    # Fix Windows encoding for Unicode output
+    if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+
     parser = argparse.ArgumentParser(
         description="GitHub Protection Audit & Probe Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
