@@ -21,30 +21,37 @@ fi
 
 # ---------------------------------------------------------------------------
 # Category A: Secret file reads
-# Blocks: cat/less/more/head/tail on .env*, .dev.vars, .aws/credentials
+# Blocks: ANY command that references secret files as arguments.
+# Covers: cat, less, more, head, tail, grep, rg, awk, sed, strings, xxd,
+#         od, sort, wc, diff, cp, mv, python -c, ruby -e, etc.
+#
+# Strategy: Check if ANY secret file pattern appears anywhere in the command.
+# This is intentionally broad — false positives are safer than false negatives.
+# Issue #693: Agent bypassed old guard using `grep 'API_KEY' .dev.vars`
 # ---------------------------------------------------------------------------
 
-# Match: cmd [flags] <secret-file-pattern>
-# Allow: cat README.md, head -n 5 main.py, etc.
-if [[ "$command" =~ (^|[[:space:]])(cat|less|more|head|tail)([[:space:]]+-[a-zA-Z0-9]+)*[[:space:]]+(.*) ]]; then
-    file_args="${BASH_REMATCH[4]}"
-    if [[ "$file_args" =~ (^|[[:space:]])(\.env|\.env\.[a-zA-Z0-9_]+|\.dev\.vars) ]] ||
-       [[ "$file_args" =~ \.aws/credentials ]] ||
-       [[ "$file_args" =~ \.aws/config ]]; then
-        echo "" >&2
-        echo "========================================" >&2
-        echo "BLOCKED: Secret Guard - Secret File Read" >&2
-        echo "========================================" >&2
-        echo "" >&2
-        echo "REJECTED: $command" >&2
-        echo "" >&2
-        echo "Secret files must never be printed to stdout." >&2
-        echo "Session transcripts capture all output in plaintext." >&2
-        echo "" >&2
-        echo "Use os.environ.get() in Python to access secrets." >&2
-        echo "" >&2
-        exit 1
-    fi
+# Secret file patterns — match anywhere in the command arguments
+secret_file_pattern='(^|[[:space:]/])(\.env|\.env\.[a-zA-Z0-9_]+|\.dev\.vars)([[:space:]]|$|")'
+aws_creds_pattern='\.aws/(credentials|config)'
+
+if [[ "$command" =~ $secret_file_pattern ]] ||
+   [[ "$command" =~ $aws_creds_pattern ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - Secret File Access" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "Secret files (.env, .dev.vars, .aws/credentials) must never" >&2
+    echo "be accessed via Bash — session transcripts capture all output." >&2
+    echo "" >&2
+    echo "This blocks ALL commands targeting secret files, not just cat/head." >&2
+    echo "Agents have been observed using grep, awk, sed to bypass narrower guards." >&2
+    echo "" >&2
+    echo "Use os.environ.get() in Python to access secrets." >&2
+    echo "" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------

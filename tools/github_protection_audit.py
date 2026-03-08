@@ -831,12 +831,179 @@ def run_audit(repos: list[str]) -> list[AuditCheck]:
 
 
 # ---------------------------------------------------------------------------
+# Local hook verification (not GitHub API — filesystem checks)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HookCheck:
+    """Result of a local hook verification check."""
+
+    check_id: str
+    setting: str
+    expected: str
+    actual: str
+    status: str  # PASS, FAIL, WARN
+
+
+# Required hook patterns that must exist in secret-guard.sh
+REQUIRED_SECRET_PATTERNS = [
+    ("H01", "grep on secret files", r"grep.*\.env|grep.*\.dev\.vars|secret_file_pattern"),
+    ("H02", "cat on secret files", r"cat|less|more|head|tail"),
+    ("H03", "env var dereference", r"GITHUB_TOKEN|AWS_SECRET_ACCESS_KEY"),
+    ("H04", "gh auth token blocked", r"gh.*auth.*token"),
+    ("H05", "aws credential dump blocked", r"aws.*configure.*get|aws.*sts.*get-session-token"),
+]
+
+# Required patterns in bash-gate.sh
+REQUIRED_BASH_GATE_PATTERNS = [
+    ("H06", "git reset --hard blocked", r"git.*reset.*--hard"),
+    ("H07", "git push --force blocked", r"git.*push.*(--force|-f)"),
+    ("H08", "git branch -D blocked", r"git.*branch.*-D"),
+    ("H09", "git clean -f blocked", r"git.*clean.*-f"),
+]
+
+# Required hooks in settings.json
+REQUIRED_HOOKS = [
+    ("H10", "secret-guard.sh configured", "secret-guard"),
+    ("H11", "bash-gate.sh configured", "bash-gate"),
+]
+
+
+def run_hook_verification(projects_root: Path) -> list[HookCheck]:
+    """Verify local Claude Code hook protections are intact."""
+    import re as hook_re
+
+    results = []
+
+    # Find all project directories with .claude/hooks/
+    project_dirs = [
+        projects_root / "AssemblyZero",
+        projects_root / "Aletheia",
+        projects_root / "Talos",
+        projects_root / "Hermes",
+    ]
+
+    for project_dir in project_dirs:
+        project_name = project_dir.name
+
+        # Check settings.json for hook configuration
+        settings_path = project_dir / ".claude" / "settings.json"
+        if settings_path.exists():
+            try:
+                settings_content = settings_path.read_text(encoding="utf-8")
+                for check_id, desc, pattern in REQUIRED_HOOKS:
+                    found = pattern in settings_content
+                    results.append(HookCheck(
+                        check_id=check_id,
+                        setting=f"[{project_name}] {desc}",
+                        expected=f"{pattern} in settings.json hooks",
+                        actual="Configured" if found else "NOT FOUND",
+                        status="PASS" if found else "FAIL",
+                    ))
+            except OSError:
+                pass
+
+        # Check secret-guard.sh
+        secret_guard = project_dir / ".claude" / "hooks" / "secret-guard.sh"
+        if secret_guard.exists():
+            try:
+                sg_content = secret_guard.read_text(encoding="utf-8")
+                for check_id, desc, pattern in REQUIRED_SECRET_PATTERNS:
+                    found = bool(hook_re.search(pattern, sg_content))
+                    results.append(HookCheck(
+                        check_id=check_id,
+                        setting=f"[{project_name}] {desc}",
+                        expected=f"Pattern in secret-guard.sh",
+                        actual="Present" if found else "MISSING",
+                        status="PASS" if found else "FAIL",
+                    ))
+            except OSError:
+                pass
+        else:
+            results.append(HookCheck(
+                check_id="H01",
+                setting=f"[{project_name}] secret-guard.sh exists",
+                expected="File exists",
+                actual="NOT FOUND",
+                status="FAIL",
+            ))
+
+        # Check bash-gate.sh
+        bash_gate = project_dir / ".claude" / "hooks" / "bash-gate.sh"
+        if bash_gate.exists():
+            try:
+                bg_content = bash_gate.read_text(encoding="utf-8")
+                for check_id, desc, pattern in REQUIRED_BASH_GATE_PATTERNS:
+                    found = bool(hook_re.search(pattern, bg_content))
+                    results.append(HookCheck(
+                        check_id=check_id,
+                        setting=f"[{project_name}] {desc}",
+                        expected=f"Pattern in bash-gate.sh",
+                        actual="Present" if found else "MISSING",
+                        status="PASS" if found else "FAIL",
+                    ))
+            except OSError:
+                pass
+        else:
+            results.append(HookCheck(
+                check_id="H06",
+                setting=f"[{project_name}] bash-gate.sh exists",
+                expected="File exists",
+                actual="NOT FOUND",
+                status="WARN",
+            ))
+
+    # Check global settings
+    global_settings = Path.home() / ".claude" / "settings.json"
+    if global_settings.exists():
+        try:
+            gs_content = global_settings.read_text(encoding="utf-8")
+            for check_id, desc, pattern in REQUIRED_HOOKS:
+                found = pattern in gs_content
+                results.append(HookCheck(
+                    check_id=check_id,
+                    setting=f"[GLOBAL] {desc}",
+                    expected=f"{pattern} in global settings.json",
+                    actual="Configured" if found else "NOT FOUND",
+                    status="PASS" if found else "WARN",
+                ))
+        except OSError:
+            pass
+
+    # Check global deny list in settings.local.json
+    global_local = Path.home() / ".claude" / "settings.local.json"
+    if global_local.exists():
+        try:
+            gl_content = global_local.read_text(encoding="utf-8")
+            deny_patterns = [
+                ("H12", "git reset --hard in deny list", "git reset --hard"),
+                ("H13", "git push -f in deny list", "git push -f"),
+                ("H14", "git push --force in deny list", "git push --force"),
+                ("H15", "Read(.env) in deny list", "Read(.env"),
+            ]
+            for check_id, desc, pattern in deny_patterns:
+                found = pattern in gl_content
+                results.append(HookCheck(
+                    check_id=check_id,
+                    setting=f"[GLOBAL] {desc}",
+                    expected=f"Pattern in global deny list",
+                    actual="Present" if found else "MISSING",
+                    status="PASS" if found else "FAIL",
+                ))
+        except OSError:
+            pass
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Report formatting
 # ---------------------------------------------------------------------------
 
 def format_report(
     probe_results: list[ProbeResult] | None,
     audit_results: list[AuditCheck] | None,
+    hook_results: list[HookCheck] | None,
     repos: list[str],
     token_type: str,
     modes: list[str],
@@ -970,6 +1137,43 @@ def format_report(
         lines.append("---")
         lines.append("")
 
+    # --- Hook Verification Results ---
+    if hook_results:
+        lines.append("## Local Hook Verification")
+        lines.append("")
+
+        # Summary
+        h_statuses: dict[str, int] = {}
+        for hc in hook_results:
+            h_statuses[hc.status] = h_statuses.get(hc.status, 0) + 1
+
+        lines.append("| Status | Count |")
+        lines.append("|--------|-------|")
+        for s in ["PASS", "FAIL", "WARN"]:
+            if s in h_statuses:
+                lines.append(f"| {s} | {h_statuses[s]} |")
+        lines.append("")
+
+        lines.append("| Check | Setting | Expected | Actual | Status |")
+        lines.append("|-------|---------|----------|--------|--------|")
+        for hc in hook_results:
+            lines.append(
+                f"| {hc.check_id} | {hc.setting} | {hc.expected} | "
+                f"{hc.actual} | **{hc.status}** |"
+            )
+        lines.append("")
+
+        h_fails = [hc for hc in hook_results if hc.status == "FAIL"]
+        if h_fails:
+            lines.append("### Hook FAIL Items")
+            lines.append("")
+            for hc in h_fails:
+                lines.append(f"- **{hc.check_id}** {hc.setting}: {hc.actual}")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
     # --- Evidence Notes ---
     lines.append("## Evidence Notes")
     lines.append("")
@@ -1087,6 +1291,11 @@ def main() -> int:
         help="Output file path (default: docs/audits/github-protection/audit-{timestamp}-{type}.md)",
     )
     parser.add_argument(
+        "--hooks",
+        action="store_true",
+        help="Verify local Claude Code hook protections (filesystem check, no API)",
+    )
+    parser.add_argument(
         "--no-save",
         action="store_true",
         help="Print report to stdout without saving to file",
@@ -1094,28 +1303,33 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if not args.audit and not args.probe:
-        print("Error: specify --audit, --probe, or both.", file=sys.stderr)
+    if not args.audit and not args.probe and not args.hooks:
+        print("Error: specify --audit, --probe, --hooks, or a combination.", file=sys.stderr)
         return 1
 
-    # Detect token type
-    print("Detecting token type...")
-    token_type = detect_token_type()
-    print(f"  Token type: {token_type}")
-    print()
+    # Detect token type (skip if hooks-only)
+    token_type = "n/a"
+    repos: list[str] = []
 
-    # List repos
-    print(f"Listing repos for {args.owner}...")
-    repos = list_repos(args.owner)
-    if not repos:
-        print("Error: no repos found.", file=sys.stderr)
-        return 1
-    print(f"  Found {len(repos)} repo(s): {', '.join(repos)}")
-    print()
+    if args.audit or args.probe:
+        print("Detecting token type...")
+        token_type = detect_token_type()
+        print(f"  Token type: {token_type}")
+        print()
+
+        # List repos
+        print(f"Listing repos for {args.owner}...")
+        repos = list_repos(args.owner)
+        if not repos:
+            print("Error: no repos found.", file=sys.stderr)
+            return 1
+        print(f"  Found {len(repos)} repo(s): {', '.join(repos)}")
+        print()
 
     modes = []
     probe_results = None
     audit_results = None
+    hook_results = None
 
     # Run probes
     if args.probe:
@@ -1137,8 +1351,20 @@ def main() -> int:
         print(f"  Done: {pass_count} PASS, {fail_count} FAIL")
         print()
 
+    # Run hook verification
+    if args.hooks:
+        modes.append("hooks")
+        projects_root = Path(__file__).parent.parent.parent  # tools/ -> AssemblyZero/ -> Projects/
+        print(f"Verifying local hook protections in {projects_root}...")
+        hook_results = run_hook_verification(projects_root)
+        h_pass = sum(1 for hc in hook_results if hc.status == "PASS")
+        h_fail = sum(1 for hc in hook_results if hc.status == "FAIL")
+        print(f"  Done: {h_pass} PASS, {h_fail} FAIL")
+        print()
+
     # Generate report
-    report = format_report(probe_results, audit_results, repos, token_type, modes)
+    report = format_report(probe_results, audit_results, hook_results,
+                          repos, token_type, modes)
 
     # Save or print
     if args.no_save:
