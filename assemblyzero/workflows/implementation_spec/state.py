@@ -176,3 +176,5 @@ class ImplementationSpecState(TypedDict, total=False):
     # Issue #642: Retry context pruning
     retry_count: int
     previous_attempt_snippet: str | None
+    target_file: str
+    completed_files: list[str]
