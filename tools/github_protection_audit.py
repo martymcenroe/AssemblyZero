@@ -1378,7 +1378,8 @@ def main() -> int:
             script_dir = Path(__file__).parent.parent
             output_dir = script_dir / "docs" / "audits" / "github-protection"
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"audit-{timestamp}-{token_type}.md"
+            safe_token_type = token_type.replace("/", "-")
+            output_path = output_dir / f"audit-{timestamp}-{safe_token_type}.md"
 
         output_path.write_text(report, encoding="utf-8")
         print(f"Report saved: {output_path}")

@@ -181,6 +181,14 @@ Read the error messages carefully and fix the root cause in your implementation.
 
 """
 
+    # Issue #288: Inject architectural context if provided
+    if context_content:
+        prompt += f"""## Additional Context
+
+{context_content}
+
+"""
+
     # Issue #447: File-type-aware output format
     info = get_file_type_info(filepath)
     tag = info["language_tag"]
