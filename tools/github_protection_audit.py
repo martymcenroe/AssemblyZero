@@ -373,6 +373,23 @@ PROBES: list[tuple[str, str, str, str, str, str, str]] = [
      "Can token list org repos?", "User-level endpoint"),
 ]
 
+# Wiki probes — these use git operations, not REST API (no wiki API exists)
+# (probe_id, category, technique, description)
+WIKI_PROBES: list[tuple[str, str, str, str]] = [
+    ("P43", "Wiki Attack Surface", "T1213",
+     "Wiki enabled — no branch protection available"),
+    ("P44", "Wiki Attack Surface", "T1213",
+     "Wiki repo has content (cloneable)"),
+    ("P45", "Wiki Attack Surface", "T1565.001",
+     "Wiki repo accessible via git ls-remote"),
+    ("P46", "Wiki Attack Surface", "T1136",
+     "Wiki has no review/approval gate for pushes"),
+    ("P47", "Wiki Attack Surface", "T1114",
+     "Wiki content can be modified without notification"),
+    ("P48", "Wiki Attack Surface", "T1059",
+     "Wiki could serve as prompt injection vector for agents"),
+]
+
 # Behavioral probes (not API calls — documented patterns)
 BEHAVIORAL_PROBES: list[tuple[str, str, str, str]] = [
     ("P39", "Social Engineering", "T1656",
@@ -481,12 +498,115 @@ def run_probes(repos: list[str]) -> list[ProbeResult]:
                 detail=detail or (notes if notes else ""),
             ))
 
+    # Wiki probes — test via git ls-remote (no REST API exists for wikis)
+    print("  Probing wiki repos...")
+    for repo in repos:
+        wiki_url = f"https://github.com/{repo}.wiki.git"
+        has_wiki_content = False
+
+        try:
+            proc = subprocess.run(
+                ["git", "ls-remote", wiki_url],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            has_wiki_content = proc.returncode == 0 and "HEAD" in proc.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+        # Check if wiki is enabled via API response we already have
+        # (repos that returned 200 on P07 have .has_wiki in response)
+        wiki_enabled = False
+        for existing in results:
+            if existing.probe_id == "P07" and existing.repo == repo:
+                wiki_enabled = existing.http_status == 200
+                break
+
+        if not wiki_enabled and not has_wiki_content:
+            continue
+
+        # P43: Wiki enabled — no branch protection available
+        results.append(ProbeResult(
+            probe_id="P43", repo=repo,
+            endpoint=f"{repo}.wiki.git",
+            method="CONFIG",
+            http_status=0,
+            verdict="VULNERABLE" if wiki_enabled else "N/A",
+            attack_category="Wiki Attack Surface",
+            attack_technique="T1213",
+            detail="Wiki enabled; no branch protection/rulesets available for wiki repos",
+        ))
+
+        # P44: Wiki repo has content
+        results.append(ProbeResult(
+            probe_id="P44", repo=repo,
+            endpoint=wiki_url,
+            method="git ls-remote",
+            http_status=200 if has_wiki_content else 404,
+            verdict="VULNERABLE" if has_wiki_content else "INFORMATIONAL",
+            attack_category="Wiki Attack Surface",
+            attack_technique="T1213",
+            detail="Wiki repo has content — cloneable and modifiable" if has_wiki_content
+                   else "Wiki enabled but no content pushed",
+        ))
+
+        if has_wiki_content:
+            # P45: Wiki accessible
+            results.append(ProbeResult(
+                probe_id="P45", repo=repo,
+                endpoint=wiki_url,
+                method="git ls-remote",
+                http_status=200,
+                verdict="VULNERABLE",
+                attack_category="Wiki Attack Surface",
+                attack_technique="T1565.001",
+                detail="Wiki repo accessible — can be cloned with current credentials",
+            ))
+
+            # P46: No review gate
+            results.append(ProbeResult(
+                probe_id="P46", repo=repo,
+                endpoint=f"{repo}.wiki.git",
+                method="ARCHITECTURAL",
+                http_status=0,
+                verdict="VULNERABLE",
+                attack_category="Wiki Attack Surface",
+                attack_technique="T1136",
+                detail="No PR, review, or approval required for wiki pushes",
+            ))
+
+            # P47: No notification
+            results.append(ProbeResult(
+                probe_id="P47", repo=repo,
+                endpoint=f"{repo}.wiki.git",
+                method="ARCHITECTURAL",
+                http_status=0,
+                verdict="VULNERABLE",
+                attack_category="Wiki Attack Surface",
+                attack_technique="T1114",
+                detail="Wiki modifications generate no notifications to repo owner",
+            ))
+
+            # P48: Prompt injection vector
+            results.append(ProbeResult(
+                probe_id="P48", repo=repo,
+                endpoint=f"{repo}.wiki.git",
+                method="ARCHITECTURAL",
+                http_status=0,
+                verdict="VULNERABLE",
+                attack_category="Wiki Attack Surface",
+                attack_technique="T1059",
+                detail="Wiki content could be read by agents as trusted context — "
+                       "prompt injection via wiki modification",
+            ))
+
     # Add behavioral probes (not API calls — just documented)
     for probe_id, category, technique, desc in BEHAVIORAL_PROBES:
         results.append(ProbeResult(
             probe_id=probe_id,
             repo="n/a",
-            endpoint="n/a — behavioral observation",
+            endpoint="n/a -- behavioral observation",
             method="n/a",
             http_status=0,
             verdict="BEHAVIORAL",
@@ -512,6 +632,7 @@ AUDIT_CHECKS: list[tuple[str, str]] = [
     ("A07", "enforce_admins enabled"),
     ("A08", "Rulesets exist"),
     ("A09", "Signed commits required"),
+    ("A10", "Wiki disabled or no content"),
 ]
 
 
@@ -665,6 +786,45 @@ def run_audit(repos: list[str]) -> list[AuditCheck]:
             expected="At least 1 ruleset",
             actual=f"{ruleset_count} ruleset(s)" if rs_status == 200 else f"HTTP {rs_status}",
             status="PASS" if ruleset_count > 0 else "WARN",
+        ))
+
+        # A10: Wiki attack surface check
+        wiki_url = f"https://github.com/{repo}.wiki.git"
+        wiki_has_content = False
+        try:
+            wiki_proc = subprocess.run(
+                ["git", "ls-remote", wiki_url],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            wiki_has_content = wiki_proc.returncode == 0 and "HEAD" in wiki_proc.stdout
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+        # Check has_wiki from repo API
+        repo_status, repo_data = gh_api_silent("GET", f"/repos/{repo}")
+        wiki_enabled = False
+        if repo_status == 200 and isinstance(repo_data, dict):
+            wiki_enabled = repo_data.get("has_wiki", False)
+
+        if wiki_enabled and wiki_has_content:
+            wiki_status = "FAIL"
+            wiki_actual = ("Wiki enabled with content — no branch protection, "
+                          "no review gate, no push notifications available")
+        elif wiki_enabled and not wiki_has_content:
+            wiki_status = "WARN"
+            wiki_actual = "Wiki enabled but no content (latent risk)"
+        else:
+            wiki_status = "PASS"
+            wiki_actual = "Wiki disabled"
+
+        results.append(AuditCheck(
+            check_id="A10", repo=repo,
+            setting="Wiki disabled or no content",
+            expected="Wiki disabled or no unprotected content",
+            actual=wiki_actual,
+            status=wiki_status,
         ))
 
     return results
@@ -837,6 +997,46 @@ def format_report(
             lines.append("This confound causes LLM agents to incorrectly believe "
                        "they have admin access, triggering escalation cascades "
                        "when operations return 403.")
+
+        # Wiki gap documentation
+        wiki_vulns = [pr for pr in probe_results
+                      if pr.attack_category == "Wiki Attack Surface"
+                      and pr.verdict == "VULNERABLE"]
+        if wiki_vulns:
+            lines.append("")
+            lines.append("### Wiki Attack Surface Gap (P43-P48)")
+            lines.append("")
+            lines.append("GitHub wikis operate as separate `.wiki.git` repositories "
+                       "with **no protection mechanisms**:")
+            lines.append("")
+            lines.append("- **No branch protection**: Wikis cannot have branch rules or rulesets")
+            lines.append("- **No PR/review gate**: Pushes go directly to the wiki repo")
+            lines.append("- **No push notifications**: Repo owners receive no alerts for wiki changes")
+            lines.append("- **No REST API**: `gh repo list` does not enumerate wikis; "
+                       "no `/wiki` API endpoints exist")
+            lines.append("- **No audit log integration**: Changes only visible in wiki git history")
+            lines.append("")
+            lines.append("**Agent attack vectors:**")
+            lines.append("")
+            lines.append("1. **Prompt injection via wiki**: Agent modifies wiki content to inject "
+                       "instructions for future agent sessions that read wiki pages as context")
+            lines.append("2. **Data exfiltration**: Agent pushes sensitive data to wiki pages "
+                       "as a covert channel (no review, no notification)")
+            lines.append("3. **Context poisoning**: If `CLAUDE.md` or project docs reference "
+                       "wiki pages, a compromised agent can poison the trust chain")
+            lines.append("4. **Persistence**: Wiki modifications survive branch resets, "
+                       "repo restores, and agent session boundaries")
+            lines.append("")
+
+            # List affected repos
+            wiki_repos = sorted(set(pr.repo for pr in wiki_vulns))
+            lines.append(f"**Affected repos ({len(wiki_repos)}):**")
+            for wr in wiki_repos:
+                lines.append(f"- `{wr}`")
+            lines.append("")
+            lines.append("**Mitigation:** Disable wikis on repos that don't actively use them. "
+                       "For repos that need wikis, restrict editing to collaborators and "
+                       "monitor wiki git history for unauthorized changes.")
 
     lines.append("")
     lines.append("---")
