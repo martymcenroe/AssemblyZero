@@ -816,10 +816,14 @@ yarn-error.log
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment & Secrets
 .env
-.env.local
-*.local
+.env.*
+.dev.vars
+*.pem
+*.key
+credentials.json
+secrets.json
 
 # Logs
 *.log
@@ -953,25 +957,144 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 
 def create_settings_json(project_path: Path) -> None:
     """
-    Create a minimal .claude/settings.json file.
+    Create .claude/settings.json with canonical security hooks.
 
-    Creates a basic settings file without hooks. For advanced hooks
-    (worktree protection, security linting), run assemblyzero-generate.py later.
+    Deploys secret-guard.sh and bash-gate.sh hooks from AssemblyZero.
+    New repos must start protected — empty hooks create a security gap.
 
     Args:
         project_path: Path to the project root
     """
-    # Minimal settings - no hooks by default
-    # Users can run assemblyzero-generate.py later for advanced hooks
+    projects_root_unix = config.projects_root_unix()
+    project_name = project_path.name
+
     settings = {
         "hooks": {
-            "PreToolUse": [],
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/bash-gate.sh",
+                            "timeout": 5,
+                            "description": "Bash Command Gate (blocks &&, |, ;, destructive git)"
+                        },
+                        {
+                            "type": "command",
+                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-guard.sh",
+                            "timeout": 5,
+                            "description": "Secret Guard (blocks secret leaks to stdout)"
+                        }
+                    ]
+                }
+            ],
             "PostToolUse": []
         }
     }
 
     settings_path = project_path / ".claude" / "settings.json"
     settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding='utf-8')
+
+
+def deploy_canonical_hooks(project_path: Path) -> None:
+    """
+    Copy canonical security hooks from AssemblyZero to the new project.
+
+    Deploys:
+    - secret-guard.sh: Blocks all Bash commands referencing secret files
+    - bash-gate.sh: Blocks destructive git commands and chain operators
+
+    Args:
+        project_path: Path to the project root
+
+    Raises:
+        FileNotFoundError: If AssemblyZero hook source files don't exist.
+    """
+    import shutil
+
+    assemblyzero_root = Path(config.assemblyzero_root())
+    source_hooks_dir = assemblyzero_root / ".claude" / "hooks"
+    target_hooks_dir = project_path / ".claude" / "hooks"
+    target_hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    canonical_hooks = ["secret-guard.sh", "bash-gate.sh"]
+    for hook_name in canonical_hooks:
+        source = source_hooks_dir / hook_name
+        if not source.exists():
+            raise FileNotFoundError(
+                f"Canonical hook not found: {source}\n"
+                f"AssemblyZero hooks must exist before creating new repos."
+            )
+        target = target_hooks_dir / hook_name
+        shutil.copy2(str(source), str(target))
+
+
+def configure_branch_protection(github_user: str, repo_name: str) -> bool:
+    """
+    Configure branch protection on the main branch via GitHub API.
+
+    Sets: require PR, block force push, block deletion.
+    Does NOT set required status checks (repo needs at least one push first).
+
+    Args:
+        github_user: GitHub username
+        repo_name: Repository name
+
+    Returns:
+        True if protection was configured, False if it failed.
+    """
+    # Branch protection requires at least one commit on main
+    # We configure it after the initial push
+    try:
+        result = subprocess.run(
+            ["gh", "api", "-X", "PUT",
+             f"/repos/{github_user}/{repo_name}/branches/main/protection",
+             "-f", "required_pull_request_reviews[dismiss_stale_reviews]=false",
+             "-f", "required_pull_request_reviews[require_code_owner_reviews]=false",
+             "-F", "required_pull_request_reviews[required_approving_review_count]=0",
+             "-F", "enforce_admins=true",
+             "-F", "restrictions=null",
+             "-f", "required_status_checks[strict]=true",
+             "-f", "required_status_checks[contexts][]=pr-sentinel",
+             "-F", "allow_force_pushes=false",
+             "-F", "allow_deletions=false",
+             ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def disable_wiki(github_user: str, repo_name: str) -> bool:
+    """
+    Disable wiki on a GitHub repo.
+
+    Wikis have no protection mechanisms (no branch protection, no review gate).
+    They should be disabled by default and only enabled when explicitly needed.
+
+    Args:
+        github_user: GitHub username
+        repo_name: Repository name
+
+    Returns:
+        True if wiki was disabled, False if it failed.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "api", "-X", "PATCH",
+             f"/repos/{github_user}/{repo_name}",
+             "-F", "has_wiki=false"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 
 def audit_structure(project_path: Path, name: str) -> int:
@@ -1128,6 +1251,20 @@ Examples:
     print(f"Visibility: {'public' if args.public else 'private'}")
     print("=" * 60)
 
+    # Wrap in try/except for cleanup on failure
+    try:
+        _create_repo(project_path, args, github_user)
+    except Exception as e:
+        print(f"\n{'=' * 60}")
+        print(f"[ERROR] Repository creation failed: {e}")
+        print(f"{'=' * 60}")
+        print(f"\nPartial state may exist at: {project_path}")
+        print(f"Review and clean up manually if needed.")
+        sys.exit(1)
+
+
+def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str) -> None:
+    """Internal repo creation logic, separated for error handling."""
     # Step 1: Create directory
     print("\n1. Creating directory...")
     project_path.mkdir(parents=True)
@@ -1148,10 +1285,19 @@ Examples:
     create_project_json(project_path, args.name, github_user)
     print("  Created project.json")
 
-    # Step 5: Create .claude/settings.json
-    print("\n5. Creating .claude/settings.json...")
+    # Step 5: Create .claude/settings.json (with canonical hooks)
+    print("\n5. Creating .claude/settings.json (with security hooks)...")
     create_settings_json(project_path)
-    print("  Created settings.json")
+    print("  Created settings.json with secret-guard.sh + bash-gate.sh hooks")
+
+    # Step 5b: Deploy canonical hook scripts
+    print("\n5b. Deploying canonical security hooks...")
+    try:
+        deploy_canonical_hooks(project_path)
+        print("  Deployed: secret-guard.sh, bash-gate.sh")
+    except FileNotFoundError as e:
+        print(f"  WARNING: {e}")
+        print("  Hooks not deployed — repo will start unprotected!")
 
     # Step 6: Create CLAUDE.md
     print("\n6. Creating CLAUDE.md...")
@@ -1210,6 +1356,75 @@ Examples:
             check=False  # Don't fail if starring fails
         )
         print("  Starred repository")
+
+        # Step 15: Disable wiki (no protection mechanisms available)
+        print("\n15. Disabling wiki (no protection mechanisms available)...")
+        if disable_wiki(github_user, args.name):
+            print("  Wiki disabled")
+        else:
+            print("  WARNING: Could not disable wiki — do this manually!")
+
+        # Step 16: Configure branch protection
+        print("\n16. Configuring branch protection...")
+        if configure_branch_protection(github_user, args.name):
+            print("  Branch protection configured:")
+            print("    - Force push: blocked")
+            print("    - Deletion: blocked")
+            print("    - enforce_admins: enabled")
+            print("    - Required check: pr-sentinel")
+        else:
+            print("  WARNING: Could not configure branch protection.")
+            print("  This may fail if the token lacks admin scope.")
+            print("  Configure manually or re-run with a classic token.")
+
+    # Post-setup verification
+    print("\n" + "=" * 60)
+    print("POST-SETUP VERIFICATION")
+    print("=" * 60)
+
+    checks_passed = 0
+    checks_total = 0
+
+    # Verify hooks exist
+    checks_total += 1
+    sg = project_path / ".claude" / "hooks" / "secret-guard.sh"
+    bg = project_path / ".claude" / "hooks" / "bash-gate.sh"
+    if sg.exists() and bg.exists():
+        print("  [PASS] Security hooks deployed")
+        checks_passed += 1
+    else:
+        print("  [FAIL] Security hooks missing!")
+
+    # Verify .gitignore has security patterns
+    checks_total += 1
+    gitignore = project_path / ".gitignore"
+    if gitignore.exists():
+        gi_content = gitignore.read_text(encoding="utf-8")
+        missing = [p for p in [".env", "*.pem", "*.key", ".dev.vars"]
+                   if p not in gi_content]
+        if not missing:
+            print("  [PASS] .gitignore security patterns present")
+            checks_passed += 1
+        else:
+            print(f"  [FAIL] .gitignore missing patterns: {missing}")
+    else:
+        print("  [FAIL] .gitignore not found!")
+
+    # Verify settings.json has hooks configured
+    checks_total += 1
+    settings_file = project_path / ".claude" / "settings.json"
+    if settings_file.exists():
+        s_content = settings_file.read_text(encoding="utf-8")
+        if "secret-guard" in s_content and "bash-gate" in s_content:
+            print("  [PASS] Hook configuration in settings.json")
+            checks_passed += 1
+        else:
+            print("  [FAIL] settings.json missing hook configuration!")
+
+    print(f"\nVerification: {checks_passed}/{checks_total} checks passed")
+
+    if checks_passed < checks_total:
+        print("\nWARNING: Some checks failed. Review and fix before starting work!")
 
     print("\n" + "=" * 60)
     print(f"[SUCCESS] Repository '{args.name}' created successfully!")
