@@ -44,6 +44,7 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0923 | [Workflow Recovery and --resume](0923-workflow-recovery.md) | Manual | On interruption | - |
 | 0925 | [Agent Token Setup](0925-agent-token-setup.md) | Manual | Quarterly (rotation) | - |
 | 0926 | [Branch Protection Setup](0926-branch-protection-setup.md) | Manual | On new repo | - |
+| 0927 | [AI CLI Tools Reference](0927-ai-cli-tools-reference.md) | Reference | - | All |
 
 ## Model Selection Guide
 
@@ -51,19 +52,31 @@ When running audits or tasks, use the appropriate model to balance cost and capa
 
 | Model | Cost | Use When |
 |-------|------|----------|
-| **Opus** | $$$ | Complex reasoning, architecture decisions, ultrathink mode |
-| **Sonnet** | $$ | Standard development work, web research, documentation |
-| **Haiku** | $ | Simple automation, metric aggregation, file inventory |
+| **Opus 4.6** | $$$ | Complex reasoning, architecture, patent review — use `/effort max` |
+| **Sonnet 4.6** | $$ | Standard development work, web research, documentation |
+| **Haiku 4.5** | $ | Simple automation, metric aggregation, file inventory |
+| **Gemini 3.1 Pro** | Free tier | Budget research, large context analysis (1M tokens) |
+| **GPT-5.4 (Codex)** | With ChatGPT sub | Security-sensitive execution (native sandbox) |
 
 See `docs/0800-common-audits.md` for per-audit model recommendations.
+See [0927](0927-ai-cli-tools-reference.md) for full tool comparison.
 
-## Ultrathink Mode
+## Extended Thinking / Reasoning Effort
 
-"Ultrathink" is the term we use to invoke extended thinking. This is done via PowerShell by the user and provides deeper analysis for complex audits.
+Each CLI tool has its own mechanism for increasing reasoning depth:
 
-**When to use ultrathink:**
+| Tool | Command | Max Setting |
+|------|---------|-------------|
+| **Claude Code** | `/effort max` | `max` (unconstrained thinking) |
+| **Gemini CLI** | `thinkingLevel` in config | `high` (Deep Think) |
+| **Codex CLI** | Reasoning effort setting | `xhigh` |
+
+**Legacy:** "Ultrathink" was the old keyword-based system for Claude Code. It still works but `/effort` is the current mechanism.
+
+**When to use max reasoning:**
 - Nightly AssemblyZero self-audits
 - Architecture reviews
+- Patent claim analysis
 - Conflict detection across documents
 - Any task requiring multi-step reasoning
 
