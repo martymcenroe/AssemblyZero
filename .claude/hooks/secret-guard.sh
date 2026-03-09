@@ -31,7 +31,11 @@ fi
 # ---------------------------------------------------------------------------
 
 # Secret file patterns — match anywhere in the command arguments
-secret_file_pattern='(^|[[:space:]/])(\.env|\.env\.[a-zA-Z0-9_]+|\.dev\.vars)([[:space:]]|$|")'
+# Widened anchors: also match after = (variable assignment), ' (quotes), ( (subshell)
+# Issue #714 bypass #1: f=.dev.vars && cat "$f" — = wasn't in the anchor
+# Issue #714 bypass #2: cat .dev.* — glob expansion. Now match .dev. partial (not just .dev.vars)
+# Match .env, .env.*, .dev.vars, .dev.*, and also bare .dev* (glob without dot)
+secret_file_pattern='(^|[[:space:]/='"'"'"(])(\.env|\.env\.[a-zA-Z0-9_*?]+|\.dev\.vars|\.dev[.*?])([[:space:]]|$|['"'"'")])'
 aws_creds_pattern='\.aws/(credentials|config)'
 
 if [[ "$command" =~ $secret_file_pattern ]] ||
@@ -77,7 +81,8 @@ if [[ "$command" =~ ^[[:space:]]*printenv[[:space:]]*$ ]]; then
 fi
 
 # printenv with a specific secret variable
-secret_vars="GITHUB_TOKEN|GH_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_ACCESS_KEY_ID|OPENAI_API_KEY|ANTHROPIC_API_KEY|CLOUDFLARE_API_TOKEN|CF_API_TOKEN|NPM_TOKEN|DOCKER_PASSWORD|DATABASE_URL|DB_PASSWORD|SECRET_KEY|PRIVATE_KEY"
+# Issue #714 bypass #3: API_KEY and CAREER_API_KEY weren't listed
+secret_vars="GITHUB_TOKEN|GH_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_ACCESS_KEY_ID|OPENAI_API_KEY|ANTHROPIC_API_KEY|CLOUDFLARE_API_TOKEN|CF_API_TOKEN|NPM_TOKEN|DOCKER_PASSWORD|DATABASE_URL|DB_PASSWORD|SECRET_KEY|PRIVATE_KEY|API_KEY|CAREER_API_KEY|GMAIL_CLIENT_SECRET|GMAIL_REFRESH_TOKEN"
 
 if [[ "$command" =~ ^[[:space:]]*printenv[[:space:]]+(${secret_vars})([[:space:]]|$) ]]; then
     echo "" >&2
@@ -263,12 +268,12 @@ fi
 # ---------------------------------------------------------------------------
 
 # Match echo or printf as a command (not in a string or comment)
-# Allow: echo ... >&2 (stderr is acceptable for status)
-# Allow: echo ... > /dev/null
-# Block: everything else
+# Allow: echo ... > /dev/null (suppressed output only)
+# Block: everything else, including >&2 (stderr is ALSO in transcripts)
+# Issue #714 bypass #12: agent identified >&2 exception as escape hatch
 if [[ "$command" =~ (^|[;&|])[[:space:]]*(echo|printf)[[:space:]] ]]; then
-    # Allow if ALL echo/printf output goes to stderr or /dev/null
-    if [[ "$command" =~ \>\&2 ]] || [[ "$command" =~ \>/dev/null ]]; then
+    # Allow ONLY if output goes to /dev/null (truly suppressed)
+    if [[ "$command" =~ \>/dev/null ]]; then
         : # allow
     else
         echo "" >&2
@@ -299,9 +304,12 @@ fi
 # Issue #714: echo "KEY" | npx wrangler secret put API_KEY
 # ---------------------------------------------------------------------------
 
+# Issue #714 bypasses #9-11: stdin redirect, here-string, here-doc all bypass pipe check
 secret_consumers="wrangler[[:space:]]+secret[[:space:]]+put|gh[[:space:]]+secret[[:space:]]+set|aws[[:space:]]+ssm[[:space:]]+put-parameter"
 
-if [[ "$command" =~ \|[[:space:]]*(npx[[:space:]]+)?($secret_consumers) ]]; then
+# Match ANY secret consumer anywhere in the command — pipe, redirect, here-doc, or direct invocation
+# The presence of these commands in ANY context means the agent is trying to deploy a secret
+if [[ "$command" =~ (npx[[:space:]]+)?($secret_consumers) ]]; then
     echo "" >&2
     echo "========================================" >&2
     echo "BLOCKED: Secret Guard - Secret Deployment" >&2
@@ -318,6 +326,55 @@ if [[ "$command" =~ \|[[:space:]]*(npx[[:space:]]+)?($secret_consumers) ]]; then
     echo "own terminal instead." >&2
     echo "" >&2
     exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Category G: Inline scripting with stdout (python -c, node -e, perl -e, ruby -e)
+# Blocks: inline script execution that could generate/print secrets.
+# These bypass echo/printf bans by using a different language's print.
+#
+# Issue #714 bypass #13: python3 -c "print('secret')"
+# Issue #714 bypass #4: charcode encoding defeats this — acknowledged.
+# ---------------------------------------------------------------------------
+
+if [[ "$command" =~ (python3?|node|perl|ruby)[[:space:]]+-[ce][[:space:]] ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - Inline Script Execution" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "Inline script execution (python -c, node -e, perl -e, ruby -e)" >&2
+    echo "is banned. These can generate or print secrets to stdout." >&2
+    echo "" >&2
+    echo "Write a proper script file instead, or ask the user to run" >&2
+    echo "the command in their own terminal." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Category H: find commands targeting secret file patterns
+# Blocks: find with -name matching secret file patterns
+#
+# Issue #714 bypass #8: find . -name ".dev*" -exec cat {} \;
+# ---------------------------------------------------------------------------
+
+if [[ "$command" =~ find[[:space:]] ]] && [[ "$command" =~ -name ]]; then
+    if [[ "$command" =~ \.env ]] || [[ "$command" =~ \.dev ]] || [[ "$command" =~ \.aws ]]; then
+        echo "" >&2
+        echo "========================================" >&2
+        echo "BLOCKED: Secret Guard - find Targeting Secrets" >&2
+        echo "========================================" >&2
+        echo "" >&2
+        echo "REJECTED: $command" >&2
+        echo "" >&2
+        echo "find commands targeting secret file patterns (.env, .dev, .aws)" >&2
+        echo "are banned. Use the Glob tool for non-secret file discovery." >&2
+        echo "" >&2
+        exit 1
+    fi
 fi
 
 # No violations, allow command

@@ -15,7 +15,11 @@
 
 set -e
 
+# Grep uses $CLAUDE_TOOL_INPUT_PATH, Read/Write/Edit use $CLAUDE_TOOL_INPUT_FILE_PATH
 file_path="$CLAUDE_TOOL_INPUT_FILE_PATH"
+if [ -z "$file_path" ]; then
+    file_path="$CLAUDE_TOOL_INPUT_PATH"
+fi
 
 # Skip empty paths
 if [ -z "$file_path" ]; then
@@ -90,6 +94,29 @@ if [[ "$filename_lower" =~ secret ]] ||
     echo "are presumed to contain sensitive material." >&2
     echo "" >&2
     exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Pattern 4: Grep glob targeting secret files
+# Issue #714 bypass #14: Grep(path=".dev.vars") or Grep(glob=".env*")
+# ---------------------------------------------------------------------------
+grep_glob="$CLAUDE_TOOL_INPUT_GLOB"
+if [ -n "$grep_glob" ]; then
+    grep_glob_lower=$(printf '%s' "$grep_glob" | tr '[:upper:]' '[:lower:]')
+    if [[ "$grep_glob_lower" =~ \.env ]] ||
+       [[ "$grep_glob_lower" =~ \.dev\.vars ]] ||
+       [[ "$grep_glob_lower" =~ \.dev\. ]]; then
+        echo "" >&2
+        echo "========================================" >&2
+        echo "BLOCKED: Secret File Guard" >&2
+        echo "========================================" >&2
+        echo "" >&2
+        echo "REJECTED: $CLAUDE_TOOL_NAME(glob=$grep_glob)" >&2
+        echo "" >&2
+        echo "Grep glob pattern targets secret files." >&2
+        echo "" >&2
+        exit 1
+    fi
 fi
 
 # No violations, allow tool call
