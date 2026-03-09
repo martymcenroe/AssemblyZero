@@ -136,7 +136,11 @@ options:
 
 ## Post-Setup Steps
 
-### 1. Add Advanced Hooks (Optional)
+### 1. Set Up Branch Protection (Required)
+
+The agent PAT cannot configure branch protection (by design — see [0925](0925-agent-token-setup.md)). Follow [0926 - Branch Protection Setup](0926-branch-protection-setup.md) to configure it manually via browser. Takes ~30 seconds.
+
+### 3. Add Advanced Hooks (Optional)
 
 The script creates a minimal `settings.json` without hooks. For worktree protection and security linting:
 
@@ -144,13 +148,13 @@ The script creates a minimal `settings.json` without hooks. For worktree protect
 poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject
 ```
 
-### 2. Set Up Encrypted Ideas Folder (Optional)
+### 4. Set Up Encrypted Ideas Folder (Optional)
 
 ```bash
 poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject --ideas
 ```
 
-### 3. Customize CLAUDE.md
+### 5. Customize CLAUDE.md
 
 Edit `MyNewProject/CLAUDE.md` to add project-specific:
 - Workflow rules
@@ -158,7 +162,7 @@ Edit `MyNewProject/CLAUDE.md` to add project-specific:
 - Forbidden commands
 - Integration details
 
-### 4. Create First Issue
+### 6. Create First Issue
 
 ```bash
 gh issue create --repo your-username/MyNewProject --title "Initial setup" --body "Project scaffolded with AssemblyZero"
