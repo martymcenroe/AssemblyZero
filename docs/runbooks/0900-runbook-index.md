@@ -43,6 +43,7 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0922 | [N9 Cleanup Node](0922-implementation-spec-n9-cleanup-node---worktree-removal-lineage-archival-and-learning-summary.md) | Manual | Post-merge | - |
 | 0923 | [Workflow Recovery and --resume](0923-workflow-recovery.md) | Manual | On interruption | - |
 | 0925 | [Agent Token Setup](0925-agent-token-setup.md) | Manual | Quarterly (rotation) | - |
+| 0926 | [Branch Protection Setup](0926-branch-protection-setup.md) | Manual | On new repo | - |
 
 ## Model Selection Guide
 
