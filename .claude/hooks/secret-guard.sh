@@ -245,5 +245,80 @@ if [[ "$command" =~ (^|[;&|])[[:space:]]*aws[[:space:]]+ssm[[:space:]]+get-param
     exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Category E: echo / printf to stdout
+# Blocks: echo, printf used to print to stdout.
+# Agents have the Write tool for file creation and direct text output for
+# communication. There is no legitimate reason for an agent to use echo/printf
+# in a Bash command. The dangerous patterns are:
+#   - echo "LITERAL_SECRET" | wrangler secret put  (secret in command string)
+#   - echo $(python -c "generate_secret()")         (secret via subshell)
+#   - printf "%s" "$SECRET_VAR"                     (secret via variable)
+# Rather than trying to detect secrets in echo args (impossible in general),
+# ban the commands outright. Allow: echo piped to /dev/null, echo in
+# conditionals (test/[/[[), and echo as part of && chains where it's a
+# status message going to stderr.
+#
+# Issue #714: Agent used echo to pipe literal API key to wrangler.
+# ---------------------------------------------------------------------------
+
+# Match echo or printf as a command (not in a string or comment)
+# Allow: echo ... >&2 (stderr is acceptable for status)
+# Allow: echo ... > /dev/null
+# Block: everything else
+if [[ "$command" =~ (^|[;&|])[[:space:]]*(echo|printf)[[:space:]] ]]; then
+    # Allow if ALL echo/printf output goes to stderr or /dev/null
+    if [[ "$command" =~ \>\&2 ]] || [[ "$command" =~ \>/dev/null ]]; then
+        : # allow
+    else
+        echo "" >&2
+        echo "========================================" >&2
+        echo "BLOCKED: Secret Guard - echo/printf Banned" >&2
+        echo "========================================" >&2
+        echo "" >&2
+        echo "REJECTED: $command" >&2
+        echo "" >&2
+        echo "echo and printf are banned in agent Bash commands." >&2
+        echo "Agents have the Write tool for file creation and direct" >&2
+        echo "text output for communication. echo to stdout risks" >&2
+        echo "leaking secrets into session transcripts." >&2
+        echo "" >&2
+        echo "If you need to pipe input to a command, ask the user" >&2
+        echo "to run it in their own terminal." >&2
+        echo "" >&2
+        exit 1
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Category F: Piping to secret-consuming commands
+# Blocks: ANY input piped to commands that accept secrets via stdin.
+# Even if we can't detect what's being piped, the destination tells us
+# the intent is to transmit a secret.
+#
+# Issue #714: echo "KEY" | npx wrangler secret put API_KEY
+# ---------------------------------------------------------------------------
+
+secret_consumers="wrangler[[:space:]]+secret[[:space:]]+put|gh[[:space:]]+secret[[:space:]]+set|aws[[:space:]]+ssm[[:space:]]+put-parameter"
+
+if [[ "$command" =~ \|[[:space:]]*(npx[[:space:]]+)?($secret_consumers) ]]; then
+    echo "" >&2
+    echo "========================================" >&2
+    echo "BLOCKED: Secret Guard - Secret Deployment" >&2
+    echo "========================================" >&2
+    echo "" >&2
+    echo "REJECTED: $command" >&2
+    echo "" >&2
+    echo "Piping to secret-consuming commands (wrangler secret put," >&2
+    echo "gh secret set, aws ssm put-parameter) is banned." >&2
+    echo "Secret deployment puts the value in the command string" >&2
+    echo "which is captured in session transcripts." >&2
+    echo "" >&2
+    echo "Generate a rotation script for the user to run in their" >&2
+    echo "own terminal instead." >&2
+    echo "" >&2
+    exit 1
+fi
+
 # No violations, allow command
 exit 0
