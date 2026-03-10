@@ -424,7 +424,7 @@ def test_get_repo_root_git_not_installed():
     
     This covers the FileNotFoundError exception handling (lines 35-37).
     """
-    with mock.patch("assemblyzero.workflows.checkpoint.subprocess.run") as mock_run:
+    with mock.patch("assemblyzero.utils.shell.subprocess.run") as mock_run:
         mock_run.side_effect = FileNotFoundError("git not found")
         result = get_repo_root()
         assert result is None

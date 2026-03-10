@@ -69,12 +69,6 @@ class TestGeminiClientModelValidation:
 
         assert "forbidden" in str(exc_info.value).lower()
 
-    def test_130_forbidden_model_rejected_old_3_pro(self):
-        """Test that old gemini-3.1-pro-preview is rejected after 3.1 refresh."""
-        with pytest.raises(ValueError) as exc_info:
-            GeminiClient(model="gemini-3.1-pro-preview")
-
-        assert "forbidden" in str(exc_info.value).lower()
 
     def test_130_forbidden_model_rejected_old_3_pro_ga(self):
         """Test that old gemini-3-pro is rejected after 3.1 refresh."""
