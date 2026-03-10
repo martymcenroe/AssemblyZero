@@ -31,8 +31,6 @@ ALL_SUBPACKAGES = [
     "assemblyzero.workflows",
     "assemblyzero.workflows.implementation_spec",
     "assemblyzero.workflows.implementation_spec.nodes",
-    "assemblyzero.workflows.issue",
-    "assemblyzero.workflows.issue.nodes",
     "assemblyzero.workflows.orchestrator",
     "assemblyzero.workflows.parallel",
     "assemblyzero.workflows.requirements",

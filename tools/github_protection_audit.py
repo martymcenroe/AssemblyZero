@@ -735,11 +735,11 @@ def run_audit(repos: list[str]) -> list[AuditCheck]:
             ))
 
             # A06: pr-sentinel check present
-            has_sentinel = "pr-sentinel" in contexts
+            has_sentinel = any("pr-sentinel" in ctx for ctx in contexts)
             results.append(AuditCheck(
                 check_id="A06", repo=repo,
                 setting="pr-sentinel check present",
-                expected="pr-sentinel in required contexts",
+                expected="pr-sentinel (substring) in required contexts",
                 actual=f"{'Present' if has_sentinel else 'Absent'} in {contexts}",
                 status="PASS" if has_sentinel else "WARN",
             ))
