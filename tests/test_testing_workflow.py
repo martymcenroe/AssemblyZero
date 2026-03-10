@@ -171,11 +171,12 @@ Test the logout flow.
         assert "Appendix" not in result
 
     def test_extract_test_plan_section_missing(self):
-        """extract_test_plan_section returns empty for missing section."""
-        lld = "# LLD\n\n## 1. Context\n\nNo test plan here."
-        result = extract_test_plan_section(lld)
+        """extract_test_plan_section raises WorkflowParsingError for missing section."""
+        from assemblyzero.workflows.testing.nodes.load_lld import WorkflowParsingError
 
-        assert result == ""
+        lld = "# LLD\n\n## 1. Context\n\nNo test plan here."
+        with pytest.raises(WorkflowParsingError, match="Expected: ## 10. Test Mapping"):
+            extract_test_plan_section(lld)
 
     def test_extract_requirements(self):
         """extract_requirements finds requirement patterns."""
