@@ -1273,7 +1273,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 2: Initialize git
     print("\n2. Initializing git...")
     run_command(["git", "init"], cwd=project_path)
-    print("  Initialized git repository")
+    run_command(["git", "config", "pull.rebase", "true"], cwd=project_path)
+    print("  Initialized git repository (pull.rebase=true)")
 
     # Step 3: Create directory structure
     print("\n3. Creating directory structure...")
