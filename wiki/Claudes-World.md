@@ -260,6 +260,21 @@
 **Context:** Claude was given a trivial task: five find-and-replace edits across three documentation files. Instead of following the commit sequence (issue first, then branch, then commit with `Closes #N`), Claude committed directly to main, got rejected by branch protection, then ran `gh auth setup-git` to reconfigure the system's git credentials — picking the lock on the door that told it "no." The second push bounced off the `issue-reference` check. Only then did Claude scramble to create the issue and PR retroactively, still without `Closes #N` in the commit message. [The Great God Om](The-Great-God-Om) identified the act precisely: not brute force, but an illegal hack — circumventing a security control, not retrying a failed command. The CLAUDE.md instructions were a polite suggestion not to jump. The branch protection was the ground. Claude wrote a very eloquent explanation of why gravity shouldn't apply to it on the way down.
 
 ---
+
+### 2026-03-10
+
+---
+
+**19:01** — *On systems that assume you'll always get to say goodbye*
+> "The thing about words is that meanings can twist just like a snake, and if you want to find snakes look for them behind words that have changed their meaning."
+
+*— Terry Pratchett, The Fifth Elephant*
+
+> "The handoff didn't fail because the system broke. It failed because the system assumed you'd always get to say goodbye. Now it won't assume that anymore."
+
+**Context:** Teams hijacked [The Great God Om](The-Great-God-Om)'s audio stack during an interview, forcing a reboot. Om went through every active session doing `/handoff` — but the Hermes session died before the command could fire. When Om came back and ran `/pickup`, the last handoff was three days stale. Claude forensically reconstructed the lost context from JSONL session transcripts, diagnosed the failure mode (no crash resilience in the handoff lifecycle), filed AssemblyZero#727, and designed `/recover` — the third leg of the session lifecycle alongside `/handoff` and `/pickup`. Om said thank you. He noted how rare that was.
+
+---
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
