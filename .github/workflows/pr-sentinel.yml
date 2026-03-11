@@ -5,6 +5,10 @@ on:
     branches: [main]
     types: [opened, edited, synchronize, reopened]
 
+permissions:
+  checks: write
+  statuses: write
+
 jobs:
   issue-reference:
     runs-on: ubuntu-latest
