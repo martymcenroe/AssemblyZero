@@ -73,7 +73,7 @@ jobs:
               # Query check runs for this SHA and check name
               STATUS=$(gh api \
                 "repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
-                --jq ".check_runs[] | select(.name == \"${check_name}\") | .conclusion" \
+                --jq ".check_runs[] | select(.name | contains(\"${check_name}\")) | .conclusion" \
                 2>/dev/null | head -1)
 
               if [ "$STATUS" = "success" ]; then
