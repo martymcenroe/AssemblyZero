@@ -1,0 +1,23 @@
+name: Auto Review
+
+# Caller workflow: invokes the reusable auto-reviewer from AssemblyZero.
+# Copy this file to .github/workflows/auto-reviewer.yml in each repo.
+#
+# For repos with additional required checks beyond pr-sentinel, override:
+#   required_checks: "pr-sentinel, CI, CodeQL"
+#
+# Issue: #736
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  auto-review:
+    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
+    with:
+      required_checks: "pr-sentinel"
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

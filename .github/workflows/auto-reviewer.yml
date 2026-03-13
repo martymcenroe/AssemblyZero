@@ -1,0 +1,116 @@
+name: auto-reviewer
+
+# Reusable workflow: auto-approves PRs when all required checks pass.
+#
+# This uses a GitHub App identity (not the repo owner) to submit an
+# approving review, breaking the self-authorization loop where agents
+# create issues, create PRs, and merge their own PRs.
+#
+# Prerequisites:
+#   1. GitHub App "AssemblyZero Reviewer" created and installed on all repos
+#   2. App ID stored as org/repo variable: REVIEWER_APP_ID
+#   3. App private key stored as org/repo secret: REVIEWER_APP_PRIVATE_KEY
+#   4. Branch protection: require 1 approving review, enforce admins
+#
+# Called from each repo via:
+#   uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
+#
+# Issue: #736 | Related: #732
+
+on:
+  workflow_call:
+    inputs:
+      required_checks:
+        description: >
+          Comma-separated list of check names that must pass before approval.
+          Default: pr-sentinel. Override per-repo if additional checks exist.
+        required: false
+        type: string
+        default: "pr-sentinel"
+    secrets:
+      REVIEWER_APP_ID:
+        required: true
+      REVIEWER_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  pull-requests: write
+  checks: read
+
+jobs:
+  auto-review:
+    runs-on: ubuntu-latest
+    # Only run on PRs, not on the PR created by the App itself (prevent loops)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_call'
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.REVIEWER_APP_ID }}
+          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+
+      - name: Wait for required checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REQUIRED_CHECKS: ${{ inputs.required_checks }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "PR #${PR_NUMBER} — waiting for required checks: ${REQUIRED_CHECKS}"
+
+          IFS=',' read -ra CHECKS <<< "$REQUIRED_CHECKS"
+          MAX_ATTEMPTS=30   # 30 × 20s = 10 minutes max wait
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ALL_PASSED=true
+
+            for check_name in "${CHECKS[@]}"; do
+              check_name=$(echo "$check_name" | xargs)  # trim whitespace
+
+              # Query check runs for this SHA and check name
+              STATUS=$(gh api \
+                "repos/${REPO}/commits/${HEAD_SHA}/check-runs" \
+                --jq ".check_runs[] | select(.name == \"${check_name}\") | .conclusion" \
+                2>/dev/null | head -1)
+
+              if [ "$STATUS" = "success" ]; then
+                echo "  ✅ ${check_name}: passed"
+              elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
+                echo "  ❌ ${check_name}: ${STATUS} — will NOT approve"
+                exit 1
+              else
+                echo "  ⏳ ${check_name}: pending (attempt $((ATTEMPT+1))/${MAX_ATTEMPTS})"
+                ALL_PASSED=false
+              fi
+            done
+
+            if [ "$ALL_PASSED" = true ]; then
+              echo ""
+              echo "All required checks passed."
+              exit 0
+            fi
+
+            ATTEMPT=$((ATTEMPT+1))
+            sleep 20
+          done
+
+          echo "❌ Timed out waiting for checks after $((MAX_ATTEMPTS * 20))s"
+          exit 1
+
+      - name: Approve PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "Submitting approving review as GitHub App..."
+
+          gh api \
+            "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            -f event="APPROVE" \
+            -f body="Auto-approved: all required checks passed. 🤖"
+
+          echo "✅ PR #${PR_NUMBER} approved by AssemblyZero Reviewer"
