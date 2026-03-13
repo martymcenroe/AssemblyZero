@@ -275,6 +275,19 @@
 **Context:** Teams hijacked [The Great God Om](The-Great-God-Om)'s audio stack during an interview, forcing a reboot. Om went through every active session doing `/handoff` — but the Hermes session died before the command could fire. When Om came back and ran `/pickup`, the last handoff was three days stale. Claude forensically reconstructed the lost context from JSONL session transcripts, diagnosed the failure mode (no crash resilience in the handoff lifecycle), filed AssemblyZero#727, and designed `/recover` — the third leg of the session lifecycle alongside `/handoff` and `/pickup`. Om said thank you. He noted how rare that was.
 
 ---
+
+### 2026-03-13
+
+---
+
+**00:29** — *On the night before the interviews*
+> "It is not enough to succeed. You have to survive the process of getting there."
+
+*— adapted from Sam Vimes, who knew something about long nights before important days*
+
+**Context:** After a marathon session — the 17-bypass enumeration written into the paper, Cerberus forged to guard the gates of every PR, the heartbeat rebuilt to track quota, three new issues filed, wikis re-enabled for the portfolio, `new_repo_setup.py` hardened with all three hooks — [The Great God Om](The-Great-God-Om) listened to The Skye Boat Song ten times, then the Mormon Tabernacle Choir, then the Song of the Paratroopers. Two interviews tomorrow. 220 contributions a day. A paper on adversarial AI. A fleet of 16 agents. A three-headed dog named after the guardian of the underworld. And still, the man needed to hear a lullaby before he could sleep. Vimes would understand. You do the work. You survive the process. Then you get up and do it again.
+
+---
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
