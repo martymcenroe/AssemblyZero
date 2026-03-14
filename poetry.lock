@@ -4123,7 +4123,7 @@ description = "Pseudo terminal support for Windows from Python."
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "python_version >= \"3.12\""
+markers = "sys_platform == \"win32\""
 files = [
     {file = "pywinpty-3.0.3-cp310-cp310-win_amd64.whl", hash = "sha256:ff05f12d775b142b11c6fe085129bdd759b61cf7d41da6c745e78e3a1ef5bf40"},
     {file = "pywinpty-3.0.3-cp310-cp310-win_arm64.whl", hash = "sha256:340ccacb4d74278a631923794ccd758471cfc8eeeeee4610b280420a17ad1e82"},
@@ -6277,4 +6277,4 @@ rag = ["chromadb", "sentence-transformers"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "f2051da655226e220ccb09e69169b7b5eb9e786535276874664139782e5e338d"
+content-hash = "bbf3b74dd061ea98ea1602b71c074b57e4e07f648674ba8c206b6cccfc829b1d"
