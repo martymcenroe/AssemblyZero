@@ -4,7 +4,7 @@ name: Auto Review
 # Copy this file to .github/workflows/auto-reviewer.yml in each repo.
 #
 # For repos with additional required checks beyond pr-sentinel, override:
-#   required_checks: "pr-sentinel, CI, CodeQL"
+#   required_checks: "issue-reference, CI, CodeQL"
 #
 # Issue: #736
 
@@ -13,11 +13,15 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened]
 
+permissions:
+  pull-requests: write
+  checks: read
+
 jobs:
   auto-review:
     uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
     with:
-      required_checks: "pr-sentinel"
+      required_checks: "issue-reference"
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
