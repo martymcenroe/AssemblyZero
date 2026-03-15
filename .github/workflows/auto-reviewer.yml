@@ -26,7 +26,7 @@ on:
           Default: pr-sentinel. Override per-repo if additional checks exist.
         required: false
         type: string
-        default: "pr-sentinel"
+        default: "issue-reference"
     secrets:
       REVIEWER_APP_ID:
         required: true

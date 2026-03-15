@@ -187,9 +187,12 @@ def parse_usage_data(raw_output: str) -> dict:
         "weekly_sonnet": {"percent_used": None, "resets_at": None}
     }
 
+    # PTY output may collapse whitespace (e.g. "Currentsession", "Currentweek(allmodels)")
+    # so all inter-word \s+ are replaced with \s* to handle both normal and collapsed output.
+
     # Session pattern - handles TUI box characters
     session_match = re.search(
-        r'Current\s+session[^\d]*(\d+)%\s*used.*?Resets?\s+([^\n\r│]+)',
+        r'Current\s*session[^\d]*(\d+)\s*%\s*used.*?Reset?s?\s*([^\n\r│]+)',
         text, re.IGNORECASE | re.DOTALL
     )
     if session_match:
@@ -198,7 +201,7 @@ def parse_usage_data(raw_output: str) -> dict:
 
     # Weekly all models pattern
     weekly_all_match = re.search(
-        r'Current\s+week\s*\(all\s+models?\)[^\d]*(\d+)%\s*used.*?Resets?\s+([^\n\r│]+)',
+        r'Current\s*week\s*\(all\s*models?\)[^\d]*(\d+)\s*%\s*used.*?Resets?\s*([^\n\r│]+)',
         text, re.IGNORECASE | re.DOTALL
     )
     if weekly_all_match:
@@ -207,12 +210,11 @@ def parse_usage_data(raw_output: str) -> dict:
 
     # Weekly Sonnet only pattern - captures percentage and optional reset time
     weekly_sonnet_match = re.search(
-        r'Current\s+week\s*\(Sonnet\s+only\)[^\d]*(\d+)%\s*used(?:.*?Resets?\s+([^\n\r│]+))?',
+        r'Current\s*week\s*\(Sonnet\s*only\)[^\d]*(\d+)\s*%\s*used(?:.*?Resets?\s*([^\n\r│]+))?',
         text, re.IGNORECASE | re.DOTALL
     )
     if weekly_sonnet_match:
         result["weekly_sonnet"]["percent_used"] = int(weekly_sonnet_match.group(1))
-        # Sonnet reset time may not be shown if 0% - capture if present
         if weekly_sonnet_match.group(2):
             result["weekly_sonnet"]["resets_at"] = weekly_sonnet_match.group(2).strip()
 
