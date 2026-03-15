@@ -82,16 +82,29 @@ export async function handleWebhook(request, env) {
 
     const pr = payload.pull_request;
 
-    // Skip dependabot PRs
-    if (pr.user?.login === "dependabot[bot]") {
-      return new Response("Skipped dependabot", { status: 200 });
-    }
-
     const owner = payload.repository.owner.login;
     const repo = payload.repository.name;
     const headSha = pr.head.sha;
     const installationId = payload.installation.id;
     const checkName = env.CHECK_NAME || "pr-sentinel / issue-reference";
+
+    // Auto-pass dependabot PRs — they don't have issue references
+    // but the check run must be created to complete the check suite
+    if (pr.user?.login === "dependabot[bot]") {
+      const token = await getInstallationToken(
+        env.APP_ID,
+        env.PRIVATE_KEY_B64,
+        installationId
+      );
+      await createCheckRun(token, owner, repo, headSha, checkName, {
+        valid: true,
+        reason: "Dependabot PR — issue reference not required.",
+      });
+      return new Response(
+        JSON.stringify({ conclusion: "success", skipped: "dependabot" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     // Validate PR body (regex check)
     let result = validatePRBody(pr.body);
