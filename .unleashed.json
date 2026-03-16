@@ -1,0 +1,7 @@
+{
+  "profile": "default",
+  "claude": {
+    "model": "opus",
+    "effort": "max"
+  }
+}
