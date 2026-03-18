@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1184,25 +1184,6 @@ class TestE2EValidationReturnCodes:
 class TestImplementCodeModule:
     """Tests for implement_code.py module."""
 
-    def test_find_claude_cli_with_shutil_which(self):
-        """_find_claude_cli finds CLI via shutil.which."""
-        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
-
-        with patch("shutil.which") as mock_which:
-            mock_which.return_value = "/usr/bin/claude"
-            result = _find_claude_cli()
-            assert result == "/usr/bin/claude"
-
-    def test_find_claude_cli_fallback_to_paths(self, tmp_path):
-        """_find_claude_cli checks common paths when which fails."""
-        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
-
-        with patch("shutil.which", return_value=None):
-            # None of the fallback paths exist, so should return None
-            result = _find_claude_cli()
-            # Result is None when no CLI found
-            assert result is None or isinstance(result, str)
-
     def test_build_implementation_prompt_basic(self, tmp_path):
         """build_implementation_prompt creates valid prompt."""
         from assemblyzero.workflows.testing.nodes.implement_code import build_implementation_prompt
@@ -1476,7 +1457,8 @@ __pycache__/
                 implement_code(state)
 
         # Check that error is about Claude API
-        assert "API error after 3 attempts" in str(exc_info.value)
+        # MAX_FILE_RETRIES = 2
+        assert "API error after 2 attempts" in str(exc_info.value)
 
     def test_call_claude_headless_sdk_fallback(self):
         """call_claude_headless falls back to SDK when CLI unavailable."""
@@ -3146,7 +3128,8 @@ def example():
             with pytest.raises(ImplementationError) as exc_info:
                 implement_code(state)
 
-        assert "No code block after 3 attempts" in str(exc_info.value)
+        # MAX_FILE_RETRIES = 2
+        assert "No code block after 2 attempts" in str(exc_info.value)
 
     def test_parse_implementation_response_various_formats(self):
         """parse_implementation_response handles various formats."""
@@ -3687,68 +3670,91 @@ class TestFinalizeFullCoverage:
 
 
 class TestImplementCodeCLIPaths:
-    """Tests for CLI paths in implement_code.py."""
+    """Tests for call_claude_headless via get_provider (Issue #783)."""
 
-    def test_call_claude_headless_cli_success(self):
-        """call_claude_headless succeeds with CLI."""
+    def test_call_claude_headless_success(self):
+        """call_claude_headless succeeds via provider."""
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="```python\n# File: test.py\npass\n```",
+            raw_response="```python\n# File: test.py\npass\n```",
+            error_message=None,
+            provider="claude",
+            model_used="opus",
+            duration_ms=1000,
+            attempts=1,
+        )
+
+        with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider", return_value=mock_provider):
+            response, error = call_claude_headless("test prompt")
+
+            assert "# File: test.py" in response
+            assert error == ""
+
+    def test_call_claude_headless_error(self):
+        """call_claude_headless handles provider error."""
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=None,
+            error_message="Error",
+            provider="claude",
+            model_used="opus",
+            duration_ms=100,
+            attempts=1,
+            retryable=True,
+        )
+
+        with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider", return_value=mock_provider):
+            response, error = call_claude_headless("test prompt")
+
+            assert isinstance(response, str)
+            assert isinstance(error, str)
+            assert error != ""
+
+    def test_call_claude_headless_timeout(self):
+        """call_claude_headless handles provider timeout."""
+        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=None,
+            error_message="timeout after 600s",
+            provider="claude",
+            model_used="opus",
+            duration_ms=600000,
+            attempts=1,
+            retryable=True,
+        )
+
+        with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider", return_value=mock_provider):
+            response, error = call_claude_headless("test prompt")
+
+            assert "timeout" in error.lower()
+
+    def test_call_claude_headless_provider_exception(self):
+        """call_claude_headless handles provider exception."""
         from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
 
-        # Mock successful CLI call
-        with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = "```python\n# File: test.py\npass\n```"
-                mock_run.return_value.stderr = ""
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            side_effect=Exception("provider unavailable"),
+        ):
+            response, error = call_claude_headless("test prompt")
 
-                response, error = call_claude_headless("test prompt")
-
-                assert "# File: test.py" in response
-                assert error == ""
-
-    def test_call_claude_headless_cli_error(self):
-        """call_claude_headless handles CLI error."""
-        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
-
-        with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
-                mock_run.return_value.returncode = 1
-                mock_run.return_value.stdout = ""
-                mock_run.return_value.stderr = "Error"
-
-                # Should fall back to SDK or return error
-                response, error = call_claude_headless("test prompt")
-
-                # Either SDK response or error
-                assert isinstance(response, str)
-                assert isinstance(error, str)
-
-    def test_call_claude_headless_cli_timeout(self):
-        """call_claude_headless handles CLI timeout."""
-        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
-
-        with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
-                mock_run.side_effect = subprocess.TimeoutExpired("claude", 600)
-
-                response, error = call_claude_headless("test prompt")
-
-                # Issue #321: Error message now includes timeout duration
-                assert "timeout" in error.lower()
-
-    def test_call_claude_headless_cli_empty_response(self):
-        """call_claude_headless handles empty CLI response."""
-        from assemblyzero.workflows.testing.nodes.implement_code import call_claude_headless
-
-        with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command") as mock_run:
-                mock_run.return_value.returncode = 0
-                mock_run.return_value.stdout = ""
-                mock_run.return_value.stderr = ""
-
-                # Should fall back to SDK
-                response, error = call_claude_headless("test prompt")
-
-                assert isinstance(response, str)
+            assert isinstance(response, str)
+            assert "Provider error" in error
 
 
 class TestE2EValidationMockPath:
@@ -4697,14 +4703,6 @@ class TestReviewTestPlanCoverageGaps:
 
 class TestImplementCodeCoverageGaps:
     """Tests for remaining uncovered lines in implement_code.py."""
-
-    def test_find_claude_cli_returns_string_or_none(self):
-        """_find_claude_cli returns a string path or None."""
-        from assemblyzero.workflows.testing.nodes.implement_code import _find_claude_cli
-
-        result = _find_claude_cli()
-        # Should return either a valid path string or None
-        assert result is None or (isinstance(result, str) and len(result) > 0)
 
     def test_parse_response_pattern4_fallback_with_comment_path(self):
         """parse_implementation_response uses pattern 4 fallback with path in comment."""

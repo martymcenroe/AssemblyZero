@@ -41,13 +41,11 @@ from .prompts import (
 # --- claude_client.py ---
 from .claude_client import (
     CLI_TIMEOUT,
-    SDK_TIMEOUT,
     ImplementationError,
     ProgressReporter,
     build_system_prompt,
     call_claude_for_file,
     compute_dynamic_timeout,
-    _find_claude_cli,
 )
 
 # --- orchestrator.py ---
@@ -103,13 +101,11 @@ __all__ = [
     "build_stable_system_prompt",
     # claude_client
     "CLI_TIMEOUT",
-    "SDK_TIMEOUT",
     "ImplementationError",
     "ProgressReporter",
     "build_system_prompt",
     "call_claude_for_file",
     "compute_dynamic_timeout",
-    "_find_claude_cli",
     # orchestrator
     "CODE_GEN_PROMPT_CAP",
     "generate_file_with_retry",

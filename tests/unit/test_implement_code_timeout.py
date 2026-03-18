@@ -1,73 +1,65 @@
 """Tests for timeout handling in implementation workflow.
 
 Issue #321: Implementation workflow silently exits on API timeout.
-Solution: Add timeout to SDK fallback, ensure errors propagate correctly.
-
-TDD: These tests are written BEFORE implementation.
+Issue #783: Refactored to test through unified provider gate (get_provider).
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
-import time
+from unittest.mock import MagicMock, patch
 
 
 # =============================================================================
-# T010: SDK timeout handling
+# T010: Provider timeout handling
 # =============================================================================
 
 
-class TestSDKTimeout:
-    """Tests for SDK timeout behavior."""
+class TestProviderTimeout:
+    """Tests for provider timeout behavior via get_provider."""
 
-    def test_sdk_timeout_returns_error(self):
-        """T010: SDK call that times out should return error tuple."""
+    def test_provider_timeout_returns_error(self):
+        """T010: Provider call that times out should return error tuple."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
         )
-        import httpx
+        from assemblyzero.core.llm_provider import LLMCallResult
 
-        # Mock the CLI to not exist, forcing SDK fallback
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=None,
+            error_message="timeout after 300s waiting for response",
+            provider="claude",
+            model_used="opus",
+            duration_ms=300000,
+            attempts=1,
+            retryable=True,
+        )
+
         with patch(
-            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
-            return_value=None,
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
         ):
-            # Mock anthropic module at import time
-            mock_anthropic = MagicMock()
-            mock_client = MagicMock()
-            mock_anthropic.Anthropic.return_value = mock_client
+            response, error = call_claude_for_file("test prompt")
 
-            # Simulate timeout by raising httpx.TimeoutException
-            # Issue #541: now uses messages.stream instead of messages.create
-            mock_client.messages.stream.side_effect = httpx.TimeoutException(
-                "Connection timed out"
-            )
+            assert response == ""
+            assert "timeout" in error.lower()
 
-            with patch.dict(
-                "sys.modules",
-                {"anthropic": mock_anthropic, "httpx": httpx},
-            ):
-                response, error = call_claude_for_file("test prompt")
-
-                assert response == ""
-                assert "timeout" in error.lower()
-
-    def test_sdk_timeout_does_not_hang(self):
-        """SDK should not hang indefinitely on slow responses."""
+    def test_provider_exception_returns_error(self):
+        """Provider raising an exception should return error tuple."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
-            SDK_TIMEOUT,
         )
 
-        # Verify SDK_TIMEOUT constant exists and is reasonable
-        assert hasattr(
-            __import__(
-                "assemblyzero.workflows.testing.nodes.implement_code",
-                fromlist=["SDK_TIMEOUT"],
-            ),
-            "SDK_TIMEOUT",
-        )
-        assert SDK_TIMEOUT > 0
-        assert SDK_TIMEOUT <= 900  # Reasonable upper bound
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            side_effect=Exception("connection failed"),
+        ):
+            response, error = call_claude_for_file("test prompt")
+
+            assert response == ""
+            assert "Provider error" in error
+            assert "connection failed" in error
 
 
 # =============================================================================
@@ -102,66 +94,46 @@ class TestErrorPropagation:
             assert "API error" in str(exc_info.value)
 
     def test_timeout_error_includes_duration(self):
-        """Timeout errors should include how long we waited."""
+        """Timeout errors should include the timeout value in the message."""
         from assemblyzero.workflows.testing.nodes.implement_code import (
             call_claude_for_file,
             compute_dynamic_timeout,
         )
-        import httpx
+        from assemblyzero.core.llm_provider import LLMCallResult
 
         prompt = "test"
         expected_timeout = compute_dynamic_timeout(prompt)
 
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=None,
+            error_message=f"timeout after {expected_timeout}s waiting for response",
+            provider="claude",
+            model_used="opus",
+            duration_ms=expected_timeout * 1000,
+            attempts=1,
+            retryable=True,
+        )
+
         with patch(
-            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
-            return_value=None,
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
         ):
-            mock_anthropic = MagicMock()
-            mock_client = MagicMock()
-            mock_anthropic.Anthropic.return_value = mock_client
-            mock_client.messages.stream.side_effect = httpx.TimeoutException("timed out")
+            response, error = call_claude_for_file(prompt)
 
-            with patch.dict(
-                "sys.modules",
-                {"anthropic": mock_anthropic, "httpx": httpx},
-            ):
-                response, error = call_claude_for_file(prompt)
-
-                # Error should mention timeout duration
-                assert "timeout" in error.lower()
-                assert str(expected_timeout) in error
+            assert "timeout" in error.lower()
+            assert str(expected_timeout) in error
 
 
 # =============================================================================
-# T030: CLI timeout handling (already exists, verify it works)
+# T030: CLI timeout constant (still exists for compute_dynamic_timeout)
 # =============================================================================
 
 
 class TestCLITimeout:
-    """Tests for CLI timeout behavior (should already work)."""
-
-    def test_cli_timeout_returns_error(self):
-        """CLI timeout should return error tuple, not hang."""
-        from assemblyzero.workflows.testing.nodes.implement_code import (
-            call_claude_for_file,
-        )
-        import subprocess
-
-        with patch(
-            "assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli",
-            return_value="/usr/bin/claude",
-        ):
-            with patch(
-                "assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command"
-            ) as mock_run:
-                mock_run.side_effect = subprocess.TimeoutExpired(
-                    cmd="claude", timeout=300
-                )
-
-                response, error = call_claude_for_file("test prompt")
-
-                assert response == ""
-                assert "timeout" in error.lower() or "timed out" in error.lower()
+    """Tests for CLI timeout constant."""
 
     def test_cli_timeout_value(self):
         """CLI timeout should be 10 minutes (600 seconds). Issue #373."""
@@ -173,7 +145,45 @@ class TestCLITimeout:
 
 
 # =============================================================================
-# T040: Workflow exit code
+# T040: Non-retryable errors
+# =============================================================================
+
+
+class TestNonRetryableErrors:
+    """Tests for non-retryable error handling."""
+
+    def test_non_retryable_error_prefixed(self):
+        """Non-retryable provider errors get [NON-RETRYABLE] prefix."""
+        from assemblyzero.workflows.testing.nodes.implement_code import (
+            call_claude_for_file,
+        )
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=False,
+            response=None,
+            raw_response=None,
+            error_message="invalid_api_key",
+            provider="claude",
+            model_used="opus",
+            duration_ms=100,
+            attempts=1,
+            retryable=False,
+        )
+
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ):
+            response, error = call_claude_for_file("test prompt")
+
+            assert response == ""
+            assert error.startswith("[NON-RETRYABLE]")
+
+
+# =============================================================================
+# T050: Workflow exit code
 # =============================================================================
 
 
@@ -217,3 +227,81 @@ class TestWorkflowExitCode:
             # Should raise ImplementationError, not return success
             with pytest.raises(ImplementationError):
                 implement_code(state)
+
+
+# =============================================================================
+# T060: Provider gate is used (Issue #783)
+# =============================================================================
+
+
+class TestProviderGate:
+    """Tests that call_claude_for_file uses get_provider (not direct SDK)."""
+
+    def test_uses_get_provider(self):
+        """call_claude_for_file must call get_provider, not anthropic.Anthropic."""
+        from assemblyzero.workflows.testing.nodes.implement_code import (
+            call_claude_for_file,
+        )
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="```python\nprint('hello')\n```",
+            raw_response="```python\nprint('hello')\n```",
+            error_message=None,
+            provider="claude",
+            model_used="opus",
+            duration_ms=1000,
+            attempts=1,
+        )
+
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ) as mock_get:
+            response, error = call_claude_for_file("write code")
+
+            mock_get.assert_called_once_with("claude:opus")
+            mock_provider.invoke.assert_called_once()
+            assert response == "```python\nprint('hello')\n```"
+            assert error == ""
+
+    def test_passes_model_to_provider(self):
+        """Model parameter flows through to get_provider spec."""
+        from assemblyzero.workflows.testing.nodes.implement_code import (
+            call_claude_for_file,
+        )
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="code",
+            raw_response="code",
+            error_message=None,
+            provider="claude",
+            model_used="haiku",
+            duration_ms=500,
+            attempts=1,
+        )
+
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ) as mock_get:
+            call_claude_for_file("prompt", model="haiku")
+
+            mock_get.assert_called_once_with("claude:haiku")
+
+    def test_no_direct_anthropic_import(self):
+        """claude_client.py must not import anthropic directly."""
+        import importlib
+        import assemblyzero.workflows.testing.nodes.implementation.claude_client as mod
+
+        source = importlib.util.find_spec(mod.__name__)
+        assert source is not None
+        import inspect
+        src = inspect.getsource(mod)
+        assert "import anthropic" not in src
+        assert "anthropic.Anthropic" not in src
