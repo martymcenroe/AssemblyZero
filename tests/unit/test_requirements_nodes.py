@@ -1394,7 +1394,7 @@ class TestReviewNodeCoverage:
 
         review(state)
 
-        mock_get_provider.assert_called_with("mock:review")
+        mock_get_provider.assert_called_with("mock:review", effort=None)
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_handles_invalid_reviewer(self, mock_get_provider, tmp_path):

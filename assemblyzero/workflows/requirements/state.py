@@ -161,6 +161,7 @@ class RequirementsWorkflowState(TypedDict, total=False):
     target_repo: str  # ALWAYS set, NEVER empty
     config_drafter: str
     config_reviewer: str
+    config_effort: str  # Issue #773: Effort level for Claude reviewer
     config_gates_draft: bool
     config_gates_verdict: bool
     config_auto_mode: bool

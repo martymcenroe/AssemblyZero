@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.workflows.testing.audit import (
@@ -462,8 +462,6 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
 
     # Issue #773: Use unified LLM provider instead of hardcoded GeminiClient
-    from assemblyzero.core.llm_provider import get_provider
-
     reviewer_spec = state.get("config_reviewer", "claude:opus")
     if state.get("mock_mode", False):
         reviewer_spec = "mock:review"

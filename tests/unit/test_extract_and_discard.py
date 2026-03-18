@@ -62,10 +62,11 @@ class TestBlockedVerdictExtraction:
         mock_result.input_tokens = 100
         mock_result.output_tokens = 50
 
-        with patch("assemblyzero.core.gemini_client.GeminiClient") as mock_cls, \
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = mock_result
+        with patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider", return_value=mock_provider), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost", return_value=0.0), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.check_requirement_coverage") as mock_cov:
-            mock_cls.return_value.invoke.return_value = mock_result
             # Force past fast-path
             mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
@@ -97,10 +98,11 @@ class TestApprovedVerdictExtraction:
         mock_result.input_tokens = 100
         mock_result.output_tokens = 50
 
-        with patch("assemblyzero.core.gemini_client.GeminiClient") as mock_cls, \
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = mock_result
+        with patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider", return_value=mock_provider), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost", return_value=0.0), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.check_requirement_coverage") as mock_cov:
-            mock_cls.return_value.invoke.return_value = mock_result
             mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
             state = _make_state()
@@ -125,10 +127,11 @@ class TestApprovedVerdictExtraction:
         mock_result.input_tokens = 100
         mock_result.output_tokens = 50
 
-        with patch("assemblyzero.core.gemini_client.GeminiClient") as mock_cls, \
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = mock_result
+        with patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider", return_value=mock_provider), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost", return_value=0.0), \
              patch("assemblyzero.workflows.testing.nodes.review_test_plan.check_requirement_coverage") as mock_cov:
-            mock_cls.return_value.invoke.return_value = mock_result
             mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
             state = _make_state()
@@ -208,11 +211,12 @@ class TestAuditFilePreservation:
         mock_result.output_tokens = 50
 
         import tempfile
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = mock_result
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("assemblyzero.core.gemini_client.GeminiClient") as mock_cls, \
+            with patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider", return_value=mock_provider), \
                  patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost", return_value=0.0), \
                  patch("assemblyzero.workflows.testing.nodes.review_test_plan.check_requirement_coverage") as mock_cov:
-                mock_cls.return_value.invoke.return_value = mock_result
                 mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
                 state = _make_state(audit_dir=tmpdir)
