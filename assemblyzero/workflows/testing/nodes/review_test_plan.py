@@ -461,25 +461,35 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         }
     # --------------------------------------------------------------------------
 
-    # Call Gemini for review (with retry)
+    # Issue #773: Use unified LLM provider instead of hardcoded GeminiClient
+    from assemblyzero.core.llm_provider import get_provider
+
+    reviewer_spec = state.get("config_reviewer", "claude:opus")
+    if state.get("mock_mode", False):
+        reviewer_spec = "mock:review"
+    print(f"    Reviewer: {reviewer_spec}")
+
+    try:
+        reviewer = get_provider(reviewer_spec)
+    except ValueError as e:
+        return {
+            "error_message": f"Invalid reviewer: {e}",
+            "test_plan_status": "BLOCKED",
+        }
+
     cost_before = get_cumulative_cost()
     try:
         import time
 
-        from assemblyzero.core.config import REVIEWER_MODEL
-        from assemblyzero.core.gemini_client import GeminiClient
-
-        client = GeminiClient(model=REVIEWER_MODEL)
-
-        # N1 Gemini Retry: 2 attempts with exponential backoff
+        # N1 Retry: 2 attempts with exponential backoff
         max_attempts = 2
         last_error = ""
         result = None
 
         for attempt in range(1, max_attempts + 1):
-            # Issue #494: Request structured JSON verdict from Gemini
-            result = client.invoke(
-                system_instruction="You are a senior QA engineer reviewing a test plan for coverage and quality.",
+            # Issue #773: Pass response_schema to all providers uniformly
+            result = reviewer.invoke(
+                system_prompt="You are a senior QA engineer reviewing a test plan for coverage and quality.",
                 content=full_prompt,
                 response_schema=VERDICT_SCHEMA,
             )
@@ -488,7 +498,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 break
 
             last_error = result.error_message or "Unknown error"
-            print(f"    [N1] Gemini attempt {attempt}/{max_attempts} failed: {last_error}")
+            print(f"    [N1] Reviewer attempt {attempt}/{max_attempts} failed: {last_error}")
 
             if attempt < max_attempts:
                 backoff = 2 ** attempt  # 2s, 4s
@@ -496,7 +506,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 time.sleep(backoff)
 
         if not result or not result.success:
-            error_msg = f"Gemini review failed after {max_attempts} attempts: {last_error}"
+            error_msg = f"Reviewer failed after {max_attempts} attempts: {last_error}"
             print(f"    [ERROR] {error_msg}")
 
             # Save error to audit trail
@@ -505,8 +515,8 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 save_audit_file(
                     audit_dir,
                     file_num,
-                    "gemini-error.md",
-                    f"# Gemini Review Error\n\nAttempts: {max_attempts}\nLast error: {last_error}\n",
+                    "reviewer-error.md",
+                    f"# Review Error\n\nAttempts: {max_attempts}\nLast error: {last_error}\n",
                 )
 
             return {
@@ -517,12 +527,6 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         verdict_content = result.response
         node_cost_usd = get_cumulative_cost() - cost_before
 
-    except ImportError as e:
-        print(f"    [ERROR] Gemini client not available: {e}")
-        return {
-            "error_message": f"Gemini client not available: {e}",
-            "test_plan_status": "BLOCKED",
-        }
     except Exception as e:
         print(f"    [ERROR] Unexpected error during review: {e}")
         return {

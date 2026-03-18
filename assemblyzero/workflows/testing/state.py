@@ -192,6 +192,7 @@ class TestingWorkflowState(TypedDict, total=False):
     context_content: str
 
     # Mode flags
+    config_reviewer: str  # Issue #773: Reviewer LLM spec (e.g., "claude:opus")
     auto_mode: bool
     mock_mode: bool
     skip_e2e: bool
