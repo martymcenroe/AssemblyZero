@@ -506,7 +506,16 @@ class ClaudeCLIProvider(LLMProvider):
 
             try:
                 response_data = json.loads(stdout)
-                response_text = response_data.get("result", "")
+
+                # Issue #779: When --json-schema is used, claude -p puts the
+                # structured output in "structured_output" (dict), not "result"
+                # (which is empty). Serialize it back to JSON string so
+                # downstream consumers (parse_structured_verdict) can parse it.
+                structured_out = response_data.get("structured_output")
+                if structured_out is not None and response_schema:
+                    response_text = json.dumps(structured_out)
+                else:
+                    response_text = response_data.get("result", "")
 
                 # Extract usage from claude -p JSON
                 usage = response_data.get("usage", {})
