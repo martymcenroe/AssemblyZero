@@ -599,6 +599,7 @@ def build_initial_state(
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
+            effort=getattr(args, "effort", "max"),
             brief_file=args.brief or "",
             source_idea=source_idea,
         )
@@ -614,15 +615,13 @@ def build_initial_state(
             auto_mode=args.review == "none",
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
+            effort=getattr(args, "effort", "max"),
             issue_number=args.issue or 0,
             context_files=args.context or [],
         )
 
     # Issue #476: API cost budget
     state["cost_budget_usd"] = getattr(args, "budget", 5.0)
-
-    # Issue #773: Effort level for Claude reviewer
-    state["config_effort"] = getattr(args, "effort", "max")
 
     return state
 

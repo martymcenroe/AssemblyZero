@@ -263,6 +263,7 @@ def create_initial_state(
     auto_mode: bool = False,
     mock_mode: bool = False,
     max_iterations: int = 3,
+    effort: str = "max",
     # Issue-specific
     brief_file: str = "",
     source_idea: str = "",
@@ -310,6 +311,7 @@ def create_initial_state(
         "target_repo": target_repo,
         "config_drafter": drafter,
         "config_reviewer": reviewer,
+        "config_effort": effort,
         "config_gates_draft": gates_draft,
         "config_gates_verdict": gates_verdict,
         "config_auto_mode": auto_mode,

@@ -128,6 +128,7 @@ class TestCreateInitialState:
 
         assert state["config_drafter"] == "claude:sonnet"
         assert state["config_reviewer"] == "claude:opus"
+        assert state["config_effort"] == "max"
         assert state["config_gates_draft"] is True
         assert state["config_gates_verdict"] is True
         assert state["config_auto_mode"] is False
@@ -142,6 +143,7 @@ class TestCreateInitialState:
             issue_number=1,
             drafter="gemini:flash",
             reviewer="claude:sonnet",
+            effort="high",
             gates_draft=False,
             gates_verdict=True,
             auto_mode=True,
@@ -150,6 +152,7 @@ class TestCreateInitialState:
 
         assert state["config_drafter"] == "gemini:flash"
         assert state["config_reviewer"] == "claude:sonnet"
+        assert state["config_effort"] == "high"
         assert state["config_gates_draft"] is False
         assert state["config_gates_verdict"] is True
         assert state["config_auto_mode"] is True

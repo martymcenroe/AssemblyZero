@@ -57,7 +57,7 @@ Two-strike rule applies per issue per phase.
 ## Done Criteria
 
 - LLD: `docs/lld/active/LLD-{NUMBER}.md` exists with APPROVED verdict
-- Impl Spec: spec exists under `docs/lld/drafts/` with Gemini APPROVED
+- Impl Spec: spec exists under `docs/lld/drafts/` with APPROVED verdict
 - TDD: tests pass, no regressions
 
 ## Closing Issues
