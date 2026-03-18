@@ -434,6 +434,13 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
     )
 
+    # Issue #773: Reviewer LLM configuration
+    parser.add_argument(
+        "--reviewer",
+        default="claude:opus",
+        help="Reviewer LLM spec (default: claude:opus)",
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -706,6 +713,7 @@ def main():
     initial_state: TestingWorkflowState = {
         "issue_number": args.issue,
         "repo_root": str(repo_root),
+        "config_reviewer": args.reviewer,  # Issue #773
         "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,
