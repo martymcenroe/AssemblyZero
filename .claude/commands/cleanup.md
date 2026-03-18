@@ -218,6 +218,15 @@ Session: {SESSION_NAME}
    - `find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -delete`
    - Report count in results
 
+9. **Filesystem Hygiene Report** (counts only — no auto-delete):
+   ```bash
+   find /c/Users/mcwiz/.claude/todos/ -name "*.json" -size -20c 2>/dev/null | wc -l
+   ls /c/Users/mcwiz/.claude/plans/*.md 2>/dev/null | wc -l
+   ls /c/Users/mcwiz/.claude/security_warnings_state_*.json 2>/dev/null | wc -l
+   ```
+   - Report: "Filesystem: {N} empty todos, {N} plan files, {N} stale state files"
+   - If empty todos > 100 or plan files > 20: suggest purge
+
 ## Phase 3: Session Log
 
 Create/append session log:
@@ -279,6 +288,9 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -r
 | Empty Worktree Dirs Deleted | {count} / 0 |
 | Stashes | None / {count} |
 | tmpclaude Purged | {count} files / 0 |
+| Empty Todos | {count} (purge if >100) |
+| Plan Files | {count} (archive if >20) |
+| Stale State Files | {count} (purge if >0) |
 | Commit | Pushed |
 
 **BLOCKING CONDITIONS (must be resolved):**
