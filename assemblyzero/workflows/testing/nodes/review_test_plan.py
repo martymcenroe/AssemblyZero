@@ -469,8 +469,10 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         reviewer_spec = "mock:review"
     print(f"    Reviewer: {reviewer_spec}")
 
+    # Issue #773: Pass effort level to Claude reviewer
+    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec)
+        reviewer = get_provider(reviewer_spec, effort=effort)
     except ValueError as e:
         return {
             "error_message": f"Invalid reviewer: {e}",

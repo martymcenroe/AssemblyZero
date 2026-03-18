@@ -161,6 +161,12 @@ Examples:
         default="claude:opus",
         help="Reviewer LLM spec (default: claude:opus)",
     )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        help="Claude reviewer effort level (default: max)",
+    )
 
     # Review configuration (human gates)
     parser.add_argument(
@@ -393,6 +399,7 @@ def build_initial_state(
         "config_reviewer": args.reviewer,
         "config_drafter": args.drafter,
         "config_mock_mode": args.mock,
+        "config_effort": args.effort,  # Issue #773
         # Issue #511: Per-node LLM cost tracking
         "node_costs": {},
         "node_tokens": {},

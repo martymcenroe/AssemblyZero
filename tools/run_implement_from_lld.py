@@ -447,6 +447,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default="claude:opus",
         help="Reviewer LLM spec (default: claude:opus)",
     )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        help="Claude reviewer effort level (default: max)",
+    )
 
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
@@ -725,6 +731,7 @@ def main():
         "issue_number": args.issue,
         "repo_root": str(repo_root),
         "config_reviewer": args.reviewer,  # Issue #773
+        "config_effort": args.effort,  # Issue #773
         "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,

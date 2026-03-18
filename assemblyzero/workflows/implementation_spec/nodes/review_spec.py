@@ -170,8 +170,10 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     else:
         reviewer_spec = state.get("config_reviewer", DEFAULT_REVIEWER)
 
+    # Issue #773: Pass effort level to Claude reviewer
+    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec)
+        reviewer = get_provider(reviewer_spec, effort=effort)
     except ValueError as e:
         print(f"    ERROR: Invalid reviewer: {e}")
         return {"error_message": f"Invalid reviewer: {e}"}

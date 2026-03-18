@@ -381,6 +381,12 @@ Examples:
         default="claude:opus",
         help="Reviewer LLM spec (default: claude:opus)",
     )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        help="Claude reviewer effort level (default: max)",
+    )
 
     # Review configuration (human gates)
     parser.add_argument(
@@ -614,6 +620,10 @@ def build_initial_state(
 
     # Issue #476: API cost budget
     state["cost_budget_usd"] = getattr(args, "budget", 5.0)
+
+    # Issue #773: Effort level for Claude reviewer
+    state["config_effort"] = getattr(args, "effort", "max")
+
     return state
 
 

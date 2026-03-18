@@ -73,8 +73,10 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
         return {"error_message": str(e)}
 
     # Get reviewer provider
+    # Issue #773: Pass effort level to Claude reviewer
+    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec)
+        reviewer = get_provider(reviewer_spec, effort=effort)
     except ValueError as e:
         return {"error_message": f"Invalid reviewer: {e}"}
 
