@@ -158,8 +158,8 @@ Examples:
     )
     parser.add_argument(
         "--reviewer",
-        default="gemini:3.1-pro-preview",
-        help="Reviewer LLM spec (default: gemini:3.1-pro-preview)",
+        default="claude:opus",
+        help="Reviewer LLM spec (default: claude:opus)",
     )
 
     # Review configuration (human gates)

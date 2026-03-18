@@ -12,10 +12,11 @@ from pathlib import Path
 # =============================================================================
 
 # Primary review model - highest reasoning tier available
-REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "gemini-3.1-pro-preview")
+# Issue #773: Default to Claude Opus via Max subscription (free)
+REVIEWER_MODEL = os.environ.get("REVIEWER_MODEL", "claude-opus-4-6")
 
-# Acceptable fallback models (Pro-tier only)
-REVIEWER_MODEL_FALLBACKS = ["gemini-3.1-pro"]
+# Acceptable fallback models
+REVIEWER_MODEL_FALLBACKS = ["claude-sonnet-4-6"]
 
 # Forbidden models - fail closed rather than use these
 FORBIDDEN_MODELS = [

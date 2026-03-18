@@ -91,7 +91,7 @@ class WorkflowConfig:
 
     workflow_type: Literal["issue", "lld"]
     drafter: str = "claude:sonnet"
-    reviewer: str = "gemini:3.1-pro-preview"
+    reviewer: str = "claude:opus"
     draft_template_path: Path = field(default_factory=lambda: Path(""))
     review_prompt_path: Path = field(default_factory=lambda: Path(""))
     gates: GateConfig = field(default_factory=GateConfig)
@@ -159,7 +159,7 @@ class WorkflowConfig:
 
 def create_issue_config(
     drafter: str = "claude:sonnet",
-    reviewer: str = "gemini:3.1-pro-preview",
+    reviewer: str = "claude:opus",
     gates: str = "none",
     max_iterations: int = 3,
     auto_mode: bool = False,
@@ -199,7 +199,7 @@ def create_issue_config(
 
 def create_lld_config(
     drafter: str = "claude:sonnet",
-    reviewer: str = "gemini:3.1-pro-preview",
+    reviewer: str = "claude:opus",
     gates: str = "none",
     max_iterations: int = 3,
     auto_mode: bool = False,

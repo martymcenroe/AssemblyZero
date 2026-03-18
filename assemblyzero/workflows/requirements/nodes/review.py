@@ -58,7 +58,7 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     if mock_mode:
         reviewer_spec = "mock:review"
     else:
-        reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro-preview")
+        reviewer_spec = state.get("config_reviewer", "claude:opus")
 
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
