@@ -116,8 +116,19 @@ def main():
         action="store_true",
         help="Verbose output",
     )
+    # Issue #773: API policy
+    parser.add_argument(
+        "--allow-api",
+        action="store_true",
+        dest="allow_api",
+        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
+    )
 
     args = parser.parse_args()
+
+    # Issue #773: Set API policy before any providers are created
+    from assemblyzero.core.llm_provider import set_api_policy
+    set_api_policy(args.allow_api)
 
     print(f"Scout Workflow - External Intelligence Gathering")
     print(f"=" * 50)
