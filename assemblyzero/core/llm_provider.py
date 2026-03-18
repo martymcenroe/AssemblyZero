@@ -113,6 +113,30 @@ _circuit_breaker_registry: dict[str, int] = {}
 _CIRCUIT_BREAKER_MAX = 2
 
 
+# =============================================================================
+# Issue #773: API policy — block Anthropic API usage by default
+# =============================================================================
+# Default: False (no API). Max subscription makes `claude -p` free.
+# Anthropic API costs real money. Opt-in via `--allow-api` CLI flag.
+
+_api_allowed: bool = False
+
+
+def set_api_policy(allow: bool) -> None:
+    """Set whether Anthropic API usage is allowed this session.
+
+    Args:
+        allow: True to allow API calls, False to block them.
+    """
+    global _api_allowed
+    _api_allowed = allow
+
+
+def is_api_allowed() -> bool:
+    """Return whether Anthropic API usage is currently allowed."""
+    return _api_allowed
+
+
 def reset_circuit_breakers() -> None:
     """Reset all circuit breaker counters (for testing)."""
     _circuit_breaker_registry.clear()
@@ -219,6 +243,7 @@ class LLMProvider(ABC):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke the LLM with system prompt and content.
 
@@ -226,6 +251,7 @@ class LLMProvider(ABC):
             system_prompt: Instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait for response.
+            response_schema: Optional JSON schema for structured output.
 
         Returns:
             LLMCallResult with response or error information.
@@ -277,11 +303,12 @@ class ClaudeCLIProvider(LLMProvider):
         "haiku": "claude-haiku-4-5",
     }
 
-    def __init__(self, model: str = "opus"):
+    def __init__(self, model: str = "opus", effort: str | None = None):
         """Initialize Claude CLI provider.
 
         Args:
             model: Model identifier (opus, sonnet, haiku) or full model ID.
+            effort: Effort level for claude -p (low/medium/high/max). None omits flag.
 
         Raises:
             ValueError: If model is not recognized.
@@ -299,6 +326,7 @@ class ClaudeCLIProvider(LLMProvider):
             valid = ", ".join(self.MODEL_MAP.keys())
             raise ValueError(f"Unknown Claude model '{model}'. Valid: {valid}")
 
+        self._effort = effort
         self._cli_path: Optional[str] = None
 
     @property
@@ -352,6 +380,7 @@ class ClaudeCLIProvider(LLMProvider):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Claude via headless mode (claude -p).
 
@@ -359,6 +388,7 @@ class ClaudeCLIProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (default 5 minutes).
+            response_schema: Optional JSON schema for structured output (--json-schema).
 
         Returns:
             LLMCallResult with response or error.
@@ -392,6 +422,14 @@ class ClaudeCLIProvider(LLMProvider):
 
         if system_prompt:
             cmd.extend(["--system-prompt", system_prompt])
+
+        # Issue #773: Effort level (low/medium/high/max)
+        if self._effort:
+            cmd.extend(["--effort", self._effort])
+
+        # Issue #773: Structured output via --json-schema
+        if response_schema:
+            cmd.extend(["--json-schema", json.dumps(response_schema)])
 
         try:
             # Use Popen instead of subprocess.run so we can kill the entire
@@ -623,6 +661,7 @@ class AnthropicProvider(LLMProvider):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Claude via the Anthropic API.
 
@@ -630,6 +669,8 @@ class AnthropicProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (default 5 minutes).
+            response_schema: Optional JSON schema (accepted for interface
+                compatibility but not currently used by Anthropic API).
 
         Returns:
             LLMCallResult with response or error.
@@ -855,6 +896,7 @@ class FallbackProvider(LLMProvider):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke primary, fall back to secondary on failure.
 
@@ -864,6 +906,7 @@ class FallbackProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time for fallback provider.
+            response_schema: Optional JSON schema, passed through to underlying providers.
 
         Returns:
             LLMCallResult from whichever provider succeeded (or last failure).
@@ -900,7 +943,9 @@ class FallbackProvider(LLMProvider):
         else:
             # Try primary with shorter timeout
             effective_timeout = min(timeout_seconds, self._primary_timeout)
-            result = self._primary.invoke(system_prompt, content, effective_timeout)
+            result = self._primary.invoke(
+                system_prompt, content, effective_timeout, response_schema=response_schema,
+            )
             if result.success:
                 _circuit_breaker_registry[self._breaker_key] = 0
                 return result
@@ -911,7 +956,9 @@ class FallbackProvider(LLMProvider):
                 f"({result.error_message[:80] if result.error_message else 'unknown'}), "
                 f"falling back to {self._fallback.provider_name}..."
             )
-        fallback_result = self._fallback.invoke(system_prompt, content, timeout_seconds)
+        fallback_result = self._fallback.invoke(
+            system_prompt, content, timeout_seconds, response_schema=response_schema,
+        )
         if fallback_result.success:
             _circuit_breaker_registry[self._breaker_key] = 0
         else:
@@ -1125,6 +1172,7 @@ class MockProvider(LLMProvider):
         system_prompt: str,
         content: str,
         timeout_seconds: int = 300,
+        response_schema: dict | None = None,
     ) -> LLMCallResult:
         """Return mock response.
 
@@ -1132,6 +1180,7 @@ class MockProvider(LLMProvider):
             system_prompt: Ignored.
             content: Ignored.
             timeout_seconds: Ignored.
+            response_schema: Ignored.
 
         Returns:
             LLMCallResult with mock response or error.
@@ -1191,35 +1240,46 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
     return provider, model
 
 
-def get_provider(spec: str) -> LLMProvider:
+def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
     """Factory function to create LLM provider from spec.
+
+    Issue #773: Respects API policy. When API is blocked (default),
+    ``claude:`` specs return bare ClaudeCLIProvider (no FallbackProvider),
+    and ``anthropic:`` specs raise ValueError.
 
     Args:
         spec: Provider specification like "claude:opus", "anthropic:haiku",
               or "gemini:3.1-pro-preview".
+        effort: Effort level for Claude CLI (low/medium/high/max). None omits flag.
 
     Returns:
         Configured LLMProvider instance.
 
     Raises:
-        ValueError: If provider or model is not recognized.
+        ValueError: If provider or model is not recognized, or if
+            ``anthropic:`` is used when API is blocked.
 
     Examples:
         >>> drafter = get_provider("claude:opus")
-        >>> direct = get_provider("anthropic:haiku")
+        >>> direct = get_provider("anthropic:haiku")  # requires --allow-api
         >>> reviewer = get_provider("gemini:3.1-pro-preview")
         >>> mock = get_provider("mock:test")
     """
     provider, model = parse_provider_spec(spec)
 
     if provider == "claude":
-        cli = ClaudeCLIProvider(model=model)
-        # If API key available, wrap with automatic fallback
-        if _load_anthropic_api_key():
+        cli = ClaudeCLIProvider(model=model, effort=effort)
+        # Only wrap with FallbackProvider if API is allowed AND key exists
+        if _api_allowed and _load_anthropic_api_key():
             api = AnthropicProvider(model=model)
             return FallbackProvider(primary=cli, fallback=api, primary_timeout=300)
         return cli
     elif provider == "anthropic":
+        if not _api_allowed:
+            raise ValueError(
+                f"Anthropic API usage is blocked (default). "
+                f"Use --allow-api to enable paid API calls."
+            )
         return AnthropicProvider(model=model)
     elif provider == "gemini":
         return GeminiProvider(model=model)
