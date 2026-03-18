@@ -359,6 +359,13 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS,  # Hidden deprecated alias
     )
+    # Issue #773: API policy
+    parser.add_argument(
+        "--allow-api",
+        action="store_true",
+        dest="allow_api",
+        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
+    )
     parser.add_argument(
         "--mock",
         action="store_true",
@@ -432,6 +439,19 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Max estimated tokens before circuit breaker trips (0 = unlimited)",
+    )
+
+    # Issue #773: Reviewer LLM configuration
+    parser.add_argument(
+        "--reviewer",
+        default="claude:opus",
+        help="Reviewer LLM spec (default: claude:opus)",
+    )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        help="Claude reviewer effort level (default: max)",
     )
 
     # Issue #517: Global workflow timeout
@@ -565,6 +585,10 @@ def _write_status_file(
 def main():
     parser = create_argument_parser()
     args = parser.parse_args()
+
+    # Issue #773: Set API policy before any providers are created
+    from assemblyzero.core.llm_provider import set_api_policy
+    set_api_policy(args.allow_api)
 
     # Apply review configuration
     apply_review_config(args)
@@ -706,6 +730,8 @@ def main():
     initial_state: TestingWorkflowState = {
         "issue_number": args.issue,
         "repo_root": str(repo_root),
+        "config_reviewer": args.reviewer,  # Issue #773
+        "config_effort": args.effort,  # Issue #773
         "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,

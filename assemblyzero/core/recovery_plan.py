@@ -153,7 +153,7 @@ def _build_recommendation(error_type: str, error_message: str, workflow: str) ->
     if error_type == "capacity_exhausted":
         return (
             "Transient error: Gemini is overloaded (503/529). "
-            "Wait 15 minutes and retry, or try --reviewer gemini:3.1-pro-preview."
+            "Wait 15 minutes and retry, or try --reviewer claude:opus."
         )
     elif error_type == "quota_exhausted":
         return (

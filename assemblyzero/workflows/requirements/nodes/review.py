@@ -58,7 +58,7 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     if mock_mode:
         reviewer_spec = "mock:review"
     else:
-        reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro-preview")
+        reviewer_spec = state.get("config_reviewer", "claude:opus")
 
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
@@ -73,8 +73,10 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
         return {"error_message": str(e)}
 
     # Get reviewer provider
+    # Issue #773: Pass effort level to Claude reviewer
+    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec)
+        reviewer = get_provider(reviewer_spec, effort=effort)
     except ValueError as e:
         return {"error_message": f"Invalid reviewer: {e}"}
 
@@ -99,13 +101,12 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         previous_draft=previous_draft,
     )
 
-    # Issue #492: Pass structured schema when reviewer is Gemini
+    # Issue #773: Pass response_schema to all providers uniformly
     invoke_kwargs: dict = {
         "system_prompt": system_prompt,
         "content": review_content,
     }
-    is_gemini = reviewer_spec.startswith("gemini:")
-    if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
+    if not mock_mode:
         invoke_kwargs["response_schema"] = VERDICT_SCHEMA
 
     # Call reviewer
@@ -137,8 +138,8 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     else:
         verdict_path = None
 
-    # Issue #492: Try structured JSON parsing first, fall back to regex
-    structured = parse_structured_verdict(verdict_content) if is_gemini else None
+    # Issue #773: Try structured JSON parsing first, fall back to regex
+    structured = parse_structured_verdict(verdict_content)
     if structured:
         lld_status = structured["verdict"]
         # Map REVISE -> BLOCKED for workflow purposes

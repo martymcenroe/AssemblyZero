@@ -33,11 +33,13 @@ from assemblyzero.core.llm_provider import (
     _CIRCUIT_BREAKER_MAX,
     get_cumulative_cost,
     get_provider,
+    is_api_allowed,
     is_non_retryable_error,
     log_llm_call,
     parse_provider_spec,
     reset_circuit_breakers,
     reset_cumulative_cost,
+    set_api_policy,
     _load_anthropic_api_key,
 )
 
@@ -636,7 +638,9 @@ class TestFallbackProvider:
         fb.invoke("system", "content", timeout_seconds=600)
 
         # Primary should be called with min(600, 180) = 180
-        primary.invoke.assert_called_once_with("system", "content", 180)
+        primary.invoke.assert_called_once_with(
+            "system", "content", 180, response_schema=None,
+        )
 
     def test_primary_timeout_not_exceeded_when_smaller(self):
         """If caller timeout < primary_timeout, use caller timeout."""
@@ -652,7 +656,9 @@ class TestFallbackProvider:
         fb.invoke("system", "content", timeout_seconds=60)
 
         # Primary should be called with min(60, 180) = 60
-        primary.invoke.assert_called_once_with("system", "content", 60)
+        primary.invoke.assert_called_once_with(
+            "system", "content", 60, response_schema=None,
+        )
 
     def test_fallback_gets_full_timeout(self):
         """Fallback provider gets the original full timeout."""
@@ -671,7 +677,9 @@ class TestFallbackProvider:
         fb.invoke("system", "content", timeout_seconds=600)
 
         # Fallback should get full 600s
-        fallback.invoke.assert_called_once_with("system", "content", 600)
+        fallback.invoke.assert_called_once_with(
+            "system", "content", 600, response_schema=None,
+        )
 
     def test_provider_name_delegates_to_primary(self):
         """provider_name comes from the primary provider."""
@@ -839,19 +847,40 @@ class TestGetProvider:
         assert provider.model == "opus"
 
     @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
-    def test_claude_with_api_key_returns_fallback(self, mock_load_key):
-        """Claude with API key returns FallbackProvider."""
+    def test_claude_with_api_key_returns_fallback_when_api_allowed(self, mock_load_key):
+        """Claude with API key + allow-api returns FallbackProvider."""
+        set_api_policy(True)
+        try:
+            provider = get_provider("claude:opus")
+            assert isinstance(provider, FallbackProvider)
+            assert provider.provider_name == "claude"
+            assert provider.model == "opus"
+        finally:
+            set_api_policy(False)
+
+    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
+    def test_claude_with_api_key_no_fallback_when_api_blocked(self, mock_load_key):
+        """Claude with API key but no --allow-api returns bare ClaudeCLIProvider."""
+        set_api_policy(False)
         provider = get_provider("claude:opus")
-        assert isinstance(provider, FallbackProvider)
-        assert provider.provider_name == "claude"
+        assert isinstance(provider, ClaudeCLIProvider)
         assert provider.model == "opus"
 
-    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value=None)
-    def test_get_anthropic_provider(self, mock_load_key):
-        """Get direct AnthropicProvider."""
-        provider = get_provider("anthropic:haiku")
-        assert isinstance(provider, AnthropicProvider)
-        assert provider.model == "haiku"
+    def test_get_anthropic_provider_when_api_allowed(self):
+        """Get direct AnthropicProvider when API is allowed."""
+        set_api_policy(True)
+        try:
+            provider = get_provider("anthropic:haiku")
+            assert isinstance(provider, AnthropicProvider)
+            assert provider.model == "haiku"
+        finally:
+            set_api_policy(False)
+
+    def test_anthropic_blocked_by_default(self):
+        """Anthropic raises ValueError when API is blocked (default)."""
+        set_api_policy(False)
+        with pytest.raises(ValueError, match="Anthropic API usage is blocked"):
+            get_provider("anthropic:haiku")
 
     def test_get_gemini_provider(self):
         """Test getting Gemini provider."""
@@ -1368,3 +1397,167 @@ class TestCumulativeCost:
 
         reset_cumulative_cost()
         assert get_cumulative_cost() == 0.0
+
+
+class TestAPIPolicy:
+    """Tests for Issue #773: API policy — --no-api default."""
+
+    def setup_method(self):
+        """Reset API policy to default (blocked) before each test."""
+        set_api_policy(False)
+
+    def teardown_method(self):
+        """Reset API policy after each test."""
+        set_api_policy(False)
+
+    def test_api_blocked_by_default(self):
+        """API policy defaults to False (blocked)."""
+        assert is_api_allowed() is False
+
+    def test_set_api_policy_allow(self):
+        """set_api_policy(True) enables API access."""
+        set_api_policy(True)
+        assert is_api_allowed() is True
+
+    def test_set_api_policy_block(self):
+        """set_api_policy(False) disables API access."""
+        set_api_policy(True)
+        set_api_policy(False)
+        assert is_api_allowed() is False
+
+    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value=None)
+    def test_claude_no_api_returns_bare_cli(self, mock_load_key):
+        """claude: with no-api returns bare ClaudeCLIProvider (not FallbackProvider)."""
+        provider = get_provider("claude:opus")
+        assert isinstance(provider, ClaudeCLIProvider)
+        assert not isinstance(provider, FallbackProvider)
+
+    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
+    def test_claude_with_allow_api_and_key_returns_fallback(self, mock_load_key):
+        """claude: with allow-api + key returns FallbackProvider."""
+        set_api_policy(True)
+        provider = get_provider("claude:opus")
+        assert isinstance(provider, FallbackProvider)
+
+    @patch("assemblyzero.core.llm_provider._load_anthropic_api_key", return_value="sk-ant-key")
+    def test_claude_with_key_but_no_api_returns_bare_cli(self, mock_load_key):
+        """claude: with key but no --allow-api returns bare ClaudeCLIProvider."""
+        provider = get_provider("claude:opus")
+        assert isinstance(provider, ClaudeCLIProvider)
+
+    def test_anthropic_blocked_raises_valueerror(self):
+        """anthropic: raises ValueError when API is blocked."""
+        with pytest.raises(ValueError, match="Anthropic API usage is blocked"):
+            get_provider("anthropic:haiku")
+
+    def test_anthropic_allowed_works(self):
+        """anthropic: works when API is allowed."""
+        set_api_policy(True)
+        provider = get_provider("anthropic:haiku")
+        assert isinstance(provider, AnthropicProvider)
+
+    def test_gemini_unaffected_by_api_policy(self):
+        """gemini: unaffected by API policy."""
+        provider = get_provider("gemini:2.5-pro")
+        assert isinstance(provider, GeminiProvider)
+
+    def test_mock_unaffected_by_api_policy(self):
+        """mock: unaffected by API policy."""
+        provider = get_provider("mock:test")
+        assert isinstance(provider, MockProvider)
+
+
+class TestEffortFlag:
+    """Tests for Issue #773: --effort flag on ClaudeCLIProvider."""
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_effort_max_in_command(self, mock_find_cli, mock_popen):
+        """--effort max appears in subprocess command."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        provider = ClaudeCLIProvider(model="opus", effort="max")
+        provider.invoke("system", "content")
+
+        cmd = mock_popen.call_args[0][0]
+        assert "--effort" in cmd
+        idx = cmd.index("--effort")
+        assert cmd[idx + 1] == "max"
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_effort_none_omits_flag(self, mock_find_cli, mock_popen):
+        """effort=None omits --effort from command."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        provider = ClaudeCLIProvider(model="opus")
+        provider.invoke("system", "content")
+
+        cmd = mock_popen.call_args[0][0]
+        assert "--effort" not in cmd
+
+    def test_effort_passed_through_get_provider(self):
+        """get_provider passes effort kwarg to ClaudeCLIProvider."""
+        provider = get_provider("claude:opus", effort="high")
+        assert isinstance(provider, ClaudeCLIProvider)
+        assert provider._effort == "high"
+
+
+class TestResponseSchema:
+    """Tests for Issue #773: response_schema on invoke()."""
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_json_schema_in_command_when_provided(self, mock_find_cli, mock_popen):
+        """--json-schema appears in subprocess command when schema provided."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+        provider = ClaudeCLIProvider(model="opus")
+        provider.invoke("system", "content", response_schema=schema)
+
+        cmd = mock_popen.call_args[0][0]
+        assert "--json-schema" in cmd
+        idx = cmd.index("--json-schema")
+        parsed = json.loads(cmd[idx + 1])
+        assert parsed == schema
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_json_schema_omitted_when_none(self, mock_find_cli, mock_popen):
+        """--json-schema omitted when response_schema is None."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        provider = ClaudeCLIProvider(model="opus")
+        provider.invoke("system", "content")
+
+        cmd = mock_popen.call_args[0][0]
+        assert "--json-schema" not in cmd
+
+    def test_mock_provider_accepts_response_schema(self):
+        """MockProvider.invoke() accepts response_schema without error."""
+        provider = MockProvider(model="test")
+        result = provider.invoke("sys", "content", response_schema={"type": "object"})
+        assert result.success is True
+
+    def test_gemini_provider_accepts_response_schema(self):
+        """GeminiProvider.invoke() accepts response_schema in signature."""
+        import inspect
+        sig = inspect.signature(GeminiProvider.invoke)
+        assert "response_schema" in sig.parameters

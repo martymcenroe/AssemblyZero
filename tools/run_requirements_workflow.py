@@ -378,8 +378,14 @@ Examples:
     )
     parser.add_argument(
         "--reviewer",
-        default="gemini:3.1-pro-preview",
-        help="Reviewer LLM spec (default: gemini:3.1-pro-preview)",
+        default="claude:opus",
+        help="Reviewer LLM spec (default: claude:opus)",
+    )
+    parser.add_argument(
+        "--effort",
+        choices=["low", "medium", "high", "max"],
+        default="max",
+        help="Claude reviewer effort level (default: max)",
     )
 
     # Review configuration (human gates)
@@ -394,6 +400,14 @@ Examples:
         default=None,
         dest="gates_deprecated",
         help=argparse.SUPPRESS,  # Hidden deprecated alias for --review
+    )
+
+    # Issue #773: API policy
+    parser.add_argument(
+        "--allow-api",
+        action="store_true",
+        dest="allow_api",
+        help="Allow paid Anthropic API calls (default: blocked, uses claude -p via Max subscription)",
     )
 
     # Modes
@@ -606,6 +620,10 @@ def build_initial_state(
 
     # Issue #476: API cost budget
     state["cost_budget_usd"] = getattr(args, "budget", 5.0)
+
+    # Issue #773: Effort level for Claude reviewer
+    state["config_effort"] = getattr(args, "effort", "max")
+
     return state
 
 
@@ -1321,6 +1339,10 @@ def main() -> int:
         Exit code (0 for success, non-zero for error).
     """
     args = parse_args()
+
+    # Issue #773: Set API policy before any providers are created
+    from assemblyzero.core.llm_provider import set_api_policy
+    set_api_policy(args.allow_api)
 
     # Handle deprecated --gates flag (bridge to --review)
     if args.gates_deprecated is not None:

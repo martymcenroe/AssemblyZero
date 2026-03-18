@@ -39,7 +39,7 @@ from assemblyzero.workflows.implementation_spec.state import ImplementationSpecS
 # =============================================================================
 
 # Default reviewer model spec
-DEFAULT_REVIEWER = "gemini:3.1-pro-preview"
+DEFAULT_REVIEWER = "claude:opus"
 
 # Minimum spec size to be considered valid (bytes)
 MIN_SPEC_SIZE = 100
@@ -170,8 +170,10 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     else:
         reviewer_spec = state.get("config_reviewer", DEFAULT_REVIEWER)
 
+    # Issue #773: Pass effort level to Claude reviewer
+    effort = state.get("config_effort")
     try:
-        reviewer = get_provider(reviewer_spec)
+        reviewer = get_provider(reviewer_spec, effort=effort)
     except ValueError as e:
         print(f"    ERROR: Invalid reviewer: {e}")
         return {"error_message": f"Invalid reviewer: {e}"}
@@ -180,14 +182,13 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # -------------------------------------------------------------------------
     # Call reviewer LLM
-    # Issue #492: Pass structured schema when reviewer is Gemini
+    # Issue #773: Pass response_schema to all providers uniformly
     # -------------------------------------------------------------------------
     invoke_kwargs: dict = {
         "system_prompt": REVIEWER_SYSTEM_PROMPT,
         "content": review_content,
     }
-    is_gemini = reviewer_spec.startswith("gemini:")
-    if is_gemini and hasattr(reviewer, "invoke") and not mock_mode:
+    if not mock_mode:
         invoke_kwargs["response_schema"] = VERDICT_SCHEMA
 
     cost_before = get_cumulative_cost()
@@ -225,7 +226,8 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # Parse verdict
     # Issue #492: Try structured JSON parsing first, fall back to regex
     # -------------------------------------------------------------------------
-    structured = parse_structured_verdict(verdict_content) if is_gemini else None
+    # Issue #773: Always try structured JSON parsing (all providers now support response_schema)
+    structured = parse_structured_verdict(verdict_content)
     if structured:
         verdict_status = structured["verdict"]
         feedback = structured.get("summary", "")

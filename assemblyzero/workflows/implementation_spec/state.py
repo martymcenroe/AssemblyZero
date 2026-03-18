@@ -125,6 +125,7 @@ class ImplementationSpecState(TypedDict, total=False):
     config_mock_mode: bool
     config_drafter: str
     config_reviewer: str
+    config_effort: str  # Issue #773: Effort level for Claude reviewer
 
     # Loaded content (N0)
     lld_content: str
