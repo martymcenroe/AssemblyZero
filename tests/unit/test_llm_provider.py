@@ -1550,6 +1550,57 @@ class TestResponseSchema:
         cmd = mock_popen.call_args[0][0]
         assert "--json-schema" not in cmd
 
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_structured_output_extracted_when_schema_provided(self, mock_find_cli, mock_popen):
+        """Issue #781: When --json-schema is used, response comes from structured_output, not result."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        # Real claude -p output when --json-schema is used:
+        # result is empty, structured_output has the actual response
+        mock_proc.communicate.return_value = (
+            json.dumps({
+                "result": "",
+                "structured_output": {"verdict": "APPROVED", "feedback": []},
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+                "total_cost_usd": 0.01,
+            }),
+            "",
+        )
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
+        provider = ClaudeCLIProvider(model="opus")
+        result = provider.invoke("system", "content", response_schema=schema)
+
+        assert result.success is True
+        parsed = json.loads(result.response)
+        assert parsed["verdict"] == "APPROVED"
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_result_used_when_no_schema(self, mock_find_cli, mock_popen):
+        """Without response_schema, response comes from result field as before."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = (
+            json.dumps({
+                "result": "Hello world",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "total_cost_usd": 0.001,
+            }),
+            "",
+        )
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        provider = ClaudeCLIProvider(model="opus")
+        result = provider.invoke("system", "content")
+
+        assert result.success is True
+        assert result.response == "Hello world"
+
     def test_mock_provider_accepts_response_schema(self):
         """MockProvider.invoke() accepts response_schema without error."""
         provider = MockProvider(model="test")
