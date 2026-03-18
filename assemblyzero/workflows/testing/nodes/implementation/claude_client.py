@@ -1,24 +1,18 @@
 """Claude API client for code generation.
 
-Handles CLI and SDK fallback, timeouts, and progress reporting.
+Uses the unified provider gate (get_provider) for all LLM calls.
+Issue #783: Sealed API gate — no more direct CLI/SDK fallback.
 """
 
-import os
-import shutil
-import subprocess
 import threading
 import time
-from pathlib import Path
 
-from assemblyzero.core.config import CLAUDE_MODEL
-from assemblyzero.core.text_sanitizer import strip_emoji
-from assemblyzero.utils.shell import run_command
+from assemblyzero.core.llm_provider import get_provider
 
 
 # Issue #321: Timeout constants
 # Issue #373: Increased from 300s — large test file prompts need more time
-CLI_TIMEOUT = 600  # 10 minutes base for CLI subprocess
-SDK_TIMEOUT = 600  # 10 minutes base for SDK API call
+CLI_TIMEOUT = 600  # 10 minutes base (used by compute_dynamic_timeout)
 
 
 class ProgressReporter:
@@ -74,25 +68,6 @@ class ImplementationError(Exception):
         self.response_preview = response_preview
         super().__init__(f"FATAL: Failed to implement {filepath}: {reason}")
 
-
-def _find_claude_cli() -> str | None:
-    """Find the Claude CLI executable."""
-    cli = shutil.which("claude")
-    if cli:
-        return cli
-
-    npm_paths = [
-        Path.home() / "AppData" / "Roaming" / "npm" / "claude.cmd",
-        Path.home() / "AppData" / "Roaming" / "npm" / "claude",
-        Path.home() / ".npm-global" / "bin" / "claude",
-        Path("/c/Users") / os.environ.get("USERNAME", "") / "AppData" / "Roaming" / "npm" / "claude.cmd",
-    ]
-
-    for path in npm_paths:
-        if path.exists():
-            return str(path)
-
-    return None
 
 
 def compute_dynamic_timeout(prompt: str) -> int:
@@ -157,111 +132,30 @@ def call_claude_for_file(
 
     Returns (response, error).
     NO RETRIES - if it fails, it fails.
+
+    Issue #783: Uses unified provider gate (get_provider) instead of
+    rolling its own CLI/SDK fallback. Respects --no-api policy.
     """
-    claude_cli = _find_claude_cli()
     # Issue #373: Dynamic timeout based on prompt size
     timeout = compute_dynamic_timeout(prompt)
-
-    # Issue #641: Resolve model — CLI uses short names, SDK uses full model IDs
-    cli_model = model or "opus"
 
     # Issue #643: Use provided stable system prompt, fall back to per-file prompt
     effective_system_prompt = system_prompt or build_system_prompt(file_path)
 
-    if claude_cli:
-        try:
-            cmd = [
-                claude_cli,
-                "--print",
-                "--dangerously-skip-permissions",
-                "--model", cli_model,
-                "--system-prompt", effective_system_prompt,
-            ]
-
-            result = run_command(
-                cmd,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,  # Issue #373: Dynamic timeout
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                # Issue #527: Strip emojis from code gen response
-                return strip_emoji(result.stdout), ""
-            else:
-                stderr = result.stderr[:200] if result.stderr else "no stderr"
-                # Fall through to SDK
-                print(f"    [WARN] CLI failed (exit {result.returncode}): {stderr}")
-
-        except subprocess.TimeoutExpired:
-            return "", f"CLI timeout after {timeout}s waiting for response"
-        except FileNotFoundError:
-            print("    [WARN] Claude CLI not found, falling back to SDK")
-        except OSError as e:
-            print(f"    [WARN] CLI error: {e}")
-
-    # Fallback to SDK with streaming (Issue #541)
+    # Issue #783: Use unified provider — respects API policy gate
     try:
-        import anthropic
-        import httpx
-
-        # Issue #373: Dynamic timeout for SDK too
-        client = anthropic.Anthropic(
-            timeout=httpx.Timeout(timeout, connect=30.0)
+        provider = get_provider(f"claude:{model or 'opus'}")
+        result = provider.invoke(
+            system_prompt=effective_system_prompt,
+            content=prompt,
+            timeout_seconds=timeout,
         )
-
-        # Issue #625: Pass system prompt as structured block with cache_control.
-        # Mirrors the pattern in AnthropicProvider (llm_provider.py:662-670).
-        # First file pays 125% (cache write), files 2+ pay 10% (cache read).
-        sdk_system = [
-            {
-                "type": "text",
-                "text": effective_system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-
-        # Issue #541: Streaming eliminates timeout blindness — chunks
-        # arrive incrementally so the connection stays active.  The old
-        # client.messages.create() blocked for the entire generation
-        # and httpx timeouts never fired on Windows/MSYS2.
-        response_text = ""
-        with client.messages.stream(
-            model=model or CLAUDE_MODEL,
-            max_tokens=32768,
-            system=sdk_system,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                response_text += text
-
-        # Issue #625: Log cache metrics for cost visibility
-        final_msg = stream.get_final_message()
-        usage = final_msg.usage
-        cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cache_create = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        if cache_read or cache_create:
-            print(f"        [CACHE] read={cache_read} create={cache_create}")
-
-        # Issue #527: Strip emojis from code gen response
-        return strip_emoji(response_text), ""
-
-    except ImportError:
-        return "", "Neither Claude CLI nor Anthropic SDK available"
-    except httpx.TimeoutException:
-        return "", f"SDK timeout after {timeout}s waiting for response"
-    except TimeoutError:
-        return "", f"SDK timeout after {timeout}s waiting for response"
+        if result.success:
+            return result.response, ""
+        else:
+            error_msg = result.error_message or "Unknown error"
+            if not result.retryable:
+                return "", f"[NON-RETRYABLE] {error_msg}"
+            return "", error_msg
     except Exception as e:
-        # Issue #546: Classify through the typed error hierarchy
-        try:
-            from assemblyzero.core.errors import classify_anthropic_error
-            classified = classify_anthropic_error(e)
-            status_code = classified.status_code
-            prefix = "[NON-RETRYABLE] " if not classified.retryable else ""
-            return "", f"{prefix}SDK error (status={status_code}): {e}"
-        except Exception:
-            return "", f"SDK error: {e}"
+        return "", f"Provider error: {e}"

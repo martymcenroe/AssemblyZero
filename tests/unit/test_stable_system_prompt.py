@@ -169,30 +169,31 @@ class TestSingleFilePromptExcludesStableContent:
 
 
 class TestCallClaudeSystemPrompt:
-    """Verify system_prompt parameter is passed to SDK."""
+    """Verify system_prompt parameter is passed through to provider.
 
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli")
-    def test_sdk_receives_system_kwarg_with_cache_control(self, mock_cli):
-        """When system_prompt is provided, SDK stream() gets structured system block with cache_control."""
-        mock_cli.return_value = None  # Force SDK path
+    Issue #783: Tests updated to mock get_provider instead of SDK/CLI internals.
+    """
 
-        mock_final_msg = MagicMock()
-        mock_final_msg.usage.cache_read_input_tokens = 0
-        mock_final_msg.usage.cache_creation_input_tokens = 100
+    def test_provider_receives_system_prompt(self):
+        """When system_prompt is provided, provider.invoke() receives it."""
+        from assemblyzero.core.llm_provider import LLMCallResult
 
-        mock_stream = MagicMock()
-        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-        mock_stream.__exit__ = MagicMock(return_value=False)
-        mock_stream.text_stream = ["```python\nprint('hi')\n```"]
-        mock_stream.get_final_message.return_value = mock_final_msg
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="```python\nprint('hi')\n```",
+            raw_response="```python\nprint('hi')\n```",
+            error_message=None,
+            provider="claude",
+            model_used="opus",
+            duration_ms=1000,
+            attempts=1,
+        )
 
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.stream.return_value = mock_stream
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        import sys
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic, "httpx": MagicMock()}):
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ):
             from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
                 call_claude_for_file,
             )
@@ -204,142 +205,70 @@ class TestCallClaudeSystemPrompt:
                 system_prompt=stable_prompt,
             )
 
-            call_kwargs = mock_client.messages.stream.call_args
-            system_val = call_kwargs.kwargs["system"]
-            # Issue #625: Must be structured block list with cache_control
-            assert isinstance(system_val, list)
-            assert len(system_val) == 1
-            assert system_val[0]["type"] == "text"
-            assert system_val[0]["text"] == stable_prompt
-            assert system_val[0]["cache_control"] == {"type": "ephemeral"}
+            call_kwargs = mock_provider.invoke.call_args
+            assert call_kwargs.kwargs["system_prompt"] == stable_prompt
 
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli")
-    def test_sdk_no_system_prompt_still_works(self, mock_cli):
-        """When system_prompt is empty, SDK uses build_system_prompt fallback with cache_control."""
-        mock_cli.return_value = None
+    def test_fallback_system_prompt_when_none_provided(self):
+        """When system_prompt is empty, build_system_prompt fallback is used."""
+        from assemblyzero.core.llm_provider import LLMCallResult
 
-        mock_final_msg = MagicMock()
-        mock_final_msg.usage.cache_read_input_tokens = 0
-        mock_final_msg.usage.cache_creation_input_tokens = 0
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="```python\nprint('hi')\n```",
+            raw_response="```python\nprint('hi')\n```",
+            error_message=None,
+            provider="claude",
+            model_used="opus",
+            duration_ms=1000,
+            attempts=1,
+        )
 
-        mock_stream = MagicMock()
-        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-        mock_stream.__exit__ = MagicMock(return_value=False)
-        mock_stream.text_stream = ["```python\nprint('hi')\n```"]
-        mock_stream.get_final_message.return_value = mock_final_msg
-
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.stream.return_value = mock_stream
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        import sys
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic, "httpx": MagicMock()}):
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ):
             from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
                 call_claude_for_file,
             )
 
             call_claude_for_file(prompt="# Implement foo.py", file_path="foo.py")
 
-            call_kwargs = mock_client.messages.stream.call_args
-            system_val = call_kwargs.kwargs["system"]
-            # Should be structured block list even for fallback
-            assert isinstance(system_val, list)
-            assert system_val[0]["cache_control"] == {"type": "ephemeral"}
-            assert "file generator" in system_val[0]["text"].lower()
+            call_kwargs = mock_provider.invoke.call_args
+            system_val = call_kwargs.kwargs["system_prompt"]
+            # Should be the default build_system_prompt output
+            assert "file generator" in system_val.lower()
 
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli")
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client.run_command")
-    def test_cli_receives_system_prompt(self, mock_run, mock_cli):
-        """CLI path should use the provided system_prompt."""
-        mock_cli.return_value = "/usr/bin/claude"
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "```python\nprint('hi')\n```"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+    def test_provider_receives_custom_system_prompt(self):
+        """Custom system_prompt passes through verbatim to provider."""
+        from assemblyzero.core.llm_provider import LLMCallResult
 
-        from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
-            call_claude_for_file,
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = LLMCallResult(
+            success=True,
+            response="code",
+            raw_response="code",
+            error_message=None,
+            provider="claude",
+            model_used="opus",
+            duration_ms=500,
+            attempts=1,
         )
 
-        stable = "Stable system prompt with LLD"
-        call_claude_for_file(
-            prompt="# Implement foo.py",
-            file_path="foo.py",
-            system_prompt=stable,
-        )
-
-        cmd_args = mock_run.call_args[0][0]
-        # Find --system-prompt flag and its value
-        idx = cmd_args.index("--system-prompt")
-        assert cmd_args[idx + 1] == stable
-
-
-# ---------------------------------------------------------------------------
-# Issue #625: Cache metric logging
-# ---------------------------------------------------------------------------
-
-
-class TestCacheMetricLogging:
-    """Verify cache metrics are logged when present."""
-
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli")
-    def test_cache_log_printed_when_nonzero(self, mock_cli, capsys):
-        """[CACHE] log line should appear when cache_read or cache_create > 0."""
-        mock_cli.return_value = None
-
-        mock_final_msg = MagicMock()
-        mock_final_msg.usage.cache_read_input_tokens = 5000
-        mock_final_msg.usage.cache_creation_input_tokens = 0
-
-        mock_stream = MagicMock()
-        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-        mock_stream.__exit__ = MagicMock(return_value=False)
-        mock_stream.text_stream = ["```python\nprint('hi')\n```"]
-        mock_stream.get_final_message.return_value = mock_final_msg
-
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.stream.return_value = mock_stream
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        import sys
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic, "httpx": MagicMock()}):
+        with patch(
+            "assemblyzero.workflows.testing.nodes.implementation.claude_client.get_provider",
+            return_value=mock_provider,
+        ):
             from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
                 call_claude_for_file,
             )
-            call_claude_for_file(prompt="# foo", file_path="foo.py", system_prompt="stable")
 
-        captured = capsys.readouterr()
-        assert "[CACHE] read=5000 create=0" in captured.out
-
-    @patch("assemblyzero.workflows.testing.nodes.implementation.claude_client._find_claude_cli")
-    def test_cache_log_not_printed_when_zero(self, mock_cli, capsys):
-        """No [CACHE] log when both cache metrics are 0."""
-        mock_cli.return_value = None
-
-        mock_final_msg = MagicMock()
-        mock_final_msg.usage.cache_read_input_tokens = 0
-        mock_final_msg.usage.cache_creation_input_tokens = 0
-
-        mock_stream = MagicMock()
-        mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-        mock_stream.__exit__ = MagicMock(return_value=False)
-        mock_stream.text_stream = ["```python\nprint('hi')\n```"]
-        mock_stream.get_final_message.return_value = mock_final_msg
-
-        mock_anthropic = MagicMock()
-        mock_client = MagicMock()
-        mock_client.messages.stream.return_value = mock_stream
-        mock_anthropic.Anthropic.return_value = mock_client
-
-        import sys
-        with patch.dict(sys.modules, {"anthropic": mock_anthropic, "httpx": MagicMock()}):
-            from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
-                call_claude_for_file,
+            stable = "Stable system prompt with LLD"
+            call_claude_for_file(
+                prompt="# Implement foo.py",
+                file_path="foo.py",
+                system_prompt=stable,
             )
-            call_claude_for_file(prompt="# foo", file_path="foo.py", system_prompt="stable")
 
-        captured = capsys.readouterr()
-        assert "[CACHE]" not in captured.out
+            call_kwargs = mock_provider.invoke.call_args
+            assert call_kwargs.kwargs["system_prompt"] == stable
