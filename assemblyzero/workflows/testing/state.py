@@ -193,6 +193,7 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Mode flags
     config_reviewer: str  # Issue #773: Reviewer LLM spec (e.g., "claude:opus")
+    config_effort: str  # Issue #779: Effort level for Claude reviewer
     auto_mode: bool
     mock_mode: bool
     skip_e2e: bool
