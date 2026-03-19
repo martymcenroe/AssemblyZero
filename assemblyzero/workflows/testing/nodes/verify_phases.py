@@ -134,6 +134,72 @@ def _build_failure_summary(output: str) -> str:
     return result
 
 
+def _classify_import_errors(
+    output: str, expected_module_paths: list[str]
+) -> tuple[int, int, list[str]]:
+    """Classify ImportErrors in pytest output as expected or unexpected.
+
+    Issue #842: In TDD red phase, ImportError on the module-under-test is
+    expected (it doesn't exist yet). But ImportError on other modules means
+    the generated code has hallucinated imports (e.g., assemblyzero.core.metrics).
+
+    Args:
+        output: Combined stdout + stderr from pytest.
+        expected_module_paths: File paths of modules being implemented
+            (e.g., ["assemblyzero/utils/foo.py"]). Converted to dotted
+            module names for matching.
+
+    Returns:
+        Tuple of (expected_count, unexpected_count, unexpected_module_names).
+    """
+    # Convert file paths to dotted module names for matching
+    # e.g., "assemblyzero/utils/foo.py" -> "assemblyzero.utils.foo"
+    expected_dotted: set[str] = set()
+    for path in expected_module_paths:
+        dotted = path.replace("/", ".").replace("\\", ".")
+        if dotted.endswith(".py"):
+            dotted = dotted[:-3]
+        expected_dotted.add(dotted)
+        # Also add each parent package so "from assemblyzero.utils import foo" matches
+        parts = dotted.split(".")
+        for i in range(1, len(parts)):
+            expected_dotted.add(".".join(parts[:i]))
+
+    # Parse ModuleNotFoundError / ImportError from pytest output
+    # Patterns: "ModuleNotFoundError: No module named 'X'"
+    #           "ImportError: cannot import name 'Y' from 'X'"
+    import_error_pattern = re.compile(
+        r"(?:ModuleNotFoundError|ImportError):\s*(?:No module named\s+['\"]([^'\"]+)['\"]"
+        r"|cannot import name\s+['\"]?\w+['\"]?\s+from\s+['\"]([^'\"]+)['\"])"
+    )
+
+    expected_count = 0
+    unexpected_count = 0
+    unexpected_modules: list[str] = []
+    seen_modules: set[str] = set()
+
+    for match in import_error_pattern.finditer(output):
+        module_name = match.group(1) or match.group(2)
+        if not module_name or module_name in seen_modules:
+            continue
+        seen_modules.add(module_name)
+
+        # Check if this module is one we expect to be missing
+        is_expected = any(
+            module_name == exp or module_name.startswith(exp + ".")
+            or exp.startswith(module_name + ".")
+            for exp in expected_dotted
+        )
+
+        if is_expected:
+            expected_count += 1
+        else:
+            unexpected_count += 1
+            unexpected_modules.append(module_name)
+
+    return expected_count, unexpected_count, unexpected_modules
+
+
 def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     """Convert a relative file path to the correct --cov target.
 
@@ -340,9 +406,47 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     failed_count = parsed.get("failed", 0)
     error_count = parsed.get("errors", 0)
 
-    # Issue #263: Import errors are valid RED phase behavior
-    # With import-based TDD scaffolding, ImportError means "module doesn't exist"
-    # which is exactly what RED phase should catch.
+    # Issue #842: Classify import errors — expected (module-under-test) vs
+    # unexpected (hallucinated imports like assemblyzero.core.metrics).
+    files_to_modify = state.get("files_to_modify", [])
+    expected_modules = [f["path"] for f in files_to_modify if f.get("path", "").endswith(".py")]
+    expected_import_count, unexpected_import_count, unexpected_modules = _classify_import_errors(
+        output, expected_modules
+    )
+
+    if unexpected_import_count > 0:
+        # Issue #842: Unexpected ImportErrors are code defects, not valid red.
+        # Route back to N4 with specific feedback about broken imports.
+        bad_modules_str = ", ".join(unexpected_modules[:5])
+        error_msg = (
+            f"Red phase detected {unexpected_import_count} unexpected ImportError(s): "
+            f"{bad_modules_str}. These modules do not exist in the codebase. "
+            f"Fix the imports in the generated code."
+        )
+        print(f"    [GUARD] {error_msg}")
+
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="red_phase_unexpected_imports",
+            details={
+                "unexpected_modules": unexpected_modules,
+                "expected_import_count": expected_import_count,
+            },
+        )
+
+        return {
+            "red_phase_output": output,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "error_message": error_msg,
+            "next_node": "N4_implement_code",
+        }
+
+    # Issue #263: Expected import errors are valid RED phase behavior.
+    # With import-based TDD scaffolding, ImportError on the module-under-test
+    # means "module doesn't exist yet" which is exactly what RED should catch.
     total_red = failed_count + error_count
 
     # Red phase success = ALL tests fail or error (none pass)
@@ -379,10 +483,9 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         }
 
     # Success: all tests failed or errored as expected
-    # Note: errors include ImportError which is valid TDD RED behavior
-    if error_count > 0:
-        print(f"    Red phase PASSED: {error_count} import errors (module doesn't exist yet)")
-    else:
+    if expected_import_count > 0:
+        print(f"    Red phase PASSED: {expected_import_count} expected import errors (module doesn't exist yet)")
+    if failed_count > 0:
         print(f"    Red phase PASSED: {failed_count} tests failed as expected")
 
     log_workflow_execution(
