@@ -59,7 +59,9 @@ def extract_code_block(response: str, file_path: str = "") -> str | None:
     return best_match or fallback_match
 
 
-def validate_code_response(code: str, filepath: str, existing_content: str = "") -> tuple[bool, str]:
+def validate_code_response(
+    code: str, filepath: str, existing_content: str = "", repo_root: str = "",
+) -> tuple[bool, str]:
     """Mechanically validate code. No LLM judgment.
 
     Returns (valid, error_message).
@@ -98,6 +100,17 @@ def validate_code_response(code: str, filepath: str, existing_content: str = "")
             ast.parse(code)
         except SyntaxError as e:
             return False, f"Python syntax error: {e}"
+
+        # Issue #842: Validate imports resolve to real modules.
+        # Only run when repo_root is provided (skip for batch validation
+        # where repo_root isn't passed through).
+        if repo_root:
+            from .import_validator import validate_imports
+            from pathlib import Path
+
+            imports_ok, bad_imports = validate_imports(code, filepath, Path(repo_root))
+            if not imports_ok:
+                return False, f"Unresolvable imports: {', '.join(bad_imports)}"
 
     return True, ""
 
