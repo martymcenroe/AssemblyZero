@@ -43,6 +43,8 @@ from assemblyzero.core.errors import (
     classify_gemini_error,
 )
 
+from assemblyzero.telemetry.llm_call_record import LLMOutputMetadata
+
 
 # =============================================================================
 # Error Classification
@@ -904,3 +906,20 @@ class GeminiClient:
             minutes = int(match.group(2))
             return hours + minutes / 60
         return None
+
+
+def _parse_usage_from_gemini_response(response_dict: dict) -> LLMOutputMetadata:
+    """Extract usageMetadata from Gemini response dict.
+
+    Issue #774: Parse token counts from Gemini GenerateContentResponse.
+    Cost estimation for Gemini is deferred (returns 0.0 via cost.py unknown model path).
+    """
+    usage = response_dict.get("usageMetadata", {})
+    model_version = response_dict.get("modelVersion", "gemini-unknown")
+
+    return LLMOutputMetadata(
+        model_used=model_version,
+        input_tokens=usage.get("promptTokenCount"),
+        output_tokens=usage.get("candidatesTokenCount"),
+        stop_reason="end_turn",
+    )

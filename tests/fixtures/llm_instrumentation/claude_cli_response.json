@@ -1,0 +1,13 @@
+{
+  "model": "claude-opus-4-5-20250514",
+  "result": "Generated content here.",
+  "usage": {
+    "input_tokens": 12450,
+    "output_tokens": 3200,
+    "thinking_tokens": 8500,
+    "cache_read_input_tokens": 4000,
+    "cache_creation_input_tokens": 1200
+  },
+  "stop_reason": "end_turn",
+  "total_cost_usd": 0.42
+}
