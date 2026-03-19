@@ -19,8 +19,14 @@ import random
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional, TYPE_CHECKING
 
 from assemblyzero.core.text_sanitizer import strip_emoji
+
+from assemblyzero.telemetry.llm_call_record import LLMInputParams, LLMOutputMetadata
+
+if TYPE_CHECKING:
+    from assemblyzero.telemetry.store import CallStore
 
 # Configuration
 MAX_RETRIES = 5
@@ -135,3 +141,69 @@ def _calculate_backoff(attempt: int) -> float:
     delay = min(BASE_DELAY * (2**attempt), MAX_DELAY)
     jitter = delay * JITTER_FACTOR * (2 * random.random() - 1)
     return delay + jitter
+
+
+def _parse_usage_from_cli_output(raw_json: dict) -> LLMOutputMetadata:
+    """Extract token counts, stop reason, model from Claude CLI JSON response.
+
+    Issue #774: Parse the JSON output from Claude CLI --output-format json.
+    Uses .get() with None defaults so missing fields don't crash.
+    """
+    usage = raw_json.get("usage", {})
+    return LLMOutputMetadata(
+        model_used=raw_json.get("model", "unknown"),
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        thinking_tokens=usage.get("thinking_tokens"),
+        cache_read_tokens=usage.get("cache_read_input_tokens"),
+        cache_write_tokens=usage.get("cache_creation_input_tokens"),
+        stop_reason=raw_json.get("stop_reason", "unknown"),
+    )
+
+
+def call_claude_with_instrumentation(
+    prompt: str,
+    *,
+    model: str,
+    working_dir: str | Path = ".",
+    effort: Optional[str] = None,
+    max_budget_usd: Optional[float] = None,
+    store: Optional["CallStore"] = None,
+    workflow: str = "unknown",
+    node: str = "unknown",
+    issue_number: Optional[int] = None,
+    timeout: int = 300,
+) -> str:
+    """Invoke Claude CLI with instrumentation. Wraps invoke_claude().
+
+    Issue #774: Drop-in wrapper that adds telemetry around existing CLI calls.
+    If store is None or store.enabled is False, behaves exactly like invoke_claude().
+    """
+    from assemblyzero.telemetry.instrumentation import InstrumentedCall
+    from assemblyzero.telemetry.store import CallStore
+
+    inputs: LLMInputParams = {
+        "provider": "claude_cli",
+        "model_requested": model,
+        "workflow": workflow,
+        "node": node,
+        "user_prompt_len": len(prompt),
+    }
+    if effort is not None:
+        inputs["effort_level"] = effort
+    if max_budget_usd is not None:
+        inputs["max_budget_usd"] = max_budget_usd
+    if issue_number is not None:
+        inputs["issue_number"] = issue_number
+
+    if store is None:
+        store = CallStore(enabled=False)
+
+    with InstrumentedCall(store, inputs) as ic:
+        result = invoke_claude(prompt, working_dir, timeout=timeout)
+        # Note: invoke_claude returns a string, not JSON.
+        # Full JSON parsing would require modifying invoke_claude itself.
+        # For now, we record the call without detailed token counts from CLI.
+        # Token parsing is available via _parse_usage_from_cli_output when
+        # callers have access to the raw JSON response.
+        return result

@@ -17,6 +17,7 @@ Kill switch: set ASSEMBLYZERO_TELEMETRY=0 to disable all emission.
 """
 
 from assemblyzero.telemetry.emitter import emit, flush, track_tool
+
 from assemblyzero.telemetry.cascade_events import (
     CascadeEvent,
     create_cascade_event,
@@ -24,12 +25,27 @@ from assemblyzero.telemetry.cascade_events import (
     log_cascade_event,
 )
 
+from assemblyzero.telemetry.llm_call_record import (
+    LLMCallRecord,
+    LLMInputParams,
+    LLMOutputMetadata,
+)
+from assemblyzero.telemetry.instrumentation import InstrumentedCall
+from assemblyzero.telemetry.store import CallStore
+from assemblyzero.telemetry.cost import estimate_cost
+
 __all__ = [
+    "CallStore",
     "CascadeEvent",
     "create_cascade_event",
     "emit",
+    "estimate_cost",
     "flush",
     "get_cascade_stats",
+    "InstrumentedCall",
+    "LLMCallRecord",
+    "LLMInputParams",
+    "LLMOutputMetadata",
     "log_cascade_event",
     "track_tool",
 ]
