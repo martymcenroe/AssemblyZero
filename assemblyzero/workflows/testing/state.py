@@ -169,6 +169,8 @@ class TestingWorkflowState(TypedDict, total=False):
     previous_green_failures: list[str]  # Issue #501: Previous green phase failed test names for identity comparison
     test_failure_summary: str  # Issue #498: Structured test failure feedback for N4
     e2e_failure_summary: str  # Issue #498: Structured E2E failure feedback for N4
+    full_suite_validated: bool  # Issue #842: True after full test suite passes regression check
+    full_suite_regressions: list[str]  # Issue #842: Failed test names from last full suite run (for stagnation)
 
     # Review artifacts
     test_plan_review_prompt: str
