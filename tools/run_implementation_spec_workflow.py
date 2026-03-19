@@ -224,6 +224,13 @@ Examples:
         help="Max API cost in USD before halting (default $3.00, 0=unlimited)",
     )
 
+    # Issue #825: Worktree isolation
+    parser.add_argument(
+        "--no-worktree",
+        action="store_true",
+        help="Allow running in the AssemblyZero root directory (not recommended)",
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -302,6 +309,25 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     else:
         target_repo = _detect_repo_from_cwd()
 
+    # Issue #825: Enforce worktree isolation for AssemblyZero itself
+    if target_repo.resolve() == assemblyzero_root.resolve():
+        if not getattr(args, "no_worktree", False):
+            print()
+            print("=" * 60)
+            print("ERROR: Refusing to run in the AssemblyZero root directory.")
+            print("=" * 60)
+            print("To prevent branch pollution, you must run in an isolated worktree.")
+            print()
+            print("1. Create a worktree:")
+            print("   git worktree add ../AssemblyZero-ISSUE -b branch-name")
+            print()
+            print("2. Run the workflow pointing to the worktree:")
+            print("   python tools/run_implementation_spec_workflow.py ... --repo ../AssemblyZero-ISSUE")
+            print()
+            print("If you MUST run on main, use the --no-worktree escape hatch.")
+            print("=" * 60)
+            sys.exit(1)
+
     return assemblyzero_root, target_repo
 
 
@@ -351,7 +377,12 @@ def build_initial_state(
     # Resolve LLD path
     lld_path = ""
     if args.lld:
-        lld_path = str(Path(args.lld).resolve())
+        # Resolve relative to target_repo if not absolute
+        p = Path(args.lld)
+        if not p.is_absolute():
+            lld_path = str((target_repo / p).resolve())
+        else:
+            lld_path = str(p.resolve())
     else:
         # Auto-discover LLD from issue number
         found = find_lld_path(args.issue, target_repo)
