@@ -177,11 +177,11 @@ This skips all stages before `spec` and begins from that stage.
 
 ```bash
 # Was running, got interrupted
-poetry run python tools/run_implement_from_lld.py --issue 381 --no-worktree
+poetry run python tools/run_implement_from_lld.py --issue 381
 # ^C (interrupted at N4)
 
 # Resume from where it stopped
-poetry run python tools/run_implement_from_lld.py --issue 381 --no-worktree --resume
+poetry run python tools/run_implement_from_lld.py --issue 381 --resume
 ```
 
 ### Resume After Credential Exhaustion
