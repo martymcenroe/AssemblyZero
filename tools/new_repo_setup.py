@@ -775,6 +775,38 @@ Required Notice: Copyright (c) {year} {github_user} (https://github.com/{github_
     license_path.write_text(content, encoding='utf-8')
 
 
+def create_mit_license(project_path: Path, github_user: str) -> None:
+    """Create MIT LICENSE file.
+
+    Issue #755: Alternative license for open-source projects.
+    """
+    year = datetime.now().year
+    content = f"""MIT License
+
+Copyright (c) {year} {github_user}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+    license_path = project_path / "LICENSE"
+    license_path.write_text(content, encoding='utf-8')
+
+
 def create_gitignore(project_path: Path) -> None:
     """
     Create the .gitignore file.
@@ -959,7 +991,7 @@ def create_settings_json(project_path: Path) -> None:
     """
     Create .claude/settings.json with canonical security hooks.
 
-    Deploys secret-guard.sh and bash-gate.sh hooks from AssemblyZero.
+    Deploys secret-guard.sh, bash-gate.sh, and secret-file-guard.sh hooks from AssemblyZero.
     New repos must start protected — empty hooks create a security gap.
 
     Args:
@@ -987,6 +1019,17 @@ def create_settings_json(project_path: Path) -> None:
                             "description": "Secret Guard (blocks secret leaks to stdout)"
                         }
                     ]
+                },
+                {
+                    "matcher": "Read|Write|Edit|Grep|NotebookEdit",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-file-guard.sh",
+                            "timeout": 5,
+                            "description": "Secret File Guard (blocks file tools on .env, credentials)"
+                        }
+                    ]
                 }
             ],
             "PostToolUse": []
@@ -1004,6 +1047,7 @@ def deploy_canonical_hooks(project_path: Path) -> None:
     Deploys:
     - secret-guard.sh: Blocks all Bash commands referencing secret files
     - bash-gate.sh: Blocks destructive git commands and chain operators
+    - secret-file-guard.sh: Blocks file tools on .env, credentials
 
     Args:
         project_path: Path to the project root
@@ -1018,7 +1062,7 @@ def deploy_canonical_hooks(project_path: Path) -> None:
     target_hooks_dir = project_path / ".claude" / "hooks"
     target_hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    canonical_hooks = ["secret-guard.sh", "bash-gate.sh"]
+    canonical_hooks = ["secret-guard.sh", "bash-gate.sh", "secret-file-guard.sh"]
     for hook_name in canonical_hooks:
         source = source_hooks_dir / hook_name
         if not source.exists():
@@ -1208,6 +1252,12 @@ Examples:
         action="store_true",
         help="Overwrite existing files when creating structure (default: skip)"
     )
+    parser.add_argument(
+        "--license",
+        choices=["polyform", "mit"],
+        default="polyform",
+        help="License type (default: polyform)"
+    )
 
     args = parser.parse_args()
 
@@ -1289,13 +1339,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 5: Create .claude/settings.json (with canonical hooks)
     print("\n5. Creating .claude/settings.json (with security hooks)...")
     create_settings_json(project_path)
-    print("  Created settings.json with secret-guard.sh + bash-gate.sh hooks")
+    print("  Created settings.json with secret-guard.sh + bash-gate.sh + secret-file-guard.sh hooks")
 
     # Step 5b: Deploy canonical hook scripts
     print("\n5b. Deploying canonical security hooks...")
     try:
         deploy_canonical_hooks(project_path)
-        print("  Deployed: secret-guard.sh, bash-gate.sh")
+        print("  Deployed: secret-guard.sh, bash-gate.sh, secret-file-guard.sh")
     except FileNotFoundError as e:
         print(f"  WARNING: {e}")
         print("  Hooks not deployed — repo will start unprotected!")
@@ -1317,8 +1367,12 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     # Step 9: Create LICENSE
     print("\n9. Creating LICENSE...")
-    create_license(project_path, github_user)
-    print("  Created LICENSE (PolyForm Noncommercial 1.0.0)")
+    if args.license == "mit":
+        create_mit_license(project_path, github_user)
+        print("  Created LICENSE (MIT)")
+    else:
+        create_license(project_path, github_user)
+        print("  Created LICENSE (PolyForm Noncommercial 1.0.0)")
 
     # Step 10: Create .gitignore
     print("\n10. Creating .gitignore...")
@@ -1339,44 +1393,55 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     )
     print("  Created initial commit")
 
+    github_created = False
     if not args.no_github:
         # Step 13: Create GitHub repo
         print("\n13. Creating GitHub repository...")
         visibility = "--public" if args.public else "--private"
-        run_command(
-            ["gh", "repo", "create", f"{github_user}/{args.name}", visibility, "--source", ".", "--push"],
-            cwd=project_path
-        )
-        print(f"  Created: https://github.com/{github_user}/{args.name}")
+        try:
+            run_command(
+                ["gh", "repo", "create", f"{github_user}/{args.name}", visibility, "--source", ".", "--push"],
+                cwd=project_path
+            )
+            print(f"  Created: https://github.com/{github_user}/{args.name}")
+            github_created = True
+        except Exception as e:
+            print(f"  WARNING: gh repo create failed: {e}")
+            print(f"  Your PAT may lack the 'create repository' permission.")
+            print(f"  The local repo is fully valid. To finish manually:")
+            print(f"    1. Create repo at https://github.com/new")
+            print(f"    2. git remote add origin https://github.com/{github_user}/{args.name}.git")
+            print(f"    3. git push -u origin main")
 
-        # Step 14: Star the repo
-        print("\n14. Starring repository...")
-        run_command(
-            ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{args.name}"],
-            cwd=project_path,
-            check=False  # Don't fail if starring fails
-        )
-        print("  Starred repository")
+        if github_created:
+            # Step 14: Star the repo
+            print("\n14. Starring repository...")
+            run_command(
+                ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{args.name}"],
+                cwd=project_path,
+                check=False  # Don't fail if starring fails
+            )
+            print("  Starred repository")
 
-        # Step 15: Disable wiki (no protection mechanisms available)
-        print("\n15. Disabling wiki (no protection mechanisms available)...")
-        if disable_wiki(github_user, args.name):
-            print("  Wiki disabled")
-        else:
-            print("  WARNING: Could not disable wiki — do this manually!")
+            # Step 15: Disable wiki (no protection mechanisms available)
+            print("\n15. Disabling wiki (no protection mechanisms available)...")
+            if disable_wiki(github_user, args.name):
+                print("  Wiki disabled")
+            else:
+                print("  WARNING: Could not disable wiki — do this manually!")
 
-        # Step 16: Configure branch protection
-        print("\n16. Configuring branch protection...")
-        if configure_branch_protection(github_user, args.name):
-            print("  Branch protection configured:")
-            print("    - Force push: blocked")
-            print("    - Deletion: blocked")
-            print("    - enforce_admins: enabled")
-            print("    - Required check: pr-sentinel")
-        else:
-            print("  WARNING: Could not configure branch protection.")
-            print("  This may fail if the token lacks admin scope.")
-            print("  Configure manually or re-run with a classic token.")
+            # Step 16: Configure branch protection
+            print("\n16. Configuring branch protection...")
+            if configure_branch_protection(github_user, args.name):
+                print("  Branch protection configured:")
+                print("    - Force push: blocked")
+                print("    - Deletion: blocked")
+                print("    - enforce_admins: enabled")
+                print("    - Required check: pr-sentinel")
+            else:
+                print("  WARNING: Could not configure branch protection.")
+                print("  This may fail if the token lacks admin scope.")
+                print("  Configure manually or re-run with a classic token.")
 
     # Post-setup verification
     print("\n" + "=" * 60)
@@ -1390,11 +1455,16 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     checks_total += 1
     sg = project_path / ".claude" / "hooks" / "secret-guard.sh"
     bg = project_path / ".claude" / "hooks" / "bash-gate.sh"
-    if sg.exists() and bg.exists():
-        print("  [PASS] Security hooks deployed")
+    sfg = project_path / ".claude" / "hooks" / "secret-file-guard.sh"
+    if sg.exists() and bg.exists() and sfg.exists():
+        print("  [PASS] Security hooks deployed (secret-guard, bash-gate, secret-file-guard)")
         checks_passed += 1
     else:
-        print("  [FAIL] Security hooks missing!")
+        missing_hooks = []
+        if not sg.exists(): missing_hooks.append("secret-guard.sh")
+        if not bg.exists(): missing_hooks.append("bash-gate.sh")
+        if not sfg.exists(): missing_hooks.append("secret-file-guard.sh")
+        print(f"  [FAIL] Security hooks missing: {', '.join(missing_hooks)}")
 
     # Verify .gitignore has security patterns
     checks_total += 1
@@ -1416,8 +1486,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     settings_file = project_path / ".claude" / "settings.json"
     if settings_file.exists():
         s_content = settings_file.read_text(encoding="utf-8")
-        if "secret-guard" in s_content and "bash-gate" in s_content:
-            print("  [PASS] Hook configuration in settings.json")
+        if "secret-guard" in s_content and "bash-gate" in s_content and "secret-file-guard" in s_content:
+            print("  [PASS] Hook configuration in settings.json (all 3 hooks)")
             checks_passed += 1
         else:
             print("  [FAIL] settings.json missing hook configuration!")
