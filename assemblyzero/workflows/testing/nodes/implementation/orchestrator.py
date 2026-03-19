@@ -64,6 +64,7 @@ def generate_file_with_retry(
     estimated_line_count: int = 0,
     is_test_scaffold: bool = False,
     system_prompt: str = "",
+    repo_root: Path | None = None,
 ) -> tuple[str, bool]:
     """Generate code for a single file with retry on validation failure and model routing.
 
@@ -193,8 +194,11 @@ def generate_file_with_retry(
                     response_preview=response[:500]
                 )
 
-        # Validate code mechanically
-        validation_result = validate_code_response(code, filepath, existing_content)
+        # Validate code mechanically (Issue #842: pass repo_root for import validation)
+        validation_result = validate_code_response(
+            code, filepath, existing_content,
+            repo_root=str(repo_root) if repo_root else "",
+        )
 
         # Handle both tuple (valid, error_msg) and bare bool returns
         if isinstance(validation_result, tuple):
@@ -613,6 +617,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                 pruned_prompt=pruned_prompt,
                 existing_content=existing_content,
                 system_prompt=stable_system_prompt,
+                repo_root=repo_root,
             )
         # Note: generate_file_with_retry raises ImplementationError on failure,
         # so if we get here, code is valid
