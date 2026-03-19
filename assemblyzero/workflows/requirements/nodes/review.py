@@ -3,6 +3,7 @@
 Issue #101: Unified Requirements Workflow
 Issue #248: Add post-review open questions check
 Issue #257: Update draft with resolved open questions after approval
+Issue #775: Replace regex LLM output parsing with structured JSON schema
 
 Uses the configured reviewer LLM to review the current draft.
 Saves verdict to audit trail and updates verdict history.
@@ -15,13 +16,44 @@ from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
-from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
+from assemblyzero.core.verdict_schema import (
+    VERDICT_SCHEMA,
+    FEEDBACK_SCHEMA,
+    FeedbackResult,
+    parse_structured_verdict,
+    parse_structured_feedback,
+    parse_structured_draft_questions,
+)
 from assemblyzero.workflows.requirements.audit import (
     load_review_prompt,
     next_file_number,
     save_audit_file,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+
+
+def _invoke_reviewer_with_feedback_schema(
+    provider,
+    prompt: str,
+    system: str,
+) -> FeedbackResult:
+    """Call reviewer with FEEDBACK_SCHEMA and parse structured response.
+
+    Issue #775: Uses response_schema for Gemini, json_schema for all other
+    providers (including FallbackProvider which wraps ClaudeCLIProvider).
+    Falls back to regex if structured parse fails (logs WARNING).
+    """
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    schema_kwargs = {}
+    if isinstance(provider, GeminiProvider):
+        schema_kwargs["response_schema"] = FEEDBACK_SCHEMA
+    else:
+        schema_kwargs["json_schema"] = FEEDBACK_SCHEMA
+
+    result = provider.invoke(system, prompt, **schema_kwargs)
+    raw = result.content if hasattr(result, "content") else str(result)
+    return parse_structured_feedback(raw)
 
 
 def review(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -101,23 +133,20 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         previous_draft=previous_draft,
     )
 
-    # Issue #773: Pass response_schema to all providers uniformly
-    invoke_kwargs: dict = {
-        "system_prompt": system_prompt,
-        "content": review_content,
-    }
-    if not mock_mode:
-        invoke_kwargs["response_schema"] = VERDICT_SCHEMA
-
     # Call reviewer
     print(f"    Reviewer: {reviewer_spec}")
     cost_before = get_cumulative_cost()
-    result = reviewer.invoke(**invoke_kwargs)
-    node_cost_usd = get_cumulative_cost() - cost_before
 
-    if not result.success:
-        print(f"    ERROR: {result.error_message}")
-        return {"error_message": f"Reviewer failed: {result.error_message}"}
+    # Issue #775: Use structured schema-passing helper (REQ-2).
+    # _invoke_reviewer_with_feedback_schema passes FEEDBACK_SCHEMA to the
+    # provider via response_schema (Gemini) or json_schema (Claude CLI),
+    # then parses the response through parse_structured_feedback which
+    # falls back to regex if JSON parse fails.
+    feedback_result = _invoke_reviewer_with_feedback_schema(
+        reviewer, review_content, system_prompt
+    )
+
+    node_cost_usd = get_cumulative_cost() - cost_before
 
     # Issue #476: Budget check
     cumulative = get_cumulative_cost()
@@ -127,48 +156,66 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         print(f"    {msg}")
         return {"error_message": msg}
 
-    verdict_content = result.response or ""
+    # Keep `response` available for downstream code that reads the raw text
+    # (e.g., logging, state snapshots). Raw text no longer primary; structured result is authoritative.
+    response = ""
+    verdict_status = feedback_result["verdict"]
+    if verdict_status == "UNKNOWN":
+        verdict_status = "REVISE"
+    # Backward compat: derive `structured` dict for any remaining callers
+    structured = {"verdict": verdict_status, "rationale": feedback_result["rationale"]}
+
+    # Map REVISE -> BLOCKED for workflow purposes
+    if verdict_status == "REVISE":
+        lld_status = "BLOCKED"
+    elif verdict_status == "APPROVED":
+        lld_status = "APPROVED"
+    elif verdict_status == "DISCUSS":
+        lld_status = "BLOCKED"
+    else:
+        lld_status = "BLOCKED"
+
+    print(f"    Parsed structured verdict: {verdict_status}")
+
+    # Build verdict_content for audit trail from feedback_result
+    verdict_content = feedback_result.get("rationale", "")
+    if not verdict_content:
+        items = feedback_result.get("feedback_items", [])
+        if items:
+            verdict_content = "\n".join(f"- {item}" for item in items)
 
     # Save to audit trail
     file_num = next_file_number(audit_dir)
+    audit_content = f"Verdict: {verdict_status}\n\nRationale: {feedback_result.get('rationale', '')}\n"
+    if feedback_result.get("feedback_items"):
+        audit_content += "\n## Feedback Items\n"
+        for item in feedback_result["feedback_items"]:
+            audit_content += f"- {item}\n"
     if audit_dir.exists():
         verdict_path = save_audit_file(
-            audit_dir, file_num, "verdict.md", verdict_content
+            audit_dir, file_num, "verdict.md", audit_content
         )
     else:
         verdict_path = None
 
-    # Issue #773: Try structured JSON parsing first, fall back to regex
-    structured = parse_structured_verdict(verdict_content)
-    if structured:
-        lld_status = structured["verdict"]
-        # Map REVISE -> BLOCKED for workflow purposes
-        if lld_status == "REVISE":
-            lld_status = "BLOCKED"
-        print(f"    Parsed structured verdict: {structured['verdict']}")
-    else:
-        # Determine LLD status from verdict via regex
-        lld_status = _parse_verdict_status(verdict_content)
-
     # Issue #248: Check open questions resolution status
-    open_questions_status = _check_open_questions_status(current_draft, verdict_content)
+    open_questions_status = _check_open_questions_status(current_draft, audit_content)
 
     # Issue #257: Update draft with resolutions if APPROVED
     updated_draft = current_draft
     if lld_status == "APPROVED":
-        updated_draft = _update_draft_with_verdict(current_draft, verdict_content)
+        updated_draft = _update_draft_with_verdict(current_draft, audit_content)
         if updated_draft != current_draft:
             print("    Draft updated with resolved open questions")
 
     # Issue #506: Extract actionable feedback — store structured data in state,
     # full prose stays in the audit trail file only.
     actionable_feedback = _extract_actionable_feedback(
-        verdict_content, lld_status, structured
+        response, lld_status, structured, feedback_result=feedback_result
     )
 
-    verdict_lines = len(verdict_content.splitlines()) if verdict_content else 0
     feedback_lines = len(actionable_feedback.splitlines()) if actionable_feedback else 0
-    print(f"    Verdict: {lld_status} ({verdict_lines} lines, {feedback_lines} in feedback)")
+    print(f"    Verdict: {lld_status} ({feedback_lines} lines in feedback)")
     print(f"    Open Questions: {open_questions_status}")
     if verdict_path:
         print(f"    Saved: {verdict_path.name}")
@@ -183,8 +230,8 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     node_tokens = accumulate_node_tokens(
         dict(state.get("node_tokens", {})),
         "review",
-        result.input_tokens,
-        result.output_tokens,
+        0,
+        0,
     )
 
     return {
@@ -326,12 +373,15 @@ def _extract_actionable_feedback(
     verdict_content: str,
     lld_status: str,
     structured: dict | None,
+    feedback_result: FeedbackResult | None = None,
 ) -> str:
     """Extract actionable feedback from verdict, discarding boilerplate.
 
     Issue #506: Store only actionable feedback in state, not full prose.
     Full prose stays in the audit trail file. This saves ~2,000 tokens
     per iteration in the revision prompt.
+
+    Issue #775: Prefer structured feedback_items when available.
 
     For structured JSON verdicts (Issue #492): extracts summary,
     blocking_issues, and suggestions.
@@ -344,10 +394,18 @@ def _extract_actionable_feedback(
         verdict_content: Full raw verdict text from reviewer.
         lld_status: Parsed verdict status (APPROVED/BLOCKED).
         structured: Parsed structured verdict dict, or None.
+        feedback_result: Structured FeedbackResult from parse_structured_feedback, or None.
 
     Returns:
         Concise actionable feedback string.
     """
+    # Issue #775: Prefer structured feedback_items when available
+    if feedback_result and feedback_result["source"] == "structured":
+        items = feedback_result["feedback_items"]
+        if items:
+            return "\n".join(f"- {item}" for item in items)
+        return ""
+
     if not verdict_content or not verdict_content.strip():
         return f"Verdict: {lld_status}"
 
@@ -468,6 +526,8 @@ def _check_open_questions_status(draft_content: str, verdict_content: str) -> st
     2. Questions marked as HUMAN REQUIRED
     3. Questions remain unanswered
 
+    Issue #775: Uses parse_structured_draft_questions for structured parsing.
+
     Args:
         draft_content: The draft that was reviewed.
         verdict_content: Gemini's verdict.
@@ -490,6 +550,18 @@ def _check_open_questions_status(draft_content: str, verdict_content: str) -> st
 
     # Check if verdict has "Open Questions Resolved" section with answers
     if _verdict_has_resolved_questions(verdict_content):
+        return "RESOLVED"
+
+    # Issue #775: Use structured parse when verdict_content is available.
+    # We parse the full verdict_content (not questions_section) because
+    # parse_structured_draft_questions handles both JSON (from structured
+    # output) and markdown (via regex fallback that finds the ## Open
+    # Questions section internally).
+    dq_result = parse_structured_draft_questions(verdict_content)
+    unchecked = [q["text"] for q in dq_result["open_questions"] if not q["resolved"]]
+    checked = [q["text"] for q in dq_result["open_questions"] if q["resolved"]]
+
+    if checked and not unchecked:
         return "RESOLVED"
 
     # Questions exist but weren't answered

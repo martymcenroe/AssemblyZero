@@ -178,6 +178,7 @@ class TestReviewNodeStoresExtractedFeedback:
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
+        import json as _json
         full_verdict = """## Identity Confirmation
 I am Gemini 3 Pro.
 
@@ -199,6 +200,7 @@ No blocking issues found.
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "LLD looks good overall.", "feedback_items": [], "open_questions": []}),
             response=full_verdict,
             error_message=None,
             input_tokens=100,
@@ -226,21 +228,27 @@ No blocking issues found.
         cv = result.get("current_verdict", "")
         assert "I am Gemini 3 Pro" not in cv
         assert "Pre-Flight Gate" not in cv
-        # Should contain actionable content
-        assert "APPROVED" in cv
+        # #775: structured APPROVED with empty feedback_items returns ""
+        # (no actionable feedback to store). Verdict confirmed via lld_status.
+        assert result.get("lld_status") == "APPROVED"
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
-    def test_audit_trail_has_full_prose(self, mock_get_provider, tmp_path):
-        """Audit trail file still contains the full verdict prose."""
+    def test_audit_trail_has_structured_verdict(self, mock_get_provider, tmp_path):
+        """Audit trail file contains structured verdict content (#775).
+
+        Issue #775: Audit trail now writes structured feedback_result data
+        (verdict + rationale + feedback_items), not raw LLM prose.
+        """
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
-        full_verdict = "## Identity Confirmation\nI am Gemini.\n\n## Verdict\n[X] **APPROVED**"
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            response=full_verdict,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "Looks good", "feedback_items": ["Consider caching"], "open_questions": []}),
+            response="raw prose",
             error_message=None,
             input_tokens=100,
             output_tokens=200,
@@ -263,11 +271,13 @@ No blocking issues found.
 
         review(state)
 
-        # Audit trail should have the full verdict
+        # Audit trail should have structured verdict content
         audit_files = list(Path(state["audit_dir"]).glob("*verdict*"))
         assert len(audit_files) == 1
         content = audit_files[0].read_text()
-        assert "I am Gemini" in content  # Full prose preserved
+        assert "APPROVED" in content
+        assert "Looks good" in content
+        assert "Consider caching" in content
 
 
 # ===========================================================================

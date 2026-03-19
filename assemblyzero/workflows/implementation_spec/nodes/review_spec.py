@@ -1,6 +1,7 @@
 """N5: Review Spec node for Implementation Spec Workflow.
 
 Issue #304: Implementation Readiness Review Workflow (LLD -> Implementation Spec)
+Issue #775: Replace regex verdict/feedback parsing with structured JSON schema
 
 Uses the configured reviewer LLM (Gemini) to perform an implementation
 readiness review of the generated spec draft. This is a semantic review
@@ -26,7 +27,13 @@ from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
-from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
+from assemblyzero.core.verdict_schema import (
+    VERDICT_SCHEMA,
+    REVIEW_SPEC_SCHEMA,
+    ReviewSpecResult,
+    parse_structured_verdict,
+    parse_structured_review_spec,
+)
 from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
@@ -73,6 +80,34 @@ You ARE reviewing:
 - Specificity: Could someone write exact diffs from the instructions?
 - Consistency: Do patterns, naming, and structure match the codebase?
 - Feasibility: Are the instructions technically achievable?"""
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+
+def _invoke_reviewer_with_spec_schema(
+    provider,
+    prompt: str,
+    system: str,
+) -> ReviewSpecResult:
+    """Call spec reviewer with REVIEW_SPEC_SCHEMA and parse structured response.
+
+    Issue #775: Uses response_schema for Gemini, json_schema for all other
+    providers (including FallbackProvider which wraps ClaudeCLIProvider).
+    """
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    schema_kwargs = {}
+    if isinstance(provider, GeminiProvider):
+        schema_kwargs["response_schema"] = REVIEW_SPEC_SCHEMA
+    else:
+        schema_kwargs["json_schema"] = REVIEW_SPEC_SCHEMA
+
+    result = provider.invoke(system, prompt, **schema_kwargs)
+    raw = result.content if hasattr(result, "content") else str(result)
+    return parse_structured_review_spec(raw)
 
 
 # =============================================================================
@@ -182,22 +217,15 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # -------------------------------------------------------------------------
     # Call reviewer LLM
-    # Issue #773: Pass response_schema to all providers uniformly
+    # Issue #775: Use structured schema-passing helper (REQ-2).
+    # _invoke_reviewer_with_spec_schema passes REVIEW_SPEC_SCHEMA to the
+    # provider, then parses via parse_structured_review_spec.
     # -------------------------------------------------------------------------
-    invoke_kwargs: dict = {
-        "system_prompt": REVIEWER_SYSTEM_PROMPT,
-        "content": review_content,
-    }
-    if not mock_mode:
-        invoke_kwargs["response_schema"] = VERDICT_SCHEMA
-
     cost_before = get_cumulative_cost()
-    result = reviewer.invoke(**invoke_kwargs)
+    spec_result = _invoke_reviewer_with_spec_schema(
+        reviewer, review_content, REVIEWER_SYSTEM_PROMPT
+    )
     node_cost_usd = get_cumulative_cost() - cost_before
-
-    if not result.success:
-        print(f"    ERROR: {result.error_message}")
-        return {"error_message": f"Reviewer failed: {result.error_message}"}
 
     # Issue #476: Budget check
     cumulative = get_cumulative_cost()
@@ -207,7 +235,13 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         print(f"    {msg}")
         return {"error_message": msg}
 
-    verdict_content = result.response or ""
+    response = ""  # Raw text no longer primary; structured result is authoritative
+    verdict_status = spec_result["verdict"]
+    if verdict_status == "UNKNOWN":
+        verdict_status = "REVISE"
+    feedback = spec_result["rationale"]
+    if not feedback and spec_result["feedback_items"]:
+        feedback = "\n".join(f"- {item}" for item in spec_result["feedback_items"])
 
     # -------------------------------------------------------------------------
     # Save verdict to audit trail
@@ -216,34 +250,17 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     audit_dir = Path(audit_dir_str) if audit_dir_str else None
     verdict_path = None
 
+    verdict_content = f"Verdict: {verdict_status}\n\nRationale: {spec_result['rationale']}\n"
+    if spec_result.get("feedback_items"):
+        verdict_content += "\n## Feedback Items\n"
+        for item in spec_result["feedback_items"]:
+            verdict_content += f"- {item}\n"
+
     if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
         verdict_path = save_audit_file(
             audit_dir, file_num, "readiness-verdict.md", verdict_content
         )
-
-    # -------------------------------------------------------------------------
-    # Parse verdict
-    # Issue #492: Try structured JSON parsing first, fall back to regex
-    # -------------------------------------------------------------------------
-    # Issue #773: Always try structured JSON parsing (all providers now support response_schema)
-    structured = parse_structured_verdict(verdict_content)
-    if structured:
-        verdict_status = structured["verdict"]
-        feedback = structured.get("summary", "")
-        blocking = structured.get("blocking_issues", [])
-        if blocking:
-            feedback += "\n\n## Blocking Issues\n"
-            for issue in blocking:
-                feedback += f"- [{issue.get('severity', 'HIGH')}] {issue.get('section', '')}: {issue.get('issue', '')}\n"
-        suggestions = structured.get("suggestions", [])
-        if suggestions:
-            feedback += "\n\n## Suggestions\n"
-            for s in suggestions:
-                feedback += f"- {s}\n"
-        print(f"    Parsed structured verdict: {verdict_status}")
-    else:
-        verdict_status, feedback = parse_review_verdict(verdict_content)
 
     # -------------------------------------------------------------------------
     # Report results
@@ -267,8 +284,8 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     node_tokens = accumulate_node_tokens(
         dict(state.get("node_tokens", {})),
         "review_spec",
-        result.input_tokens,
-        result.output_tokens,
+        0,
+        0,
     )
 
     return {
@@ -467,21 +484,14 @@ IMPORTANT:
 
 
 def parse_review_verdict(response: str) -> tuple[str, str]:
-    """Extract verdict and feedback from Gemini response.
+    """Extract verdict and feedback from reviewer response.
 
-    Parses the structured Gemini response to extract:
-    1. The verdict (APPROVED, REVISE, or BLOCKED)
-    2. The full feedback content for revision prompts
-
-    The verdict is determined by checked checkboxes in the response:
-    - [X] **APPROVED** -> "APPROVED"
-    - [X] **REVISE** -> "REVISE"
-    - [X] **BLOCKED** -> "BLOCKED"
-
-    Falls back to keyword matching if no checkboxes found.
+    Issue #775: Uses structured JSON as primary path, regex as fallback.
+    Kept for backward compatibility — external callers may invoke this directly.
+    The primary call path in review_spec() now uses _invoke_reviewer_with_spec_schema().
 
     Args:
-        response: Raw Gemini response text.
+        response: Raw reviewer response text.
 
     Returns:
         Tuple of (verdict_status, feedback_text).
@@ -489,46 +499,14 @@ def parse_review_verdict(response: str) -> tuple[str, str]:
         feedback_text: The full response as feedback for revision prompts.
     """
     if not response or not response.strip():
-        return "BLOCKED", "Empty review response received."
-
-    response_upper = response.upper()
-
-    # -------------------------------------------------------------------
-    # Primary: Check for checked checkboxes (structured verdict)
-    # -------------------------------------------------------------------
-    if re.search(r"\[X\]\s*\**APPROVED\**", response_upper):
-        verdict = "APPROVED"
-    elif re.search(r"\[X\]\s*\**REVISE\**", response_upper):
-        verdict = "REVISE"
-    elif re.search(r"\[X\]\s*\**BLOCKED\**", response_upper):
+        return "BLOCKED", ""
+    result = parse_structured_review_spec(response)
+    verdict = result["verdict"]
+    if verdict in ("UNKNOWN", "DISCUSS"):
         verdict = "BLOCKED"
-    # -------------------------------------------------------------------
-    # Secondary: Check for "Verdict: X" pattern
-    # -------------------------------------------------------------------
-    elif "VERDICT: APPROVED" in response_upper:
-        verdict = "APPROVED"
-    elif "VERDICT: REVISE" in response_upper:
-        verdict = "REVISE"
-    elif "VERDICT: BLOCKED" in response_upper:
-        verdict = "BLOCKED"
-    # -------------------------------------------------------------------
-    # Tertiary: Check for DISCUSS (maps to BLOCKED)
-    # -------------------------------------------------------------------
-    elif re.search(r"\[X\]\s*\**DISCUSS\**", response_upper):
-        verdict = "BLOCKED"
-    # -------------------------------------------------------------------
-    # Fallback: Default to BLOCKED (safe choice)
-    # -------------------------------------------------------------------
-    else:
-        verdict = "BLOCKED"
-
-    # -------------------------------------------------------------------
-    # Extract feedback
-    # -------------------------------------------------------------------
-    # Use the full response as feedback for the revision prompt.
-    # This ensures the drafter has full context when revising.
-    feedback = _extract_feedback(response, verdict)
-
+    feedback = result["rationale"]
+    if not feedback and result["feedback_items"]:
+        feedback = "\n".join(f"- {item}" for item in result["feedback_items"])
     return verdict, feedback
 
 
@@ -540,7 +518,7 @@ def _extract_feedback(response: str, verdict: str) -> str:
     issues, and suggestions as combined feedback.
 
     Args:
-        response: Full Gemini review response.
+        response: Full reviewer response.
         verdict: Parsed verdict status.
 
     Returns:

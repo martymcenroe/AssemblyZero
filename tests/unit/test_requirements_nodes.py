@@ -325,9 +325,11 @@ class TestReviewNode:
         from assemblyzero.workflows.requirements.state import create_initial_state
 
         # Setup mock provider
+        import json as _json
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "All requirements met.", "feedback_items": [], "open_questions": []}),
             response="## Verdict: APPROVED\n\nAll requirements met.",
             error_message=None,
             input_tokens=0,
@@ -353,7 +355,9 @@ class TestReviewNode:
         result = review(state)
 
         assert result.get("error_message", "") == ""
-        assert "APPROVED" in result.get("current_verdict", "")
+        # #775: structured APPROVED with empty feedback_items -> current_verdict
+        # is empty (no actionable feedback), but lld_status confirms approval
+        assert result.get("lld_status") == "APPROVED"
         mock_provider.invoke.assert_called_once()
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
@@ -361,10 +365,12 @@ class TestReviewNode:
         """Test that verdict_count is incremented."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             response="APPROVED",
             error_message=None,
             input_tokens=0,
@@ -396,10 +402,12 @@ class TestReviewNode:
         """Test that verdict is appended to history."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing tests", "feedback_items": ["Missing tests"], "open_questions": []}),
             response="BLOCKED: Missing tests",
             error_message=None,
             input_tokens=0,
@@ -641,10 +649,12 @@ class TestReviewNodeAdditional:
         """Test review for issue workflow."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "Issue looks good.", "feedback_items": [], "open_questions": []}),
             response="[x] **APPROVED** - Issue looks good.",
             error_message=None,
             input_tokens=0,
@@ -676,10 +686,12 @@ class TestReviewNodeAdditional:
         """Test review correctly sets BLOCKED status."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing required sections.", "feedback_items": ["Missing required sections."], "open_questions": []}),
             response="BLOCKED: Missing required sections.",
             error_message=None,
             input_tokens=0,
@@ -1366,10 +1378,12 @@ class TestReviewNodeCoverage:
         """Test that mock mode uses mock:review provider."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             response="APPROVED",
             error_message=None,
             input_tokens=0,
@@ -1423,13 +1437,18 @@ class TestReviewNodeCoverage:
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_handles_reviewer_failure(self, mock_get_provider, tmp_path):
-        """Test handling of reviewer invocation failure."""
+        """Test handling of reviewer invocation failure gracefully degrades to BLOCKED.
+
+        Issue #775: review node no longer checks result.success. Empty content
+        from a failed provider falls through to regex fallback -> UNKNOWN -> BLOCKED.
+        """
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=False,
+            content="",
             response=None,
             error_message="API error",
         )
@@ -1451,17 +1470,20 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        assert "api error" in result.get("error_message", "").lower()
+        # With #775, empty content degrades to BLOCKED via UNKNOWN -> REVISE -> BLOCKED
+        assert result.get("lld_status") == "BLOCKED"
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_verdict_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
         """Test verdict_path is None when audit_dir doesn't exist."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             response="APPROVED",
             error_message=None,
             input_tokens=0,
@@ -1491,10 +1513,12 @@ class TestReviewNodeCoverage:
         """Test [x] DISCUSS checkbox maps to BLOCKED status."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "DISCUSS", "rationale": "Need clarification on requirements", "feedback_items": ["Need clarification on requirements"], "open_questions": []}),
             response="[x] **DISCUSS** - Need clarification on requirements",
             error_message=None,
             input_tokens=0,
@@ -1525,10 +1549,12 @@ class TestReviewNodeCoverage:
         """Test [x] REVISE checkbox maps to BLOCKED status."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
 
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing error handling section", "feedback_items": ["Missing error handling section"], "open_questions": []}),
             response="[X] **REVISE** - Missing error handling section",
             error_message=None,
             input_tokens=0,
@@ -1563,6 +1589,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
+            content="Some random response without clear verdict markers",
             response="Some random response without clear verdict markers",
             error_message=None,
             input_tokens=0,

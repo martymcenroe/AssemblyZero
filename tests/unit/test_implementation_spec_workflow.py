@@ -1560,6 +1560,7 @@ class TestReviewSpec:
         reviewer.invoke.return_value = Mock(
             success=True,
             response="## Verdict\n[X] **APPROVED** - Ready\n",
+            content="## Verdict\n[X] **APPROVED** - Ready\n",
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -1579,12 +1580,14 @@ class TestReviewSpec:
     def test_revise_verdict(self, mock_provider, base_state):
         """REVISE verdict returned with feedback."""
         reviewer = Mock()
+        _response = (
+            "## Blocking Issues\n1. Missing excerpts.\n\n"
+            "## Verdict\n[X] **REVISE** - Fix issues\n"
+        )
         reviewer.invoke.return_value = Mock(
             success=True,
-            response=(
-                "## Blocking Issues\n1. Missing excerpts.\n\n"
-                "## Verdict\n[X] **REVISE** - Fix issues\n"
-            ),
+            response=_response,
+            content=_response,
             error_message=None,
             input_tokens=0,
             output_tokens=0,

@@ -21,7 +21,7 @@ class TestVerdictSchema:
     """Verify the verdict schema structure."""
 
     def test_schema_has_required_fields(self):
-        assert VERDICT_SCHEMA["required"] == ["verdict", "summary"]
+        assert VERDICT_SCHEMA["required"] == ["verdict", "rationale"]
 
     def test_schema_verdict_enum(self):
         verdict_prop = VERDICT_SCHEMA["properties"]["verdict"]
@@ -36,17 +36,17 @@ class TestParseStructuredVerdict:
     def test_valid_json_verdict(self):
         response = json.dumps({
             "verdict": "APPROVED",
-            "summary": "Looks good",
+            "rationale": "Looks good",
             "blocking_issues": [],
             "suggestions": ["Minor formatting"],
         })
         result = parse_structured_verdict(response)
         assert result is not None
         assert result["verdict"] == "APPROVED"
-        assert result["summary"] == "Looks good"
+        assert result["rationale"] == "Looks good"
 
     def test_json_in_code_fence(self):
-        response = '```json\n{"verdict": "REVISE", "summary": "Needs work"}\n```'
+        response = '```json\n{"verdict": "REVISE", "rationale": "Needs work"}\n```'
         result = parse_structured_verdict(response)
         assert result is not None
         assert result["verdict"] == "REVISE"
@@ -61,14 +61,14 @@ class TestParseStructuredVerdict:
         assert parse_structured_verdict(None) is None
 
     def test_json_missing_required_fields(self):
-        response = json.dumps({"verdict": "APPROVED"})  # missing summary
+        response = json.dumps({"rationale": "no verdict key"})  # missing verdict
         result = parse_structured_verdict(response)
         assert result is None
 
     def test_blocking_issues_parsed(self):
         response = json.dumps({
             "verdict": "BLOCKED",
-            "summary": "Issues found",
+            "rationale": "Issues found",
             "blocking_issues": [
                 {"section": "2.1", "issue": "Missing file", "severity": "BLOCKING"},
             ],
@@ -92,7 +92,7 @@ class TestGeminiPassesResponseSchema:
         mock_genai.Client.return_value = mock_client_instance
 
         mock_response = MagicMock()
-        mock_response.text = json.dumps({"verdict": "APPROVED", "summary": "OK"})
+        mock_response.text = json.dumps({"verdict": "APPROVED", "rationale": "OK"})
         mock_client_instance.models.generate_content.return_value = mock_response
 
         client = GeminiClient.__new__(GeminiClient)
@@ -140,7 +140,7 @@ class TestGeminiPassesResponseSchema:
         mock_client = MagicMock()
         mock_result = MagicMock()
         mock_result.success = True
-        mock_result.response = '{"verdict": "APPROVED", "summary": "OK"}'
+        mock_result.response = '{"verdict": "APPROVED", "rationale": "OK"}'
         mock_result.raw_response = "raw"
         mock_result.error_type = None
         mock_result.error_message = None

@@ -703,7 +703,7 @@ class TestFallbackProvider:
 
         # Primary should be called with min(600, 180) = 180
         primary.invoke.assert_called_once_with(
-            "system", "content", 180, response_schema=None,
+            "system", "content", 180, response_schema=None, json_schema=None,
         )
 
     def test_primary_timeout_not_exceeded_when_smaller(self):
@@ -721,7 +721,7 @@ class TestFallbackProvider:
 
         # Primary should be called with min(60, 180) = 60
         primary.invoke.assert_called_once_with(
-            "system", "content", 60, response_schema=None,
+            "system", "content", 60, response_schema=None, json_schema=None,
         )
 
     def test_fallback_gets_full_timeout(self):
@@ -742,7 +742,7 @@ class TestFallbackProvider:
 
         # Fallback should get full 600s
         fallback.invoke.assert_called_once_with(
-            "system", "content", 600, response_schema=None,
+            "system", "content", 600, response_schema=None, json_schema=None,
         )
 
     def test_provider_name_delegates_to_primary(self):

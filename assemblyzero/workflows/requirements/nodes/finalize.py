@@ -23,6 +23,10 @@ from assemblyzero.workflows.requirements.audit import (
 )
 from assemblyzero.workflows.testing.audit import log_workflow_execution
 from ..git_operations import commit_and_push, GitOperationError
+from assemblyzero.core.verdict_schema import (
+    FinalizeQuestionsResult,
+    parse_structured_finalize_questions,
+)
 
 # Constants
 GH_TIMEOUT_SECONDS = 30
@@ -179,6 +183,22 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
+def _detect_open_questions(content: str) -> FinalizeQuestionsResult:
+    """Detect unresolved questions/TODOs in content, trying structured JSON first.
+
+    Issue #775: This is a local parse — no LLM call. Tries json.loads() first
+    (for content that is already structured JSON from a prior step), falls
+    back to regex line scanning via parse_structured_finalize_questions.
+
+    Deviation from LLD: The LLD Section 2.4 defines this function with a
+    `provider: LLMProvider` parameter for an LLM call. This implementation
+    intentionally uses local parsing only because finalize.py validates
+    already-generated content for residual questions/TODOs — a deterministic
+    scan, not a semantic analysis task.
+    """
+    return parse_structured_finalize_questions(content)
+
+
 def validate_lld_final(content: str, open_questions_resolved: bool = False) -> list[str]:
     """Final structural checks before LLD finalization.
 
@@ -218,6 +238,24 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
             open_questions_section = match.group(1)
             if re.search(r"^- \[ \]", open_questions_section, re.MULTILINE):
                 errors.append("Unresolved open questions remain")
+
+    # Issue #775: Use structured detection for questions/TODOs (REQ-1)
+    if not open_questions_resolved:
+        detection = _detect_open_questions(content)
+        if detection["has_open_questions"]:
+            # Preserve original issue message format for backward compatibility
+            has_questions = any(q.endswith("?") for q in detection["questions"])
+            has_todos = any("TODO" in q.upper() for q in detection["questions"])
+            if has_questions:
+                errors.append("Content contains unresolved questions (lines ending with ?)")
+            if has_todos:
+                errors.append("Content contains TODO markers")
+    else:
+        # When open_questions_resolved=True, still check for TODOs (original behavior)
+        detection = _detect_open_questions(content)
+        has_todos = any("TODO" in q.upper() for q in detection["questions"])
+        if has_todos:
+            errors.append("Content contains TODO markers")
 
     # Check for unresolved TODO in table cells
     if re.search(r"\|\s*TODO\s*\|", content):
