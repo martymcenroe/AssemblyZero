@@ -950,6 +950,82 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
 
     # --------------------------------------------------------------------------
+    # Issue #842: Full suite regression gate — run ONCE after new tests pass.
+    # Catches regressions in existing 4000+ tests that the targeted test run misses.
+    # --------------------------------------------------------------------------
+    if not state.get("full_suite_validated", False):
+        print("    [N5] Running full test suite regression check...")
+        full_result = run_pytest([], repo_root=repo_root)
+        full_parsed = full_result["parsed"]
+        full_failed = full_parsed.get("failed", 0)
+        full_errors = full_parsed.get("errors", 0)
+        full_passed = full_parsed.get("passed", 0)
+
+        if full_failed > 0 or full_errors > 0:
+            full_output = full_result["stdout"] + "\n" + full_result["stderr"]
+            regression_summary = _build_failure_summary(full_output)
+            regression_names = _extract_failed_test_names(full_output)
+
+            # Check for stagnation: same regressions across 2 iterations → halt
+            previous_regressions = state.get("full_suite_regressions", [])
+            if previous_regressions and sorted(regression_names) == sorted(previous_regressions):
+                stagnant_msg = (
+                    f"Full suite regression stagnant: same {len(regression_names)} test(s) "
+                    f"failing across iterations. Halting."
+                )
+                print(f"    [STAGNANT] {stagnant_msg}")
+                return {
+                    "green_phase_output": output,
+                    "coverage_achieved": coverage_achieved,
+                    "previous_coverage": coverage_achieved,
+                    "previous_passed": passed_count,
+                    "previous_green_failures": [],
+                    "test_failure_summary": regression_summary,
+                    "full_suite_validated": False,
+                    "full_suite_regressions": regression_names,
+                    "file_counter": file_num,
+                    "pytest_exit_code": exit_code,
+                    "iteration_count": iteration_count + 1,
+                    "next_node": "end",
+                    "error_message": stagnant_msg,
+                }
+
+            print(f"    [N5] Full suite: {full_failed + full_errors} regression(s) detected "
+                  f"({full_passed} passed) — routing back to N4")
+
+            log_workflow_execution(
+                target_repo=repo_root,
+                issue_number=state.get("issue_number", 0),
+                workflow_type="testing",
+                event="full_suite_regression",
+                details={
+                    "full_passed": full_passed,
+                    "full_failed": full_failed,
+                    "full_errors": full_errors,
+                    "regression_names": regression_names[:10],
+                },
+            )
+
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
+                "previous_green_failures": [],
+                "test_failure_summary": regression_summary,
+                "full_suite_validated": False,
+                "full_suite_regressions": regression_names,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "N4_implement_code",
+                "error_message": "",
+            }
+
+        print(f"    [N5] Full suite: {full_passed} tests passed — no regressions")
+    # --------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------
     # Issue #562: Skip audit gate — validate skipped tests post-run
     # --------------------------------------------------------------------------
     skipped_count = parsed.get("skipped", 0)
@@ -997,6 +1073,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "previous_passed": passed_count,
             "previous_green_failures": [],
             "test_failure_summary": "",
+            "full_suite_validated": True,
+            "full_suite_regressions": [],
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "skip_audit": skip_audit,
@@ -1011,6 +1089,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         "previous_passed": passed_count,
         "previous_green_failures": [],
         "test_failure_summary": "",
+        "full_suite_validated": True,
+        "full_suite_regressions": [],
         "file_counter": file_num,
         "pytest_exit_code": exit_code,
         "skip_audit": skip_audit,

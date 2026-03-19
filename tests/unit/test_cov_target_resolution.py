@@ -151,8 +151,9 @@ def test_fallback_infers_tools_from_impl_files(mock_root, mock_pytest, tmp_path:
     from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
     verify_green_phase(state)
 
-    # Check that run_pytest was called with coverage_module starting with "tools"
-    call_args = mock_pytest.call_args
+    # Check that the FIRST run_pytest call used coverage_module starting with "tools"
+    # (Issue #842: second call is the full suite regression check with no coverage_module)
+    call_args = mock_pytest.call_args_list[0]
     assert call_args is not None
     cov_module = call_args.kwargs.get("coverage_module") or call_args[1].get("coverage_module")
     if cov_module is None:
@@ -184,7 +185,8 @@ def test_tools_impl_file_uses_file_path_not_dotted(mock_root, mock_pytest, tmp_p
     from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
     verify_green_phase(state)
 
-    call_args = mock_pytest.call_args
+    # Issue #842: use first call (targeted tests), not last call (full suite check)
+    call_args = mock_pytest.call_args_list[0]
     cov_module = call_args.kwargs.get("coverage_module") or call_args[1].get("coverage_module")
     if cov_module is None:
         cov_module = call_args[0][1] if len(call_args[0]) > 1 else None
@@ -217,7 +219,8 @@ def test_package_impl_file_uses_dotted_module(mock_root, mock_pytest, tmp_path: 
     from assemblyzero.workflows.testing.nodes.verify_phases import verify_green_phase
     verify_green_phase(state)
 
-    call_args = mock_pytest.call_args
+    # Issue #842: use first call (targeted tests), not last call (full suite check)
+    call_args = mock_pytest.call_args_list[0]
     cov_module = call_args.kwargs.get("coverage_module") or call_args[1].get("coverage_module")
     if cov_module is None:
         cov_module = call_args[0][1] if len(call_args[0]) > 1 else None
