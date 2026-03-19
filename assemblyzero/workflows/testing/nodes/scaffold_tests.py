@@ -957,6 +957,7 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         "test_files": [str(test_file_path)],
+        "generated_tests": content,  # Issue #789: validate_tests_mechanical reads this
         "file_counter": file_num,
         "error_message": "",
     }
@@ -999,6 +1000,7 @@ def test_mock_example():
 
     return {
         "test_files": [str(test_file_path)],
+        "generated_tests": content,  # Issue #789: validate_tests_mechanical reads this
         "file_counter": file_num,
         "error_message": "",
     }
