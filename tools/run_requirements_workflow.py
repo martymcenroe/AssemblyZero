@@ -432,6 +432,11 @@ Examples:
         dest="yes",
         help="Auto-confirm regeneration prompts (shifts existing lineage to n-1)",
     )
+    parser.add_argument(
+        "--no-worktree",
+        action="store_true",
+        help="Skip worktree isolation check (allow running on AssemblyZero main)",
+    )
 
     # Paths
     parser.add_argument(
@@ -556,6 +561,21 @@ def resolve_roots(args: argparse.Namespace) -> tuple[Path, Path]:
     else:
         # Fall back to CWD detection
         target_repo = _detect_repo_from_cwd()
+
+    # Issue #825: Worktree isolation — prevent running directly on AssemblyZero main
+    if target_repo == assemblyzero_root and not getattr(args, "no_worktree", False):
+        print(
+            "\n[FAIL] ERROR: Target repo resolves to AssemblyZero root.\n"
+            "\n"
+            "Running workflows directly on the main branch risks polluting the\n"
+            "repository and causing conflicts with other agents.\n"
+            "\n"
+            "Options:\n"
+            "  1. Create a worktree:  git worktree add ../AssemblyZero-worktrees/825 -b 825-feature\n"
+            "  2. Use --no-worktree flag to override this check\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     return assemblyzero_root, target_repo
 

@@ -1,8 +1,8 @@
-"""LLM Provider abstraction for pluggable model support.
+﻿"""LLM Provider abstraction for pluggable model support.
 
 Issue #101: Unified Governance Workflow
 Issue #395: Anthropic API provider with CLI->API fallback
-Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
+Issue #605: Systemic Model Refresh â€” Gemini 3.1, Claude 4.6
 
 Provides a unified interface for calling different LLM providers:
 - Claude CLI (via claude -p CLI, uses Max subscription)
@@ -19,6 +19,7 @@ falls back to the Anthropic API if an API key is configured in .env.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,25 @@ from assemblyzero.core.errors import (
     classify_anthropic_error,
 )
 from assemblyzero.core.text_sanitizer import strip_emoji
+
+
+_PYDANTIC_WARNING_RE = re.compile(
+    r".*PydanticDeprecatedSince\d+.*|.*pydantic.*(DeprecationWarning|UserWarning).*|.*Core Pydantic V1.*",
+    re.IGNORECASE,
+)
+
+
+def _filter_stderr(stderr: str) -> str:
+    """Filter known non-error warnings from subprocess stderr.
+
+    Issue #826: Pydantic deprecation warnings in stderr cause subprocess
+    error detection to false-positive. Strip them before error checking.
+    """
+    if not stderr:
+        return stderr
+    lines = stderr.splitlines()
+    filtered = [line for line in lines if not _PYDANTIC_WARNING_RE.match(line)]
+    return "\n".join(filtered).strip()
 
 
 @dataclass
@@ -108,7 +128,7 @@ def reset_cumulative_cost() -> None:
 # Issue #542: Module-level circuit breaker registry
 # =============================================================================
 # FallbackProvider._consecutive_failures was per-instance, but get_provider()
-# creates a fresh instance each LangGraph iteration — resetting the counter.
+# creates a fresh instance each LangGraph iteration â€” resetting the counter.
 # This module-level dict persists across all instances for the process lifetime.
 
 _circuit_breaker_registry: dict[str, int] = {}
@@ -116,7 +136,7 @@ _CIRCUIT_BREAKER_MAX = 2
 
 
 # =============================================================================
-# Issue #773: API policy — block Anthropic API usage by default
+# Issue #773: API policy â€” block Anthropic API usage by default
 # =============================================================================
 # Default: False (no API). Max subscription makes `claude -p` free.
 # Anthropic API costs real money. Opt-in via `--allow-api` CLI flag.
@@ -188,7 +208,7 @@ def log_llm_call(result: LLMCallResult) -> None:
 def _load_anthropic_api_key() -> Optional[str]:
     """Load ANTHROPIC_API_KEY from the .env file at the repo root.
 
-    Does NOT check os.environ — setting ANTHROPIC_API_KEY as an OS env var
+    Does NOT check os.environ â€” setting ANTHROPIC_API_KEY as an OS env var
     conflicts with Claude Code's auth. The .env file is the only source.
 
     Returns:
@@ -269,19 +289,22 @@ def _kill_process_tree(pid: int) -> None:
     On Windows, uses taskkill /T (tree-kill) to terminate the entire
     process group.  On Unix, kills the process group via os.killpg.
     Issue #526: subprocess.run timeout on Windows only kills the root
-    process — grandchildren keep pipes open for hundreds of seconds.
+    process â€” grandchildren keep pipes open for hundreds of seconds.
     """
     try:
         if sys.platform == "win32":
+            env = os.environ.copy()
+            env["PYTHONWARNINGS"] = "ignore"
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 capture_output=True,
                 timeout=10,
+                env=env,
             )
         else:
             os.killpg(os.getpgid(pid), 9)
     except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
-        # Process already dead — that's fine
+        # Process already dead â€” that's fine
         pass
 
 
@@ -472,7 +495,7 @@ class ClaudeCLIProvider(LLMProvider):
             with _dir_ctx as temp_path:
                 if temp_path:
                     # Write system prompt as CLAUDE.md so claude -p reads it
-                    # as project context — preserves system prompt caching.
+                    # as project context â€” preserves system prompt caching.
                     Path(temp_path, "CLAUDE.md").write_text(
                         system_prompt, encoding="utf-8"
                     )
@@ -481,6 +504,9 @@ class ClaudeCLIProvider(LLMProvider):
                     # Switch from "user" to "user,project" to load CLAUDE.md
                     idx = cmd.index("--setting-sources")
                     cmd[idx + 1] = "user,project"
+
+                env = os.environ.copy()
+                env["PYTHONWARNINGS"] = "ignore"
 
                 proc = subprocess.Popen(
                     cmd,
@@ -491,6 +517,7 @@ class ClaudeCLIProvider(LLMProvider):
                     encoding="utf-8",
                     cwd=temp_path,  # None when not using temp dir (= inherit)
                     creationflags=creation_flags,
+                    env=env,
                 )
                 try:
                     stdout, stderr = proc.communicate(
@@ -520,8 +547,10 @@ class ClaudeCLIProvider(LLMProvider):
 
                 duration_ms = int((time.time() - start_time) * 1000)
 
+                filtered_stderr = _filter_stderr(stderr)
+
                 if proc.returncode != 0:
-                    error_msg = stderr or stdout or "Unknown error"
+                    error_msg = filtered_stderr if filtered_stderr else f"CLI exited with code {proc.returncode}"
                     # Check for non-retryable errors (like usage limits)
                     retryable = not is_non_retryable_error(error_msg)
 
@@ -539,7 +568,7 @@ class ClaudeCLIProvider(LLMProvider):
                     log_llm_call(call_result)
                     return call_result
 
-                # Parse JSON response — extract usage stats (Issue #398)
+                # Parse JSON response â€” extract usage stats (Issue #398)
                 input_tokens = 0
                 output_tokens = 0
                 cache_read_tokens = 0
@@ -741,7 +770,7 @@ class AnthropicProvider(LLMProvider):
 
             # Issue #541: Use streaming to eliminate timeout blindness.
             # client.messages.create() blocks until the entire response is
-            # ready — on Windows/MSYS2 the httpx read timeout never fires,
+            # ready â€” on Windows/MSYS2 the httpx read timeout never fires,
             # so calls hang indefinitely.  Streaming gets chunks as they're
             # generated: the connection stays active, and any real stall
             # surfaces as a read-timeout on a per-chunk basis.
@@ -915,7 +944,7 @@ def is_non_retryable_error(error_msg: str | None) -> bool:
 class FallbackProvider(LLMProvider):
     """Tries primary provider first, falls back to secondary on failure.
 
-    Issue #395: Wraps two providers — typically CLI (free) primary with
+    Issue #395: Wraps two providers â€” typically CLI (free) primary with
     API (paid) fallback for reliability.
     """
 
@@ -970,7 +999,7 @@ class FallbackProvider(LLMProvider):
         Returns:
             LLMCallResult from whichever provider succeeded (or last failure).
         """
-        # Issue #476/#542: Circuit breaker — module-level registry
+        # Issue #476/#542: Circuit breaker â€” module-level registry
         failures = _circuit_breaker_registry.get(self._breaker_key, 0)
         if failures >= _CIRCUIT_BREAKER_MAX:
             n = failures
@@ -990,13 +1019,13 @@ class FallbackProvider(LLMProvider):
                 attempts=0,
             )
 
-        # Issue #539: Skip CLI for large prompts — they always time out.
+        # Issue #539: Skip CLI for large prompts â€” they always time out.
         # LLD/spec prompts are 100K+ chars; the CLI subprocess overhead
         # guarantees a timeout.  Go straight to the API.
         prompt_size = len(system_prompt) + len(content)
         if prompt_size > 50_000:
             print(
-                f"    [LLM] Prompt {prompt_size:,} chars — "
+                f"    [LLM] Prompt {prompt_size:,} chars â€” "
                 f"skipping CLI, using {self._fallback.provider_name} directly"
             )
         else:
@@ -1010,7 +1039,7 @@ class FallbackProvider(LLMProvider):
                 _circuit_breaker_registry[self._breaker_key] = 0
                 return result
 
-            # Primary failed — try fallback with full timeout
+            # Primary failed â€” try fallback with full timeout
             print(
                 f"    [LLM] {self._primary.provider_name} failed "
                 f"({result.error_message[:80] if result.error_message else 'unknown'}), "
@@ -1058,7 +1087,7 @@ class GeminiProvider(LLMProvider):
     """
 
     # Model mapping from friendly names to actual model IDs
-    # Issue #605: Gemini 3.1 (REQ-1) — removed deprecated 3.0 entries
+    # Issue #605: Gemini 3.1 (REQ-1) â€” removed deprecated 3.0 entries
     MODEL_MAP = {
         "2.5-pro": "gemini-2.5-pro",
         "pro": "gemini-2.5-pro",
@@ -1120,7 +1149,7 @@ class GeminiProvider(LLMProvider):
             timeout_seconds: Maximum time to wait (not directly used - client has own timeout).
             response_schema: Optional JSON schema for structured output (Issue #492).
             json_schema: JSON schema dict (accepted for interface compatibility
-                but not used by Gemini — use response_schema instead).
+                but not used by Gemini â€” use response_schema instead).
 
         Returns:
             LLMCallResult with response or error.
