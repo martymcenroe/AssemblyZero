@@ -140,6 +140,13 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_patterns)
     _log_check(check_patterns)
 
+    # Check 6: Import targets should exist (Issue #842)
+    check_imports = check_import_targets_exist(
+        spec_draft, files_to_modify, repo_root_str
+    )
+    checks.append(check_imports)
+    _log_check(check_imports)
+
     # Collect issues from failed checks
     completeness_issues = [
         check["details"] for check in checks if not check["passed"]
@@ -636,6 +643,150 @@ def check_pattern_references_valid(
             f"({len(pattern_refs)} references checked)."
         ),
     )
+
+
+def check_import_targets_exist(
+    spec: str,
+    files: list[FileToModify],
+    repo_root_str: str = "",
+) -> CompletenessCheck:
+    """Verify that imports referenced in the spec point to existing modules.
+
+    Issue #842: Catches the scenario where the spec instructs code to import
+    from modules that don't exist (e.g., `from assemblyzero.core.metrics import X`
+    when assemblyzero.core.metrics doesn't exist). Cross-references against
+    the spec's Files Changed table for new files the spec itself creates.
+
+    Args:
+        spec: Implementation Spec markdown content.
+        files: List of FileToModify from the LLD.
+        repo_root_str: Repository root path string.
+
+    Returns:
+        CompletenessCheck with pass/fail result and details.
+    """
+    if not repo_root_str:
+        return CompletenessCheck(
+            check_name="import_targets_exist",
+            passed=True,
+            details="No repo_root available for import validation — skipping.",
+        )
+
+    repo_root = Path(repo_root_str)
+
+    # Collect paths of files the spec is creating (new "Add" files)
+    new_file_paths: set[str] = set()
+    for f in files:
+        if f.get("change_type", "").lower() == "add":
+            path = f.get("path", "")
+            if path:
+                new_file_paths.add(path)
+
+    # Extract `from X import Y` and `import X` patterns from code blocks in spec
+    # Only look inside code blocks to avoid matching prose
+    code_block_pattern = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
+    import_pattern = re.compile(
+        r"(?:from\s+([\w.]+)\s+import|^import\s+([\w.]+))", re.MULTILINE
+    )
+
+    unresolvable: list[str] = []
+    checked: set[str] = set()
+
+    for block_match in code_block_pattern.finditer(spec):
+        block_content = block_match.group(1)
+        for imp_match in import_pattern.finditer(block_content):
+            module_path = imp_match.group(1) or imp_match.group(2)
+            if not module_path or module_path in checked:
+                continue
+            checked.add(module_path)
+
+            # Skip stdlib and common third-party
+            top_level = module_path.split(".")[0]
+            if top_level in _KNOWN_STDLIB_TOPS:
+                continue
+
+            # Only validate internal imports (heuristic: contains a dot
+            # suggesting it's a project-internal path, or starts with a
+            # known project package directory)
+            if "." not in module_path:
+                continue
+
+            # Check if it resolves on disk
+            if _import_resolves(module_path, repo_root, new_file_paths):
+                continue
+
+            unresolvable.append(module_path)
+
+    if unresolvable:
+        mod_list = ", ".join(f"`{m}`" for m in unresolvable[:5])
+        suffix = f" (and {len(unresolvable) - 5} more)" if len(unresolvable) > 5 else ""
+        return CompletenessCheck(
+            check_name="import_targets_exist",
+            passed=False,
+            details=(
+                f"Imports in spec reference nonexistent modules: "
+                f"{mod_list}{suffix}. Verify these modules exist or "
+                f"are being created by this spec."
+            ),
+        )
+
+    return CompletenessCheck(
+        check_name="import_targets_exist",
+        passed=True,
+        details=f"All {len(checked)} import targets validated.",
+    )
+
+
+def _import_resolves(
+    module_path: str, repo_root: Path, new_file_paths: set[str]
+) -> bool:
+    """Check if an import resolves to an existing file or a new file in the spec."""
+    parts = module_path.split(".")
+
+    # Check as module file: a/b/c.py
+    file_path = Path(*parts).with_suffix(".py")
+    if (repo_root / file_path).exists():
+        return True
+    # Check if the spec is creating this file
+    if str(file_path).replace("\\", "/") in new_file_paths:
+        return True
+
+    # Check as package: a/b/c/__init__.py
+    package_path = Path(*parts) / "__init__.py"
+    if (repo_root / package_path).exists():
+        return True
+    if str(package_path).replace("\\", "/") in new_file_paths:
+        return True
+
+    # Check parent (from a.b import c — c might be a name inside a.b.py)
+    if len(parts) > 1:
+        parent_file = Path(*parts[:-1]).with_suffix(".py")
+        if (repo_root / parent_file).exists():
+            return True
+        if str(parent_file).replace("\\", "/") in new_file_paths:
+            return True
+        parent_pkg = Path(*parts[:-1]) / "__init__.py"
+        if (repo_root / parent_pkg).exists():
+            return True
+        if str(parent_pkg).replace("\\", "/") in new_file_paths:
+            return True
+
+    return False
+
+
+# Common stdlib top-level module names (subset for fast rejection)
+_KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({
+    "abc", "argparse", "ast", "asyncio", "base64", "builtins", "collections",
+    "contextlib", "copy", "csv", "dataclasses", "datetime", "decimal",
+    "difflib", "email", "enum", "functools", "glob", "gzip", "hashlib",
+    "hmac", "html", "http", "importlib", "inspect", "io", "itertools",
+    "json", "logging", "math", "mimetypes", "multiprocessing", "operator",
+    "os", "pathlib", "pickle", "platform", "pprint", "queue", "random",
+    "re", "secrets", "shlex", "shutil", "signal", "socket", "sqlite3",
+    "string", "struct", "subprocess", "sys", "tempfile", "textwrap",
+    "threading", "time", "timeit", "tomllib", "traceback", "types",
+    "typing", "unittest", "urllib", "uuid", "warnings", "xml", "zipfile",
+})
 
 
 # =============================================================================
