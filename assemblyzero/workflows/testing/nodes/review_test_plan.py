@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
-from assemblyzero.core.verdict_schema import VERDICT_SCHEMA, parse_structured_verdict
+from assemblyzero.core.verdict_schema import (
+    VERDICT_SCHEMA,
+    VerdictResult,
+    parse_structured_verdict,
+    _regex_fallback_verdict,
+)
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.workflows.testing.audit import (
     gate_log,
@@ -344,6 +349,27 @@ def _run_mechanical_gates(state: TestingWorkflowState) -> list[str]:
     return errors
 
 
+def _parse_verdict(raw: str) -> VerdictResult:
+    """Parse verdict from test-plan reviewer response.
+
+    Issue #775: Primary path: structured JSON via parse_structured_verdict.
+    Fallback: _regex_fallback_verdict with WARNING log.
+    Previously: regex-only after structured parse failure.
+
+    Returns VerdictResult TypedDict with 'verdict', 'rationale', 'source' keys.
+    """
+    structured = parse_structured_verdict(raw)
+    if structured:
+        return VerdictResult(
+            verdict=structured.get("verdict", "REVISE"),
+            rationale=structured.get("rationale", ""),
+            source="structured",
+        )
+
+    # Issue #775: Delegate to centralized regex fallback (logs WARNING internally)
+    return _regex_fallback_verdict(raw)
+
+
 def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     """N1: Submit test plan to Gemini for review.
 
@@ -487,11 +513,19 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         result = None
 
         for attempt in range(1, max_attempts + 1):
-            # Issue #773: Pass response_schema to all providers uniformly
+            # Issue #775: Pass VERDICT_SCHEMA to provider for structured output (REQ-2)
+            from assemblyzero.core.llm_provider import GeminiProvider
+
+            schema_kwargs = {}
+            if isinstance(reviewer, GeminiProvider):
+                schema_kwargs["response_schema"] = VERDICT_SCHEMA
+            else:
+                schema_kwargs["json_schema"] = VERDICT_SCHEMA
+
             result = reviewer.invoke(
                 system_prompt="You are a senior QA engineer reviewing a test plan for coverage and quality.",
                 content=full_prompt,
-                response_schema=VERDICT_SCHEMA,
+                **schema_kwargs,
             )
 
             if result.success:
@@ -539,7 +573,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "verdict.md", verdict_content)
 
-    # Issue #494: Parse verdict — structured JSON first, regex fallback
+    # Issue #775: Parse verdict — structured JSON first, regex fallback via _parse_verdict
     structured = parse_structured_verdict(verdict_content)
     verdict_method = "regex"
     if structured:
@@ -550,7 +584,15 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         verdict_method = "structured"
         print(f"    Verdict: {test_plan_status} (structured JSON)")
     else:
-        test_plan_status = _parse_verdict(verdict_content)
+        verdict_result = _parse_verdict(verdict_content)
+        raw_verdict = verdict_result["verdict"]
+        if raw_verdict == "UNKNOWN":
+            raw_verdict = "REVISE"
+        # Map REVISE -> BLOCKED for workflow purposes
+        if raw_verdict == "REVISE":
+            test_plan_status = "BLOCKED"
+        else:
+            test_plan_status = raw_verdict
         print(f"    Verdict: {test_plan_status} (regex fallback)")
 
     # Log review result
@@ -613,62 +655,6 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
     }
-
-
-def _parse_verdict(verdict_content: str) -> str:
-    """Parse verdict from Gemini response.
-
-    Issue #385: More robust parsing to avoid false BLOCKED results.
-    Checks checked checkboxes first, then verdict keyword patterns,
-    then falls back to keyword presence with priority to APPROVED.
-
-    Args:
-        verdict_content: Gemini response text.
-
-    Returns:
-        "APPROVED" or "BLOCKED".
-    """
-    content_upper = verdict_content.upper()
-
-    # Primary: Look for checked checkboxes [X] or [x]
-    has_approved_checked = bool(
-        re.search(r"\[X\]\s*\**APPROVED\**", content_upper)
-    )
-    has_blocked_checked = bool(
-        re.search(r"\[X\]\s*\**BLOCKED\**", content_upper)
-    )
-
-    # If only one is checked, use it
-    if has_approved_checked and not has_blocked_checked:
-        return "APPROVED"
-    if has_blocked_checked and not has_approved_checked:
-        return "BLOCKED"
-
-    # Secondary: Look for "Verdict: X" pattern
-    verdict_match = re.search(
-        r"VERDICT[:\s]+\**\s*(APPROVED|BLOCKED)\b", content_upper
-    )
-    if verdict_match:
-        return verdict_match.group(1)
-
-    # Tertiary: If both or neither checkbox found, check verdict section
-    # Look for the ## Verdict section and see what's checked there
-    verdict_section = re.search(
-        r"##\s*VERDICT\s*\n(.*?)(?=\n##|\Z)", content_upper, re.DOTALL
-    )
-    if verdict_section:
-        section_text = verdict_section.group(1)
-        if "APPROVED" in section_text and "BLOCKED" not in section_text:
-            return "APPROVED"
-        if "BLOCKED" in section_text and "APPROVED" not in section_text:
-            return "BLOCKED"
-
-    # Fallback: presence of keywords (APPROVED gets priority)
-    if "APPROVED" in content_upper:
-        return "APPROVED"
-
-    # Default to BLOCKED if truly unclear
-    return "BLOCKED"
 
 
 def _extract_feedback(verdict_content: str) -> str:

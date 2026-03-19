@@ -42,6 +42,29 @@ from assemblyzero.workflows.requirements.feedback_window import (
     build_feedback_block,
     render_feedback_markdown,
 )
+from assemblyzero.core.verdict_schema import (
+    DRAFT_QUESTIONS_SCHEMA,
+    DraftQuestionsResult,
+    parse_structured_draft_questions,
+)
+
+
+def _extract_open_questions(
+    provider,
+    response: str,
+    system_prompt: str,
+) -> DraftQuestionsResult:
+    """Extract open questions from reviewer response using DRAFT_QUESTIONS_SCHEMA.
+
+    Issue #775: First attempts structured JSON parse of the existing response.
+    If that fails (response is markdown), the parse helper's regex fallback
+    extracts the ## Open Questions section automatically.
+
+    The provider and system_prompt params are accepted for future use
+    (re-extraction via LLM call) but are not used in v1 — we parse the
+    existing response directly.
+    """
+    return parse_structured_draft_questions(response)
 
 
 def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -156,7 +179,17 @@ Use the template structure provided. Include all sections. Be specific about:
     print(f"    Drafter: {drafter_spec}")
 
     cost_before = get_cumulative_cost()
-    result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+
+    # Issue #775: Pass DRAFT_QUESTIONS_SCHEMA to provider for structured output (REQ-2)
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    schema_kwargs = {}
+    if isinstance(drafter, GeminiProvider):
+        schema_kwargs["response_schema"] = DRAFT_QUESTIONS_SCHEMA
+    else:
+        schema_kwargs["json_schema"] = DRAFT_QUESTIONS_SCHEMA
+
+    result = drafter.invoke(system_prompt=system_prompt, content=prompt, **schema_kwargs)
     node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
@@ -171,7 +204,13 @@ Use the template structure provided. Include all sections. Be specific about:
         print(f"    {msg}")
         return {"error_message": msg}
 
-    draft_content = result.response or ""
+    response = result.response or ""
+    draft_content = response
+
+    # Issue #775: Use structured parse for open questions extraction (REQ-1, REQ-2).
+    # parse_structured_draft_questions tries JSON first, falls back to regex.
+    dq_result = _extract_open_questions(drafter, response, system_prompt)
+    open_questions = dq_result["open_questions"]
 
     # Save to audit trail
     iteration_count = state.get("iteration_count", 0) + 1

@@ -23,7 +23,7 @@ class TestStructuredVerdictParsing:
     def test_approved_json(self):
         verdict = json.dumps({
             "verdict": "APPROVED",
-            "summary": "All requirements covered.",
+            "rationale": "All requirements covered.",
         })
         result = parse_structured_verdict(verdict)
         assert result is not None
@@ -32,7 +32,7 @@ class TestStructuredVerdictParsing:
     def test_blocked_json_with_issues(self):
         verdict = json.dumps({
             "verdict": "BLOCKED",
-            "summary": "Missing coverage for 2 requirements.",
+            "rationale": "Missing coverage for 2 requirements.",
             "blocking_issues": [
                 {
                     "section": "Coverage",
@@ -51,7 +51,7 @@ class TestStructuredVerdictParsing:
         """REVISE verdict should be mapped to BLOCKED by the caller."""
         verdict = json.dumps({
             "verdict": "REVISE",
-            "summary": "Needs more edge case coverage.",
+            "rationale": "Needs more edge case coverage.",
         })
         result = parse_structured_verdict(verdict)
         assert result is not None
@@ -59,7 +59,7 @@ class TestStructuredVerdictParsing:
         # The mapping to BLOCKED happens in review_test_plan, not in parse
 
     def test_json_in_code_fence(self):
-        verdict = '```json\n{"verdict": "APPROVED", "summary": "Good."}\n```'
+        verdict = '```json\n{"verdict": "APPROVED", "rationale": "Good."}\n```'
         result = parse_structured_verdict(verdict)
         assert result is not None
         assert result["verdict"] == "APPROVED"
@@ -70,7 +70,7 @@ class TestStructuredVerdictParsing:
         assert result is None
 
     def test_json_missing_verdict_returns_none(self):
-        verdict = json.dumps({"summary": "No verdict field"})
+        verdict = json.dumps({"rationale": "No verdict field"})
         result = parse_structured_verdict(verdict)
         assert result is None
 
@@ -84,19 +84,19 @@ class TestRegexFallback:
 
     def test_approved_checkbox(self):
         verdict = "## Verdict\n[X] **APPROVED** — all good"
-        assert _parse_verdict(verdict) == "APPROVED"
+        assert _parse_verdict(verdict)["verdict"] == "APPROVED"
 
     def test_blocked_checkbox(self):
         verdict = "## Verdict\n[X] **BLOCKED** — needs work"
-        assert _parse_verdict(verdict) == "BLOCKED"
+        assert _parse_verdict(verdict)["verdict"] == "BLOCKED"
 
     def test_verdict_keyword(self):
         verdict = "After review, Verdict: APPROVED"
-        assert _parse_verdict(verdict) == "APPROVED"
+        assert _parse_verdict(verdict)["verdict"] == "APPROVED"
 
-    def test_default_blocked(self):
+    def test_default_unknown(self):
         verdict = "Unclear response with no verdict markers"
-        assert _parse_verdict(verdict) == "BLOCKED"
+        assert _parse_verdict(verdict)["verdict"] == "UNKNOWN"
 
 
 class TestVerdictSchemaShape:
@@ -109,7 +109,7 @@ class TestVerdictSchemaShape:
 
     def test_schema_requires_verdict_and_summary(self):
         assert "verdict" in VERDICT_SCHEMA["required"]
-        assert "summary" in VERDICT_SCHEMA["required"]
+        assert "rationale" in VERDICT_SCHEMA["required"]
 
     def test_schema_has_blocking_issues(self):
         props = VERDICT_SCHEMA["properties"]
@@ -130,7 +130,7 @@ class TestStructuredFeedbackExtraction:
         """When structured data available, feedback uses blocking_issues."""
         structured = {
             "verdict": "BLOCKED",
-            "summary": "Coverage gaps found.",
+            "rationale": "Coverage gaps found.",
             "blocking_issues": [
                 {
                     "section": "Coverage",
@@ -144,7 +144,7 @@ class TestStructuredFeedbackExtraction:
                 },
             ],
         }
-        feedback_parts = [structured["summary"]]
+        feedback_parts = [structured["rationale"]]
         for issue in structured.get("blocking_issues", []):
             feedback_parts.append(
                 f"[{issue.get('severity', 'BLOCKING')}] {issue.get('section', '?')}: {issue.get('issue', '?')}"
@@ -158,9 +158,9 @@ class TestStructuredFeedbackExtraction:
         """When no blocking_issues, just use summary."""
         structured = {
             "verdict": "BLOCKED",
-            "summary": "Not enough tests.",
+            "rationale": "Not enough tests.",
         }
-        feedback_parts = [structured["summary"]]
+        feedback_parts = [structured["rationale"]]
         for issue in structured.get("blocking_issues", []):
             feedback_parts.append(f"[{issue.get('severity')}] {issue.get('issue')}")
         feedback = "\n".join(feedback_parts)

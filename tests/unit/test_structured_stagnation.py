@@ -15,10 +15,10 @@ from assemblyzero.core.verdict_schema import (
 )
 
 
-def _json_verdict(verdict: str, issues: list[dict], summary: str = "Summary") -> str:
+def _json_verdict(verdict: str, issues: list[dict], rationale: str = "Summary") -> str:
     return json.dumps({
         "verdict": verdict,
-        "summary": summary,
+        "rationale": rationale,
         "blocking_issues": issues,
     })
 

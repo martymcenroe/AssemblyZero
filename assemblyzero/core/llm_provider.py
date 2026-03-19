@@ -246,6 +246,7 @@ class LLMProvider(ABC):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke the LLM with system prompt and content.
 
@@ -254,6 +255,7 @@ class LLMProvider(ABC):
             content: User content to process.
             timeout_seconds: Maximum time to wait for response.
             response_schema: Optional JSON schema for structured output.
+            json_schema: JSON schema dict for structured output via --json-schema (Claude CLI).
 
         Returns:
             LLMCallResult with response or error information.
@@ -388,6 +390,7 @@ class ClaudeCLIProvider(LLMProvider):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Claude via headless mode (claude -p).
 
@@ -395,7 +398,9 @@ class ClaudeCLIProvider(LLMProvider):
             system_prompt: System instructions for the model.
             content: User content to process.
             timeout_seconds: Maximum time to wait (default 5 minutes).
-            response_schema: Optional JSON schema for structured output (--json-schema).
+            response_schema: Ignored for Claude CLI (use json_schema instead).
+            json_schema: JSON schema dict for structured output.
+                When provided, appends --json-schema '<json>' to CLI args.
 
         Returns:
             LLMCallResult with response or error.
@@ -441,8 +446,10 @@ class ClaudeCLIProvider(LLMProvider):
         if self._effort:
             cmd.extend(["--effort", self._effort])
 
-        # Issue #773: Structured output via --json-schema
-        if response_schema:
+        # Issue #773: Structured output via --json-schema (legacy response_schema support)
+        if json_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(json_schema)])
+        elif response_schema:
             cmd.extend(["--json-schema", json.dumps(response_schema)])
 
         try:
@@ -539,6 +546,9 @@ class ClaudeCLIProvider(LLMProvider):
                 cache_creation_tokens = 0
                 cost_usd = 0.0
 
+                # Determine which schema was used for structured output detection
+                active_schema = json_schema if json_schema is not None else response_schema
+
                 try:
                     response_data = json.loads(stdout)
 
@@ -547,7 +557,7 @@ class ClaudeCLIProvider(LLMProvider):
                     # (which is empty). Serialize it back to JSON string so
                     # downstream consumers (parse_structured_verdict) can parse it.
                     structured_out = response_data.get("structured_output")
-                    if structured_out is not None and response_schema:
+                    if structured_out is not None and active_schema:
                         response_text = json.dumps(structured_out)
                     else:
                         response_text = response_data.get("result", "")
@@ -706,6 +716,7 @@ class AnthropicProvider(LLMProvider):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Claude via the Anthropic API.
 
@@ -715,6 +726,8 @@ class AnthropicProvider(LLMProvider):
             timeout_seconds: Maximum time to wait (default 5 minutes).
             response_schema: Optional JSON schema (accepted for interface
                 compatibility but not currently used by Anthropic API).
+            json_schema: JSON schema dict (accepted for interface compatibility
+                but not currently used by Anthropic API).
 
         Returns:
             LLMCallResult with response or error.
@@ -941,6 +954,7 @@ class FallbackProvider(LLMProvider):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke primary, fall back to secondary on failure.
 
@@ -951,6 +965,7 @@ class FallbackProvider(LLMProvider):
             content: User content to process.
             timeout_seconds: Maximum time for fallback provider.
             response_schema: Optional JSON schema, passed through to underlying providers.
+            json_schema: JSON schema dict for structured output, passed through to underlying providers.
 
         Returns:
             LLMCallResult from whichever provider succeeded (or last failure).
@@ -988,7 +1003,8 @@ class FallbackProvider(LLMProvider):
             # Try primary with shorter timeout
             effective_timeout = min(timeout_seconds, self._primary_timeout)
             result = self._primary.invoke(
-                system_prompt, content, effective_timeout, response_schema=response_schema,
+                system_prompt, content, effective_timeout,
+                response_schema=response_schema, json_schema=json_schema,
             )
             if result.success:
                 _circuit_breaker_registry[self._breaker_key] = 0
@@ -1001,7 +1017,8 @@ class FallbackProvider(LLMProvider):
                 f"falling back to {self._fallback.provider_name}..."
             )
         fallback_result = self._fallback.invoke(
-            system_prompt, content, timeout_seconds, response_schema=response_schema,
+            system_prompt, content, timeout_seconds,
+            response_schema=response_schema, json_schema=json_schema,
         )
         if fallback_result.success:
             _circuit_breaker_registry[self._breaker_key] = 0
@@ -1093,6 +1110,7 @@ class GeminiProvider(LLMProvider):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Invoke Gemini via GeminiClient.
 
@@ -1101,6 +1119,8 @@ class GeminiProvider(LLMProvider):
             content: User content to process.
             timeout_seconds: Maximum time to wait (not directly used - client has own timeout).
             response_schema: Optional JSON schema for structured output (Issue #492).
+            json_schema: JSON schema dict (accepted for interface compatibility
+                but not used by Gemini — use response_schema instead).
 
         Returns:
             LLMCallResult with response or error.
@@ -1217,6 +1237,7 @@ class MockProvider(LLMProvider):
         content: str,
         timeout_seconds: int = 300,
         response_schema: dict | None = None,
+        json_schema: dict | None = None,
     ) -> LLMCallResult:
         """Return mock response.
 
@@ -1225,6 +1246,7 @@ class MockProvider(LLMProvider):
             content: Ignored.
             timeout_seconds: Ignored.
             response_schema: Ignored.
+            json_schema: Ignored.
 
         Returns:
             LLMCallResult with mock response or error.
