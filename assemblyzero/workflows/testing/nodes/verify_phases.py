@@ -186,10 +186,17 @@ def run_pytest(
     cmd = ["poetry", "run", "pytest", "-v", "--tb=short"]
     cmd.extend(test_files)
 
+    # Issue #789: Only add --cov flags if pytest-cov is installed.
+    # Without it, pytest returns exit code 4 ("unrecognized arguments")
+    # which the workflow misclassifies as "collection/syntax error" and loops.
     if coverage_module:
-        cmd.extend([f"--cov={coverage_module}", "--cov-report=term-missing"])
-        if coverage_target:
-            cmd.append(f"--cov-fail-under={coverage_target}")
+        try:
+            import pytest_cov  # noqa: F401
+            cmd.extend([f"--cov={coverage_module}", "--cov-report=term-missing"])
+            if coverage_target:
+                cmd.append(f"--cov-fail-under={coverage_target}")
+        except ImportError:
+            print("    [WARN] pytest-cov not installed — skipping coverage measurement")
 
     try:
         result = run_command(
