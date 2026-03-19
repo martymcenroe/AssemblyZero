@@ -44,7 +44,7 @@ CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implementation_spec_w
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
 CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
-    --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} --no-worktree \
+    --issue {NUMBER} --repo /c/Users/mcwiz/Projects/{TARGET_REPO} \
     > /tmp/tdd-{NUMBER}.log 2>&1
 ```
 

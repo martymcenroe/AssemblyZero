@@ -23,7 +23,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_requirements_workflow.py \
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
 PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
-    --issue NUMBER --repo /c/Users/mcwiz/Projects/TARGET_REPO --no-worktree
+    --issue NUMBER --repo /c/Users/mcwiz/Projects/TARGET_REPO 
 ```
 
 ### Common Gotchas
@@ -33,7 +33,7 @@ PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
 | No output in background runs | `PYTHONUNBUFFERED=1` — Python buffers stdout when not on a TTY |
 | Nested Claude sessions fail | `CLAUDECODE= PYTHONUNBUFFERED=1 poetry run ...` (empty string, NOT unset) |
 | `--yes` flag on implementation | Does NOT exist — only the LLD workflow has `--yes` |
-| Worktree already exists | Use `--no-worktree` flag on implementation workflow |
+| Worktree already exists | ONLY if you have confirmed the stale worktree is archived/safe: use `--no-worktree` flag |
 | Workflow runs from wrong dir | ALWAYS `cd` to AssemblyZero first. The `--repo` flag points to the target |
 
 ## Key Files

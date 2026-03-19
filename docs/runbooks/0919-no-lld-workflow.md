@@ -84,7 +84,7 @@ For issues that fit the no-LLD criteria, the TDD workflow supports an `--issue-o
 cd /c/Users/mcwiz/Projects/AssemblyZero
 CLAUDECODE= PYTHONUNBUFFERED=1 poetry run python tools/run_implement_from_lld.py \
     --issue NUMBER --repo /c/Users/mcwiz/Projects/TARGET_REPO \
-    --issue-only --no-worktree
+    --issue-only
 ```
 
 This skips the LLD/spec file search and constructs a synthetic spec from the issue title and body. All downstream TDD nodes (N1-N8) run normally.
