@@ -22,8 +22,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -295,6 +297,11 @@ class ClaudeCLIProvider(LLMProvider):
     - haiku (claude-haiku-4-5)
     """
 
+    # Issue #787: Windows CreateProcessW limit is 32,767 chars for the entire
+    # command line. Large system prompts (LLD + tests + repo structure) blow
+    # this. When exceeded, write to temp dir CLAUDE.md instead of --system-prompt.
+    SYSTEM_PROMPT_CLI_LIMIT = 20_000
+
     # Model mapping from friendly names to actual model specs
     # Issue #605: Claude 4.6 (REQ-2)
     MODEL_MAP = {
@@ -420,7 +427,14 @@ class ClaudeCLIProvider(LLMProvider):
             "--model", self._model_id,  # Use full model ID (e.g., claude-opus-4-6)
         ]
 
-        if system_prompt:
+        # Issue #787: Large system prompts exceed Windows' 32,767-char
+        # CreateProcessW limit. Write to temp dir CLAUDE.md instead.
+        use_tempdir_prompt = (
+            system_prompt
+            and len(system_prompt) > self.SYSTEM_PROMPT_CLI_LIMIT
+        )
+
+        if system_prompt and not use_tempdir_prompt:
             cmd.extend(["--system-prompt", system_prompt])
 
         # Issue #773: Effort level (low/medium/high/max)
@@ -441,114 +455,135 @@ class ClaudeCLIProvider(LLMProvider):
             if sys.platform == "win32":
                 creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
 
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                creationflags=creation_flags,
-            )
-            try:
-                stdout, stderr = proc.communicate(
-                    input=content, timeout=timeout_seconds
+            # Issue #787: When using temp dir, wrap in TemporaryDirectory
+            # context manager so cleanup is guaranteed.
+            if use_tempdir_prompt:
+                _dir_ctx = tempfile.TemporaryDirectory()
+            else:
+                _dir_ctx = nullcontext(None)
+
+            with _dir_ctx as temp_path:
+                if temp_path:
+                    # Write system prompt as CLAUDE.md so claude -p reads it
+                    # as project context — preserves system prompt caching.
+                    Path(temp_path, "CLAUDE.md").write_text(
+                        system_prompt, encoding="utf-8"
+                    )
+                    # Marker so claude finds the project root here
+                    Path(temp_path, ".git").mkdir()
+                    # Switch from "user" to "user,project" to load CLAUDE.md
+                    idx = cmd.index("--setting-sources")
+                    cmd[idx + 1] = "user,project"
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    cwd=temp_path,  # None when not using temp dir (= inherit)
+                    creationflags=creation_flags,
                 )
-            except subprocess.TimeoutExpired:
-                # Kill the entire process tree so pipes close immediately
-                _kill_process_tree(proc.pid)
-                # Drain any remaining pipe data
                 try:
-                    proc.communicate(timeout=5)
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
+                    stdout, stderr = proc.communicate(
+                        input=content, timeout=timeout_seconds
+                    )
+                except subprocess.TimeoutExpired:
+                    # Kill the entire process tree so pipes close immediately
+                    _kill_process_tree(proc.pid)
+                    # Drain any remaining pipe data
+                    try:
+                        proc.communicate(timeout=5)
+                    except (subprocess.TimeoutExpired, OSError):
+                        pass
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    call_result = LLMCallResult(
+                        success=False,
+                        response=None,
+                        raw_response=None,
+                        error_message=f"claude -p timed out after {timeout_seconds}s",
+                        provider=self.provider_name,
+                        model_used=self._model,
+                        duration_ms=duration_ms,
+                        attempts=1,
+                    )
+                    log_llm_call(call_result)
+                    return call_result
+
                 duration_ms = int((time.time() - start_time) * 1000)
-                call_result = LLMCallResult(
-                    success=False,
-                    response=None,
-                    raw_response=None,
-                    error_message=f"claude -p timed out after {timeout_seconds}s",
-                    provider=self.provider_name,
-                    model_used=self._model,
-                    duration_ms=duration_ms,
-                    attempts=1,
-                )
-                log_llm_call(call_result)
-                return call_result
 
-            duration_ms = int((time.time() - start_time) * 1000)
+                if proc.returncode != 0:
+                    error_msg = stderr or stdout or "Unknown error"
+                    # Check for non-retryable errors (like usage limits)
+                    retryable = not is_non_retryable_error(error_msg)
 
-            if proc.returncode != 0:
-                error_msg = stderr or stdout or "Unknown error"
-                # Check for non-retryable errors (like usage limits)
-                retryable = not is_non_retryable_error(error_msg)
-                
+                    call_result = LLMCallResult(
+                        success=False,
+                        response=None,
+                        raw_response=stdout,
+                        error_message=f"claude -p failed: {error_msg}",
+                        provider=self.provider_name,
+                        model_used=self._model,
+                        duration_ms=duration_ms,
+                        attempts=1,
+                        retryable=retryable,
+                    )
+                    log_llm_call(call_result)
+                    return call_result
+
+                # Parse JSON response — extract usage stats (Issue #398)
+                input_tokens = 0
+                output_tokens = 0
+                cache_read_tokens = 0
+                cache_creation_tokens = 0
+                cost_usd = 0.0
+
+                try:
+                    response_data = json.loads(stdout)
+
+                    # Issue #779: When --json-schema is used, claude -p puts the
+                    # structured output in "structured_output" (dict), not "result"
+                    # (which is empty). Serialize it back to JSON string so
+                    # downstream consumers (parse_structured_verdict) can parse it.
+                    structured_out = response_data.get("structured_output")
+                    if structured_out is not None and response_schema:
+                        response_text = json.dumps(structured_out)
+                    else:
+                        response_text = response_data.get("result", "")
+
+                    # Extract usage from claude -p JSON
+                    usage = response_data.get("usage", {})
+                    input_tokens = usage.get("input_tokens", 0)
+                    output_tokens = usage.get("output_tokens", 0)
+                    cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+                    cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+                    cost_usd = response_data.get("total_cost_usd", 0.0)
+
+                except json.JSONDecodeError:
+                    # Fall back to raw stdout if not valid JSON
+                    response_text = stdout.strip()
+
+                # Issue #527: Strip emojis from response (preserve raw_response)
+                response_text = strip_emoji(response_text)
+
                 call_result = LLMCallResult(
-                    success=False,
-                    response=None,
+                    success=True,
+                    response=response_text,
                     raw_response=stdout,
-                    error_message=f"claude -p failed: {error_msg}",
+                    error_message=None,
                     provider=self.provider_name,
                     model_used=self._model,
                     duration_ms=duration_ms,
                     attempts=1,
-                    retryable=retryable,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_creation_tokens=cache_creation_tokens,
+                    cost_usd=cost_usd,
                 )
                 log_llm_call(call_result)
                 return call_result
-
-            # Parse JSON response — extract usage stats (Issue #398)
-            input_tokens = 0
-            output_tokens = 0
-            cache_read_tokens = 0
-            cache_creation_tokens = 0
-            cost_usd = 0.0
-
-            try:
-                response_data = json.loads(stdout)
-
-                # Issue #779: When --json-schema is used, claude -p puts the
-                # structured output in "structured_output" (dict), not "result"
-                # (which is empty). Serialize it back to JSON string so
-                # downstream consumers (parse_structured_verdict) can parse it.
-                structured_out = response_data.get("structured_output")
-                if structured_out is not None and response_schema:
-                    response_text = json.dumps(structured_out)
-                else:
-                    response_text = response_data.get("result", "")
-
-                # Extract usage from claude -p JSON
-                usage = response_data.get("usage", {})
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
-                cache_read_tokens = usage.get("cache_read_input_tokens", 0)
-                cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
-                cost_usd = response_data.get("total_cost_usd", 0.0)
-
-            except json.JSONDecodeError:
-                # Fall back to raw stdout if not valid JSON
-                response_text = stdout.strip()
-
-            # Issue #527: Strip emojis from response (preserve raw_response)
-            response_text = strip_emoji(response_text)
-
-            call_result = LLMCallResult(
-                success=True,
-                response=response_text,
-                raw_response=stdout,
-                error_message=None,
-                provider=self.provider_name,
-                model_used=self._model,
-                duration_ms=duration_ms,
-                attempts=1,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read_tokens,
-                cache_creation_tokens=cache_creation_tokens,
-                cost_usd=cost_usd,
-            )
-            log_llm_call(call_result)
-            return call_result
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)

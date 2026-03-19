@@ -20,6 +20,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import json
 import subprocess
+from pathlib import Path
 
 from assemblyzero.core.llm_provider import (
     LLMCallResult,
@@ -352,6 +353,69 @@ class TestClaudeCLIProvider:
         assert result.success is False
         assert "timed out" in result.error_message.lower()
         mock_kill.assert_called_once_with(12345)
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_small_system_prompt_uses_cli_arg(self, mock_find_cli, mock_popen):
+        """Issue #787: System prompt under limit uses --system-prompt CLI arg."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        small_prompt = "You are a helpful assistant"
+        provider = ClaudeCLIProvider()
+        provider.invoke(system_prompt=small_prompt, content="Hello")
+
+        cmd = mock_popen.call_args[0][0]
+        assert "--system-prompt" in cmd
+        assert small_prompt in cmd
+        # cwd should be None (inherit parent)
+        assert mock_popen.call_args[1].get("cwd") is None
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_large_system_prompt_uses_tempdir(self, mock_find_cli, mock_popen):
+        """Issue #787: System prompt over limit writes CLAUDE.md to temp dir."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        large_prompt = "x" * (ClaudeCLIProvider.SYSTEM_PROMPT_CLI_LIMIT + 1)
+        provider = ClaudeCLIProvider()
+        provider.invoke(system_prompt=large_prompt, content="Hello")
+
+        cmd = mock_popen.call_args[0][0]
+        # --system-prompt should NOT be in cmd
+        assert "--system-prompt" not in cmd
+        # --setting-sources should be "user,project"
+        idx = cmd.index("--setting-sources")
+        assert cmd[idx + 1] == "user,project"
+        # cwd should be set to a temp dir path (not None)
+        cwd = mock_popen.call_args[1].get("cwd")
+        assert cwd is not None
+
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_tempdir_cleanup_after_invoke(self, mock_find_cli, mock_popen):
+        """Issue #787: Temp dir is cleaned up after invoke returns."""
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_proc = Mock()
+        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        large_prompt = "x" * (ClaudeCLIProvider.SYSTEM_PROMPT_CLI_LIMIT + 1)
+        provider = ClaudeCLIProvider()
+        result = provider.invoke(system_prompt=large_prompt, content="Hello")
+
+        assert result.success is True
+        # The temp dir that was used as cwd should be cleaned up
+        cwd = mock_popen.call_args[1].get("cwd")
+        assert not Path(cwd).exists()
 
 
 class TestAnthropicProvider:
