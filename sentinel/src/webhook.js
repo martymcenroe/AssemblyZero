@@ -1,4 +1,4 @@
-// Webhook handler — HMAC-SHA256 signature verification + event dispatch.
+﻿// Webhook handler â€” HMAC-SHA256 signature verification + event dispatch.
 
 import { getInstallationToken } from "./auth.js";
 import { createCheckRun } from "./checks.js";
@@ -88,7 +88,7 @@ export async function handleWebhook(request, env) {
     const installationId = payload.installation.id;
     const checkName = env.CHECK_NAME || "pr-sentinel / issue-reference";
 
-    // Auto-pass dependabot PRs — they don't have issue references
+    // Auto-pass dependabot PRs â€” they don't have issue references
     // but the check run must be created to complete the check suite
     if (pr.user?.login === "dependabot[bot]") {
       const token = await getInstallationToken(
@@ -98,7 +98,7 @@ export async function handleWebhook(request, env) {
       );
       await createCheckRun(token, owner, repo, headSha, checkName, {
         valid: true,
-        reason: "Dependabot PR — issue reference not required.",
+        reason: "Dependabot PR â€” issue reference not required.",
       });
       return new Response(
         JSON.stringify({ conclusion: "success", skipped: "dependabot" }),
@@ -141,3 +141,4 @@ export async function handleWebhook(request, env) {
     return new Response("Internal error", { status: 500 });
   }
 }
+

@@ -1,4 +1,4 @@
-name: pr-sentinel
+﻿name: pr-sentinel
 
 on:
   pull_request:
@@ -17,10 +17,18 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Check PR title or body for issue reference patterns:
-          #   #123, GH-123, fixes #123, closes #123, resolves #123
-          PATTERN='(#[0-9]+|GH-[0-9]+|[Ff]ixes #[0-9]+|[Cc]loses #[0-9]+|[Rr]esolves #[0-9]+)'
+          # Check PR title, body, or commits for issue reference pattern:
+          #   Closes #123
+          PATTERN='([Cc]loses #[0-9]+)'
+
+          PR_COMMITS=$(gh pr view $PR_NUMBER --json commits --jq '.[].commits.[].messageBody')
+          if echo "$PR_COMMITS" | grep -qE "$PATTERN"; then
+            echo "✅ Issue reference found in commit messages"
+            exit 0
+          fi
 
           if echo "$PR_TITLE" | grep -qE "$PATTERN"; then
             echo "✅ Issue reference found in PR title"
@@ -34,8 +42,10 @@ jobs:
 
           echo "❌ No issue reference found."
           echo ""
-          echo "PR title and body must reference a GitHub issue."
-          echo "Examples: '#123', 'fixes #123', 'closes #45'"
+          echo "PR title, body, or commit message must close a GitHub issue."
+          echo "Required Format: 'Closes #123'"
           echo ""
-          echo "Title: $PR_TITLE"
+          echo "If you are blocked, run:"
+          echo "  git commit --amend"
+          echo "  git push --force"
           exit 1
