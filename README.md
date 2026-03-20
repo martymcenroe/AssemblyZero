@@ -20,21 +20,19 @@
 
 ---
 
-## Production Evidence: 492 Issues Closed, 911 Commits
+## Production Evidence: 70 Days, 64 Active, 493 Issues Closed
 
-This isn't theoretical. AssemblyZero has processed **566 issues** (492 closed) across 68 days of operation, with **5,090+ tests** and **911 commits**:
+This isn't theoretical. AssemblyZero has been under **continuous development for 70 days** with contributions on **64 of them (91.4%)**. Only 6 days off since January 10, 2026.
 
-```
-Issues closed per day (Central Time):
-2026-01-21:  12 ############
-2026-02-03:  60 ############################################################
-2026-02-17:  24 ########################
-2026-03-01:  29 #############################
-2026-03-07:  31 ###############################
-2026-03-20:  11 ###########
-```
+| Metric | Value |
+|--------|-------|
+| **Issues closed** | 493 |
+| **Commits** | 912 |
+| **PRs merged** | 283 |
+| **Tests** | 5,090+ across 134 files |
+| **Active days** | 64 of 70 (91.4%) |
 
-**Average velocity:** 7.2 issues/day | **Peak:** 60 issues in one day | **Closure rate:** 86.9% | **[Full Metrics →](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** | **[March 2026 Velocity →](https://github.com/martymcenroe/AssemblyZero/wiki/March-2026-Velocity)**
+**[Daily Activity Log →](https://github.com/martymcenroe/AssemblyZero/wiki/Daily-Activity-Log)** · **[Metrics →](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** · **[March 2026 Velocity →](https://github.com/martymcenroe/AssemblyZero/wiki/March-2026-Velocity)**
 
 ---
 
