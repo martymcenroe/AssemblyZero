@@ -1,3 +1,4 @@
+```python
 """Core state definition for AssemblyZero LangGraph workflows.
 
 This module defines the AgentState TypedDict that travels through
@@ -5,6 +6,9 @@ the governance pipeline: Issue -> LLD Review -> Implementation -> Code Review ->
 """
 
 from typing import Annotated, Literal, TypedDict
+
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 from assemblyzero.core.workspace_context import WorkspaceContext
 
@@ -26,7 +30,7 @@ class AgentState(TypedDict):
     """
 
     # Standard LangGraph message accumulator
-    messages: list
+    messages: Annotated[list[BaseMessage], add_messages]
 
     # Issue tracking
     issue_id: int
@@ -46,7 +50,6 @@ class AgentState(TypedDict):
     # Safety: loop prevention
     iteration_count: int
 
-    # Workspace context (ref #838)
     workspace_ctx: WorkspaceContext  # ref #838 — immutable workspace path context
 
 
@@ -84,3 +87,4 @@ class _TestFileLocation(TypedDict):
     created_at: str
     created_by_phase: str
     moved_from: str | None
+```

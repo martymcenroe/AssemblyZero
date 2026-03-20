@@ -1,3 +1,4 @@
+```python
 """Core components for AssemblyZero state management and infrastructure."""
 
 from assemblyzero.core.audit import (
@@ -61,3 +62,4 @@ __all__ = [
     "WorkspaceContext",
     "make_workspace_context",
 ]
+```
