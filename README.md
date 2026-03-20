@@ -8,19 +8,33 @@
 
 ---
 
-## Production Evidence: 207 Issues in 27 Days
+## Start Here
 
-This isn't theoretical. AssemblyZero has processed **207 issues** (159 closed) in 27 days:
+| You are... | Start with |
+|------------|------------|
+| **Engineering Leader** evaluating AI adoption | [Why AssemblyZero?](https://github.com/martymcenroe/AssemblyZero/wiki/For-Enterprise-Leaders-Why-AssemblyZero) |
+| **AI Strategy / Operations** implementing Claude Enterprise | [AI Strategy & Operations](https://github.com/martymcenroe/AssemblyZero/wiki/AI-Strategy-and-Operations) |
+| **Technical Architect** designing agent infrastructure | [Technical Architecture](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture) |
+| **Security & Compliance** approving AI tooling | [Secret Guard Architecture](https://github.com/martymcenroe/AssemblyZero/wiki/Secret-Guard-Architecture) |
+| **Practitioner** building with Claude Code | [Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start) |
+
+---
+
+## Production Evidence: 492 Issues Closed, 911 Commits
+
+This isn't theoretical. AssemblyZero has processed **566 issues** (492 closed) across 68 days of operation, with **5,090+ tests** and **911 commits**:
 
 ```
 Issues closed per day (Central Time):
 2026-01-21:  12 ############
-2026-02-02:  23 #######################
-2026-02-03:  55 #######################################################
-2026-02-04:  31 ###############################
+2026-02-03:  60 ############################################################
+2026-02-17:  24 ########################
+2026-03-01:  29 #############################
+2026-03-07:  31 ###############################
+2026-03-20:  11 ###########
 ```
 
-**Average velocity:** 5.9 issues/day | **Peak:** 55 issues in one day | **[Full Metrics →](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)**
+**Average velocity:** 7.2 issues/day | **Peak:** 60 issues in one day | **Closure rate:** 86.9% | **[Full Metrics →](https://github.com/martymcenroe/AssemblyZero/wiki/Metrics)** | **[March 2026 Velocity →](https://github.com/martymcenroe/AssemblyZero/wiki/March-2026-Velocity)**
 
 ---
 
@@ -58,10 +72,13 @@ graph TD
 
 | Capability | What It Means |
 |------------|---------------|
-| **12+ Concurrent Agents** | Multiple Claude agents work in parallel on features, bugs, docs - all under one user identity |
-| **Gemini Reviews Claude** | Every design doc and code change is reviewed by Gemini 3 Pro before humans see it |
-| **Enforced Gates** | LLD review, implementation review, report generation - gates that can't be skipped |
-| **34 Governance Audits** | OWASP, GDPR, NIST AI Safety - adversarial audits that find violations |
+| **12+ Concurrent Agents** | Multiple Claude agents work in parallel on features, bugs, docs — all under one user identity |
+| **Gemini Reviews Claude** | Every design doc and code change is reviewed by Gemini before humans see it |
+| **Enforced Gates** | LLD review, implementation review, report generation — gates that can't be skipped |
+| **Secret Guard Architecture** | Two-layer hook system protecting credentials from AI session transcripts — [12/17 bypass vectors blocked](https://github.com/martymcenroe/AssemblyZero/wiki/Secret-Guard-Architecture) |
+| **Cerberus PR Governance** | [GitHub App](https://github.com/martymcenroe/AssemblyZero/wiki/Cerberus-PR-Governance) auto-approves PRs after CI validation — no human bottleneck |
+| **Prompt Economics** | [System prompt caching](https://github.com/martymcenroe/AssemblyZero/wiki/Prompt-Economics) (90% savings), Haiku routing, batch generation, budget guards |
+| **34 Governance Audits** | OWASP, GDPR, NIST AI Safety — adversarial audits that find violations |
 
 ---
 
@@ -376,7 +393,7 @@ The generated configs include:
 
 ### Wiki
 
-Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/AssemblyZero/wiki)** (32 pages):
+Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/AssemblyZero/wiki)** (50 pages):
 
 | Page | Description |
 |------|-------------|
@@ -393,12 +410,7 @@ Full documentation at **[AssemblyZero Wiki](https://github.com/martymcenroe/Asse
 
 ### For Different Audiences
 
-| Audience | Start Here |
-|----------|------------|
-| **Engineering Leaders** | [Why AssemblyZero?](https://github.com/martymcenroe/AssemblyZero/wiki/For-Enterprise-Leaders-Why-AssemblyZero) |
-| **Architects** | [Technical Architecture](https://github.com/martymcenroe/AssemblyZero/wiki/Technical-Architecture) |
-| **Security Teams** | [Security & Compliance](https://github.com/martymcenroe/AssemblyZero/wiki/Security-Compliance) |
-| **Developers** | [Quick Start](https://github.com/martymcenroe/AssemblyZero/wiki/Quick-Start) |
+See **[Start Here](#start-here)** at the top of this page for persona-based navigation.
 
 ---
 
@@ -420,11 +432,13 @@ Having led enterprise AI adoption, I know the blockers:
 
 | Blocker | AssemblyZero Solution |
 |---------|------------------|
-| "Security won't approve ungoverned AI" | 34 audits, Gemini gates, enforced checkpoints |
-| "We can't measure productivity" | KPI framework, friction tracking, cost attribution |
-| "Agents conflict with each other" | Worktree isolation, single-user identity model |
+| "Security won't approve ungoverned AI" | 34 audits, Gemini gates, [secret guard hooks](https://github.com/martymcenroe/AssemblyZero/wiki/Secret-Guard-Architecture), [62-repo security audit](https://github.com/martymcenroe/AssemblyZero/wiki/Fleet-Security-Audit) |
+| "We can't measure productivity" | KPI framework, friction tracking, [per-call cost attribution](https://github.com/martymcenroe/AssemblyZero/wiki/Prompt-Economics) |
+| "Agents conflict with each other" | [Worktree isolation](https://github.com/martymcenroe/AssemblyZero/wiki/Worktree-Isolation), single-user identity model |
+| "PRs block waiting for human review" | [Cerberus GitHub App](https://github.com/martymcenroe/AssemblyZero/wiki/Cerberus-PR-Governance) auto-approves after CI validation |
 | "Developers hate the permission prompts" | Pattern detection, friction analysis, auto-remediation |
-| "It's just pilots, not real adoption" | Infrastructure that scales to organization-wide |
+| "Token costs are unpredictable" | [Prompt caching](https://github.com/martymcenroe/AssemblyZero/wiki/Prompt-Economics) (90% savings), budget guards, circuit breakers |
+| "It's just pilots, not real adoption" | Infrastructure that scales — [492 issues closed in 68 days](https://github.com/martymcenroe/AssemblyZero/wiki/March-2026-Velocity) |
 
 ### Technical Foundation
 
@@ -439,9 +453,12 @@ Having led enterprise AI adoption, I know the blockers:
 
 The code in this repo is the same code that:
 - Runs the Gemini verification gates
+- Protects secrets via hook-based guard architecture
+- Governs PR merges via the Cerberus GitHub App
+- Optimizes prompt costs (90% savings via caching and routing)
 - Tracks permission friction patterns
 - Generates the audit reports
-- Manages credential rotation
+- [Bypasses Windows' 32K-char limit](https://github.com/martymcenroe/AssemblyZero/wiki/The-WinError-206-Hack) with a temp-dir CLAUDE.md hack
 
 **If you're scaling AI coding assistants across an engineering organization, this is the infrastructure layer you need.**
 
@@ -492,6 +509,7 @@ graph TB
 | **Captain Angua** | External intelligence scout | Implemented | #93 |
 | **Lu-Tze** | Repository hygiene — constant sweeping | Implemented | #94 |
 | **DEATH** | Documentation reconciliation | Manual | #114 |
+| **Cerberus** | PR governance — three heads, one gate | Implemented | #736 |
 | **Vimes** | Regression guardian — deep suspicion | Planned | — |
 | **Ponder Stibbons** | Auto-fix compositor | Planned | #307 |
 
