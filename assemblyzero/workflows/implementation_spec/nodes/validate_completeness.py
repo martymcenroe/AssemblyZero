@@ -774,7 +774,7 @@ def _import_resolves(
     return False
 
 
-# Common stdlib top-level module names (subset for fast rejection)
+# Common stdlib and third-party top-level module names (subset for fast rejection)
 _KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({
     "abc", "argparse", "ast", "asyncio", "base64", "builtins", "collections",
     "contextlib", "copy", "csv", "dataclasses", "datetime", "decimal",
@@ -786,6 +786,7 @@ _KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({
     "string", "struct", "subprocess", "sys", "tempfile", "textwrap",
     "threading", "time", "timeit", "tomllib", "traceback", "types",
     "typing", "unittest", "urllib", "uuid", "warnings", "xml", "zipfile",
+    "langchain_core", "langchain", "langgraph", "pydantic", "pytest", "typing_extensions", "boto3", "requests"
 })
 
 

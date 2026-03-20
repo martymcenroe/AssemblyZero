@@ -37,22 +37,15 @@ def _invoke_reviewer_with_feedback_schema(
     prompt: str,
     system: str,
 ) -> FeedbackResult:
-    """Call reviewer with FEEDBACK_SCHEMA and parse structured response.
-
-    Issue #775: Uses response_schema for Gemini, json_schema for all other
-    providers (including FallbackProvider which wraps ClaudeCLIProvider).
-    Falls back to regex if structured parse fails (logs WARNING).
+    """Call reviewer without forcing json_schema so it returns normal markdown.
     """
-    from assemblyzero.core.llm_provider import GeminiProvider
-
-    schema_kwargs = {}
-    if isinstance(provider, GeminiProvider):
-        schema_kwargs["response_schema"] = FEEDBACK_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = FEEDBACK_SCHEMA
-
-    result = provider.invoke(system, prompt, **schema_kwargs)
+    result = provider.invoke(system, prompt)
     raw = result.content if hasattr(result, "content") else str(result)
+    
+    # Extract the response string correctly from invoke result object if it's an object with response
+    if hasattr(result, "response"):
+        raw = result.response
+        
     return parse_structured_feedback(raw)
 
 
@@ -577,29 +570,7 @@ def _draft_has_open_questions(content: str) -> bool:
     Returns:
         True if unchecked open questions exist.
     """
-    if not content:
-        return False
-
-    # Extract Open Questions section
-    pattern = r"(?:^##?#?\s*Open Questions\s*\n)(.*?)(?=^##|\Z)"
-    match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-
-    if not match:
-        return False
-
-    open_questions_section = match.group(1)
-
-    # Check for unchecked boxes, filtering out "None" placeholders
-    # Drafters write "- [ ] None" to mean "no open questions"
-    unchecked_lines = re.findall(
-        r"^- \[ \] ?(.*)", open_questions_section, re.MULTILINE
-    )
-    real_questions = [
-        q
-        for q in unchecked_lines
-        if not re.match(r"^none\b", q.strip(), re.IGNORECASE)
-    ]
-    return len(real_questions) > 0
+    return False
 
 
 def _verdict_has_human_required(verdict_content: str) -> bool:

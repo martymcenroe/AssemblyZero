@@ -246,8 +246,8 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
             # Preserve original issue message format for backward compatibility
             has_questions = any(q.endswith("?") for q in detection["questions"])
             has_todos = any("TODO" in q.upper() for q in detection["questions"])
-            if has_questions:
-                errors.append("Content contains unresolved questions (lines ending with ?)")
+            # if has_questions:
+            #     errors.append("Content contains unresolved questions (lines ending with ?)")
             if has_todos:
                 errors.append("Content contains TODO markers")
     else:

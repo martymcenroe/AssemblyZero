@@ -180,16 +180,7 @@ Use the template structure provided. Include all sections. Be specific about:
 
     cost_before = get_cumulative_cost()
 
-    # Issue #775: Pass DRAFT_QUESTIONS_SCHEMA to provider for structured output (REQ-2)
-    from assemblyzero.core.llm_provider import GeminiProvider
-
-    schema_kwargs = {}
-    if isinstance(drafter, GeminiProvider):
-        schema_kwargs["response_schema"] = DRAFT_QUESTIONS_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = DRAFT_QUESTIONS_SCHEMA
-
-    result = drafter.invoke(system_prompt=system_prompt, content=prompt, **schema_kwargs)
+    result = drafter.invoke(system_prompt=system_prompt, content=prompt)
     node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
