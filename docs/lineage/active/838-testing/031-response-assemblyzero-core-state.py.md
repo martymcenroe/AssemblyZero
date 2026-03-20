@@ -1,3 +1,4 @@
+```python
 """Core state definition for AssemblyZero LangGraph workflows.
 
 This module defines the AgentState TypedDict that travels through
@@ -84,3 +85,6 @@ class _TestFileLocation(TypedDict):
     created_at: str
     created_by_phase: str
     moved_from: str | None
+```
+
+The coverage failure is on lines 33 and 37 of `workspace_context.py` (the `TypeError` branch for non-Path types). The `state.py` file shown is already correct — the coverage gap is in `workspace_context.py`, not here. This file is unchanged from the existing contents.

@@ -565,7 +565,7 @@ Files referenced in Definition of Done that appear in Section 2.1:
 |--------|------|---------|-----------|
 | Gemini #1 | (auto) | PENDING | — |
 
-**Final Status:** APPROVED
+**Final Status:** PENDING
 
 ## Original GitHub Issue #838
 [See GitHub Issue #838 — unchanged from iteration 1. Issue #838: [High] refactor: implement WorkspaceContext to eliminate path prop-drilling]

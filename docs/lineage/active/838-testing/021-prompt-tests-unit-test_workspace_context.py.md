@@ -1,3 +1,110 @@
+# Implementation Request: tests/unit/test_workspace_context.py
+
+## Task
+
+Write the complete contents of `tests/unit/test_workspace_context.py`.
+
+Change type: Add
+Description: Unit tests T010–T150
+
+## Previously Implemented Files
+
+These files have already been implemented. Use them for imports and references:
+
+### assemblyzero/core/workspace_context.py (signatures)
+
+```python
+"""WorkspaceContext: immutable bundle of workspace paths.
+
+Issue #838: Eliminates path prop-drilling across workflow nodes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from pathlib import Path
+
+class WorkspaceContext:
+
+    """Immutable container for workspace path configuration.
+
+Constructed once at workflow entry and threaded through LangGraph"""
+
+    def __post_init__(self) -> None:
+    """Validate both paths are absolute and exist."""
+    ...
+
+    def docs_dir(self) -> Path:
+    """Return assemblyzero_root / 'docs'."""
+    ...
+
+    def lld_active_dir(self) -> Path:
+    """Return docs / 'lld' / 'active'."""
+    ...
+
+    def reports_dir(self) -> Path:
+    """Return docs / 'reports'."""
+    ...
+
+    def target_name(self) -> str:
+    """Return the basename of the target repository."""
+    ...
+
+def make_workspace_context(
+    assemblyzero_root: str | Path,
+    target_repo: str | Path,
+) -> WorkspaceContext:
+    """Construct a WorkspaceContext, resolving both paths to absolute.
+
+Args:"""
+    ...
+```
+
+### assemblyzero/core/__init__.py (signatures)
+
+```python
+"""Core components for AssemblyZero state management and infrastructure."""
+
+from assemblyzero.core.audit import (
+    ReviewAuditLog,
+    ReviewLogEntry,
+    GeminiReviewResponse,
+    create_log_entry,
+)
+
+from assemblyzero.core.config import (
+    REVIEWER_MODEL,
+    REVIEWER_MODEL_FALLBACKS,
+    FORBIDDEN_MODELS,
+    CREDENTIALS_FILE,
+    ROTATION_STATE_FILE,
+    MAX_RETRIES_PER_CREDENTIAL,
+    BACKOFF_BASE_SECONDS,
+    BACKOFF_MAX_SECONDS,
+    DEFAULT_AUDIT_LOG_PATH,
+    LLD_REVIEW_PROMPT_PATH,
+)
+
+from assemblyzero.core.gemini_client import (
+    GeminiClient,
+    GeminiCallResult,
+    GeminiErrorType,
+    Credential,
+    RotationState,
+)
+
+from assemblyzero.core.state import AgentState
+
+from assemblyzero.core.workspace_context import (
+    WorkspaceContext,
+    make_workspace_context,
+)
+```
+
+### assemblyzero/core/state.py (full)
+
+```python
 """Core state definition for AssemblyZero LangGraph workflows.
 
 This module defines the AgentState TypedDict that travels through
@@ -84,3 +191,18 @@ class _TestFileLocation(TypedDict):
     created_at: str
     created_by_phase: str
     moved_from: str | None
+```
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block

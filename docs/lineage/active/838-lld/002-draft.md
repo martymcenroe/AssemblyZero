@@ -2,9 +2,9 @@
 
 <!-- Template Metadata
 Last Updated: 2026-03-19
-Updated By: Issue #838 LLD Rev 3 (mechanical validation fixes — coverage gaps REQ-4 through REQ-8)
-Update Reason: Added REQ-N suffixes to all Section 10.1 scenarios; added scenarios 130–150 to cover REQ-4, REQ-5/REQ-6, REQ-8; added T130–T150 to TDD plan; fixed Section 3 to numbered-list format (already correct in Rev 2)
-Previous: Rev 2 — 37.5% requirement coverage; missing REQ-4, REQ-5, REQ-6, REQ-7, REQ-8 test scenarios
+Updated By: Issue #838 LLD
+Update Reason: Initial draft
+Previous: N/A
 -->
 
 ## 1. Context & Goal
@@ -18,7 +18,6 @@ Previous: Rev 2 — 37.5% requirement coverage; missing REQ-4, REQ-5, REQ-6, REQ
 
 - [ ] Are there any callers outside `assemblyzero/` (e.g., in `tools/`) that pass these paths and need updating in the same PR?
 - [ ] Should `WorkspaceContext` be frozen (immutable) to prevent accidental mutation during a workflow run?
-- [ ] For each node file listed as "Add" below — does a similarly-named file already exist in that directory under a different name? Implementer must `ls` the directory before creating to avoid duplicates.
 
 ## 2. Proposed Changes
 
@@ -30,18 +29,16 @@ Previous: Rev 2 — 37.5% requirement coverage; missing REQ-4, REQ-5, REQ-6, REQ
 |------|-------------|-------------|
 | `assemblyzero/core/workspace_context.py` | Add | New module defining `WorkspaceContext` dataclass and factory helpers |
 | `assemblyzero/core/__init__.py` | Modify | Re-export `WorkspaceContext` from `assemblyzero.core` |
-| `assemblyzero/core/state.py` | Modify | Add `workspace_ctx: WorkspaceContext` field to shared graph state TypedDicts |
-| `assemblyzero/workflows/requirements/nodes/lld_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/requirements/nodes/gemini_review_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/requirements/nodes/issue_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/implementation_spec/nodes/spec_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/lld/nodes/lld_writer_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/lld/nodes/lld_tracker_node.py` | Add | Node reading `workspace_ctx` from state instead of raw path params |
-| `assemblyzero/workflows/orchestrator/orchestrator.py` | Add | Constructs `WorkspaceContext` at entry point and threads through graph state |
+| `assemblyzero/workflows/requirements/nodes/lld_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/requirements/nodes/gemini_review_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/requirements/nodes/issue_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/implementation_spec/nodes/spec_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/lld/nodes/lld_writer_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/lld/nodes/lld_tracker_node.py` | Modify | Replace `assemblyzero_root, target_repo` params with `WorkspaceContext` |
+| `assemblyzero/workflows/orchestrator/orchestrator.py` | Modify | Construct `WorkspaceContext` at entry point and thread through graph state |
+| `assemblyzero/graphs/state.py` | Modify | Add `workspace_ctx: WorkspaceContext` field to shared graph state TypedDicts |
 | `tests/unit/test_workspace_context.py` | Add | Unit tests for `WorkspaceContext` construction, validation, and property access |
 | `tests/unit/test_gate/test_gate_workspace_context.py` | Add | Tests verifying gate nodes accept and correctly use `WorkspaceContext` |
-
-> **Implementer Note:** The node files above are marked Add because the paths were not found in the repository at LLD authoring time. Before creating each file, run `ls assemblyzero/workflows/<workflow>/nodes/` to check whether a pre-existing file with a similar name (e.g., `lld_writer.py`, `spec.py`) should be modified instead of a new file created. If a matching file is found, update Section 2.1 to reflect "Modify" before proceeding.
 
 ### 2.1.1 Path Validation (Mechanical - Auto-Checked)
 
@@ -52,21 +49,6 @@ Mechanical validation automatically checks:
 - All "Delete" files must exist in repository
 - All "Add" files must have existing parent directories
 - No placeholder prefixes (`src/`, `lib/`, `app/`) unless directory exists
-
-**Parent directory existence for all "Add" entries:**
-
-| File | Parent Directory | Exists? |
-|------|-----------------|---------|
-| `assemblyzero/core/workspace_context.py` | `assemblyzero/core/` | [PASS] |
-| `assemblyzero/workflows/requirements/nodes/lld_node.py` | `assemblyzero/workflows/requirements/nodes/` | [PASS] |
-| `assemblyzero/workflows/requirements/nodes/gemini_review_node.py` | `assemblyzero/workflows/requirements/nodes/` | [PASS] |
-| `assemblyzero/workflows/requirements/nodes/issue_node.py` | `assemblyzero/workflows/requirements/nodes/` | [PASS] |
-| `assemblyzero/workflows/implementation_spec/nodes/spec_node.py` | `assemblyzero/workflows/implementation_spec/nodes/` | [PASS] |
-| `assemblyzero/workflows/lld/nodes/lld_writer_node.py` | `assemblyzero/workflows/lld/nodes/` | [PASS] |
-| `assemblyzero/workflows/lld/nodes/lld_tracker_node.py` | `assemblyzero/workflows/lld/nodes/` | [PASS] |
-| `assemblyzero/workflows/orchestrator/orchestrator.py` | `assemblyzero/workflows/orchestrator/` | [PASS] |
-| `tests/unit/test_workspace_context.py` | `tests/unit/` | [PASS] |
-| `tests/unit/test_gate/test_gate_workspace_context.py` | `tests/unit/test_gate/` | [PASS] |
 
 **If validation fails, the LLD is BLOCKED before reaching review.**
 
@@ -99,9 +81,9 @@ class WorkspaceContext:
 
 ```python
 
-# assemblyzero/core/state.py additions (pseudocode)
+# Graph state additions (pseudocode)
 class WorkflowState(TypedDict):
-    # ... existing fields preserved ...
+    # ... existing fields ...
     workspace_ctx: WorkspaceContext   # replaces: assemblyzero_root, target_repo
 ```
 
@@ -117,7 +99,7 @@ class WorkspaceContext:
     target_repo: Path
 
     def __post_init__(self) -> None:
-        """Validate both paths are absolute and exist. Raises ValueError if not."""
+        """Validate both paths are absolute and exist."""
         ...
 
     @property
@@ -149,7 +131,7 @@ def make_workspace_context(
     Construct a WorkspaceContext, resolving both paths to absolute.
 
     Raises:
-        ValueError: if either path does not exist after resolution.
+        ValueError: if either path does not exist.
     """
     ...
 ```
@@ -168,36 +150,22 @@ def build_initial_state(
     """
     Construct the initial LangGraph state dict, creating WorkspaceContext once.
 
-    WorkspaceContext is created here and stored in state; downstream nodes
-    read from state["workspace_ctx"] rather than accepting path parameters.
-
-    Raises:
-        ValueError: propagated from make_workspace_context if paths invalid.
+    WorkspaceContext is created here and stored in state; nodes read from state.
     """
     ...
 ```
 
 ```python
 
-# Generic node signature pattern (applied to all node files in Section 2.1)
+# Generic node signature pattern (applied to all modified nodes)
 
 def lld_node(state: WorkflowState) -> WorkflowState:
     """
     Node reads workspace_ctx from state instead of accepting path params.
-
     No longer receives assemblyzero_root / target_repo as direct arguments.
     """
     ctx: WorkspaceContext = state["workspace_ctx"]
     ...
-```
-
-```python
-
-# assemblyzero/core/state.py — updated TypedDict
-
-class WorkflowState(TypedDict):
-    # existing fields remain unchanged
-    workspace_ctx: WorkspaceContext  # ref #838
 ```
 
 ### 2.5 Logic Flow (Pseudocode)
@@ -219,10 +187,10 @@ NODE USAGE (any node that formerly took path params)
 4. No path arguments passed between nodes — state carries context
 
 PROPERTY ACCESS
-1. ctx.docs_dir       -> ctx.assemblyzero_root / "docs"
+1. ctx.docs_dir -> ctx.assemblyzero_root / "docs"
 2. ctx.lld_active_dir -> ctx.docs_dir / "lld" / "active"
-3. ctx.reports_dir    -> ctx.docs_dir / "reports"
-4. ctx.target_name    -> ctx.target_repo.name
+3. ctx.reports_dir -> ctx.docs_dir / "reports"
+4. ctx.target_name -> ctx.target_repo.name
 ```
 
 ### 2.6 Technical Approach
@@ -241,10 +209,9 @@ PROPERTY ACCESS
 |----------|-------------------|--------|-----------|
 | Mutability | Mutable dataclass, frozen dataclass, NamedTuple | `frozen=True` dataclass | Prevents accidental mid-workflow mutation; dataclass gives `__repr__` and type checker support |
 | Derived paths | Store as fields, compute as `@property` | `@property` | SQLite checkpointer serializes state; storing `Path` objects as extra fields risks serialization edge cases; properties are always consistent |
-| Placement in package | `assemblyzero/`, `assemblyzero/core/`, `assemblyzero/utils/` | `assemblyzero/core/` | `core/` already contains foundational types (validation, state); consistent location for shared primitives |
+| Placement in package | `assemblyzero/`, `assemblyzero/core/`, `assemblyzero/utils/` | `assemblyzero/core/` | `core/` already contains foundational types (validation); consistent location for shared primitives |
 | State integration | Thread through function args, store in LangGraph state | LangGraph state | Eliminates prop-drilling entirely; state is already the canonical carrier between nodes |
 | Validation timing | Lazy (on property access), eager (in `__post_init__`) | Eager in `__post_init__` | Fail fast at construction rather than mid-workflow; errors surface at startup with clear message |
-| State file location | `assemblyzero/graphs/state.py`, `assemblyzero/core/state.py` | `assemblyzero/core/state.py` | That file exists; `assemblyzero/graphs/state.py` does not |
 
 **Architectural Constraints:**
 - Must not break existing public API of `assemblyzero/workflows/` (nodes remain callable by LangGraph)
@@ -262,7 +229,6 @@ PROPERTY ACCESS
 5. All existing tests continue to pass (no regressions).
 6. New unit tests achieve ≥95% line coverage of `workspace_context.py`.
 7. `WorkspaceContext` is importable as `from assemblyzero.core import WorkspaceContext`.
-8. `assemblyzero/core/state.py` contains `workspace_ctx: WorkspaceContext` in the shared `WorkflowState` TypedDict.
 
 ## 4. Alternatives Considered
 
@@ -363,7 +329,6 @@ sequenceDiagram
 | Invalid paths reaching deep into workflow before failing | Eager validation in `__post_init__` — raise `ValueError` immediately at construction if either path does not exist | Addressed |
 | Mid-workflow mutation causing inconsistent state | `frozen=True` prevents all attribute reassignment; any attempt raises `FrozenInstanceError` | Addressed |
 | Incorrect path passed silently (str vs Path confusion) | `make_workspace_context` accepts `str | Path` and always resolves to absolute `Path` before constructing | Addressed |
-| Pre-existing node files overwritten by accident | Implementer note in §2.1 requires directory listing before creating new files | Addressed |
 
 **Fail Mode:** Fail Closed — if either path is invalid, `make_workspace_context` raises `ValueError` before the LangGraph graph is compiled or invoked.
 
@@ -386,10 +351,10 @@ sequenceDiagram
 | Resource | Unit Cost | Estimated Usage | Monthly Cost |
 |----------|-----------|-----------------|--------------|
 | LLM API calls | $0 | 0 (pure Python refactor) | $0 |
-| Storage | $0 | No new files on disk beyond source | $0 |
+| Storage | $0 | No new files on disk | $0 |
 
 **Cost Controls:**
-- [x] N/A — no external resource consumption
+- [ ] N/A — no external resource consumption
 
 **Worst-Case Scenario:** No cost impact. This is a pure internal refactor.
 
@@ -434,10 +399,7 @@ sequenceDiagram
 | T090 | `target_name` returns `target_repo.name` | String basename returned | RED |
 | T100 | `WorkspaceContext` importable from `assemblyzero.core` | No import error | RED |
 | T110 | Node receives `workspace_ctx` from state, not direct args | Node reads `state["workspace_ctx"]`; no `TypeError` | RED |
-| T120 | `WorkflowState` TypedDict in `state.py` declares `workspace_ctx` field | `get_type_hints(WorkflowState)["workspace_ctx"]` is `WorkspaceContext` | RED |
-| T130 | `build_initial_state` calls `make_workspace_context` exactly once | Mock spy confirms single call; `state["workspace_ctx"]` is the returned instance | RED |
-| T140 | Full test suite passes with no regressions | `pytest` exits zero; no previously-passing tests fail | RED |
-| T150 | Coverage report shows ≥95% for `workspace_context.py` | `--cov` report line coverage ≥ 95% | RED |
+| T120 | `build_initial_state` embeds `WorkspaceContext` in returned dict | `state["workspace_ctx"]` is a `WorkspaceContext` instance | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -451,21 +413,18 @@ sequenceDiagram
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Happy path — valid absolute paths (REQ-1) | Auto | Two existing `tmp_path` dirs | `WorkspaceContext` instance | Fields equal inputs |
-| 020 | String inputs to factory (REQ-2) | Auto | Two str paths to existing dirs | `WorkspaceContext` | `isinstance(ctx.assemblyzero_root, Path)` |
-| 030 | Missing `assemblyzero_root` (REQ-2) | Auto | Non-existent root path | `ValueError` | Message contains path string |
-| 040 | Missing `target_repo` (REQ-2) | Auto | Non-existent target path | `ValueError` | Message contains path string |
-| 050 | Frozen immutability (REQ-1) | Auto | Valid `WorkspaceContext`, attempt field set | `FrozenInstanceError` | Exception raised |
-| 060 | `docs_dir` property (REQ-1) | Auto | Valid ctx | `assemblyzero_root / "docs"` | Path equality |
-| 070 | `lld_active_dir` property (REQ-1) | Auto | Valid ctx | `docs_dir / "lld" / "active"` | Path equality |
-| 080 | `reports_dir` property (REQ-1) | Auto | Valid ctx | `docs_dir / "reports"` | Path equality |
-| 090 | `target_name` property (REQ-1) | Auto | ctx with `target_repo = Path("/x/my-repo")` | `"my-repo"` | String equality |
-| 100 | Public import (REQ-7) | Auto | `from assemblyzero.core import WorkspaceContext` | No exception | Import succeeds |
-| 110 | Node reads ctx from state (REQ-3) | Auto | State dict with `workspace_ctx` key | Node accesses correct paths | No `KeyError`; correct paths used |
-| 120 | `WorkflowState` TypedDict declares `workspace_ctx` field (REQ-8) | Auto | `get_type_hints(WorkflowState)` | Key `"workspace_ctx"` maps to `WorkspaceContext` | Type hint present and correct |
-| 130 | `build_initial_state` constructs `WorkspaceContext` exactly once (REQ-4) | Auto | Valid root + repo strings; mock spy on `make_workspace_context` | `state["workspace_ctx"]` is the mocked return value; spy call count == 1 | `mock.assert_called_once()` passes |
-| 140 | Full test suite passes with no regressions (REQ-5) | Auto | Entire `tests/` directory | All previously-passing tests still pass | `pytest` exit code 0; no new failures |
-| 150 | Coverage ≥95% on `workspace_context.py` (REQ-6) | Auto | `pytest --cov=assemblyzero.core.workspace_context` | Coverage report line% ≥ 95 | `--cov-fail-under=95` passes |
+| 010 | Happy path — valid absolute paths | Auto | Two existing `tmp_path` dirs | `WorkspaceContext` instance | Fields equal inputs |
+| 020 | String inputs to factory | Auto | Two str paths to existing dirs | `WorkspaceContext` | `isinstance(ctx.assemblyzero_root, Path)` |
+| 030 | Missing `assemblyzero_root` | Auto | Non-existent root path | `ValueError` | Message contains path string |
+| 040 | Missing `target_repo` | Auto | Non-existent target path | `ValueError` | Message contains path string |
+| 050 | Frozen immutability | Auto | Valid `WorkspaceContext`, attempt field set | `FrozenInstanceError` (or `dataclasses.FrozenInstanceError`) | Exception raised |
+| 060 | `docs_dir` property | Auto | Valid ctx | `assemblyzero_root / "docs"` | Path equality |
+| 070 | `lld_active_dir` property | Auto | Valid ctx | `docs_dir / "lld" / "active"` | Path equality |
+| 080 | `reports_dir` property | Auto | Valid ctx | `docs_dir / "reports"` | Path equality |
+| 090 | `target_name` property | Auto | ctx with `target_repo = Path("/x/my-repo")` | `"my-repo"` | String equality |
+| 100 | Public import | Auto | `from assemblyzero.core import WorkspaceContext` | No exception | Import succeeds |
+| 110 | Node reads ctx from state | Auto | State dict with `workspace_ctx` key | Node accesses correct paths | No `KeyError`; correct paths used |
+| 120 | `build_initial_state` embeds ctx | Auto | Valid root + repo strings | State dict with `workspace_ctx` | `isinstance(state["workspace_ctx"], WorkspaceContext)` |
 
 ### 10.2 Test Commands
 
@@ -474,14 +433,11 @@ sequenceDiagram
 # Run all new unit tests
 poetry run pytest tests/unit/test_workspace_context.py tests/unit/test_gate/test_gate_workspace_context.py -v
 
-# Run full test suite (no regressions — covers REQ-5)
+# Run full test suite (no regressions)
 poetry run pytest -v
 
-# Coverage report for new module (covers REQ-6)
-poetry run pytest tests/unit/test_workspace_context.py \
-    --cov=assemblyzero.core.workspace_context \
-    --cov-report=term-missing \
-    --cov-fail-under=95
+# Coverage report for new module
+poetry run pytest tests/unit/test_workspace_context.py --cov=assemblyzero.core.workspace_context --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -494,28 +450,27 @@ N/A - All scenarios automated.
 |------|--------|------------|------------|
 | Nodes missed during refactor still use old path params | Med | Med | Grep codebase for `assemblyzero_root` and `target_repo` parameter names post-implementation; add CI check |
 | LangGraph SQLite checkpointer cannot serialize `Path` in state | High | Low | `Path` objects serialize cleanly via `str()` in most LangGraph versions; add integration smoke test with SQLite checkpointer |
-| `frozen=True` breaks LangGraph state merging | High | Low | LangGraph state merges via dict update, not in-place attribute mutation; `WorkspaceContext` stored as a single dict value — not mutated by LangGraph |
+| `frozen=True` breaks LangGraph state merging (if state is mutated in-place) | High | Low | LangGraph state merges via dict update, not in-place attribute mutation; `WorkspaceContext` stored as a single dict value — not mutated by LangGraph |
 | Circular import if `workspace_context.py` imports from workflow modules | Med | Low | `workspace_context.py` imports only `pathlib` and `dataclasses`; strictly no workflow imports |
 | Tests for modified nodes break due to fixture changes | Med | Med | Update node test fixtures in same PR to pass `WorkspaceContext` via state instead of direct args |
-| Implementer creates duplicate node files alongside pre-existing ones | High | Med | Implementer note in §2.1 mandates `ls` check before creating; `make_workspace_context` factory function centralises path resolution so any pre-existing path logic is straightforward to port |
 
 ## 12. Definition of Done
 
 ### Code
 - [ ] `assemblyzero/core/workspace_context.py` created with `WorkspaceContext` dataclass and `make_workspace_context` factory
 - [ ] `assemblyzero/core/__init__.py` exports `WorkspaceContext`
-- [ ] `assemblyzero/core/state.py` updated with `workspace_ctx: WorkspaceContext` field
-- [ ] All workflow nodes listed in Section 2.1 created/updated to read from `state["workspace_ctx"]`
-- [ ] `assemblyzero/workflows/orchestrator/orchestrator.py` constructs `WorkspaceContext` once at entry and embeds in initial state
+- [ ] All workflow nodes listed in Section 2.1 updated to read from `state["workspace_ctx"]`
+- [ ] `orchestrator.py` constructs `WorkspaceContext` once at entry and embeds in initial state
+- [ ] `assemblyzero/graphs/state.py` updated with `workspace_ctx` field
 - [ ] Code comments reference `#838`
 - [ ] No remaining `assemblyzero_root` or `target_repo` positional path parameters in node function signatures
 
 ### Tests
-- [ ] `tests/unit/test_workspace_context.py` created with all T010–T150 scenarios
+- [ ] `tests/unit/test_workspace_context.py` created with all T010–T120 scenarios
 - [ ] `tests/unit/test_gate/test_gate_workspace_context.py` created
 - [ ] All new tests pass (GREEN)
-- [ ] Full test suite passes with no regressions (REQ-5 / T140)
-- [ ] Coverage ≥95% on `workspace_context.py` (REQ-6 / T150)
+- [ ] Full test suite passes with no regressions
+- [ ] Coverage ≥95% on `workspace_context.py`
 
 ### Documentation
 - [ ] This LLD updated with any deviations discovered during implementation
@@ -535,12 +490,12 @@ Mechanical validation automatically checks:
 - Every risk mitigation in Section 11 should have a corresponding function in Section 2.4
 
 Files referenced in Definition of Done that appear in Section 2.1:
-- `assemblyzero/core/workspace_context.py` [PASS]
-- `assemblyzero/core/__init__.py` [PASS]
-- `assemblyzero/core/state.py` [PASS]
-- `assemblyzero/workflows/orchestrator/orchestrator.py` [PASS]
-- `tests/unit/test_workspace_context.py` [PASS]
-- `tests/unit/test_gate/test_gate_workspace_context.py` [PASS]
+- `assemblyzero/core/workspace_context.py`
+- `assemblyzero/core/__init__.py`
+- `assemblyzero/graphs/state.py`
+- `assemblyzero/workflows/orchestrator/orchestrator.py`
+- `tests/unit/test_workspace_context.py`
+- `tests/unit/test_gate/test_gate_workspace_context.py`
 
 **If files are missing from Section 2.1, the LLD is BLOCKED.**
 
@@ -565,10 +520,4 @@ Files referenced in Definition of Done that appear in Section 2.1:
 |--------|------|---------|-----------|
 | Gemini #1 | (auto) | PENDING | — |
 
-**Final Status:** APPROVED
-
-## Original GitHub Issue #838
-[See GitHub Issue #838 — unchanged from iteration 1. Issue #838: [High] refactor: implement WorkspaceContext to eliminate path prop-drilling]
-
-## Template (REQUIRED STRUCTURE)
-[Template structure unchanged — already embedded in the current draft. Preserve all section headings.]
+**Final Status:** PENDING

@@ -2,9 +2,9 @@
 
 <!-- Template Metadata
 Last Updated: 2026-03-19
-Updated By: Issue #838 LLD Rev 3 (mechanical validation fixes — coverage gaps REQ-4 through REQ-8)
-Update Reason: Added REQ-N suffixes to all Section 10.1 scenarios; added scenarios 130–150 to cover REQ-4, REQ-5/REQ-6, REQ-8; added T130–T150 to TDD plan; fixed Section 3 to numbered-list format (already correct in Rev 2)
-Previous: Rev 2 — 37.5% requirement coverage; missing REQ-4, REQ-5, REQ-6, REQ-7, REQ-8 test scenarios
+Updated By: Issue #838 LLD Rev 2 (mechanical validation fixes)
+Update Reason: Fixed all Modify->Add errors; corrected assemblyzero/graphs/state.py to assemblyzero/core/state.py
+Previous: Rev 1 — had 8 invalid "Modify" paths
 -->
 
 ## 1. Context & Goal
@@ -434,10 +434,7 @@ sequenceDiagram
 | T090 | `target_name` returns `target_repo.name` | String basename returned | RED |
 | T100 | `WorkspaceContext` importable from `assemblyzero.core` | No import error | RED |
 | T110 | Node receives `workspace_ctx` from state, not direct args | Node reads `state["workspace_ctx"]`; no `TypeError` | RED |
-| T120 | `WorkflowState` TypedDict in `state.py` declares `workspace_ctx` field | `get_type_hints(WorkflowState)["workspace_ctx"]` is `WorkspaceContext` | RED |
-| T130 | `build_initial_state` calls `make_workspace_context` exactly once | Mock spy confirms single call; `state["workspace_ctx"]` is the returned instance | RED |
-| T140 | Full test suite passes with no regressions | `pytest` exits zero; no previously-passing tests fail | RED |
-| T150 | Coverage report shows ≥95% for `workspace_context.py` | `--cov` report line coverage ≥ 95% | RED |
+| T120 | `build_initial_state` embeds `WorkspaceContext` in returned dict | `state["workspace_ctx"]` is a `WorkspaceContext` instance | RED |
 
 **Coverage Target:** ≥95% for all new code
 
@@ -451,21 +448,18 @@ sequenceDiagram
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | Happy path — valid absolute paths (REQ-1) | Auto | Two existing `tmp_path` dirs | `WorkspaceContext` instance | Fields equal inputs |
-| 020 | String inputs to factory (REQ-2) | Auto | Two str paths to existing dirs | `WorkspaceContext` | `isinstance(ctx.assemblyzero_root, Path)` |
-| 030 | Missing `assemblyzero_root` (REQ-2) | Auto | Non-existent root path | `ValueError` | Message contains path string |
-| 040 | Missing `target_repo` (REQ-2) | Auto | Non-existent target path | `ValueError` | Message contains path string |
-| 050 | Frozen immutability (REQ-1) | Auto | Valid `WorkspaceContext`, attempt field set | `FrozenInstanceError` | Exception raised |
-| 060 | `docs_dir` property (REQ-1) | Auto | Valid ctx | `assemblyzero_root / "docs"` | Path equality |
-| 070 | `lld_active_dir` property (REQ-1) | Auto | Valid ctx | `docs_dir / "lld" / "active"` | Path equality |
-| 080 | `reports_dir` property (REQ-1) | Auto | Valid ctx | `docs_dir / "reports"` | Path equality |
-| 090 | `target_name` property (REQ-1) | Auto | ctx with `target_repo = Path("/x/my-repo")` | `"my-repo"` | String equality |
-| 100 | Public import (REQ-7) | Auto | `from assemblyzero.core import WorkspaceContext` | No exception | Import succeeds |
-| 110 | Node reads ctx from state (REQ-3) | Auto | State dict with `workspace_ctx` key | Node accesses correct paths | No `KeyError`; correct paths used |
-| 120 | `WorkflowState` TypedDict declares `workspace_ctx` field (REQ-8) | Auto | `get_type_hints(WorkflowState)` | Key `"workspace_ctx"` maps to `WorkspaceContext` | Type hint present and correct |
-| 130 | `build_initial_state` constructs `WorkspaceContext` exactly once (REQ-4) | Auto | Valid root + repo strings; mock spy on `make_workspace_context` | `state["workspace_ctx"]` is the mocked return value; spy call count == 1 | `mock.assert_called_once()` passes |
-| 140 | Full test suite passes with no regressions (REQ-5) | Auto | Entire `tests/` directory | All previously-passing tests still pass | `pytest` exit code 0; no new failures |
-| 150 | Coverage ≥95% on `workspace_context.py` (REQ-6) | Auto | `pytest --cov=assemblyzero.core.workspace_context` | Coverage report line% ≥ 95 | `--cov-fail-under=95` passes |
+| 010 | Happy path — valid absolute paths | Auto | Two existing `tmp_path` dirs | `WorkspaceContext` instance | Fields equal inputs |
+| 020 | String inputs to factory | Auto | Two str paths to existing dirs | `WorkspaceContext` | `isinstance(ctx.assemblyzero_root, Path)` |
+| 030 | Missing `assemblyzero_root` | Auto | Non-existent root path | `ValueError` | Message contains path string |
+| 040 | Missing `target_repo` | Auto | Non-existent target path | `ValueError` | Message contains path string |
+| 050 | Frozen immutability | Auto | Valid `WorkspaceContext`, attempt field set | `FrozenInstanceError` | Exception raised |
+| 060 | `docs_dir` property | Auto | Valid ctx | `assemblyzero_root / "docs"` | Path equality |
+| 070 | `lld_active_dir` property | Auto | Valid ctx | `docs_dir / "lld" / "active"` | Path equality |
+| 080 | `reports_dir` property | Auto | Valid ctx | `docs_dir / "reports"` | Path equality |
+| 090 | `target_name` property | Auto | ctx with `target_repo = Path("/x/my-repo")` | `"my-repo"` | String equality |
+| 100 | Public import | Auto | `from assemblyzero.core import WorkspaceContext` | No exception | Import succeeds |
+| 110 | Node reads ctx from state | Auto | State dict with `workspace_ctx` key | Node accesses correct paths | No `KeyError`; correct paths used |
+| 120 | `build_initial_state` embeds ctx | Auto | Valid root + repo strings | State dict with `workspace_ctx` | `isinstance(state["workspace_ctx"], WorkspaceContext)` |
 
 ### 10.2 Test Commands
 
@@ -474,14 +468,12 @@ sequenceDiagram
 # Run all new unit tests
 poetry run pytest tests/unit/test_workspace_context.py tests/unit/test_gate/test_gate_workspace_context.py -v
 
-# Run full test suite (no regressions — covers REQ-5)
+# Run full test suite (no regressions)
 poetry run pytest -v
 
-# Coverage report for new module (covers REQ-6)
+# Coverage report for new module
 poetry run pytest tests/unit/test_workspace_context.py \
-    --cov=assemblyzero.core.workspace_context \
-    --cov-report=term-missing \
-    --cov-fail-under=95
+    --cov=assemblyzero.core.workspace_context --cov-report=term-missing
 ```
 
 ### 10.3 Manual Tests (Only If Unavoidable)
@@ -511,11 +503,11 @@ N/A - All scenarios automated.
 - [ ] No remaining `assemblyzero_root` or `target_repo` positional path parameters in node function signatures
 
 ### Tests
-- [ ] `tests/unit/test_workspace_context.py` created with all T010–T150 scenarios
+- [ ] `tests/unit/test_workspace_context.py` created with all T010–T120 scenarios
 - [ ] `tests/unit/test_gate/test_gate_workspace_context.py` created
 - [ ] All new tests pass (GREEN)
-- [ ] Full test suite passes with no regressions (REQ-5 / T140)
-- [ ] Coverage ≥95% on `workspace_context.py` (REQ-6 / T150)
+- [ ] Full test suite passes with no regressions
+- [ ] Coverage ≥95% on `workspace_context.py`
 
 ### Documentation
 - [ ] This LLD updated with any deviations discovered during implementation
@@ -565,10 +557,4 @@ Files referenced in Definition of Done that appear in Section 2.1:
 |--------|------|---------|-----------|
 | Gemini #1 | (auto) | PENDING | — |
 
-**Final Status:** APPROVED
-
-## Original GitHub Issue #838
-[See GitHub Issue #838 — unchanged from iteration 1. Issue #838: [High] refactor: implement WorkspaceContext to eliminate path prop-drilling]
-
-## Template (REQUIRED STRUCTURE)
-[Template structure unchanged — already embedded in the current draft. Preserve all section headings.]
+**Final Status:** PENDING

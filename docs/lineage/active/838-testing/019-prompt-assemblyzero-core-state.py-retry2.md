@@ -1,3 +1,17 @@
+# Implementation Request: assemblyzero/core/state.py
+
+## Task
+
+Write the complete contents of `assemblyzero/core/state.py`.
+
+Change type: Modify
+Description: Add `workspace_ctx` field to `AgentState`
+
+## Existing File Contents
+
+The file currently contains:
+
+```python
 """Core state definition for AssemblyZero LangGraph workflows.
 
 This module defines the AgentState TypedDict that travels through
@@ -6,7 +20,8 @@ the governance pipeline: Issue -> LLD Review -> Implementation -> Code Review ->
 
 from typing import Annotated, Literal, TypedDict
 
-from assemblyzero.core.workspace_context import WorkspaceContext
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
@@ -22,11 +37,10 @@ class AgentState(TypedDict):
         design_status: Designer Node outcome status.
         gemini_critique: Feedback from Gemini verification layer.
         iteration_count: Safety counter for loop prevention.
-        workspace_ctx: Immutable workspace path context (ref #838).
     """
 
     # Standard LangGraph message accumulator
-    messages: list
+    messages: Annotated[list[BaseMessage], add_messages]
 
     # Issue tracking
     issue_id: int
@@ -45,9 +59,6 @@ class AgentState(TypedDict):
 
     # Safety: loop prevention
     iteration_count: int
-
-    # Workspace context (ref #838)
-    workspace_ctx: WorkspaceContext  # ref #838 — immutable workspace path context
 
 
 class TDDState(TypedDict):
@@ -84,3 +95,33 @@ class _TestFileLocation(TypedDict):
     created_at: str
     created_by_phase: str
     moved_from: str | None
+```
+
+Modify this file according to the LLD specification.
+
+
+
+## Previous Attempt Failed (Attempt 2/2)
+
+Your previous response had an error:
+
+```
+Validation failed: Unresolvable imports: langchain_core.messages (line 9), langgraph.graph.message (line 10)
+```
+
+Please fix this issue and provide the corrected, complete file contents.
+IMPORTANT: Output the ENTIRE file, not just the fix.
+
+## Output Format
+
+Output ONLY the file contents. No explanations, no markdown headers, just the Python code.
+
+```python
+# Your Python code here
+```
+
+IMPORTANT:
+- Output the COMPLETE file contents
+- Do NOT output a summary or description
+- Do NOT say "I've implemented..."
+- Just output the Python code in a single fenced code block

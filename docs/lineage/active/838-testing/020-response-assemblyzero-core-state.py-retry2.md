@@ -1,3 +1,4 @@
+```python
 """Core state definition for AssemblyZero LangGraph workflows.
 
 This module defines the AgentState TypedDict that travels through
@@ -84,3 +85,4 @@ class _TestFileLocation(TypedDict):
     created_at: str
     created_by_phase: str
     moved_from: str | None
+```
