@@ -64,3 +64,11 @@ Two-strike rule applies per issue per phase.
 
 Use `Closes #{NUMBER}` in commit message body — never `gh issue close`.
 After push, verify issues show CLOSED on GitHub.
+
+### Worktree Cleanup
+Archival must happen BEFORE creating the PR. Inside your worktree, run:
+```bash
+poetry run python tools/archive_worktree_lineage.py --worktree . --issue {NUMBER} --main-repo .
+git commit -m "chore: archive workflow lineage (Closes #{NUMBER})"
+```
+Submit the lineage as part of your feature PR.
