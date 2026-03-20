@@ -75,8 +75,8 @@ def clean_ephemeral(worktree_path: Path) -> None:
             print(f"  Cleaned: {name}")
 
 
-def commit_archived(main_repo: Path, issue_number: int) -> None:
-    """Commit archived lineage to main repo.
+def stage_archived(main_repo: Path, issue_number: int) -> None:
+    """Stage archived lineage in the main repo without committing.
 
     Args:
         main_repo: Path to main repository
@@ -92,14 +92,9 @@ def commit_archived(main_repo: Path, issue_number: int) -> None:
     )
 
     if result.returncode != 0:  # There are staged changes
-        subprocess.run(
-            ["git", "-C", str(main_repo), "commit", "-m",
-             f"chore: archive workflow lineage for #{issue_number}"],
-            check=True,
-        )
-        print(f"  Committed archived lineage for #{issue_number}")
+        print(f"  Staged archived lineage for #{issue_number}. Ready to be committed.")
     else:
-        print("  No lineage changes to commit")
+        print("  No lineage changes to stage")
 
 
 def main():
@@ -108,7 +103,7 @@ def main():
     parser.add_argument("--worktree", required=True, help="Path to worktree")
     parser.add_argument("--issue", required=True, type=int, help="Issue number")
     parser.add_argument("--main-repo", default=".", help="Path to main repo (default: cwd)")
-    parser.add_argument("--no-commit", action="store_true", help="Skip git commit")
+    parser.add_argument("--no-stage", action="store_true", help="Skip git add")
     args = parser.parse_args()
 
     worktree = Path(args.worktree).resolve()
@@ -122,9 +117,9 @@ def main():
     # Clean ephemeral files
     clean_ephemeral(worktree)
 
-    # Commit to main
-    if archived and not args.no_commit:
-        commit_archived(main_repo, args.issue)
+    # Stage in repo
+    if archived and not args.no_stage:
+        stage_archived(main_repo, args.issue)
 
     print(f"\nDone. You can now remove the worktree:")
     print(f"  git worktree remove {worktree}")

@@ -48,12 +48,19 @@ After completing a task, ask "What would you like to work on next?" as an open-e
 
 ## Merging PRs
 
-Follow root CLAUDE.md "Merging PRs (Universal)" with `--repo martymcenroe/AssemblyZero`, then:
+Follow root CLAUDE.md "Merging PRs (Universal)" with `--repo martymcenroe/AssemblyZero`.
+
+**Important: Archival must happen BEFORE creating the PR, inside the worktree.**
 
 ```bash
-# If worktree was used — archive lineage before removing
-poetry run python tools/archive_worktree_lineage.py --worktree ../AssemblyZero-{ID} --issue {ID}
-git worktree remove ../AssemblyZero-{ID}
+# Inside the worktree:
+poetry run python tools/archive_worktree_lineage.py --worktree . --issue {ID} --main-repo .
+git commit -m "chore: archive workflow lineage (Closes #{ID})"
+# Then push and create the PR
 ```
 
-Then: `git branch -d {BRANCH} && git checkout main && git pull`
+After merging the PR, simply delete the worktree and branch:
+```bash
+git worktree remove ../AssemblyZero-{ID}
+git branch -d {ID}-fix && git checkout main && git pull
+```

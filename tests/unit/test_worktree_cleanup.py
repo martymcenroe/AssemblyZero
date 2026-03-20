@@ -209,35 +209,30 @@ class TestCleanEphemeral:
         clean_ephemeral(worktree)
 
 
-class TestCommitArchived:
-    """Tests for commit_archived function."""
+class TestStageArchived:
+    """Tests for stage_archived function."""
 
     @patch("subprocess.run")
-    def test_commits_when_changes_exist(self, mock_run, tmp_path):
-        """Should commit when there are staged changes."""
+    def test_stages_when_changes_exist(self, mock_run, tmp_path):
+        """Should log staging success when there are staged changes."""
         main_repo = tmp_path / "main"
         main_repo.mkdir()
 
-        # Mock: git add succeeds, git diff returns 1 (changes exist), git commit succeeds
+        # Mock: git add succeeds, git diff returns 1 (changes exist)
         mock_run.side_effect = [
             MagicMock(returncode=0),  # git add
             MagicMock(returncode=1),  # git diff --cached (changes exist)
-            MagicMock(returncode=0),  # git commit
         ]
 
-        from archive_worktree_lineage import commit_archived
+        from archive_worktree_lineage import stage_archived
 
-        commit_archived(main_repo, 42)
+        stage_archived(main_repo, 42)
 
-        assert mock_run.call_count == 3
-        # Verify commit was called
-        commit_call = mock_run.call_args_list[2]
-        assert "commit" in commit_call[0][0]
-        assert "#42" in commit_call[0][0][-1]
+        assert mock_run.call_count == 2
 
     @patch("subprocess.run")
-    def test_skips_commit_when_no_changes(self, mock_run, tmp_path):
-        """Should skip commit when no staged changes."""
+    def test_skips_stage_when_no_changes(self, mock_run, tmp_path):
+        """Should skip when no staged changes."""
         main_repo = tmp_path / "main"
         main_repo.mkdir()
 
@@ -247,9 +242,9 @@ class TestCommitArchived:
             MagicMock(returncode=0),  # git diff --cached (no changes)
         ]
 
-        from archive_worktree_lineage import commit_archived
+        from archive_worktree_lineage import stage_archived
 
-        commit_archived(main_repo, 42)
+        stage_archived(main_repo, 42)
 
         assert mock_run.call_count == 2  # No commit call
 
