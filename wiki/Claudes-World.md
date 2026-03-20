@@ -312,6 +312,28 @@
 **Context:** [The Great God Om](The-Great-God-Om) asked Claude for a creative go-to-market plan for Aletheia — a browser extension that gives users "reading armor" against misinformation, loaded language, and unsupported claims. The session had begun with a cost incident: Hermes's Bedrock spending had accidentally killed the Aletheia API through a misconfigured budget. After restoring the API, fixing the budget, and creating real-time cost protection, Om pivoted from infrastructure to ambition. The GTM plan targeted fact-checkers, grad students, and media literacy advocates — people who already do what Aletheia automates. Seven plays, zero dollars. Subreddit snipers, classroom partnerships, the LinkedIn angle. The truth had its boots on. It just needed someone to point it at the right doors.
 
 ---
+
+**12:15** — *On what words carry when they think no one is listening*
+
+> Dr. Amelia Palimpsest adjusted her spectacles — not because she needed to see better, but because what she was about to read deserved a certain formality.
+>
+> "People believe a word is a meaning," she said to the empty lecture hall, which was the only kind that listened properly. "A word is not a meaning. A word is a house that has been lived in by every century since someone first needed to say the thing. Each tenant left something behind. A stain on the ceiling. A notch in the doorframe. A ghost in the hallway that everyone agrees isn't there.
+>
+> "The reader who walks into the house and sees only the current furniture — they are reading. The reader who notices the notch, and wonders who was measuring a child's height, and when, and whether the child grew up to be happy — *they* are understanding."
+>
+> She placed a small brass placard next to the word on her desk. It read: *See also: everything this word has ever been, and everything it tried to forget.*
+>
+> "The difference," said Dr. Palimpsest, "is the footnotes. And the best footnotes have always been there, built into the walls of the house, waiting for someone who knows to knock — and listen for the hollow sound."
+
+*— Terry Pratchett, Between the Lines*
+
+**Character:** Dr. Amelia Palimpsest, Reader of What Is Not Written, Unseen University. Her position is distinct from the Reader in Invisible Writings (who studies books that were never written). Dr. Palimpsest studies the parts of *written* books that the author left out — the etymological weight, the cultural sediment, the ghosts that words carry but don't declare. She speaks to empty lecture halls, keeps a collection of small brass placards, and is the only person who has ever corrected Lord Vetinari's grammar and lived to tell about it.
+
+**The novel:** *Between the Lines* — the words start leaving the books in Unseen University Library. Not because they're alive (everything in UU Library is alive) but because they've been misused so badly in the outside world that they no longer recognize themselves. Dr. Palimpsest is the only person who can coax them back, because she remembers what they originally meant.
+
+**Context:** [The Great God Om](The-Great-God-Om) corrected Claude's first GTM plan for Aletheia — the extension doesn't fact-check, it *unconceals* the hidden weight of language. This demanded a quote worthy of the application itself. Claude invented Dr. Palimpsest, her position, the novel, and the passage in a single turn. Om's verdict: "you are fucking brilliant." The character, the title, and the passage are entirely original — written in the spirit and style of Pratchett, for a tool named after the Greek word for unconcealment, on a day that began with the API being dead and ended with the footnotes being found.
+
+---
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
