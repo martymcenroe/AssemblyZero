@@ -24,7 +24,7 @@ jobs:
           #   Closes #123
           PATTERN='([Cc]loses #[0-9]+)'
 
-          PR_COMMITS=$(gh pr view $PR_NUMBER --json commits --jq '.[].commits.[].messageBody')
+          PR_COMMITS=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json commits --jq '.[].commits.[].messageBody')
           if echo "$PR_COMMITS" | grep -qE "$PATTERN"; then
             echo "✅ Issue reference found in commit messages"
             exit 0
