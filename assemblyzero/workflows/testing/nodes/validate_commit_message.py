@@ -1,6 +1,6 @@
-"""Validate commit message node for TDD Testing Workflow.
+﻿"""Validate commit message node for TDD Testing Workflow.
 
-Issue #190: Validates that commit messages contain 'fixes #N' or equivalent
+Issue #190: Validates that commit messages contain exactly 'Closes #N'
 to ensure issues are auto-closed when PRs are merged.
 """
 
@@ -10,12 +10,7 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 
 
 def validate_commit_message(state: TestingWorkflowState) -> dict[str, Any]:
-    """Validate commit message contains issue-closing keyword.
-
-    Checks that the commit message contains one of:
-    - fixes #N
-    - closes #N
-    - resolves #N
+    """Validate commit message contains exactly 'Closes #N'.
 
     Where N matches state["issue_number"].
 
@@ -30,14 +25,12 @@ def validate_commit_message(state: TestingWorkflowState) -> dict[str, Any]:
 
     if not commit_message:
         return {
-            "error_message": f"BLOCKED: Empty commit message. Must contain 'fixes #{issue_number}' to auto-close the issue.",
+            "error_message": f"BLOCKED: Empty commit message. Must contain 'Closes #{issue_number}' to auto-close the issue.",
         }
 
     # Check for valid patterns (case-insensitive)
     patterns = [
-        f"fixes #{issue_number}",
         f"closes #{issue_number}",
-        f"resolves #{issue_number}",
     ]
 
     message_lower = commit_message.lower()
@@ -46,8 +39,10 @@ def validate_commit_message(state: TestingWorkflowState) -> dict[str, Any]:
 
     return {
         "error_message": (
-            f"BLOCKED: Commit message must contain 'fixes #{issue_number}' "
-            f"(or 'closes #{issue_number}' or 'resolves #{issue_number}') "
+            f"BLOCKED: Commit message must contain exactly 'Closes #{issue_number}' "
             f"to auto-close the issue when the PR is merged."
         ),
     }
+
+
+
