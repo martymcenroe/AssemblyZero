@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 import { validatePRBody, extractIssueRefs } from "../src/validate.js";
 
 describe("extractIssueRefs", () => {
@@ -15,7 +15,7 @@ describe("extractIssueRefs", () => {
   });
 
   it("extracts multiple references", () => {
-    const refs = extractIssueRefs("Closes #1, Fixes owner/repo#2");
+    const refs = extractIssueRefs("Closes #1, Closes owner/repo#2");
     expect(refs).toEqual([
       { owner: null, repo: null, number: 1 },
       { owner: "owner", repo: "repo", number: 2 },
@@ -31,7 +31,7 @@ describe("extractIssueRefs", () => {
   });
 
   it("handles dots and hyphens in owner/repo", () => {
-    expect(extractIssueRefs("Fixes my-org/my.repo#5")).toEqual([
+    expect(extractIssueRefs("Closes my-org/my.repo#5")).toEqual([
       { owner: "my-org", repo: "my.repo", number: 5 },
     ]);
   });
@@ -44,12 +44,6 @@ describe("validatePRBody", () => {
       ["closes #1", "lowercase"],
       ["Closed #99", "past tense"],
       ["Close #5", "imperative"],
-      ["Fixes #10", "Fixes"],
-      ["Fixed #10", "Fixed"],
-      ["Fix #10", "Fix"],
-      ["Resolves #7", "Resolves"],
-      ["Resolved #7", "Resolved"],
-      ["Resolve #7", "Resolve"],
     ])("passes for '%s' (%s)", (body) => {
       const result = validatePRBody(body);
       expect(result.valid).toBe(true);
@@ -64,7 +58,7 @@ describe("validatePRBody", () => {
     });
 
     it("passes for cross-repo reference with dots/hyphens", () => {
-      const result = validatePRBody("Fixes my-org/my.repo#5");
+      const result = validatePRBody("Closes my-org/my.repo#5");
       expect(result.valid).toBe(true);
     });
 
@@ -96,13 +90,23 @@ describe("validatePRBody", () => {
     });
 
     it("passes for multiple issue references", () => {
-      const result = validatePRBody("Closes #1, Fixes #2");
+      const result = validatePRBody("Closes #1, Closes #2");
       expect(result.valid).toBe(true);
       expect(result.refs).toHaveLength(2);
     });
   });
 
   describe("failing cases", () => {
+    it.each([
+      ["Fixed #10", "fails for Fixed"],
+      ["Fix #10", "fails for Fix"],
+      ["Resolved #7", "fails for Resolved"],
+      ["Resolve #7", "fails for Resolve"],
+    ])("fails for '%s' (%s)", (body) => {
+      const result = validatePRBody(body);
+      expect(result.valid).toBe(false);
+    });
+
     it("fails for null body", () => {
       const result = validatePRBody(null);
       expect(result.valid).toBe(false);

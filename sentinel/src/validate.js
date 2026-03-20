@@ -1,5 +1,5 @@
-// PR body validation rules:
-// Pass: Closes #N, Fixes #N, Resolves #N (case-insensitive, also cross-repo owner/repo#N)
+﻿// PR body validation rules:
+// Pass: Closes #N (case-insensitive, also cross-repo owner/repo#N)
 // Pass: No-Issue: <reason> (requires non-empty reason)
 // Fail: empty body, no matching pattern
 
@@ -16,7 +16,7 @@ export function extractIssueRefs(body) {
   if (!body) return [];
   const refs = [];
   const refPattern =
-    /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:([\w.-]+)\/([\w.-]+))?#(\d+)/gi;
+    /\b(?:close[sd]?)\s+(?:([\w.-]+)\/([\w.-]+))?#(\d+)/gi;
   let match;
   while ((match = refPattern.exec(body)) !== null) {
     refs.push({
@@ -60,8 +60,11 @@ export function validatePRBody(body) {
   return {
     valid: false,
     reason:
-      "No issue reference found. Add `Closes #N`, `Fixes #N`, `Resolves #N`, or `No-Issue: <reason>` to the PR body.",
+      "No issue reference found. Add `Closes #N` or `No-Issue: <reason>` to the PR body.",
     refs: [],
     noIssue: false,
   };
 }
+
+
+

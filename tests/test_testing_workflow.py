@@ -1,4 +1,4 @@
-"""Tests for TDD Testing Workflow.
+﻿"""Tests for TDD Testing Workflow.
 
 Issue #101: Test Plan Reviewer
 Issue #102: TDD Initialization
@@ -2275,7 +2275,7 @@ Requirement: REQ-1
         """load_lld returns error when spec not found."""
         from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 
-        # Create empty spec directory — no spec files
+        # Create empty spec directory â€” no spec files
         spec_dir = tmp_path / "docs" / "lld" / "drafts"
         spec_dir.mkdir(parents=True)
 
@@ -5481,11 +5481,11 @@ class TestValidateCommitMessage:
     """Tests for validate_commit_message node (Issue #190).
 
     TDD: These tests define the expected behavior for commit message validation.
-    The node should block commits that don't include 'fixes #N' or equivalent.
+    The node should block commits that don't include exactly 'Closes #N'.
     """
 
-    def test_valid_message_with_fixes(self):
-        """Commit message with 'fixes #N' should pass validation."""
+    def test_invalid_message_with_fixes(self):
+        """Commit message with 'fixes #N' should FAIL validation."""
         from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
@@ -5497,8 +5497,7 @@ class TestValidateCommitMessage:
 
         result = validate_commit_message(state)
 
-        assert result.get("error_message", "") == ""
-        assert "BLOCKED" not in result.get("error_message", "")
+        assert "BLOCKED" in result.get("error_message", "")
 
     def test_valid_message_with_closes(self):
         """Commit message with 'closes #N' should pass validation."""
@@ -5515,8 +5514,8 @@ class TestValidateCommitMessage:
 
         assert result.get("error_message", "") == ""
 
-    def test_valid_message_with_resolves(self):
-        """Commit message with 'resolves #N' should pass validation."""
+    def test_invalid_message_with_resolves(self):
+        """Commit message with 'resolves #N' should FAIL validation."""
         from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
@@ -5528,17 +5527,16 @@ class TestValidateCommitMessage:
 
         result = validate_commit_message(state)
 
-        assert result.get("error_message", "") == ""
+        assert "BLOCKED" in result.get("error_message", "")
 
     def test_valid_message_case_insensitive(self):
         """Validation should be case-insensitive."""
         from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
-
         state: TestingWorkflowState = {
             "issue_number": 42,
-            "commit_message": "feat: add feature\n\nFIXES #42",
+            "commit_message": "feat: add feature\n\nCLOSES #42",
         }
 
         result = validate_commit_message(state)
@@ -5546,7 +5544,7 @@ class TestValidateCommitMessage:
         assert result.get("error_message", "") == ""
 
     def test_invalid_message_missing_keyword(self):
-        """Commit message without fixes/closes/resolves should be BLOCKED."""
+        """Commit message without closes should be BLOCKED."""
         from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
@@ -5606,8 +5604,8 @@ class TestValidateCommitMessage:
 
         assert "BLOCKED" in result.get("error_message", "")
 
-    def test_valid_message_inline_format(self):
-        """Commit message with inline 'fixes #N' should pass."""
+    def test_invalid_message_inline_format(self):
+        """Commit message with inline 'fixes #N' should fail."""
         from assemblyzero.workflows.testing.nodes.validate_commit_message import (
             validate_commit_message,
         )
@@ -5619,7 +5617,7 @@ class TestValidateCommitMessage:
 
         result = validate_commit_message(state)
 
-        assert result.get("error_message", "") == ""
+        assert "BLOCKED" in result.get("error_message", "")
 
 
 class TestImplSpecTestPlanExtraction:
@@ -5925,3 +5923,8 @@ class TestSkipAuditGate:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+
+
+
