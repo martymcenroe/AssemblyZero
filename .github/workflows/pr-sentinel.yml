@@ -1,4 +1,4 @@
-﻿name: pr-sentinel
+name: pr-sentinel
 
 on:
   pull_request:
