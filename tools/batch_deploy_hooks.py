@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Batch deploy security hooks to all GitHub repos.
+"""DEPRECATED: Batch deploy security hooks to all GitHub repos.
 
-Deploys secret-guard.sh and bash-gate.sh to every repo under the owner.
-Creates issues, branches, commits, pushes, and PRs automatically.
+As of #872, secret-guard.sh and bash-gate.sh are registered globally in
+~/.claude/settings.json pointing to ~/.claude/hooks/. Per-repo deployment
+is no longer needed. Use batch_cleanup_security_hooks.py to remove stale
+per-repo copies.
 
-Usage:
+This script is kept for reference only. Do not run it.
+
+Original usage:
     poetry run python tools/batch_deploy_hooks.py --owner martymcenroe --dry-run
     poetry run python tools/batch_deploy_hooks.py --owner martymcenroe
 """
