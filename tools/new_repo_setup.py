@@ -989,10 +989,11 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 
 def create_settings_json(project_path: Path) -> None:
     """
-    Create .claude/settings.json with canonical security hooks.
+    Create .claude/settings.json with per-repo hooks.
 
-    Deploys secret-guard.sh, bash-gate.sh, and secret-file-guard.sh hooks from AssemblyZero.
-    New repos must start protected — empty hooks create a security gap.
+    Only deploys secret-file-guard.sh per-repo. Security hooks (secret-guard.sh,
+    bash-gate.sh) are registered globally in ~/.claude/settings.json and do not
+    need per-repo copies. See AssemblyZero #872.
 
     Args:
         project_path: Path to the project root
@@ -1003,23 +1004,6 @@ def create_settings_json(project_path: Path) -> None:
     settings = {
         "hooks": {
             "PreToolUse": [
-                {
-                    "matcher": "Bash",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/bash-gate.sh",
-                            "timeout": 5,
-                            "description": "Bash Command Gate (blocks &&, |, ;, destructive git)"
-                        },
-                        {
-                            "type": "command",
-                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-guard.sh",
-                            "timeout": 5,
-                            "description": "Secret Guard (blocks secret leaks to stdout)"
-                        }
-                    ]
-                },
                 {
                     "matcher": "Read|Write|Edit|Grep|NotebookEdit",
                     "hooks": [
@@ -1042,12 +1026,11 @@ def create_settings_json(project_path: Path) -> None:
 
 def deploy_canonical_hooks(project_path: Path) -> None:
     """
-    Copy canonical security hooks from AssemblyZero to the new project.
+    Copy per-repo hooks from AssemblyZero to the new project.
 
-    Deploys:
-    - secret-guard.sh: Blocks all Bash commands referencing secret files
-    - bash-gate.sh: Blocks destructive git commands and chain operators
-    - secret-file-guard.sh: Blocks file tools on .env, credentials
+    Only deploys secret-file-guard.sh per-repo. Security hooks (secret-guard.sh,
+    bash-gate.sh) are registered globally in ~/.claude/settings.json and do not
+    need per-repo copies. See AssemblyZero #872.
 
     Args:
         project_path: Path to the project root
@@ -1062,8 +1045,8 @@ def deploy_canonical_hooks(project_path: Path) -> None:
     target_hooks_dir = project_path / ".claude" / "hooks"
     target_hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    canonical_hooks = ["secret-guard.sh", "bash-gate.sh", "secret-file-guard.sh"]
-    for hook_name in canonical_hooks:
+    per_repo_hooks = ["secret-file-guard.sh"]
+    for hook_name in per_repo_hooks:
         source = source_hooks_dir / hook_name
         if not source.exists():
             raise FileNotFoundError(
@@ -1339,13 +1322,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 5: Create .claude/settings.json (with canonical hooks)
     print("\n5. Creating .claude/settings.json (with security hooks)...")
     create_settings_json(project_path)
-    print("  Created settings.json with secret-guard.sh + bash-gate.sh + secret-file-guard.sh hooks")
+    print("  Created settings.json with secret-file-guard.sh hook (security hooks are global)")
 
     # Step 5b: Deploy canonical hook scripts
     print("\n5b. Deploying canonical security hooks...")
     try:
         deploy_canonical_hooks(project_path)
-        print("  Deployed: secret-guard.sh, bash-gate.sh, secret-file-guard.sh")
+        print("  Deployed: secret-file-guard.sh (security hooks are global)")
     except FileNotFoundError as e:
         print(f"  WARNING: {e}")
         print("  Hooks not deployed — repo will start unprotected!")
@@ -1451,20 +1434,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     checks_passed = 0
     checks_total = 0
 
-    # Verify hooks exist
+    # Verify per-repo hook exists (security hooks are global since #872)
     checks_total += 1
-    sg = project_path / ".claude" / "hooks" / "secret-guard.sh"
-    bg = project_path / ".claude" / "hooks" / "bash-gate.sh"
     sfg = project_path / ".claude" / "hooks" / "secret-file-guard.sh"
-    if sg.exists() and bg.exists() and sfg.exists():
-        print("  [PASS] Security hooks deployed (secret-guard, bash-gate, secret-file-guard)")
+    if sfg.exists():
+        print("  [PASS] Per-repo hook deployed (secret-file-guard)")
         checks_passed += 1
     else:
-        missing_hooks = []
-        if not sg.exists(): missing_hooks.append("secret-guard.sh")
-        if not bg.exists(): missing_hooks.append("bash-gate.sh")
-        if not sfg.exists(): missing_hooks.append("secret-file-guard.sh")
-        print(f"  [FAIL] Security hooks missing: {', '.join(missing_hooks)}")
+        print("  [FAIL] Per-repo hook missing: secret-file-guard.sh")
 
     # Verify .gitignore has security patterns
     checks_total += 1
@@ -1486,8 +1463,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     settings_file = project_path / ".claude" / "settings.json"
     if settings_file.exists():
         s_content = settings_file.read_text(encoding="utf-8")
-        if "secret-guard" in s_content and "bash-gate" in s_content and "secret-file-guard" in s_content:
-            print("  [PASS] Hook configuration in settings.json (all 3 hooks)")
+        if "secret-file-guard" in s_content:
+            print("  [PASS] Hook configuration in settings.json (secret-file-guard)")
             checks_passed += 1
         else:
             print("  [FAIL] settings.json missing hook configuration!")
