@@ -945,7 +945,8 @@ This document provides a complete inventory of files in the {name} project, orga
 ├── GEMINI.md                   # Gemini agent instructions
 ├── README.md                   # Project overview
 ├── LICENSE                     # PolyForm Noncommercial 1.0.0
-└── .gitignore                  # Git ignore rules
+├── .gitignore                  # Git ignore rules
+└── .unleashed.json             # Unleashed wrapper config (model, effort)
 ```
 
 ---
@@ -985,6 +986,33 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 """
     inventory_path = project_path / "docs" / "00003-file-inventory.md"
     inventory_path.write_text(content, encoding='utf-8')
+
+
+def create_unleashed_json(project_path: Path) -> None:
+    """Create .unleashed.json with standard wrapper configuration.
+
+    Sets model=opus, effort=max so unleashed wrappers pass the correct
+    CLI flags. Without this file, wrappers fall back to tool defaults.
+
+    Args:
+        project_path: Path to the project root.
+    """
+    content = json.dumps({
+        "profile": "default",
+        "claude": {
+            "model": "opus",
+            "effort": "max"
+        },
+        "assemblyZero": False,
+        "onboard": {
+            "auto": True,
+            "pickupThresholdMinutes": 10,
+            "guide": None,
+            "plan": None
+        }
+    }, indent=2) + "\n"
+    unleashed_path = project_path / ".unleashed.json"
+    unleashed_path.write_text(content, encoding='utf-8')
 
 
 def create_settings_json(project_path: Path) -> None:
@@ -1366,6 +1394,11 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\n11. Creating docs/00003-file-inventory.md...")
     create_file_inventory(project_path, args.name)
     print("  Created file inventory")
+
+    # Step 11b: Create .unleashed.json (wrapper configuration)
+    print("\n11b. Creating .unleashed.json...")
+    create_unleashed_json(project_path)
+    print("  Created .unleashed.json (model=opus, effort=max)")
 
     # Step 12: Initial commit
     print("\n12. Creating initial commit...")

@@ -511,6 +511,7 @@ class TestMainLocalWorkflow:
         assert (project / "README.md").exists()
         assert (project / "LICENSE").exists()
         assert (project / ".gitignore").exists()
+        assert (project / ".unleashed.json").exists()
         assert (project / "docs").is_dir()
         assert (project / "src").is_dir()
         assert (project / "tests" / "unit").is_dir()
