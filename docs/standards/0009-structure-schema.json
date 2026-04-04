@@ -203,6 +203,10 @@
     "docs/00003-file-inventory.md": {
       "required": true,
       "description": "Project file inventory"
+    },
+    ".unleashed.json": {
+      "required": true,
+      "description": "Unleashed wrapper configuration (model, effort, onboard settings)"
     }
   }
 }
