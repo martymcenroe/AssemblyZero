@@ -1,6 +1,6 @@
 # Operational Dashboard Reference Architecture
 
-A cross-project playbook for building operational dashboards. Derived from production experience with Hermes (Cloudflare Workers + D1 + React) and intended to guide any project that needs a web-based operational UI backed by AWS or similar cloud services.
+A cross-project playbook for building operational dashboards. Derived from production experience with Hermes (Cloudflare Workers + D1 + React) and Aletheia (AWS Lambda + DynamoDB + LinkedIn OAuth), intended to guide any project that needs a web-based operational UI backed by AWS or similar cloud services.
 
 This is not prescriptive about specific frameworks. It captures **patterns that worked**, **patterns that didn't**, and **decisions you'll face early** that are expensive to change later.
 
@@ -51,7 +51,7 @@ Production dashboards need at least two auth paths. Hermes uses three:
 | Method | Use Case | Implementation |
 |--------|----------|---------------|
 | **API Key** | Owner/admin shortcut, CI/CD, scripts | `Authorization: Bearer {key}` header or `?key=` query param |
-| **OAuth Session** | Primary user login | GitHub OAuth → session cookie (7-day TTL) |
+| **OAuth Session** | Primary user login | OAuth (LinkedIn, GitHub, Google) → session cookie or JWT |
 | **Viewer Token** | Temporary read-only sharing | UUID token, 4-hour TTL, stored in DB |
 
 **Pattern: Auth at the gateway, not per-endpoint.**
@@ -133,6 +133,158 @@ Patterns to mask:
 | Full names | `Contact #N` |
 
 **Lesson:** Masking is harder than you think. Names appear in email bodies, subjects, signatures, and quoted replies. Start with the patterns above, then add more as you find leaks.
+
+### 2.5 Multi-Provider OAuth
+
+Design auth around provider-agnostic stable IDs, not email addresses. Every OAuth provider has a different "stable ID" field:
+
+| Provider | Stable ID Field | Notes |
+|----------|----------------|-------|
+| **LinkedIn** | `sub` (OIDC) | Immutable. `vanityName` requires restricted Marketing API — don't use it. |
+| **GitHub** | `id` (numeric) | Immutable. `login` can change — don't use it as a key. |
+| **Google** | `sub` (OIDC) | Immutable. Same OIDC pattern as LinkedIn. |
+
+**Pattern: Provider-prefixed user IDs.**
+
+Store user IDs as `{provider}:{stable_id}` (e.g., `linkedin:782bbtaQ`) to support multi-provider login without collisions. If you only support one provider, the raw stable ID is fine — but add the prefix if there's any chance you'll add a second.
+
+**LinkedIn OAuth specifics:**
+
+```
+Scopes: openid profile email
+Authorization: https://www.linkedin.com/oauth/v2/authorization
+Token exchange: https://www.linkedin.com/oauth/v2/accessToken
+User info: https://api.linkedin.com/v2/userinfo (OIDC claims)
+```
+
+- LinkedIn access tokens default to **60-day expiry** — much longer than GitHub's. Use a lazy refresh strategy: only refresh when the token expires within a 24-hour buffer.
+- The OIDC `/v2/userinfo` endpoint does NOT return `vanityName` (profile URL slug). That requires the Profile API with restricted permissions you probably won't get approved for. Use `sub` as your user key from day one.
+- Refresh tokens exist but aren't always returned in the response. Handle the absent case gracefully.
+
+### 2.6 Social Incentive / Coupon Flow
+
+Pattern for "follow us on X → get a reward" mechanics (e.g., follow a LinkedIn company page for bonus access):
+
+**Flow:**
+
+1. User clicks CTA ("Follow us on LinkedIn for bonus access")
+2. User follows the company page (opens in new tab)
+3. User clicks "Verify" in your app
+4. Backend calls provider API to confirm the action
+5. On success: generate a one-time coupon code, store atomically
+6. Return coupon to user (display + email)
+
+**Rate-limit verification attempts** (3/hour/user). Users will spam the verify button.
+
+**Coupon generation (atomic):**
+
+```javascript
+const code = `FOLLOW-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+await db.put({
+  TableName: "coupons",
+  Item: {
+    code,
+    user_id,
+    source: "linkedin_follow",
+    reward_type: "bonus_requests",
+    reward_amount: 50,
+    uses: 0,
+    max_uses: 1,
+    created_at: new Date().toISOString(),
+    expiry: 0,       // 0 = no expiry
+    revoked: false,
+  },
+  ConditionExpression: "attribute_not_exists(code)",  // Prevent collisions
+});
+```
+
+**Coupon redemption (atomic):**
+
+```javascript
+await db.update({
+  TableName: "coupons",
+  Key: { code },
+  UpdateExpression: "SET uses = uses + :one, redeemed_at = :now ADD redeemed_by :uid",
+  ConditionExpression: "uses < max_uses AND revoked = :false AND (expiry = :zero OR expiry > :now_unix)",
+  ExpressionAttributeValues: {
+    ":one": 1, ":now": new Date().toISOString(),
+    ":uid": db.createSet([user_id]),
+    ":false": false, ":zero": 0,
+    ":now_unix": Math.floor(Date.now() / 1000),
+  },
+});
+```
+
+The `ConditionExpression` handles race conditions, exhausted codes, revoked codes, and expired codes in a single atomic operation. Failed conditions return `ConditionalCheckFailedException` — map that to a user-friendly error.
+
+**LinkedIn follow verification gotcha:** LinkedIn has no "does user X follow org Y" API for individual checks. You need the Marketing API and `organizationalEntityFollowerStatistics` endpoint, which requires a separate LinkedIn Marketing Developer Platform approval — plan for this lead time.
+
+### 2.7 Token Storage Security Hierarchy
+
+Where tokens live determines your blast radius if compromised:
+
+| Token Type | Storage | Lifetime | Rationale |
+|-----------|---------|----------|-----------|
+| **Access token** | Session storage | Hours | Short-lived, high-privilege — don't survive browser restart |
+| **JWT** | Session storage | 24 hours | Ephemeral session credential |
+| **Refresh token** | Local storage | 60 days | Needed for silent re-auth — survives browser close |
+| **OAuth tokens** | Never server-side | — | GDPR liability — exchange immediately, then discard |
+
+**Pattern: Exchange OAuth tokens for your own JWT immediately.** Don't store provider tokens in your database. The JWT is your session — it contains the user ID and tier. The OAuth token was just proof of identity.
+
+**Lesson from Aletheia:** LinkedIn tokens are NOT persisted in DynamoDB — only the `user_id` mapping. This reduces GDPR surface area and eliminates a class of token-breach scenarios.
+
+### 2.8 JWT Design for Tiered Access
+
+Embed authorization context in the JWT so rate limiting and feature gating work without a DB lookup on every request:
+
+```javascript
+{
+  "user_id": "782bbtaQ",
+  "exp": 1712345678,
+  "iat": 1712259278,
+  "jti": "a1b2c3d4-...",
+  "tier": "free",              // "free" | "subscriber" | "pro"
+  "billing_anchor_day": 1      // Day of month for usage reset
+}
+```
+
+Middleware reads the tier, applies the rate limit, never hits the database. Tier changes take effect on next JWT issuance (next login or refresh).
+
+**Dual-secret rotation:**
+
+```python
+def validate_jwt(token):
+    primary = get_secret("primary")       # Cached 5 min from Secrets Manager
+    secondary = get_secret("secondary")   # Fallback during rotation window
+
+    try:
+        return jwt.decode(token, primary, leeway=300)
+    except InvalidSignatureError:
+        return jwt.decode(token, secondary, leeway=300)
+```
+
+Deploy the new secret as `primary`, move the old one to `secondary`. After 24 hours (max JWT lifetime), remove `secondary`. Zero downtime.
+
+**Fail-closed daily token cap:**
+
+```python
+def check_daily_cap(table, date_key):
+    try:
+        table.update_item(
+            Key={"date": date_key},
+            UpdateExpression="SET #count = if_not_exists(#count, :zero) + :one",
+            ConditionExpression="if_not_exists(#count, :zero) < :max",
+            ExpressionAttributeValues={":one": 1, ":zero": 0, ":max": DAILY_CAP},
+        )
+        return True
+    except ConditionalCheckFailedException:
+        return False  # Cap exceeded
+    except Exception:
+        return False  # Fail CLOSED — if we can't check, deny
+```
+
+If the cap check itself errors (network, DynamoDB throttle), **deny the request**. Never fail open on token issuance.
 
 ---
 
@@ -549,4 +701,4 @@ When spinning up a new operational dashboard:
 
 ---
 
-*Derived from production experience with Hermes (2024-2026). Updated as new patterns emerge.*
+*Derived from production experience with Hermes (2024-2026) and Aletheia (2025-2026). Updated as new patterns emerge.*
