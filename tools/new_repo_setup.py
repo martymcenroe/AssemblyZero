@@ -1015,6 +1015,99 @@ def create_unleashed_json(project_path: Path) -> None:
     unleashed_path.write_text(content, encoding='utf-8')
 
 
+def create_github_workflows(project_path: Path) -> None:
+    """Create GitHub Actions workflow files for PR governance.
+
+    Deploys two workflows:
+    - pr-sentinel.yml: validates issue references in PR title/body/commits
+    - auto-reviewer.yml: calls the reusable auto-reviewer from AssemblyZero
+      to approve PRs after pr-sentinel passes (requires Cerberus secrets)
+
+    These workflows make the merge gate work on new repos immediately
+    (once Cerberus secrets are deployed fleet-wide).
+    """
+    workflows_dir = project_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+
+    # pr-sentinel: local issue reference check
+    pr_sentinel = '''\
+name: pr-sentinel
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  checks: write
+  statuses: write
+
+jobs:
+  issue-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for issue reference
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PATTERN='([Cc]loses #[0-9]+)'
+
+          PR_COMMITS=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json commits --jq '.commits[].messageHeadline, .commits[].messageBody')
+          if echo "$PR_COMMITS" | grep -qE "$PATTERN"; then
+            echo "Issue reference found in commit messages"
+            exit 0
+          fi
+
+          if echo "$PR_TITLE" | grep -qE "$PATTERN"; then
+            echo "Issue reference found in PR title"
+            exit 0
+          fi
+
+          if echo "$PR_BODY" | grep -qE "$PATTERN"; then
+            echo "Issue reference found in PR body"
+            exit 0
+          fi
+
+          echo "No issue reference found."
+          echo ""
+          echo "PR title, body, or commit message must close a GitHub issue."
+          echo "Required Format: 'Closes #123'"
+          exit 1
+'''
+    (workflows_dir / "pr-sentinel.yml").write_text(pr_sentinel, encoding="utf-8")
+
+    # auto-reviewer caller: invokes AssemblyZero's reusable workflow
+    auto_reviewer = '''\
+name: Auto Review
+
+# Caller workflow: invokes the reusable auto-reviewer from AssemblyZero.
+# Requires Cerberus secrets (REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY).
+# Deploy secrets fleet-wide: poetry run python tools/deploy_cerberus_secrets.py
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  checks: read
+
+jobs:
+  auto-review:
+    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
+    with:
+      required_checks: "issue-reference"
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+'''
+    (workflows_dir / "auto-reviewer.yml").write_text(auto_reviewer, encoding="utf-8")
+
+
 def create_settings_json(project_path: Path) -> None:
     """
     Create .claude/settings.json with per-repo hooks.
@@ -1399,6 +1492,12 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
     print("  Created .unleashed.json (model=opus, effort=max)")
+
+    # Step 11c: Create GitHub Actions workflows (PR governance)
+    print("\n11c. Creating GitHub Actions workflows...")
+    create_github_workflows(project_path)
+    print("  Created pr-sentinel.yml (issue reference check)")
+    print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
 
     # Step 12: Initial commit
     print("\n12. Creating initial commit...")
