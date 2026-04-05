@@ -1,8 +1,8 @@
 # 0901 - New Project Setup
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.0
-**Last Updated:** 2026-01-29
+**Version:** 2.1
+**Last Updated:** 2026-04-05
 
 ---
 
@@ -108,6 +108,7 @@ MyNewProject/
 | `README.md` | Project overview |
 | `LICENSE` | MIT License |
 | `.gitignore` | Standard ignore patterns |
+| `.unleashed.json` | Unleashed wrapper configuration (model, effort, onboard settings) |
 | `docs/00003-file-inventory.md` | Project file inventory |
 
 ### GitHub Actions
@@ -255,3 +256,4 @@ The script automates all of this in one command.
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial version (manual process) |
 | 2.0 | 2026-01-29 | Automated with new_repo_setup.py, added 4 new dirs |
+| 2.1 | 2026-04-05 | Added `.unleashed.json` to file table (was in script/schema but missing from docs) |

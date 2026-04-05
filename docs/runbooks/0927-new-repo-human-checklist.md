@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.2
-**Last Updated:** 2026-03-18
+**Version:** 1.3
+**Last Updated:** 2026-04-05
 
 ---
 
@@ -29,11 +29,13 @@ Go to: https://github.com/new
 
 Click Create repository.
 
-### 2. Enable the wiki
+### 2. Enable wiki (if needed)
 
-Go to: https://github.com/martymcenroe/REPO/settings
+Skip this step if the repo doesn't need a wiki.
 
-Scroll to Features section. Check Wikis. Click Save (or it auto-saves).
+**Public repos:** Enable the wiki in Settings > Features > Wikis. The wiki inherits the repo's visibility.
+
+**Private repos:** GitHub wikis inherit the repo's visibility — a private repo's wiki is also private. If you need a public-facing wiki for a private repo, create a separate public repo (e.g., `my-project-wiki`) and manage wiki content there instead.
 
 ### 3. Set up branch protection
 
@@ -107,3 +109,4 @@ Tell the agent the repo is ready. The agent will:
 | 2026-03-18 | Initial runbook created |
 | 2026-03-18 | v1.1: Added Step 4 — Cerberus secrets deployment. App is fleet-wide but secrets are per-repo. |
 | 2026-03-18 | v1.2: Expanded Step 4 with full .pem walkthrough. Clarified that new keys don't invalidate existing ones. Added revoke step. Referenced #763 for future auto-detection. |
+| 2026-04-05 | v1.3: Made wiki step conditional with public/private guidance. Private repo wikis inherit visibility — use a separate public repo for public-facing wikis. |
