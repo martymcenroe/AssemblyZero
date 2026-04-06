@@ -1,8 +1,8 @@
 # 0901 - New Project Setup
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.0
-**Last Updated:** 2026-01-29
+**Version:** 2.2
+**Last Updated:** 2026-04-05
 
 ---
 
@@ -108,6 +108,9 @@ MyNewProject/
 | `README.md` | Project overview |
 | `LICENSE` | MIT License |
 | `.gitignore` | Standard ignore patterns |
+| `.unleashed.json` | Unleashed wrapper configuration (model, effort, onboard settings) |
+| `.github/workflows/pr-sentinel.yml` | PR issue reference check (GitHub Actions) |
+| `.github/workflows/auto-reviewer.yml` | Cerberus auto-approval caller workflow |
 | `docs/00003-file-inventory.md` | Project file inventory |
 
 ### GitHub Actions
@@ -136,11 +139,11 @@ options:
 
 ## Post-Setup Steps
 
-### 1. Set Up Branch Protection (Required)
+### 1. Deploy Cerberus Secrets (If Needed)
 
-The agent PAT cannot configure branch protection (by design — see [0925](0925-agent-token-setup.md)). Follow [0926 - Branch Protection Setup](0926-branch-protection-setup.md) to configure it manually via browser. Takes ~30 seconds.
+The script deploys PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`) and configures branch protection automatically. The only remaining step is ensuring Cerberus secrets exist on the new repo. See [0927 - Human Checklist](0927-new-repo-human-checklist.md) step 2 for the fleet-wide deploy process.
 
-### 3. Add Advanced Hooks (Optional)
+### 2. Add Advanced Hooks (Optional)
 
 The script creates a minimal `settings.json` without hooks. For worktree protection and security linting:
 
@@ -255,3 +258,5 @@ The script automates all of this in one command.
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial version (manual process) |
 | 2.0 | 2026-01-29 | Automated with new_repo_setup.py, added 4 new dirs |
+| 2.1 | 2026-04-05 | Added `.unleashed.json` to file table (was in script/schema but missing from docs) |
+| 2.2 | 2026-04-05 | Added workflow files to file table. Updated post-setup: branch protection is now automated, Cerberus is the remaining human step. |

@@ -1,59 +1,50 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.2
-**Last Updated:** 2026-03-18
+**Version:** 2.0
+**Last Updated:** 2026-04-05
 
 ---
 
 ## Purpose
 
-Every step the human must do when creating a new GitHub repo. The agent PAT (fine-grained) cannot create repos or configure rulesets. Cerberus-AZ app installation is fleet-wide (All repositories), but its GitHub Actions secrets must be deployed per-repo.
+The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, and initial push in one command.
 
-After completing this checklist, hand off to the agent for scaffolding (CLAUDE.md, directory structure, poetry init, etc.).
+The human handles only what the script can't: Cerberus secret deployment (requires a .pem from the GitHub UI) and wiki setup (a human decision).
 
 ---
 
 ## Checklist
 
-### 1. Create the repo
+### 1. Run the setup script
 
-Go to: https://github.com/new
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/new_repo_setup.py {name} [--public] [--license mit]
+```
 
-| Field | Value |
-|-------|-------|
-| Repository name | the repo name (lowercase, hyphenated) |
-| Description | one-line description of what it does |
-| Visibility | Private (unless intentionally public) |
-| Initialize with | check Add a README file |
+The script handles all of the following automatically:
+- Local directory structure (31 dirs) + all config files
+- GitHub repo creation via `gh repo create --source . --push`
+- Branch protection (require PR, block force push, block deletion, pr-sentinel check)
+- PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`)
+- Wiki disable (default — override below if needed)
+- `.unleashed.json`, `.claude/settings.json`, security hooks
+- Initial commit and push
 
-Click Create repository.
+If `gh repo create` fails (PAT lacks create permission), the script prints manual fallback steps.
 
-### 2. Enable the wiki
+### 2. Deploy Cerberus secrets (if needed)
 
-Go to: https://github.com/martymcenroe/REPO/settings
+The auto-reviewer workflow (deployed by the script in step 1) needs two GitHub Actions secrets to approve PRs: `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`. These are deployed **fleet-wide** — the script covers ALL repos at once, not just the new one.
 
-Scroll to Features section. Check Wikis. Click Save (or it auto-saves).
+**Check if secrets are already deployed:** If you've run `deploy_cerberus_secrets.py` since the last time you created a repo, the new repo might not have secrets yet. If your last fleet deploy was recent and you haven't created repos since, you're fine — skip to step 3.
 
-### 3. Set up branch protection
-
-Follow [0926 - Branch Protection Setup](0926-branch-protection-setup.md), quick reference:
-
-1. https://github.com/martymcenroe/REPO/settings/rules > New branch ruleset
-2. Name: main, Enforcement: Active
-3. Add target > Include default branch
-4. Check (in UI order): Restrict deletions, Require PR (1 approval), Block force pushes
-5. Create
-
-### 4. Deploy Cerberus secrets
-
-Cerberus-AZ needs two GitHub Actions secrets (REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY) to approve PRs. The Cerberus app installation is fleet-wide, but GitHub Actions secrets are per-repo on personal accounts. New repos don't inherit secrets from existing repos.
-
-**Important: generating a new .pem does NOT invalidate existing keys.** GitHub Apps support multiple active private keys simultaneously. Your existing repos keep working. You can generate and delete .pem files freely.
+**If the new repo needs secrets:**
 
 Run all of this in your own git-bash (never an agent session):
 
-**Step 4a: Generate a private key**
+**Step 2a: Generate a private key**
 
 1. Go to https://github.com/settings/apps/cerberus-az
 2. Scroll down to Private keys
@@ -61,18 +52,18 @@ Run all of this in your own git-bash (never an agent session):
 4. Browser downloads a .pem file to your Downloads folder
    (filename like cerberus-az.2026-03-18.private-key.pem)
 
-**Step 4b: Deploy to new repo(s)**
+**Important:** generating a new .pem does NOT invalidate existing keys. GitHub Apps support multiple active private keys simultaneously.
+
+**Step 2b: Deploy to all repos**
 
 ```
 cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/deploy_cerberus_secrets.py /c/Users/mcwiz/Downloads/THE-FILE.pem
 ```
 
-The script deploys to all repos. Check the output — look for OK next to your new repo name(s).
+The script deploys to ALL repos. Check the output — look for OK next to your new repo name(s).
 
-(Future: #763 will add auto-detection of repos missing secrets, so you only deploy where needed.)
-
-**Step 4c: Delete the .pem and revoke**
+**Step 2c: Delete the .pem and revoke**
 
 1. Delete the .pem file from Downloads immediately
 2. Go back to https://github.com/settings/apps/cerberus-az > Private keys
@@ -80,23 +71,40 @@ The script deploys to all repos. Check the output — look for OK next to your n
    — The secrets are already stored in GitHub Actions. The .pem is never needed again.
    — Revoking prevents the key from being used if the file wasn't fully deleted.
 
-**If you skip this step:** PRs on the new repo will hang on the 1-approval requirement with no way to merge. Cerberus cannot approve without the secrets.
+**What happens without secrets:** PRs on the new repo will pass pr-sentinel (the check) but won't get auto-approved (the auto-reviewer workflow will fail). You can still merge manually via the GitHub UI until secrets are deployed.
 
-### 5. Hand off to agent
+### 3. Create wiki (if needed)
 
-Tell the agent the repo is ready. The agent will:
-- Clone locally via gh repo clone (HTTPS, never SSH)
-- Create CLAUDE.md
-- Set up directory structure
-- Initialize poetry if applicable
-- Push and verify
+Skip this step if the repo doesn't need a wiki.
+
+**Public repos:** Enable the wiki in Settings > Features > Wikis. The wiki inherits the repo's visibility. Create the first wiki page.
+
+**Private repos:** GitHub wikis inherit the repo's visibility — a private repo's wiki is also private. If you need a public-facing wiki for a private repo, create a separate public repo (e.g., `my-project-wiki`) and manage wiki content there instead.
+
+---
+
+## What's Automatic (No Human Action)
+
+These all happen without any per-repo human intervention:
+
+| Component | Why It's Automatic |
+|-----------|-------------------|
+| Cerberus-AZ app access | Fleet-wide installation ("All repositories") — new repos are covered instantly |
+| pr-sentinel check (Cloudflare Worker) | Receives webhooks for all repos, authenticates with its own stored credentials |
+| pr-sentinel check (GitHub Actions) | Workflow file created by setup script in initial commit |
+| Auto-reviewer workflow file | Created by setup script in initial commit |
+| Branch protection | Configured by setup script via GitHub API |
+| Directory structure + configs | Created by setup script |
+
+The **only** per-repo human steps are Cerberus secrets (fleet deploy covers it) and wiki setup.
 
 ---
 
 ## Related Documents
 
-- [0901 - New Project Setup](0901-new-project-setup.md) — Agent-side scaffolding
-- [0926 - Branch Protection Setup](0926-branch-protection-setup.md) — Detailed branch protection steps
+- [0901 - New Project Setup](0901-new-project-setup.md) — Script reference and file details
+- [0926 - Branch Protection Setup](0926-branch-protection-setup.md) — Manual branch protection steps (fallback if script fails)
+- [0925 - Agent Token Setup](0925-agent-token-setup.md) — PAT permissions and rotation
 
 ---
 
@@ -105,5 +113,7 @@ Tell the agent the repo is ready. The agent will:
 | Date | Change |
 |------|--------|
 | 2026-03-18 | Initial runbook created |
-| 2026-03-18 | v1.1: Added Step 4 — Cerberus secrets deployment. App is fleet-wide but secrets are per-repo. |
-| 2026-03-18 | v1.2: Expanded Step 4 with full .pem walkthrough. Clarified that new keys don't invalidate existing ones. Added revoke step. Referenced #763 for future auto-detection. |
+| 2026-03-18 | v1.1: Added Cerberus secrets deployment. App is fleet-wide but secrets are per-repo. |
+| 2026-03-18 | v1.2: Expanded .pem walkthrough. Clarified multi-key support. Added revoke step. |
+| 2026-04-05 | v1.3: Made wiki step conditional with public/private guidance. |
+| 2026-04-05 | v2.0: Complete rewrite. Script now handles repo creation, branch protection, and workflow deployment. Human steps reduced to Cerberus secrets (fleet-wide) and wiki setup. |
