@@ -108,6 +108,7 @@ Read config + most recent session log + open issues. No pickup detection.
 1. Read `{repo_root}/data/session-index.jsonl`
 2. Parse last 5 entries (each is one JSON object per line)
 3. Check for thrashing and crash patterns (see below)
+4. Count sessions that started AFTER the handoff timestamp (post-handoff activity)
 
 **C) Apply decision logic:**
 
@@ -115,10 +116,14 @@ Read config + most recent session log + open issues. No pickup detection.
 |-----------|--------|
 | `--pickup` flag set | Auto-pickup, no confirmation |
 | Handoff age < threshold (default 10 min) | Auto-pickup, no confirmation |
-| Handoff age 10 min - 48h | Show 5-line preview + age, ask user to confirm |
+| Handoff age 10 min - 48h | Show timestamp + age + post-handoff sessions, ask user to confirm |
 | Handoff age > 48h or no handoff | Skip pickup, proceed to Step 2 |
 | THRASHING detected | Skip pickup, report thrashing, find last substantive session |
 | CRASH detected | Report crash, offer session log as partial context |
+
+**Post-handoff activity display (10 min - 48h case):**
+Always show the absolute timestamp: "Handoff from YYYY-MM-DD HH:MM:SS ({age})".
+If post-handoff sessions exist, show: "Note: {N} session(s) ran after this handoff ({total_lines} lines, {total_hours}h)."
 
 **Thrashing detection:**
 - From session-index.jsonl, check if 3+ entries have start timestamps within a 30-minute window AND each has `line_count < 50`
@@ -177,6 +182,6 @@ Then ask: "What do you want to work on next?"
 - Use absolute paths and `git -C` patterns (no cd && chaining)
 - Use `--repo {owner}/{repo}` for all gh commands
 - CLAUDE.md and MEMORY.md are already in context — never re-read them
-- `data/handoff-log.md` is read-only — never modify it
+- `data/handoff-log.md` is append-only -- never delete or rewrite entries. Pickup markers (`<!-- picked-up ... -->`) may be appended after `<!-- handoff-end -->`
 - `data/session-index.jsonl` is read-only — never modify it
 - If no `.unleashed.json` exists, use defaults: `assemblyZero=false`, `pickupThreshold=10`, no guide, no plan
