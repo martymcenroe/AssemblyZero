@@ -1041,6 +1041,8 @@ on:
 permissions:
   checks: write
   statuses: write
+  pull-requests: read
+  contents: read
 
 jobs:
   issue-reference:
@@ -1192,19 +1194,31 @@ def configure_branch_protection(github_user: str, repo_name: str) -> bool:
     Returns:
         True if protection was configured, False if it failed.
     """
-    # Branch protection requires at least one commit on main
-    # We configure it after the initial push
+    # Branch protection requires at least one commit on main.
+    # Verify remote branch exists before attempting.
+    try:
+        check = subprocess.run(
+            ["gh", "api", f"/repos/{github_user}/{repo_name}/branches/main"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if check.returncode != 0:
+            print("    Remote branch 'main' not found — skipping branch protection.")
+            print("    Push to main first, then re-run or configure manually.")
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
     try:
         result = subprocess.run(
             ["gh", "api", "-X", "PUT",
              f"/repos/{github_user}/{repo_name}/branches/main/protection",
-             "-f", "required_pull_request_reviews[dismiss_stale_reviews]=false",
-             "-f", "required_pull_request_reviews[require_code_owner_reviews]=false",
-             "-F", "required_pull_request_reviews[required_approving_review_count]=0",
+             "-F", "required_pull_request_reviews[dismiss_stale_reviews]=false",
+             "-F", "required_pull_request_reviews[require_code_owner_reviews]=false",
+             "-F", "required_pull_request_reviews[required_approving_review_count]=1",
              "-F", "enforce_admins=true",
              "-F", "restrictions=null",
-             "-f", "required_status_checks[strict]=true",
-             "-f", "required_status_checks[contexts][]=pr-sentinel",
+             "-F", "required_status_checks[strict]=false",
+             "-f", "required_status_checks[contexts][]=pr-sentinel / issue-reference",
              "-F", "allow_force_pushes=false",
              "-F", "allow_deletions=false",
              ],
@@ -1217,25 +1231,28 @@ def configure_branch_protection(github_user: str, repo_name: str) -> bool:
         return False
 
 
-def disable_wiki(github_user: str, repo_name: str) -> bool:
+def configure_repo_settings(github_user: str, repo_name: str) -> bool:
     """
-    Disable wiki on a GitHub repo.
+    Configure GitHub repo settings to match fleet standards.
 
-    Wikis have no protection mechanisms (no branch protection, no review gate).
-    They should be disabled by default and only enabled when explicitly needed.
+    Sets: wiki disabled, projects disabled, squash-only merge, delete branch on merge.
 
     Args:
         github_user: GitHub username
         repo_name: Repository name
 
     Returns:
-        True if wiki was disabled, False if it failed.
+        True if settings were applied, False if it failed.
     """
     try:
         result = subprocess.run(
             ["gh", "api", "-X", "PATCH",
              f"/repos/{github_user}/{repo_name}",
-             "-F", "has_wiki=false"],
+             "-F", "has_wiki=false",
+             "-F", "has_projects=false",
+             "-F", "delete_branch_on_merge=true",
+             "-F", "allow_merge_commit=false",
+             "-F", "allow_rebase_merge=false"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -1509,54 +1526,95 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("  Created initial commit")
 
     github_created = False
+    push_succeeded = False
+    repo_settings_ok = False
+    protection_ok = False
+
     if not args.no_github:
+        print("\n" + "=" * 60)
+        print("GITHUB REMOTE")
+        print("=" * 60)
+
+        # Detect PAT type and warn about workflow scope
+        try:
+            auth_result = subprocess.run(
+                ["gh", "auth", "status"],
+                capture_output=True, text=True, timeout=15,
+            )
+            auth_output = auth_result.stdout + auth_result.stderr
+            if "github_pat_" in auth_output:
+                print("\n  NOTE: Fine-grained PAT detected.")
+                print("  Workflow files (.github/workflows/) require 'workflow' scope.")
+                print("  If push fails, switch to classic PAT:")
+                print("    gh auth login -h github.com -p https")
+                print("  Then push manually: git push -u origin main")
+                print("  Then switch back to fine-grained PAT.\n")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
         # Step 13: Create GitHub repo
-        print("\n13. Creating GitHub repository...")
+        repo_name_lower = args.name.lower()
+        print(f"\n13. Creating GitHub repository ({repo_name_lower})...")
         visibility = "--public" if args.public else "--private"
         try:
             run_command(
-                ["gh", "repo", "create", f"{github_user}/{args.name}", visibility, "--source", ".", "--push"],
+                ["gh", "repo", "create", f"{github_user}/{repo_name_lower}", visibility, "--source", ".", "--push"],
                 cwd=project_path
             )
-            print(f"  Created: https://github.com/{github_user}/{args.name}")
+            print(f"  Created: https://github.com/{github_user}/{repo_name_lower}")
             github_created = True
+            push_succeeded = True
         except Exception as e:
             print(f"  WARNING: gh repo create failed: {e}")
-            print(f"  Your PAT may lack the 'create repository' permission.")
-            print(f"  The local repo is fully valid. To finish manually:")
-            print(f"    1. Create repo at https://github.com/new")
-            print(f"    2. git remote add origin https://github.com/{github_user}/{args.name}.git")
-            print(f"    3. git push -u origin main")
+            print("  Your PAT may lack 'create repository' or 'workflow' scope.")
+            print("  The local repo is fully valid. To finish manually:")
+            print("    1. Create repo at https://github.com/new")
+            print(f"    2. git remote add origin https://github.com/{github_user}/{repo_name_lower}.git")
+            print("    3. gh auth login -h github.com -p https  # classic PAT with workflow scope")
+            print("    4. git push -u origin main")
+            print("    5. gh auth login -h github.com -p https  # back to fine-grained PAT")
 
         if github_created:
             # Step 14: Star the repo
             print("\n14. Starring repository...")
             run_command(
-                ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{args.name}"],
+                ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{repo_name_lower}"],
                 cwd=project_path,
                 check=False  # Don't fail if starring fails
             )
             print("  Starred repository")
 
-            # Step 15: Disable wiki (no protection mechanisms available)
-            print("\n15. Disabling wiki (no protection mechanisms available)...")
-            if disable_wiki(github_user, args.name):
-                print("  Wiki disabled")
+            # Step 15: Configure repo settings (wiki, projects, merge strategy)
+            print("\n15. Configuring repo settings...")
+            if configure_repo_settings(github_user, repo_name_lower):
+                print("  Repo settings configured:")
+                print("    - Wiki: disabled")
+                print("    - Projects: disabled")
+                print("    - Merge strategy: squash only")
+                print("    - Delete branch on merge: enabled")
+                repo_settings_ok = True
             else:
-                print("  WARNING: Could not disable wiki — do this manually!")
+                print("  WARNING: Could not configure repo settings.")
 
             # Step 16: Configure branch protection
             print("\n16. Configuring branch protection...")
-            if configure_branch_protection(github_user, args.name):
-                print("  Branch protection configured:")
-                print("    - Force push: blocked")
-                print("    - Deletion: blocked")
-                print("    - enforce_admins: enabled")
-                print("    - Required check: pr-sentinel")
+            if push_succeeded:
+                if configure_branch_protection(github_user, repo_name_lower):
+                    print("  Branch protection configured:")
+                    print("    - Force push: blocked")
+                    print("    - Deletion: blocked")
+                    print("    - enforce_admins: enabled")
+                    print("    - Required reviews: 1 (Cerberus auto-approves)")
+                    print("    - Required check: pr-sentinel / issue-reference")
+                    print("    - strict: false")
+                    protection_ok = True
+                else:
+                    print("  WARNING: Could not configure branch protection.")
+                    print("  This may fail if the token lacks admin scope.")
+                    print("  Configure manually or re-run with a classic token.")
             else:
-                print("  WARNING: Could not configure branch protection.")
-                print("  This may fail if the token lacks admin scope.")
-                print("  Configure manually or re-run with a classic token.")
+                print("  SKIPPED: Push failed — no remote branch to protect.")
+                print("  After pushing, configure branch protection manually.")
 
     # Post-setup verification
     print("\n" + "=" * 60)
@@ -1606,13 +1664,31 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     if checks_passed < checks_total:
         print("\nWARNING: Some checks failed. Review and fix before starting work!")
 
+    # Final summary
+    if not args.no_github:
+        print("\n" + "=" * 60)
+        print("SUMMARY")
+        print("=" * 60)
+        repo_name_lower = args.name.lower()
+        print("  Local scaffold:     OK")
+        print(f"  GitHub repo:        {'OK' if github_created else 'FAILED'}")
+        print(f"  Push:               {'OK' if push_succeeded else 'FAILED'}")
+        print(f"  Repo settings:      {'OK' if repo_settings_ok else 'FAILED — configure manually'}")
+        print(f"  Branch protection:  {'OK' if protection_ok else 'FAILED — configure manually or re-run with classic PAT'}")
+
     print("\n" + "=" * 60)
-    print(f"[SUCCESS] Repository '{args.name}' created successfully!")
-    print(f"\nNext steps:")
+    print(f"[SUCCESS] Repository '{args.name}' created!")
+    print("\nNext steps:")
     print(f"  cd {project_path}")
     if not args.no_github:
-        print(f"  # Repository is live at: https://github.com/{github_user}/{args.name}")
-    print(f"  # Start coding!")
+        repo_name_lower = args.name.lower()
+        print(f"  # Repository: https://github.com/{github_user}/{repo_name_lower}")
+        if not push_succeeded:
+            print("  # IMPORTANT: Push failed. Switch to classic PAT and push:")
+            print("  #   gh auth login -h github.com -p https  # classic PAT")
+            print("  #   git push -u origin main")
+            print("  #   gh auth login -h github.com -p https  # fine-grained PAT")
+    print("  # Deploy Cerberus secrets: see runbook 0927")
 
 
 if __name__ == "__main__":

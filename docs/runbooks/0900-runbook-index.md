@@ -46,6 +46,7 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0926 | [Branch Protection Setup](0926-branch-protection-setup.md) | Manual | On new repo | - |
 | 0927 | [AI CLI Tools Reference](0927-ai-cli-tools-reference.md) | Reference | - | All |
 | 0928 | [New Repo: Human Checklist](0927-new-repo-human-checklist.md) | Manual | On new repo | - |
+| 0929 | [Cloudflare Zone Setup](0928-cloudflare-zone-setup.md) | Manual | On new domain | - |
 
 ## Model Selection Guide
 
