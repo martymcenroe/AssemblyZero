@@ -49,31 +49,6 @@ CLAUDE.md (root + repo) and MEMORY.md (index) are auto-injected by Claude Code a
    - `onboard.plan` (string or null) — path to immediate plan doc
 5. Get GitHub repo: `git -C {unix_root} remote get-url origin` and extract `{owner}/{repo}`
 
-## Step 0.5: Skill Sync
-
-Ensure user-level skills at `~/.claude/commands/` match the source of truth in AssemblyZero.
-
-1. List all `.md` files in `C:\Users\mcwiz\Projects\AssemblyZero\.claude\commands\`
-2. For each file that has `scope: global` in its frontmatter:
-   - **Missing locally** (`~/.claude/commands/{name}` does not exist): Copy from AZ. Report: "Deployed {name}"
-   - **Repo is newer** (repo file mtime > local file mtime): Copy from AZ. Report: "Updated {name}"
-   - **Local is newer** (local file mtime > repo file mtime): **Do NOT overwrite.** Warn: "DRIFT: {name} modified locally — commit to AZ or discard"
-   - **Identical or local is same age**: Skip silently
-3. Files with `scope: project` or no `scope` field are NOT synced — they stay project-scoped.
-
-Use `stat` to compare modification times:
-```bash
-stat -c %Y /c/Users/mcwiz/Projects/AssemblyZero/.claude/commands/{name} 2>/dev/null
-stat -c %Y /c/Users/mcwiz/.claude/commands/{name} 2>/dev/null
-```
-
-Copy command (when deploying):
-```bash
-cp /c/Users/mcwiz/Projects/AssemblyZero/.claude/commands/{name} /c/Users/mcwiz/.claude/commands/{name}
-```
-
-**This step runs in ALL modes** (refresh, quick, full). It is fast (file stat comparisons only) and ensures every session has current skills.
-
 ## Modes
 
 | Mode | Use Case |
