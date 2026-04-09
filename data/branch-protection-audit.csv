@@ -1,0 +1,57 @@
+repo,review_count,strict,contexts,app_ids,enforce_admins
+acpb-manifest-poc,1,false,pr-sentinel / issue-reference,null,true
+Agora,1,false,pr-sentinel / issue-reference,null,true
+ai-power-systems-compendium,1,false,pr-sentinel / issue-reference,null,true
+Aletheia,1,false,pr-sentinel / issue-reference,null,true
+AssemblyZero,1,false,issue-reference,15368,true
+athleet.dev,1,false,pr-sentinel / issue-reference,null,true
+athleet.github.io,1,false,pr-sentinel / issue-reference,null,true
+automation-scripts,1,false,pr-sentinel / issue-reference,null,true
+best-of-pes-ai,1,false,pr-sentinel / issue-reference,null,true
+boostgauge,NO_PROTECTION,,,,
+career,1,false,pr-sentinel / issue-reference,null,true
+Clio,1,false,pr-sentinel / issue-reference,null,true
+collectibricks,PRIVATE_FREE_TIER,,,,
+comp-environ,NO_PROTECTION,,,,
+CS512_link_predictor,1,true,pr-sentinel / issue-reference,null,true
+data-harvest,1,false,pr-sentinel / issue-reference,null,true
+dispatch,1,false,pr-sentinel / issue-reference,null,true
+dont-stop-now,1,false,pr-sentinel / issue-reference,null,true
+dotfiles,1,false,pr-sentinel / issue-reference,null,true
+electric-nexus,1,false,pr-sentinel / issue-reference,null,true
+GentlePersuader,1,true,pr-sentinel / issue-reference,null,true
+gh-galaxy-quest,NO_PROTECTION,,,,
+gh-link-auditor,1,false,pr-sentinel / issue-reference,null,true
+github-readme-stats,NO_MAIN_BRANCH,,,,
+GlucoPulse,1,false,pr-sentinel / issue-reference,null,true
+Hermes,1,true,pr-sentinel / issue-reference,2975092,true
+hermes-docs,1,false,pr-sentinel / issue-reference,null,true
+HermesWiki,1,false,pr-sentinel / issue-reference,null,true
+iconoscope,1,false,pr-sentinel / issue-reference,null,true
+IEEE-standards,1,false,pr-sentinel / issue-reference,null,true
+job-sniper,1,false,pr-sentinel / issue-reference,null,true
+maintenance,1,false,pr-sentinel / issue-reference,null,true
+martymcenroe,1,false,pr-sentinel / issue-reference,null,true
+martymcenroe.github.io,1,false,pr-sentinel / issue-reference,null,true
+metabolic-protocols,1,false,pr-sentinel / issue-reference,null,true
+my-discussions,1,false,pr-sentinel / issue-reference,null,true
+mySvelte,1,false,pr-sentinel / issue-reference,null,true
+my_hackerrank_python,1,false,pr-sentinel / issue-reference,null,true
+my_hackerrank_SQL,1,false,pr-sentinel / issue-reference,null,true
+neatworks-file-recovery,1,false,pr-sentinel / issue-reference,null,true
+nec2017-analyzer,1,true,pr-sentinel / issue-reference,null,true
+Orpheus,1,false,pr-sentinel / issue-reference,null,true
+patent-general,1,false,pr-sentinel / issue-reference,2975092,true
+power-agent.github.io,1,true,pr-sentinel / issue-reference,2975092,true
+prompt-stream,1,false,pr-sentinel / issue-reference,null,true
+RCA-PDF-extraction-pipeline,1,false,pr-sentinel / issue-reference,null,true
+sentinel,1,false,pr-sentinel / issue-reference,null,true
+sentinel-rfc,1,false,pr-sentinel / issue-reference,null,true
+sextant,1,false,issue-reference,15368,true
+sextant-wiki,NO_MAIN_BRANCH,,,,
+spotify-personal-backups,1,false,pr-sentinel / issue-reference,null,true
+Talos,1,false,pr-sentinel / issue-reference,null,true
+TheMobyPerogative.world,1,false,pr-sentinel / issue-reference,null,true
+thrivetech-ai,1,false,pr-sentinel / issue-reference,null,true
+TxDOT-LDA,1,false,pr-sentinel / issue-reference,null,true
+unleashed,1,false,pr-sentinel / issue-reference,null,true
