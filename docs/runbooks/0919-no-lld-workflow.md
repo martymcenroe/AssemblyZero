@@ -65,7 +65,7 @@ Ensure no regressions. Add tests for new behavior.
 
 ```bash
 git add <specific files>
-git commit -m "feat: description (#ISSUE)"
+git commit -m "feat: description (Closes #ISSUE)"
 git push -u origin {BRANCH}
 gh pr create --title "..." --body "..."
 ```

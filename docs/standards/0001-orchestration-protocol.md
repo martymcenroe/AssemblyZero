@@ -25,7 +25,7 @@ Every feature or fix must strictly follow this 12-step execution loop to ensure 
 | **5. Gate** | Request permission | State: "LLD review complete. May I proceed?" |
 | **6. Worktree** | Isolation (after approval) | `git worktree add ../Aletheia-ID -b ID-desc` |
 | **7. Code** | Implementation | Edit source files |
-| **8. Commit** | Save | `git commit -m "type: desc (ref #ID)"` |
+| **8. Commit** | Save | `git commit -m "type: desc (Closes #ID)"` |
 | **9. Push** | Team Visibility (REQUIRED) | `git push -u origin HEAD` |
 | **10. PR** | Review | `gh pr create --fill` |
 | **11. Reports** | Document (MANDATORY) | Create `docs/reports/{ID}/` with both reports |

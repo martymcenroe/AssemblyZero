@@ -101,7 +101,7 @@ act issues -e test-event.json
 
 ```bash
 git add .github/workflows/archive-lld.yml
-git commit -m "feat: add GitHub Action to archive LLDs on issue close (#276)
+git commit -m "feat: add GitHub Action to archive LLDs on issue close (Closes #276)
 
 Automatically moves LLD-{N}.md from docs/lld/active/ to docs/lld/done/
 when issue N is closed.
