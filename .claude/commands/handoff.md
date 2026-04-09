@@ -43,6 +43,12 @@ Before generating the handoff, clean up after yourself:
    find /c/Users/mcwiz/Projects/{REPO_NAME} -name "tmpclaude-*-cwd" -type f -delete 2>/dev/null
    ```
 
+5. **Skill sync (AssemblyZero only):** If the current repo is AssemblyZero, run:
+   ```bash
+   python /c/Users/mcwiz/Projects/unleashed/src/skill_sync.py
+   ```
+   This deploys updated `scope: global` skills to `~/.claude/commands/` and warns on local drift. Zero LLM cost — Python handles the comparison.
+
 This step is fast — don't skip it. The next session shouldn't start by cleaning up after this one.
 
 ### Step 1: Gather State (parallel)
