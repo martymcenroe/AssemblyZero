@@ -1,6 +1,7 @@
 ---
 description: Promote patterns from child projects to AssemblyZero
 argument-hint: "[--help] [--command NAME] [--tool NAME] [--template DIR] [--permission PATTERN] [--from PROJECT]"
+scope: project
 ---
 
 # Promote to AssemblyZero

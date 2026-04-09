@@ -1,6 +1,7 @@
 ---
 description: Analyze session transcripts for permission friction (15-30 min)
 argument-hint: "[--help] [--sessions N] [--since YYYY-MM-DD]"
+scope: global
 ---
 
 # Permission Friction Analysis

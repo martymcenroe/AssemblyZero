@@ -1,6 +1,7 @@
 ---
 description: Mine reports for testing gaps and automation opportunities
 argument-hint: "[--full] [--file path] [--layer reports|infra|heuristics|all] [--project-type auto|extension|api|webapp|cli]"
+scope: global
 ---
 
 <!--
