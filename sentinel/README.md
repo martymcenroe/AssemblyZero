@@ -2,7 +2,7 @@
 
 PR Issue-Reference Enforcer — a GitHub App on Cloudflare Workers.
 
-Every PR must reference an open issue (`Closes #N`, `Fixes #N`, `Resolves #N`) or declare `No-Issue: <reason>`. The app creates a check run that blocks merge until the requirement is met.
+Every PR must reference an open issue (`Closes #N`) or declare `No-Issue: <reason>`. The app creates a check run that blocks merge until the requirement is met.
 
 ## Deployment
 

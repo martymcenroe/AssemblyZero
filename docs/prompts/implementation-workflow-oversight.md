@@ -113,7 +113,7 @@ Before creating PR, verify LLD Section 12:
 
 ```bash
 git add [specific files]
-git commit -m "feat: description (#IssueID)
+git commit -m "feat: description (Closes #IssueID)
 
 [summary of changes]
 

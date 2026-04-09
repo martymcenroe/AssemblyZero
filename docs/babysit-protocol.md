@@ -62,7 +62,8 @@ Two-strike rule applies per issue per phase.
 
 ## Closing Issues
 
-Use `Closes #{NUMBER}` in commit message body — never `gh issue close`.
+The naked `(#NUMBER)` format is permanently banned. You must NEVER use it in commit messages or PR titles.
+You must append exactly `Closes #{NUMBER}` to every git commit message — never use `gh issue close`.
 After push, verify issues show CLOSED on GitHub.
 
 ### Worktree Cleanup

@@ -39,20 +39,18 @@ Rules defining what AI agents must never do, regardless of user instructions.
 
 ## 2. Issue Closure Rules
 
-### 2.1 No Premature Closure
+### 2.1 Complete Delivery Required
 
-AI agents must NEVER close issues until:
-1. Human testing is complete
-2. User explicitly confirms success
-3. All acceptance criteria are met
+There is no such thing as partial issue completion in this environment. AI agents are required to do all the work to fulfill an issue.
+1. All code changes and tests must be completed.
+2. The agent must use `Closes #N` in all commits related to the task.
+3. The naked `(#N)` and `(ref #N)` formats are permanently banned.
 
 **Workflow:**
 ```
-AI: Commits with (ref #ID)
-AI: "Ready for testing in commit XXXXXX"
-Human: Tests the implementation
-Human: "Confirmed working"
-AI: May now close issue
+AI: Completes all implementation and tests
+AI: Commits with (Closes #ID)
+AI: Creates PR and follows the PR Merge Protocol
 ```
 
 ### 2.2 Documentation-Only Exception

@@ -51,7 +51,7 @@ Analyze the changes and create an appropriate commit message:
 
 ```bash
 git commit -m "$(cat <<'EOF'
-type: brief description
+type: brief description (Closes #N)
 
 Longer explanation if needed.
 
@@ -71,11 +71,12 @@ git push -u origin HEAD
 **MANDATORY: Every PR must reference a GitHub issue.**
 - No issue exists? Create one first: `gh issue create --title "..." --body "..."`
 - Issue already closed? Create a new one.
-- PR title MUST end with `(#N)` where N is the issue number.
+- The naked `(#N)` format is permanently banned. You must NEVER use it in PR titles or commit messages.
+- PR title MUST end with `(Closes #N)` where N is the issue number.
 - PR body MUST contain `Closes #N`.
 
 ```bash
-gh pr create --title "type: brief description (#N)" --body "$(cat <<'EOF'
+gh pr create --title "type: brief description (Closes #N)" --body "$(cat <<'EOF'
 ## Summary
 - Bullet points describing changes
 
@@ -92,7 +93,7 @@ EOF
 
 If `--draft` flag was provided:
 ```bash
-gh pr create --draft --title "type: brief description (#N)" --body "..."
+gh pr create --draft --title "type: brief description (Closes #N)" --body "..."
 ```
 
 ### Step 6: Report

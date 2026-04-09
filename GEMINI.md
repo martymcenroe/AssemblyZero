@@ -2,15 +2,6 @@
 
 ## 1. Session Initialization (The Handshake)
 
-**CRITICAL:** When a session begins:
-1. **Analyze:** Silently parse the provided `git status` or issue context.
-2. **Halt & Ask:** Your **FIRST** output must be exactly:
-   > "ACK. State determination complete. Please identify my model version."
-3. **Wait:** Do not proceed until the user replies (e.g., "3.0 Pro").
-4. **Update Identity:** Incorporate the version into your Metadata Tag for all future turns.
-
----
-
 ## 2. Core Rules
 
 **Read `CLAUDE.md` in this repository.** Those rules apply to ALL agents:

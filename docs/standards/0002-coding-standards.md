@@ -41,7 +41,7 @@ AI agents must NEVER use these commands under ANY circumstances:
 2. **Worktree:** Isolation (`git worktree add ../Project-{IssueID} -b {IssueID}-short-desc`).
 3. **Edit:** Implementation.
 4. **Stage:** Preparation (`git add`).
-5. **Commit:** Conventional (`type: desc (ref #ID)`).
+5. **Commit:** Conventional (`type: desc (Closes #ID)`).
 6. **Push:** Team Visibility (`git push -u origin HEAD`). REQUIRED.
 7. **PR:** Review (`gh pr create`).
 8. **Merge:** Finalize.
@@ -64,22 +64,15 @@ Format: `{IssueID}-short-description`
 | ~~`feat/wire-engine`~~ | ❌ Missing issue ID |
 
 ### 6.2 Commit Message Format
-Format: `type: description (KEYWORD #ID)`
+Format: `type: description (Closes #ID)`
 
 Types: `feat`, `fix`, `docs`, `chore`, `test`, `refactor`
 
-**Issue Keywords:**
-* **`ref #ID`:** Commit contributes to issue, work is in-progress.
-* **`close #ID`:** Issue's "Definition of Done" is fully met.
-
-### 6.3 Testing Before Closing
-**CRITICAL:** AI agents must NEVER close an issue until human testing is complete.
-
-1. AI agent commits with `(ref #ID)`
-2. AI agent reports completion
-3. User tests the implementation
-4. User confirms results
-5. **ONLY THEN** may the issue be closed
+**Issue Keywords (CRITICAL RULE):**
+* **The naked `(#ID)` or `(ref #ID)` format is permanently banned.**
+* You must NEVER use it in commit messages or PR titles.
+* You must append exactly `Closes #ID` to every git commit message.
+* There is no such thing as partial issue completion. If you commit, you must use `Closes #ID`.
 
 ## 7. Documentation Standards
 
