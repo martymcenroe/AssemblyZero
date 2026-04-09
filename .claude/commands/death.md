@@ -1,3 +1,8 @@
+---
+description: Reconcile documentation with reality
+scope: project
+---
+
 # /death — The Hourglass Protocol
 
 DEATH arrives when the documentation no longer describes reality.

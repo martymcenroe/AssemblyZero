@@ -1,6 +1,7 @@
 ---
 description: Full 08xx audit suite with project-specific extensions
 argument-hint: "[--help] [--deep] [--ultimate] [NNNN] [NNNN] ..."
+scope: global
 ---
 
 # Full Audit Suite

@@ -1,6 +1,7 @@
 ---
 description: Commit, push, and open a PR
 argument-hint: "[--title \"...\"] [--draft]"
+scope: global
 ---
 
 # Commit, Push, and PR

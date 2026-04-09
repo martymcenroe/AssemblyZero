@@ -1,6 +1,7 @@
 ---
 description: Single-agent code review (PR or staged changes)
 argument-hint: "[PR#] [--files path1 path2...] [--focus security|quality|all]"
+scope: global
 ---
 
 # Code Review

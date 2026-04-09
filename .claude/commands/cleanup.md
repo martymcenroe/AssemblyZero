@@ -2,6 +2,7 @@
 description: Session cleanup with quick/normal/full modes
 argument-hint: "[--help] [--quick|--normal|--full] [--no-auto-delete]"
 aliases: ["/closeout", "/goodbye"]
+scope: global
 ---
 
 # Cleanup
