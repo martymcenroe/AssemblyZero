@@ -60,7 +60,11 @@ Run these in parallel to supplement your memory with current facts:
    pwd && git rev-parse --show-toplevel 2>/dev/null && echo $UNLEASHED_VERSION && date '+%Y-%m-%d %H:%M:%S'
    ```
 
-2. **Plan file** — Read the plan file if one exists (check `C:\Users\mcwiz\.claude\plans\` for the most recent `.md` file). Note which phases are complete.
+2. **Plan snapshot (deterministic):** Run
+   ```bash
+   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py status
+   ```
+   Read the emitted JSON. Use its fields (`plan_path`, `plan_slug`, `plan_state`, `total_steps`, `completed_steps`, `remaining_steps`) in the `## The Plan` section below. Do NOT reconstruct plan state from memory — the JSON is the source of truth. If `status: "no_plan"`, skip the `## The Plan` section entirely. If `status: "error"`, note the error in `## The Plan` and continue.
 
 3. **Git status across touched repos** — For every repo you modified this session, run:
    ```bash
@@ -109,8 +113,21 @@ Output a single markdown block to the screen (NOT to a file). The user will copy
 
 ## The Plan
 
-{If a plan file exists, checklist with phases complete/pending. Include plan file path.
-If no plan, state the user's intent.}
+{If Step 1.2 emitted `status: "ok"`, include the parseable block below filled in from the JSON. /onboard and /pickup parse this block to decide whether to resume the plan. If `status: "no_plan"`, omit this section entirely.}
+
+<!-- plan-state-start -->
+```yaml
+plan_path: {from JSON plan_path}
+plan_slug: {from JSON plan_slug}
+plan_state: {active | completed}
+total_steps: {from JSON}
+completed_steps: {from JSON}
+remaining_steps: {from JSON}
+archive_path: {from the Step 5.4B archive call result, or omit if archive failed}
+```
+<!-- plan-state-end -->
+
+{Optional human-readable checklist or narrative below the block — agents can read it, but machines read the block above.}
 
 ## What To Do Next
 
@@ -214,6 +231,14 @@ After outputting the prompt to screen, persist it to the repo's handoff log so i
 
 6. **Confirm to user:** "Handoff logged to `{path}`"
 
+7. **Archive the active plan (deterministic):** If the Step 1.2 JSON had `status: "ok"`, run:
+   ```bash
+   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py archive --slug {plan_slug}
+   ```
+   If `plan_state == "completed"` in that JSON, add `--mark-completed` to the command. The archiver is idempotent — if the live plan matches the newest archive, it emits `status: "already_archived"` and no-ops. Skip this step if Step 1.2 returned `status: "no_plan"` or `status: "error"`.
+
+   After archiving succeeds, update the `archive_path` field in the `<!-- plan-state-start -->` block in `data/handoff-log.md` with the path from the archiver's JSON output. This is what /onboard and /pickup read to resume or ignore the plan.
+
 ### Step 5B: Persist Lessons Learned
 
 Lessons learned are institutional knowledge — they get committed, unlike the handoff log.
@@ -288,7 +313,7 @@ After persisting the handoff log, spawn a new unleashed session. Auto-onboard (d
 
 - **Be concrete, not summary.** "Updated 3 files" is useless. "Updated `Architecture.md`, `Version-History.md`, `Version-Promotions.md`" is useful.
 - **Include commit SHAs.** The next agent can `git show` them to understand changes.
-- **Include the plan file path.** The next agent should read it, not reconstruct it.
+- **Plan state is machine-read.** The `<!-- plan-state-start -->` YAML block in `## The Plan` is the source of truth for /onboard and /pickup. Fill it from `plan_archiver.py status` output — do NOT reconstruct it from memory. Archive the plan in Step 5.7 so the next session knows whether to resume it.
 - **Don't pad.** If nothing happened in a section, skip it. A shorter, accurate prompt beats a longer, padded one.
 - **User preferences go in "Key Decisions."** Things like "user doesn't want numbered options" or "always use poetry run python" — if you learned it this session and it's not in CLAUDE.md or MEMORY.md, capture it here.
 - **Always persist** — the log survives even if the clipboard is lost.

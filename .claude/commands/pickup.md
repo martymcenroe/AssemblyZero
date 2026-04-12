@@ -75,17 +75,25 @@ Ask the user: "Import this handoff? (Y/n)"
 ### Step 5: Import Context
 
 1. Internalize the full handoff prompt as your working context.
-2. Read every file listed in the "Files to Read First" section of the handoff. Actually read them — don't just note the paths.
-3. Summarize what you imported:
+2. **Parse the plan-state block (deterministic).** If the handoff contains a `<!-- plan-state-start -->` / `<!-- plan-state-end -->` block, read the YAML inside. Apply this decision logic:
+   - `plan_state: completed` → Tell user: "Previous plan `{plan_slug}` was completed (archived at `{archive_path}`). Starting fresh." Do NOT read the plan file.
+   - `plan_state: active` with `remaining_steps > 0` → Tell user: "Resuming plan `{plan_slug}`: {completed_steps}/{total_steps} steps done." Read `{plan_path}` and treat it as the active plan for this session.
+   - `plan_path` is set but the file is missing → Fall back to `{archive_path}`. Warn user: "Live plan missing, reading archived copy instead."
+   - No plan-state block, or `plan_state: none` → Continue without a plan.
+3. Read every file listed in the "Files to Read First" section of the handoff. Actually read them — don't just note the paths.
+4. Summarize what you imported:
    - What was accomplished in the previous session
    - What the next steps are
    - How many files you read from the "Files to Read First" list
+   - Whether a plan was resumed, started fresh, or absent
+5. **Write the pickup marker** by running: `python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
+   If it fails, report the error to the user. Do NOT proceed silently.
 
 Tell the user: "Pickup complete. Ready to continue where the last session left off."
 
 ## Rules
 
-- **Append-only** -- never delete or rewrite entries in `data/handoff-log.md`. After pickup is accepted, append a `<!-- picked-up ... -->` marker on the line after the consumed `<!-- handoff-end -->` marker.
+- **Append-only** -- never delete or rewrite entries in `data/handoff-log.md`. The pickup marker is written by `pickup_marker.py` (Step 5.5), not by the agent directly.
 - **Always show age** — the user needs to know how stale the context is.
 - **Always ask before importing** — don't silently load context.
 - **Actually read the files** — the "Files to Read First" section exists so the agent gets grounded in current code, not just the handoff narrative.
