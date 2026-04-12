@@ -139,8 +139,15 @@ If post-handoff sessions exist, show: "Note: {N} session(s) ran after this hando
 **Pickup import (when triggered):**
 1. Extract full content between `<!-- handoff-start -->` and `<!-- handoff-end -->`
 2. Internalize as working context
-3. Read every file listed in the "Files to Read First" section
-4. Report: "Picked up handoff from {age}. {N} files read."
+3. **Parse the plan-state block (deterministic).** If the handoff contains a `<!-- plan-state-start -->` / `<!-- plan-state-end -->` block, read the YAML inside. Apply this decision logic:
+   - `plan_state: completed` → Tell user: "Previous plan `{plan_slug}` was completed (archived at `{archive_path}`). Starting fresh." Do NOT read the plan file.
+   - `plan_state: active` with `remaining_steps > 0` → Tell user: "Resuming plan `{plan_slug}`: {completed_steps}/{total_steps} steps done." Read `{plan_path}` and treat it as the active plan for this session.
+   - `plan_path` is set but the file is missing → Fall back to `{archive_path}`. Warn user: "Live plan missing, reading archived copy instead."
+   - No plan-state block, or `plan_state: none` → Continue without a plan.
+4. Read every file listed in the "Files to Read First" section
+5. **Write the pickup marker** by running: `python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
+   If it fails, report the error to the user. Do NOT proceed silently.
+6. Report: "Picked up handoff from {age}. {N} files read."
 
 ### Step 2: Project Context
 
@@ -183,6 +190,6 @@ Then ask: "What do you want to work on next?"
 - Use absolute paths and `git -C` patterns (no cd && chaining)
 - Use `--repo {owner}/{repo}` for all gh commands
 - CLAUDE.md and MEMORY.md are already in context — never re-read them
-- `data/handoff-log.md` is append-only -- never delete or rewrite entries. Pickup markers (`<!-- picked-up ... -->`) may be appended after `<!-- handoff-end -->`
+- `data/handoff-log.md` is append-only -- never delete or rewrite entries. Pickup markers are written by `pickup_marker.py` (Step 1C.5), not by the agent directly.
 - `data/session-index.jsonl` is read-only — never modify it
 - If no `.unleashed.json` exists, use defaults: `assemblyZero=false`, `pickupThreshold=10`, no guide, no plan
