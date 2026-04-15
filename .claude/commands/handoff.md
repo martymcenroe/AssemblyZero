@@ -297,17 +297,17 @@ Brief backward-looking record of the session. One entry per session.
 
 **OTHERWISE:**
 
-After persisting the handoff log, spawn a new unleashed session. Auto-onboard (default in v30+) detects the fresh handoff and auto-picks up the context.
+After persisting the handoff log, spawn a new `unleashed-alpha` session. Auto-onboard (default in v30+) detects the fresh handoff and auto-picks up the context. **Always spawn the alpha tier**, not production — this ensures every post-handoff session lands on the current-iteration build so new fixes get exercised. Users who need production can still invoke `unleashed` manually.
 
 1. **Get repo root Windows path:** Convert the git toplevel path to a Windows path with backslashes (e.g. `C:\Users\mcwiz\Projects\AssemblyZero`)
 2. **Get repo name uppercased** for the window title (e.g. `ASSEMBLYZERO`)
 3. **Get Unix-style repo path** for the cd command (e.g. `/c/Users/mcwiz/Projects/AssemblyZero`)
 4. **Spawn via Python** (MSYS2 mangles paths — must go through cmd.exe):
    ```bash
-   python -c "import subprocess; subprocess.Popen(r'wt.exe -w new nt --title \"{REPO_NAME}\" --suppressApplicationTitle -d \"{WINDOWS_PATH}\" \"C:\Program Files\Git\usr\bin\bash.exe\" -l -c \"cd {UNIX_PATH} && unleashed\"', shell=True)"
+   python -c "import subprocess; subprocess.Popen(r'wt.exe -w new nt --title \"{REPO_NAME}\" --suppressApplicationTitle -d \"{WINDOWS_PATH}\" \"C:\Program Files\Git\usr\bin\bash.exe\" -l -c \"cd {UNIX_PATH} && unleashed-alpha\"', shell=True)"
    ```
-   This opens a new Windows Terminal window, cd's to the target repo, and runs `unleashed`. The wrapper auto-injects `/onboard` after Claude's first prompt. Onboard detects the fresh handoff (< 10 min old) and auto-imports it. Zero manual steps.
-5. **Tell user:** "New unleashed session spawning in {REPO_NAME} with auto-onboard."
+   This opens a new Windows Terminal window, cd's to the target repo, and runs `unleashed-alpha`. The wrapper auto-injects `/onboard` after Claude's first prompt. Onboard detects the fresh handoff (< 10 min old) and auto-imports it. Zero manual steps.
+5. **Tell user:** "New unleashed-alpha session spawning in {REPO_NAME} with auto-onboard."
 
 ## Rules
 
