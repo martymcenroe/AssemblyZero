@@ -155,29 +155,80 @@ poetry run python {{TOOLS_DIR}}/append_session_log.py \
 
 If no session log tool exists, manually append to the current day's session log.
 
-## Phase 4: Single Commit & Push (SKIP FOR QUICK MODE)
+## Phase 4: Commit Session Artifacts via Tracked PR (SKIP FOR QUICK MODE)
 
 **If mode is `quick`: SKIP this entire phase. Go directly to Phase 5.**
 
-Stage all documentation changes:
+**Scope (critical — do NOT expand without secret-scan + size-gate mitigations):** this phase is INTENTIONALLY NARROW. Auto-staging user code risks committing secrets, binaries, and drafts (see AssemblyZero #920).
+
+**ALLOWED paths** (auto-staged):
+- `docs/session-logs/*.md`
+- `docs/lessons-learned.md`
+- `data/session-index.jsonl`
+- `data/pickup-status.json`
+
+**DENIED patterns** (NEVER staged, even if changed):
+- Credentials: `*.env*`, `*.dev.vars*`, `*.pem`, `*.key`, anything matching `*secret*`, `*credential*`, `*token*` in filename
+- Binaries/opaque: `*.zip`, `*.pptx`, `*.mp4`, `*.wav`, `*.mov`, `*.ipynb`, any file `>10MB`
+- Content: `drafts/**`, anything outside the ALLOWED list
+
+### 4.1 — Detect ALLOWED-scope changes
+
 ```bash
-git -C {{PROJECT_ROOT}} add docs/session-logs/
+git -C {{PROJECT_ROOT}} status --porcelain
 ```
 
-Review staged changes:
+- If no ALLOWED-scope files changed: skip to Phase 5.
+- If NON-ALLOWED files also changed: stage only ALLOWED; REPORT the others.
+
+### 4.2 — Detect branch protection
+
 ```bash
-git -C {{PROJECT_ROOT}} status
+gh api repos/{{GITHUB_REPO}}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
 ```
 
-Commit (ONE commit for everything):
+- `true` → tracked-PR flow (4.3).
+- `false` / error → direct-push fallback (4.9).
+
+### 4.3 — Tracked-PR flow
+
 ```bash
-git -C {{PROJECT_ROOT}} commit -m "docs: [MODE] cleanup $(powershell.exe -Command "Get-Date -Format 'yyyy-MM-dd'")"
+# Create tracking issue
+gh issue create --repo {{GITHUB_REPO}} \
+  --title "chore: session cleanup [DATE] — [SESSION_NAME]" \
+  --body "Auto-created by /cleanup. Session: [SESSION_NAME]"
+# Capture ISSUE_N from returned URL
+
+BRANCH="cleanup-[DATE]-[session-slug]"
+git -C {{PROJECT_ROOT}} checkout -b $BRANCH
+git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE] (Closes #${ISSUE_N})"
+git -C {{PROJECT_ROOT}} push -u origin $BRANCH
+
+gh pr create --repo {{GITHUB_REPO}} --head $BRANCH --base main \
+  --title "chore: session cleanup [DATE] (Closes #${ISSUE_N})" \
+  --body "Session artifacts. Closes #${ISSUE_N}"
+# Capture PR_N
+
+# Wait for checks, merge, cleanup
+until [ "$(gh api repos/{{GITHUB_REPO}}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
+gh pr merge $PR_N --squash --repo {{GITHUB_REPO}}
+git -C {{PROJECT_ROOT}} checkout main
+git -C {{PROJECT_ROOT}} pull --rebase
+git -C {{PROJECT_ROOT}} branch -D $BRANCH
 ```
 
-Push:
+### 4.9 — Direct-push fallback (unprotected main)
+
 ```bash
+git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE]"
 git -C {{PROJECT_ROOT}} push
 ```
+
+### 4.10 — Failure handling
+
+If any tracked-PR step fails: STOP and REPORT. Do NOT use `--admin` or `--no-verify`.
 
 ## Phase 5: Verification (PARALLEL)
 
