@@ -61,7 +61,6 @@ Select **All repositories** (public and private).
 | Pages | Read and Write | Wiki pages, GitHub Pages deployments |
 | Pull requests | Read and Write | Create/merge PRs |
 | Webhooks | Read and Write | Webhook management (sentinel, etc.) |
-| Workflows | Read and Write | Create/modify `.github/workflows/` files |
 
 **Read-only (auto-enabled):**
 
@@ -69,12 +68,13 @@ Select **All repositories** (public and private).
 |------------|--------|-----|
 | Metadata | Read-only | Required by GitHub (cannot change) |
 
-**DO NOT GRANT (the only two that matter):**
+**DO NOT GRANT (the three that matter):**
 
 | Permission | Why NOT |
 |------------|---------|
 | **Administration** | Would allow bypassing branch protection (`--admin`) |
 | **Secrets** | Agents must never access repo secrets |
+| **Workflows** | Would allow the agent to modify its own governance workflows (`.github/workflows/pr-sentinel.yml`, `auto-reviewer.yml`). Agents must not modify their own guardrails. Pushing workflow files is a human task — switch to a classic PAT temporarily, see [0927 - New Repo: Human Checklist](0927-new-repo-human-checklist.md) steps 1 and 3. |
 
 Everything else not listed above: leave at **No access**.
 
@@ -214,3 +214,4 @@ This token is one layer in a three-layer defense:
 |------|--------|
 | 2026-03-07 | Initial runbook created |
 | 2026-03-07 | Updated permissions: grant Actions, Commit statuses, Dependabot alerts, Pages, Webhooks, Workflows. Block only Administration + Secrets. All repos scope. |
+| 2026-04-18 | **Correction:** removed `Workflows` from granted permissions and added to DO NOT GRANT list. The agent PAT must not be able to modify its own governance workflows. Workflow pushes are a human task via classic PAT. Aligns with 0927, 0926, and Standard 0016. (Closes #924) |

@@ -4654,8 +4654,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/runbooks/0924-implementation-spec-feature-inventory-as-code-node.md | 0924-implementation-spec-feature-inventory-as-code-node.md | Runbooks | Active |
 | docs/runbooks/0925-agent-token-setup.md | 0925-agent-token-setup.md | Runbooks | Active |
 | docs/runbooks/0926-branch-protection-setup.md | 0926-branch-protection-setup.md | Runbooks | Active |
-| docs/runbooks/0927-ai-cli-tools-reference.md | 0927-ai-cli-tools-reference.md | Runbooks | Active |
 | docs/runbooks/0927-new-repo-human-checklist.md | 0927-new-repo-human-checklist.md | Runbooks | Active |
+| docs/runbooks/0929-ai-cli-tools-reference.md | 0929-ai-cli-tools-reference.md | Runbooks | Active |
 | docs/security/secret-guard-briefing.md | secret-guard-briefing.md | Security | Active |
 | docs/session-logs/2026-01-13.md | 2026-01-13.md | Session-logs | Active |
 | docs/session-logs/2026-01-14.md | 2026-01-14.md | Session-logs | Active |
