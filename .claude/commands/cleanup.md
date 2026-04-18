@@ -245,19 +245,118 @@ Content:
 - **Next:** Per user direction
 ```
 
-## Phase 4: Single Commit & Push
+## Phase 4: Commit Session Artifacts via Tracked PR
 
-Stage ALL pending doc changes:
+**Scope (critical — do NOT expand without addressing #920 risks):** this phase is INTENTIONALLY NARROW. It stages only session artifacts, never user code, binaries, or drafts. Expanding scope (auto-committing user work) requires the secret-scan, size-gate, and policy-file mitigations tracked in #920 Phase 2+.
+
+**ALLOWED paths** (auto-staged):
+- `docs/session-logs/*.md`
+- `docs/lessons-learned.md`
+- `data/session-index.jsonl`
+- `data/pickup-status.json`
+- `.claude/commands/*.md` (AssemblyZero only — skill sync)
+- `.claude/hooks/*.sh` (AssemblyZero only — hook sync)
+
+**DENIED patterns** (NEVER staged, even if changed — report only so user handles separately):
+- Credentials: `*.env*`, `*.dev.vars*`, `*.pem`, `*.key`, anything matching `*secret*`, `*credential*`, `*token*` in filename
+- Binaries/opaque: `*.zip`, `*.pptx`, `*.mp4`, `*.wav`, `*.mov`, `*.ipynb`, any file `>10MB`
+- Content: `drafts/**`, anything outside the ALLOWED list
+
+### 4.1 — Detect ALLOWED-scope changes
+
 ```bash
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/ CLAUDE.md .github/workflows/ .claude/
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} status --porcelain
 ```
 
-Review and commit:
+- If no ALLOWED-scope files are modified/untracked: skip to Phase 5.
+- If NON-ALLOWED files are ALSO modified: stage only the ALLOWED ones; REPORT the non-allowed list to the user so they can handle it separately. Do NOT block cleanup.
+
+### 4.2 — Detect branch protection
+
 ```bash
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} status
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "docs: {MODE} cleanup $(powershell.exe -Command "Get-Date -Format 'yyyy-MM-dd'")"
+gh api repos/{GITHUB_REPO}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
+```
+
+- Output `true`: main is protected → use tracked-PR flow (4.3).
+- Output `false` / error / 404: main is unprotected → use direct-push fallback (4.9).
+
+### 4.3 — Tracked-PR flow (protected main)
+
+**a) Create tracking issue:**
+```bash
+gh issue create --repo {GITHUB_REPO} \
+  --title "chore: session cleanup {DATE} — {SESSION_NAME}" \
+  --body "Auto-created by /cleanup to track session-artifact commit.
+
+Files:
+{LIST_OF_ALLOWED_FILES}
+
+Session: {SESSION_NAME}"
+```
+Capture issue number from the URL → `ISSUE_N`.
+
+**b) Branch + stage ALLOWED paths + commit:**
+```bash
+BRANCH="cleanup-{DATE}-{session-slug}"
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout -b $BRANCH
+# Stage only ALLOWED paths (ignore errors for paths that don't apply to this project):
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/lessons-learned.md 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add data/session-index.jsonl 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add data/pickup-status.json 2>/dev/null
+# AssemblyZero only (skill + hook sync):
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add .claude/commands/ 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add .claude/hooks/ 2>/dev/null
+# Review what's staged:
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} diff --cached --stat
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "chore: session cleanup {DATE} (Closes #${ISSUE_N})
+
+Session: {SESSION_NAME}
+
+Co-Authored-By: Claude [model] <noreply@anthropic.com>"
+```
+
+**c) Push and open PR:**
+```bash
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} push -u origin $BRANCH
+gh pr create --repo {GITHUB_REPO} --head $BRANCH --base main \
+  --title "chore: session cleanup {DATE} (Closes #${ISSUE_N})" \
+  --body "## Summary
+
+Session cleanup artifacts from \`{SESSION_NAME}\`.
+
+{git diff --cached --stat output}
+
+Closes #${ISSUE_N}"
+```
+Capture PR number → `PR_N`.
+
+**d) Wait for checks, merge, clean up branch:**
+```bash
+until [ "$(gh api repos/{GITHUB_REPO}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
+gh pr merge $PR_N --squash --repo {GITHUB_REPO}
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout main
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} pull --rebase
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -D $BRANCH
+```
+
+### 4.9 — Direct-push fallback (unprotected main only)
+
+If 4.2 detected no protection:
+```bash
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "chore: session cleanup {DATE} — {SESSION_NAME}"
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} push
 ```
+
+### 4.10 — Failure handling
+
+If ANY step in 4.3 fails: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, or bypass branch protection. Report:
+- Tracking issue number (may need manual closure)
+- Branch name (may need manual push/merge)
+- Files still uncommitted
+
+Let the user decide the next step.
 
 ## Phase 5: Verification (PARALLEL)
 
