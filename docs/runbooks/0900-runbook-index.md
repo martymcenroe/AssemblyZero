@@ -44,9 +44,9 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0923 | [Workflow Recovery and --resume](0923-workflow-recovery.md) | Manual | On interruption | - |
 | 0925 | [Agent Token Setup](0925-agent-token-setup.md) | Manual | Quarterly (rotation) | - |
 | 0926 | [Branch Protection Setup](0926-branch-protection-setup.md) | Manual | On new repo | - |
-| 0927 | [AI CLI Tools Reference](0927-ai-cli-tools-reference.md) | Reference | - | All |
-| 0928 | [New Repo: Human Checklist](0927-new-repo-human-checklist.md) | Manual | On new repo | - |
-| 0929 | [Cloudflare Zone Setup](0928-cloudflare-zone-setup.md) | Manual | On new domain | - |
+| 0927 | [New Repo: Human Checklist](0927-new-repo-human-checklist.md) | Manual | On new repo | - |
+| 0928 | [Cloudflare Zone Setup](0928-cloudflare-zone-setup.md) | Manual | On new domain | - |
+| 0929 | [AI CLI Tools Reference](0929-ai-cli-tools-reference.md) | Reference | - | All |
 
 ## Model Selection Guide
 
@@ -61,7 +61,7 @@ When running audits or tasks, use the appropriate model to balance cost and capa
 | **GPT-5.4 (Codex)** | With ChatGPT sub | Security-sensitive execution (native sandbox) |
 
 See `docs/0800-common-audits.md` for per-audit model recommendations.
-See [0927](0927-ai-cli-tools-reference.md) for full tool comparison.
+See [0929](0929-ai-cli-tools-reference.md) for full tool comparison.
 
 ## Extended Thinking / Reasoning Effort
 

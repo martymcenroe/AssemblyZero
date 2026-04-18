@@ -1,8 +1,8 @@
 # 0926 - Branch Protection Setup (Manual)
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.0
-**Last Updated:** 2026-03-18
+**Version:** 2.1
+**Last Updated:** 2026-04-18
 
 ---
 
@@ -11,6 +11,16 @@
 Configure branch protection for new repos when the agent PAT cannot do it. The fine-grained PAT deliberately excludes Administration scope (see [0925](0925-agent-token-setup.md)), so branch protection must be set manually via browser.
 
 **When to use:** After creating a new repo and pushing at least one commit, or after any repo creation where the agent reports a 403 on branch protection.
+
+> ### ⚠️ Mechanism mismatch — read before following these steps
+>
+> This runbook uses GitHub's newer **Rulesets** UI. However, `tools/new_repo_setup.py` uses the **classic Branch Protection API** (`PUT /repos/{owner}/{repo}/branches/main/protection`), as does every script in the fleet (`fix_branch_protections.py`, `deploy_auto_reviewer_fleet.py`, `github_protection_audit.py`). All 48+ protected repos in the fleet use classic branch protection, not rulesets.
+>
+> **If the script ran successfully:** you do NOT need this runbook. The script already set classic branch protection correctly.
+>
+> **If you follow the manual steps below:** the resulting ruleset works functionally (same rules enforced), but the repo will appear as a ruleset-protected outlier in `data/branch-protection-audit.csv` instead of matching the fleet majority. Known outlier of this type: `patent-general` (#748 history).
+>
+> **Preferred recovery path when the script fails on branch protection:** re-run only the `configure_branch_protection()` step with a classic PAT. This keeps the repo consistent with the fleet. Full alignment to classic-protection manual steps is tracked under #924.
 
 ---
 
@@ -119,3 +129,4 @@ git checkout -- README.md
 |------|--------|
 | 2026-03-09 | Initial runbook created (from patent-general setup experience) |
 | 2026-03-18 | v2.0: Reordered rules to match GitHub UI top-to-bottom. Added Cerberus-AZ step. Changed required approvals from 0 to 1 (Cerberus auto-approves). Removed smart quotes and ambiguous backtick formatting from values. |
+| 2026-04-18 | v2.1: Added mechanism-mismatch warning. Manual steps use Rulesets; the script and fleet use classic Branch Protection API. (Closes #924) |

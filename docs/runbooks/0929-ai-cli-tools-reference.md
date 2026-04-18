@@ -1,8 +1,10 @@
-# 0927 - AI CLI Tools Reference
+# 0929 - AI CLI Tools Reference
 
 **Category:** Runbook / Reference
-**Version:** 1.0
-**Last Updated:** 2026-03-09
+**Version:** 1.1
+**Last Updated:** 2026-04-18
+
+> **Renumbered from 0927 → 0929** to resolve a filename collision with `0927-new-repo-human-checklist.md`. (Closes #924)
 
 ---
 

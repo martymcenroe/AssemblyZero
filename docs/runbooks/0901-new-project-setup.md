@@ -25,6 +25,8 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 | AssemblyZero cloned | `ls /c/Users/mcwiz/Projects/AssemblyZero` |
 | GitHub CLI | `gh auth status` |
 
+> **PAT dance required.** The setup script pushes `.github/workflows/` files, which needs a classic PAT (the fine-grained agent PAT deliberately lacks `workflow` scope). Switch to classic PAT before running, then switch back immediately after. Full procedure: [0927 - New Repo: Human Checklist](0927-new-repo-human-checklist.md) steps 1 and 3.
+
 ---
 
 ## Quick Start (Automated)
@@ -141,7 +143,7 @@ options:
 
 ### 1. Deploy Cerberus Secrets (If Needed)
 
-The script deploys PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`) and configures branch protection automatically. The only remaining step is ensuring Cerberus secrets exist on the new repo. See [0927 - Human Checklist](0927-new-repo-human-checklist.md) step 2 for the fleet-wide deploy process.
+The script deploys PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`) and configures branch protection automatically. The only remaining step is ensuring Cerberus secrets exist on the new repo. See the [Cerberus secrets section of the Human Checklist](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed) for the fleet-wide deploy process.
 
 ### 2. Add Advanced Hooks (Optional)
 
@@ -151,13 +153,13 @@ The script creates a minimal `settings.json` without hooks. For worktree protect
 poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject
 ```
 
-### 4. Set Up Encrypted Ideas Folder (Optional)
+### 3. Set Up Encrypted Ideas Folder (Optional)
 
 ```bash
 poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/assemblyzero-generate.py --project MyNewProject --ideas
 ```
 
-### 5. Customize CLAUDE.md
+### 4. Customize CLAUDE.md
 
 Edit `MyNewProject/CLAUDE.md` to add project-specific:
 - Workflow rules
@@ -165,7 +167,7 @@ Edit `MyNewProject/CLAUDE.md` to add project-specific:
 - Forbidden commands
 - Integration details
 
-### 6. Create First Issue
+### 5. Create First Issue
 
 ```bash
 gh issue create --repo your-username/MyNewProject --title "Initial setup" --body "Project scaffolded with AssemblyZero"
