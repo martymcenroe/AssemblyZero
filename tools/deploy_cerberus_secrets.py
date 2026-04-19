@@ -45,6 +45,46 @@ def set_secret(repo: str, name: str, value: str) -> bool:
     return result.returncode == 0
 
 
+def deploy_to_repo(repo: str, pem_content: str) -> tuple[bool, list[str]]:
+    """Deploy REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY to a single repo.
+
+    Args:
+        repo: Repo name (not owner/name) under GITHUB_USER.
+        pem_content: The raw .pem file contents.
+
+    Returns:
+        (success, failed_secret_names). `success` is True iff both secrets set.
+    """
+    failed: list[str] = []
+    if not set_secret(repo, "REVIEWER_APP_ID", APP_ID):
+        failed.append("REVIEWER_APP_ID")
+    if not set_secret(repo, "REVIEWER_APP_PRIVATE_KEY", pem_content):
+        failed.append("REVIEWER_APP_PRIVATE_KEY")
+    return (len(failed) == 0, failed)
+
+
+def verify_secrets(repo: str) -> tuple[bool, list[str]]:
+    """Check that both required Cerberus secrets are present on the repo.
+
+    Args:
+        repo: Repo name (not owner/name) under GITHUB_USER.
+
+    Returns:
+        (all_present, missing_secret_names).
+    """
+    required = {"REVIEWER_APP_ID", "REVIEWER_APP_PRIVATE_KEY"}
+    result = subprocess.run(
+        ["gh", "api", f"repos/{GITHUB_USER}/{repo}/actions/secrets",
+         "--jq", ".secrets[].name"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return (False, sorted(required))
+    present = {n.strip() for n in result.stdout.split("\n") if n.strip()}
+    missing = sorted(required - present)
+    return (len(missing) == 0, missing)
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem")
@@ -79,20 +119,12 @@ def main():
 
     for i, repo in enumerate(repos, 1):
         prefix = f"[{i}/{len(repos)}] {repo}"
-
-        ok_id = set_secret(repo, "REVIEWER_APP_ID", APP_ID)
-        ok_key = set_secret(repo, "REVIEWER_APP_PRIVATE_KEY", pem_content)
-
-        if ok_id and ok_key:
+        ok, failed_names = deploy_to_repo(repo, pem_content)
+        if ok:
             print(f"  {prefix}: OK")
             succeeded += 1
         else:
-            parts = []
-            if not ok_id:
-                parts.append("APP_ID")
-            if not ok_key:
-                parts.append("PRIVATE_KEY")
-            print(f"  {prefix}: FAILED ({', '.join(parts)})")
+            print(f"  {prefix}: FAILED ({', '.join(failed_names)})")
             failed.append(repo)
 
     print(f"\n{'=' * 50}")

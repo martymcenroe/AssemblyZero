@@ -39,6 +39,13 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from assemblyzero_config import config
 
+# Cerberus secret deploy helpers (used by --cerberus-pem flag)
+try:
+    from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
+
 
 # ---------------------------------------------------------------------------
 # Schema types and exceptions
@@ -1274,6 +1281,65 @@ def audit_structure(project_path: Path, name: str) -> int:
         return 1
 
 
+def _deploy_cerberus(repo_name: str, pem_path: Path) -> str:
+    """Deploy Cerberus secrets to a single repo and handle pem file lifecycle.
+
+    Reads the .pem file, deploys REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
+    to the specified repo, verifies they landed, deletes the .pem, and
+    prints a reminder to revoke the key in the app UI.
+
+    Args:
+        repo_name: The new repo name (lowercased, owner-less).
+        pem_path: Path to the Cerberus App .pem file.
+
+    Returns a short status string for the summary table.
+    """
+    print("\n" + "=" * 60)
+    print("CERBERUS SECRETS DEPLOY")
+    print("=" * 60)
+
+    if not pem_path.exists():
+        print(f"  ERROR: .pem file not found: {pem_path}")
+        return "PEM_MISSING"
+
+    pem_content = pem_path.read_text(encoding="utf-8").strip()
+    if "PRIVATE KEY" not in pem_content:
+        print(f"  ERROR: File does not look like a private key: {pem_path}")
+        return "INVALID_PEM"
+
+    print(f"  Target repo: {repo_name}")
+    print(f"  .pem file:   {pem_path.name} ({len(pem_content)} chars)")
+
+    ok, failed = deploy_to_repo(repo_name, pem_content)
+    if not ok:
+        print(f"  FAILED to deploy: {', '.join(failed)}")
+        print(f"  .pem file NOT deleted — retry manually:")
+        print(f"    poetry run python tools/deploy_cerberus_secrets.py {pem_path}")
+        return f"FAILED: {', '.join(failed)}"
+    print("  Secrets set.")
+
+    ok, missing = verify_secrets(repo_name)
+    if not ok:
+        print(f"  WARNING: verification failed; missing {missing}")
+        print(f"  .pem file NOT deleted — investigate before deleting.")
+        return f"UNVERIFIED: {', '.join(missing)}"
+    print("  Secrets verified on GitHub (both REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY present).")
+
+    try:
+        pem_path.unlink()
+        print(f"  .pem file deleted: {pem_path}")
+    except OSError as e:
+        print(f"  WARNING: could not delete .pem file: {e}")
+        print(f"  DELETE MANUALLY: {pem_path}")
+
+    print()
+    print("  NEXT STEP (browser-only, cannot be automated):")
+    print("    Revoke the key you just used in the GitHub App UI:")
+    print("    https://github.com/settings/apps/cerberus-az > Private keys > Revoke")
+
+    return "OK"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Scaffold a new repository with AssemblyZero structure",
@@ -1323,8 +1389,24 @@ Examples:
         default="polyform",
         help="License type (default: polyform)"
     )
+    parser.add_argument(
+        "--cerberus-pem",
+        metavar="PATH",
+        default=None,
+        help="Path to Cerberus App .pem file. When provided, after repo "
+             "creation the script deploys REVIEWER_APP_ID and "
+             "REVIEWER_APP_PRIVATE_KEY secrets to the new repo, verifies "
+             "they landed, deletes the .pem file, and prints a reminder "
+             "to revoke the key in the app UI. When omitted, runbook "
+             "0927 step 4 is printed as manual fallback."
+    )
 
     args = parser.parse_args()
+
+    # --cerberus-pem requires --no-github not set (need the repo to deploy to)
+    if args.cerberus_pem and args.no_github:
+        print("ERROR: --cerberus-pem requires GitHub repo creation (cannot be combined with --no-github)")
+        sys.exit(1)
 
     # Validate name
     valid, error = validate_name(args.name)
@@ -1608,6 +1690,11 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     if checks_passed < checks_total:
         print("\nWARNING: Some checks failed. Review and fix before starting work!")
 
+    # Cerberus secrets deploy (if --cerberus-pem provided, and repo was created)
+    cerberus_status: str | None = None
+    if not args.no_github and push_succeeded and args.cerberus_pem:
+        cerberus_status = _deploy_cerberus(args.name.lower(), Path(args.cerberus_pem))
+
     # Final summary
     if not args.no_github:
         print("\n" + "=" * 60)
@@ -1619,6 +1706,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print(f"  Push:               {'OK' if push_succeeded else 'FAILED'}")
         print(f"  Repo settings:      {'OK' if repo_settings_ok else 'FAILED — configure manually'}")
         print(f"  Branch protection:  {'OK' if protection_ok else 'FAILED — configure manually or re-run with classic PAT'}")
+        if cerberus_status is not None:
+            print(f"  Cerberus secrets:   {cerberus_status}")
 
     print("\n" + "=" * 60)
     print(f"[SUCCESS] Repository '{args.name}' created!")
@@ -1632,7 +1721,19 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  #   gh auth login -h github.com -p https  # classic PAT")
             print("  #   git push -u origin main")
             print("  #   gh auth login -h github.com -p https  # fine-grained PAT")
-    print("  # Deploy Cerberus secrets: see runbook 0927")
+    if args.cerberus_pem is None and not args.no_github:
+        print()
+        print("  # Cerberus secrets (manual):")
+        print("  #   Without secrets, PRs pass pr-sentinel but are never auto-approved.")
+        print("  #   1. https://github.com/settings/apps/cerberus-az > Private keys > Generate")
+        print("  #   2. poetry run python tools/deploy_cerberus_secrets.py /path/to/downloaded.pem")
+        print("  #   3. Delete the .pem, revoke the key in the app UI")
+        print("  #   See runbook 0927 step 4 for full procedure.")
+        print("  #   OR re-run this script with --cerberus-pem PATH to automate.")
+    elif cerberus_status == "OK":
+        print()
+        print("  # Cerberus secrets deployed and verified.")
+        print("  # REMEMBER to revoke the key in the app UI (browser-only step).")
 
 
 if __name__ == "__main__":

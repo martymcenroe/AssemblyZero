@@ -55,30 +55,48 @@ gh auth login -h github.com -p https
 
 ### 4. Deploy Cerberus secrets (if needed)
 
-The auto-reviewer needs two secrets per repo: `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`. These are deployed **fleet-wide** — the script covers ALL repos at once, not just the new one.
+The auto-reviewer needs two secrets per repo: `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`. Without them, PRs pass pr-sentinel but don't get auto-approved.
 
-**Skip this step if** you've deployed Cerberus secrets since the last time you created a repo (the new repo is already covered by the fleet-wide install).
+**Skip this step if** you've deployed Cerberus secrets since the last time you created a repo (the new repo may already be covered).
 
-**If the new repo needs secrets**, follow this checklist as one uninterrupted sequence. Run all commands in your own git-bash (never an agent session):
+Two ways to do this: **preferred** (integrated into `new_repo_setup.py`) or **fallback** (standalone fleet-wide script).
+
+#### Preferred: pass `--cerberus-pem PATH` to `new_repo_setup.py`
+
+When you invoke `new_repo_setup.py` with the flag, the script handles steps 3-5 below automatically after the repo is created:
 
 1. Go to https://github.com/settings/apps/cerberus-az > Private keys
 2. Click **Generate a private key** — browser downloads a `.pem` file
-   (generating a new key does NOT invalidate existing keys)
+3. Run the setup script with the flag (re-using the same invocation if this is the first time):
+   ```bash
+   cd /c/Users/mcwiz/Projects/AssemblyZero
+   poetry run python tools/new_repo_setup.py MyNewRepo --cerberus-pem /c/Users/mcwiz/Downloads/THE-FILE.pem
+   ```
+   The script deploys both secrets to ONLY the new repo, verifies they landed via `gh api`, then deletes the `.pem`.
+4. Go to https://github.com/settings/apps/cerberus-az > Private keys
+5. Click **Revoke** on the key you just generated (browser-only — the GitHub App management API does not expose programmatic revocation).
+
+#### Fallback: standalone fleet-wide script
+
+Use this path if the new repo was already created (without the flag) or if you want to deploy to multiple repos at once.
+
+1. Go to https://github.com/settings/apps/cerberus-az > Private keys
+2. Click **Generate a private key** — browser downloads a `.pem` file
 3. Deploy to all repos:
    ```bash
    cd /c/Users/mcwiz/Projects/AssemblyZero
    poetry run python tools/deploy_cerberus_secrets.py /c/Users/mcwiz/Downloads/THE-FILE.pem
    ```
-4. **Verify:** Look for `OK` next to your new repo name in the output
+4. **Verify:** Look for `OK` next to your new repo name in the output.
 5. **Delete the .pem file immediately:**
    ```bash
    rm /c/Users/mcwiz/Downloads/THE-FILE.pem
    ```
 6. Go back to https://github.com/settings/apps/cerberus-az > Private keys
-7. Click **Revoke** on the key you just generated (most recent one)
-   - The secrets are already stored in GitHub Actions — the .pem is never needed again
-   - Revoking prevents the key from being used if the file wasn't fully deleted
-   - **Note:** GitHub Apps require at least one active key. If only one key exists, you cannot revoke it. File deletion (step 5) is your only protection.
+7. Click **Revoke** on the key you just generated.
+   - The secrets are already stored in GitHub Actions — the .pem is never needed again.
+   - Revoking prevents the key from being used if the file wasn't fully deleted.
+   - **Note:** GitHub Apps require at least one active key. If only one exists, you cannot revoke it. File deletion (step 5) is your only protection.
 8. **Done.** Secrets deployed, .pem deleted, key revoked.
 
 **What happens without secrets:** PRs pass pr-sentinel but don't get auto-approved. You can merge manually via the GitHub UI until secrets are deployed.
