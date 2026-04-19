@@ -24,6 +24,7 @@ See: docs/standards/0009-canonical-project-structure.md
 import argparse
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -1562,21 +1563,32 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("=" * 60)
 
         # Detect PAT type and warn about workflow scope
-        try:
-            auth_result = subprocess.run(
-                ["gh", "auth", "status"],
-                capture_output=True, text=True, timeout=15,
-            )
-            auth_output = auth_result.stdout + auth_result.stderr
-            if "github_pat_" in auth_output:
-                print("\n  NOTE: Fine-grained PAT detected.")
-                print("  Workflow files (.github/workflows/) require 'workflow' scope.")
-                print("  If push fails, switch to classic PAT:")
-                print("    gh auth login -h github.com -p https")
-                print("  Then push manually: git push -u origin main")
-                print("  Then switch back to fine-grained PAT.\n")
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+        if os.environ.get("GH_TOKEN"):
+            # User has set GH_TOKEN (the preferred env-scoped path). Assume they
+            # pointed it at a classic PAT and skip the "swap your auth" warning —
+            # it will only confuse them.
+            print("\n  NOTE: GH_TOKEN env var detected. gh CLI will use it for all")
+            print("  calls this run. If it maps to a classic PAT with workflow +")
+            print("  admin scopes, privileged operations will succeed.\n")
+        else:
+            try:
+                auth_result = subprocess.run(
+                    ["gh", "auth", "status"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                auth_output = auth_result.stdout + auth_result.stderr
+                if "github_pat_" in auth_output:
+                    print("\n  NOTE: Fine-grained PAT detected and GH_TOKEN not set.")
+                    print("  Workflow files (.github/workflows/) require 'workflow' scope.")
+                    print("  Preferred: re-run with env-scoped classic PAT:")
+                    print("    env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \\")
+                    print("      poetry run python tools/new_repo_setup.py ... --cerberus-pem ...")
+                    print("  Fallback: switch gh auth storage manually:")
+                    print("    gh auth login -h github.com -p https  # paste classic PAT")
+                    print("    [re-run script]")
+                    print("    gh auth login -h github.com -p https  # paste fine-grained PAT back\n")
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
 
         # Step 13: Create GitHub repo
         repo_name_lower = args.name.lower()
@@ -1596,9 +1608,18 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  The local repo is fully valid. To finish manually:")
             print("    1. Create repo at https://github.com/new")
             print(f"    2. git remote add origin https://github.com/{github_user}/{repo_name_lower}.git")
-            print("    3. gh auth login -h github.com -p https  # classic PAT with workflow scope")
-            print("    4. git push -u origin main")
-            print("    5. gh auth login -h github.com -p https  # back to fine-grained PAT")
+            if os.environ.get("GH_TOKEN"):
+                print("    3. GH_TOKEN is set but the scope was insufficient — check that your")
+                print("       gpg-decrypted classic PAT has 'repo' + 'workflow' + 'admin:repo_hook'")
+                print("    4. git push -u origin main")
+            else:
+                print("    3. Re-run the script with env-scoped classic PAT (preferred):")
+                print("       env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \\")
+                print(f"         poetry run python tools/new_repo_setup.py {args.name} ...")
+                print("       — OR legacy fallback —")
+                print("       gh auth login -h github.com -p https  # paste classic PAT")
+                print("       git push -u origin main")
+                print("       gh auth login -h github.com -p https  # paste fine-grained PAT back")
 
         if github_created:
             # Step 14: Star the repo
@@ -1717,10 +1738,12 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         repo_name_lower = args.name.lower()
         print(f"  # Repository: https://github.com/{github_user}/{repo_name_lower}")
         if not push_succeeded:
-            print("  # IMPORTANT: Push failed. Switch to classic PAT and push:")
-            print("  #   gh auth login -h github.com -p https  # classic PAT")
+            print("  # IMPORTANT: Push failed. Preferred recovery — env-scoped classic PAT:")
+            print("  #   env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) git push -u origin main")
+            print("  # Fallback — swap gh auth storage:")
+            print("  #   gh auth login -h github.com -p https  # paste classic PAT")
             print("  #   git push -u origin main")
-            print("  #   gh auth login -h github.com -p https  # fine-grained PAT")
+            print("  #   gh auth login -h github.com -p https  # paste fine-grained PAT back")
     if args.cerberus_pem is None and not args.no_github:
         print()
         print("  # Cerberus secrets (manual):")

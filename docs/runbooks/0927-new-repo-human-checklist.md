@@ -1,57 +1,93 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 3.0
-**Last Updated:** 2026-04-08
+**Version:** 4.0
+**Last Updated:** 2026-04-18
 
 ---
 
 ## Purpose
 
-The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, and initial push in one command.
+The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
 
-The human handles only what the script can't: PAT switching for workflow files, Cerberus secret deployment, and optional wiki/domain setup.
+The human handles only what the script genuinely can't: supplying a classic PAT for privileged operations (workflow push + branch protection), downloading the Cerberus `.pem` from the browser, and revoking the Cerberus key when done.
+
+---
+
+## One-time setup (do this once, reuse forever)
+
+**Encrypt your classic PAT with gpg** so you never paste it interactively again:
+
+```bash
+# Generate a classic PAT at https://github.com/settings/tokens with scopes:
+#   repo + workflow + admin:repo_hook
+# Then encrypt it:
+echo '<paste-your-classic-pat-here>' | gpg -c -o ~/.secrets/classic-pat.gpg
+# You'll be prompted for a passphrase — remember it; you'll enter it once per shell session
+```
+
+**Tighten gpg-agent caching (optional but recommended):**
+
+```bash
+mkdir -p ~/.gnupg
+echo 'default-cache-ttl 0' >> ~/.gnupg/gpg-agent.conf
+echo 'max-cache-ttl 0' >> ~/.gnupg/gpg-agent.conf
+gpgconf --kill gpg-agent
+```
+
+With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (instead of caching for ~10 minutes). Your choice on the ergonomics-vs-security tradeoff.
 
 ---
 
 ## Checklist
 
-### 1. Switch to classic PAT (required for workflow files)
-
-The setup script creates `.github/workflows/` files. Pushing these requires a PAT with `workflow` scope. The fine-grained PAT deliberately lacks this scope (agents must not modify their own guardrails).
-
-```bash
-gh auth login -h github.com -p https
-# Paste classic PAT with: repo + workflow scopes
-# Get one from: https://github.com/settings/tokens
-```
-
-### 2. Run the setup script
+### 1. Run the setup script with env-scoped classic PAT (preferred)
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} [--public] [--license mit]
+env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \
+  poetry run python tools/new_repo_setup.py {name} [--public] [--license mit] [--cerberus-pem PATH]
 ```
+
+**Why `env VAR=VALUE command` instead of `export`:**
+- The variable is scoped to the single command's process tree
+- When the script exits, `GH_TOKEN` ceases to exist — no `unset` to forget
+- Never touches `gh auth` storage, so the classic PAT isn't left sitting there for other agents
+
+**What `GH_TOKEN` does:** the `gh` CLI documented behavior is to honor `GH_TOKEN` over whatever's in `gh auth` storage for the duration of the process. Every privileged `gh` call inside the script (workflow push, branch protection, secret set) transparently uses the classic PAT.
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
 - GitHub repo creation (forced lowercase) via `gh repo create --source . --push`
 - Repo settings: wiki disabled, projects disabled, squash-only merge, delete branch on merge
 - Branch protection: require PR (1 review), block force push, block deletion, enforce_admins, pr-sentinel check
-- PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`)
+- PR governance workflow (`auto-reviewer.yml` — pr-sentinel check comes from the Cloudflare Worker fleet-wide)
 - `.unleashed.json`, `.claude/settings.json`, security hooks
 - Initial commit and push
+- Cerberus secrets deploy (if `--cerberus-pem` supplied)
 
-The script prints a summary showing what succeeded and what failed. If push fails, it prints manual steps.
+The script prints a summary showing what succeeded and what failed.
 
-### 3. Switch back to fine-grained PAT (immediately)
+### 2. Legacy fallback — `gh auth login` swap (if you haven't set up gpg)
+
+If you haven't done the one-time gpg setup, you can still use the legacy two-paste swap:
 
 ```bash
-gh auth login -h github.com -p https
-# Paste fine-grained PAT
+gh auth login -h github.com -p https   # paste classic PAT
+
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/new_repo_setup.py {name} [--public] [--license mit]
+
+gh auth login -h github.com -p https   # paste fine-grained PAT back — do this immediately
 ```
 
-**Do this immediately.** The classic PAT has broader permissions than agents should ever have access to. Every minute it stays active is a risk window.
+**Risk:** if you forget the swap-back, classic-PAT access stays live in `gh auth` storage and any agent using the same storage inherits it. The env-scoped path in Step 1 avoids this entirely.
+
+### 3. Security considerations for `GH_TOKEN` env var
+
+Even scoped to a single process, `GH_TOKEN` in a shell env is readable by same-user processes via OS APIs (`/proc/<pid>/environ` on Linux, `NtQueryInformationProcess` on Windows). Secret-guard hooks catch `echo $GH_TOKEN` / `printenv` patterns, but a subprocess making direct syscalls can snoop around the hook.
+
+Practical mitigation: **don't launch Claude Code (or any agent session) in the same user session while a new-repo creation is in progress**. Open the new-repo creation in a separate terminal, do the work, close the terminal before returning to an agent session. The `env VAR=VALUE command` form limits exposure to a single process's lifetime, which limits the window.
 
 ### 4. Deploy Cerberus secrets (if needed)
 
@@ -132,13 +168,13 @@ These all happen without any per-repo human intervention:
 |-----------|-------------------|
 | Cerberus-AZ app access | Fleet-wide installation ("All repositories") — new repos are covered instantly |
 | pr-sentinel check (Cloudflare Worker) | Receives webhooks for all repos, authenticates with its own stored credentials |
-| pr-sentinel check (GitHub Actions) | Workflow file created by setup script in initial commit |
 | Auto-reviewer workflow file | Created by setup script in initial commit |
 | Repo settings | Configured by setup script: wiki off, projects off, squash-only, delete-branch-on-merge |
 | Branch protection | Configured by setup script: 1 review, enforce_admins, pr-sentinel check, strict=false |
 | Directory structure + configs | Created by setup script |
+| Cerberus secrets deploy | Handled by the script when `--cerberus-pem PATH` is passed |
 
-The **per-repo human steps** are: PAT switch (before/after), Cerberus secrets (fleet deploy), and optional wiki/domain setup.
+The **per-repo human steps** are: supplying the classic PAT (via env-scoped GH_TOKEN or legacy swap), downloading the Cerberus `.pem`, revoking the Cerberus key when done, and optional wiki/domain setup.
 
 ---
 
@@ -160,3 +196,4 @@ The **per-repo human steps** are: PAT switch (before/after), Cerberus secrets (f
 | 2026-04-05 | v1.3: Made wiki step conditional with public/private guidance. |
 | 2026-04-05 | v2.0: Complete rewrite. Script now handles repo creation, branch protection, and workflow deployment. Human steps reduced to Cerberus secrets (fleet-wide) and wiki setup. |
 | 2026-04-08 | v3.0: Added PAT switch protocol (steps 1/3). Expanded repo settings (projects, merge, delete-branch). Rewrote Cerberus section as numbered checklist with .pem lifecycle notes. Added shadow wiki creation steps. (#883) |
+| 2026-04-18 | v4.0: Replaced interactive `gh auth login` swap with env-scoped `GH_TOKEN=$(gpg -d ...) poetry run ...` as preferred. Documented one-time gpg setup for at-rest PAT encryption. Legacy swap retained as fallback. Removed `pr-sentinel.yml` from automatic-component table (Worker-only after #938/#939). Documented `--cerberus-pem` flag as preferred Cerberus path (#940/#941). Added security note on env-var snooping via OS APIs. (#942) |
