@@ -1011,68 +1011,19 @@ def create_unleashed_json(project_path: Path) -> None:
 def create_github_workflows(project_path: Path) -> None:
     """Create GitHub Actions workflow files for PR governance.
 
-    Deploys two workflows:
-    - pr-sentinel.yml: validates issue references in PR title/body/commits
+    Deploys one workflow:
     - auto-reviewer.yml: calls the reusable auto-reviewer from AssemblyZero
       to approve PRs after pr-sentinel passes (requires Cerberus secrets)
 
-    These workflows make the merge gate work on new repos immediately
-    (once Cerberus secrets are deployed fleet-wide).
+    pr-sentinel check is posted by the Cloudflare Worker (pr-sentinel-mm
+    GitHub App, installed in "All repositories" mode fleet-wide). The
+    Worker covers the issue-reference check on every new repo
+    automatically — no per-repo Actions workflow needed. Branch protection
+    gates on context "pr-sentinel / issue-reference" (the Worker's check
+    name), set by configure_branch_protection().
     """
     workflows_dir = project_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
-
-    # pr-sentinel: local issue reference check
-    pr_sentinel = '''\
-name: pr-sentinel
-
-on:
-  pull_request:
-    branches: [main]
-    types: [opened, edited, synchronize, reopened]
-
-permissions:
-  checks: write
-  statuses: write
-  pull-requests: read
-  contents: read
-
-jobs:
-  issue-reference:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check for issue reference
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          PATTERN='([Cc]loses #[0-9]+)'
-
-          PR_COMMITS=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json commits --jq '.commits[].messageHeadline, .commits[].messageBody')
-          if echo "$PR_COMMITS" | grep -qE "$PATTERN"; then
-            echo "Issue reference found in commit messages"
-            exit 0
-          fi
-
-          if echo "$PR_TITLE" | grep -qE "$PATTERN"; then
-            echo "Issue reference found in PR title"
-            exit 0
-          fi
-
-          if echo "$PR_BODY" | grep -qE "$PATTERN"; then
-            echo "Issue reference found in PR body"
-            exit 0
-          fi
-
-          echo "No issue reference found."
-          echo ""
-          echo "PR title, body, or commit message must close a GitHub issue."
-          echo "Required Format: 'Closes #123'"
-          exit 1
-'''
-    (workflows_dir / "pr-sentinel.yml").write_text(pr_sentinel, encoding="utf-8")
 
     # auto-reviewer caller: invokes AssemblyZero's reusable workflow
     auto_reviewer = '''\
