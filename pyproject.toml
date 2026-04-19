@@ -40,6 +40,7 @@ rag = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 addopts = "-m 'not integration and not e2e and not adversarial'"
 markers = [
     "integration: tests that call real external services (deselect with '-m \"not integration\"')",
