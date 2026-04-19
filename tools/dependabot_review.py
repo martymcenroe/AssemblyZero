@@ -47,7 +47,11 @@ from pathlib import Path
 
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
-EXPECTED_AUTHOR = "dependabot[bot]"
+# GitHub returns different strings for the same bot depending on API surface:
+#   - REST API / web UI:              "dependabot[bot]"
+#   - gh CLI GraphQL .author.login:   "app/dependabot"
+# Accept both forms at the hard gate — still refuses anything else.
+ACCEPTED_AUTHORS: tuple[str, ...] = ("dependabot[bot]", "app/dependabot")
 POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 300
 PYTEST_TIMEOUT_S = 1800
@@ -117,10 +121,10 @@ def count_packages(body: str) -> int:
 # ---------------------------------------------------------------------------
 
 def verify_author(pr: PRInfo) -> bool:
-    if pr.author_login != EXPECTED_AUTHOR:
+    if pr.author_login not in ACCEPTED_AUTHORS:
         print(f"  REFUSE: PR #{pr.number} author is '{pr.author_login}', "
-              f"expected '{EXPECTED_AUTHOR}' — this script operates only on "
-              f"dependabot PRs")
+              f"expected one of {ACCEPTED_AUTHORS} — this script operates only "
+              f"on dependabot PRs")
         return False
     return True
 
