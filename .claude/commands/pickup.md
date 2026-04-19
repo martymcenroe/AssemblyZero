@@ -86,7 +86,7 @@ Ask the user: "Import this handoff? (Y/n)"
    - What the next steps are
    - How many files you read from the "Files to Read First" list
    - Whether a plan was resumed, started fresh, or absent
-5. **Write the pickup marker** by running: `python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
+5. **Write the pickup marker** by running: `poetry run python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
    If it fails, report the error to the user. Do NOT proceed silently.
 
 Tell the user: "Pickup complete. Ready to continue where the last session left off."

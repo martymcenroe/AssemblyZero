@@ -145,7 +145,7 @@ If post-handoff sessions exist, show: "Note: {N} session(s) ran after this hando
    - `plan_path` is set but the file is missing → Fall back to `{archive_path}`. Warn user: "Live plan missing, reading archived copy instead."
    - No plan-state block, or `plan_state: none` → Continue without a plan.
 4. Read every file listed in the "Files to Read First" section
-5. **Write the pickup marker** by running: `python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
+5. **Write the pickup marker** by running: `poetry run python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
    If it fails, report the error to the user. Do NOT proceed silently.
 6. Report: "Picked up handoff from {age}. {N} files read."
 
