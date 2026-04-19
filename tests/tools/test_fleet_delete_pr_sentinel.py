@@ -255,7 +255,7 @@ class TestMain:
         monkeypatch.setattr(fdps, "discover_repos", discover_mock)
         monkeypatch.setattr(
             fdps, "process_repo",
-            mock.Mock(side_effect=lambda repo, pat, dry_run: f"{repo}: skipped"),
+            mock.Mock(side_effect=lambda repo, pat, dry_run, **kw: f"{repo}: skipped"),
         )
         monkeypatch.setattr(fdps.sys, "argv", ["fleet_delete_pr_sentinel.py", "--repos", "RepoA,RepoB", "--dry-run"])
 
@@ -273,7 +273,7 @@ class TestMain:
         monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
         monkeypatch.setattr(fdps.sys, "argv", ["fleet_delete_pr_sentinel.py", "--repos", "A,B,C"])
 
-        def _process(repo, pat, dry_run):
+        def _process(repo, pat, dry_run, **kw):
             if repo == "B":
                 raise requests.HTTPError("boom")
             return f"{repo}: ok"
@@ -293,7 +293,7 @@ class TestMain:
         monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
         monkeypatch.setattr(fdps.sys, "argv", ["fleet_delete_pr_sentinel.py", "--repos", "A,B,C"])
 
-        def _process(repo, pat, dry_run):
+        def _process(repo, pat, dry_run, **kw):
             return {
                 "A": "A: PR #1 merged at abcdefgh  ✓",
                 "B": "B: open deletion PR already exists (#5), skipping",
@@ -307,3 +307,212 @@ class TestMain:
         assert "merged: 1" in out
         assert "skipped: 1" in out
         assert "errored: 1" in out
+
+
+# --- new flags from #980 -------------------------------------------------
+
+
+class TestMergeableTimeoutFlag:
+    def test_default_is_900_seconds(self, monkeypatch):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        captured: dict = {}
+
+        def _process(repo, pat, dry_run, **kw):
+            captured.update(kw)
+            return f"{repo}: skipping"
+
+        monkeypatch.setattr(fdps, "process_repo", mock.Mock(side_effect=_process))
+        monkeypatch.setattr(fdps.sys, "argv", ["fleet_delete_pr_sentinel.py", "--repos", "X"])
+        fdps.main()
+        assert captured["mergeable_timeout"] == 900
+
+    def test_custom_timeout_passes_through(self, monkeypatch):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        captured: dict = {}
+
+        def _process(repo, pat, dry_run, **kw):
+            captured.update(kw)
+            return f"{repo}: skipping"
+
+        monkeypatch.setattr(fdps, "process_repo", mock.Mock(side_effect=_process))
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py", "--repos", "X", "--mergeable-timeout", "1800",
+        ])
+        fdps.main()
+        assert captured["mergeable_timeout"] == 1800
+
+
+class TestExternalIssueRefFlag:
+    def test_invalid_ref_format_rejected(self, monkeypatch, capsys):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py",
+            "--repos", "X",
+            "--external-issue-ref", "not-a-valid-ref",
+        ])
+        rc = fdps.main()
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "Invalid --external-issue-ref" in out
+
+    def test_requires_exactly_one_repo(self, monkeypatch, capsys):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py",
+            "--repos", "RepoA,RepoB",
+            "--external-issue-ref", "owner/repo#1",
+        ])
+        rc = fdps.main()
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "exactly one repo" in out
+
+    def test_requires_repos_flag(self, monkeypatch, capsys):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py",
+            "--external-issue-ref", "owner/repo#1",
+        ])
+        rc = fdps.main()
+        out = capsys.readouterr().out
+        assert rc == 1
+        assert "exactly one repo" in out
+
+    def test_valid_ref_passes_through_to_process_repo(self, monkeypatch):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        captured: dict = {}
+
+        def _process(repo, pat, dry_run, **kw):
+            captured.update(kw)
+            return f"{repo}: ok"
+
+        monkeypatch.setattr(fdps, "process_repo", mock.Mock(side_effect=_process))
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py",
+            "--repos", "RepoX",
+            "--external-issue-ref", "owner/repo#42",
+        ])
+        rc = fdps.main()
+        assert rc == 0
+        assert captured["external_issue_ref"] == "owner/repo#42"
+
+    def test_bare_hash_ref_format_accepted(self, monkeypatch):
+        @contextmanager
+        def fake_session(*a, **kw):
+            yield FAKE_PAT
+        monkeypatch.setattr(fdps, "classic_pat_session", fake_session)
+        monkeypatch.setattr(fdps, "process_repo", mock.Mock(return_value="X: ok"))
+        monkeypatch.setattr(fdps.sys, "argv", [
+            "fleet_delete_pr_sentinel.py",
+            "--repos", "RepoX",
+            "--external-issue-ref", "#42",
+        ])
+        rc = fdps.main()
+        assert rc == 0
+
+
+class TestProcessRepoExternalRef:
+    """When external_issue_ref is provided, process_repo skips create_issue."""
+
+    def test_external_ref_skips_create_issue(self, monkeypatch):
+        monkeypatch.setattr(fdps, "get_file_info", mock.Mock(return_value={"sha": "abc"}))
+        monkeypatch.setattr(fdps, "find_existing_deletion_pr", mock.Mock(return_value=None))
+        create_issue_mock = mock.Mock(side_effect=AssertionError("must not be called"))
+        monkeypatch.setattr(fdps, "create_issue", create_issue_mock)
+        monkeypatch.setattr(fdps, "get_branch_head", mock.Mock(return_value="mainsha"))
+        monkeypatch.setattr(fdps, "create_branch", mock.Mock())
+        monkeypatch.setattr(fdps, "delete_file_on_branch", mock.Mock())
+        monkeypatch.setattr(fdps, "create_pr", mock.Mock(return_value=99))
+        monkeypatch.setattr(fdps, "wait_for_mergeable", mock.Mock(return_value="clean"))
+        monkeypatch.setattr(fdps, "merge_pr", mock.Mock(return_value="mergesha"))
+
+        result = fdps.process_repo(
+            "X", FAKE_PAT, dry_run=False,
+            external_issue_ref="martymcenroe/AssemblyZero#980",
+        )
+        assert "merged at" in result
+
+    def test_external_ref_used_in_pr_title(self, monkeypatch):
+        monkeypatch.setattr(fdps, "get_file_info", mock.Mock(return_value={"sha": "abc"}))
+        monkeypatch.setattr(fdps, "find_existing_deletion_pr", mock.Mock(return_value=None))
+        monkeypatch.setattr(fdps, "get_branch_head", mock.Mock(return_value="mainsha"))
+        create_branch_mock = mock.Mock()
+        monkeypatch.setattr(fdps, "create_branch", create_branch_mock)
+        monkeypatch.setattr(fdps, "delete_file_on_branch", mock.Mock())
+        create_pr_mock = mock.Mock(return_value=99)
+        monkeypatch.setattr(fdps, "create_pr", create_pr_mock)
+        monkeypatch.setattr(fdps, "wait_for_mergeable", mock.Mock(return_value="clean"))
+        monkeypatch.setattr(fdps, "merge_pr", mock.Mock(return_value="mergesha"))
+
+        fdps.process_repo(
+            "X", FAKE_PAT, dry_run=False,
+            external_issue_ref="martymcenroe/AssemblyZero#980",
+        )
+        title = create_pr_mock.call_args.kwargs["title"]
+        assert "Closes martymcenroe/AssemblyZero#980" in title
+
+        # Branch name uses the issue number, not the full ref
+        branch_name = create_branch_mock.call_args[0][1]
+        assert "delete-pr-sentinel-980" == branch_name
+
+    def test_external_ref_dry_run_skips_create_issue(self, monkeypatch):
+        monkeypatch.setattr(fdps, "get_file_info", mock.Mock(return_value={"sha": "abcd1234"}))
+        monkeypatch.setattr(fdps, "find_existing_deletion_pr", mock.Mock(return_value=None))
+        create_issue_mock = mock.Mock(side_effect=AssertionError("must not be called"))
+        monkeypatch.setattr(fdps, "create_issue", create_issue_mock)
+
+        result = fdps.process_repo(
+            "X", FAKE_PAT, dry_run=True,
+            external_issue_ref="owner/repo#42",
+        )
+        assert "WOULD" in result
+        assert "owner/repo#42" in result
+
+
+class TestWaitForMergeable_BlockedToleration:
+    """blocked may flip to clean as auto-reviewer arrives — tolerate one cycle."""
+
+    def test_blocked_then_clean_returns_clean(self, monkeypatch):
+        states = iter(["blocked", "clean"])
+        monkeypatch.setattr(
+            fdps.requests, "get",
+            mock.Mock(side_effect=lambda *a, **kw: _resp({"mergeable_state": next(states)})),
+        )
+        result = fdps.wait_for_mergeable("X", 1, FAKE_PAT, sleep_fn=lambda s: None)
+        assert result == "clean"
+
+    def test_blocked_persistent_returns_blocked(self, monkeypatch):
+        monkeypatch.setattr(
+            fdps.requests, "get",
+            mock.Mock(return_value=_resp({"mergeable_state": "blocked"})),
+        )
+        result = fdps.wait_for_mergeable("X", 1, FAKE_PAT, sleep_fn=lambda s: None)
+        assert result == "blocked"
+
+    def test_custom_timeout_passes_through(self, monkeypatch):
+        states = iter(["unknown"] * 100)
+        monkeypatch.setattr(
+            fdps.requests, "get",
+            mock.Mock(side_effect=lambda *a, **kw: _resp({"mergeable_state": next(states)})),
+        )
+        # With timeout_s=0 the loop exits immediately with last_state
+        result = fdps.wait_for_mergeable("X", 1, FAKE_PAT, timeout_s=0, sleep_fn=lambda s: None)
+        assert result == "unknown"
