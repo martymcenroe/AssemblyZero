@@ -1,207 +1,192 @@
 # 0911 - Dependabot PR Audit
 
 **Category:** Runbook / Security Maintenance
-**Version:** 1.0
-**Last Updated:** 2026-02-15
+**Version:** 2.0
+**Last Updated:** 2026-04-19
 
 ---
 
 ## Purpose
 
-Safely merge Dependabot PRs with regression verification. Dependency updates are merged automatically when tests pass, with automatic rollback when problems occur.
+Safely review, approve, and merge Dependabot PRs with regression verification. Dependency updates land on main only after the full test suite passes against the bumped versions in an isolated worktree. On test failure, PRs are commented and left for human review; multi-package PRs are split via `@dependabot recreate`.
 
-**Key Principle:** Trust exit codes, not LLM interpretation of test output.
+**Key principle (unchanged from v1.0):** Trust exit codes, not LLM interpretation of test output.
+
+**New in v2.0:**
+- Test-then-merge order (v1.0 merged-then-tested — wrong order on branch-protected repos)
+- Author gate: tool refuses any PR not authored by `dependabot[bot]`
+- `No-Issue:` body injection so pr-sentinel's exemption path passes (v1.0 predated this)
+- Explicit approval step attributing to the invoking user (Code Review profile stat accrues to the user, not to Cerberus-AZ)
+- Multi-package split via `@dependabot recreate` on failure
+- Poetry venv eviction integrated (#944 / Fix 5 pattern) so worktrees remove cleanly on Windows
+- Mechanical implementation: `tools/dependabot_review.py`
+
+---
+
+## Implementation
+
+The manual procedure in v1.0 has been replaced by a deterministic Python tool at `tools/dependabot_review.py` invokable via the `/dependabot` skill.
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/dependabot_review.py [--dry-run]
+```
+
+Or via the skill: `/dependabot`.
 
 ---
 
 ## Prerequisites
 
 | Requirement | Check |
-|-------------|-------|
-| Clean working directory | `git status` shows no changes |
-| On main branch | `git branch --show-current` |
-| Poetry environment | `poetry run python --version` |
+|---|---|
+| Clean working directory on main | `git status` |
+| Poetry installed | `poetry --version` |
 | GitHub CLI authenticated | `gh auth status` |
+| Must NOT run from inside a worktree | `git rev-parse --show-toplevel` matches main repo path |
 
 ---
 
-## Quick Reference
+## Hard gates (enforced by the tool)
 
-```bash
-# List Dependabot PRs
-gh pr list --author "app/dependabot" --json number,title
+### Author gate
 
-# List security alerts
-gh api repos/OWNER/REPO/dependabot/alerts --jq '.[] | select(.state=="open")'
+For each PR returned by `gh pr list --author app/dependabot`, the tool re-verifies `pr.author.login == "dependabot[bot]"` before any action. Any mismatch is a hard refusal — no approval, no merge, status recorded as `errored`.
 
-# Run tests with exit code capture
-poetry run pytest; echo "EXIT_CODE=$?"
-```
+This prevents the tool from ever operating on a PR it wasn't designed to handle. Even if someone crafts an unrelated PR and passes it through this tool, it won't be approved or merged.
+
+### Exit-code gate
+
+`poetry run pytest -q --tb=short` must exit 0. Any non-zero exit means:
+- No approval, no merge
+- A comment is posted on the PR noting the exit code and the forensics worktree path
+- The PR is recorded as `deferred`
+- The worktree is NOT cleaned up — it's left in place so the user can investigate
+- If the PR updates multiple packages, `@dependabot recreate` is posted to split it into per-package PRs
+
+No human judgment is applied to the exit code. No LLM is consulted about whether "the failures look related." Trust the exit code.
 
 ---
 
-## Procedure
+## End-to-end flow (per PR)
 
-### Phase 1: Setup & Baseline
-
-```bash
-# 1.1 Create Audit Worktree
-# Use a timestamped branch for uniqueness
-AUDIT_ID=$(date +%Y%m%d-%H%M)
-git worktree add ../AssemblyZero-dependabot-audit-$AUDIT_ID -b dependabot-audit-$AUDIT_ID
-git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID push -u origin HEAD
-
-# 1.2 Run baseline tests in worktree - CAPTURE EXIT CODE
-poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
-BASELINE_EXIT=$?
-echo "BASELINE_EXIT=$BASELINE_EXIT"
-
-# 1.3 Capture baseline test count
-poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --collect-only -q 2>/dev/null | tail -1
 ```
+1. Create audit worktree from current main at ../AssemblyZero-dependabot-<N>
+2. `gh pr checkout <N>` into the worktree — brings the dependabot bump in
+3. Evict cached poetry venv (Fix 5 / #944) so locks release
+4. `poetry install` — fresh install of updated dependencies
+5. `poetry run pytest -q --tb=short` — capture exit code
 
-**STOP if baseline fails (exit code != 0).** Fix existing issues first.
+   --- exit != 0 ---
+6a. Comment on PR with exit code + worktree path (forensics)
+6b. If multi-package, comment `@dependabot recreate`
+6c. Leave worktree in place; move to next PR
 
-### Phase 2: Identify PRs
-
-```bash
-# 2.1 List Dependabot PRs
-gh pr list --author "app/dependabot" --json number,title,headRefName
-
-# 2.2 List security alerts (for context)
-gh api repos/OWNER/REPO/dependabot/alerts \
-  --jq '.[] | select(.state=="open") | "\(.number) | \(.security_advisory.severity) | \(.dependency.package.name)"'
-
-# 2.3 Store PR numbers
-DEPENDABOT_PRS=$(gh pr list --author "app/dependabot" --json number --jq '.[].number' | tr '\n' ' ')
-echo "PRs to process: $DEPENDABOT_PRS"
-```
-
-**If no PRs exist, proceed to Phase 5 (Cleanup).**
-
-### Phase 3: Merge and Test (In Worktree)
-
-```bash
-# 3.1 For each PR, merge and test within the worktree
-for PR in $DEPENDABOT_PRS; do
-    echo "=== Processing PR #$PR ==="
-
-    # Merge PR into worktree branch
-    # Note: Using 'gh pr merge' with --merge flag handles the remote update
-    gh pr merge $PR --merge --repo martymcenroe/AssemblyZero
-    git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID pull origin main
-
-    # Test - CAPTURE EXIT CODE
-    poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
-    POST_MERGE_EXIT=$?
-    echo "POST_MERGE_EXIT=$POST_MERGE_EXIT"
-
-    # If failed, revert in main immediately (to keep main clean)
-    if [ $POST_MERGE_EXIT -ne 0 ]; then
-        echo "REGRESSION DETECTED - Reverting PR #$PR"
-        # We must revert on a fresh branch or main since main was modified by the merge
-        git checkout main
-        git pull origin main
-        git revert HEAD --no-edit
-        git push origin main
-        
-        # Sync worktree back to main
-        git -C ../AssemblyZero-dependabot-audit-$AUDIT_ID pull origin main
-
-        # Comment on PR
-        gh pr comment $PR --body "❌ Automated regression detected. Merge reverted. Manual investigation required."
-
-        # Create issue
-        gh issue create \
-            --title "Dependabot PR #$PR causes regression" \
-            --body "PR #$PR was merged but caused test failures. Reverted automatically." \
-            --label "dependencies,regression,bug"
-    else
-        echo "PR #$PR merged successfully - tests pass"
-
-        # Approve the PR for contribution graph credit
-        gh pr review $PR --approve --repo martymcenroe/AssemblyZero \
-            --body "Automated review: regression tests pass. Merged via 0911 dependabot audit."
-    fi
-done
-```
-
-### Phase 4: Verify Final State
-
-```bash
-# 4.1 Final test run in worktree
-poetry --directory ../AssemblyZero-dependabot-audit-$AUDIT_ID run pytest --tb=short -q
-FINAL_EXIT=$?
-
-# 4.2 Compare with baseline
-echo "Baseline exit: $BASELINE_EXIT"
-echo "Final exit: $FINAL_EXIT"
-```
-
-### Phase 5: Cleanup
-
-```bash
-# 5.1 Remove Worktree
-git worktree remove ../AssemblyZero-dependabot-audit-$AUDIT_ID
-
-# 5.2 Delete local audit branch
-git branch -D dependabot-audit-$AUDIT_ID
-
-# 5.3 Sync main repo
-git pull origin main
+   --- exit == 0 ---
+6a. `gh pr edit <N> --body "<body>\n\nNo-Issue: automated dependency update (...)"`
+     — satisfies pr-sentinel Worker's No-Issue exemption
+6b. Wait 5s for pr-sentinel to re-evaluate
+6c. `gh pr review <N> --approve --body "..."` — PullRequestReview event
+     attributed to the invoking user (Code Review profile stat accrues to that user)
+6d. Poll `mergeable_state` until `clean` (up to 5 min)
+6e. `gh pr merge <N> --squash`
+6f. Evict worktree's poetry venv; `git worktree remove`; `git branch -D` the
+     audit branch
 ```
 
 ---
 
-## Decision Tree
+## Why the invoking user approves (not Cerberus-AZ)
 
-```
-Baseline passes?
-├── No → ABORT: Fix existing issues first
-└── Yes → Any Dependabot PRs?
-    ├── No → PASS: No action needed
-    └── Yes → For each PR:
-        ├── Merge and test
-        ├── Tests pass? → Keep merged
-        └── Tests fail? → Revert, comment, create issue
-```
+Cerberus-AZ auto-approves Marty-authored PRs after pr-sentinel passes. Its approval events are attributed to the Cerberus-AZ GitHub App, not to the user. GitHub's Code Review profile stat counts reviews authored by the user.
+
+For dependabot PRs specifically — where the user did NOT author the code — the correct attribution is the user. The tool uses the invoking user's `gh` credentials to create the approval event. This is a bounded, author-gated, exit-code-gated scope; the same credentials do NOT approve anything else.
+
+Constraints embedded in the tool:
+- Author must be `dependabot[bot]` (hard gate)
+- Tests must exit 0 (hard gate)
+- Approval body explicitly names the tool and its gates
+
+Outside this specific tool, agent-initiated approvals remain disallowed.
 
 ---
 
-## Automation Status
+## On multi-package PRs
 
-**Current:** Manual procedure (this runbook)
+Dependabot PR bodies include one `` Updates `<package>` `` block per bumped package. The tool counts these via regex. If a multi-package PR fails tests:
 
-**Planned:** LangGraph workflow (see brief: Issue #TBD)
-- Programmatic exit code verification
-- No LLM interpretation of "passed" / "failed"
-- Structured state machine for rollback
+1. The failure comment is posted
+2. `@dependabot recreate` is posted as a second comment — dependabot listens for this and splits the grouped update into per-package PRs
+3. The next `/dependabot` run processes the smaller PRs, and typically only one of the per-package splits actually fails
+
+This is bisect-by-dependabot, not bisect-by-us. Dependabot does the splitting; our tool processes whatever dependabot produces.
+
+---
+
+## Forensics on failure
+
+When the tool leaves a worktree in place, it's at `C:/Users/mcwiz/Projects/AssemblyZero-dependabot-<N>`. You can:
+
+```bash
+cd C:/Users/mcwiz/Projects/AssemblyZero-dependabot-<N>
+poetry run pytest --tb=long <path_to_failing_test> -x
+```
+
+When done investigating:
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry env remove --all
+git worktree remove ../AssemblyZero-dependabot-<N>
+git branch -D dependabot-audit-<N>
+```
+
+The cleanup skill will also catch this as an orphan directory per Fix 5's logic.
+
+---
+
+## Summary output
+
+At end of run, the tool prints:
+
+```
+=== Summary ===
+  Merged:   [756, 741]
+  Deferred: [479]
+  Errored:  []
+```
+
+- **Merged:** PR passed both gates and is on main.
+- **Deferred:** PR failed a gate (test failure or poetry install failure). Worktree retained, comment posted, possibly `@dependabot recreate` posted.
+- **Errored:** Infrastructure failure (couldn't create worktree, couldn't checkout PR, couldn't approve, etc.). Worktree is cleaned up; the PR needs manual attention.
 
 ---
 
 ## Integration
 
 Run this audit:
-- Before Security Audit (0809)
-- Weekly as maintenance
-- When Dependabot alerts accumulate
+
+- On demand via `/dependabot`
+- Before shipping a batch of features (so dependencies stay current)
+- Weekly as maintenance if the queue has been neglected
+- Can be wired to the `schedule` skill for passive processing — not in scope for v2.0
 
 ---
 
-## Audit Record
+## Related Documents
 
-| Date | Auditor | PRs Processed | Outcome | Issues Created |
-|------|---------|---------------|---------|----------------|
-| | | | | |
-
----
-
-## References
-
-- `.claude/templates/docs/dependabot-audit.md` - Original template
-- `docs/audits/0812-ai-supply-chain.md` - Supply chain context
-- GitHub Dependabot documentation
+- `tools/dependabot_review.py` — the implementation
+- `.claude/commands/dependabot.md` — the skill wrapper
+- `docs/standards/0016-pr-sentinel-system-architecture.md` — pr-sentinel `No-Issue:` semantics
+- #949 — tracking issue for v2.0
+- #692 — auto-merge variant (related; different goal — this runbook keeps a human-in-the-loop via the review attribution)
+- #944 / PR #945 — poetry venv eviction (Fix 5), reused here
 
 ---
 
-*Template source: AssemblyZero/.claude/templates/docs/dependabot-audit.md*
+## History
+
+| Date | Change |
+|------|--------|
+| 2026-02-15 | v1.0: Initial runbook — manual procedure, merge-first / test-after, no pr-sentinel integration |
+| 2026-04-19 | v2.0 (#949): Rewritten for current branch protection + pr-sentinel. Test-then-merge order. Author gate, exit-code gate, `No-Issue:` body injection, approval attributed to invoking user (Code Review stat), multi-package split via `@dependabot recreate`, poetry venv eviction. Mechanical implementation at `tools/dependabot_review.py` and `/dependabot` skill. |
