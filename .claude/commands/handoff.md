@@ -302,11 +302,11 @@ After persisting the handoff log, spawn a new `unleashed-alpha` session. Auto-on
 1. **Get repo root Windows path:** Convert the git toplevel path to a Windows path with backslashes (e.g. `C:\Users\mcwiz\Projects\AssemblyZero`)
 2. **Get repo name uppercased** for the window title (e.g. `ASSEMBLYZERO`)
 3. **Get Unix-style repo path** for the cd command (e.g. `/c/Users/mcwiz/Projects/AssemblyZero`)
-4. **Spawn via Python** (MSYS2 mangles paths — must go through cmd.exe):
+4. **Spawn via Python** (MSYS2 mangles paths — must go through cmd.exe). Capture the user's foreground HWND before the spawn and restore it after an 800ms delay so the new WT window can't steal focus from whatever app they switched to mid-handoff (see #969):
    ```bash
-   python -c "import subprocess; subprocess.Popen(r'wt.exe -w new nt --title \"{REPO_NAME}\" --suppressApplicationTitle -d \"{WINDOWS_PATH}\" \"C:\Program Files\Git\usr\bin\bash.exe\" -l -c \"cd {UNIX_PATH} && unleashed-alpha\"', shell=True)"
+   python -c "import ctypes,subprocess,time; u32=ctypes.windll.user32; h=u32.GetForegroundWindow(); subprocess.Popen(r'wt.exe -w new nt --title \"{REPO_NAME}\" --suppressApplicationTitle -d \"{WINDOWS_PATH}\" \"C:\Program Files\Git\usr\bin\bash.exe\" -l -c \"cd {UNIX_PATH} && unleashed-alpha\"', shell=True); time.sleep(0.8); u32.SetForegroundWindow(h)"
    ```
-   This opens a new Windows Terminal window, cd's to the target repo, and runs `unleashed-alpha`. The wrapper auto-injects `/onboard` after Claude's first prompt. Onboard detects the fresh handoff (< 10 min old) and auto-imports it. Zero manual steps.
+   This opens a new Windows Terminal window, cd's to the target repo, and runs `unleashed-alpha`. The wrapper auto-injects `/onboard` after Claude's first prompt. Onboard detects the fresh handoff (< 10 min old) and auto-imports it. Zero manual steps. The HWND save/restore keeps the user's original foreground window (Chrome/IDE/etc.) in focus after the new WT window appears.
 5. **Tell user:** "New unleashed-alpha session spawning in {REPO_NAME} with auto-onboard."
 
 ## Rules
