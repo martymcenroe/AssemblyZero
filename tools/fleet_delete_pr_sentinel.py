@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import re
 import sys
 import time
 from pathlib import Path
@@ -61,8 +62,20 @@ WORKFLOW_PATH = ".github/workflows/pr-sentinel.yml"
 DELETION_PR_TITLE_PREFIX = "chore: delete legacy pr-sentinel.yml"
 HTTP_TIMEOUT_S = 30
 POLL_INTERVAL_S = 10
-MERGEABLE_TIMEOUT_S = 300
+# 900s default (was 300s in PR #976). The first fleet run found ~10% of
+# repos legitimately took longer than 5 min for Cerberus-AZ to post its
+# approving review. 15 min covers the observed tail. Override with
+# --mergeable-timeout for unusual cases.
+MERGEABLE_TIMEOUT_S = 900
 MAX_REPOS_PER_RUN = 50  # safety cap
+
+# Issue-ref pattern matched by the Cloudflare Worker's verify-issues.js.
+# Either bare `#N` (same-repo, populated when caller supplies just an issue
+# number) or fully-qualified `owner/repo#N` (cross-repo, used when the
+# target repo has issues disabled).
+EXTERNAL_REF_PATTERN = re.compile(
+    r"^(?:[\w.-]+/[\w.-]+)?#\d+$"
+)
 
 ISSUE_BODY = """## Context
 
@@ -233,22 +246,37 @@ def get_mergeable_state(repo: str, pr_number: int, pat: str) -> str | None:
 
 
 def wait_for_mergeable(
-    repo: str, pr_number: int, pat: str, sleep_fn=time.sleep
+    repo: str, pr_number: int, pat: str,
+    timeout_s: int = MERGEABLE_TIMEOUT_S,
+    sleep_fn=time.sleep,
 ) -> str:
     """Poll until the PR is in a mergeable state. Returns the final state.
 
     Accepts both 'clean' (all checks pass) and 'unstable' (only non-required
     checks failing — gh pr merge --squash succeeds in both cases).
+
+    `dirty` (merge conflict) is returned immediately — won't resolve via
+    waiting. `blocked` is treated the same: the required check or the
+    approval is missing, and unlike auto-reviewer-pending state, `blocked`
+    does not become `clean` by itself within reasonable time.
+
+    Note: `blocked` CAN flip to `clean` later if Cerberus posts an
+    approving review after our wait timer started but before it fired,
+    so we only return `blocked` after at least one poll cycle.
     """
-    deadline = time.time() + MERGEABLE_TIMEOUT_S
+    deadline = time.time() + timeout_s
     last_state = "unknown"
+    polled_at_least_once = False
     while time.time() < deadline:
         state = get_mergeable_state(repo, pr_number, pat) or "unknown"
         last_state = state
         if state in ("clean", "unstable"):
             return state
-        if state in ("dirty", "blocked"):
+        if state == "dirty":
+            return state
+        if state == "blocked" and polled_at_least_once:
             return state  # caller decides whether to abort
+        polled_at_least_once = True
         sleep_fn(POLL_INTERVAL_S)
     return last_state
 
@@ -264,7 +292,22 @@ def merge_pr(repo: str, pr_number: int, pat: str) -> str:
     return r.json().get("sha", "")
 
 
-def process_repo(repo: str, pat: str, dry_run: bool) -> str:
+def process_repo(
+    repo: str, pat: str, dry_run: bool,
+    mergeable_timeout: int = MERGEABLE_TIMEOUT_S,
+    external_issue_ref: str | None = None,
+) -> str:
+    """Process one repo. Returns a one-line status string.
+
+    Args:
+        repo: Owner-less repo name (owner is GITHUB_USER).
+        pat: gpg-decrypted classic PAT.
+        dry_run: If True, no API mutations.
+        mergeable_timeout: Seconds to wait for mergeable_state to resolve.
+        external_issue_ref: If set (e.g. "owner/repo#123" or "#123"), skip
+            create_issue and use the supplied ref in the PR title/body.
+            Required for repos that have issues disabled.
+    """
     file_info = get_file_info(repo, WORKFLOW_PATH, pat)
     if file_info is None:
         return f"{repo}: {WORKFLOW_PATH} not present, skipping"
@@ -274,16 +317,25 @@ def process_repo(repo: str, pat: str, dry_run: bool) -> str:
         return f"{repo}: open deletion PR already exists (#{existing_pr}), skipping"
 
     if dry_run:
-        return f"{repo}: WOULD delete {WORKFLOW_PATH} (sha={file_info['sha'][:8]}) via new issue + PR"
+        ref_note = f" using external ref {external_issue_ref}" if external_issue_ref else ""
+        return f"{repo}: WOULD delete {WORKFLOW_PATH} (sha={file_info['sha'][:8]}) via new issue + PR{ref_note}"
 
-    issue_number = create_issue(
-        repo,
-        title="chore: delete legacy .github/workflows/pr-sentinel.yml",
-        body=ISSUE_BODY,
-        pat=pat,
-    )
+    if external_issue_ref:
+        # Use the supplied ref directly. Branch name uses the issue number
+        # portion of the ref so it remains unique and informative.
+        ref_for_pr = external_issue_ref  # e.g., "martymcenroe/AssemblyZero#980"
+        ref_number_only = external_issue_ref.split("#")[-1]
+        branch = f"delete-pr-sentinel-{ref_number_only}"
+    else:
+        issue_number = create_issue(
+            repo,
+            title="chore: delete legacy .github/workflows/pr-sentinel.yml",
+            body=ISSUE_BODY,
+            pat=pat,
+        )
+        ref_for_pr = f"#{issue_number}"
+        branch = f"{issue_number}-fix"
 
-    branch = f"{issue_number}-fix"
     main_sha = get_branch_head(repo, "main", pat)
     create_branch(repo, branch, main_sha, pat)
 
@@ -291,22 +343,22 @@ def process_repo(repo: str, pat: str, dry_run: bool) -> str:
         repo,
         path=WORKFLOW_PATH,
         file_sha=file_info["sha"],
-        message=f"chore: delete legacy pr-sentinel.yml (Closes #{issue_number})",
+        message=f"chore: delete legacy pr-sentinel.yml (Closes {ref_for_pr})",
         branch=branch,
         pat=pat,
     )
 
-    pr_title = f"chore: delete legacy pr-sentinel.yml (Closes #{issue_number})"
+    pr_title = f"chore: delete legacy pr-sentinel.yml (Closes {ref_for_pr})"
     pr_number = create_pr(
         repo,
         head=branch,
         base="main",
         title=pr_title,
-        body=PR_BODY.format(issue_number=issue_number),
+        body=PR_BODY.format(issue_number=ref_for_pr),
         pat=pat,
     )
 
-    final_state = wait_for_mergeable(repo, pr_number, pat)
+    final_state = wait_for_mergeable(repo, pr_number, pat, timeout_s=mergeable_timeout)
     if final_state not in ("clean", "unstable"):
         return (
             f"{repo}: PR #{pr_number} did not become mergeable "
@@ -328,7 +380,26 @@ def main() -> int:
     parser.add_argument("--repos", default="",
                         help="Comma-separated owner-less repo names. "
                              "Defaults to GitHub code-search discovery.")
+    parser.add_argument("--mergeable-timeout", type=int, default=MERGEABLE_TIMEOUT_S,
+                        help=f"Seconds to wait for PR mergeable_state to "
+                             f"resolve (default: {MERGEABLE_TIMEOUT_S}).")
+    parser.add_argument("--external-issue-ref", default=None,
+                        help="Use an external issue reference (e.g. "
+                             "'owner/repo#123' or '#123') instead of "
+                             "filing a new issue in the target repo. "
+                             "Required when the target has issues disabled. "
+                             "When set, --repos must contain exactly one repo.")
     args = parser.parse_args()
+
+    if args.external_issue_ref:
+        if not EXTERNAL_REF_PATTERN.match(args.external_issue_ref):
+            print(f"Invalid --external-issue-ref: {args.external_issue_ref!r}. "
+                  f"Expected '#N' or 'owner/repo#N'.")
+            return 1
+        if not args.repos or "," in args.repos:
+            print("--external-issue-ref requires --repos with exactly one repo "
+                  "(prevents pointing many PRs at the same closing issue).")
+            return 1
 
     with classic_pat_session() as pat:
         if args.repos:
@@ -350,7 +421,11 @@ def main() -> int:
         results: list[str] = []
         for repo in repos:
             try:
-                line = process_repo(repo, pat, args.dry_run)
+                line = process_repo(
+                    repo, pat, args.dry_run,
+                    mergeable_timeout=args.mergeable_timeout,
+                    external_issue_ref=args.external_issue_ref,
+                )
             except requests.HTTPError as e:
                 line = f"{repo}: ERROR — {e} {getattr(e.response, 'text', '')[:200]}"
             except Exception as e:  # noqa: BLE001
