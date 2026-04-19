@@ -197,19 +197,30 @@ Session: {SESSION_NAME}
      - Check if corresponding branch has an OPEN PR
      - If PR is MERGED or CLOSED: worktree is orphaned → REPORT AS ERROR
    - Worktrees for merged work MUST be removed manually (safety)
+   - **Pre-removal poetry venv eviction (Windows file-lock mitigation):** Before calling `git worktree remove` on any worktree, run the following inside that worktree so its cached poetry virtualenv doesn't hold file locks:
+     ```bash
+     poetry env remove --all  # run from inside the worktree
+     ```
+     Without this, `git worktree remove` will succeed in deregistration but leave the on-disk directory locked by the venv's Python process handles. (#944)
 
 5. **Delete Empty Orphaned Worktree Directories:**
-   - After `git -C ... worktree prune`, scan for leftover empty directories:
+   - After `git -C ... worktree prune`, scan for leftover orphan directories:
      ```bash
      ls -d /c/Users/mcwiz/Projects/{PROJECT_NAME}-*/ 2>/dev/null
      ```
    - For each matching directory:
      - Skip if it appears in `git worktree list` (still active)
+     - **Evict cached poetry venv first** (releases Windows file locks):
+       ```bash
+       cd /c/Users/mcwiz/Projects/{DIR_NAME}
+       poetry env remove --all 2>/dev/null || true
+       cd -
+       ```
      - Check if empty: `ls -A /c/Users/mcwiz/Projects/{DIR_NAME}/`
      - If empty: `rmdir /c/Users/mcwiz/Projects/{DIR_NAME}` (safe — fails if not empty)
      - If contains only `.git` file: remove it first, then rmdir
-     - If not empty: report as warning (do NOT rm -rf)
-   - Report count of deleted directories
+     - If still not empty after venv eviction: report as warning with contents listing (do NOT `rm -rf` from the skill — user decides)
+   - Report count of deleted directories and any residue
 
 6. **Open PRs** - Flag if any exist
 
