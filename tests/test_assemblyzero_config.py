@@ -391,65 +391,27 @@ class TestSanitizePath:
 
 
 class TestModelIdVerification:
-    """Issue #605: Verify model IDs are correctly set after systemic refresh.
+    """Verify default model IDs in config.py and llm_provider.py source.
 
-    T010: Gemini model ID verification (REQ-1)
     T020: Claude model ID verification (REQ-2)
+
+    Note: The original T010 (gemini-3.1-pro in REVIEWER_MODEL_FALLBACKS) was
+    deleted when PR #773 made Claude Opus the default reviewer and dropped
+    Gemini from the fallback chain.
     """
 
-    def test_t010_gemini_model_id_is_3_1(self):
-        """T010: REVIEWER_MODEL defaults to gemini-3.1-pro-preview (REQ-1).
-
-        Verifies the default Gemini model in config.py has been updated
-        to Gemini 3.1 as part of the systemic model refresh.
-        """
-        from assemblyzero.core.config import (
-            FORBIDDEN_MODELS,
-            REVIEWER_MODEL_FALLBACKS,
-        )
-
-        # Check default (when env var not set) by inspecting the source directly
-        # We can't easily unset env vars that may override, so verify the
-        # module-level constants that don't depend on env vars.
-        assert "gemini-3.1-pro" in REVIEWER_MODEL_FALLBACKS, (
-            "REVIEWER_MODEL_FALLBACKS must include gemini-3.1-pro"
-        )
-
-        # Ensure old Gemini 2.x and 3.0 models are forbidden
-        for forbidden in ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-3-pro-preview", "gemini-3-pro"]:
-            assert forbidden in FORBIDDEN_MODELS, (
-                f"{forbidden} must be in FORBIDDEN_MODELS"
-            )
-
-        # Verify the default REVIEWER_MODEL contains gemini-3.1
-        # (may be overridden by env var, but the source default must be correct)
-        from assemblyzero.core import config as config_module
-        import inspect
-        source = inspect.getsource(config_module)
-        assert 'gemini-3.1-pro-preview' in source, (
-            "config.py source must reference gemini-3.1-pro-preview as default"
-        )
-
     def test_t020_claude_model_id_is_4_6(self):
-        """T020: CLAUDE_MODEL defaults to claude-sonnet-4-6 (REQ-2).
-
-        Verifies the default Claude model in config.py has been updated
-        to Claude 4.6 as part of the systemic model refresh.
-        """
-        import importlib
+        """T020: CLAUDE_MODEL defaults to claude-sonnet-4-6 (REQ-2)."""
         import inspect
 
-        # Force-reload config to get fresh source (avoids stale module cache)
-        import assemblyzero.core.config as config_module
-        importlib.reload(config_module)
+        from assemblyzero.core import config as config_module
+        from assemblyzero.core import llm_provider as llm_module
+
         source = inspect.getsource(config_module)
         assert 'claude-sonnet-4-6' in source, (
             "config.py source must reference claude-sonnet-4-6 as default"
         )
 
-        # Force-reload llm_provider to get fresh source
-        import assemblyzero.core.llm_provider as llm_module
-        importlib.reload(llm_module)
         provider_source = inspect.getsource(llm_module)
 
         assert 'claude-sonnet-4-6' in provider_source and 'claude-opus-4-6' in provider_source, (

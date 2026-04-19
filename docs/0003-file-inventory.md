@@ -351,6 +351,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/adrs/0212-local-only-embeddings.md | 0212-local-only-embeddings.md | ADR | Active |
 | docs/adrs/0213-aws-multi-app-cost-separation.md | 0213-aws-multi-app-cost-separation.md | ADR | Active |
 | docs/adrs/0214-fleet-wide-workflow-permissions-enforcement.md | 0214-fleet-wide-workflow-permissions-enforcement.md | ADR | Active |
+| docs/adrs/0215-claude-hook-locations.md | 0215-claude-hook-locations.md | ADR | Active |
 | docs/architecture/data-flow.md | data-flow.md | Architecture | Active |
 | docs/architecture/system-overview.md | system-overview.md | Architecture | Active |
 | docs/architecture/workflow-interactions.md | workflow-interactions.md | Architecture | Active |
@@ -457,6 +458,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/audit-results/2026-01-16.md | 2026-01-16.md | Audit-results | Active |
 | docs/audit-results/2026-01-18.md | 2026-01-18.md | Audit-results | Active |
 | docs/audit-results/2026-01-21.md | 2026-01-21.md | Audit-results | Active |
+| docs/audit-results/2026-04-09-branch-protection-timing-audit.md | 2026-04-09-branch-protection-timing-audit.md | Audit-results | Active |
 | docs/audits/0800-audit-index.md | 0800-audit-index.md | Audits | Active |
 | docs/audits/0801-security-audit.md | 0801-security-audit.md | Audits | Active |
 | docs/audits/0802-privacy-audit.md | 0802-privacy-audit.md | Audits | Active |
@@ -514,14 +516,10 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/audits/github-protection/fix-20260308-211037.md | fix-20260308-211037.md | Audits | Active |
 | docs/audits/github-protection/fix-20260308-222329.md | fix-20260308-222329.md | Audits | Active |
 | docs/audits/github-protection/fix-20260313-050247.md | fix-20260313-050247.md | Audits | Active |
+| docs/audits/governance-tests/local-20260409-043837.md | local-20260409-043837.md | Audits | Active |
+| docs/audits/governance-tests/local-20260409-044013.md | local-20260409-044013.md | Audits | Active |
 | docs/audits/github-protection/merge-sentinel-prs-20260313-135755.md | merge-sentinel-prs-20260313-135755.md | Audits | Active |
 | docs/audits/github-protection/merge-sentinel-prs-20260313-141928.md | merge-sentinel-prs-20260313-141928.md | Audits | Active |
-| docs/blog/2026-02-05-from-agentos-to-assemblyzero.md | 2026-02-05-from-agentos-to-assemblyzero.md | Blog | Active |
-| docs/blog/2026-02-24-the-gitkeep-bug.md | 2026-02-24-the-gitkeep-bug.md | Blog | Active |
-| docs/blog/2026-03-05-hand-built-tools-distributed-autonomy.md | 2026-03-05-hand-built-tools-distributed-autonomy.md | Blog | Active |
-| docs/blog/permission-friction-saga-draft.md | permission-friction-saga-draft.md | Blog | Active |
-| docs/blog/drafts/the-judgment-line.md | the-judgment-line.md | Blog | Active |
-| docs/blog/drafts/what-question-should-i-be-asking.md | what-question-should-i-be-asking.md | Blog | Active |
 | docs/design-notes/DN-001-workflow-context-injection.md | DN-001-workflow-context-injection.md | Design-notes | Active |
 | docs/lld/done/00012-add-ideas-directory-to-canonical-structure.md | 00012-add-ideas-directory-to-canonical-structure.md | LLD | Active |
 | docs/lld/done/15-path-parameterization.md | 15-path-parameterization.md | LLD | Active |
@@ -638,6 +636,10 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lld/active/LLD-612.md | LLD-612.md | LLD | Active |
 | docs/lld/active/LLD-641.md | LLD-641.md | LLD | Active |
 | docs/lld/active/LLD-642.md | LLD-642.md | LLD | Active |
+| docs/lld/active/LLD-774.md | LLD-774.md | LLD | Active |
+| docs/lld/active/LLD-775.md | LLD-775.md | LLD | Active |
+| docs/lld/active/LLD-825.md | LLD-825.md | LLD | Active |
+| docs/lld/active/LLD-838.md | LLD-838.md | LLD | Active |
 | docs/lld/drafts/spec-0088-implementation-readiness.md | spec-0088-implementation-readiness.md | LLD | Active |
 | docs/lld/drafts/spec-0092-implementation-readiness.md | spec-0092-implementation-readiness.md | LLD | Active |
 | docs/lld/drafts/spec-0094-implementation-readiness.md | spec-0094-implementation-readiness.md | LLD | Active |
@@ -671,6 +673,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lld/drafts/spec-0612-implementation-readiness.md | spec-0612-implementation-readiness.md | LLD | Active |
 | docs/lld/drafts/spec-0641-implementation-readiness.md | spec-0641-implementation-readiness.md | LLD | Active |
 | docs/lld/drafts/spec-0642-implementation-readiness.md | spec-0642-implementation-readiness.md | LLD | Active |
+| docs/lld/drafts/spec-0838-implementation-readiness.md | spec-0838-implementation-readiness.md | LLD | Active |
 | docs/lineage/done/101-test-plan-reviewer/001-brief.md | 001-brief.md | Lineage | Active |
 | docs/lineage/done/102-tdd-test-initialization/001-brief.md | 001-brief.md | Lineage | Active |
 | docs/lineage/done/112-gfiat-fft-resampling/001-brief.md | 001-brief.md | Lineage | Active |
@@ -802,6 +805,9 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/99-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/done/99-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/archived/283-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/archived/838-lld/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/archived/99-lld/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
@@ -860,9 +866,14 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/641-lld/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/641-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/642-lld/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/active/774-lld/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/active/775-lld/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/83-lld/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/83-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/active/838-lld/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/active/838-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
+| docs/lineage/active/838-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/84-lld/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/84-lld-n1/001-issue.md | 001-issue.md | Lineage | Active |
 | docs/lineage/active/84-lld-n2/001-issue.md | 001-issue.md | Lineage | Active |
@@ -905,6 +916,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/88-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/done/92-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/archived/283-testing/001-lld.md | 001-lld.md | Lineage | Active |
+| docs/lineage/archived/838-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/333-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/381-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/434-testing/001-lld.md | 001-lld.md | Lineage | Active |
@@ -921,6 +933,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/612-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/641-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/642-testing/001-lld.md | 001-lld.md | Lineage | Active |
+| docs/lineage/active/838-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/active/94-testing/001-lld.md | 001-lld.md | Lineage | Active |
 | docs/lineage/done/534-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/done/598-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
@@ -931,6 +944,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/612-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/done/641-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/done/642-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
+| docs/lineage/done/838-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/active/535-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/active/600-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
 | docs/lineage/active/605-implspec/001-spec-draft.md | 001-spec-draft.md | Lineage | Active |
@@ -1064,6 +1078,9 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/99-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/done/99-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/archived/283-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
@@ -1110,9 +1127,14 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/611-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/641-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/642-lld/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/active/774-lld/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/active/775-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld-n1/002-draft.md | 002-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld-n2/002-draft.md | 002-draft.md | Lineage | Active |
@@ -1140,6 +1162,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/94-implspec/002-readiness-verdict.md | 002-readiness-verdict.md | Lineage | Active |
 | docs/lineage/done/534-implspec/002-spec-draft.md | 002-spec-draft.md | Lineage | Active |
 | docs/lineage/done/612-implspec/002-spec-draft.md | 002-spec-draft.md | Lineage | Active |
+| docs/lineage/done/838-implspec/002-spec-draft.md | 002-spec-draft.md | Lineage | Active |
 | docs/lineage/active/535-implspec/002-spec-draft.md | 002-spec-draft.md | Lineage | Active |
 | docs/lineage/done/104-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/done/106-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
@@ -1167,6 +1190,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/88-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/done/92-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/archived/283-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
+| docs/lineage/archived/838-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/333-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/381-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/434-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
@@ -1183,6 +1207,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/612-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/641-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/642-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
+| docs/lineage/active/838-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/active/94-testing/002-test-plan.md | 002-test-plan.md | Lineage | Active |
 | docs/lineage/done/113-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/done/147-lld/003-draft.md | 003-draft.md | Lineage | Active |
@@ -1227,6 +1252,9 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/99-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/done/99-lld-n2/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/archived/283-lld-n1/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n1/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n2/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n2/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/100-lld/003-draft.md | 003-draft.md | Lineage | Active |
@@ -1258,7 +1286,12 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/611-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/641-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/642-lld/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/active/774-lld/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/active/775-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n1/003-draft.md | 003-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n2/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/active/94-lld/003-draft.md | 003-draft.md | Lineage | Active |
 | docs/lineage/done/598-implspec/003-final-spec.md | 003-final-spec.md | Lineage | Active |
@@ -1272,6 +1305,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/98-lld-n1/003-issue.md | 003-issue.md | Lineage | Active |
 | docs/lineage/done/534-implspec/003-readiness-verdict.md | 003-readiness-verdict.md | Lineage | Active |
 | docs/lineage/done/612-implspec/003-readiness-verdict.md | 003-readiness-verdict.md | Lineage | Active |
+| docs/lineage/done/838-implspec/003-readiness-verdict.md | 003-readiness-verdict.md | Lineage | Active |
 | docs/lineage/done/104-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/done/106-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/done/113-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
@@ -1298,6 +1332,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/88-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/done/92-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/archived/283-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
+| docs/lineage/archived/838-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/333-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/381-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/434-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
@@ -1314,6 +1349,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/612-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/641-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/642-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
+| docs/lineage/active/838-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/active/94-testing/003-review-prompt.md | 003-review-prompt.md | Lineage | Active |
 | docs/lineage/done/611-implspec/003-spec-draft.md | 003-spec-draft.md | Lineage | Active |
 | docs/lineage/active/600-implspec/003-spec-draft.md | 003-spec-draft.md | Lineage | Active |
@@ -1512,6 +1548,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/99-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/done/99-lld-n2/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/archived/283-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n2/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n2/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/100-lld/004-draft.md | 004-draft.md | Lineage | Active |
@@ -1541,8 +1579,12 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/600-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/611-lld/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/641-lld/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/active/774-lld/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/active/775-lld/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld/004-draft.md | 004-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n2/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld-n1/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/active/84-lld-n2/004-draft.md | 004-draft.md | Lineage | Active |
@@ -1552,6 +1594,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/94-lld/004-draft.md | 004-draft.md | Lineage | Active |
 | docs/lineage/done/534-implspec/004-final-spec.md | 004-final-spec.md | Lineage | Active |
 | docs/lineage/done/612-implspec/004-final-spec.md | 004-final-spec.md | Lineage | Active |
+| docs/lineage/done/838-implspec/004-final-spec.md | 004-final-spec.md | Lineage | Active |
 | docs/lineage/done/107-lld/004-final.md | 004-final.md | Lineage | Active |
 | docs/lineage/done/108-lld/004-final.md | 004-final.md | Lineage | Active |
 | docs/lineage/done/109-lld/004-final.md | 004-final.md | Lineage | Active |
@@ -1645,6 +1688,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/92-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/done/99-lld/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/archived/283-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n1/004-verdict.md | 004-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/archived/99-lld/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n1/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n2/004-verdict.md | 004-verdict.md | Lineage | Active |
@@ -1674,6 +1719,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/612-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/active/641-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/active/642-lld/004-verdict.md | 004-verdict.md | Lineage | Active |
+| docs/lineage/active/838-lld-n1/004-verdict.md | 004-verdict.md | Lineage | Active |
+| docs/lineage/active/838-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/active/94-testing/004-verdict.md | 004-verdict.md | Lineage | Active |
 | docs/lineage/done/113-lld/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/done/180-lld/005-draft.md | 005-draft.md | Lineage | Active |
@@ -1687,6 +1734,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/99-lld/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/done/99-lld-n1/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/done/99-lld-n2/005-draft.md | 005-draft.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n1/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n1/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/archived/99-lld-n2/005-draft.md | 005-draft.md | Lineage | Active |
@@ -1700,6 +1748,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/83-lld/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/active/83-lld-n2/005-draft.md | 005-draft.md | Lineage | Active |
+| docs/lineage/active/838-lld-n1/005-draft.md | 005-draft.md | Lineage | Active |
 | docs/lineage/done/438-lld/005-final.md | 005-final.md | Lineage | Active |
 | docs/lineage/done/443-lld/005-final.md | 005-final.md | Lineage | Active |
 | docs/lineage/done/444-lld/005-final.md | 005-final.md | Lineage | Active |
@@ -1808,6 +1857,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/98-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/done/98-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/archived/283-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-lld-n2/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n2/005-verdict.md | 005-verdict.md | Lineage | Active |
@@ -1830,8 +1881,12 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/600-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/611-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/641-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/active/774-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/active/775-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/83-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/active/838-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
+| docs/lineage/active/838-lld-n2/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/84-lld/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/84-lld-n1/005-verdict.md | 005-verdict.md | Lineage | Active |
 | docs/lineage/active/84-lld-n2/005-verdict.md | 005-verdict.md | Lineage | Active |
@@ -1890,6 +1945,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/566-lld-n1/006-draft.md | 006-draft.md | Lineage | Active |
 | docs/lineage/active/600-lld-n1/006-draft.md | 006-draft.md | Lineage | Active |
 | docs/lineage/active/611-lld/006-draft.md | 006-draft.md | Lineage | Active |
+| docs/lineage/active/775-lld/006-draft.md | 006-draft.md | Lineage | Active |
 | docs/lineage/done/611-implspec/006-final-spec.md | 006-final-spec.md | Lineage | Active |
 | docs/lineage/active/642-implspec/006-final-spec.md | 006-final-spec.md | Lineage | Active |
 | docs/lineage/done/113-lld-n1/006-final.md | 006-final.md | Lineage | Active |
@@ -2019,6 +2075,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/141-lld/007-issue.md | 007-issue.md | Lineage | Active |
 | docs/lineage/done/87-lld-n1/007-issue.md | 007-issue.md | Lineage | Active |
 | docs/lineage/done/87-lld-n2/007-issue.md | 007-issue.md | Lineage | Active |
+| docs/lineage/archived/838-testing/007-lld.md | 007-lld.md | Lineage | Active |
+| docs/lineage/active/838-testing/007-lld.md | 007-lld.md | Lineage | Active |
 | docs/lineage/done/272-lld/007-pre-claude-code-1-lld.md | 007-pre-claude-code-1-lld.md | Lineage | Active |
 | docs/lineage/done/170-testing/007-prompt-agentos-nodes-check_type_renames.py.md | 007-prompt-agentos-nodes-check_type_renames.py.md | Lineage | Active |
 | docs/lineage/active/608-testing/007-prompt-docs-standards-0701-implementation-spec-template.md.md | 007-prompt-docs-standards-0701-implementation-spec-template.md.md | Lineage | Active |
@@ -2074,6 +2132,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/566-lld-n1/007-verdict.md | 007-verdict.md | Lineage | Active |
 | docs/lineage/active/600-testing/007-verdict.md | 007-verdict.md | Lineage | Active |
 | docs/lineage/active/642-testing/007-verdict.md | 007-verdict.md | Lineage | Active |
+| docs/lineage/active/775-lld/007-verdict.md | 007-verdict.md | Lineage | Active |
 | docs/lineage/done/101-test-plan-reviewer/008-draft.md | 008-draft.md | Lineage | Active |
 | docs/lineage/done/102-tdd-test-initialization/008-draft.md | 008-draft.md | Lineage | Active |
 | docs/lineage/done/104-lld/008-draft.md | 008-draft.md | Lineage | Active |
@@ -2152,6 +2211,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/170-testing/008-response-agentos-nodes-check_type_renames.py.md | 008-response-agentos-nodes-check_type_renames.py.md | Lineage | Active |
 | docs/lineage/active/608-testing/008-response-docs-standards-0701-implementation-spec-template.md.md | 008-response-docs-standards-0701-implementation-spec-template.md.md | Lineage | Active |
 | docs/lineage/archived/283-testing/008-review-prompt.md | 008-review-prompt.md | Lineage | Active |
+| docs/lineage/archived/838-testing/008-test-plan.md | 008-test-plan.md | Lineage | Active |
+| docs/lineage/active/838-testing/008-test-plan.md | 008-test-plan.md | Lineage | Active |
 | docs/lineage/done/161-testing/008-verdict.md | 008-verdict.md | Lineage | Active |
 | docs/lineage/done/600-lld/008-verdict.md | 008-verdict.md | Lineage | Active |
 | docs/lineage/done/605-lld/008-verdict.md | 008-verdict.md | Lineage | Active |
@@ -2214,6 +2275,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/443-testing/009-response-tests-unit-test_circuit_breaker.py.md | 009-response-tests-unit-test_circuit_breaker.py.md | Lineage | Active |
 | docs/lineage/active/598-testing/009-response-tests-unit-test_shell_security.py.md | 009-response-tests-unit-test_shell_security.py.md | Lineage | Active |
 | docs/lineage/active/612-testing/009-response-tools-mine_quality_patterns.py.md | 009-response-tools-mine_quality_patterns.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/009-review-prompt.md | 009-review-prompt.md | Lineage | Active |
+| docs/lineage/active/838-testing/009-review-prompt.md | 009-review-prompt.md | Lineage | Active |
 | docs/lineage/done/180-testing/009-test-plan.md | 009-test-plan.md | Lineage | Active |
 | docs/lineage/done/225-testing/009-test-plan.md | 009-test-plan.md | Lineage | Active |
 | docs/lineage/active/333-testing/009-test-plan.md | 009-test-plan.md | Lineage | Active |
@@ -2284,11 +2347,13 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/87-lld-n1/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/done/87-lld-n2/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/done/88-lld-n2/010-verdict.md | 010-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-testing/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n1/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/active/100-lld-n2/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/active/83-lld/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/active/83-lld-n1/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/active/83-lld-n2/010-verdict.md | 010-verdict.md | Lineage | Active |
+| docs/lineage/active/838-testing/010-verdict.md | 010-verdict.md | Lineage | Active |
 | docs/lineage/done/312-lld/011-draft.md | 011-draft.md | Lineage | Active |
 | docs/lineage/done/600-lld/011-draft.md | 011-draft.md | Lineage | Active |
 | docs/lineage/done/80-lld/011-draft.md | 011-draft.md | Lineage | Active |
@@ -2395,6 +2460,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/141-testing/013-implementation-response.md | 013-implementation-response.md | Lineage | Active |
 | docs/lineage/done/177-testing/013-implementation-response.md | 013-implementation-response.md | Lineage | Active |
 | docs/lineage/done/605-testing/013-prompt-assemblyzero-core-llm_provider.py.md | 013-prompt-assemblyzero-core-llm_provider.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/013-prompt-assemblyzero-core-workspace_context.py.md | 013-prompt-assemblyzero-core-workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/013-prompt-assemblyzero-core-workspace_context.py.md | 013-prompt-assemblyzero-core-workspace_context.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/013-prompt-assemblyzero-workflows-testing-runners-base_runner.py.md | 013-prompt-assemblyzero-workflows-testing-runners-base_runner.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/013-prompt-assemblyzero-workflows-testing-state.py.md | 013-prompt-assemblyzero-workflows-testing-state.py.md | Lineage | Active |
 | docs/lineage/active/435-testing/013-prompt-example.py.md | 013-prompt-example.py.md | Lineage | Active |
@@ -2451,6 +2518,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/147-testing/014-prompt-tests-unit-test_completeness_gate.py.md | 014-prompt-tests-unit-test_completeness_gate.py.md | Lineage | Active |
 | docs/lineage/done/599-testing/014-prompt-tests-unit-test_inventory_node.py.md | 014-prompt-tests-unit-test_inventory_node.py.md | Lineage | Active |
 | docs/lineage/done/605-testing/014-response-assemblyzero-core-llm_provider.py.md | 014-response-assemblyzero-core-llm_provider.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/014-response-assemblyzero-core-workspace_context.py.md | 014-response-assemblyzero-core-workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/014-response-assemblyzero-core-workspace_context.py.md | 014-response-assemblyzero-core-workspace_context.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/014-response-assemblyzero-workflows-testing-runners-base_runner.py.md | 014-response-assemblyzero-workflows-testing-runners-base_runner.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/014-response-assemblyzero-workflows-testing-state.py.md | 014-response-assemblyzero-workflows-testing-state.py.md | Lineage | Active |
 | docs/lineage/done/170-testing/014-response-tests-fixtures-renamed_class.diff.md | 014-response-tests-fixtures-renamed_class.diff.md | Lineage | Active |
@@ -2470,6 +2539,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/161-testing/015-implementation-prompt.md | 015-implementation-prompt.md | Lineage | Active |
 | docs/lineage/done/257-testing/015-implementation-prompt.md | 015-implementation-prompt.md | Lineage | Active |
 | docs/lineage/done/148-lld/015-issue.md | 015-issue.md | Lineage | Active |
+| docs/lineage/archived/838-testing/015-prompt-assemblyzero-core-__init__.py.md | 015-prompt-assemblyzero-core-__init__.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/015-prompt-assemblyzero-core-__init__.py.md | 015-prompt-assemblyzero-core-__init__.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/015-prompt-assemblyzero-workflows-testing-framework_detector.py.md | 015-prompt-assemblyzero-workflows-testing-framework_detector.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/015-prompt-assemblyzero-workflows-testing-nodes-cleanup_helpers.py.md | 015-prompt-assemblyzero-workflows-testing-nodes-cleanup_helpers.py.md | Lineage | Active |
 | docs/lineage/active/641-testing/015-prompt-assemblyzero-workflows-testing-nodes-implement_code.py.md | 015-prompt-assemblyzero-workflows-testing-nodes-implement_code.py.md | Lineage | Active |
@@ -2518,6 +2589,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/438-testing/016-prompt-tests-e2e-conftest.py.md | 016-prompt-tests-e2e-conftest.py.md | Lineage | Active |
 | docs/lineage/active/434-testing/016-prompt-tests-fixtures-scraper-golden_output.txt.md | 016-prompt-tests-fixtures-scraper-golden_output.txt.md | Lineage | Active |
 | docs/lineage/active/497-testing/016-prompt-tests-fixtures-verdict_analyzer-sample_verdict_iteration_3.json.md | 016-prompt-tests-fixtures-verdict_analyzer-sample_verdict_iteration_3.json.md | Lineage | Active |
+| docs/lineage/archived/838-testing/016-response-assemblyzero-core-__init__.py.md | 016-response-assemblyzero-core-__init__.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/016-response-assemblyzero-core-__init__.py.md | 016-response-assemblyzero-core-__init__.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/016-response-assemblyzero-workflows-testing-framework_detector.py.md | 016-response-assemblyzero-workflows-testing-framework_detector.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/016-response-assemblyzero-workflows-testing-nodes-cleanup_helpers.py.md | 016-response-assemblyzero-workflows-testing-nodes-cleanup_helpers.py.md | Lineage | Active |
 | docs/lineage/active/641-testing/016-response-assemblyzero-workflows-testing-nodes-implement_code.py.md | 016-response-assemblyzero-workflows-testing-nodes-implement_code.py.md | Lineage | Active |
@@ -2534,6 +2607,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/177-testing/017-implementation-prompt.md | 017-implementation-prompt.md | Lineage | Active |
 | docs/lineage/done/248-testing/017-implementation-response.md | 017-implementation-response.md | Lineage | Active |
 | docs/lineage/active/607-testing/017-lld.md | 017-lld.md | Lineage | Active |
+| docs/lineage/archived/838-testing/017-prompt-assemblyzero-core-state.py.md | 017-prompt-assemblyzero-core-state.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/017-prompt-assemblyzero-core-state.py.md | 017-prompt-assemblyzero-core-state.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/017-prompt-assemblyzero-workflows-testing-nodes-cleanup.py.md | 017-prompt-assemblyzero-workflows-testing-nodes-cleanup.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/017-prompt-assemblyzero-workflows-testing-runner_registry.py.md | 017-prompt-assemblyzero-workflows-testing-runner_registry.py.md | Lineage | Active |
 | docs/lineage/done/438-testing/017-prompt-tests-e2e-conftest.py-retry2.md | 017-prompt-tests-e2e-conftest.py-retry2.md | Lineage | Active |
@@ -2581,6 +2656,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/608-testing/018-prompt-docs-standards-0701-implementation-spec-template.md.md | 018-prompt-docs-standards-0701-implementation-spec-template.md.md | Lineage | Active |
 | docs/lineage/active/642-testing/018-prompt-tests-fixtures-retry_prompt-full_lld.md.md | 018-prompt-tests-fixtures-retry_prompt-full_lld.md.md | Lineage | Active |
 | docs/lineage/active/434-testing/018-prompt-tests-fixtures-scraper-golden_output.txt-retry2.md | 018-prompt-tests-fixtures-scraper-golden_output.txt-retry2.md | Lineage | Active |
+| docs/lineage/archived/838-testing/018-response-assemblyzero-core-state.py.md | 018-response-assemblyzero-core-state.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/018-response-assemblyzero-core-state.py.md | 018-response-assemblyzero-core-state.py.md | Lineage | Active |
 | docs/lineage/done/180-testing/018-response-assemblyzero-workflows-testing-nodes-cleanup.py.md | 018-response-assemblyzero-workflows-testing-nodes-cleanup.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/018-response-assemblyzero-workflows-testing-runner_registry.py.md | 018-response-assemblyzero-workflows-testing-runner_registry.py.md | Lineage | Active |
 | docs/lineage/done/438-testing/018-response-tests-e2e-conftest.py-retry2.md | 018-response-tests-e2e-conftest.py-retry2.md | Lineage | Active |
@@ -2599,6 +2676,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/257-testing/019-implementation-2.md | 019-implementation-2.md | Lineage | Active |
 | docs/lineage/done/104-testing/019-implementation-response.md | 019-implementation-response.md | Lineage | Active |
 | docs/lineage/active/642-testing/019-lld.md | 019-lld.md | Lineage | Active |
+| docs/lineage/archived/838-testing/019-prompt-assemblyzero-core-state.py-retry2.md | 019-prompt-assemblyzero-core-state.py-retry2.md | Lineage | Active |
+| docs/lineage/active/838-testing/019-prompt-assemblyzero-core-state.py-retry2.md | 019-prompt-assemblyzero-core-state.py-retry2.md | Lineage | Active |
 | docs/lineage/done/180-testing/019-prompt-assemblyzero-workflows-testing-nodes-__init__.py.md | 019-prompt-assemblyzero-workflows-testing-nodes-__init__.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/019-prompt-assemblyzero-workflows-testing-runners-pytest_runner.py.md | 019-prompt-assemblyzero-workflows-testing-runners-pytest_runner.py.md | Lineage | Active |
 | docs/lineage/done/438-testing/019-prompt-tests-e2e-test_lld_workflow_mock.py.md | 019-prompt-tests-e2e-test_lld_workflow_mock.py.md | Lineage | Active |
@@ -2645,6 +2724,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/438-testing/020-prompt-tests-e2e-test_lld_workflow_mock.py-retry2.md | 020-prompt-tests-e2e-test_lld_workflow_mock.py-retry2.md | Lineage | Active |
 | docs/lineage/active/434-testing/020-prompt-tests-fixtures-scraper-golden_output.txt-retry3.md | 020-prompt-tests-fixtures-scraper-golden_output.txt-retry3.md | Lineage | Active |
 | docs/lineage/done/401-testing/020-prompt-tests-unit-test_analyze_codebase.py.md | 020-prompt-tests-unit-test_analyze_codebase.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/020-response-assemblyzero-core-state.py-retry2.md | 020-response-assemblyzero-core-state.py-retry2.md | Lineage | Active |
+| docs/lineage/active/838-testing/020-response-assemblyzero-core-state.py-retry2.md | 020-response-assemblyzero-core-state.py-retry2.md | Lineage | Active |
 | docs/lineage/done/180-testing/020-response-assemblyzero-workflows-testing-nodes-__init__.py.md | 020-response-assemblyzero-workflows-testing-nodes-__init__.py.md | Lineage | Active |
 | docs/lineage/active/381-testing/020-response-assemblyzero-workflows-testing-runners-pytest_runner.py.md | 020-response-assemblyzero-workflows-testing-runners-pytest_runner.py.md | Lineage | Active |
 | docs/lineage/active/333-testing/020-response-tests-fixtures-metrics-mock_issues_rca_pdf.json.md | 020-response-tests-fixtures-metrics-mock_issues_rca_pdf.json.md | Lineage | Active |
@@ -2664,6 +2745,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/333-testing/021-prompt-tests-fixtures-metrics-expected_aggregated_output.json.md | 021-prompt-tests-fixtures-metrics-expected_aggregated_output.json.md | Lineage | Active |
 | docs/lineage/done/605-testing/021-prompt-tests-test_assemblyzero_config.py.md | 021-prompt-tests-test_assemblyzero_config.py.md | Lineage | Active |
 | docs/lineage/done/401-testing/021-prompt-tests-unit-test_analyze_codebase.py-retry2.md | 021-prompt-tests-unit-test_analyze_codebase.py-retry2.md | Lineage | Active |
+| docs/lineage/archived/838-testing/021-prompt-tests-unit-test_workspace_context.py.md | 021-prompt-tests-unit-test_workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/021-prompt-tests-unit-test_workspace_context.py.md | 021-prompt-tests-unit-test_workspace_context.py.md | Lineage | Active |
 | docs/lineage/done/225-testing/021-prompt-tools-test-gate.py.md | 021-prompt-tools-test-gate.py.md | Lineage | Active |
 | docs/lineage/done/170-testing/021-response-agentos-nodes-check_type_renames.py.md | 021-response-agentos-nodes-check_type_renames.py.md | Lineage | Active |
 | docs/lineage/done/113-testing/021-response-assemblyzero-rag-collections.py.md | 021-response-assemblyzero-rag-collections.py.md | Lineage | Active |
@@ -2709,6 +2792,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/active/333-testing/022-response-tests-fixtures-metrics-expected_aggregated_output.json.md | 022-response-tests-fixtures-metrics-expected_aggregated_output.json.md | Lineage | Active |
 | docs/lineage/done/605-testing/022-response-tests-test_assemblyzero_config.py.md | 022-response-tests-test_assemblyzero_config.py.md | Lineage | Active |
 | docs/lineage/done/401-testing/022-response-tests-unit-test_analyze_codebase.py-retry2.md | 022-response-tests-unit-test_analyze_codebase.py-retry2.md | Lineage | Active |
+| docs/lineage/archived/838-testing/022-response-tests-unit-test_workspace_context.py.md | 022-response-tests-unit-test_workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/022-response-tests-unit-test_workspace_context.py.md | 022-response-tests-unit-test_workspace_context.py.md | Lineage | Active |
 | docs/lineage/done/225-testing/022-response-tools-test-gate.py.md | 022-response-tools-test-gate.py.md | Lineage | Active |
 | docs/lineage/done/248-testing/022-test-plan.md | 022-test-plan.md | Lineage | Active |
 | docs/lineage/done/599-testing/022-token-budget.md | 022-token-budget.md | Lineage | Active |
@@ -2727,6 +2812,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/605-testing/023-prompt-tests-test_gemini_client.py.md | 023-prompt-tests-test_gemini_client.py.md | Lineage | Active |
 | docs/lineage/done/401-testing/023-prompt-tests-unit-test_codebase_reader.py.md | 023-prompt-tests-unit-test_codebase_reader.py.md | Lineage | Active |
 | docs/lineage/done/225-testing/023-prompt-tests-unit-test_gate-__init__.py.md | 023-prompt-tests-unit-test_gate-__init__.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/023-prompt-tests-unit-test_gate-test_gate_workspace_context.py.md | 023-prompt-tests-unit-test_gate-test_gate_workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/023-prompt-tests-unit-test_gate-test_gate_workspace_context.py.md | 023-prompt-tests-unit-test_gate-test_gate_workspace_context.py.md | Lineage | Active |
 | docs/lineage/done/170-testing/023-response-agentos-nodes-__init__.py.md | 023-response-agentos-nodes-__init__.py.md | Lineage | Active |
 | docs/lineage/done/113-testing/023-response-assemblyzero-rag-chunking.py.md | 023-response-assemblyzero-rag-chunking.py.md | Lineage | Active |
 | docs/lineage/done/535-testing/023-response-assemblyzero-workflows-death-skill.py.md | 023-response-assemblyzero-workflows-death-skill.py.md | Lineage | Active |
@@ -2767,8 +2854,12 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/605-testing/024-response-tests-test_gemini_client.py.md | 024-response-tests-test_gemini_client.py.md | Lineage | Active |
 | docs/lineage/done/401-testing/024-response-tests-unit-test_codebase_reader.py.md | 024-response-tests-unit-test_codebase_reader.py.md | Lineage | Active |
 | docs/lineage/done/225-testing/024-response-tests-unit-test_gate-__init__.py.md | 024-response-tests-unit-test_gate-__init__.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/024-response-tests-unit-test_gate-test_gate_workspace_context.py.md | 024-response-tests-unit-test_gate-test_gate_workspace_context.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/024-response-tests-unit-test_gate-test_gate_workspace_context.py.md | 024-response-tests-unit-test_gate-test_gate_workspace_context.py.md | Lineage | Active |
 | docs/lineage/done/248-testing/024-verdict.md | 024-verdict.md | Lineage | Active |
 | docs/lineage/done/605-testing/025-completeness-ast-analysis.md | 025-completeness-ast-analysis.md | Lineage | Active |
+| docs/lineage/archived/838-testing/025-completeness-ast-analysis.md | 025-completeness-ast-analysis.md | Lineage | Active |
+| docs/lineage/active/838-testing/025-completeness-ast-analysis.md | 025-completeness-ast-analysis.md | Lineage | Active |
 | docs/lineage/done/161-testing/025-implementation-1.md | 025-implementation-1.md | Lineage | Active |
 | docs/lineage/done/177-testing/025-implementation-1.md | 025-implementation-1.md | Lineage | Active |
 | docs/lineage/done/104-testing/025-implementation-5.md | 025-implementation-5.md | Lineage | Active |
@@ -2867,6 +2958,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/248-testing/028-lld.md | 028-lld.md | Lineage | Active |
 | docs/lineage/active/600-testing/028-lld.md | 028-lld.md | Lineage | Active |
 | docs/lineage/active/641-testing/028-lld.md | 028-lld.md | Lineage | Active |
+| docs/lineage/archived/838-testing/028-prompt-assemblyzero-core-__init__.py.md | 028-prompt-assemblyzero-core-__init__.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/028-prompt-assemblyzero-core-__init__.py.md | 028-prompt-assemblyzero-core-__init__.py.md | Lineage | Active |
 | docs/lineage/done/605-testing/028-prompt-assemblyzero-core-config.py.md | 028-prompt-assemblyzero-core-config.py.md | Lineage | Active |
 | docs/lineage/done/304-testing/028-prompt-assemblyzero-workflows-implementation_spec-nodes-review_spec.py.md | 028-prompt-assemblyzero-workflows-implementation_spec-nodes-review_spec.py.md | Lineage | Active |
 | docs/lineage/active/534-testing/028-prompt-assemblyzero-workflows-janitor-probes-stale_timestamps.py.md | 028-prompt-assemblyzero-workflows-janitor-probes-stale_timestamps.py.md | Lineage | Active |
@@ -2900,6 +2993,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/401-testing/029-prompt-tests-fixtures-mock_repo-CLAUDE.md.md | 029-prompt-tests-fixtures-mock_repo-CLAUDE.md.md | Lineage | Active |
 | docs/lineage/done/180-testing/029-prompt-tests-unit-test_cleanup_helpers.py.md | 029-prompt-tests-unit-test_cleanup_helpers.py.md | Lineage | Active |
 | docs/lineage/done/225-testing/029-prompt-tests-unit-test_gate-test_integration.py.md | 029-prompt-tests-unit-test_gate-test_integration.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/029-response-assemblyzero-core-__init__.py.md | 029-response-assemblyzero-core-__init__.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/029-response-assemblyzero-core-__init__.py.md | 029-response-assemblyzero-core-__init__.py.md | Lineage | Active |
 | docs/lineage/done/605-testing/029-response-assemblyzero-core-config.py.md | 029-response-assemblyzero-core-config.py.md | Lineage | Active |
 | docs/lineage/done/304-testing/029-response-assemblyzero-workflows-implementation_spec-nodes-review_spec.py.md | 029-response-assemblyzero-workflows-implementation_spec-nodes-review_spec.py.md | Lineage | Active |
 | docs/lineage/active/534-testing/029-response-assemblyzero-workflows-janitor-probes-stale_timestamps.py.md | 029-response-assemblyzero-workflows-janitor-probes-stale_timestamps.py.md | Lineage | Active |
@@ -2925,6 +3020,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/535-testing/030-prompt-.gitignore.md | 030-prompt-.gitignore.md | Lineage | Active |
 | docs/lineage/active/94-testing/030-prompt-.gitignore.md | 030-prompt-.gitignore.md | Lineage | Active |
 | docs/lineage/done/605-testing/030-prompt-assemblyzero-core-llm_provider.py.md | 030-prompt-assemblyzero-core-llm_provider.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/030-prompt-assemblyzero-core-state.py.md | 030-prompt-assemblyzero-core-state.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/030-prompt-assemblyzero-core-state.py.md | 030-prompt-assemblyzero-core-state.py.md | Lineage | Active |
 | docs/lineage/done/304-testing/030-prompt-assemblyzero-workflows-implementation_spec-nodes-finalize_spec.py.md | 030-prompt-assemblyzero-workflows-implementation_spec-nodes-finalize_spec.py.md | Lineage | Active |
 | docs/lineage/active/534-testing/030-prompt-assemblyzero-workflows-janitor-probes-readme_claims.py.md | 030-prompt-assemblyzero-workflows-janitor-probes-readme_claims.py.md | Lineage | Active |
 | docs/lineage/archived/283-testing/030-prompt-dashboard-src-components-shared-conversation-MessageBubble.tsx.md | 030-prompt-dashboard-src-components-shared-conversation-MessageBubble.tsx.md | Lineage | Active |
@@ -2959,6 +3056,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/535-testing/031-response-.gitignore.md | 031-response-.gitignore.md | Lineage | Active |
 | docs/lineage/active/94-testing/031-response-.gitignore.md | 031-response-.gitignore.md | Lineage | Active |
 | docs/lineage/done/605-testing/031-response-assemblyzero-core-llm_provider.py.md | 031-response-assemblyzero-core-llm_provider.py.md | Lineage | Active |
+| docs/lineage/archived/838-testing/031-response-assemblyzero-core-state.py.md | 031-response-assemblyzero-core-state.py.md | Lineage | Active |
+| docs/lineage/active/838-testing/031-response-assemblyzero-core-state.py.md | 031-response-assemblyzero-core-state.py.md | Lineage | Active |
 | docs/lineage/done/304-testing/031-response-assemblyzero-workflows-implementation_spec-nodes-finalize_spec.py.md | 031-response-assemblyzero-workflows-implementation_spec-nodes-finalize_spec.py.md | Lineage | Active |
 | docs/lineage/active/534-testing/031-response-assemblyzero-workflows-janitor-probes-readme_claims.py.md | 031-response-assemblyzero-workflows-janitor-probes-readme_claims.py.md | Lineage | Active |
 | docs/lineage/archived/283-testing/031-response-dashboard-src-components-shared-conversation-MessageBubble.tsx.md | 031-response-dashboard-src-components-shared-conversation-MessageBubble.tsx.md | Lineage | Active |
@@ -2969,6 +3068,8 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/lineage/done/88-testing/031-response-tools-rebuild_knowledge_base.py.md | 031-response-tools-rebuild_knowledge_base.py.md | Lineage | Active |
 | docs/lineage/done/248-testing/031-verdict.md | 031-verdict.md | Lineage | Active |
 | docs/lineage/active/641-testing/031-verdict.md | 031-verdict.md | Lineage | Active |
+| docs/lineage/archived/838-testing/032-completeness-ast-analysis.md | 032-completeness-ast-analysis.md | Lineage | Active |
+| docs/lineage/active/838-testing/032-completeness-ast-analysis.md | 032-completeness-ast-analysis.md | Lineage | Active |
 | docs/lineage/done/141-testing/032-implementation-0.md | 032-implementation-0.md | Lineage | Active |
 | docs/lineage/done/104-testing/032-implementation-2.md | 032-implementation-2.md | Lineage | Active |
 | docs/lineage/done/177-testing/032-implementation-prompt.md | 032-implementation-prompt.md | Lineage | Active |
@@ -4593,6 +4694,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/reports/active/70-test-report.md | 70-test-report.md | Reports | Active |
 | docs/reports/done/82-implementation-report.md | 82-implementation-report.md | Reports | Active |
 | docs/reports/done/82-test-report.md | 82-test-report.md | Reports | Active |
+| docs/reports/active/838-implementation-report.md | 838-implementation-report.md | Reports | Active |
 | docs/reports/done/86-implementation-report.md | 86-implementation-report.md | Reports | Active |
 | docs/reports/done/86-test-report.md | 86-test-report.md | Reports | Active |
 | docs/reports/done/88-implementation-report.md | 88-implementation-report.md | Reports | Active |
@@ -4625,6 +4727,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/index.md | index.md | Root | Active |
 | docs/lessons-learned-verdict-analyzer.md | lessons-learned-verdict-analyzer.md | Root | Active |
 | docs/lessons-learned.md | lessons-learned.md | Root | Active |
+| docs/test-merge.md | test-merge.md | Root | Active |
 | docs/workflow-lessons-learned-1.md | workflow-lessons-learned-1.md | Root | Active |
 | docs/runbooks/0801-orchestrator-workflow.md | 0801-orchestrator-workflow.md | Runbooks | Active |
 | docs/runbooks/0900-runbook-index.md | 0900-runbook-index.md | Runbooks | Active |
@@ -4655,6 +4758,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/runbooks/0925-agent-token-setup.md | 0925-agent-token-setup.md | Runbooks | Active |
 | docs/runbooks/0926-branch-protection-setup.md | 0926-branch-protection-setup.md | Runbooks | Active |
 | docs/runbooks/0927-new-repo-human-checklist.md | 0927-new-repo-human-checklist.md | Runbooks | Active |
+| docs/runbooks/0928-cloudflare-zone-setup.md | 0928-cloudflare-zone-setup.md | Runbooks | Active |
 | docs/runbooks/0929-ai-cli-tools-reference.md | 0929-ai-cli-tools-reference.md | Runbooks | Active |
 | docs/security/secret-guard-briefing.md | secret-guard-briefing.md | Security | Active |
 | docs/session-logs/2026-01-13.md | 2026-01-13.md | Session-logs | Active |
@@ -4681,6 +4785,14 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/session-logs/2026-03-01.md | 2026-03-01.md | Session-logs | Active |
 | docs/session-logs/2026-03-04.md | 2026-03-04.md | Session-logs | Active |
 | docs/session-logs/2026-03-18.md | 2026-03-18.md | Session-logs | Active |
+| docs/session-logs/2026-03-19.md | 2026-03-19.md | Session-logs | Active |
+| docs/session-logs/2026-03-20.md | 2026-03-20.md | Session-logs | Active |
+| docs/session-logs/2026-03-27.md | 2026-03-27.md | Session-logs | Active |
+| docs/session-logs/2026-04-05.md | 2026-04-05.md | Session-logs | Active |
+| docs/session-logs/2026-04-06.md | 2026-04-06.md | Session-logs | Active |
+| docs/session-logs/2026-04-08.md | 2026-04-08.md | Session-logs | Active |
+| docs/session-logs/2026-04-09.md | 2026-04-09.md | Session-logs | Active |
+| docs/session-logs/2026-04-18.md | 2026-04-18.md | Session-logs | Active |
 | docs/setup/assemblyzero-config.md | assemblyzero-config.md | Setup | Active |
 | docs/setup/git-crypt-ideas.md | git-crypt-ideas.md | Setup | Active |
 | docs/setup/new-project.md | new-project.md | Setup | Active |
@@ -4738,6 +4850,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | docs/standards/0014-extract-and-discard-pattern.md | 0014-extract-and-discard-pattern.md | Standard | Active |
 | docs/standards/0015-age-transition-protocol.md | 0015-age-transition-protocol.md | Standard | Active |
 | docs/standards/0015-spelunking-audit-standard.md | 0015-spelunking-audit-standard.md | Standard | Active |
+| docs/standards/0016-pr-sentinel-system-architecture.md | 0016-pr-sentinel-system-architecture.md | Standard | Active |
 | docs/standards/0701-implementation-spec-template.md | 0701-implementation-spec-template.md | Standard | Active |
 | docs/standards/0702-implementation-readiness-review.md | 0702-implementation-readiness-review.md | Standard | Active |
 | docs/temp/LLD-587.md | LLD-587.md | Temp | Active |

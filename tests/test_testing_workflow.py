@@ -1944,7 +1944,7 @@ class TestReviewTestPlanModule:
         verdict = "[x] **APPROVED** - Test plan is ready"
         result = _parse_verdict(verdict)
 
-        assert result == "APPROVED"
+        assert result["verdict"] == "APPROVED"
 
     def test_parse_verdict_blocked_explicit(self):
         """_parse_verdict detects explicit BLOCKED."""
@@ -1953,7 +1953,7 @@ class TestReviewTestPlanModule:
         verdict = "[x] **BLOCKED** - Test plan needs revision"
         result = _parse_verdict(verdict)
 
-        assert result == "BLOCKED"
+        assert result["verdict"] == "BLOCKED"
 
     def test_parse_verdict_approved_implicit(self):
         """_parse_verdict detects implicit APPROVED."""
@@ -1962,16 +1962,16 @@ class TestReviewTestPlanModule:
         verdict = "The test plan is APPROVED for implementation."
         result = _parse_verdict(verdict)
 
-        assert result == "APPROVED"
+        assert result["verdict"] == "APPROVED"
 
-    def test_parse_verdict_blocked_default(self):
-        """_parse_verdict defaults to BLOCKED for unclear verdict."""
+    def test_parse_verdict_unknown_default(self):
+        """_parse_verdict returns UNKNOWN for unclear verdict (#775)."""
         from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
         verdict = "Some unclear response"
         result = _parse_verdict(verdict)
 
-        assert result == "BLOCKED"
+        assert result["verdict"] == "UNKNOWN"
 
     def test_extract_feedback_required_changes_section(self):
         """_extract_feedback extracts from Required Changes section."""
@@ -4387,68 +4387,6 @@ class TestReviewTestPlanCoverageGaps:
         assert result.get("test_plan_status") == "BLOCKED"
         assert "GUARD" in result.get("error_message", "")
 
-    def test_review_test_plan_gemini_import_error(self, tmp_path):
-        """review_test_plan handles ImportError when Gemini client unavailable."""
-        import sys
-
-        # Save and remove the module to simulate ImportError
-        saved_modules = {}
-        for mod_name in list(sys.modules.keys()):
-            if "gemini" in mod_name.lower() or mod_name == "assemblyzero.core.gemini_client":
-                saved_modules[mod_name] = sys.modules.pop(mod_name)
-
-        try:
-            # Patch builtins.__import__ to raise ImportError for gemini_client
-            original_import = __builtins__["__import__"]
-
-            def mock_import(name, *args, **kwargs):
-                if "gemini" in name.lower():
-                    raise ImportError("No module named 'gemini'")
-                return original_import(name, *args, **kwargs)
-
-            # Reload the review_test_plan module to clear cached imports
-            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
-
-            with patch.dict("builtins.__dict__", {"__import__": mock_import}):
-                from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
-
-                state: TestingWorkflowState = {
-                    "issue_number": 42,
-                    "repo_root": str(tmp_path),
-                    "mock_mode": False,  # Non-mock to hit real path
-                    "audit_dir": str(tmp_path),
-                    "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
-                    "test_scenarios": [
-                        {
-                            "name": "test_something",
-                            "requirement_ref": "REQ-1",
-                            "test_type": "unit",
-                            "description": "Test something",
-                            "mock_needed": False,
-                            "assertions": ["passes"],
-                        },
-                        {
-                            "name": "test_other",
-                            "requirement_ref": "REQ-3",
-                            "test_type": "unit",
-                            "description": "Covers non-existent req to pass gate 3 count",
-                            "mock_needed": False,
-                            "assertions": ["passes"],
-                        },
-                    ],
-                    "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
-                }
-
-                result = review_test_plan(state)
-
-                # Should return BLOCKED due to import error
-                assert result.get("test_plan_status") == "BLOCKED"
-                assert "not available" in result.get("error_message", "").lower() or "import" in result.get("error_message", "").lower()
-        finally:
-            # Restore modules
-            sys.modules.update(saved_modules)
-
     def test_review_test_plan_gemini_api_success_approved(self, tmp_path):
         """review_test_plan with mocked Gemini returning APPROVED."""
         import sys
@@ -4579,126 +4517,6 @@ class TestReviewTestPlanCoverageGaps:
             assert result.get("test_plan_status") == "BLOCKED"
             assert "gemini_feedback" in result
 
-    def test_review_test_plan_gemini_api_failure(self, tmp_path):
-        """review_test_plan with mocked Gemini returning failure."""
-        import sys
-
-        # Create a mock GeminiClient that returns failure
-        class MockResult:
-            success = False
-            response = ""
-            error_message = "API rate limit exceeded"
-
-        class MockGeminiClient:
-            def __init__(self, model=None):
-                pass
-            def invoke(self, system_instruction=None, content=None, **kwargs):
-                return MockResult()
-
-        mock_config = type(sys)("mock_config")
-        mock_config.REVIEWER_MODEL = "gemini-test"
-
-        mock_gemini = type(sys)("mock_gemini")
-        mock_gemini.GeminiClient = MockGeminiClient
-
-        with patch.dict(sys.modules, {
-            "assemblyzero.core.config": mock_config,
-            "assemblyzero.core.gemini_client": mock_gemini,
-        }):
-            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
-
-            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
-
-            state: TestingWorkflowState = {
-                "issue_number": 42,
-                "repo_root": str(tmp_path),
-                "mock_mode": False,
-                "audit_dir": str(tmp_path),
-                "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
-                "test_scenarios": [
-                    {
-                        "name": "test_something",
-                        "requirement_ref": "REQ-1",
-                        "test_type": "unit",
-                        "description": "Test",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    },
-                    {
-                        "name": "test_other",
-                        "requirement_ref": "REQ-3",
-                        "test_type": "unit",
-                        "description": "Covers non-existent req to pass gate 3 count",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    },
-                ],
-                "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
-            }
-
-            result = review_test_plan(state)
-
-            assert result.get("test_plan_status") == "BLOCKED"
-            assert "rate limit" in result.get("error_message", "").lower()
-
-    def test_review_test_plan_gemini_exception(self, tmp_path):
-        """review_test_plan handles general exceptions from Gemini."""
-        import sys
-
-        # Create a mock GeminiClient that raises exception
-        class MockGeminiClient:
-            def __init__(self, model=None):
-                pass
-            def invoke(self, system_instruction=None, content=None):
-                raise RuntimeError("Connection timeout")
-
-        mock_config = type(sys)("mock_config")
-        mock_config.REVIEWER_MODEL = "gemini-test"
-
-        mock_gemini = type(sys)("mock_gemini")
-        mock_gemini.GeminiClient = MockGeminiClient
-
-        with patch.dict(sys.modules, {
-            "assemblyzero.core.config": mock_config,
-            "assemblyzero.core.gemini_client": mock_gemini,
-        }):
-            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
-
-            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
-
-            state: TestingWorkflowState = {
-                "issue_number": 42,
-                "repo_root": str(tmp_path),
-                "mock_mode": False,
-                "audit_dir": str(tmp_path),
-                "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
-                "test_scenarios": [
-                    {
-                        "name": "test_something",
-                        "requirement_ref": "REQ-1",
-                        "test_type": "unit",
-                        "description": "Test",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    },
-                    {
-                        "name": "test_other",
-                        "requirement_ref": "REQ-3",
-                        "test_type": "unit",
-                        "description": "Covers non-existent req to pass gate 3 count",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    },
-                ],
-                "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
-            }
-
-            result = review_test_plan(state)
-
-            assert result.get("test_plan_status") == "BLOCKED"
-            assert "timeout" in result.get("error_message", "").lower() or "error" in result.get("error_message", "").lower()
 
 
 class TestImplementCodeCoverageGaps:
@@ -5621,76 +5439,13 @@ class TestValidateCommitMessage:
 
 
 class TestImplSpecTestPlanExtraction:
-    """Tests for Issue #412: extract_test_plan_section supports impl spec formats.
+    """Tests for impl spec test extraction.
 
-    Implementation specs use '## 9. Test Mapping' instead of '## 10. Test Plan'.
-    Some specs embed complete test files in code blocks under '### 6.x' sections.
+    Standard 0701 v1.1 (Issue #608) requires Section 10 — Section 9 and
+    unnumbered headings are explicitly rejected by validate_spec_structure.
+    Some specs embed complete test files in code blocks under '### 6.x' sections,
+    which the code-block fallback handles when called directly.
     """
-
-    def test_extract_section_9_test_mapping(self):
-        """extract_test_plan_section matches '## 9. Test Mapping'."""
-        spec = """# Implementation Spec
-
-## 8. Implementation Notes
-
-Some notes.
-
-## 9. Test Mapping
-
-| Test ID | Scenario | Req | File |
-|---------|----------|-----|------|
-| test_config_defaults | Verify defaults | REQ-1 | tests/unit/test_config.py |
-| test_state_transitions | Verify state flow | REQ-2 | tests/unit/test_state.py |
-
-## 10. Appendix
-"""
-        result = extract_test_plan_section(spec)
-
-        assert "test_config_defaults" in result
-        assert "test_state_transitions" in result
-        assert "Appendix" not in result
-
-    def test_extract_section_9_parses_into_scenarios(self):
-        """Section 9 table content is parseable by parse_test_scenarios."""
-        spec = """# Spec
-
-## 9. Test Mapping
-
-| Test ID | Scenario | Type | File |
-|---------|----------|------|------|
-| test_load_config | Load config from file | unit | tests/unit/test_config.py |
-| test_integration_flow | Full pipeline test | integration | tests/integration/test_flow.py |
-
-## 10. Notes
-"""
-        section = extract_test_plan_section(spec)
-        scenarios = parse_test_scenarios(section)
-
-        assert len(scenarios) >= 2
-        names = [s["name"] for s in scenarios]
-        assert any("load_config" in n for n in names)
-        assert any("integration_flow" in n for n in names)
-
-    def test_extract_generic_test_mapping_heading(self):
-        """extract_test_plan_section matches '## Test Mapping' (no number)."""
-        spec = """# Spec
-
-## Implementation
-
-Code details.
-
-## Test Mapping
-
-| Test | Desc |
-|------|------|
-| test_foo | Tests foo |
-
-## Appendix
-"""
-        result = extract_test_plan_section(spec)
-
-        assert "test_foo" in result
-        assert "Appendix" not in result
 
     def test_code_block_fallback_extracts_test_methods(self):
         """_extract_test_scenarios_from_code_blocks extracts def test_* from code blocks."""
@@ -5802,44 +5557,6 @@ def test_e2e_thing(self):
         assert "unit" in unit_line
         assert "integration" in integ_line
         assert "e2e" in e2e_line
-
-    def test_full_pipeline_spec_with_code_blocks(self):
-        """End-to-end: spec with only code blocks (no Section 9/10) still extracts scenarios."""
-        spec = '''# Implementation Spec
-
-## 1. Overview
-
-This spec implements feature X.
-
-APPROVED
-
-### 6.9 `tests/unit/test_feature.py`
-
-```python
-class TestFeature:
-    def test_create(self):
-        """Create a new feature instance."""
-        f = Feature()
-        assert f is not None
-
-    def test_validate(self):
-        """Validate feature properties."""
-        f = Feature()
-        assert f.is_valid()
-```
-
-## 7. Dependencies
-'''
-        # extract_test_plan_section should fall through to code block fallback
-        section = extract_test_plan_section(spec)
-        assert section != ""
-
-        # parse_test_scenarios should parse the synthetic table
-        scenarios = parse_test_scenarios(section)
-        assert len(scenarios) >= 2
-        names = [s["name"] for s in scenarios]
-        assert any("create" in n for n in names)
-        assert any("validate" in n for n in names)
 
     def test_section_10_still_works(self):
         """Existing Section 10 extraction is not broken by new patterns."""

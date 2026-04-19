@@ -9,11 +9,26 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
 import orjson
 import pytest
+
+
+def _recent_iso(days_ago: float, hour: int = 12) -> str:
+    """ISO-8601 UTC timestamp at a fixed hour `days_ago` days before now.
+
+    SAMPLE_EVENTS uses this so the fixture stays inside any reasonable
+    --days lookback window regardless of when the test suite runs. Without
+    it, hardcoded timestamps age past the default 7-day window and main()
+    bails out with "No telemetry events".
+    """
+    dt = (datetime.now(timezone.utc) - timedelta(days=days_ago)).replace(
+        hour=hour, minute=0, second=0, microsecond=0
+    )
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 # Add tools/ to sys.path so we can import the script as a module
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
@@ -69,7 +84,7 @@ def _create_telemetry_db(
 SAMPLE_EVENTS: list[dict] = [
     {
         "event_type": "quality.gate_rejected",
-        "timestamp": "2026-03-04T14:22:31Z",
+        "timestamp": _recent_iso(2, hour=14),
         "workflow_id": "aaa-111",
         "node": "code_review_gate",
         "detail": json.dumps({"reason": "Missing type hints"}),
@@ -77,7 +92,7 @@ SAMPLE_EVENTS: list[dict] = [
     },
     {
         "event_type": "quality.gate_rejected",
-        "timestamp": "2026-03-04T15:00:00Z",
+        "timestamp": _recent_iso(2, hour=15),
         "workflow_id": "bbb-222",
         "node": "code_review_gate",
         "detail": json.dumps({"reason": "Missing type hints"}),
@@ -85,7 +100,7 @@ SAMPLE_EVENTS: list[dict] = [
     },
     {
         "event_type": "quality.gate_rejected",
-        "timestamp": "2026-03-05T09:00:00Z",
+        "timestamp": _recent_iso(1, hour=9),
         "workflow_id": "ccc-333",
         "node": "code_review_gate",
         "detail": json.dumps({"reason": "Missing type hints"}),
@@ -93,7 +108,7 @@ SAMPLE_EVENTS: list[dict] = [
     },
     {
         "event_type": "retry.strike_one",
-        "timestamp": "2026-03-03T11:05:00Z",
+        "timestamp": _recent_iso(3, hour=11),
         "workflow_id": "ddd-444",
         "node": "implementation_node",
         "detail": json.dumps({"reason": "Lint failure on first attempt"}),
@@ -101,7 +116,7 @@ SAMPLE_EVENTS: list[dict] = [
     },
     {
         "event_type": "workflow.halt_and_plan",
-        "timestamp": "2026-03-02T08:00:00Z",
+        "timestamp": _recent_iso(4, hour=8),
         "workflow_id": "eee-555",
         "node": "planning_node",
         "detail": json.dumps({"reason": "Budget exceeded"}),
