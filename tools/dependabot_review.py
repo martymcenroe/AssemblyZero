@@ -41,6 +41,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,25 @@ def run(cmd: list[str], cwd: str | None = None,
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT after {timeout}s")
         return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="TIMEOUT")
+
+
+def run_gh_with_body(args_pre: list[str], body: str) -> subprocess.CompletedProcess:
+    """Run a gh command, passing `body` via --body-file to avoid argv size limits.
+
+    Windows CreateProcess rejects command lines over ~32K chars (WinError 206).
+    Dependabot multi-package PR bodies regularly exceed this with embedded
+    release notes. --body-file makes gh read the body from disk instead of
+    argv, sidestepping the limit on every platform.
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, encoding="utf-8",
+    ) as tf:
+        tf.write(body)
+        tmp_path = tf.name
+    try:
+        return run(args_pre + ["--body-file", tmp_path])
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +207,10 @@ def inject_no_issue(pr: PRInfo, repo: str) -> bool:
         f"approved after green test run via tools/dependabot_review.py)"
     )
     new_body = pr.body.rstrip() + "\n\n" + tag
-    result = run(["gh", "pr", "edit", str(pr.number), "--repo", repo,
-                  "--body", new_body])
+    result = run_gh_with_body(
+        ["gh", "pr", "edit", str(pr.number), "--repo", repo],
+        new_body,
+    )
     return result.returncode == 0
 
 
@@ -222,7 +244,10 @@ def squash_merge(pr_number: int, repo: str) -> bool:
 
 
 def comment_on_pr(pr_number: int, repo: str, body: str) -> None:
-    run(["gh", "pr", "comment", str(pr_number), "--repo", repo, "--body", body])
+    run_gh_with_body(
+        ["gh", "pr", "comment", str(pr_number), "--repo", repo],
+        body,
+    )
 
 
 def request_dependabot_recreate(pr_number: int, repo: str) -> None:
