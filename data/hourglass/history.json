@@ -340,5 +340,14 @@
     "findings_count": 0,
     "actions_count": 0,
     "mode": "report"
+  },
+  {
+    "age_number": 1,
+    "trigger": "summon",
+    "trigger_details": "DEATH triggered by summon",
+    "timestamp": "2026-04-20T04:59:41.427520+00:00",
+    "findings_count": 0,
+    "actions_count": 0,
+    "mode": "report"
   }
 ]
