@@ -180,3 +180,54 @@ class TestCommentOnPr:
         assert "--body" not in captured["cmd"]
         assert "gh" in captured["cmd"][0]
         assert "comment" in captured["cmd"]
+
+
+class TestWaitForMergeable:
+    """Issue #971: accept 'unstable' in addition to 'clean', tolerate one
+    cycle of 'blocked' to absorb the Cerberus-arrival race."""
+
+    def _stub_state(self, monkeypatch, states):
+        """Make `run` return a sequence of mergeable_state values."""
+        it = iter(states)
+
+        def _capture(cmd, *args, **kwargs):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=next(it), stderr=""
+            )
+
+        monkeypatch.setattr(dependabot_review, "run", mock.Mock(side_effect=_capture))
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+
+    def test_clean_returns_true(self, monkeypatch):
+        self._stub_state(monkeypatch, ["clean"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
+
+    def test_unstable_returns_true(self, monkeypatch):
+        """Unstable means non-required checks failing; gh pr merge --squash
+        accepts this. Was the gating bug in PR #953 + #741 today."""
+        self._stub_state(monkeypatch, ["unstable"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
+
+    def test_dirty_returns_false_immediately(self, monkeypatch):
+        """Merge conflict — waiting won't help. Don't burn 15 min."""
+        self._stub_state(monkeypatch, ["dirty"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+
+    def test_persistent_blocked_returns_false(self, monkeypatch):
+        """After tolerating one cycle, persistent blocked gives up."""
+        self._stub_state(monkeypatch, ["blocked", "blocked", "blocked"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+
+    def test_blocked_then_clean_returns_true(self, monkeypatch):
+        """Race tolerance: Cerberus arrives between two of our polls."""
+        self._stub_state(monkeypatch, ["blocked", "clean"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
+
+    def test_pending_then_clean_returns_true(self, monkeypatch):
+        """Normal happy path: state resolves after a few cycles."""
+        self._stub_state(monkeypatch, ["unknown", "unknown", "clean"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
+
+    def test_default_timeout_is_900s(self):
+        """Issue #971: bumped from 300 -> 900 to cover Cerberus tail."""
+        assert dependabot_review.MERGEABLE_TIMEOUT_S == 900

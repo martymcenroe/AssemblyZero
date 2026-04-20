@@ -18,7 +18,15 @@ the primary protection is process scope (the OS reclaims the address space
 when the script exits, well before any neighbor agent could observe it).
 
 One-time setup (user):
-    echo '<classic-pat>' | gpg -c -o ~/.secrets/classic-pat.gpg
+    mkdir -p ~/.secrets
+    # Copy the classic PAT to clipboard, then:
+    cat /dev/clipboard | gpg -c -o ~/.secrets/classic-pat.gpg
+
+(macOS: substitute `pbpaste`. Linux: `xclip -selection clipboard -o`.)
+
+The clipboard pattern keeps the secret out of shell history and out of
+the process argv table — the previous `echo '<pat>' | gpg ...` form
+exposed the secret in both places.
 """
 
 from __future__ import annotations
@@ -52,8 +60,11 @@ def classic_pat_session(
     """
     if not pat_path.exists():
         raise FileNotFoundError(
-            f"Classic PAT not found at {pat_path}. "
-            f"One-time setup: echo '<classic-pat>' | gpg -c -o {pat_path}"
+            f"Classic PAT not found at {pat_path}.\n"
+            f"One-time setup (copy your classic PAT to clipboard first, then):\n"
+            f"  mkdir -p {pat_path.parent}\n"
+            f"  cat /dev/clipboard | gpg -c -o {pat_path}\n"
+            f"(macOS: pbpaste. Linux: xclip -selection clipboard -o.)"
         )
 
     result = subprocess.run(
