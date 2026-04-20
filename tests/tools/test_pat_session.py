@@ -81,6 +81,21 @@ class TestClassicPatSession:
         assert "One-time setup" in msg, "error must guide user to create the file"
         assert str(missing) in msg
 
+    def test_setup_hint_uses_clipboard_not_echo(self, tmp_path):
+        """Issue #968: hint must NOT suggest `echo '<pat>' | gpg ...` —
+        that pattern puts the secret in shell history and process argv."""
+        missing = tmp_path / "does_not_exist.gpg"
+        with pytest.raises(FileNotFoundError) as excinfo:
+            with _pat_session.classic_pat_session(missing):
+                pass
+        msg = str(excinfo.value)
+        assert "echo '<classic-pat>'" not in msg, (
+            "must not suggest the echo pattern — it leaks via shell history + argv"
+        )
+        assert "/dev/clipboard" in msg or "pbpaste" in msg or "xclip" in msg, (
+            "must suggest a clipboard-pipe pattern instead"
+        )
+
     def test_gpg_failure_raises_runtimeerror_with_stderr(self, tmp_path, monkeypatch):
         pat_file = tmp_path / "classic-pat.gpg"
         pat_file.write_bytes(b"fake gpg blob")

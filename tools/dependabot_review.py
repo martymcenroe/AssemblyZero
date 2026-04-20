@@ -54,7 +54,10 @@ DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
 # Accept both forms at the hard gate — still refuses anything else.
 ACCEPTED_AUTHORS: tuple[str, ...] = ("dependabot[bot]", "app/dependabot")
 POLL_INTERVAL_S = 10
-MERGEABLE_TIMEOUT_S = 300
+# Issue #971: 300s default was too tight; ~10% of fleet runs missed the
+# Cerberus-AZ approval window. 900s covers the observed tail. The
+# fleet_delete_pr_sentinel.py companion also uses 900s after #981.
+MERGEABLE_TIMEOUT_S = 900
 PYTEST_TIMEOUT_S = 1800
 POETRY_INSTALL_TIMEOUT_S = 600
 
@@ -226,14 +229,31 @@ def approve_pr(pr_number: int, repo: str) -> bool:
 
 
 def wait_for_mergeable(pr_number: int, repo: str) -> bool:
+    """Poll until the PR is in a mergeable state. Returns True on success.
+
+    Issue #971: accepts both 'clean' (all checks pass) and 'unstable'
+    (only non-required checks failing — `gh pr merge --squash` succeeds
+    in both cases). Today's pattern: legacy issue-reference checks fail
+    on dependabot PRs even though the worker check passes; mergeable_state
+    reports `unstable`, not `clean`. Branch protection is the actual gate.
+
+    Tolerates one cycle of `blocked` to absorb the Cerberus-arrival race
+    where the App posts approval between two of our polls.
+    """
     deadline = time.time() + MERGEABLE_TIMEOUT_S
+    polled_at_least_once = False
     while time.time() < deadline:
         result = run(["gh", "api", f"repos/{repo}/pulls/{pr_number}",
                       "--jq", ".mergeable_state"])
         state = (result.stdout or "").strip().strip('"')
         print(f"  mergeable_state: {state}")
-        if state == "clean":
+        if state in ("clean", "unstable"):
             return True
+        if state == "dirty":
+            return False  # merge conflict; waiting won't help
+        if state == "blocked" and polled_at_least_once:
+            return False
+        polled_at_least_once = True
         time.sleep(POLL_INTERVAL_S)
     return False
 
