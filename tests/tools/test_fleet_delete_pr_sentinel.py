@@ -516,3 +516,76 @@ class TestWaitForMergeable_BlockedToleration:
         # With timeout_s=0 the loop exits immediately with last_state
         result = fdps.wait_for_mergeable("X", 1, FAKE_PAT, timeout_s=0, sleep_fn=lambda s: None)
         assert result == "unknown"
+
+
+# --- #988: PR_BODY template correctness for same-repo and cross-repo refs
+
+
+class TestProcessRepoBodyFormatting:
+    """Issue #988: PR_BODY template must produce a well-formed `Closes <ref>`
+    line regardless of whether the ref is same-repo (`#42`) or cross-repo
+    (`owner/repo#42`). The previous template hardcoded a `#` before
+    `{issue_number}` which silently survived same-repo (the worker's regex
+    skipped the spurious `#`) but broke cross-repo (no digit pattern
+    immediately after `#`)."""
+
+    def _setup_mocks(self, monkeypatch, body_capture: dict):
+        monkeypatch.setattr(fdps, "get_file_info", mock.Mock(return_value={"sha": "abc"}))
+        monkeypatch.setattr(fdps, "find_existing_deletion_pr", mock.Mock(return_value=None))
+        monkeypatch.setattr(fdps, "get_branch_head", mock.Mock(return_value="mainsha"))
+        monkeypatch.setattr(fdps, "create_branch", mock.Mock())
+        monkeypatch.setattr(fdps, "delete_file_on_branch", mock.Mock())
+
+        def _capture_pr(repo, head, base, title, body, pat):
+            body_capture["title"] = title
+            body_capture["body"] = body
+            return 42
+
+        monkeypatch.setattr(fdps, "create_pr", mock.Mock(side_effect=_capture_pr))
+        monkeypatch.setattr(fdps, "wait_for_mergeable", mock.Mock(return_value="clean"))
+        monkeypatch.setattr(fdps, "merge_pr", mock.Mock(return_value="mergesha"))
+
+    def test_same_repo_body_has_single_hash(self, monkeypatch):
+        captured: dict = {}
+        monkeypatch.setattr(fdps, "create_issue", mock.Mock(return_value=99))
+        self._setup_mocks(monkeypatch, captured)
+
+        fdps.process_repo("X", FAKE_PAT, dry_run=False)
+
+        # Body must contain `Closes #99` — single `#`, worker regex matches cleanly
+        assert "Closes #99" in captured["body"]
+        assert "Closes ##99" not in captured["body"], (
+            "double `#` is the old bug — template hardcoded `#` before the "
+            "substituted value which itself started with `#`"
+        )
+
+    def test_cross_repo_body_has_no_leading_hash(self, monkeypatch):
+        captured: dict = {}
+        create_issue_mock = mock.Mock(side_effect=AssertionError("must not be called"))
+        monkeypatch.setattr(fdps, "create_issue", create_issue_mock)
+        self._setup_mocks(monkeypatch, captured)
+
+        fdps.process_repo(
+            "X", FAKE_PAT, dry_run=False,
+            external_issue_ref="martymcenroe/AssemblyZero#982",
+        )
+
+        # Body must contain `Closes martymcenroe/AssemblyZero#982` — NO leading `#`.
+        # The old template produced `Closes #martymcenroe/AssemblyZero#982` which the
+        # worker's regex couldn't parse (not `owner/repo#N` shape, not `#N` shape).
+        assert "Closes martymcenroe/AssemblyZero#982" in captured["body"]
+        assert "Closes #martymcenroe/AssemblyZero#982" not in captured["body"], (
+            "the old template bug — hardcoded `#` in front of a cross-repo ref "
+            "broke the worker's extractIssueRefs regex"
+        )
+
+    def test_title_unaffected_by_bug(self, monkeypatch):
+        """Title construction was always correct; this is a regression guard."""
+        captured: dict = {}
+        monkeypatch.setattr(fdps, "create_issue", mock.Mock(return_value=99))
+        self._setup_mocks(monkeypatch, captured)
+
+        fdps.process_repo("X", FAKE_PAT, dry_run=False)
+
+        assert "Closes #99" in captured["title"]
+        assert "Closes ##99" not in captured["title"]

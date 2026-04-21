@@ -103,7 +103,7 @@ processed automatically by `tools/fleet_delete_pr_sentinel.py`.
 
 PR_BODY = """## Summary
 
-Deletes `.github/workflows/pr-sentinel.yml`. Closes #{issue_number}.
+Deletes `.github/workflows/pr-sentinel.yml`. Closes {issue_number}.
 
 Branch protection on this repo gates on the Cloudflare Worker check
 `pr-sentinel / issue-reference` (app_id 2975092). The legacy per-repo
