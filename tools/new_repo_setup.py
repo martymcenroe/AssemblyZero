@@ -1252,6 +1252,65 @@ def configure_repo_settings(github_user: str, repo_name: str, pat: str) -> bool:
         return False
 
 
+def _deploy_workflows_via_contents_api(
+    project_path: Path,
+    github_user: str,
+    repo_name: str,
+    pat: str,
+    branch: str = "main",
+) -> tuple[bool, int]:
+    """Upload all files under .github/workflows/ via the GitHub Contents API.
+
+    Each PUT creates one commit on the remote. Fine-grained PATs cannot
+    push workflow-file changes via git (they lack the `workflow` scope),
+    so this path uses classic-PAT REST calls instead. Invoked after the
+    non-workflow initial commit is already on the remote. (#1000 / ADR-0216.)
+
+    Args:
+        project_path: Local repo root.
+        github_user: GitHub username (owner).
+        repo_name: Lowercased repository name.
+        pat: Classic PAT from classic_pat_session().
+        branch: Target branch (default "main").
+
+    Returns:
+        (success, count) — success is True iff every workflow file was
+        uploaded (HTTP < 300). count is the number of files uploaded.
+        If the workflows directory is missing or empty, returns (True, 0).
+    """
+    import base64
+    workflows_dir = project_path / ".github" / "workflows"
+    if not workflows_dir.exists():
+        return True, 0
+    files = sorted(p for p in workflows_dir.iterdir() if p.is_file())
+    if not files:
+        return True, 0
+
+    uploaded = 0
+    for wf in files:
+        rel_path = f".github/workflows/{wf.name}"
+        payload = {
+            "message": f"chore: add {rel_path}",
+            "content": base64.b64encode(wf.read_bytes()).decode("ascii"),
+            "branch": branch,
+        }
+        try:
+            resp = requests.put(
+                f"{_GH_API}/repos/{github_user}/{repo_name}/contents/{rel_path}",
+                headers=_gh_headers(pat),
+                json=payload,
+                timeout=_HTTP_TIMEOUT_S,
+            )
+        except requests.RequestException as e:
+            print(f"  Contents API PUT errored for {rel_path}: {e}")
+            return False, uploaded
+        if resp.status_code >= 300:
+            print(f"  Contents API PUT failed for {rel_path}: HTTP {resp.status_code} — {resp.text[:200]}")
+            return False, uploaded
+        uploaded += 1
+    return True, uploaded
+
+
 def audit_structure(project_path: Path, name: str) -> int:
     """
     Audit an existing project structure against the canonical schema.
@@ -1578,20 +1637,40 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11c: Create GitHub Actions workflows (PR governance)
     print("\n11c. Creating GitHub Actions workflows...")
     create_github_workflows(project_path)
-    print("  Created pr-sentinel.yml (issue reference check)")
     print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
 
-    # Step 12: Initial commit
-    print("\n12. Creating initial commit...")
-    run_command(["git", "add", "."], cwd=project_path)
+    # Step 12: Initial commit — non-workflow files only.
+    # Workflow files (.github/workflows/*) require the `workflow` scope on
+    # push, which fine-grained PATs lack. Instead of requiring env-scoped
+    # classic PAT for the initial push, we commit non-workflow files here,
+    # push via normal git, then upload workflows via Contents API using an
+    # in-process classic PAT (ADR-0216, #1000).
+    print("\n12. Creating initial commit (non-workflow files)...")
     run_command(
-        ["git", "commit", "-m", "chore: initialize project with AssemblyZero\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"],
+        ["git", "add", "--", ".", ":!.github/workflows"],
+        cwd=project_path,
+    )
+    run_command(
+        ["git", "commit", "-m", "chore: initialize project with AssemblyZero\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"],
         cwd=project_path
     )
-    print("  Created initial commit")
+    print("  Created initial commit (workflows deferred — go via Contents API)")
+
+    # Step 12b: If skipping GitHub, commit workflows locally as a second
+    # commit so the local repo is complete. With GitHub in play, workflow
+    # files stay untracked locally until `git pull` brings them back after
+    # the Contents API upload (step 16 below).
+    if args.no_github:
+        run_command(["git", "add", ".github/workflows"], cwd=project_path)
+        run_command(
+            ["git", "commit", "-m", "chore: add GitHub Actions workflows"],
+            cwd=project_path,
+        )
+        print("  Created workflow commit (local-only mode)")
 
     github_created = False
     push_succeeded = False
+    workflows_deployed = False
     repo_settings_ok = False
     protection_ok = False
 
@@ -1599,36 +1678,16 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("\n" + "=" * 60)
         print("GITHUB REMOTE")
         print("=" * 60)
+        print("\n  Post-#1000: GH_TOKEN is not required.")
+        print("  - Step 13 pushes non-workflow files with your fine-grained gh auth.")
+        print("  - Step 15 uploads workflows via Contents API + in-process classic PAT.")
+        print("  - Steps 17-18 configure settings + protection via in-process classic PAT.\n")
 
-        # Detect PAT type and warn about workflow scope
-        if os.environ.get("GH_TOKEN"):
-            # User has set GH_TOKEN (the preferred env-scoped path). Assume they
-            # pointed it at a classic PAT and skip the "swap your auth" warning —
-            # it will only confuse them.
-            print("\n  NOTE: GH_TOKEN env var detected. gh CLI will use it for all")
-            print("  calls this run. If it maps to a classic PAT with workflow +")
-            print("  admin scopes, privileged operations will succeed.\n")
-        else:
-            try:
-                auth_result = subprocess.run(
-                    ["gh", "auth", "status"],
-                    capture_output=True, text=True, timeout=15,
-                )
-                auth_output = auth_result.stdout + auth_result.stderr
-                if "github_pat_" in auth_output:
-                    print("\n  NOTE: Fine-grained PAT detected and GH_TOKEN not set.")
-                    print("  Workflow files (.github/workflows/) require 'workflow' scope.")
-                    print("  Preferred: re-run with env-scoped classic PAT:")
-                    print("    env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \\")
-                    print("      poetry run python tools/new_repo_setup.py ... --cerberus-pem ...")
-                    print("  Fallback: switch gh auth storage manually:")
-                    print("    gh auth login -h github.com -p https  # paste classic PAT")
-                    print("    [re-run script]")
-                    print("    gh auth login -h github.com -p https  # paste fine-grained PAT back\n")
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass
-
-        # Step 13: Create GitHub repo
+        # Step 13: Create GitHub repo + push non-workflow files.
+        # The initial commit excludes .github/workflows (step 12), so this
+        # push succeeds with fine-grained PAT — it does not cross the
+        # `workflow` scope boundary. If GH_TOKEN happens to be set (legacy
+        # invocation), `gh` still honors it, which is harmless.
         repo_name_lower = args.name.lower()
         print(f"\n13. Creating GitHub repository ({repo_name_lower})...")
         visibility = "--public" if args.public else "--private"
@@ -1642,25 +1701,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             push_succeeded = True
         except Exception as e:
             print(f"  WARNING: gh repo create failed: {e}")
-            print("  Your PAT may lack 'create repository' or 'workflow' scope.")
             print("  The local repo is fully valid. To finish manually:")
             print("    1. Create repo at https://github.com/new")
             print(f"    2. git remote add origin https://github.com/{github_user}/{repo_name_lower}.git")
-            if os.environ.get("GH_TOKEN"):
-                print("    3. GH_TOKEN is set but the scope was insufficient — check that your")
-                print("       gpg-decrypted classic PAT has 'repo' + 'workflow' + 'admin:repo_hook'")
-                print("    4. git push -u origin main")
-            else:
-                print("    3. Re-run the script with env-scoped classic PAT (preferred):")
-                print("       env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \\")
-                print(f"         poetry run python tools/new_repo_setup.py {args.name} ...")
-                print("       — OR legacy fallback —")
-                print("       gh auth login -h github.com -p https  # paste classic PAT")
-                print("       git push -u origin main")
-                print("       gh auth login -h github.com -p https  # paste fine-grained PAT back")
+            print("    3. git push -u origin main  # workflows are NOT in this push — fine-grained PAT OK")
+            print("    4. Re-run this script (it will skip create+push and proceed to workflow upload + settings).")
 
         if github_created:
-            # Step 14: Star the repo
+            # Step 14: Star the repo (non-privileged — uses gh auth).
             print("\n14. Starring repository...")
             run_command(
                 ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{repo_name_lower}"],
@@ -1669,16 +1717,57 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             )
             print("  Starred repository")
 
-            # Steps 15 + 16 are privileged (admin scope). Acquire the
-            # classic PAT once, in-process, and pass it to both functions
-            # in a single `with` so gpg-agent is prompted at most once per
-            # run (ADR-0216). Exceptions propagate to _create_repo's outer
-            # try/except — FileNotFoundError means the user hasn't run the
-            # one-time gpg setup (docs/runbooks/0927); RuntimeError means
-            # gpg decryption failed.
+            # Steps 15, 17, 18 are privileged (need workflow / admin scope).
+            # Step 16 is a local `git pull` that uses gh auth. All four run
+            # inside a single classic_pat_session so gpg-agent is prompted
+            # at most once per run (ADR-0216).
+            # Exceptions propagate to _create_repo's outer try/except:
+            # FileNotFoundError means the user hasn't run the one-time gpg
+            # setup (docs/runbooks/0927); RuntimeError means gpg decryption
+            # failed.
             with classic_pat_session() as pat:
-                # Step 15: Configure repo settings (wiki, projects, merge strategy)
-                print("\n15. Configuring repo settings...")
+                # Step 15: Upload workflow files via Contents API.
+                # Fine-grained PATs can't push workflow changes via git,
+                # so we create them on the remote directly. Each PUT is a
+                # separate commit (one per workflow file).
+                print("\n15. Uploading workflow files via Contents API...")
+                success, count = _deploy_workflows_via_contents_api(
+                    project_path, github_user, repo_name_lower, pat,
+                )
+                if success:
+                    workflows_deployed = True
+                    if count > 0:
+                        print(f"  Uploaded {count} workflow file(s) to main")
+                    else:
+                        print("  No workflow files to upload (skipped)")
+                else:
+                    print("  WARNING: Workflow upload failed. You can retry manually with:")
+                    print(f"    cd {project_path}")
+                    print("    git add .github/workflows && git commit -m 'chore: add workflows'")
+                    print("    git push  # requires classic PAT in gh auth or GH_TOKEN")
+
+                # Step 16: Sync local repo with the Contents API commits.
+                # The remote now has workflow file(s) that the local repo
+                # doesn't track yet; the local filesystem already has the
+                # same files (untracked). We remove them, then pull, which
+                # fast-forwards and checks them out tracked.
+                if workflows_deployed and count > 0:
+                    print("\n16. Syncing local repo with remote workflow commits...")
+                    import shutil as _shutil
+                    workflows_dir = project_path / ".github" / "workflows"
+                    if workflows_dir.exists():
+                        _shutil.rmtree(workflows_dir)
+                    pull = subprocess.run(
+                        ["git", "pull", "--rebase", "origin", "main"],
+                        cwd=str(project_path), capture_output=True, text=True, timeout=60,
+                    )
+                    if pull.returncode == 0:
+                        print("  Synced — local is now at remote HEAD with workflows tracked.")
+                    else:
+                        print(f"  WARNING: git pull failed: {pull.stderr.strip()}")
+
+                # Step 17: Configure repo settings (was step 15).
+                print("\n17. Configuring repo settings...")
                 if configure_repo_settings(github_user, repo_name_lower, pat):
                     print("  Repo settings configured:")
                     print("    - Wiki: disabled")
@@ -1689,8 +1778,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 else:
                     print("  WARNING: Could not configure repo settings.")
 
-                # Step 16: Configure branch protection
-                print("\n16. Configuring branch protection...")
+                # Step 18: Configure branch protection (was step 16).
+                print("\n18. Configuring branch protection...")
                 if push_succeeded:
                     if configure_branch_protection(github_user, repo_name_lower, pat):
                         print("  Branch protection configured:")
