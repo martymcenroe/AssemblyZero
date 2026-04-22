@@ -62,17 +62,9 @@ Preview (first 5 lines):
 > {line 5}
 ```
 
-5. If post-handoff sessions exist, show: "Note: {N} session(s) ran after this handoff ({total_lines} lines, {total_hours}h). This handoff may not reflect the latest state."
-6. If the handoff is older than 48 hours, add a warning: "This handoff is {age} old. The codebase may have changed significantly since then."
+5. If post-handoff sessions exist, show: "Note: {N} session(s) ran after this handoff ({total_lines} lines, {total_hours}h). This handoff may not reflect the latest state." (Activity-based warning only. Age alone is not a warning condition — a handoff with no intervening activity is pickup-eligible regardless of age. See martymcenroe/AssemblyZero#992 and martymcenroe/unleashed#334.)
 
-### Step 4: Confirm Import
-
-Ask the user: "Import this handoff? (Y/n)"
-
-- If declined, say "Pickup cancelled." and STOP.
-- If confirmed, proceed to Step 5.
-
-### Step 5: Import Context
+### Step 4: Import Context
 
 1. Internalize the full handoff prompt as your working context.
 2. **Parse the plan-state block (deterministic).** If the handoff contains a `<!-- plan-state-start -->` / `<!-- plan-state-end -->` block, read the YAML inside. Apply this decision logic:
@@ -93,7 +85,8 @@ Tell the user: "Pickup complete. Ready to continue where the last session left o
 
 ## Rules
 
-- **Append-only** -- never delete or rewrite entries in `data/handoff-log.md`. The pickup marker is written by `pickup_marker.py` (Step 5.5), not by the agent directly.
+- **Append-only** -- never delete or rewrite entries in `data/handoff-log.md`. The pickup marker is written by `pickup_marker.py` (Step 4.5), not by the agent directly.
 - **Always show age** — the user needs to know how stale the context is.
-- **Always ask before importing** — don't silently load context.
+- **Execute, don't confirm** — `/pickup` is a command, not a discussion. Emit the activity-based warning (Step 3.5) if it applies, then import immediately. Do not ask "Y/n".
+- **Staleness is activity-based, not age-based** — a handoff with no intervening sessions is pickup-eligible regardless of age. Only warn if sessions ran after the handoff was written.
 - **Actually read the files** — the "Files to Read First" section exists so the agent gets grounded in current code, not just the handoff narrative.
