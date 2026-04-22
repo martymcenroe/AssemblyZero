@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 4.0
-**Last Updated:** 2026-04-18
+**Version:** 4.1
+**Last Updated:** 2026-04-22
 
 ---
 
@@ -21,10 +21,15 @@ The human handles only what the script genuinely can't: supplying a classic PAT 
 ```bash
 # Generate a classic PAT at https://github.com/settings/tokens with scopes:
 #   repo + workflow + admin:repo_hook
-# Then encrypt it:
-echo '<paste-your-classic-pat-here>' | gpg -c -o ~/.secrets/classic-pat.gpg
-# You'll be prompted for a passphrase — remember it; you'll enter it once per shell session
+# Copy the token to your clipboard, then encrypt it by piping from the
+# clipboard (NOT echo — echo puts the token in shell history and argv):
+cat /dev/clipboard | gpg -c -o ~/.secrets/classic-pat.gpg
+#   macOS:  pbpaste | gpg -c -o ~/.secrets/classic-pat.gpg
+#   Linux:  xclip -selection clipboard -o | gpg -c -o ~/.secrets/classic-pat.gpg
+# You'll be prompted for a passphrase — remember it; you'll enter it once per shell session.
 ```
+
+This is the canonical form documented by `tools/_pat_session.py`. The clipboard pattern keeps the secret out of shell history and out of the process argv table.
 
 **Tighten gpg-agent caching (optional but recommended):**
 
@@ -54,7 +59,12 @@ env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \
 - When the script exits, `GH_TOKEN` ceases to exist — no `unset` to forget
 - Never touches `gh auth` storage, so the classic PAT isn't left sitting there for other agents
 
-**What `GH_TOKEN` does:** the `gh` CLI documented behavior is to honor `GH_TOKEN` over whatever's in `gh auth` storage for the duration of the process. Every privileged `gh` call inside the script (workflow push, branch protection, secret set) transparently uses the classic PAT.
+**What `GH_TOKEN` does:** the `gh` CLI documented behavior is to honor `GH_TOKEN` over whatever's in `gh auth` storage for the duration of the process. This is needed for the two remaining `gh`-backed privileged operations:
+
+- the initial `git push` of the scaffold (via `gh repo create --source . --push`) — requires `workflow` scope because the push includes `.github/workflows/*.yml` files, which fine-grained PATs can't push.
+- Cerberus secret-set (via `gh api`) — requires the `secrets` scope.
+
+**Branch protection and repo settings no longer need `GH_TOKEN`.** After PR #1001 (Phase A of #964), those two REST calls decrypt the same gpg file inline via `tools/_pat_session.py` (per ADR-0216) and consume the PAT as a Python heap variable. The PAT never enters the env block for those calls. Net effect: the snoopable env-block exposure window shrank from ~90s (full privileged sequence) to ~5s (the git push only). Phase B — tracked in #1000 — will eliminate even the push window by deploying workflow files via the Contents API.
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
@@ -85,9 +95,14 @@ gh auth login -h github.com -p https   # paste fine-grained PAT back — do this
 
 ### 3. Security considerations for `GH_TOKEN` env var
 
-Even scoped to a single process, `GH_TOKEN` in a shell env is readable by same-user processes via OS APIs (`/proc/<pid>/environ` on Linux, `NtQueryInformationProcess` on Windows). Secret-guard hooks catch `echo $GH_TOKEN` / `printenv` patterns, but a subprocess making direct syscalls can snoop around the hook.
+While `GH_TOKEN` is in the env block, it is readable by same-user processes via OS APIs (`/proc/<pid>/environ` on Linux, `NtQueryInformationProcess` on Windows). Secret-guard hooks catch `echo $GH_TOKEN` / `printenv` patterns, but a subprocess making direct syscalls can snoop around the hook.
 
-Practical mitigation: **don't launch Claude Code (or any agent session) in the same user session while a new-repo creation is in progress**. Open the new-repo creation in a separate terminal, do the work, close the terminal before returning to an agent session. The `env VAR=VALUE command` form limits exposure to a single process's lifetime, which limits the window.
+Post-Phase-A (#964 / PR #1001), that window is approximately **the 5 seconds of the initial git push** — not the full privileged sequence. Cerberus secret-set also uses `GH_TOKEN` briefly. The branch-protection and repo-settings calls no longer widen the window because they don't read `GH_TOKEN` at all.
+
+Practical guidance:
+- For the typical case, the ~5s window is small enough to not require special precautions.
+- If you're especially cautious, run new-repo creation in a terminal where no other agent session is running.
+- Phase B (#1000) will eliminate the window entirely by deploying workflow files via Contents API instead of git push.
 
 ### 4. Deploy Cerberus secrets (if needed)
 
@@ -197,3 +212,4 @@ The **per-repo human steps** are: supplying the classic PAT (via env-scoped GH_T
 | 2026-04-05 | v2.0: Complete rewrite. Script now handles repo creation, branch protection, and workflow deployment. Human steps reduced to Cerberus secrets (fleet-wide) and wiki setup. |
 | 2026-04-08 | v3.0: Added PAT switch protocol (steps 1/3). Expanded repo settings (projects, merge, delete-branch). Rewrote Cerberus section as numbered checklist with .pem lifecycle notes. Added shadow wiki creation steps. (#883) |
 | 2026-04-18 | v4.0: Replaced interactive `gh auth login` swap with env-scoped `GH_TOKEN=$(gpg -d ...) poetry run ...` as preferred. Documented one-time gpg setup for at-rest PAT encryption. Legacy swap retained as fallback. Removed `pr-sentinel.yml` from automatic-component table (Worker-only after #938/#939). Documented `--cerberus-pem` flag as preferred Cerberus path (#940/#941). Added security note on env-var snooping via OS APIs. (#942) |
+| 2026-04-22 | v4.1: Fixed unsafe one-time-setup command (`echo '...' \| gpg -c` → `cat /dev/clipboard \| gpg -c`, matching the canonical form in `tools/_pat_session.py`). Updated "What GH_TOKEN does" paragraph to reflect Phase A of #964 (PR #1001): branch protection + repo settings now use in-process classic PAT via `classic_pat_session()` and do not read `GH_TOKEN`; only the initial git push and Cerberus secret-set still do. Toned down the env-snooping mitigation note — window shrank from ~90s to ~5s. Added forward-reference to #1000 (Phase B will eliminate the remaining window). (#1004) |
