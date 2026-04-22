@@ -47,6 +47,19 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
 
+# In-process classic PAT for privileged REST calls (ADR-0216).
+# Branch protection PUT and repo settings PATCH used to shell out to
+# `gh api` which reads GH_TOKEN from the env block (snoopable by sibling
+# same-user processes); the PAT now lives only in the Python heap via
+# classic_pat_session(). gh repo create --source . --push still reads
+# GH_TOKEN for the workflow-scoped initial push — tracked in #1000.
+import requests  # noqa: E402
+try:
+    from _pat_session import classic_pat_session
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _pat_session import classic_pat_session
+
 
 # ---------------------------------------------------------------------------
 # Schema types and exceptions
@@ -1132,22 +1145,40 @@ def deploy_canonical_hooks(project_path: Path) -> None:
         shutil.copy2(str(source), str(target))
 
 
-def configure_branch_protection(github_user: str, repo_name: str) -> bool:
-    """
-    Configure branch protection on the main branch via GitHub API.
+_GH_API = "https://api.github.com"
+_HTTP_TIMEOUT_S = 30
 
-    Sets: require PR, block force push, block deletion.
-    Does NOT set required status checks (repo needs at least one push first).
+
+def _gh_headers(pat: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {pat}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def configure_branch_protection(github_user: str, repo_name: str, pat: str) -> bool:
+    """
+    Configure branch protection on the main branch via GitHub REST API.
+
+    The privileged PUT is issued via `requests` using an in-process classic
+    PAT (ADR-0216) so the token never enters the subprocess argv or env block.
+    The branch-existence pre-check stays on `gh api` (read-only, fine-grained
+    PAT suffices and keeps a single source of truth for gh-CLI auth state).
+
+    Sets: require PR, block force push, block deletion, enforce_admins,
+    pr-sentinel / issue-reference required check.
 
     Args:
         github_user: GitHub username
         repo_name: Repository name
+        pat: Classic PAT obtained via classic_pat_session().
 
     Returns:
         True if protection was configured, False if it failed.
     """
     # Branch protection requires at least one commit on main.
-    # Verify remote branch exists before attempting.
+    # Verify remote branch exists before attempting. Read-only — no classic PAT needed.
     try:
         check = subprocess.run(
             ["gh", "api", f"/repos/{github_user}/{repo_name}/branches/main"],
@@ -1160,57 +1191,64 @@ def configure_branch_protection(github_user: str, repo_name: str) -> bool:
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
+    body = {
+        "required_status_checks": {
+            "strict": False,
+            "contexts": ["pr-sentinel / issue-reference"],
+        },
+        "enforce_admins": True,
+        "required_pull_request_reviews": {
+            "dismiss_stale_reviews": False,
+            "require_code_owner_reviews": False,
+            "required_approving_review_count": 1,
+        },
+        "restrictions": None,
+        "allow_force_pushes": False,
+        "allow_deletions": False,
+    }
     try:
-        result = subprocess.run(
-            ["gh", "api", "-X", "PUT",
-             f"/repos/{github_user}/{repo_name}/branches/main/protection",
-             "-F", "required_pull_request_reviews[dismiss_stale_reviews]=false",
-             "-F", "required_pull_request_reviews[require_code_owner_reviews]=false",
-             "-F", "required_pull_request_reviews[required_approving_review_count]=1",
-             "-F", "enforce_admins=true",
-             "-F", "restrictions=null",
-             "-F", "required_status_checks[strict]=false",
-             "-f", "required_status_checks[contexts][]=pr-sentinel / issue-reference",
-             "-F", "allow_force_pushes=false",
-             "-F", "allow_deletions=false",
-             ],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        resp = requests.put(
+            f"{_GH_API}/repos/{github_user}/{repo_name}/branches/main/protection",
+            headers=_gh_headers(pat),
+            json=body,
+            timeout=_HTTP_TIMEOUT_S,
         )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return resp.status_code < 300
+    except requests.RequestException:
         return False
 
 
-def configure_repo_settings(github_user: str, repo_name: str) -> bool:
+def configure_repo_settings(github_user: str, repo_name: str, pat: str) -> bool:
     """
-    Configure GitHub repo settings to match fleet standards.
+    Configure GitHub repo settings to match fleet standards via REST API
+    using an in-process classic PAT (ADR-0216).
 
     Sets: wiki disabled, projects disabled, squash-only merge, delete branch on merge.
 
     Args:
         github_user: GitHub username
         repo_name: Repository name
+        pat: Classic PAT obtained via classic_pat_session().
 
     Returns:
         True if settings were applied, False if it failed.
     """
+    body = {
+        "has_wiki": False,
+        "has_projects": False,
+        "delete_branch_on_merge": True,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+    }
     try:
-        result = subprocess.run(
-            ["gh", "api", "-X", "PATCH",
-             f"/repos/{github_user}/{repo_name}",
-             "-F", "has_wiki=false",
-             "-F", "has_projects=false",
-             "-F", "delete_branch_on_merge=true",
-             "-F", "allow_merge_commit=false",
-             "-F", "allow_rebase_merge=false"],
-            capture_output=True,
-            text=True,
-            timeout=30,
+        resp = requests.patch(
+            f"{_GH_API}/repos/{github_user}/{repo_name}",
+            headers=_gh_headers(pat),
+            json=body,
+            timeout=_HTTP_TIMEOUT_S,
         )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return resp.status_code < 300
+    except requests.RequestException:
         return False
 
 
@@ -1631,37 +1669,45 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             )
             print("  Starred repository")
 
-            # Step 15: Configure repo settings (wiki, projects, merge strategy)
-            print("\n15. Configuring repo settings...")
-            if configure_repo_settings(github_user, repo_name_lower):
-                print("  Repo settings configured:")
-                print("    - Wiki: disabled")
-                print("    - Projects: disabled")
-                print("    - Merge strategy: squash only")
-                print("    - Delete branch on merge: enabled")
-                repo_settings_ok = True
-            else:
-                print("  WARNING: Could not configure repo settings.")
-
-            # Step 16: Configure branch protection
-            print("\n16. Configuring branch protection...")
-            if push_succeeded:
-                if configure_branch_protection(github_user, repo_name_lower):
-                    print("  Branch protection configured:")
-                    print("    - Force push: blocked")
-                    print("    - Deletion: blocked")
-                    print("    - enforce_admins: enabled")
-                    print("    - Required reviews: 1 (Cerberus auto-approves)")
-                    print("    - Required check: pr-sentinel / issue-reference")
-                    print("    - strict: false")
-                    protection_ok = True
+            # Steps 15 + 16 are privileged (admin scope). Acquire the
+            # classic PAT once, in-process, and pass it to both functions
+            # in a single `with` so gpg-agent is prompted at most once per
+            # run (ADR-0216). Exceptions propagate to _create_repo's outer
+            # try/except — FileNotFoundError means the user hasn't run the
+            # one-time gpg setup (docs/runbooks/0927); RuntimeError means
+            # gpg decryption failed.
+            with classic_pat_session() as pat:
+                # Step 15: Configure repo settings (wiki, projects, merge strategy)
+                print("\n15. Configuring repo settings...")
+                if configure_repo_settings(github_user, repo_name_lower, pat):
+                    print("  Repo settings configured:")
+                    print("    - Wiki: disabled")
+                    print("    - Projects: disabled")
+                    print("    - Merge strategy: squash only")
+                    print("    - Delete branch on merge: enabled")
+                    repo_settings_ok = True
                 else:
-                    print("  WARNING: Could not configure branch protection.")
-                    print("  This may fail if the token lacks admin scope.")
-                    print("  Configure manually or re-run with a classic token.")
-            else:
-                print("  SKIPPED: Push failed — no remote branch to protect.")
-                print("  After pushing, configure branch protection manually.")
+                    print("  WARNING: Could not configure repo settings.")
+
+                # Step 16: Configure branch protection
+                print("\n16. Configuring branch protection...")
+                if push_succeeded:
+                    if configure_branch_protection(github_user, repo_name_lower, pat):
+                        print("  Branch protection configured:")
+                        print("    - Force push: blocked")
+                        print("    - Deletion: blocked")
+                        print("    - enforce_admins: enabled")
+                        print("    - Required reviews: 1 (Cerberus auto-approves)")
+                        print("    - Required check: pr-sentinel / issue-reference")
+                        print("    - strict: false")
+                        protection_ok = True
+                    else:
+                        print("  WARNING: Could not configure branch protection.")
+                        print("  This may fail if the PAT lacks admin scope.")
+                        print("  Configure manually or re-run after fixing the PAT.")
+                else:
+                    print("  SKIPPED: Push failed — no remote branch to protect.")
+                    print("  After pushing, configure branch protection manually.")
 
     # Post-setup verification
     print("\n" + "=" * 60)
