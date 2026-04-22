@@ -1,7 +1,7 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 4.1
+**Version:** 5.0
 **Last Updated:** 2026-04-22
 
 ---
@@ -10,7 +10,9 @@
 
 The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
 
-The human handles only what the script genuinely can't: supplying a classic PAT for privileged operations (workflow push + branch protection), downloading the Cerberus `.pem` from the browser, and revoking the Cerberus key when done.
+Post-#1000 (PR landed 2026-04-22), the script needs **no environment-variable prefix**. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow scope, and the PAT lives only in the Python process heap — never in the env block.
+
+The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT, the gpg passphrase prompt (per gpg-agent cache window), downloading the Cerberus `.pem` from the browser, and revoking the Cerberus key when done.
 
 ---
 
@@ -46,63 +48,65 @@ With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (ins
 
 ## Checklist
 
-### 1. Run the setup script with env-scoped classic PAT (preferred)
+### 1. Run the setup script (bare — no env prefix needed)
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) \
-  poetry run python tools/new_repo_setup.py {name} [--public] [--license mit] [--cerberus-pem PATH]
+poetry run python tools/new_repo_setup.py {name} [--public] [--license mit] [--cerberus-pem PATH]
 ```
 
-**Why `env VAR=VALUE command` instead of `export`:**
-- The variable is scoped to the single command's process tree
-- When the script exits, `GH_TOKEN` ceases to exist — no `unset` to forget
-- Never touches `gh auth` storage, so the classic PAT isn't left sitting there for other agents
+gpg-agent will prompt for your passphrase once per cache window (controlled by `~/.gnupg/gpg-agent.conf`) and the script handles the rest.
 
-**What `GH_TOKEN` does:** the `gh` CLI documented behavior is to honor `GH_TOKEN` over whatever's in `gh auth` storage for the duration of the process. This is needed for the two remaining `gh`-backed privileged operations:
+**What the script does under the hood (post-#1000):**
 
-- the initial `git push` of the scaffold (via `gh repo create --source . --push`) — requires `workflow` scope because the push includes `.github/workflows/*.yml` files, which fine-grained PATs can't push.
-- Cerberus secret-set (via `gh api`) — requires the `secrets` scope.
+| Step | Operation | Auth path |
+|------|-----------|-----------|
+| 12 | Local initial commit — non-workflow files only | (local git) |
+| 13 | Create GitHub repo + push initial commit | `gh auth` (fine-grained PAT is sufficient because the push contains no workflow-file changes) |
+| 14 | Star the repo | `gh auth` (fine-grained PAT) |
+| 15 | **Upload `.github/workflows/*` via Contents API** | In-process classic PAT via `classic_pat_session()` — PAT stays in Python heap |
+| 16 | `git pull --rebase` to sync local with the Contents-API commits | `gh auth` (read-only) |
+| 17 | **Configure repo settings (wiki/projects/merge strategy)** via PATCH | In-process classic PAT |
+| 18 | **Configure branch protection** via PUT | In-process classic PAT |
 
-**Branch protection and repo settings no longer need `GH_TOKEN`.** After PR #1001 (Phase A of #964), those two REST calls decrypt the same gpg file inline via `tools/_pat_session.py` (per ADR-0216) and consume the PAT as a Python heap variable. The PAT never enters the env block for those calls. Net effect: the snoopable env-block exposure window shrank from ~90s (full privileged sequence) to ~5s (the git push only). Phase B — tracked in #1000 — will eliminate even the push window by deploying workflow files via the Contents API.
+Steps in **bold** require the classic-PAT admin scopes (`repo`, `workflow`, `admin:repo_hook`). The PAT never enters the env block or subprocess argv — the three calls share a single `classic_pat_session()`, so gpg is prompted at most once per run.
+
+**If you pass `--cerberus-pem PATH`:** the Cerberus secret-set step (`gh secret set` → `PUT /repos/.../actions/secrets/*`) currently uses `gh auth` credentials. If your fine-grained PAT has `Actions: write` (or equivalent secrets write permission), bare invocation still works. If not, prepend `env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg)` just for that specific invocation. A follow-up migration of the Cerberus path to in-process PAT will be filed if needed.
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
-- GitHub repo creation (forced lowercase) via `gh repo create --source . --push`
+- GitHub repo creation (forced lowercase) + initial push of non-workflow files
+- Workflow file upload via Contents API (one PUT per file)
 - Repo settings: wiki disabled, projects disabled, squash-only merge, delete branch on merge
 - Branch protection: require PR (1 review), block force push, block deletion, enforce_admins, pr-sentinel check
 - PR governance workflow (`auto-reviewer.yml` — pr-sentinel check comes from the Cloudflare Worker fleet-wide)
 - `.unleashed.json`, `.claude/settings.json`, security hooks
-- Initial commit and push
 - Cerberus secrets deploy (if `--cerberus-pem` supplied)
 
 The script prints a summary showing what succeeded and what failed.
 
-### 2. Legacy fallback — `gh auth login` swap (if you haven't set up gpg)
+### 2. Emergency fallback — `gh auth login` swap (almost never needed now)
 
-If you haven't done the one-time gpg setup, you can still use the legacy two-paste swap:
+Only use this if **both** Step 1 failed AND `--cerberus-pem` is needed AND your fine-grained PAT lacks `Actions: write`. For a plain `poetry run python tools/new_repo_setup.py ...` invocation, this path is dead.
 
 ```bash
 gh auth login -h github.com -p https   # paste classic PAT
 
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} [--public] [--license mit]
+poetry run python tools/new_repo_setup.py {name} [--public] [--license mit] [--cerberus-pem PATH]
 
 gh auth login -h github.com -p https   # paste fine-grained PAT back — do this immediately
 ```
 
-**Risk:** if you forget the swap-back, classic-PAT access stays live in `gh auth` storage and any agent using the same storage inherits it. The env-scoped path in Step 1 avoids this entirely.
+**Risk:** if you forget the swap-back, classic-PAT access stays live in `gh auth` storage and any agent using the same storage inherits it.
 
-### 3. Security considerations for `GH_TOKEN` env var
+### 3. Env-block exposure — historical note
 
-While `GH_TOKEN` is in the env block, it is readable by same-user processes via OS APIs (`/proc/<pid>/environ` on Linux, `NtQueryInformationProcess` on Windows). Secret-guard hooks catch `echo $GH_TOKEN` / `printenv` patterns, but a subprocess making direct syscalls can snoop around the hook.
+Pre-#1000, the runbook required `env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) poetry run ...` to give the initial git push `workflow` scope. While `GH_TOKEN` was in the env block, it was readable by same-user processes via OS APIs (`/proc/<pid>/environ` on Linux, `NtQueryInformationProcess` on Windows).
 
-Post-Phase-A (#964 / PR #1001), that window is approximately **the 5 seconds of the initial git push** — not the full privileged sequence. Cerberus secret-set also uses `GH_TOKEN` briefly. The branch-protection and repo-settings calls no longer widen the window because they don't read `GH_TOKEN` at all.
+After #1000, the script no longer needs `GH_TOKEN` for the git push — workflow files are deployed via Contents API with an in-process classic PAT instead, and the initial push contains no workflow changes (so fine-grained PAT suffices).
 
-Practical guidance:
-- For the typical case, the ~5s window is small enough to not require special precautions.
-- If you're especially cautious, run new-repo creation in a terminal where no other agent session is running.
-- Phase B (#1000) will eliminate the window entirely by deploying workflow files via Contents API instead of git push.
+Net effect: **no `GH_TOKEN` env-block exposure for a plain invocation**. The only time `GH_TOKEN` might still appear in env is if the user passes `--cerberus-pem` AND their fine-grained PAT lacks `Actions: write` — a narrow edge case not applicable to most runs.
 
 ### 4. Deploy Cerberus secrets (if needed)
 
@@ -183,13 +187,13 @@ These all happen without any per-repo human intervention:
 |-----------|-------------------|
 | Cerberus-AZ app access | Fleet-wide installation ("All repositories") — new repos are covered instantly |
 | pr-sentinel check (Cloudflare Worker) | Receives webhooks for all repos, authenticates with its own stored credentials |
-| Auto-reviewer workflow file | Created by setup script in initial commit |
-| Repo settings | Configured by setup script: wiki off, projects off, squash-only, delete-branch-on-merge |
-| Branch protection | Configured by setup script: 1 review, enforce_admins, pr-sentinel check, strict=false |
+| Auto-reviewer workflow file | Uploaded by setup script via Contents API (#1000) — in-process classic PAT |
+| Repo settings | PATCHed by setup script — in-process classic PAT (#964 Phase A) |
+| Branch protection | PUT by setup script — in-process classic PAT (#964 Phase A) |
 | Directory structure + configs | Created by setup script |
 | Cerberus secrets deploy | Handled by the script when `--cerberus-pem PATH` is passed |
 
-The **per-repo human steps** are: supplying the classic PAT (via env-scoped GH_TOKEN or legacy swap), downloading the Cerberus `.pem`, revoking the Cerberus key when done, and optional wiki/domain setup.
+The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agent cache window), downloading the Cerberus `.pem` if `--cerberus-pem` is used, revoking the Cerberus key when done, and optional wiki/domain setup.
 
 ---
 
@@ -213,3 +217,4 @@ The **per-repo human steps** are: supplying the classic PAT (via env-scoped GH_T
 | 2026-04-08 | v3.0: Added PAT switch protocol (steps 1/3). Expanded repo settings (projects, merge, delete-branch). Rewrote Cerberus section as numbered checklist with .pem lifecycle notes. Added shadow wiki creation steps. (#883) |
 | 2026-04-18 | v4.0: Replaced interactive `gh auth login` swap with env-scoped `GH_TOKEN=$(gpg -d ...) poetry run ...` as preferred. Documented one-time gpg setup for at-rest PAT encryption. Legacy swap retained as fallback. Removed `pr-sentinel.yml` from automatic-component table (Worker-only after #938/#939). Documented `--cerberus-pem` flag as preferred Cerberus path (#940/#941). Added security note on env-var snooping via OS APIs. (#942) |
 | 2026-04-22 | v4.1: Fixed unsafe one-time-setup command (`echo '...' \| gpg -c` → `cat /dev/clipboard \| gpg -c`, matching the canonical form in `tools/_pat_session.py`). Updated "What GH_TOKEN does" paragraph to reflect Phase A of #964 (PR #1001): branch protection + repo settings now use in-process classic PAT via `classic_pat_session()` and do not read `GH_TOKEN`; only the initial git push and Cerberus secret-set still do. Toned down the env-snooping mitigation note — window shrank from ~90s to ~5s. Added forward-reference to #1000 (Phase B will eliminate the remaining window). (#1004) |
+| 2026-04-22 | v5.0: Phase B of #964 / #1000 landed. Invocation is now bare `poetry run python tools/new_repo_setup.py NAME [...]`; no `env GH_TOKEN` prefix required. Script splits step 13 into non-workflow initial commit (pushed via `git` with fine-grained PAT) + workflow upload via Contents API (PUT with in-process classic PAT) + `git pull` to sync. Env-block exposure of the classic PAT is eliminated for the common path. Cerberus secret-set (`--cerberus-pem`) still uses `gh auth` — bare works if your fine-grained PAT has `Actions: write`, else prepend `env GH_TOKEN=...` for that invocation. Demoted the "`gh auth login` swap" section to emergency-fallback. Replaced Section 3 (env-snooping mitigation) with a historical note. |
