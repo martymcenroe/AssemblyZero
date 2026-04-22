@@ -1,7 +1,7 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 5.2
+**Version:** 5.3
 **Last Updated:** 2026-04-22
 
 ---
@@ -60,8 +60,14 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
 **Before using `--cerberus-pem`**, download the `.pem`:
 
 1. Go to <https://github.com/settings/apps/cerberus-az> → **Private keys**
-2. Click **Generate a private key** — the browser downloads a `.pem` file (typically to `~/Downloads/`)
-3. Pass that path to `--cerberus-pem`. Full walkthrough (including the revoke step) is in [Section 4](#4-deploy-cerberus-secrets-if-needed) below.
+2. Click **Generate a private key** — the browser downloads a `.pem` file (typically to `C:\Users\mcwiz\Downloads\`)
+3. Pass that path to `--cerberus-pem` in **Git Bash Unix-style**:
+   ```bash
+   poetry run python tools/new_repo_setup.py MyNewRepo --private \
+     --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.2026-04-22.private-key.pem
+   ```
+   MSYS translates `/c/Users/...` → `C:\Users\...` before `python.exe` sees argv, so pathlib handles it correctly. Windows-style `'C:\Users\mcwiz\Downloads\foo.pem'` also works if single-quoted (or with escaped backslashes), but the Unix-style form matches every other path example in this runbook.
+4. Full walkthrough (deploy + delete + revoke) is in [Section 4](#4-deploy-cerberus-secrets-if-needed) below.
 
 *Why you have to do this manually:* the GitHub App management API does not expose programmatic key generation or revocation — both are browser-only.
 
@@ -227,3 +233,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-04-22 | v5.0: Phase B of #964 / #1000 landed. Invocation is now bare `poetry run python tools/new_repo_setup.py NAME [...]`; no `env GH_TOKEN` prefix required. Script splits step 13 into non-workflow initial commit (pushed via `git` with fine-grained PAT) + workflow upload via Contents API (PUT with in-process classic PAT) + `git pull` to sync. Env-block exposure of the classic PAT is eliminated for the common path. Cerberus secret-set (`--cerberus-pem`) still uses `gh auth` — bare works if your fine-grained PAT has `Actions: write`, else prepend `env GH_TOKEN=...` for that invocation. Demoted the "`gh auth login` swap" section to emergency-fallback. Replaced Section 3 (env-snooping mitigation) with a historical note. |
 | 2026-04-22 | v5.1: #1007 — `tools/deploy_cerberus_secrets.py` migrated to in-process classic PAT (pynacl sealed-box encryption + REST API). `--cerberus-pem` invocation no longer needs `env GH_TOKEN` regardless of fine-grained PAT scope. `gh auth login` swap section updated to reflect it's now fully legacy (only relevant if `classic_pat_session` itself fails). Updated the under-the-hood table to include Cerberus secret-set on the in-process path. |
 | 2026-04-22 | v5.2: #1009 — surfaced the Cerberus `.pem` download URL (`https://github.com/settings/apps/cerberus-az > Private keys`) next to the Step 1 invocation so users don't have to scroll to Section 4 to find it when they're about to run `--cerberus-pem`. |
+| 2026-04-22 | v5.3: #1014 — made the \`--cerberus-pem\` path-format explicit. Git Bash Unix-style (\`/c/Users/mcwiz/Downloads/...\`) is preferred; noted MSYS translation and the Windows-style fallback with its quoting caveat. Concrete example given in the Step 1 block. |
