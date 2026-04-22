@@ -1,7 +1,7 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 5.0
+**Version:** 5.1
 **Last Updated:** 2026-04-22
 
 ---
@@ -10,7 +10,7 @@
 
 The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
 
-Post-#1000 (PR landed 2026-04-22), the script needs **no environment-variable prefix**. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow scope, and the PAT lives only in the Python process heap — never in the env block.
+Post-#1000 + #1007 (both landed 2026-04-22), the script needs **no environment-variable prefix**, even when `--cerberus-pem` is used. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow/secrets scope, and the PAT lives only in the Python process heap — never in the env block.
 
 The human handles only what the script genuinely can't: the one-time gpg encryption of the classic PAT, the gpg passphrase prompt (per gpg-agent cache window), downloading the Cerberus `.pem` from the browser, and revoking the Cerberus key when done.
 
@@ -57,7 +57,7 @@ poetry run python tools/new_repo_setup.py {name} [--public] [--license mit] [--c
 
 gpg-agent will prompt for your passphrase once per cache window (controlled by `~/.gnupg/gpg-agent.conf`) and the script handles the rest.
 
-**What the script does under the hood (post-#1000):**
+**What the script does under the hood (post-#1000 + #1007):**
 
 | Step | Operation | Auth path |
 |------|-----------|-----------|
@@ -68,10 +68,9 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
 | 16 | `git pull --rebase` to sync local with the Contents-API commits | `gh auth` (read-only) |
 | 17 | **Configure repo settings (wiki/projects/merge strategy)** via PATCH | In-process classic PAT |
 | 18 | **Configure branch protection** via PUT | In-process classic PAT |
+| — | **Cerberus secrets** (if `--cerberus-pem` passed): sealed-box encrypt + PUT | In-process classic PAT (#1007) |
 
-Steps in **bold** require the classic-PAT admin scopes (`repo`, `workflow`, `admin:repo_hook`). The PAT never enters the env block or subprocess argv — the three calls share a single `classic_pat_session()`, so gpg is prompted at most once per run.
-
-**If you pass `--cerberus-pem PATH`:** the Cerberus secret-set step (`gh secret set` → `PUT /repos/.../actions/secrets/*`) currently uses `gh auth` credentials. If your fine-grained PAT has `Actions: write` (or equivalent secrets write permission), bare invocation still works. If not, prepend `env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg)` just for that specific invocation. A follow-up migration of the Cerberus path to in-process PAT will be filed if needed.
+Steps in **bold** require classic-PAT scopes. The PAT never enters the env block or subprocess argv — privileged calls share a `classic_pat_session()`, and gpg-agent caches the passphrase across sessions, so you'll typically see the prompt at most once per shell.
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
@@ -85,9 +84,9 @@ The script handles all of the following automatically:
 
 The script prints a summary showing what succeeded and what failed.
 
-### 2. Emergency fallback — `gh auth login` swap (almost never needed now)
+### 2. Emergency fallback — `gh auth login` swap (legacy; should never be needed)
 
-Only use this if **both** Step 1 failed AND `--cerberus-pem` is needed AND your fine-grained PAT lacks `Actions: write`. For a plain `poetry run python tools/new_repo_setup.py ...` invocation, this path is dead.
+All privileged paths now route through in-process classic PAT (#964 + #1000 + #1007). The `gh auth login` swap is retained only as a break-glass fallback if `classic_pat_session()` itself fails (e.g., missing `~/.secrets/classic-pat.gpg` or broken gpg-agent):
 
 ```bash
 gh auth login -h github.com -p https   # paste classic PAT
@@ -218,3 +217,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-04-18 | v4.0: Replaced interactive `gh auth login` swap with env-scoped `GH_TOKEN=$(gpg -d ...) poetry run ...` as preferred. Documented one-time gpg setup for at-rest PAT encryption. Legacy swap retained as fallback. Removed `pr-sentinel.yml` from automatic-component table (Worker-only after #938/#939). Documented `--cerberus-pem` flag as preferred Cerberus path (#940/#941). Added security note on env-var snooping via OS APIs. (#942) |
 | 2026-04-22 | v4.1: Fixed unsafe one-time-setup command (`echo '...' \| gpg -c` → `cat /dev/clipboard \| gpg -c`, matching the canonical form in `tools/_pat_session.py`). Updated "What GH_TOKEN does" paragraph to reflect Phase A of #964 (PR #1001): branch protection + repo settings now use in-process classic PAT via `classic_pat_session()` and do not read `GH_TOKEN`; only the initial git push and Cerberus secret-set still do. Toned down the env-snooping mitigation note — window shrank from ~90s to ~5s. Added forward-reference to #1000 (Phase B will eliminate the remaining window). (#1004) |
 | 2026-04-22 | v5.0: Phase B of #964 / #1000 landed. Invocation is now bare `poetry run python tools/new_repo_setup.py NAME [...]`; no `env GH_TOKEN` prefix required. Script splits step 13 into non-workflow initial commit (pushed via `git` with fine-grained PAT) + workflow upload via Contents API (PUT with in-process classic PAT) + `git pull` to sync. Env-block exposure of the classic PAT is eliminated for the common path. Cerberus secret-set (`--cerberus-pem`) still uses `gh auth` — bare works if your fine-grained PAT has `Actions: write`, else prepend `env GH_TOKEN=...` for that invocation. Demoted the "`gh auth login` swap" section to emergency-fallback. Replaced Section 3 (env-snooping mitigation) with a historical note. |
+| 2026-04-22 | v5.1: #1007 — `tools/deploy_cerberus_secrets.py` migrated to in-process classic PAT (pynacl sealed-box encryption + REST API). `--cerberus-pem` invocation no longer needs `env GH_TOKEN` regardless of fine-grained PAT scope. `gh auth login` swap section updated to reflect it's now fully legacy (only relevant if `classic_pat_session` itself fails). Updated the under-the-hood table to include Cerberus secret-set on the in-process path. |
