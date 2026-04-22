@@ -66,6 +66,33 @@ Detect the current project from working directory:
 
 ---
 
+## Preflight: WorktimeGate Check
+
+Before any git/gh command, check whether the unleashed WorktimeGate is engaged. This prevents cascading "command not found" failures mid-flow when the binaries are parked (Mon-Fri 09:00-18:00 CT).
+
+Run this check once at the top of cleanup (both Quick inline and Normal/Full subagent paths):
+
+```bash
+if [ -f /c/Users/mcwiz/Projects/unleashed/data/worktime-gate-status.json ]; then
+  ENGAGED=$(jq -r '.want_engaged' /c/Users/mcwiz/Projects/unleashed/data/worktime-gate-status.json 2>/dev/null)
+  if [ "$ENGAGED" = "true" ]; then
+    echo "NOTICE: WorktimeGate is ENGAGED."
+    echo "  git and gh binaries are parked (Mon-Fri 09:00-18:00 CT)."
+    echo "  Cleanup proceeds: session log will append, orphan analysis runs."
+    echo "  BUT Phase 4 (commit + PR) will fail; artifacts stay untracked until gate releases."
+    echo "  Re-run /cleanup --full after 18:00 CT (or bypass) to commit the accumulated artifacts."
+  fi
+fi
+```
+
+**If the status file is absent** (unleashed not installed, or running on a different machine): the check silently no-ops.
+
+**If the NOTICE fires:** do NOT abort. Proceed with cleanup — Phase 4 will fail later, and that failure is now pre-explained instead of surprising. Report it cleanly in the final summary.
+
+For Normal/Full modes: include the preflight result in the Task prompt passed to the subagent so the subagent knows the gate state without re-reading the file.
+
+---
+
 ## Execution
 
 **Mode:** Parse `$ARGUMENTS` for flags. Default is `--normal` if no flag provided.
