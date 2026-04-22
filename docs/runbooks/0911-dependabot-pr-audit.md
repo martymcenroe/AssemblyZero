@@ -111,15 +111,35 @@ Outside this specific tool, agent-initiated approvals remain disallowed.
 
 ---
 
+## On stale dependabot branches (#994)
+
+Dependabot PRs can sit open for days or weeks while main moves forward. By the time the tool runs, the PR's base SHA may be far behind current `main`. Tests that pass on current `main` can fail on the PR's branch — not because of the upgrade, but because the PR is missing fixes that landed since.
+
+**Today's pattern that motivated this:** torch-2.10.0 PR #479 deferred for 20 test failures. All 20 matched the failure inventory of #954, which was fixed by PR #955 four days earlier. The PR was created before #955 landed and was running against the unfixed baseline. After `@dependabot rebase`, the branch picked up #955's fix and the same 20 tests passed.
+
+**The tool now diagnoses this automatically.** On the deferral path, after posting the test-failure comment:
+
+1. Compares the PR's `base.sha` to current `main` HEAD via `gh api`
+2. If they differ (branch is stale): posts `@dependabot rebase` as a second comment
+3. If they match AND the PR is multi-package: falls back to the `@dependabot recreate` flow described below
+
+Staleness check supersedes recreate — rebasing is cheaper and the more likely fix. If the rebased branch fails again, the next `/dependabot` run will treat it as multi-package recreate (or single-package real-incompatibility) territory.
+
+**Manual fallback:** if you ever see a deferral that the tool DIDN'T auto-rebase (because the SHAs happened to match at scrape-time), you can post `@dependabot rebase` by hand and re-run `/dependabot` after dependabot finishes the rebase (~1-2 min).
+
+---
+
 ## On multi-package PRs
 
-Dependabot PR bodies include one `` Updates `<package>` `` block per bumped package. The tool counts these via regex. If a multi-package PR fails tests:
+Dependabot PR bodies include one `` Updates `<package>` `` block per bumped package. The tool counts these via regex. If a multi-package PR fails tests AND the branch is current with main:
 
 1. The failure comment is posted
 2. `@dependabot recreate` is posted as a second comment — dependabot listens for this and splits the grouped update into per-package PRs
 3. The next `/dependabot` run processes the smaller PRs, and typically only one of the per-package splits actually fails
 
 This is bisect-by-dependabot, not bisect-by-us. Dependabot does the splitting; our tool processes whatever dependabot produces.
+
+(Per #994: if the multi-package PR is ALSO stale, rebase fires instead of recreate. Rebase is cheaper and may resolve the failure without recreating. If the rebased PR fails again on the next run, multi-package handling resumes.)
 
 ---
 

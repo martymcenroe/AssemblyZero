@@ -231,3 +231,159 @@ class TestWaitForMergeable:
     def test_default_timeout_is_900s(self):
         """Issue #971: bumped from 300 -> 900 to cover Cerberus tail."""
         assert dependabot_review.MERGEABLE_TIMEOUT_S == 900
+
+
+class TestIsPRBranchStale:
+    """Issue #994: detect when a PR's base SHA is behind current main HEAD."""
+
+    def _stub_api(self, monkeypatch, base_sha, main_sha):
+        """Stub `run` to return base_sha for the pulls call, main_sha for branches."""
+        def _capture(cmd, *args, **kwargs):
+            joined = " ".join(cmd)
+            if "/pulls/" in joined:
+                stdout = base_sha
+            elif "/branches/main" in joined:
+                stdout = main_sha
+            else:
+                stdout = ""
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=stdout, stderr="")
+        monkeypatch.setattr(dependabot_review, "run", mock.Mock(side_effect=_capture))
+
+    def test_returns_true_when_shas_differ(self, monkeypatch):
+        self._stub_api(monkeypatch, "abc123", "def456")
+        assert dependabot_review.is_pr_branch_stale(1, "owner/repo") is True
+
+    def test_returns_false_when_shas_match(self, monkeypatch):
+        self._stub_api(monkeypatch, "samesha", "samesha")
+        assert dependabot_review.is_pr_branch_stale(1, "owner/repo") is False
+
+    def test_returns_false_on_empty_responses(self, monkeypatch):
+        """Conservative: don't trigger rebase on uncertain state."""
+        self._stub_api(monkeypatch, "", "")
+        assert dependabot_review.is_pr_branch_stale(1, "owner/repo") is False
+
+    def test_strips_quotes_from_jq_output(self, monkeypatch):
+        """gh api --jq returns JSON-quoted strings; helper must strip quotes."""
+        self._stub_api(monkeypatch, '"abc123"', '"abc123"')
+        assert dependabot_review.is_pr_branch_stale(1, "owner/repo") is False
+
+
+class TestRequestDependabotRebase:
+    """Issue #994: posts both an explanatory comment AND the trigger comment."""
+
+    def test_posts_explanation_then_trigger(self, monkeypatch):
+        comments: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review,
+            "comment_on_pr",
+            lambda pr_number, repo, body: comments.append(body),
+        )
+        dependabot_review.request_dependabot_rebase(42, "owner/repo")
+
+        assert len(comments) == 2
+        assert "@dependabot rebase" in comments[1]
+        explanation = comments[0].lower()
+        assert "rebas" in explanation or "behind" in explanation or "main" in explanation
+
+
+class TestProcessPrDeferralStaleBranchPriority:
+    """Issue #994: in the deferral path, staleness check supersedes
+    multi-package recreate. Both can be true simultaneously; rebase first."""
+
+    def _stub_pipeline(self, monkeypatch, exit_code, package_count, is_stale):
+        """Stub the pieces of process_pr we need to exercise the deferral branch."""
+        monkeypatch.setattr(dependabot_review, "verify_author", lambda pr: True)
+        monkeypatch.setattr(
+            dependabot_review,
+            "create_audit_worktree",
+            lambda main_repo, pr_number: (Path("/tmp/fake"), "fake-branch"),
+        )
+        monkeypatch.setattr(
+            dependabot_review,
+            "checkout_pr_into_worktree",
+            lambda worktree, pr_number, repo: True,
+        )
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda worktree: None)
+        monkeypatch.setattr(dependabot_review, "install_deps", lambda worktree: True)
+        monkeypatch.setattr(dependabot_review, "run_tests", lambda worktree: exit_code)
+        monkeypatch.setattr(dependabot_review, "count_packages", lambda body: package_count)
+        monkeypatch.setattr(dependabot_review, "is_pr_branch_stale", lambda pr, repo: is_stale)
+
+    def test_stale_branch_triggers_rebase_not_recreate(self, monkeypatch):
+        actions: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "comment_on_pr",
+            lambda pr_number, repo, body: actions.append(f"comment: {body[:40]}"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_rebase",
+            lambda pr_number, repo: actions.append("REBASE"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_recreate",
+            lambda pr_number, repo: actions.append("RECREATE"),
+        )
+
+        self._stub_pipeline(monkeypatch, exit_code=1, package_count=3, is_stale=True)
+        pr = dependabot_review.PRInfo(
+            number=42, title="t", author_login="app/dependabot",
+            body="fake", head_ref="r",
+        )
+        result = dependabot_review.process_pr(pr, "owner/repo", Path("/tmp/main"))
+        assert result == "deferred"
+        assert "REBASE" in actions
+        assert "RECREATE" not in actions, (
+            "staleness diagnosis should preempt recreate — rebase is cheaper"
+        )
+
+    def test_current_branch_multi_package_still_recreates(self, monkeypatch):
+        """Existing behavior preserved when staleness check returns False."""
+        actions: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "comment_on_pr",
+            lambda pr_number, repo, body: actions.append(f"comment: {body[:40]}"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_rebase",
+            lambda pr_number, repo: actions.append("REBASE"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_recreate",
+            lambda pr_number, repo: actions.append("RECREATE"),
+        )
+
+        self._stub_pipeline(monkeypatch, exit_code=1, package_count=3, is_stale=False)
+        pr = dependabot_review.PRInfo(
+            number=42, title="t", author_login="app/dependabot",
+            body="fake", head_ref="r",
+        )
+        result = dependabot_review.process_pr(pr, "owner/repo", Path("/tmp/main"))
+        assert result == "deferred"
+        assert "RECREATE" in actions
+        assert "REBASE" not in actions
+
+    def test_current_branch_single_package_neither_action(self, monkeypatch):
+        """Current + single-package failure: just the test-failure comment, no auto-action."""
+        actions: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "comment_on_pr",
+            lambda pr_number, repo, body: actions.append(f"comment: {body[:40]}"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_rebase",
+            lambda pr_number, repo: actions.append("REBASE"),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_recreate",
+            lambda pr_number, repo: actions.append("RECREATE"),
+        )
+
+        self._stub_pipeline(monkeypatch, exit_code=1, package_count=1, is_stale=False)
+        pr = dependabot_review.PRInfo(
+            number=42, title="t", author_login="app/dependabot",
+            body="fake", head_ref="r",
+        )
+        result = dependabot_review.process_pr(pr, "owner/repo", Path("/tmp/main"))
+        assert result == "deferred"
+        assert "REBASE" not in actions
+        assert "RECREATE" not in actions

@@ -279,6 +279,51 @@ def request_dependabot_recreate(pr_number: int, repo: str) -> None:
     comment_on_pr(pr_number, repo, "@dependabot recreate")
 
 
+def request_dependabot_rebase(pr_number: int, repo: str) -> None:
+    """Issue #994: auto-recover from stale-branch deferrals.
+
+    When a dependabot PR's base SHA is behind current main, test failures
+    are often caused by missing fixes that have since landed on main rather
+    than by the dependency upgrade itself. Posting `@dependabot rebase`
+    triggers dependabot to force-push a rebased branch; the next
+    /dependabot run can then re-test against the up-to-date code.
+
+    Non-destructive: if the failure is real (upgrade incompatibility),
+    the rebased PR will fail again on next run.
+    """
+    comment_on_pr(
+        pr_number, repo,
+        "Test suite failed AND this PR's base is behind current `main`. "
+        "Many failures from this pattern resolve after rebasing onto the "
+        "latest baseline (vs. being real upgrade incompatibilities). "
+        "Requesting `@dependabot rebase` so the next `/dependabot` run "
+        "evaluates against current main.",
+    )
+    comment_on_pr(pr_number, repo, "@dependabot rebase")
+
+
+def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
+    """Issue #994: True if the PR's base SHA differs from main HEAD.
+
+    Cheap proxy for "the branch is missing recent commits from main."
+    Used in the deferral path to decide whether to auto-request a rebase
+    before treating the test failure as an upgrade incompatibility.
+    """
+    base_result = run([
+        "gh", "api", f"repos/{repo}/pulls/{pr_number}",
+        "--jq", ".base.sha",
+    ])
+    main_result = run([
+        "gh", "api", f"repos/{repo}/branches/main",
+        "--jq", ".commit.sha",
+    ])
+    pr_base = (base_result.stdout or "").strip().strip('"')
+    main_head = (main_result.stdout or "").strip().strip('"')
+    if not pr_base or not main_head:
+        return False  # Conservative: don't trigger rebase on uncertain state
+    return pr_base != main_head
+
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
@@ -327,7 +372,15 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
             f"FAILED (exit {exit_code}). Worktree retained at `{worktree}` "
             f"for forensics. Not approving, not merging.",
         )
-        if package_count > 1:
+        # Issue #994: prefer staleness diagnosis over recreate.
+        # If the branch is behind main, the failure may be an artifact of a
+        # missing fix on main; rebase first before considering the upgrade
+        # incompatible.
+        if is_pr_branch_stale(pr.number, repo):
+            print("  PR branch is stale (base behind main) — "
+                  "requesting @dependabot rebase")
+            request_dependabot_rebase(pr.number, repo)
+        elif package_count > 1:
             print(f"  Multi-package PR ({package_count} packages) — "
                   f"requesting dependabot recreate")
             request_dependabot_recreate(pr.number, repo)
