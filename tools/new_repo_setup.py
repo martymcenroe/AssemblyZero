@@ -1379,16 +1379,19 @@ def audit_structure(project_path: Path, name: str) -> int:
         return 1
 
 
-def _deploy_cerberus(repo_name: str, pem_path: Path) -> str:
+def _deploy_cerberus(repo_name: str, pem_path: Path, pat: str) -> str:
     """Deploy Cerberus secrets to a single repo and handle pem file lifecycle.
 
     Reads the .pem file, deploys REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
-    to the specified repo, verifies they landed, deletes the .pem, and
-    prints a reminder to revoke the key in the app UI.
+    to the specified repo via in-process classic PAT (sealed-box encrypted
+    per GitHub's secrets API), verifies they landed, deletes the .pem, and
+    prints a reminder to revoke the key in the app UI. (#1007)
 
     Args:
         repo_name: The new repo name (lowercased, owner-less).
         pem_path: Path to the Cerberus App .pem file.
+        pat: Classic PAT from classic_pat_session() — consumed by
+            deploy_to_repo / verify_secrets, never placed in env.
 
     Returns a short status string for the summary table.
     """
@@ -1408,7 +1411,7 @@ def _deploy_cerberus(repo_name: str, pem_path: Path) -> str:
     print(f"  Target repo: {repo_name}")
     print(f"  .pem file:   {pem_path.name} ({len(pem_content)} chars)")
 
-    ok, failed = deploy_to_repo(repo_name, pem_content)
+    ok, failed = deploy_to_repo(repo_name, pem_content, pat)
     if not ok:
         print(f"  FAILED to deploy: {', '.join(failed)}")
         print(f"  .pem file NOT deleted — retry manually:")
@@ -1416,7 +1419,7 @@ def _deploy_cerberus(repo_name: str, pem_path: Path) -> str:
         return f"FAILED: {', '.join(failed)}"
     print("  Secrets set.")
 
-    ok, missing = verify_secrets(repo_name)
+    ok, missing = verify_secrets(repo_name, pat)
     if not ok:
         print(f"  WARNING: verification failed; missing {missing}")
         print(f"  .pem file NOT deleted — investigate before deleting.")
@@ -1846,10 +1849,24 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     if checks_passed < checks_total:
         print("\nWARNING: Some checks failed. Review and fix before starting work!")
 
-    # Cerberus secrets deploy (if --cerberus-pem provided, and repo was created)
+    # Cerberus secrets deploy (if --cerberus-pem provided, and repo was created).
+    # Acquire the classic PAT in-process — no env GH_TOKEN needed. gpg-agent
+    # will typically reuse the cached passphrase from the earlier session.
     cerberus_status: str | None = None
     if not args.no_github and push_succeeded and args.cerberus_pem:
-        cerberus_status = _deploy_cerberus(args.name.lower(), Path(args.cerberus_pem))
+        try:
+            with classic_pat_session() as pat:
+                cerberus_status = _deploy_cerberus(
+                    args.name.lower(), Path(args.cerberus_pem), pat,
+                )
+        except FileNotFoundError as e:
+            print(f"\n  WARNING: classic PAT not configured: {e}")
+            print("  Skipping Cerberus deploy. Retry later with:")
+            print(f"    poetry run python tools/deploy_cerberus_secrets.py {args.cerberus_pem}")
+            cerberus_status = "PAT_NOT_CONFIGURED"
+        except RuntimeError as e:
+            print(f"\n  WARNING: gpg decrypt failed: {e}")
+            cerberus_status = "GPG_FAILED"
 
     # Final summary
     if not args.no_github:
