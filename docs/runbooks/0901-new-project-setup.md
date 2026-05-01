@@ -25,7 +25,7 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 | AssemblyZero cloned | `ls /c/Users/mcwiz/Projects/AssemblyZero` |
 | GitHub CLI | `gh auth status` |
 
-> **PAT dance required.** The setup script pushes `.github/workflows/` files, which needs a classic PAT (the fine-grained agent PAT deliberately lacks `workflow` scope). Switch to classic PAT before running, then switch back immediately after. Full procedure: [0927 - New Repo: Human Checklist](0927-new-repo-human-checklist.md) steps 1 and 3.
+> **Classic PAT required (in-process, no `gh auth` swap).** The setup script's privileged steps (workflow upload via Contents API, repo settings PATCH, branch protection PUT) use the in-process classic-PAT pattern from [ADR-0216](../adrs/0216-in-process-classic-pat-decryption.md). Prerequisites: `~/.secrets/classic-pat.gpg` must exist (one-time setup procedure in `tools/_pat_session.py`'s docstring) and `~/.gnupg/gpg-agent.conf` must have `default-cache-ttl 0` + `max-cache-ttl 0` (post-2026-04-30 hardening — see [standard 0017](../standards/0017-classic-pat-fleet-tooling-reference-architecture.md)). Pinentry will prompt for the gpg passphrase once when the script reaches the privileged section. The user must run the script personally; agents must NOT invoke it via their tool surfaces.
 
 ---
 
@@ -111,7 +111,6 @@ MyNewProject/
 | `LICENSE` | MIT License |
 | `.gitignore` | Standard ignore patterns |
 | `.unleashed.json` | Unleashed wrapper configuration (model, effort, onboard settings) |
-| `.github/workflows/pr-sentinel.yml` | PR issue reference check (GitHub Actions) |
 | `.github/workflows/auto-reviewer.yml` | Cerberus auto-approval caller workflow |
 | `docs/00003-file-inventory.md` | Project file inventory |
 
