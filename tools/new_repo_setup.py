@@ -1571,8 +1571,85 @@ Examples:
         sys.exit(1)
 
 
+def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
+    """Classify what's at project_path when it already exists.
+
+    Pre-flight helper for _create_repo. Returns (kind, recovery_lines)
+    where `kind` is one of:
+        'file'           — path exists as a regular file, not a directory
+        'stale_worktree' — directory has a `.git` FILE pointing at a
+                            worktree registration (the #935 case — usually
+                            a leftover from a prior worktree-based session)
+        'live_repo'      — directory has a `.git` DIRECTORY (real local repo)
+        'unknown_dir'    — directory exists, no `.git` of any kind
+
+    `recovery_lines` is a list of human-readable strings the caller prints
+    to help the user clean up and retry. No side effects performed —
+    callers must not auto-delete; the user decides.
+    """
+    if project_path.is_file():
+        return ("file", [
+            f"Path is a regular file, not a directory.",
+            f"Remove it: rm '{project_path}'",
+            f"Then re-run.",
+        ])
+
+    git_path = project_path / ".git"
+
+    if git_path.is_file():
+        registration = ""
+        try:
+            registration = git_path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            pass
+        return ("stale_worktree", [
+            f"Directory contains a `.git` FILE — looks like a stale git-worktree leftover (#935).",
+            f"  .git contents: {registration or '(unreadable)'}",
+            "Recovery options (try in this order):",
+            f"  1. cd '{project_path}' && poetry env remove --all  # release venv file locks",
+            f"  2. rm -rf '{project_path}'                          # may still fail if other locks remain",
+            f"  3. powershell -c \"Get-Process | Where-Object {{ \\$_.Path -like '*{project_path.name}*' }}\"  # find lock-holder",
+            f"  4. If a stale Python process holds the lock: powershell -c \"Get-Process python | Stop-Process\" (carefully)",
+            f"  5. Reboot is the nuclear option.",
+        ])
+
+    if git_path.is_dir():
+        return ("live_repo", [
+            f"Directory is an existing git repo (has a `.git` directory).",
+            f"This is NOT a leftover. Refusing to overwrite.",
+            f"Pick a different name for your new repo, or move/rename the existing repo first.",
+        ])
+
+    try:
+        entry_count = sum(1 for _ in project_path.iterdir())
+    except OSError:
+        entry_count = -1
+    return ("unknown_dir", [
+        f"Directory exists with {entry_count} entries but no `.git` of any kind.",
+        f"Either remove it (if not yours) or pick a different name:",
+        f"  rm -rf '{project_path}'  # if you confirm you don't need it",
+    ])
+
+
 def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str) -> None:
     """Internal repo creation logic, separated for error handling."""
+    # Pre-flight: refuse to proceed if anything already exists at project_path.
+    # No GitHub state should be created when there's a local collision; the
+    # user resolves it and re-runs. Covers the #935 stale-worktree case
+    # plus typos and accidental name reuse.
+    if project_path.exists():
+        kind, recovery_lines = _diagnose_existing_path(project_path)
+        print("\n" + "=" * 60)
+        print(f"[PRE-FLIGHT] Refusing to proceed: target path already exists")
+        print("=" * 60)
+        print(f"Path: {project_path}")
+        print(f"Kind: {kind}")
+        for line in recovery_lines:
+            print(f"  {line}")
+        print()
+        print("No local files written, no GitHub repo created. Resolve the collision and re-run.")
+        sys.exit(1)
+
     # Step 1: Create directory
     print("\n1. Creating directory...")
     project_path.mkdir(parents=True)
