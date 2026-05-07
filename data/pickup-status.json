@@ -1,7 +1,7 @@
 {
-  "status": "ok",
-  "timestamp": "2026-04-21 21:12:35",
-  "handoff_timestamp": "2026-04-21 21:08:13",
+  "status": "already",
+  "timestamp": "2026-04-21 22:04:32",
+  "handoff_timestamp": null,
   "repo": "AssemblyZero",
-  "message": "Marked handoff from 2026-04-21 21:08:13 as picked up at 2026-04-21 21:12:35"
+  "message": "Already marked (line 3175)"
 }
