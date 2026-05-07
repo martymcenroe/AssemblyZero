@@ -47,6 +47,8 @@ Quick reference for the user (Marty) on how to run tools, commands, agents, audi
 | 0927 | [New Repo: Human Checklist](0927-new-repo-human-checklist.md) | Manual | On new repo | - |
 | 0928 | [Cloudflare Zone Setup](0928-cloudflare-zone-setup.md) | Manual | On new domain | - |
 | 0929 | [AI CLI Tools Reference](0929-ai-cli-tools-reference.md) | Reference | - | All |
+| 0930 | [GPG and Classic-PAT Rotation](0930-gpg-and-classic-pat-rotation.md) | Manual | Quarterly | - |
+| 0931 | [Fleet Branch Cleanup](0931-fleet-branch-cleanup.md) | Manual | Periodic / post-merge | - |
 
 ## Model Selection Guide
 
