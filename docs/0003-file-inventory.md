@@ -74,8 +74,8 @@
 | `0214-fleet-wide-workflow-permissions-enforcement.md` | Stable | Workflow permissions enforcement fleet-wide |
 | `0215-claude-hook-locations.md` | Stable | Claude Code hook placement (global vs per-repo) |
 | `0216-in-process-classic-pat-decryption.md` | Stable | In-process classic PAT decryption (no env block) |
-| `0216-playwright-system-chrome-channel.md` | Stable | Playwright system Chrome channel; **NOTE:** numbering collision with 0216-in-process-classic-pat-decryption.md — renumber when convenient |
 | `0217-squash-merge-orphan-graft-cleanup.md` | Stable | Force-free squash-merge orphan cleanup via `git replace --graft` |
+| `0218-playwright-system-chrome-channel.md` | Stable | Playwright system Chrome channel for anti-automation-gated sites (mirrored from Clio) |
 
 ### Research (02xx-R) - 1 file
 

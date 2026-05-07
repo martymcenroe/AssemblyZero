@@ -1,4 +1,6 @@
-# 0216 - ADR: System Chrome Channel for Playwright Automation Against Anti-Automation-Gated Sites
+# 0218 - ADR: System Chrome Channel for Playwright Automation Against Anti-Automation-Gated Sites
+
+> **Renumbered 2026-05-07** from 0216 to 0218 to resolve a numbering collision with `0216-in-process-classic-pat-decryption.md`. Original Clio source ADR (`Clio/docs/adrs/0201-playwright-system-chrome-channel.md`) is unchanged.
 
 **Status:** Implemented
 **Date:** 2026-04-22
