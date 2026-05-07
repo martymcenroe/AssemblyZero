@@ -1,8 +1,8 @@
 # AssemblyZero - File Inventory & Status Map
 
 **Document:** 0003
-**Version:** 2.0
-**Last Updated:** 2026-03-01
+**Version:** 3.0
+**Last Updated:** 2026-05-07
 
 ## 1. Status Taxonomy
 
@@ -52,7 +52,7 @@
 | `0108-test-report-template.md` | Stable | Test results format |
 | `0109-runbook-template.md` | Stable | Operational procedures |
 
-### ADRs (02xx) - 14 files (12 active, 2 superseded)
+### ADRs (02xx) - 20 files (18 active, 2 superseded)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -70,6 +70,12 @@
 | `0210-discworld-persona-convention.md` | Stable | Persona naming rules |
 | `0211-rag-architecture.md` | Stable | RAG architecture (Brutha foundation) |
 | `0212-local-only-embeddings.md` | Stable | Local-only embeddings policy |
+| `0213-aws-multi-app-cost-separation.md` | Stable | AWS account/cost separation across apps |
+| `0214-fleet-wide-workflow-permissions-enforcement.md` | Stable | Workflow permissions enforcement fleet-wide |
+| `0215-claude-hook-locations.md` | Stable | Claude Code hook placement (global vs per-repo) |
+| `0216-in-process-classic-pat-decryption.md` | Stable | In-process classic PAT decryption (no env block) |
+| `0216-playwright-system-chrome-channel.md` | Stable | Playwright system Chrome channel; **NOTE:** numbering collision with 0216-in-process-classic-pat-decryption.md — renumber when convenient |
+| `0217-squash-merge-orphan-graft-cleanup.md` | Stable | Force-free squash-merge orphan cleanup via `git replace --graft` |
 
 ### Research (02xx-R) - 1 file
 
@@ -145,7 +151,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0838-audit-broken-references.md` | Stable | Cross-reference validation |
 | `0899-meta-audit.md` | Stable | Audit the audits |
 
-### Runbooks (09xx) - 5 files
+### Runbooks (09xx) - 31 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -153,11 +159,37 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0901-new-project-setup.md` | Stable | Project init |
 | `0902-nightly-assemblyzero-audit.md` | Stable | Scheduled audit |
 | `0903-windows-scheduled-tasks.md` | Stable | Windows Task Scheduler |
+| `0904-issue-governance-workflow.md` | Stable | Per-issue governance flow |
 | `0905-gemini-credentials.md` | Stable | Gemini credential management |
+| `0906-lld-governance-workflow.md` | Stable | Per-LLD governance flow |
+| `0907-unified-requirements-workflow.md` | Stable | Pluggable requirements pipeline |
+| `0908-the-scout-external-intelligence-gathering-workflow.md` | Stable | Scout (Angua) external research |
+| `0909-tdd-implementation-workflow.md` | Stable | TDD implementation pipeline |
+| `0910-verdict-analyzer---template-improvement-from-gemini-verdicts.md` | Stable | Template improvement from verdicts |
+| `0911-dependabot-pr-audit.md` | Stable | Dependabot PR audit + auto-merge |
+| `0912-github-projects.md` | Stable | GitHub Projects reference |
+| `0913-skill-command-reference.md` | Stable | Skill command reference |
+| `0914-fix-implementation-workflow-should-archive-lld-and-reports-to-done--on-completion.md` | Stable | Post-merge LLD/reports archival |
+| `0915-backfill-audit-directories.md` | Stable | One-time audit dir backfill |
+| `0916-batch-workflow-runner.md` | Stable | Unattended batch workflow runner |
+| `0917-audit-skill-runbook.md` | Stable | `/audit` skill operation |
+| `0918-heartbeat-lite-install-guide.md` | Stable | Heartbeat-lite install |
+| `0919-no-lld-workflow.md` | Stable | Hotfix flow without LLD |
+| `0920-implementation-spec-hard-gate-wrapper-for-skipped-test-enforcement-test-gatepy.md` | Stable | Skipped-test enforcement gate |
+| `0921-implementation-spec-cross-project-metrics-aggregation-for-assemblyzero-usage-tracking.md` | Stable | Cross-project metrics aggregation |
+| `0922-implementation-spec-n9-cleanup-node---worktree-removal-lineage-archival-and-learning-summary.md` | Stable | N9 cleanup node (worktree + lineage) |
+| `0923-workflow-recovery.md` | Stable | Workflow recovery and `--resume` |
+| `0925-agent-token-setup.md` | Stable | Agent PAT permissions and rotation |
+| `0926-branch-protection-setup.md` | Stable | Manual branch protection (fallback) |
+| `0927-new-repo-human-checklist.md` | Stable | New-repo human checklist |
+| `0928-cloudflare-zone-setup.md` | Stable | Cloudflare zone setup on new domain |
+| `0929-ai-cli-tools-reference.md` | Stable | AI CLI tools reference |
+| `0930-gpg-and-classic-pat-rotation.md` | Stable | GPG + classic-PAT rotation procedure |
+| `0931-fleet-branch-cleanup.md` | Stable | Fleet-wide local-branch cleanup (#437; tool in unleashed) |
 
 ---
 
-## 3. Tools Inventory (36 files)
+## 3. Tools Inventory (43 files)
 
 ### Workflow Runners
 
@@ -182,7 +214,21 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/assemblyzero_credentials.py` | Stable | Credential management utilities |
 | `tools/assemblyzero-harvest.py` | Beta | Pattern harvester for permission discovery |
 | `tools/archive_worktree_lineage.py` | Stable | Post-merge lineage archival |
-| `tools/new_repo_setup.py` | Stable | New repository initialization |
+| `tools/new_repo_setup.py` | Stable | New repository initialization (with `--cerberus-pem`, in-process classic PAT) |
+
+### Privileged-Path / Fleet Tools (in-process classic PAT — ADR-0216)
+
+These tools use `tools/_pat_session.classic_pat_session()` so the classic PAT never enters the env block. See ADR-0216.
+
+| File | Status | Description |
+|------|--------|-------------|
+| `tools/_pat_session.py` | Stable | Context manager for in-process classic PAT decryption |
+| `tools/deploy_cerberus_secrets.py` | Stable | Per-repo Cerberus secret deployment (sealed-box + Contents API; #1007) |
+| `tools/sentinel_migrate.py` | Stable | Migrate outlier repos to fleet-standard pr-sentinel context (#960) |
+| `tools/fleet_delete_pr_sentinel.py` | Stable | Fleet-wide deletion of legacy pr-sentinel.yml (#975 / #886 Phase 3) |
+| `tools/fleet_set_delete_branch_on_merge.py` | Stable | Fleet flip of `delete_branch_on_merge: true` (#1019); reference `_request_with_retry` |
+| `tools/fleet_set_permission_mode.py` | In-Progress | Fleet rollout of `claude.permissionMode=auto` (#979) |
+| `tools/dependabot_review.py` | Stable | Deterministic dependabot PR audit + merge (#949; runbook 0911) |
 
 ### RAG & Knowledge Base
 
@@ -224,6 +270,17 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/transcript_filters.py` | Stable | Transcript filter utilities |
 | `tools/backfill_issue_audit.py` | Stable | Bulk audit backfill |
 | `tools/backfill_telemetry.py` | Stable | Historical telemetry backfill |
+
+### Cross-Repo / Fleet Tools (live in `unleashed/`)
+
+These tools live outside AZ but operate fleet-wide. The user invokes them from the `unleashed/` directory; AZ provides their runbooks.
+
+| File | Status | Description | Runbook |
+|------|--------|-------------|---------|
+| `unleashed/src/fleet_branch_cleanup.py` | Stable | Force-free squash-merge orphan cleanup across all repos under `~/Projects/` (ADR-0217) | [0931](runbooks/0931-fleet-branch-cleanup.md) |
+| `unleashed/src/repo_inventory_scan.py` | Stable | Discover all git repos under configured roots; upload metadata to Panopticon | (in unleashed) |
+| `unleashed/src/active_session_scan.py` | Stable | 1-min Panopticon active-session state sync | (in unleashed) |
+| `unleashed/src/session_artifact_scan.py` | Stable | Hourly Panopticon session-artifact upload | (in unleashed) |
 
 ---
 
