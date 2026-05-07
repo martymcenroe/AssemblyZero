@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1152,6 +1153,8 @@ def deploy_canonical_hooks(project_path: Path) -> None:
 
 _GH_API = "https://api.github.com"
 _HTTP_TIMEOUT_S = 30
+_MAX_RETRIES = 4
+_INITIAL_BACKOFF_S = 1.0
 
 
 def _gh_headers(pat: str) -> dict[str, str]:
@@ -1160,6 +1163,63 @@ def _gh_headers(pat: str) -> dict[str, str]:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+
+
+def _request_with_retry(
+    method: str, url: str, pat: str, **kwargs
+) -> requests.Response:
+    """HTTP request with exponential backoff on transient errors.
+
+    Retries: connection errors, timeouts, 5xx, 429 (rate-limited), and
+    403 with X-RateLimit-Remaining=0 (secondary rate limit).
+
+    Does NOT retry: 4xx other than 403/429 (permanent for this caller).
+
+    Ported from tools/fleet_set_delete_branch_on_merge.py per #1022 so
+    a transient 502 mid-setup doesn't leave a half-deployed new repo.
+    """
+    backoff = _INITIAL_BACKOFF_S
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            r = requests.request(
+                method, url, headers=_gh_headers(pat),
+                timeout=_HTTP_TIMEOUT_S, **kwargs,
+            )
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if attempt < _MAX_RETRIES:
+                print(f"    network error ({type(e).__name__}); retry in {backoff}s")
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            raise
+
+        # Rate limit: secondary (429 with Retry-After)
+        if r.status_code == 429:
+            retry_after = int(r.headers.get("Retry-After", "30"))
+            if attempt < _MAX_RETRIES:
+                print(f"    HTTP 429; sleeping {retry_after}s per Retry-After")
+                time.sleep(retry_after)
+                continue
+        # Rate limit: primary (403 + X-RateLimit-Remaining=0)
+        if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
+            reset = int(r.headers.get("X-RateLimit-Reset", "0"))
+            wait = max(reset - int(time.time()), 30)
+            if attempt < _MAX_RETRIES:
+                print(f"    primary rate limit hit; sleeping {wait}s until reset")
+                time.sleep(wait)
+                continue
+        # Server-side transient
+        if 500 <= r.status_code < 600:
+            if attempt < _MAX_RETRIES:
+                print(f"    HTTP {r.status_code}; retry in {backoff}s")
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+
+        # All other responses: return as-is (caller decides 4xx handling)
+        return r
+
+    return r  # final attempt's response, even if it was a retryable error
 
 
 def configure_branch_protection(github_user: str, repo_name: str, pat: str) -> bool:
@@ -1212,11 +1272,11 @@ def configure_branch_protection(github_user: str, repo_name: str, pat: str) -> b
         "allow_deletions": False,
     }
     try:
-        resp = requests.put(
+        resp = _request_with_retry(
+            "PUT",
             f"{_GH_API}/repos/{github_user}/{repo_name}/branches/main/protection",
-            headers=_gh_headers(pat),
+            pat,
             json=body,
-            timeout=_HTTP_TIMEOUT_S,
         )
         return resp.status_code < 300
     except requests.RequestException:
@@ -1246,11 +1306,11 @@ def configure_repo_settings(github_user: str, repo_name: str, pat: str) -> bool:
         "allow_rebase_merge": False,
     }
     try:
-        resp = requests.patch(
+        resp = _request_with_retry(
+            "PATCH",
             f"{_GH_API}/repos/{github_user}/{repo_name}",
-            headers=_gh_headers(pat),
+            pat,
             json=body,
-            timeout=_HTTP_TIMEOUT_S,
         )
         return resp.status_code < 300
     except requests.RequestException:
@@ -1305,11 +1365,11 @@ def _deploy_workflows_via_contents_api(
             "branch": branch,
         }
         try:
-            resp = requests.put(
+            resp = _request_with_retry(
+                "PUT",
                 f"{_GH_API}/repos/{github_user}/{repo_name}/contents/{rel_path}",
-                headers=_gh_headers(pat),
+                pat,
                 json=payload,
-                timeout=_HTTP_TIMEOUT_S,
             )
         except requests.RequestException as e:
             print(f"  Contents API PUT errored for {rel_path}: {e}")
