@@ -1072,7 +1072,12 @@ jobs:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 '''
-    (workflows_dir / "auto-reviewer.yml").write_text(auto_reviewer, encoding="utf-8")
+    # newline="" disables Python's Windows LF→CRLF translation. The
+    # workflow file lands on disk with LF — same as every other repo
+    # in the fleet, and matches what the Contents API upload sends.
+    (workflows_dir / "auto-reviewer.yml").write_text(
+        auto_reviewer, encoding="utf-8", newline="",
+    )
 
 
 def create_settings_json(project_path: Path) -> None:
@@ -1289,9 +1294,14 @@ def _deploy_workflows_via_contents_api(
     uploaded = 0
     for wf in files:
         rel_path = f".github/workflows/{wf.name}"
+        # CRLF normalize before base64 — Path.write_text on Windows
+        # writes CRLF, and the Contents API stores bytes verbatim, so
+        # without this the workflow lands on origin with CRLF where the
+        # rest of the fleet uses LF. Per root CLAUDE.md gotcha (2026-04-30 #3).
+        content_bytes = wf.read_bytes().replace(b"\r\n", b"\n")
         payload = {
             "message": f"chore: add {rel_path}",
-            "content": base64.b64encode(wf.read_bytes()).decode("ascii"),
+            "content": base64.b64encode(content_bytes).decode("ascii"),
             "branch": branch,
         }
         try:
