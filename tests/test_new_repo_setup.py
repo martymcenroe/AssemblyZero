@@ -417,6 +417,116 @@ class TestValidateName:
             assert not valid, f"'{name}' ({reason}) should be invalid"
 
 
+class TestPythonBootstrap:
+    """T280-T286: create_python_project (#1058)."""
+
+    @patch("new_repo_setup.run_command")
+    def test_T280_happy_path_writes_artifacts(self, mock_run, tmp_path):
+        """Successful poetry calls produce pyproject append + conftest.py."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        project = tmp_path / "TestProject"
+        project.mkdir()
+        # poetry init normally writes this; with mocked run_command,
+        # we pre-create it so the append step has a target.
+        (project / "pyproject.toml").write_text(
+            "[tool.poetry]\nname = \"testproject\"\nversion = \"0.1.0\"\n",
+            encoding="utf-8",
+        )
+        from new_repo_setup import create_python_project
+        ok = create_python_project(project, "TestProject", "polyform")
+        assert ok is True
+        content = (project / "pyproject.toml").read_text(encoding="utf-8")
+        assert "[tool.pytest.ini_options]" in content
+        assert 'testpaths = ["tests"]' in content
+        conftest = project / "tests" / "conftest.py"
+        assert conftest.exists()
+        body = conftest.read_text(encoding="utf-8")
+        assert 'sys.path.insert(0, str(ROOT / "src"))' in body
+
+    @patch("new_repo_setup.run_command")
+    def test_T281_poetry_init_failure_returns_false(self, mock_run, tmp_path):
+        """If poetry init fails, function returns False without writing files."""
+        mock_run.return_value = MagicMock(returncode=1, stderr="poetry: not found")
+        project = tmp_path / "FailProject"
+        project.mkdir()
+        from new_repo_setup import create_python_project
+        ok = create_python_project(project, "FailProject", "polyform")
+        assert ok is False
+        assert not (project / "tests" / "conftest.py").exists()
+
+    @patch("new_repo_setup.run_command")
+    def test_T282_license_polyform_maps_correctly(self, mock_run, tmp_path):
+        """polyform license maps to PolyForm-Noncommercial-1.0.0 in poetry init."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        project = tmp_path / "PolyProject"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
+        from new_repo_setup import create_python_project
+        create_python_project(project, "PolyProject", "polyform")
+        init_cmd = mock_run.call_args_list[0][0][0]
+        license_idx = init_cmd.index("--license")
+        assert init_cmd[license_idx + 1] == "PolyForm-Noncommercial-1.0.0"
+
+    @patch("new_repo_setup.run_command")
+    def test_T283_license_mit_maps_correctly(self, mock_run, tmp_path):
+        """mit license maps to MIT in poetry init."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        project = tmp_path / "MitProject"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
+        from new_repo_setup import create_python_project
+        create_python_project(project, "MitProject", "mit")
+        init_cmd = mock_run.call_args_list[0][0][0]
+        license_idx = init_cmd.index("--license")
+        assert init_cmd[license_idx + 1] == "MIT"
+
+    @patch("new_repo_setup.run_command")
+    def test_T284_package_name_is_lowercased(self, mock_run, tmp_path):
+        """Mixed-case repo names are lowercased for the Poetry package name."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        project = tmp_path / "CamelCaseRepo"
+        project.mkdir()
+        (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
+        from new_repo_setup import create_python_project
+        create_python_project(project, "CamelCaseRepo", "polyform")
+        init_cmd = mock_run.call_args_list[0][0][0]
+        name_idx = init_cmd.index("--name")
+        assert init_cmd[name_idx + 1] == "camelcaserepo"
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T285_lang_none_skips_poetry(self, mock_run, mock_config, tmp_path):
+        """--lang none short-circuits the Python bootstrap (no poetry calls)."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv",
+                   ["new_repo_setup.py", "NoLang", "--no-github", "--lang", "none"]):
+            main()
+        commands = [call[0][0] for call in mock_run.call_args_list]
+        assert not any(cmd[0] == "poetry" for cmd in commands), \
+            f"unexpected poetry calls: {[c for c in commands if c[0] == 'poetry']}"
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T286_lang_python_default_invokes_poetry(
+        self, mock_run, mock_config, tmp_path
+    ):
+        """--lang python (the default) calls poetry init + poetry add."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        with patch("sys.argv", ["new_repo_setup.py", "PyDefault", "--no-github"]):
+            main()
+        commands = [call[0][0] for call in mock_run.call_args_list]
+        poetry_inits = [c for c in commands if c[:2] == ["poetry", "init"]]
+        poetry_adds = [c for c in commands if c[:2] == ["poetry", "add"]]
+        assert len(poetry_inits) == 1, f"expected 1 poetry init, got {poetry_inits}"
+        assert len(poetry_adds) == 1, f"expected 1 poetry add, got {poetry_adds}"
+        add = poetry_adds[0]
+        assert "pytest" in add
+        assert "pytest-cov" in add
+        assert "--group" in add and "dev" in add
+
+
 class TestCanonicalLabels:
     """T215-T219: create_canonical_labels (#1061)."""
 

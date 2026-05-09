@@ -217,7 +217,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `tools/assemblyzero_credentials.py` | Stable | Credential management utilities |
 | `tools/assemblyzero-harvest.py` | Beta | Pattern harvester for permission discovery |
 | `tools/archive_worktree_lineage.py` | Stable | Post-merge lineage archival |
-| `tools/new_repo_setup.py` | Stable | New repository initialization (with `--cerberus-pem`, in-process classic PAT) |
+| `tools/new_repo_setup.py` | Stable | New repository initialization (Python bootstrap via `--lang python`/none default; `--cerberus-pem` for Cerberus secrets; in-process classic PAT for privileged ops) |
 
 ### Privileged-Path / Fleet Tools (in-process classic PAT — ADR-0216)
 
