@@ -417,6 +417,71 @@ class TestValidateName:
             assert not valid, f"'{name}' ({reason}) should be invalid"
 
 
+class TestCanonicalLabels:
+    """T215-T219: create_canonical_labels (#1061)."""
+
+    @patch("new_repo_setup.run_command")
+    def test_T215_creates_all_canonical_labels(self, mock_run):
+        """Both implementation and lld labels get created."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        from new_repo_setup import create_canonical_labels
+        created, total = create_canonical_labels("martymcenroe", "boostgauge")
+        assert created == 2
+        assert total == 2
+        # Both labels were attempted via gh CLI.
+        commands = [call[0][0] for call in mock_run.call_args_list]
+        label_names = [c[3] for c in commands if c[:3] == ["gh", "label", "create"]]
+        assert "implementation" in label_names
+        assert "lld" in label_names
+
+    @patch("new_repo_setup.run_command")
+    def test_T216_uses_force_for_idempotency(self, mock_run):
+        """gh label create is invoked with --force so reruns succeed."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        from new_repo_setup import create_canonical_labels
+        create_canonical_labels("martymcenroe", "TestRepo")
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            assert "--force" in cmd, f"--force missing from: {cmd}"
+
+    @patch("new_repo_setup.run_command")
+    def test_T217_targets_correct_repo(self, mock_run):
+        """--repo flag is set to {github_user}/{repo_name}."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        from new_repo_setup import create_canonical_labels
+        create_canonical_labels("martymcenroe", "MyRepo")
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            repo_idx = cmd.index("--repo")
+            assert cmd[repo_idx + 1] == "martymcenroe/MyRepo"
+
+    @patch("new_repo_setup.run_command")
+    def test_T218_partial_failure_returns_partial_count(self, mock_run, capsys):
+        """If one label fails, count reflects only successes; warning printed."""
+        # First call succeeds, second call fails.
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stderr=""),
+            MagicMock(returncode=1, stderr="GraphQL error: insufficient scope"),
+        ]
+        from new_repo_setup import create_canonical_labels
+        created, total = create_canonical_labels("martymcenroe", "TestRepo")
+        assert created == 1
+        assert total == 2
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+
+    @patch("new_repo_setup.run_command")
+    def test_T219_check_false_passed(self, mock_run):
+        """run_command is called with check=False so non-zero exit doesn't raise."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        from new_repo_setup import create_canonical_labels
+        create_canonical_labels("martymcenroe", "TestRepo")
+        for call in mock_run.call_args_list:
+            kwargs = call[1] if len(call) > 1 else call.kwargs
+            assert kwargs.get("check") is False, \
+                f"check=False missing from call: {call}"
+
+
 class TestMainAuditMode:
     """T220: --audit flag triggers audit path."""
 
