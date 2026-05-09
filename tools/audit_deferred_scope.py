@@ -44,10 +44,30 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "audits"
 
 CORPUS_CACHE = DATA_DIR / f"closed-issues-snapshot-{TODAY}.json"
+STATE_INDEX_CACHE = DATA_DIR / f"issue-state-index-{TODAY}.json"
 LLM_CACHE = DATA_DIR / "deferred-scope-llm-cache.json"
 
 REPORT_FULL = DOCS_DIR / f"0851-deferred-scope-audit-{TODAY}.md"
 REPORT_NEW_REPO = DOCS_DIR / f"0852-deferred-scope-new-repo-{TODAY}.md"
+
+# Bumping this invalidates the LLM cache. Bump when prompt structure
+# changes meaningfully (#1049: state-aware xref + title-similarity supplements).
+PROMPT_VERSION = "v2"
+
+# Tokens that are too generic to drive title-similarity matching. Stays
+# small — we want to filter only high-frequency English/repo glue, not
+# domain-specific vocab.
+_STOP_TOKENS = frozenset({
+    "the", "a", "an", "and", "or", "but", "for", "to", "of", "in", "on",
+    "at", "by", "with", "from", "as", "is", "are", "was", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "should", "could", "may", "might", "must", "this", "that",
+    "these", "those", "it", "its", "we", "us", "you", "i", "he", "she",
+    "they", "them", "his", "her", "their", "my", "our", "your", "no",
+    "not", "if", "then", "else", "when", "where", "why", "how", "all",
+    "any", "some", "each", "every", "more", "most", "less", "least",
+    "issue", "pr", "ticket", "fix", "feat", "chore", "docs",
+})
 
 # Regex patterns flagging potential deferred scope. Case-insensitive.
 DEFERRAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -108,7 +128,7 @@ class Candidate:
 
     def cache_key(self) -> str:
         h = hashlib.sha1(
-            f"{self.issue_number}|{self.keyword}|{self.location}|{self.context}".encode("utf-8")
+            f"{PROMPT_VERSION}|{self.issue_number}|{self.keyword}|{self.location}|{self.context}".encode("utf-8")
         ).hexdigest()
         return h
 
@@ -229,6 +249,56 @@ def fetch_corpus(refresh: bool = False) -> list[IssueRecord]:
     return records
 
 
+def fetch_state_index(refresh: bool = False) -> dict[int, dict]:
+    """Lightweight metadata index for ALL repo issues (open + closed).
+
+    Used for two #1049 fixes:
+      - bug 2: title-similarity supplement to the literal-#N xref index;
+      - bug 3: state-aware xref annotations in the LLM prompt.
+
+    Cached to `data/issue-state-index-{date}.json`. Cheap compared to
+    `fetch_corpus` because it does NOT pull bodies/comments.
+    """
+    if STATE_INDEX_CACHE.exists() and not refresh:
+        try:
+            raw = json.loads(STATE_INDEX_CACHE.read_text(encoding="utf-8"))
+            return {int(k): v for k, v in raw.items()}
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    print(f"Fetching issue state index for {REPO}...")
+    r = gh_with_backoff([
+        "gh", "issue", "list",
+        "--repo", REPO,
+        "--state", "all",
+        "--limit", "5000",
+        "--json", "number,state,title",
+    ], timeout=120)
+    if r.returncode != 0:
+        print(f"  WARN: gh issue list failed: {r.stderr.strip()}")
+        return {}
+    try:
+        items = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {}
+    idx: dict[int, dict] = {}
+    for it in items:
+        num = it.get("number")
+        if not isinstance(num, int):
+            continue
+        idx[num] = {
+            "state": (it.get("state") or "").lower(),
+            "title": it.get("title") or "",
+        }
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STATE_INDEX_CACHE.write_text(
+        json.dumps({str(k): v for k, v in idx.items()}, indent=2),
+        encoding="utf-8",
+    )
+    print(f"  {len(idx)} issues indexed; cached to {STATE_INDEX_CACHE}")
+    return idx
+
+
 # ---------------------------------------------------------------------------
 # Phase B: regex first pass
 # ---------------------------------------------------------------------------
@@ -238,6 +308,27 @@ def extract_context(text: str, span: tuple[int, int]) -> str:
     end = min(len(text), span[1] + CONTEXT_RADIUS)
     snippet = text[start:end].replace("\r\n", "\n").replace("\n", " ")
     return snippet.strip()
+
+
+# ---------------------------------------------------------------------------
+# Similarity helpers (#1049 bug 1 + bug 2)
+# ---------------------------------------------------------------------------
+
+_TOKEN_RE = re.compile(r"\w{2,}")
+
+
+def _meaningful_tokens(s: str) -> frozenset[str]:
+    """Lowercased word tokens with stop-words and 1-char fragments removed."""
+    if not s:
+        return frozenset()
+    return frozenset(t for t in _TOKEN_RE.findall(s.lower()) if t not in _STOP_TOKENS)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> float:
+    """Jaccard token-set similarity in [0, 1]. Empty inputs return 0."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
 
 
 def find_candidates(corpus: list[IssueRecord]) -> list[Candidate]:
@@ -270,7 +361,7 @@ def find_candidates(corpus: list[IssueRecord]) -> list[Candidate]:
                         context=extract_context(c.get("body", ""), m.span()),
                     ))
                     break
-    # Deduplicate by (issue, keyword, location)
+    # Pass 1: deduplicate by (issue, keyword, location).
     seen = set()
     deduped = []
     for c in candidates:
@@ -279,7 +370,30 @@ def find_candidates(corpus: list[IssueRecord]) -> list[Candidate]:
             continue
         seen.add(k)
         deduped.append(c)
-    return deduped
+
+    # Pass 2 (#1049 bug 1): deduplicate by content overlap within each issue.
+    # Different keywords can hit the same passage (e.g., "tracked separately"
+    # and "follow_up" both matching "rotation tracked in a separate follow-up
+    # issue") and produce candidates that survive pass 1 but represent the
+    # same deferral. Collapse them by Jaccard token-set similarity > 0.7.
+    by_issue: dict[int, list[Candidate]] = {}
+    for c in deduped:
+        by_issue.setdefault(c.issue_number, []).append(c)
+    final: list[Candidate] = []
+    for cands in by_issue.values():
+        kept: list[Candidate] = []
+        kept_sigs: list[frozenset[str]] = []
+        for c in cands:
+            sig = _meaningful_tokens(c.context)
+            if any(_jaccard(sig, prev) > 0.7 for prev in kept_sigs):
+                continue
+            kept.append(c)
+            kept_sigs.append(sig)
+        final.extend(kept)
+    # Preserve original order across issues.
+    order = {id(c): i for i, c in enumerate(deduped)}
+    final.sort(key=lambda c: order.get(id(c), 0))
+    return final
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +420,39 @@ def build_xref_index(corpus: list[IssueRecord]) -> dict[int, list[int]]:
     return refs
 
 
+def find_title_similar_open_issues(
+    candidate_context: str,
+    state_index: dict[int, dict],
+    exclude: int,
+    min_overlap: int = 2,
+    cap: int = 5,
+) -> list[int]:
+    """Return open issues whose title shares >= min_overlap meaningful tokens
+    with the candidate's deferred-context text.
+
+    Addresses #1049 bug 2: the textual `#N` xref index misses follow-ups
+    that reference the parent's runbook/ADR/topic instead of its issue
+    number. Concrete miss before this fix: #1017 follow-up to #1018
+    (rotation TODO) referenced runbook 0930 but never `#1018`, so the
+    LLM saw an empty xref and tagged the deferral ORPHANED.
+    """
+    ctx_tokens = _meaningful_tokens(candidate_context)
+    if not ctx_tokens:
+        return []
+    matches: list[tuple[int, int]] = []
+    for n, info in state_index.items():
+        if n == exclude:
+            continue
+        if info.get("state") != "open":
+            continue
+        title_tokens = _meaningful_tokens(info.get("title", ""))
+        overlap = len(ctx_tokens & title_tokens)
+        if overlap >= min_overlap:
+            matches.append((n, overlap))
+    matches.sort(key=lambda x: (-x[1], x[0]))
+    return [n for n, _ in matches[:cap]]
+
+
 # ---------------------------------------------------------------------------
 # Phase C: LLM classification via `claude --print`
 # ---------------------------------------------------------------------------
@@ -324,8 +471,32 @@ def save_llm_cache(cache: dict[str, dict]) -> None:
     LLM_CACHE.write_text(json.dumps(cache, indent=2), encoding="utf-8")
 
 
-def build_prompt(c: Candidate, xref: list[int]) -> str:
-    xref_text = ", ".join(f"#{n}" for n in xref) if xref else "(none found)"
+def build_prompt(
+    c: Candidate,
+    xref: list[int],
+    state_index: dict[int, dict] | None = None,
+) -> str:
+    """Build the LLM classification prompt.
+
+    When `state_index` is provided, cross-references are annotated with
+    their current state (open|closed) so the LLM does not have to guess.
+    Addresses #1049 bug 3: prior prompts passed only bare #N numbers,
+    forcing the LLM to guess `addressed_status`, leading to misclassified
+    CAUGHT items as ADDRESSED_OPEN.
+    """
+    if not xref:
+        xref_text = "(none found)"
+    elif state_index:
+        parts = []
+        for n in xref:
+            info = state_index.get(n)
+            if info and info.get("state") in ("open", "closed"):
+                parts.append(f"#{n} ({info['state']})")
+            else:
+                parts.append(f"#{n} (unknown)")
+        xref_text = ", ".join(parts)
+    else:
+        xref_text = ", ".join(f"#{n}" for n in xref)
     return (
         "You are auditing a closed GitHub issue for deferred-scope language. "
         "Answer ONLY with a strict JSON object — no prose before or after.\n\n"
@@ -338,8 +509,9 @@ def build_prompt(c: Candidate, xref: list[int]) -> str:
         "---\n"
         f"{c.context}\n"
         "---\n\n"
-        f"Other issues that reference #{c.issue_number} (cross-references): {xref_text}\n\n"
-        "Today's date: 2026-05-07.\n\n"
+        f"Other issues that reference #{c.issue_number} or share topic tokens "
+        f"with the deferred context (cross-references): {xref_text}\n\n"
+        f"Today's date: {TODAY}.\n\n"
         "Respond JSON exactly in this shape (no markdown fences):\n"
         "{\n"
         '  "is_deferral": true|false,\n'
@@ -358,6 +530,8 @@ def build_prompt(c: Candidate, xref: list[int]) -> str:
         "or any first-time-creation step.\n"
         "- addressed_in: pick the single most likely follow-up issue number from the cross-references "
         "if any directly addresses what was deferred; null otherwise.\n"
+        "- addressed_status: when cross-references are annotated like '#NNN (open)' or '#NNN (closed)', "
+        "use that state directly — do not guess. Only return null if you chose addressed_in=null.\n"
         "- still_relevant=false if the deferred concern is now moot (technology replaced, "
         "process changed, problem solved out-of-band)."
     )
@@ -393,13 +567,32 @@ def parse_json_response(text: str) -> Optional[dict]:
     return None
 
 
-def classify_candidate(c: Candidate, xref: list[int], cache: dict[str, dict]) -> Classification:
+def classify_candidate(
+    c: Candidate,
+    xref: list[int],
+    cache: dict[str, dict],
+    state_index: dict[int, dict] | None = None,
+) -> Classification:
+    """Classify a candidate via `claude --print`, with cache.
+
+    When `state_index` is provided, also supplements the literal-#N xref
+    with title-token-similar OPEN issues (#1049 bug 2) and annotates each
+    xref with its state (#1049 bug 3).
+    """
     key = c.cache_key()
     if key in cache:
         cached = cache[key]
         return Classification(**cached)
 
-    prompt = build_prompt(c, xref)
+    if state_index:
+        supplemental = find_title_similar_open_issues(
+            c.context, state_index, exclude=c.issue_number
+        )
+        merged_xref = sorted(set(xref + supplemental))
+    else:
+        merged_xref = xref
+
+    prompt = build_prompt(c, merged_xref, state_index)
     env = {**os.environ, "CLAUDECODE": ""}
     r = _run(["claude", "--print", "-p", prompt], timeout=LLM_TIMEOUT_S, env=env)
     if r.returncode != 0:
@@ -554,6 +747,10 @@ def main() -> int:
     corpus = fetch_corpus(refresh=args.refresh)
     print(f"  {len(corpus)} issues in corpus")
 
+    print("\nPhase A2: fetch issue state index (#1049 bugs 2 + 3)")
+    state_index = fetch_state_index(refresh=args.refresh)
+    print(f"  {len(state_index)} issues in state index")
+
     print("\nPhase B: regex first pass")
     candidates = find_candidates(corpus)
     print(f"  {len(candidates)} candidate matches")
@@ -578,17 +775,17 @@ def main() -> int:
         if i % 10 == 0 or i == 1:
             print(f"  classifying {i}/{len(work)} (#{c.issue_number}/{c.keyword})")
         xrefs = xref.get(c.issue_number, [])
-        cls = classify_candidate(c, xrefs, cache)
+        cls = classify_candidate(c, xrefs, cache, state_index=state_index)
         classified.append((c, cls))
 
     print(f"\n  classified {len(classified)} (errors: {sum(1 for _, cls in classified if cls.error)})")
 
     print("\nPhase D: writing reports")
-    full = render_report(classified, "Deferred-Scope Audit (Full)", "0845", only_new_repo=False)
+    full = render_report(classified, "Deferred-Scope Audit (Full)", "0851", only_new_repo=False)
     REPORT_FULL.write_text(full, encoding="utf-8")
     print(f"  wrote {REPORT_FULL.relative_to(DATA_DIR.parent)}")
 
-    new_repo = render_report(classified, "Deferred-Scope Audit — New Repo Creation Subset", "0846", only_new_repo=True)
+    new_repo = render_report(classified, "Deferred-Scope Audit — New Repo Creation Subset", "0852", only_new_repo=True)
     REPORT_NEW_REPO.write_text(new_repo, encoding="utf-8")
     print(f"  wrote {REPORT_NEW_REPO.relative_to(DATA_DIR.parent)}")
 

@@ -257,3 +257,185 @@ class TestBuildXrefIndex:
         ]
         idx = ads.build_xref_index(corpus)
         assert idx.get(2) == [1]
+
+
+# ---------------------------------------------------------------------------
+# #1049 bug 1: similarity helpers + content dedupe
+# ---------------------------------------------------------------------------
+
+class TestSimilarityHelpers:
+    def test_meaningful_tokens_filters_stopwords(self):
+        toks = ads._meaningful_tokens("The classic PAT and the gpg passphrase rotation TODO")
+        assert "classic" in toks
+        assert "pat" in toks
+        assert "gpg" in toks
+        assert "passphrase" in toks
+        assert "rotation" in toks
+        assert "todo" in toks
+        assert "the" not in toks
+        assert "and" not in toks
+
+    def test_meaningful_tokens_filters_short_fragments(self):
+        toks = ads._meaningful_tokens("a b cd ef")
+        # Single chars filtered by the \w{2,} regex
+        assert "a" not in toks
+        assert "cd" in toks
+
+    def test_jaccard_identical_is_one(self):
+        s = ads._meaningful_tokens("rotate classic PAT")
+        assert ads._jaccard(s, s) == 1.0
+
+    def test_jaccard_disjoint_is_zero(self):
+        a = ads._meaningful_tokens("alpha beta")
+        b = ads._meaningful_tokens("gamma delta")
+        assert ads._jaccard(a, b) == 0.0
+
+    def test_jaccard_empty_returns_zero(self):
+        empty = frozenset()
+        non_empty = ads._meaningful_tokens("anything")
+        assert ads._jaccard(empty, non_empty) == 0.0
+        assert ads._jaccard(non_empty, empty) == 0.0
+
+
+class TestFindCandidatesContentDedupe:
+    def test_collapses_overlapping_contexts_within_issue(self):
+        # Same passage hit by two different keywords; should dedupe to one.
+        body = (
+            "Phase 1 done. Classic PAT and gpg passphrase rotation TODO "
+            "tracked in a separate follow-up issue, not this hardening PR."
+        )
+        corpus = [
+            ads.IssueRecord(number=1018, title="hardening", state="closed",
+                            closedAt=None, body=body, labels=[], comments=[]),
+        ]
+        cands = ads.find_candidates(corpus)
+        # Multiple keywords match (TODO, separate_issue, follow_up,
+        # tracked_separately, etc.) but all overlap heavily on same passage.
+        # After bug-1 dedupe: at most one survives.
+        assert len(cands) <= 1, f"expected <= 1 after dedupe, got {len(cands)}"
+
+    def test_keeps_distinct_passages_within_issue(self):
+        body = (
+            "First deferral: GEMINI.md template generation deferred. "
+            + ("x" * 800)  # padding to push next match outside CONTEXT_RADIUS overlap
+            + " Second deferral: rotate classic PAT in a separate issue."
+        )
+        corpus = [
+            ads.IssueRecord(number=931, title="t", state="closed",
+                            closedAt=None, body=body, labels=[], comments=[]),
+        ]
+        cands = ads.find_candidates(corpus)
+        # Two genuinely distinct deferrals — both should survive.
+        assert len(cands) >= 2
+
+    def test_does_not_dedupe_across_issues(self):
+        # Same context in two different issues stays as two candidates.
+        ctx = "deferred to a follow-up issue"
+        corpus = [
+            ads.IssueRecord(number=1, title="t", state="closed",
+                            closedAt=None, body=ctx, labels=[], comments=[]),
+            ads.IssueRecord(number=2, title="t", state="closed",
+                            closedAt=None, body=ctx, labels=[], comments=[]),
+        ]
+        cands = ads.find_candidates(corpus)
+        issues = {c.issue_number for c in cands}
+        assert issues == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# #1049 bug 2: title-similarity xref supplement
+# ---------------------------------------------------------------------------
+
+class TestFindTitleSimilarOpenIssues:
+    def test_finds_open_issue_sharing_topic_tokens(self):
+        # The original miss: #1018's deferred summary ("rotate classic PAT
+        # and gpg passphrase per runbook 0930") never text-references #1017,
+        # but #1017's title shares 4+ topic tokens.
+        ctx = ("Classic PAT and gpg passphrase rotation TODO tracked in a "
+               "separate issue, per runbook 0930.")
+        state_index = {
+            1017: {"state": "open",
+                   "title": "[TODO] Rotate classic PAT and gpg passphrase per runbook 0930"},
+            42: {"state": "open", "title": "totally unrelated frontend bug"},
+            1004: {"state": "closed", "title": "old work"},
+        }
+        result = ads.find_title_similar_open_issues(ctx, state_index, exclude=1018)
+        assert 1017 in result
+        assert 42 not in result
+
+    def test_excludes_closed_issues(self):
+        ctx = "rotate classic PAT"
+        state_index = {
+            999: {"state": "closed", "title": "rotate classic PAT — done"},
+        }
+        result = ads.find_title_similar_open_issues(ctx, state_index, exclude=1)
+        assert result == []
+
+    def test_excludes_self(self):
+        ctx = "rotate classic PAT"
+        state_index = {
+            42: {"state": "open", "title": "rotate classic PAT"},
+        }
+        result = ads.find_title_similar_open_issues(ctx, state_index, exclude=42)
+        assert result == []
+
+    def test_respects_min_overlap_threshold(self):
+        # Only one shared meaningful token ('rotate'); below threshold.
+        ctx = "rotate something"
+        state_index = {
+            42: {"state": "open", "title": "rotate frontend cache"},
+        }
+        result = ads.find_title_similar_open_issues(ctx, state_index, exclude=1, min_overlap=2)
+        assert result == []
+
+    def test_caps_results(self):
+        ctx = "rotate classic PAT and gpg passphrase per runbook 0930"
+        state_index = {
+            n: {"state": "open", "title": "rotate classic PAT gpg"}
+            for n in range(100, 110)
+        }
+        result = ads.find_title_similar_open_issues(ctx, state_index, exclude=1, cap=5)
+        assert len(result) == 5
+
+
+# ---------------------------------------------------------------------------
+# #1049 bug 3: state-aware prompt formatting
+# ---------------------------------------------------------------------------
+
+class TestBuildPromptStateAware:
+    def _candidate(self) -> ads.Candidate:
+        return ads.Candidate(
+            issue_number=1018, issue_title="hardening", closed_at="2026-04-30",
+            labels=[], keyword="todo_in_close", location="body",
+            context="rotate PAT TODO tracked separately",
+        )
+
+    def test_prompt_with_state_index_annotates_xrefs(self):
+        c = self._candidate()
+        state_index = {
+            1017: {"state": "open", "title": "rotate PAT"},
+            1004: {"state": "closed", "title": "old"},
+        }
+        prompt = ads.build_prompt(c, [1017, 1004], state_index=state_index)
+        assert "#1017 (open)" in prompt
+        assert "#1004 (closed)" in prompt
+
+    def test_prompt_without_state_index_uses_bare_numbers(self):
+        c = self._candidate()
+        prompt = ads.build_prompt(c, [1017, 1004], state_index=None)
+        # Bare-number form on the cross-references line — no state suffix.
+        assert "cross-references): #1017, #1004" in prompt
+        assert "#1017 (open)" not in prompt
+        assert "#1004 (closed)" not in prompt
+
+    def test_prompt_handles_empty_xref(self):
+        c = self._candidate()
+        prompt = ads.build_prompt(c, [], state_index={1: {"state": "open", "title": "x"}})
+        assert "(none found)" in prompt
+
+    def test_prompt_handles_unknown_state(self):
+        c = self._candidate()
+        # state_index has #1017 but missing the queried #999
+        state_index = {1017: {"state": "open", "title": "x"}}
+        prompt = ads.build_prompt(c, [999], state_index=state_index)
+        assert "#999 (unknown)" in prompt

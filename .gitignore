@@ -66,6 +66,7 @@ transcripts/
 # Hourglass Protocol local state (Issue #535 — age meter is per-developer)
 data/hourglass/age_meter.json
 
-# Deferred-scope audit caches — regenerable via tools/audit_deferred_scope.py (#930)
+# Deferred-scope audit caches — regenerable via tools/audit_deferred_scope.py (#930, #1049)
 data/closed-issues-snapshot-*.json
+data/issue-state-index-*.json
 data/deferred-scope-llm-cache.json
