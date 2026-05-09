@@ -62,9 +62,12 @@ Run these in parallel to supplement your memory with current facts:
 
 2. **Plan snapshot (deterministic):** Run
    ```bash
-   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py status
+   PROJECT=$(basename "$(git rev-parse --show-toplevel)")
+   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py status --project "$PROJECT"
    ```
    Read the emitted JSON. Use its fields (`plan_path`, `plan_slug`, `plan_state`, `total_steps`, `completed_steps`, `remaining_steps`) in the `## The Plan` section below. Do NOT reconstruct plan state from memory — the JSON is the source of truth. If `status: "no_plan"`, skip the `## The Plan` section entirely. If `status: "error"`, note the error in `## The Plan` and continue.
+
+   #310: `--project` scopes the lookup to `~/.claude/plans/{project}/*.md`. Without it, `find_newest_plan` would still return whatever's globally newest by mtime, which is exactly the cross-project pollution we're fixing.
 
 3. **Git status across touched repos** — For every repo you modified this session, run:
    ```bash
@@ -233,9 +236,9 @@ After outputting the prompt to screen, persist it to the repo's handoff log so i
 
 7. **Archive the active plan (deterministic):** If the Step 1.2 JSON had `status: "ok"`, run:
    ```bash
-   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py archive --slug {plan_slug}
+   python /c/Users/mcwiz/Projects/unleashed/src/plan_archiver.py archive --slug {plan_slug} --project "$PROJECT"
    ```
-   If `plan_state == "completed"` in that JSON, add `--mark-completed` to the command. The archiver is idempotent — if the live plan matches the newest archive, it emits `status: "already_archived"` and no-ops. Skip this step if Step 1.2 returned `status: "no_plan"` or `status: "error"`.
+   `$PROJECT` was set in Step 1.2 (`basename "$(git rev-parse --show-toplevel)"`). If `plan_state == "completed"` in that JSON, add `--mark-completed` to the command. The archiver is idempotent — if the live plan matches the newest archive, it emits `status: "already_archived"` and no-ops. Skip this step if Step 1.2 returned `status: "no_plan"` or `status: "error"`.
 
    After archiving succeeds, update the `archive_path` field in the `<!-- plan-state-start -->` block in `data/handoff-log.md` with the path from the archiver's JSON output. This is what /onboard and /pickup read to resume or ignore the plan.
 
