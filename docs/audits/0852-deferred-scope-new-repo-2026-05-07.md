@@ -1,4 +1,4 @@
-# 0846 - Deferred-Scope Audit — New Repo Creation Subset
+# 0852 - Deferred-Scope Audit — New Repo Creation Subset
 
 **Auditor:** Claude Opus 4.7 (1M context) via `tools/audit_deferred_scope.py`
 **Date:** 2026-05-07

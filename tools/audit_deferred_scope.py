@@ -46,8 +46,8 @@ DOCS_DIR = Path(__file__).resolve().parent.parent / "docs" / "audits"
 CORPUS_CACHE = DATA_DIR / f"closed-issues-snapshot-{TODAY}.json"
 LLM_CACHE = DATA_DIR / "deferred-scope-llm-cache.json"
 
-REPORT_FULL = DOCS_DIR / f"0845-deferred-scope-audit-{TODAY}.md"
-REPORT_NEW_REPO = DOCS_DIR / f"0846-deferred-scope-new-repo-{TODAY}.md"
+REPORT_FULL = DOCS_DIR / f"0851-deferred-scope-audit-{TODAY}.md"
+REPORT_NEW_REPO = DOCS_DIR / f"0852-deferred-scope-new-repo-{TODAY}.md"
 
 # Regex patterns flagging potential deferred scope. Case-insensitive.
 DEFERRAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [

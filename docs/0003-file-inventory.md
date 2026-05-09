@@ -149,11 +149,11 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0836-audit-gitignore-consistency.md` | Stable | Gitignore patterns |
 | `0837-audit-readme-compliance.md` | Stable | README standards |
 | `0838-audit-broken-references.md` | Stable | Cross-reference validation |
-| `0845-deferred-scope-audit-2026-05-07.md` | Stable | Deferred-scope audit across all closed AZ issues (#930) — full report |
-| `0846-deferred-scope-new-repo-2026-05-07.md` | Stable | Deferred-scope audit (#930) — new-repo creation subset |
+| `0851-deferred-scope-audit-2026-05-07.md` | Stable | Deferred-scope audit across all closed AZ issues (#930) — full report |
+| `0852-deferred-scope-new-repo-2026-05-07.md` | Stable | Deferred-scope audit (#930) — new-repo creation subset |
 | `0899-meta-audit.md` | Stable | Audit the audits |
 
-### Runbooks (09xx) - 31 files
+### Runbooks (09xx) - 32 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -188,6 +188,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0929-ai-cli-tools-reference.md` | Stable | AI CLI tools reference |
 | `0930-gpg-and-classic-pat-rotation.md` | Stable | GPG + classic-PAT rotation procedure |
 | `0931-fleet-branch-cleanup.md` | Stable | Fleet-wide local-branch cleanup (#437; tool in unleashed) |
+| `0932-deferred-scope-audit.md` | Stable | Operating procedure for `tools/audit_deferred_scope.py` (#930) |
 
 ---
 
