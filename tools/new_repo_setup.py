@@ -1036,6 +1036,134 @@ def create_unleashed_json(project_path: Path) -> None:
     unleashed_path.write_text(content, encoding='utf-8')
 
 
+_PYTEST_INI_BLOCK = """
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers"
+"""
+
+_CONFTEST_BODY = '''"""Project test bootstrap.
+
+Adds `src/` to `sys.path` so test files can import the project's
+package without a full Poetry package install. Mirrors the pattern
+used across the AssemblyZero fleet.
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+'''
+
+# License IDs accepted by `poetry init --license`. Matches the values
+# of the existing --license CLI flag.
+_POETRY_LICENSE_MAP = {
+    "polyform": "PolyForm-Noncommercial-1.0.0",
+    "mit": "MIT",
+}
+
+
+def create_python_project(
+    project_path: Path,
+    name: str,
+    license_id: str,
+) -> bool:
+    """Bootstrap a Python project: pyproject.toml, dev deps, pytest config,
+    tests/conftest.py.
+
+    Required for repos that will host the AssemblyZero implementation
+    workflow (TDD-driven, runs pytest). Without this bootstrap, fresh
+    repos fail in the workflow's red phase with "pytest: command not
+    found". (#1058)
+
+    Steps:
+      1. `poetry init --no-interaction` produces pyproject.toml.
+      2. `poetry add --group dev pytest pytest-cov` adds dev deps and
+         creates poetry.lock as a side effect.
+      3. Append `[tool.pytest.ini_options]` to pyproject.toml for
+         deterministic test discovery across the canonical 12 test
+         subdirs.
+      4. Write `tests/conftest.py` so `from <package> import ...` works
+         in test files without a full Poetry install.
+
+    Best-effort: each step is wrapped in try/except. Failure prints a
+    warning but does not abort the overall repo creation. The user can
+    re-run `poetry init` / `poetry add` manually if needed.
+
+    Args:
+        project_path: Path to the project root.
+        name: Project name (used as the Poetry package name).
+        license_id: Either "polyform" or "mit"; mapped to a Poetry
+                    --license value.
+
+    Returns:
+        True iff all four steps succeeded.
+    """
+    poetry_license = _POETRY_LICENSE_MAP.get(license_id, "MIT")
+    package_name = name.lower().replace("_", "-")
+
+    # Step 1: poetry init
+    init_cmd = [
+        "poetry", "init",
+        "--no-interaction",
+        "--name", package_name,
+        "--description", "",
+        "--python", "^3.10",
+        "--license", poetry_license,
+    ]
+    try:
+        r = run_command(init_cmd, cwd=project_path, check=False)
+        if r.returncode != 0:
+            print(f"  WARNING: poetry init failed: {(r.stderr or '').strip()}")
+            return False
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"  WARNING: poetry init errored: {e}")
+        return False
+
+    # Step 2: poetry add dev deps (also generates poetry.lock)
+    add_cmd = ["poetry", "add", "--group", "dev", "pytest", "pytest-cov"]
+    try:
+        r = run_command(add_cmd, cwd=project_path, check=False)
+        if r.returncode != 0:
+            print(f"  WARNING: poetry add dev deps failed: "
+                  f"{(r.stderr or '').strip()}")
+            return False
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"  WARNING: poetry add errored: {e}")
+        return False
+
+    # Step 3: append pytest config
+    pyproject = project_path / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            current = pyproject.read_text(encoding="utf-8")
+            if "[tool.pytest.ini_options]" not in current:
+                pyproject.write_text(
+                    current.rstrip() + "\n" + _PYTEST_INI_BLOCK,
+                    encoding="utf-8",
+                )
+        except OSError as e:
+            print(f"  WARNING: could not append pytest config: {e}")
+            return False
+
+    # Step 4: tests/conftest.py
+    conftest = project_path / "tests" / "conftest.py"
+    try:
+        conftest.parent.mkdir(parents=True, exist_ok=True)
+        if not conftest.exists():
+            conftest.write_text(_CONFTEST_BODY, encoding="utf-8")
+    except OSError as e:
+        print(f"  WARNING: could not write tests/conftest.py: {e}")
+        return False
+
+    return True
+
+
 def create_github_workflows(project_path: Path) -> None:
     """Create GitHub Actions workflow files for PR governance.
 
@@ -1568,6 +1696,15 @@ Examples:
              "to revoke the key in the app UI. When omitted, runbook "
              "0927 step 4 is printed as manual fallback."
     )
+    parser.add_argument(
+        "--lang",
+        choices=["python", "none"],
+        default="python",
+        help="Project language bootstrap. 'python' (default) initializes "
+             "a Poetry project (pyproject.toml + dev deps + pytest config + "
+             "tests/conftest.py). 'none' skips language bootstrap — useful "
+             "for non-Python projects. (#1058)"
+    )
 
     args = parser.parse_args()
 
@@ -1780,6 +1917,22 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
     print("  Created .unleashed.json (model=opus, effort=max)")
+
+    # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
+    # pytest, pytest-cov, conftest.py. Required for AZ implementation
+    # workflow's red/green TDD phases. Skippable via --lang none.
+    if args.lang == "python":
+        print("\n11b2. Bootstrapping Python project (poetry init + pytest)...")
+        if create_python_project(project_path, args.name, args.license):
+            print("  Created pyproject.toml, poetry.lock, dev deps "
+                  "(pytest, pytest-cov), tests/conftest.py")
+        else:
+            print("  WARNING: Python bootstrap incomplete. Run manually:")
+            print(f"    cd {project_path}")
+            print("    poetry init --no-interaction")
+            print("    poetry add --group dev pytest pytest-cov")
+    else:
+        print("\n11b2. SKIPPED Python bootstrap (--lang none)")
 
     # Step 11c: Create GitHub Actions workflows (PR governance)
     print("\n11c. Creating GitHub Actions workflows...")
