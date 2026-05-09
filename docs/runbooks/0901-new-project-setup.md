@@ -142,7 +142,7 @@ options:
 
 ### 1. Deploy Cerberus Secrets (If Needed)
 
-The script deploys PR governance workflows (`pr-sentinel.yml`, `auto-reviewer.yml`) and configures branch protection automatically. The only remaining step is ensuring Cerberus secrets exist on the new repo. See the [Cerberus secrets section of the Human Checklist](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed) for the fleet-wide deploy process.
+The script deploys the `auto-reviewer.yml` workflow and configures branch protection automatically. The `pr-sentinel/issue-reference` check is provided fleet-wide by the Cloudflare Worker (per #938 / #939), not by a per-repo workflow file. The only remaining step is ensuring Cerberus secrets exist on the new repo. See the [Cerberus secrets section of the Human Checklist](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed) for the fleet-wide deploy process.
 
 ### 2. Add Advanced Hooks (Optional)
 
