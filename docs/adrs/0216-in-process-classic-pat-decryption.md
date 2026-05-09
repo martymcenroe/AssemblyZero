@@ -85,7 +85,53 @@ Five existing tools still use v2 (env-scoped) at time of writing — see issues 
 
 Until those land, mixed v2/v3 usage is tolerated. New tools MUST start at v3.
 
-## 6. References
+## 6. Post-shipping lessons (2026-04-30)
+
+The v3 pattern shipped 2026-04-21. Within ten days a hardening session surfaced six load-bearing constraints the original ADR did not record. Each one materially affects the threat model or operational discipline; an agent or human reading only sections 1-5 above would re-introduce a closed gap.
+
+### 6.1. The agent does NOT run the script. The user does.
+
+Section 3 says "the PAT is decrypted inside the calling Python process" and presents this as the protection. The implicit assumption was that the Python process belongs to the user. When an agent (Claude Code via its Bash tool, Codex, Gemini) invokes `poetry run python tools/SCRIPT.py`, the Python process is a child of the agent — heap-readable in principle from the agent's process. The "PAT lives only in heap" guarantee dissolves.
+
+**Constraint:** classic-PAT-using scripts are user-invoked. Agents observe results via GitHub side-effects (PR state, branch protection diff), not by running the script themselves. Runbooks `0927-new-repo-human-checklist.md` and `0930-gpg-and-classic-pat-rotation.md` hand the invocation to the user explicitly; tooling that automates this pattern (session skills, scheduled jobs) MUST hand off the same way.
+
+### 6.2. gpg-agent passphrase caching erodes the in-flight guarantee.
+
+`gpg --decrypt classic-pat.gpg` succeeds without a passphrase prompt while the agent is still caching from a prior decryption (default `default-cache-ttl 600`). Any sibling user-space process — agents or other Claude Code sessions running concurrently under the same OS user — can request the decrypt and get the plaintext silently. Section 2's row for v3 ("Snoopable by sibling user-space process: No, without `ptrace` / admin") was contingent on caching being disabled.
+
+**Constraint:** production use sets `default-cache-ttl 0` and `max-cache-ttl 0` (and the `-ssh` variants) in `~/.gnupg/gpg-agent.conf`, then `gpgconf --kill gpg-agent`. The cost is one passphrase prompt per script invocation; the benefit is that any sibling-process decrypt attempt surfaces a pinentry dialog the user can refuse. See `tools/_pat_session.py` module docstring.
+
+### 6.3. CRLF normalization is required when uploading via the Contents API on Windows.
+
+`Path.read_bytes()` on a Windows checkout with `core.autocrlf=true` returns CRLF-terminated content. The Contents API stores bytes verbatim, while normal `git commit` normalizes through `core.autocrlf`. An in-process classic-PAT tool that uses Contents API to upload files (per-repo workflow drops via #1000, etc.) will silently flip line endings on origin and produce noisy whole-file diffs — visually identical to a destructive accident.
+
+**Constraint:** tools that combine this pattern with Contents API uploads normalize bytes before base64-encoding:
+
+```python
+content = LOCAL_FILE.read_bytes().replace(b"\r\n", b"\n")
+```
+
+This is a contract on the *integration with* the pattern, not the pattern itself, but the failure mode shows up on every PR shipped via this path.
+
+### 6.4. Self-referential cleanup PRs cannot reach `mergeable_state == clean`.
+
+A PR whose changes remove the very check causing it to be `unstable` — the dying check ran on this PR before this PR could merge — will never satisfy strict `clean` polling. `fleet_delete_pr_sentinel.py` polls for `clean` OR `unstable` for exactly this reason.
+
+**Constraint:** tools that implement automated merge polling against this pattern accept both `clean` and `unstable` as "ready" when the PR is structurally self-referential. Strict-`clean` polling is correct for ordinary changes and a deadlock for self-referential ones; the choice is per-tool, but the deadlock is non-obvious and worth surfacing in the design.
+
+### 6.5. Pinentry on Windows needs retry-on-bad-passphrase and a generous timeout.
+
+`pinentry-w32` displays no echo while the user types the passphrase. Long passphrases (the PAT class warrants them) make mistypes common. The original `_pat_session.py` had a 30-second timeout and treated a wrong passphrase as a hard failure; both proved too tight in practice — the user could neither retype nor recover without re-running the entire script.
+
+**Constraint:** the gpg-decrypt call wraps the subprocess with a retry loop (multiple attempts, distinguishing wrong-passphrase from other failures) and a generous timeout (180s). The 2026-04-30 update to `_pat_session.py` ships this. Forks of the pattern in other tools must mirror both the retry loop and the timeout, or the user hits the same dead-end the first time their finger slips.
+
+### 6.6. Partial-run resume against a stale PR is a footgun.
+
+When an in-process classic-PAT tool that creates and merges a PR is interrupted partway, the branch and PR already exist on origin. Editing the script and re-running it does not start fresh — the script picks up the existing branch+PR and continues against the old state. Idempotency is desirable; "edit-and-resume" is not the same thing.
+
+**Constraint:** this is operational discipline, not architecture. Either finish the original run, or delete the remote branch + PR before re-running the modified script. Runbook `docs/runbooks/0930-gpg-and-classic-pat-rotation.md` documents the recovery procedure; this ADR records the constraint because at least one silent partial deployment has resulted from forgetting it.
+
+## 7. References
 
 - PR #966 (issue #959) — the `_pat_session.py` module
 - PR #967 (issue #960) — `sentinel_migrate.py`, the first production caller
@@ -93,5 +139,8 @@ Until those land, mixed v2/v3 usage is tolerated. New tools MUST start at v3.
 - PR #981 (issue #980) — `--external-issue-ref` + timeout flag, learnings from the first fleet run
 - PR #985 (issue #968, #971) — clipboard-pipe setup hint + dependabot tool brought to parity
 - PR #942 — the predecessor v2 pattern
+- Issue #1018 — 2026-04-30 hardening session that surfaced section 6
+- Issue #1051 — this section's tracking issue
+- Runbook `docs/runbooks/0930-gpg-and-classic-pat-rotation.md` — operational procedures derived from sections 6.1, 6.2, 6.5, 6.6
 - Blog draft: `dispatch/drafts/2026-04-18-pat-swap-friction-pattern-from-AssemblyZero.md` — full design narrative including the user-pushback that surfaced v3
 - Follow-up draft: `dispatch/drafts/2026-04-21-in-process-pat-decryption-from-AssemblyZero.md` — companion piece on the v3 pattern itself
