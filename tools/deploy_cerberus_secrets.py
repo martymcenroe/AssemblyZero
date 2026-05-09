@@ -25,7 +25,6 @@ Issue: #736 | Related: #732, #1007 (in-process PAT migration)
 import base64
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import requests
@@ -41,70 +40,16 @@ except ImportError:
 APP_ID = "3079970"
 GITHUB_USER = "martymcenroe"
 _GH_API = "https://api.github.com"
-_HTTP_TIMEOUT_S = 30
-_MAX_RETRIES = 4
-_INITIAL_BACKOFF_S = 1.0
 
-
-def _gh_headers(pat: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {pat}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-def _request_with_retry(
-    method: str, url: str, pat: str, **kwargs
-) -> requests.Response:
-    """HTTP request with exponential backoff on transient errors.
-
-    Retries: connection errors, timeouts, 5xx, 429 (Retry-After honored),
-    403 with X-RateLimit-Remaining=0 (X-RateLimit-Reset honored).
-
-    Does NOT retry: 4xx other than 403/429 (permanent for this caller).
-
-    Ported per #1036 from new_repo_setup.py / fleet_set_delete_branch_on_merge.py
-    so a transient 502 mid-secret-set doesn't leave a half-deployed Cerberus state.
-    """
-    backoff = _INITIAL_BACKOFF_S
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            r = requests.request(
-                method, url, headers=_gh_headers(pat),
-                timeout=_HTTP_TIMEOUT_S, **kwargs,
-            )
-        except (requests.ConnectionError, requests.Timeout) as e:
-            if attempt < _MAX_RETRIES:
-                print(f"    network error ({type(e).__name__}); retry in {backoff}s")
-                time.sleep(backoff)
-                backoff *= 2
-                continue
-            raise
-
-        if r.status_code == 429:
-            retry_after = int(r.headers.get("Retry-After", "30"))
-            if attempt < _MAX_RETRIES:
-                print(f"    HTTP 429; sleeping {retry_after}s per Retry-After")
-                time.sleep(retry_after)
-                continue
-        if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
-            reset = int(r.headers.get("X-RateLimit-Reset", "0"))
-            wait = max(reset - int(time.time()), 30)
-            if attempt < _MAX_RETRIES:
-                print(f"    primary rate limit hit; sleeping {wait}s until reset")
-                time.sleep(wait)
-                continue
-        if 500 <= r.status_code < 600:
-            if attempt < _MAX_RETRIES:
-                print(f"    HTTP {r.status_code}; retry in {backoff}s")
-                time.sleep(backoff)
-                backoff *= 2
-                continue
-
-        return r
-
-    return r
+# Shared retry helper (#1052). Imported as _request_with_retry to keep
+# existing call-sites unchanged. Loud-failure variant: retry exhaustion
+# raises requests.HTTPError / ConnectionError / Timeout (all
+# RequestException subclasses, so existing except handlers still catch).
+try:
+    from _gh_retry import request_with_retry as _request_with_retry
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _gh_retry import request_with_retry as _request_with_retry  # noqa: F401
 
 
 def get_all_repos() -> list[str]:

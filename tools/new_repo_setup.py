@@ -28,7 +28,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1152,74 +1151,16 @@ def deploy_canonical_hooks(project_path: Path) -> None:
 
 
 _GH_API = "https://api.github.com"
-_HTTP_TIMEOUT_S = 30
-_MAX_RETRIES = 4
-_INITIAL_BACKOFF_S = 1.0
 
-
-def _gh_headers(pat: str) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {pat}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-
-def _request_with_retry(
-    method: str, url: str, pat: str, **kwargs
-) -> requests.Response:
-    """HTTP request with exponential backoff on transient errors.
-
-    Retries: connection errors, timeouts, 5xx, 429 (rate-limited), and
-    403 with X-RateLimit-Remaining=0 (secondary rate limit).
-
-    Does NOT retry: 4xx other than 403/429 (permanent for this caller).
-
-    Ported from tools/fleet_set_delete_branch_on_merge.py per #1022 so
-    a transient 502 mid-setup doesn't leave a half-deployed new repo.
-    """
-    backoff = _INITIAL_BACKOFF_S
-    for attempt in range(_MAX_RETRIES + 1):
-        try:
-            r = requests.request(
-                method, url, headers=_gh_headers(pat),
-                timeout=_HTTP_TIMEOUT_S, **kwargs,
-            )
-        except (requests.ConnectionError, requests.Timeout) as e:
-            if attempt < _MAX_RETRIES:
-                print(f"    network error ({type(e).__name__}); retry in {backoff}s")
-                time.sleep(backoff)
-                backoff *= 2
-                continue
-            raise
-
-        # Rate limit: secondary (429 with Retry-After)
-        if r.status_code == 429:
-            retry_after = int(r.headers.get("Retry-After", "30"))
-            if attempt < _MAX_RETRIES:
-                print(f"    HTTP 429; sleeping {retry_after}s per Retry-After")
-                time.sleep(retry_after)
-                continue
-        # Rate limit: primary (403 + X-RateLimit-Remaining=0)
-        if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
-            reset = int(r.headers.get("X-RateLimit-Reset", "0"))
-            wait = max(reset - int(time.time()), 30)
-            if attempt < _MAX_RETRIES:
-                print(f"    primary rate limit hit; sleeping {wait}s until reset")
-                time.sleep(wait)
-                continue
-        # Server-side transient
-        if 500 <= r.status_code < 600:
-            if attempt < _MAX_RETRIES:
-                print(f"    HTTP {r.status_code}; retry in {backoff}s")
-                time.sleep(backoff)
-                backoff *= 2
-                continue
-
-        # All other responses: return as-is (caller decides 4xx handling)
-        return r
-
-    return r  # final attempt's response, even if it was a retryable error
+# Shared retry helper (#1052). Imported as _request_with_retry to keep
+# existing call-sites unchanged. Loud-failure variant: retry exhaustion
+# raises requests.HTTPError / ConnectionError / Timeout (all
+# RequestException subclasses, so existing except handlers still catch).
+try:
+    from _gh_retry import request_with_retry as _request_with_retry
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _gh_retry import request_with_retry as _request_with_retry  # noqa: F401
 
 
 def configure_branch_protection(github_user: str, repo_name: str, pat: str) -> bool:
