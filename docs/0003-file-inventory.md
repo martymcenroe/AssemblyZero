@@ -118,7 +118,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0629c-Manual-LLD-Review-Prompt.md` | Stable | Manual LLD review |
 | `0630c-Manual-Implementation-Review-Prompt.md` | Stable | Manual implementation review |
 
-### Audits (08xx) - 34 files
+### Audits (08xx) - 36 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -149,9 +149,11 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0836-audit-gitignore-consistency.md` | Stable | Gitignore patterns |
 | `0837-audit-readme-compliance.md` | Stable | README standards |
 | `0838-audit-broken-references.md` | Stable | Cross-reference validation |
+| `0851-deferred-scope-audit-2026-05-07.md` | Stable | Deferred-scope audit across all closed AZ issues (#930) — full report |
+| `0852-deferred-scope-new-repo-2026-05-07.md` | Stable | Deferred-scope audit (#930) — new-repo creation subset |
 | `0899-meta-audit.md` | Stable | Audit the audits |
 
-### Runbooks (09xx) - 31 files
+### Runbooks (09xx) - 32 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -186,10 +188,11 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0929-ai-cli-tools-reference.md` | Stable | AI CLI tools reference |
 | `0930-gpg-and-classic-pat-rotation.md` | Stable | GPG + classic-PAT rotation procedure |
 | `0931-fleet-branch-cleanup.md` | Stable | Fleet-wide local-branch cleanup (#437; tool in unleashed) |
+| `0932-deferred-scope-audit.md` | Stable | Operating procedure for `tools/audit_deferred_scope.py` (#930) |
 
 ---
 
-## 3. Tools Inventory (43 files)
+## 3. Tools Inventory (44 files)
 
 ### Workflow Runners
 
@@ -256,6 +259,7 @@ These tools use `tools/_pat_session.classic_pat_session()` so the classic PAT ne
 | `tools/collect_cross_project_metrics.py` | Stable | Multi-repo analytics |
 | `tools/collect-cross-project-metrics.py` | Stable | Multi-repo analytics (alt) |
 | `tools/audit_schedule_check.py` | Stable | Audit scheduling verification |
+| `tools/audit_deferred_scope.py` | Stable | Audit closed issues for deferred-scope language; LLM-classified per candidate (#930) |
 | `tools/test-gate.py` | Stable | Test gate enforcement |
 
 ### Utilities
