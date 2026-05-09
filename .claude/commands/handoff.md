@@ -1,6 +1,6 @@
 ---
 description: Generate a high-fidelity context transfer prompt for the next session
-argument-hint: "[--help] [--reboot]"
+argument-hint: "[--help] [--reboot] [--park]"
 scope: global
 ---
 
@@ -13,10 +13,11 @@ scope: global
 ```
 /handoff - Context transfer + lessons learned + hygiene report
 
-Usage: `/handoff [--reboot]`
+Usage: `/handoff [--reboot] [--park]`
 
 Options:
-  --reboot    Save state but skip spawning a new terminal (for reboots/shutdowns)
+  --reboot    Save state, write reboot-parked marker, skip spawn (for forced reboots/shutdowns)
+  --park      Save state, write park marker, skip spawn (for "I'm done for now, will resume later")
 
 This is context transfer AND institutional memory capture:
 - Captures what matters for the next session (forward-looking)
@@ -242,6 +243,19 @@ After outputting the prompt to screen, persist it to the repo's handoff log so i
 
    After archiving succeeds, update the `archive_path` field in the `<!-- plan-state-start -->` block in `data/handoff-log.md` with the path from the archiver's JSON output. This is what /onboard and /pickup read to resume or ignore the plan.
 
+8. **Write close-state marker (deterministic):** Append the appropriate close-state marker to `data/handoff-log.md` so panopticon and `pickup_decide.py` can distinguish the user's intent post-hoc. Run:
+
+   ```bash
+   poetry run python /c/Users/mcwiz/Projects/unleashed/src/handoff_marker.py --repo-root {REPO_ROOT} --marker {MARKER}
+   ```
+
+   Where `{MARKER}` is:
+   - `park` if `$ARGUMENTS` contains `--park`
+   - `reboot-parked` if `$ARGUMENTS` contains `--reboot`
+   - `handoff` otherwise (plain `/handoff`, including the auto-spawn case for "context window filling up")
+
+   The script is idempotent — rerunning with the same marker is a no-op. Runs BEFORE Step 6 (spawn) so the new auto-onboarding session sees the marker.
+
 ### Step 5B: Persist Lessons Learned
 
 Lessons learned are institutional knowledge — they get committed, unlike the handoff log.
@@ -294,9 +308,11 @@ Brief backward-looking record of the session. One entry per session.
 
 ### Step 6: Spawn New Unleashed Session
 
-**MANDATORY unless `--reboot` is in `$ARGUMENTS`.** The CLAUDE.md "Skill Instructions Are Explicit Authorization" rule applies. Do NOT skip this step for any reason not listed in these instructions. Do NOT invent conditions (e.g., "not running under unleashed", "environment variable empty") to justify skipping.
+**MANDATORY unless `--reboot` or `--park` is in `$ARGUMENTS`.** The CLAUDE.md "Skill Instructions Are Explicit Authorization" rule applies. Do NOT skip this step for any reason not listed in these instructions. Do NOT invent conditions (e.g., "not running under unleashed", "environment variable empty") to justify skipping.
 
-**IF `$ARGUMENTS` contains `--reboot`:** Skip this step entirely. Tell user: "Handoff saved. Skipping new session (--reboot). Ready to reboot."
+**IF `$ARGUMENTS` contains `--reboot`:** Skip this step entirely. Tell user: "Handoff saved (reboot-parked). Skipping new session. Ready to reboot."
+
+**IF `$ARGUMENTS` contains `--park`:** Skip this step entirely. Tell user: "Handoff saved and parked. Ready to /exit when you are. Next /onboard against this repo will pick it up."
 
 **OTHERWISE:**
 
@@ -318,7 +334,7 @@ After persisting the handoff log, spawn a new `unleashed-alpha` session. Auto-on
 - **Don't pad.** If nothing happened in a section, skip it. A shorter, accurate prompt beats a longer, padded one.
 - **User preferences go in "Key Decisions."** Things like "user doesn't want numbered options" or "always use poetry run python" — if you learned it this session and it's not in CLAUDE.md or MEMORY.md, capture it here.
 - **Always persist** — the log survives even if the clipboard is lost.
-- **Always spawn without flags** — v30+ auto-onboard detects the fresh handoff and auto-imports it. No `--pickup` needed. Exception: `--reboot` skips the spawn entirely.
+- **Always spawn without flags** — v30+ auto-onboard detects the fresh handoff and auto-imports it. No `--pickup` needed. Exceptions: `--reboot` and `--park` both skip the spawn entirely. The difference is the marker written in Step 5.8 — `reboot-parked` (indefinite shelf intent) vs. `park` (deliberate stop-for-now) — which panopticon and `pickup_decide.py` use to distinguish the user's intent.
 - **Lessons are institutional memory.** One real lesson is worth more than a perfect handoff. If something surprised you, cost time, or changed your approach — write it down. 0 rows is fine for routine sessions; padding is not.
 - **Hygiene is exposure, not action.** NEVER delete branches, stashes, worktrees, or files during handoff. Report what exists so the user can rescue work. `/cleanup` is for destructive operations.
 - **Session log is backward-looking, handoff prompt is forward-looking.** The session log records what happened (for mining later). The handoff prompt tells the next agent what to do. Don't conflate them.
