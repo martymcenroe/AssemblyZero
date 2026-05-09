@@ -518,6 +518,26 @@ class TestMainLocalWorkflow:
 
     @patch("new_repo_setup.config")
     @patch("new_repo_setup.run_command")
+    def test_T265_unleashed_json_defaults(self, mock_run, mock_config, tmp_path):
+        """`.unleashed.json` defaults to assemblyZero=true (#1059) and
+        does NOT include the deprecated pickupThresholdMinutes (#1060)."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv", ["new_repo_setup.py", "DefaultsProject", "--no-github"]):
+            main()
+        unleashed_json = (tmp_path / "DefaultsProject" / ".unleashed.json").read_text()
+        config = json.loads(unleashed_json)
+        # #1059: AZ-managed repos load AZ rules on /onboard.
+        assert config["assemblyZero"] is True
+        # #1060: deprecated and ignored by /onboard; should not be emitted.
+        assert "pickupThresholdMinutes" not in config["onboard"]
+        # Sanity: still has the rest of the structure.
+        assert config["claude"]["model"] == "opus"
+        assert config["claude"]["effort"] == "max"
+        assert config["onboard"]["auto"] is True
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
     def test_T270_force_flag_passed(self, mock_run, mock_config, tmp_path):
         """--force flag is accepted without error."""
         _setup_config_mock(mock_config, tmp_path)

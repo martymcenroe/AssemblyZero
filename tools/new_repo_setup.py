@@ -1008,6 +1008,14 @@ def create_unleashed_json(project_path: Path) -> None:
     Sets model=opus, effort=max so unleashed wrappers pass the correct
     CLI flags. Without this file, wrappers fall back to tool defaults.
 
+    `assemblyZero` defaults to True (#1059): repos created by this tool
+    are by definition AssemblyZero-managed, so /onboard should load
+    AssemblyZero's CLAUDE.md when a session starts here.
+
+    `pickupThresholdMinutes` is intentionally NOT emitted (#1060): the
+    /onboard skill is event-ordered now and explicitly ignores this
+    field, so writing it just confuses future readers tuning the value.
+
     Args:
         project_path: Path to the project root.
     """
@@ -1017,10 +1025,9 @@ def create_unleashed_json(project_path: Path) -> None:
             "model": "opus",
             "effort": "max"
         },
-        "assemblyZero": False,
+        "assemblyZero": True,
         "onboard": {
             "auto": True,
-            "pickupThresholdMinutes": 10,
             "guide": None,
             "plan": None
         }
