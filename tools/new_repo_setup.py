@@ -1329,6 +1329,55 @@ def _deploy_workflows_via_contents_api(
     return True, uploaded
 
 
+# Canonical AZ labels (#1061). The metrics_aggregator counts the
+# `implementation` label as the in-implementation classifier; `lld`
+# is convention for issues with an approved LLD ready for the
+# implementation workflow. Kept deliberately small — workflow
+# CONFIG names like `lld-standard` belong in code, not GitHub labels.
+_CANONICAL_LABELS: list[tuple[str, str, str]] = [
+    ("implementation", "0E8A16",
+     "Issue is in implementation or has a paired implementation PR"),
+    ("lld", "5319E7",
+     "Issue has an approved LLD in docs/lld/active/LLD-NNN.md"),
+]
+
+
+def create_canonical_labels(github_user: str, repo_name: str) -> tuple[int, int]:
+    """Create canonical AssemblyZero labels on the new repo.
+
+    Idempotent via `gh label create --force` — pre-existing labels
+    get updated to the canonical color/description rather than failing.
+
+    Args:
+        github_user: GitHub username (owner).
+        repo_name: Lowercased repository name.
+
+    Returns:
+        (created, total) — count of labels successfully created/updated
+        and total attempted.
+    """
+    repo = f"{github_user}/{repo_name}"
+    created = 0
+    for name, color, description in _CANONICAL_LABELS:
+        cmd = [
+            "gh", "label", "create", name,
+            "--color", color,
+            "--description", description,
+            "--force",
+            "--repo", repo,
+        ]
+        try:
+            r = run_command(cmd, check=False)
+            if r.returncode == 0:
+                created += 1
+            else:
+                print(f"  WARNING: failed to create label '{name}': "
+                      f"{(r.stderr or '').strip()}")
+        except (subprocess.TimeoutExpired, OSError) as e:
+            print(f"  WARNING: error creating label '{name}': {e}")
+    return created, len(_CANONICAL_LABELS)
+
+
 def audit_structure(project_path: Path, name: str) -> int:
     """
     Audit an existing project structure against the canonical schema.
@@ -1895,6 +1944,17 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 else:
                     print("  SKIPPED: Push failed — no remote branch to protect.")
                     print("  After pushing, configure branch protection manually.")
+
+                # Step 19: Create canonical AZ workflow labels (#1061).
+                print("\n19. Creating canonical labels...")
+                if push_succeeded:
+                    created, total = create_canonical_labels(
+                        github_user, repo_name_lower
+                    )
+                    print(f"  {created}/{total} labels created or updated "
+                          f"({', '.join(n for n, _, _ in _CANONICAL_LABELS)})")
+                else:
+                    print("  SKIPPED: Push failed — no remote repo to label.")
 
     # Post-setup verification
     print("\n" + "=" * 60)
