@@ -454,6 +454,21 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Claude reviewer effort level (default: max)",
     )
 
+    # Issue #1071: Retry policy for transient LLM failures.
+    parser.add_argument(
+        "--retry-policy",
+        choices=["default", "aggressive", "none"],
+        default="default",
+        help=(
+            "Retry policy for transient LLM API failures (5xx, 429, "
+            "timeouts). 'default': 5 retries, 2s→32s exponential "
+            "backoff. 'aggressive': 8 retries, 60s cap. 'none': no "
+            "retry (pre-#1071 fail-fast behavior). Server-provided "
+            "Retry-After headers are honored regardless of policy. "
+            "(#1071)"
+        ),
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -732,6 +747,7 @@ def main():
         "repo_root": str(repo_root),
         "config_reviewer": args.reviewer,  # Issue #773
         "config_effort": args.effort,  # Issue #773
+        "config_retry_policy": args.retry_policy,  # Issue #1071
         "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,

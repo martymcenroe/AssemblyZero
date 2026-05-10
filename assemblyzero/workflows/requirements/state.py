@@ -162,6 +162,7 @@ class RequirementsWorkflowState(TypedDict, total=False):
     config_drafter: str
     config_reviewer: str
     config_effort: str  # Issue #773: Effort level for Claude reviewer
+    config_retry_policy: str  # Issue #1071: "default" | "aggressive" | "none"
     config_gates_draft: bool
     config_gates_verdict: bool
     config_auto_mode: bool
@@ -264,6 +265,8 @@ def create_initial_state(
     mock_mode: bool = False,
     max_iterations: int = 3,
     effort: str = "max",
+    # Issue #1071: retry policy for transient LLM failures.
+    retry_policy: str = "default",
     # Issue-specific
     brief_file: str = "",
     source_idea: str = "",
@@ -312,6 +315,7 @@ def create_initial_state(
         "config_drafter": drafter,
         "config_reviewer": reviewer,
         "config_effort": effort,
+        "config_retry_policy": retry_policy,
         "config_gates_draft": gates_draft,
         "config_gates_verdict": gates_verdict,
         "config_auto_mode": auto_mode,
