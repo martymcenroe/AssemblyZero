@@ -1067,14 +1067,50 @@ _POETRY_LICENSE_MAP = {
     "mit": "MIT",
 }
 
+# PyPI publishing extension (#1074). Appended to pyproject.toml when
+# --no-pypi is NOT passed AND github_user is known. Wires:
+#   - poetry packages directive (src-layout — matches conftest's sys.path)
+#   - [tool.poetry.scripts] entry point so `pip install <pkg> && <pkg>` runs
+#   - [tool.poetry.urls] for the PyPI page
+# Placeholders {module} and {github_user_repo} are .format()ed in.
+_PYPROJECT_PYPI_BLOCK = """
+[tool.poetry.scripts]
+{module} = "{module}.__main__:main"
+
+[tool.poetry.urls]
+Homepage = "https://github.com/{github_user_repo}"
+Source = "https://github.com/{github_user_repo}"
+Issues = "https://github.com/{github_user_repo}/issues"
+"""
+
+# Package files for the entry-point target. Created at src/<module>/.
+_PACKAGE_INIT_BODY = '''"""{module} package."""
+'''
+
+_PACKAGE_MAIN_BODY = '''"""Entry point for `python -m {module}` and the {module} CLI script."""
+from __future__ import annotations
+
+
+def main() -> int:
+    """Run {module} as a CLI. Returns process exit code."""
+    print("{module}: replace this with the real entry point.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
 
 def create_python_project(
     project_path: Path,
     name: str,
     license_id: str,
+    enable_pypi: bool = True,
+    github_user: str = "owner",
 ) -> bool:
     """Bootstrap a Python project: pyproject.toml, dev deps, pytest config,
-    tests/conftest.py.
+    tests/conftest.py, and optional PyPI publishing scaffold.
 
     Required for repos that will host the AssemblyZero implementation
     workflow (TDD-driven, runs pytest). Without this bootstrap, fresh
@@ -1090,6 +1126,14 @@ def create_python_project(
          subdirs.
       4. Write `tests/conftest.py` so `from <package> import ...` works
          in test files without a full Poetry install.
+      5. (#1074) If enable_pypi: create src/<module>/__init__.py and
+         src/<module>/__main__.py with a no-op main() entry point.
+      6. (#1074) If enable_pypi: inject `packages = [...]` into
+         [tool.poetry] (src-layout) and append [tool.poetry.scripts]
+         + [tool.poetry.urls] blocks. Steps 5–6 wire the entry point
+         so `pip install <pkg> && <pkg>` runs the app, and populate
+         the PyPI page URLs from {github_user}/{repo}. Skipped under
+         --no-pypi.
 
     Best-effort: each step is wrapped in try/except. Failure prints a
     warning but does not abort the overall repo creation. The user can
@@ -1100,12 +1144,21 @@ def create_python_project(
         name: Project name (used as the Poetry package name).
         license_id: Either "polyform" or "mit"; mapped to a Poetry
                     --license value.
+        enable_pypi: When True (default), install the PyPI publishing
+                     scaffold (steps 5–6). When False, only steps 1–4
+                     run (pure-internal package, no publish target).
+        github_user: GitHub username, used to populate [tool.poetry.urls]
+                     in step 6. Ignored when enable_pypi is False or
+                     when github_user is the placeholder "owner"
+                     (which means --no-github mode — caller must hand-
+                     edit URLs later).
 
     Returns:
-        True iff all four steps succeeded.
+        True iff all enabled steps succeeded.
     """
     poetry_license = _POETRY_LICENSE_MAP.get(license_id, "MIT")
     package_name = name.lower().replace("_", "-")
+    module_name = name.lower().replace("-", "_")
 
     # Step 1: poetry init
     init_cmd = [
@@ -1161,15 +1214,94 @@ def create_python_project(
         print(f"  WARNING: could not write tests/conftest.py: {e}")
         return False
 
+    # Steps 5–6 are the PyPI publishing scaffold (#1074). They are
+    # opt-out: --no-pypi skips them entirely. Without them, repos
+    # created here have no entry point and no PyPI URLs — fine for
+    # internal-only packages, broken for "pip install <pkg> && <pkg>"
+    # workflows like the boostgauge speed-run.
+    if not enable_pypi:
+        return True
+
+    # Step 5: src/<module>/__init__.py + __main__.py
+    package_dir = project_path / "src" / module_name
+    try:
+        package_dir.mkdir(parents=True, exist_ok=True)
+        init_file = package_dir / "__init__.py"
+        if not init_file.exists():
+            init_file.write_text(
+                _PACKAGE_INIT_BODY.format(module=module_name),
+                encoding="utf-8",
+            )
+        main_file = package_dir / "__main__.py"
+        if not main_file.exists():
+            main_file.write_text(
+                _PACKAGE_MAIN_BODY.format(module=module_name),
+                encoding="utf-8",
+            )
+    except OSError as e:
+        print(f"  WARNING: could not write src/{module_name}/ skeleton: {e}")
+        return False
+
+    # Step 6: inject packages directive + append PyPI blocks. Three
+    # mutations to the freshly-poetry-init'd pyproject.toml:
+    #   (a) inject `packages = [{include = "<module>", from = "src"}]`
+    #       into [tool.poetry] so `poetry build` finds the src-layout
+    #       package.
+    #   (b) append [tool.poetry.scripts] mapping <module> -> main().
+    #   (c) append [tool.poetry.urls] populated from {github_user}/{repo}.
+    # When github_user == "owner" (--no-github mode), the URLs use the
+    # placeholder; the caller must hand-edit them before the first
+    # tag push, but the structural scaffold is in place either way.
+    try:
+        current = pyproject.read_text(encoding="utf-8")
+
+        # (a) Inject packages directive after the description line.
+        # poetry init always emits `description = "..."` in [tool.poetry].
+        packages_line = (
+            f'packages = [{{include = "{module_name}", from = "src"}}]'
+        )
+        if packages_line not in current:
+            new_text, n_subs = re.subn(
+                r'(^description\s*=.*$)',
+                lambda m: m.group(1) + "\n" + packages_line,
+                current,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            if n_subs == 0:
+                print(
+                    "  WARNING: could not find description line to "
+                    "anchor packages directive — pyproject.toml may "
+                    "have an unusual layout"
+                )
+                return False
+            current = new_text
+
+        # (b) + (c) Append scripts + urls blocks.
+        github_user_repo = f"{github_user}/{package_name}"
+        block = _PYPROJECT_PYPI_BLOCK.format(
+            module=module_name,
+            github_user_repo=github_user_repo,
+        )
+        if "[tool.poetry.scripts]" not in current:
+            current = current.rstrip() + "\n" + block
+
+        pyproject.write_text(current, encoding="utf-8")
+    except OSError as e:
+        print(f"  WARNING: could not write PyPI pyproject.toml additions: {e}")
+        return False
+
     return True
 
 
-def create_github_workflows(project_path: Path) -> None:
-    """Create GitHub Actions workflow files for PR governance.
+def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> None:
+    """Create GitHub Actions workflow files for PR governance + PyPI release.
 
-    Deploys one workflow:
+    Deploys two workflows by default:
     - auto-reviewer.yml: calls the reusable auto-reviewer from AssemblyZero
-      to approve PRs after pr-sentinel passes (requires Cerberus secrets)
+      to approve PRs after pr-sentinel passes (requires Cerberus secrets).
+    - release.yml (#1074): tag-triggered, OIDC-auth to PyPI, runs poetry
+      build + poetry publish. Skipped when enable_pypi is False.
 
     pr-sentinel check is posted by the Cloudflare Worker (pr-sentinel-mm
     GitHub App, installed in "All repositories" mode fleet-wide). The
@@ -1177,6 +1309,12 @@ def create_github_workflows(project_path: Path) -> None:
     automatically — no per-repo Actions workflow needed. Branch protection
     gates on context "pr-sentinel / issue-reference" (the Worker's check
     name), set by configure_branch_protection().
+
+    Args:
+        project_path: Path to the project root.
+        enable_pypi: When True (default), also deploy release.yml. When
+                     False, only auto-reviewer.yml is written. Mirrors the
+                     --no-pypi flag wired through main().
     """
     workflows_dir = project_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1213,6 +1351,54 @@ jobs:
     (workflows_dir / "auto-reviewer.yml").write_text(
         auto_reviewer, encoding="utf-8", newline="",
     )
+
+    # release.yml (#1074): tag-triggered PyPI publish via OIDC Trusted
+    # Publisher. The first tag push only succeeds AFTER the human runs
+    # runbook 0934 to register the pending publisher on PyPI's side
+    # (browser-only step, not automatable). Skipped under --no-pypi.
+    if enable_pypi:
+        release_yml = '''\
+name: Release to PyPI
+
+# Tag-triggered publish to PyPI via OIDC Trusted Publisher (no token in
+# secrets). Configure the publisher per runbook 0934 BEFORE the first
+# tag push — pre-#0934 tag pushes will fail at the publish step with a
+# "no pending publisher" error from PyPI.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  id-token: write  # Required for OIDC trust handshake with PyPI.
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi  # Must match the environment registered on PyPI.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Build distributions
+        run: poetry build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No password / token — OIDC Trusted Publisher handles auth.
+'''
+        (workflows_dir / "release.yml").write_text(
+            release_yml, encoding="utf-8", newline="",
+        )
 
 
 def create_settings_json(project_path: Path) -> None:
@@ -1705,6 +1891,17 @@ Examples:
              "tests/conftest.py). 'none' skips language bootstrap — useful "
              "for non-Python projects. (#1058)"
     )
+    parser.add_argument(
+        "--no-pypi",
+        action="store_true",
+        default=False,
+        help="Skip the PyPI publishing scaffold (entry point, src/<pkg>/ "
+             "skeleton, [tool.poetry.scripts]/[urls] blocks, release.yml). "
+             "Default: include all of those — runbook 0934 then describes "
+             "the one-time browser step on PyPI's side to enable the first "
+             "tag-push publish. Pass this flag for internal-only packages "
+             "that won't ever publish to PyPI. (#1074)"
+    )
 
     args = parser.parse_args()
 
@@ -1921,11 +2118,25 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
     # pytest, pytest-cov, conftest.py. Required for AZ implementation
     # workflow's red/green TDD phases. Skippable via --lang none.
+    # Step also installs PyPI publishing scaffold (#1074) unless --no-pypi.
+    enable_pypi = (args.lang == "python") and (not args.no_pypi)
     if args.lang == "python":
-        print("\n11b2. Bootstrapping Python project (poetry init + pytest)...")
-        if create_python_project(project_path, args.name, args.license):
+        if enable_pypi:
+            print("\n11b2. Bootstrapping Python project (poetry init + pytest + PyPI scaffold)...")
+        else:
+            print("\n11b2. Bootstrapping Python project (poetry init + pytest, --no-pypi)...")
+        if create_python_project(
+            project_path,
+            args.name,
+            args.license,
+            enable_pypi=enable_pypi,
+            github_user=github_user,
+        ):
+            tail = " + src/{m}/__main__:main + URLs".format(
+                m=args.name.lower().replace("-", "_"),
+            ) if enable_pypi else ""
             print("  Created pyproject.toml, poetry.lock, dev deps "
-                  "(pytest, pytest-cov), tests/conftest.py")
+                  "(pytest, pytest-cov), tests/conftest.py" + tail)
         else:
             print("  WARNING: Python bootstrap incomplete. Run manually:")
             print(f"    cd {project_path}")
@@ -1934,10 +2145,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     else:
         print("\n11b2. SKIPPED Python bootstrap (--lang none)")
 
-    # Step 11c: Create GitHub Actions workflows (PR governance)
+    # Step 11c: Create GitHub Actions workflows (PR governance + release)
     print("\n11c. Creating GitHub Actions workflows...")
-    create_github_workflows(project_path)
-    print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
+    create_github_workflows(project_path, enable_pypi=enable_pypi)
+    if enable_pypi:
+        print("  Created auto-reviewer.yml + release.yml (PyPI publish on tag)")
+    else:
+        print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
 
     # Step 12: Initial commit — non-workflow files only.
     # Workflow files (.github/workflows/*) require the `workflow` scope on

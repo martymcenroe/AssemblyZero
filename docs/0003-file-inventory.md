@@ -156,7 +156,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0852-deferred-scope-new-repo-2026-05-07.md` | Stable | Deferred-scope audit (#930) — new-repo creation subset |
 | `0899-meta-audit.md` | Stable | Audit the audits |
 
-### Runbooks (09xx) - 32 files
+### Runbooks (09xx) - 33 files
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -192,6 +192,7 @@ Skill documentation uses the c/p convention (CLI + Prompt pairs).
 | `0930-gpg-and-classic-pat-rotation.md` | Stable | GPG + classic-PAT rotation procedure |
 | `0931-fleet-branch-cleanup.md` | Stable | Fleet-wide local-branch cleanup (#437; tool in unleashed) |
 | `0932-deferred-scope-audit.md` | Stable | Operating procedure for `tools/audit_deferred_scope.py` (#930) |
+| `0934-pypi-trusted-publisher-setup.md` | Stable | One-time browser steps to enable tag-push PyPI publishes (#1074) |
 
 ---
 
