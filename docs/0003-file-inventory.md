@@ -18,7 +18,7 @@
 
 ## 2. Documentation Inventory
 
-### Standards (00xx) - 17 files in inventory (3 known-missing entries — see follow-up #1079)
+### Standards (00xx) - 18 files in inventory (3 known-missing entries — see follow-up #1079)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -39,6 +39,7 @@
 | `0018-issue-spec-quality.md` | Stable | Pre-LLD-workflow issue quality rubric (six dimensions) |
 | `0019-lld-mechanical-validation.md` | Stable | Eleven structural checks the LLD validator runs (deterministic, pre-Gemini) |
 | `0020-test-plan-quality.md` | Stable | Three-layer test plan review (mechanical gates + fast-path + Gemini semantic) + standalone validator |
+| `0021-workflow-error-recovery.md` | Stable | Recovery procedures for the 5 named failure modes; decision tree for halt diagnosis |
 
 ### Templates (01xx) - 10 files
 
