@@ -18,7 +18,7 @@
 
 ## 2. Documentation Inventory
 
-### Standards (00xx) - 14 files
+### Standards (00xx) - 15 files in inventory (3 known-missing entries — see follow-up)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -36,6 +36,7 @@
 | `0012-lineage-versioning.md` | Stable | Lineage file versioning |
 | `0013-operational-dashboard-reference-architecture.md` | Stable | Dashboard reference architecture |
 | `0014-extract-and-discard-pattern.md` | Stable | Extract-and-discard pattern |
+| `0018-issue-spec-quality.md` | Stable | Pre-LLD-workflow issue quality rubric (six dimensions) |
 
 ### Templates (01xx) - 10 files
 
