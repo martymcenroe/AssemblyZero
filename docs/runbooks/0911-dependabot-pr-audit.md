@@ -1,8 +1,8 @@
 # 0911 - Dependabot PR Audit
 
 **Category:** Runbook / Security Maintenance
-**Version:** 2.0
-**Last Updated:** 2026-04-19
+**Version:** 2.1
+**Last Updated:** 2026-05-10
 
 ---
 
@@ -21,6 +21,10 @@ Safely review, approve, and merge Dependabot PRs with regression verification. D
 - Poetry venv eviction integrated (#944 / Fix 5 pattern) so worktrees remove cleanly on Windows
 - Mechanical implementation: `tools/dependabot_review.py`
 
+**New in v2.1 (#1091):**
+- Failure-path comments now use `gh pr review --comment` (creates a `PullRequestReview` event) instead of `gh pr comment` (creates an unattributed issue comment). Result: deferred PRs also accrue Code Review credit for the operator who audited them.
+- `--fleet` flag enumerates user-owned Poetry repos via `gh repo list` and processes dependabot PRs across all of them. Multiplies review-event volume. Single-repo mode unchanged when the flag is omitted.
+
 ---
 
 ## Implementation
@@ -29,10 +33,18 @@ The manual procedure in v1.0 has been replaced by a deterministic Python tool at
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
+
+# Single-repo (default — AssemblyZero only)
 poetry run python tools/dependabot_review.py [--dry-run]
+
+# Specific repo
+poetry run python tools/dependabot_review.py --repo martymcenroe/Aletheia
+
+# Fleet — every user-owned Poetry repo (#1091)
+poetry run python tools/dependabot_review.py --fleet
 ```
 
-Or via the skill: `/dependabot`.
+Or via the skill: `/dependabot` (single-repo) or `/dependabot --fleet` (fleet mode).
 
 ---
 
@@ -210,3 +222,4 @@ Run this audit:
 |------|--------|
 | 2026-02-15 | v1.0: Initial runbook — manual procedure, merge-first / test-after, no pr-sentinel integration |
 | 2026-04-19 | v2.0 (#949): Rewritten for current branch protection + pr-sentinel. Test-then-merge order. Author gate, exit-code gate, `No-Issue:` body injection, approval attributed to invoking user (Code Review stat), multi-package split via `@dependabot recreate`, poetry venv eviction. Mechanical implementation at `tools/dependabot_review.py` and `/dependabot` skill. |
+| 2026-05-10 | v2.1 (#1091): Failure-path comments switched to `gh pr review --comment` so deferred PRs also accrue Code Review credit. `--fleet` flag added — enumerates user-owned Poetry repos and processes dependabot PRs across the fleet for cross-repo coverage. |

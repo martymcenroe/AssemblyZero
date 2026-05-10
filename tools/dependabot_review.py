@@ -48,6 +48,9 @@ from pathlib import Path
 
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
+# Issue #1091: --fleet mode uses gh repo list to enumerate user-owned repos.
+# Cap at 200 — well above current ~60-repo count without paginating.
+FLEET_REPO_LIMIT = 200
 # GitHub returns different strings for the same bot depending on API surface:
 #   - REST API / web UI:              "dependabot[bot]"
 #   - gh CLI GraphQL .author.login:   "app/dependabot"
@@ -264,10 +267,44 @@ def squash_merge(pr_number: int, repo: str) -> bool:
 
 
 def comment_on_pr(pr_number: int, repo: str, body: str) -> None:
+    """Post a regular issue comment. Use for @dependabot bot commands.
+
+    Issue comments do NOT count toward the user's Code Review profile
+    stat. For comments where the user wants attribution credit (e.g.,
+    test-failure deferral notes), use `review_comment_on_pr` instead.
+    Bot-directed commands like `@dependabot recreate` / `@dependabot
+    rebase` should stay as issue comments — that's the form dependabot
+    documents and there's no need to risk parsing differences.
+    """
     run_gh_with_body(
         ["gh", "pr", "comment", str(pr_number), "--repo", repo],
         body,
     )
+
+
+def review_comment_on_pr(pr_number: int, repo: str, body: str) -> bool:
+    """Post a comment AS A FORMAL REVIEW (#1091).
+
+    Creates a `PullRequestReview` event with state=COMMENTED. This
+    counts toward the invoking user's Code Review profile stat (the
+    GitHub activity overview wedge), unlike `gh pr comment` which
+    creates an unattributed issue comment.
+
+    Use for comments on the deferral path (test failure, install
+    failure) where the user — having gone through the trouble of
+    auditing the PR — should get review credit even though the PR
+    isn't being merged.
+
+    Returns True on success.
+    """
+    result = run_gh_with_body(
+        [
+            "gh", "pr", "review", str(pr_number),
+            "--repo", repo, "--comment",
+        ],
+        body,
+    )
+    return result.returncode == 0
 
 
 def request_dependabot_recreate(pr_number: int, repo: str) -> None:
@@ -356,9 +393,13 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
 
     if not install_deps(worktree):
         print("  ERROR: poetry install failed")
-        comment_on_pr(pr.number, repo,
-                      "Automated review via tools/dependabot_review.py — "
-                      "`poetry install` failed. Check Actions / worktree for details.")
+        # Issue #1091: post as a formal review-comment so the failure
+        # path also accrues to the user's Code Review profile stat.
+        review_comment_on_pr(
+            pr.number, repo,
+            "Automated review via tools/dependabot_review.py — "
+            "`poetry install` failed. Check Actions / worktree for details.",
+        )
         # Leave worktree for forensics
         return "deferred"
 
@@ -366,7 +407,11 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
 
     if exit_code != 0:
         package_count = count_packages(pr.body)
-        comment_on_pr(
+        # Issue #1091: post as a formal review-comment (creates a
+        # PullRequestReview event attributed to the invoking user)
+        # rather than an issue comment. Even on the deferral path the
+        # user has audited the PR; the credit should reflect that.
+        review_comment_on_pr(
             pr.number, repo,
             f"Automated review via tools/dependabot_review.py — test suite "
             f"FAILED (exit {exit_code}). Worktree retained at `{worktree}` "
@@ -416,6 +461,50 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fleet enumeration (Issue #1091)
+# ---------------------------------------------------------------------------
+
+def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
+    """List user-owned repos that we should attempt to process.
+
+    Returns repos as 'owner/name' strings. Filters to repos where this
+    tool can actually run the test gate — i.e., repos with a
+    `pyproject.toml` on `main`. Non-Poetry repos (npm, Cargo, etc.)
+    are omitted because the existing test gate can't validate them.
+    Future per-language test runners can lift this filter.
+    """
+    result = run([
+        "gh", "repo", "list", user,
+        "--limit", str(FLEET_REPO_LIMIT),
+        "--json", "name,nameWithOwner,isArchived,isFork",
+    ])
+    if result.returncode != 0:
+        sys.exit(f"Failed to list fleet repos: {result.stderr}")
+    repos = json.loads(result.stdout or "[]")
+
+    candidates: list[str] = []
+    for r in repos:
+        if r.get("isArchived") or r.get("isFork"):
+            continue
+        candidates.append(r["nameWithOwner"])
+
+    # Filter to repos that have a pyproject.toml on main. Non-Python
+    # repos would defer every PR (poetry run pytest fails) which is a
+    # waste — and would file failure-path review-comments on PRs the
+    # user can't actually approve. Skip silently instead.
+    processable: list[str] = []
+    for repo in candidates:
+        check = run([
+            "gh", "api", f"repos/{repo}/contents/pyproject.toml",
+            "--jq", ".name",
+        ])
+        if check.returncode == 0 and check.stdout.strip():
+            processable.append(repo)
+
+    return processable
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -426,6 +515,15 @@ def main() -> None:
     )
     parser.add_argument("--repo", default=DEFAULT_REPO,
                         help=f"GitHub repo (default: {DEFAULT_REPO})")
+    parser.add_argument(
+        "--fleet", action="store_true",
+        help=(
+            "Process dependabot PRs across ALL user-owned repos with a "
+            "pyproject.toml on main, not just --repo. Multiplies review-"
+            "event volume across the fleet. Mutually exclusive with "
+            "--repo (--fleet wins). (#1091)"
+        ),
+    )
     parser.add_argument("--main-repo", default=str(Path.cwd()),
                         help="Path to main repo (default: cwd)")
     parser.add_argument("--dry-run", action="store_true",
@@ -436,23 +534,40 @@ def main() -> None:
     if not (main_repo / ".git").exists():
         sys.exit(f"Not a git repo: {main_repo}")
 
-    prs = list_dependabot_prs(args.repo)
-    if not prs:
-        print("No open dependabot PRs. Nothing to do.")
-        return
+    # Issue #1091: fleet mode enumerates user-owned Poetry repos.
+    if args.fleet:
+        print(f"Fleet mode — enumerating {GITHUB_USER}'s Python repos...")
+        repos = list_fleet_repos()
+        print(f"  Found {len(repos)} Poetry-based repo(s) to scan.")
+    else:
+        repos = [args.repo]
 
-    print(f"Found {len(prs)} open dependabot PR(s):")
-    for pr in prs:
-        print(f"  #{pr.number}: {pr.title} ({count_packages(pr.body)} packages)")
+    # Aggregate results across repos.
+    results: dict[str, list[str]] = {
+        "merged": [], "deferred": [], "errored": [],
+    }
+
+    for repo in repos:
+        print(f"\n{'=' * 60}")
+        print(f"REPO: {repo}")
+        print(f"{'=' * 60}")
+        prs = list_dependabot_prs(repo)
+        if not prs:
+            print(f"  No open dependabot PRs in {repo}.")
+            continue
+        print(f"  Found {len(prs)} open dependabot PR(s):")
+        for pr in prs:
+            print(f"    #{pr.number}: {pr.title} "
+                  f"({count_packages(pr.body)} packages)")
+        if args.dry_run:
+            continue
+        for pr in prs:
+            status = process_pr(pr, repo, main_repo)
+            results[status].append(f"{repo}#{pr.number}")
 
     if args.dry_run:
         print("\n(dry-run; exiting)")
         return
-
-    results: dict[str, list[int]] = {"merged": [], "deferred": [], "errored": []}
-    for pr in prs:
-        status = process_pr(pr, args.repo, main_repo)
-        results[status].append(pr.number)
 
     print("\n=== Summary ===")
     print(f"  Merged:   {results['merged']}")
