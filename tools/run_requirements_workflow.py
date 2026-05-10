@@ -388,6 +388,21 @@ Examples:
         help="Claude reviewer effort level (default: max)",
     )
 
+    # Issue #1071: Retry policy for transient LLM failures.
+    parser.add_argument(
+        "--retry-policy",
+        choices=["default", "aggressive", "none"],
+        default="default",
+        help=(
+            "Retry policy for transient LLM API failures (5xx, 429, "
+            "timeouts). 'default': 5 retries, 2s→32s exponential "
+            "backoff. 'aggressive': 8 retries, 60s cap. 'none': no "
+            "retry (pre-#1071 fail-fast behavior). Server-provided "
+            "Retry-After headers are honored regardless of policy. "
+            "(#1071)"
+        ),
+    )
+
     # Review configuration (human gates)
     parser.add_argument(
         "--review",
@@ -620,6 +635,7 @@ def build_initial_state(
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
             effort=getattr(args, "effort", "max"),
+            retry_policy=getattr(args, "retry_policy", "default"),
             brief_file=args.brief or "",
             source_idea=source_idea,
         )
@@ -636,6 +652,7 @@ def build_initial_state(
             mock_mode=args.mock,
             max_iterations=args.max_iterations,
             effort=getattr(args, "effort", "max"),
+            retry_policy=getattr(args, "retry_policy", "default"),
             issue_number=args.issue or 0,
             context_files=args.context or [],
         )

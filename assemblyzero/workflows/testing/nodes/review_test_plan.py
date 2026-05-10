@@ -505,42 +505,44 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     cost_before = get_cumulative_cost()
     try:
-        import time
+        # Issue #775: Pass VERDICT_SCHEMA to provider for structured output (REQ-2)
+        from assemblyzero.core.llm_provider import GeminiProvider
 
-        # N1 Retry: 2 attempts with exponential backoff
-        max_attempts = 2
-        last_error = ""
-        result = None
+        schema_kwargs: dict[str, Any] = {}
+        if isinstance(reviewer, GeminiProvider):
+            schema_kwargs["response_schema"] = VERDICT_SCHEMA
+        else:
+            schema_kwargs["json_schema"] = VERDICT_SCHEMA
 
-        for attempt in range(1, max_attempts + 1):
-            # Issue #775: Pass VERDICT_SCHEMA to provider for structured output (REQ-2)
-            from assemblyzero.core.llm_provider import GeminiProvider
+        # Issue #1071: Centralized retry. Replaces the previous inline
+        # 2-attempt loop. Policy comes from workflow state (set by the
+        # entry-point script's --retry-policy flag); default = 5
+        # retries, 2s→32s exponential backoff.
+        from assemblyzero.utils.retry import get_policy, with_retry
 
-            schema_kwargs = {}
-            if isinstance(reviewer, GeminiProvider):
-                schema_kwargs["response_schema"] = VERDICT_SCHEMA
-            else:
-                schema_kwargs["json_schema"] = VERDICT_SCHEMA
+        retry_policy_name = state.get("config_retry_policy", "default")
+        retry_policy = get_policy(retry_policy_name)
 
-            result = reviewer.invoke(
-                system_prompt="You are a senior QA engineer reviewing a test plan for coverage and quality.",
+        result = with_retry(
+            lambda: reviewer.invoke(
+                system_prompt=(
+                    "You are a senior QA engineer reviewing a test plan "
+                    "for coverage and quality."
+                ),
                 content=full_prompt,
                 **schema_kwargs,
-            )
+            ),
+            policy=retry_policy,
+            description="N1 testing reviewer",
+        )
 
-            if result.success:
-                break
-
+        if not result.success:
             last_error = result.error_message or "Unknown error"
-            print(f"    [N1] Reviewer attempt {attempt}/{max_attempts} failed: {last_error}")
-
-            if attempt < max_attempts:
-                backoff = 2 ** attempt  # 2s, 4s
-                print(f"    [N1] Retrying in {backoff}s...")
-                time.sleep(backoff)
-
-        if not result or not result.success:
-            error_msg = f"Reviewer failed after {max_attempts} attempts: {last_error}"
+            attempts_made = retry_policy.max_retries + 1
+            error_msg = (
+                f"Reviewer failed after up to {attempts_made} attempt(s) "
+                f"({retry_policy_name} retry policy): {last_error}"
+            )
             print(f"    [ERROR] {error_msg}")
 
             # Save error to audit trail
@@ -550,7 +552,12 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                     audit_dir,
                     file_num,
                     "reviewer-error.md",
-                    f"# Review Error\n\nAttempts: {max_attempts}\nLast error: {last_error}\n",
+                    (
+                        f"# Review Error\n\n"
+                        f"Retry policy: {retry_policy_name}\n"
+                        f"Max attempts: {attempts_made}\n"
+                        f"Last error: {last_error}\n"
+                    ),
                 )
 
             return {
