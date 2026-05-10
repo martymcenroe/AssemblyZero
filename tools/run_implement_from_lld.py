@@ -469,6 +469,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # Issue #1076: Speed-run instrumentation (lap splits + run log)
+    parser.add_argument(
+        "--speedrun",
+        action="store_true",
+        default=False,
+        help=(
+            "Emit speed-run lap-splits to data/speedrun/{issue}-{attempt}.json "
+            "and append one run-log entry to data/speedrun/run-log.jsonl on "
+            "completion. For the boostgauge YouTube demo. (#1076)"
+        ),
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -790,6 +802,47 @@ def main():
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import WorkflowTimeout
 
+    # Issue #1076: Speed-run instrumentation. Set up lap-split writer +
+    # run-logger if --speedrun was passed; both are no-ops otherwise.
+    speedrun_splits = None
+    speedrun_logger = None
+    if getattr(args, "speedrun", False):
+        from assemblyzero.utils.speedrun import (
+            LapSplitWriter, RunLogger, classify_halt,
+        )
+        speedrun_splits = LapSplitWriter.start(repo_root, args.issue)
+        speedrun_logger = RunLogger(repo_root)
+        speedrun_splits.beat("workflow_started")
+        print(
+            f"[speedrun] Lap splits: {speedrun_splits.output_path} "
+            f"(attempt {speedrun_splits.attempt})"
+        )
+
+    def _finalize_speedrun(outcome: str, state: dict | None = None,
+                          error_msg: str = "", notes: str = "") -> None:
+        """Write terminal beat + run-log entry. Safe to call multiple times."""
+        nonlocal speedrun_splits, speedrun_logger
+        if speedrun_splits is None or speedrun_logger is None:
+            return
+        from assemblyzero.utils.speedrun import classify_halt as _classify
+        import time as _time
+        failure_mode = None
+        if outcome != "success":
+            failure_mode = _classify(state or {}, error_msg)
+        speedrun_splits.finalize(outcome, failure_mode)
+        speedrun_logger.complete_run(
+            issue=speedrun_splits.issue,
+            attempt=speedrun_splits.attempt,
+            started_at_iso=speedrun_splits.started_at_iso,
+            outcome=outcome,
+            total_seconds=_time.time() - speedrun_splits.started_at,
+            failure_mode=failure_mode,
+            notes=notes,
+        )
+        # Set to None so subsequent calls in the same run are no-ops.
+        speedrun_splits = None
+        speedrun_logger = None
+
     try:
       with WorkflowTimeout(minutes=args.timeout):
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
@@ -859,6 +912,7 @@ def main():
                             },
                         )
                     _write_status_file(repo_root, args.issue, "FAILED", values.get("error_message", ""), state=values)
+                    _finalize_speedrun("fail", state=values, error_msg=values.get("error_message", ""))
                     return 1
                 else:
                     print("Status: SUCCESS")
@@ -876,6 +930,7 @@ def main():
                             },
                         )
                     _write_status_file(repo_root, args.issue, "SUCCESS", state=values)
+                    _finalize_speedrun("success", state=values)
 
                     # Show next steps for worktree workflow
                     if worktree_path:
@@ -890,6 +945,7 @@ def main():
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted. Use --resume to continue.")
+        _finalize_speedrun("halt", error_msg="user interrupt", notes="KeyboardInterrupt")
         return 130
 
     except Exception as e:
@@ -910,6 +966,7 @@ def main():
         print(f"\n[FATAL] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
+        _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
         return 1
 
     return 0

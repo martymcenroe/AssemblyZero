@@ -403,6 +403,17 @@ Examples:
         ),
     )
 
+    # Issue #1076: Speed-run instrumentation.
+    parser.add_argument(
+        "--speedrun",
+        action="store_true",
+        default=False,
+        help=(
+            "Emit speed-run lap-splits and append a run-log entry to "
+            "data/speedrun/. (#1076)"
+        ),
+    )
+
     # Review configuration (human gates)
     parser.add_argument(
         "--review",
@@ -696,6 +707,39 @@ def run_single_workflow(
             print(f"  LLD would be saved to: {target_repo}/docs/lld/active/LLD-{args.issue:03d}.md")
         return 0
 
+    # Issue #1076: Speed-run instrumentation
+    speedrun_splits = None
+    speedrun_logger = None
+    if getattr(args, "speedrun", False) and getattr(args, "issue", None):
+        from assemblyzero.utils.speedrun import LapSplitWriter, RunLogger
+        speedrun_splits = LapSplitWriter.start(target_repo, args.issue)
+        speedrun_logger = RunLogger(target_repo)
+        speedrun_splits.beat("workflow_started")
+        print(f"[speedrun] Lap splits: {speedrun_splits.output_path}")
+
+    def _finalize_speedrun(outcome: str, fstate: dict | None = None,
+                          error_msg: str = "", notes: str = "") -> None:
+        nonlocal speedrun_splits, speedrun_logger
+        if speedrun_splits is None or speedrun_logger is None:
+            return
+        from assemblyzero.utils.speedrun import classify_halt as _classify
+        import time as _time
+        failure_mode = None
+        if outcome != "success":
+            failure_mode = _classify(fstate or {}, error_msg)
+        speedrun_splits.finalize(outcome, failure_mode)
+        speedrun_logger.complete_run(
+            issue=speedrun_splits.issue,
+            attempt=speedrun_splits.attempt,
+            started_at_iso=speedrun_splits.started_at_iso,
+            outcome=outcome,
+            total_seconds=_time.time() - speedrun_splits.started_at,
+            failure_mode=failure_mode,
+            notes=notes,
+        )
+        speedrun_splits = None
+        speedrun_logger = None
+
     # Create and run graph
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import WorkflowTimeout
@@ -720,12 +764,15 @@ def run_single_workflow(
         print_result(final_state)
 
         if final_state.get("error_message"):
+            _finalize_speedrun("fail", fstate=final_state, error_msg=final_state.get("error_message", ""))
             return 1
 
+        _finalize_speedrun("success", fstate=final_state)
         return 0
 
     except KeyboardInterrupt:
         print("\n\nWorkflow interrupted by user.")
+        _finalize_speedrun("halt", error_msg="user interrupt", notes="KeyboardInterrupt")
         return 130
 
     except Exception as e:
@@ -733,6 +780,7 @@ def run_single_workflow(
         if args.debug:
             import traceback
             traceback.print_exc()
+        _finalize_speedrun("halt", error_msg=str(e), notes=f"exception:{type(e).__name__}")
         return 1
 
 
