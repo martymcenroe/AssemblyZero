@@ -1,6 +1,6 @@
 ---
 description: Run the dependabot PR review + merge tool (test-then-approve, author-gated)
-argument-hint: "[--help] [--dry-run]"
+argument-hint: "[--help] [--dry-run] [--fleet]"
 scope: global
 ---
 
@@ -14,16 +14,17 @@ Runs `tools/dependabot_review.py` — a deterministic, author-gated, exit-code-g
 
 ## Help
 
-Usage: `/dependabot [--help] [--dry-run]`
+Usage: `/dependabot [--help] [--dry-run] [--fleet]`
 
 | Argument | Effect |
 |---|---|
 | `--help` | Show this help and exit |
 | `--dry-run` | List dependabot PRs that would be processed; take no action |
+| `--fleet` | Process across ALL user-owned Poetry repos, not just AssemblyZero (#1091) |
 
-The tool operates ONLY on PRs authored by `dependabot[bot]`. Any other author is refused at the author gate. Tests must exit 0; non-zero exit means the PR is commented on and left for human review (not approved, not merged). No LLM in the decision loop — decisions are pure exit-code / string-match.
+The tool operates ONLY on PRs authored by `dependabot[bot]`. Any other author is refused at the author gate. Tests must exit 0; non-zero exit means the PR gets a `gh pr review --comment` posted (deferred PRs accrue Code Review credit too — #1091) and is left for human review. No LLM in the decision loop — decisions are pure exit-code / string-match.
 
-Reference: runbook `docs/runbooks/0911-dependabot-pr-audit.md` v2.0.
+Reference: runbook `docs/runbooks/0911-dependabot-pr-audit.md` v2.1.
 
 ---
 
@@ -48,11 +49,19 @@ cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/dependabot_review.py
 ```
 
-Pass `--dry-run` through if the user supplied it:
+Pass `--dry-run` and/or `--fleet` through if the user supplied them:
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
+
+# Single-repo dry-run (default behavior)
 poetry run python tools/dependabot_review.py --dry-run
+
+# Fleet mode — every user-owned Poetry repo
+poetry run python tools/dependabot_review.py --fleet
+
+# Fleet dry-run — preview the queue across the fleet
+poetry run python tools/dependabot_review.py --fleet --dry-run
 ```
 
 Stream the tool's output to the user as-is.
