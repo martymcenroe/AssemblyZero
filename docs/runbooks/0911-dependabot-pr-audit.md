@@ -1,7 +1,7 @@
 # 0911 - Dependabot PR Audit
 
 **Category:** Runbook / Security Maintenance
-**Version:** 2.1
+**Version:** 2.2
 **Last Updated:** 2026-05-10
 
 ---
@@ -24,6 +24,9 @@ Safely review, approve, and merge Dependabot PRs with regression verification. D
 **New in v2.1 (#1091):**
 - Failure-path comments now use `gh pr review --comment` (creates a `PullRequestReview` event) instead of `gh pr comment` (creates an unattributed issue comment). Result: deferred PRs also accrue Code Review credit for the operator who audited them.
 - `--fleet` flag enumerates user-owned Poetry repos via `gh repo list` and processes dependabot PRs across all of them. Multiplies review-event volume. Single-repo mode unchanged when the flag is omitted.
+
+**New in v2.2 (#1092):**
+- Windows Task Scheduler integration. `tools/run_dependabot_fleet.ps1` wraps the `--fleet` invocation; `Claude-DependabotFleet` runs daily at 06:00 with the operator's gh credentials so review-event attribution stays correct. See §Integration → Daily Schedule.
 
 ---
 
@@ -198,10 +201,51 @@ At end of run, the tool prints:
 
 Run this audit:
 
-- On demand via `/dependabot`
-- Before shipping a batch of features (so dependencies stay current)
-- Weekly as maintenance if the queue has been neglected
-- Can be wired to the `schedule` skill for passive processing — not in scope for v2.0
+- **On demand** via `/dependabot` (single-repo) or `/dependabot --fleet` (cross-repo).
+- **Daily passive** via Windows Task Scheduler (#1092) — see §Daily Schedule below.
+- Before shipping a batch of features (so dependencies stay current).
+
+### Daily Schedule (#1092)
+
+The fleet sweep is wired to a Windows Scheduled Task `Claude-DependabotFleet` so dependabot PRs are processed automatically each morning regardless of whether the operator remembers to run `/dependabot`. The task uses the operator's logged-in account so the `gh pr review` events still attribute to the user (Code Review profile-stat credit accrues correctly).
+
+**Setup (run once on a fresh machine):**
+
+```powershell
+$action = New-ScheduledTaskAction `
+  -Execute 'powershell.exe' `
+  -Argument '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File C:\Users\mcwiz\Projects\AssemblyZero\tools\run_dependabot_fleet.ps1'
+$trigger = New-ScheduledTaskTrigger -Daily -At 06:00
+Register-ScheduledTask `
+  -TaskName 'Claude-DependabotFleet' `
+  -Action $action -Trigger $trigger `
+  -Description 'Daily fleet-wide dependabot PR review + merge (#1091, #1092)'
+```
+
+**Manual invocation (between scheduled runs):**
+
+```powershell
+Start-ScheduledTask -TaskName 'Claude-DependabotFleet'
+```
+
+**Disable / re-enable:**
+
+```powershell
+Disable-ScheduledTask -TaskName 'Claude-DependabotFleet'
+Enable-ScheduledTask -TaskName 'Claude-DependabotFleet'
+```
+
+**View the log:**
+
+```bash
+tail -50 /c/Users/mcwiz/Projects/dependabot-fleet.log
+```
+
+The PowerShell wrapper at `tools/run_dependabot_fleet.ps1` is the durable definition of what the task runs — the schedule above just points at it. Modifying the wrapper changes future runs without touching the task registration.
+
+**Why daily, not hourly?** Dependabot opens PRs at most a few times per day across the fleet. Hourly runs would add noise without adding value. 06:00 was chosen so the run completes before the operator's typical 09:00 start; merged PRs are visible in the morning git pull.
+
+**Why not use the `/schedule` skill?** That skill creates remote agents on Anthropic infra. Those agents wouldn't have access to the operator's local `gh` credentials, so the review attribution would land on whatever bot/PAT the remote agent authenticated as — defeating the entire Code Review profile-stat purpose of #1091. Local Task Scheduler keeps credentials and review-event attribution co-located with the operator.
 
 ---
 
@@ -223,3 +267,4 @@ Run this audit:
 | 2026-02-15 | v1.0: Initial runbook — manual procedure, merge-first / test-after, no pr-sentinel integration |
 | 2026-04-19 | v2.0 (#949): Rewritten for current branch protection + pr-sentinel. Test-then-merge order. Author gate, exit-code gate, `No-Issue:` body injection, approval attributed to invoking user (Code Review stat), multi-package split via `@dependabot recreate`, poetry venv eviction. Mechanical implementation at `tools/dependabot_review.py` and `/dependabot` skill. |
 | 2026-05-10 | v2.1 (#1091): Failure-path comments switched to `gh pr review --comment` so deferred PRs also accrue Code Review credit. `--fleet` flag added — enumerates user-owned Poetry repos and processes dependabot PRs across the fleet for cross-repo coverage. |
+| 2026-05-10 | v2.2 (#1092): Windows Task Scheduler integration — `tools/run_dependabot_fleet.ps1` + daily `Claude-DependabotFleet` task at 06:00. Passive cross-repo processing with operator-credentialed review attribution. |
