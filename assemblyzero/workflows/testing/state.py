@@ -197,6 +197,9 @@ class TestingWorkflowState(TypedDict, total=False):
     config_reviewer: str  # Issue #773: Reviewer LLM spec (e.g., "claude:opus")
     config_effort: str  # Issue #779: Effort level for Claude reviewer
     config_retry_policy: str  # Issue #1071: "default" | "aggressive" | "none"
+    config_drafter: str  # Issue #1072: drafter spec for test-plan revision
+    test_plan_policy: str  # Issue #1072: "revise" (default) | "auto" | "strict"
+    test_plan_revision_count: int  # Issue #1072: incremented per revision cycle
     auto_mode: bool
     mock_mode: bool
     skip_e2e: bool
