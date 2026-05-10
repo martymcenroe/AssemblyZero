@@ -1,7 +1,7 @@
 # 0911 - Dependabot PR Audit
 
 **Category:** Runbook / Security Maintenance
-**Version:** 2.2
+**Version:** 2.3
 **Last Updated:** 2026-05-10
 
 ---
@@ -27,6 +27,10 @@ Safely review, approve, and merge Dependabot PRs with regression verification. D
 
 **New in v2.2 (#1092):**
 - Windows Task Scheduler integration. `tools/run_dependabot_fleet.ps1` wraps the `--fleet` invocation; `Claude-DependabotFleet` runs daily at 06:00 with the operator's gh credentials so review-event attribution stays correct. See §Integration → Daily Schedule.
+
+**New in v2.3 (#1093):**
+- `--workers N` flag (default 3) enables cross-repo parallelism in `--fleet` mode. PRs within a single repo remain sequential (subsequent PRs need to test against the post-merge HEAD); only repos run in parallel. Substantially shortens fleet-sweep wall-clock time when many repos have queued PRs.
+- Summary now prints a review-event counter line (`N APPROVED + M COMMENTED = N+M total`) so the Code Review profile-stat math is visible per-run. Lets the operator verify each fleet sweep is delivering the expected credit.
 
 ---
 
@@ -268,3 +272,4 @@ The PowerShell wrapper at `tools/run_dependabot_fleet.ps1` is the durable defini
 | 2026-04-19 | v2.0 (#949): Rewritten for current branch protection + pr-sentinel. Test-then-merge order. Author gate, exit-code gate, `No-Issue:` body injection, approval attributed to invoking user (Code Review stat), multi-package split via `@dependabot recreate`, poetry venv eviction. Mechanical implementation at `tools/dependabot_review.py` and `/dependabot` skill. |
 | 2026-05-10 | v2.1 (#1091): Failure-path comments switched to `gh pr review --comment` so deferred PRs also accrue Code Review credit. `--fleet` flag added — enumerates user-owned Poetry repos and processes dependabot PRs across the fleet for cross-repo coverage. |
 | 2026-05-10 | v2.2 (#1092): Windows Task Scheduler integration — `tools/run_dependabot_fleet.ps1` + daily `Claude-DependabotFleet` task at 06:00. Passive cross-repo processing with operator-credentialed review attribution. |
+| 2026-05-10 | v2.3 (#1093): Cross-repo parallelism via `--workers N` (default 3) for shorter fleet sweeps. Summary now reports review-event count (APPROVED + COMMENTED) so Code Review profile-stat math is visible per run. |
