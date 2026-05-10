@@ -43,6 +43,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -505,6 +506,45 @@ def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Per-repo processing (Issue #1093 — extracted for cross-repo parallelism)
+# ---------------------------------------------------------------------------
+
+def process_repo(
+    repo: str,
+    main_repo: Path,
+    dry_run: bool = False,
+) -> dict[str, list[str]]:
+    """Process all dependabot PRs in one repo, sequentially.
+
+    Within a repo, PR processing is sequential — each merge moves
+    `main` and subsequent PRs need to test against the new HEAD.
+    Cross-repo parallelism is the caller's responsibility.
+
+    Returns a per-repo result dict with the same shape as the
+    aggregate (merged / deferred / errored lists of `repo#N` strings).
+    Empty lists when no PRs are open.
+    """
+    sub: dict[str, list[str]] = {"merged": [], "deferred": [], "errored": []}
+    print(f"\n{'=' * 60}")
+    print(f"REPO: {repo}")
+    print(f"{'=' * 60}")
+    prs = list_dependabot_prs(repo)
+    if not prs:
+        print(f"  No open dependabot PRs in {repo}.")
+        return sub
+    print(f"  Found {len(prs)} open dependabot PR(s):")
+    for pr in prs:
+        print(f"    #{pr.number}: {pr.title} "
+              f"({count_packages(pr.body)} packages)")
+    if dry_run:
+        return sub
+    for pr in prs:
+        status = process_pr(pr, repo, main_repo)
+        sub[status].append(f"{repo}#{pr.number}")
+    return sub
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -522,6 +562,16 @@ def main() -> None:
             "pyproject.toml on main, not just --repo. Multiplies review-"
             "event volume across the fleet. Mutually exclusive with "
             "--repo (--fleet wins). (#1091)"
+        ),
+    )
+    parser.add_argument(
+        "--workers", type=int, default=3,
+        help=(
+            "Cross-repo parallelism (#1093). Number of repos to process "
+            "concurrently in --fleet mode. PRs within a single repo "
+            "remain sequential (each merge moves main; the next PR "
+            "should test against the new HEAD). Ignored when --fleet "
+            "is not set. Default: 3."
         ),
     )
     parser.add_argument("--main-repo", default=str(Path.cwd()),
@@ -547,33 +597,55 @@ def main() -> None:
         "merged": [], "deferred": [], "errored": [],
     }
 
-    for repo in repos:
-        print(f"\n{'=' * 60}")
-        print(f"REPO: {repo}")
-        print(f"{'=' * 60}")
-        prs = list_dependabot_prs(repo)
-        if not prs:
-            print(f"  No open dependabot PRs in {repo}.")
-            continue
-        print(f"  Found {len(prs)} open dependabot PR(s):")
-        for pr in prs:
-            print(f"    #{pr.number}: {pr.title} "
-                  f"({count_packages(pr.body)} packages)")
-        if args.dry_run:
-            continue
-        for pr in prs:
-            status = process_pr(pr, repo, main_repo)
-            results[status].append(f"{repo}#{pr.number}")
+    # Issue #1093: parallelize across repos in --fleet mode. Single-
+    # repo mode (or --workers=1) keeps the sequential path. Within a
+    # repo, processing is always sequential.
+    if args.fleet and args.workers > 1 and not args.dry_run:
+        print(f"\nProcessing {len(repos)} repo(s) with {args.workers} "
+              f"worker(s)...")
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(process_repo, repo, main_repo, args.dry_run): repo
+                for repo in repos
+            }
+            for future in as_completed(futures):
+                repo = futures[future]
+                try:
+                    sub = future.result()
+                except Exception as e:
+                    print(f"\n  [ERROR] worker for {repo} raised: {e}")
+                    sub = {"merged": [], "deferred": [], "errored": [repo]}
+                for k in ("merged", "deferred", "errored"):
+                    results[k].extend(sub[k])
+    else:
+        for repo in repos:
+            sub = process_repo(repo, main_repo, args.dry_run)
+            for k in ("merged", "deferred", "errored"):
+                results[k].extend(sub[k])
 
     if args.dry_run:
         print("\n(dry-run; exiting)")
         return
+
+    # Issue #1093: review-event counter — every merged PR generated
+    # one APPROVED review event; every deferred PR generated one
+    # COMMENTED review event (per change A in #1091). Errored PRs
+    # generated nothing (the script bailed before any gh pr review
+    # call). The counter makes Code Review profile-stat math visible
+    # so the operator can verify credit was earned each run.
+    approved_events = len(results["merged"])
+    commented_events = len(results["deferred"])
+    total_events = approved_events + commented_events
 
     print("\n=== Summary ===")
     print(f"  Merged:   {results['merged']}")
     print(f"  Deferred (test failures / install errors, worktree retained): "
           f"{results['deferred']}")
     print(f"  Errored:  {results['errored']}")
+    print(
+        f"  Review events created: {approved_events} APPROVED "
+        f"+ {commented_events} COMMENTED = {total_events} total"
+    )
 
 
 if __name__ == "__main__":
