@@ -84,6 +84,8 @@ from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
 )
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
+from assemblyzero.workflows.testing.nodes.revise_test_plan import revise_test_plan  # Issue #1072
+
 from assemblyzero.workflows.testing.nodes.adversarial_node import (
     run_adversarial_node,
 )
@@ -110,8 +112,20 @@ def route_after_load(
 
 def route_after_review(
     state: TestingWorkflowState,
-) -> Literal["N2_scaffold_tests", "end"]:
+) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "end"]:
     """Route after N1 (review_test_plan).
+
+    Issue #1072: BLOCKED no longer terminates by default. The
+    test_plan_policy controls behavior:
+
+    - "revise" (default): route to N1_5_revise_test_plan up to
+      MAX_REVISION_CYCLES; END after exhaustion.
+    - "auto": continue to N2_scaffold_tests despite BLOCKED (matches
+      the legacy auto_mode bypass).
+    - "strict": END on BLOCKED (legacy default behavior).
+
+    The legacy `auto_mode` flag is honored for backward compatibility:
+    when set, it forces the auto path regardless of test_plan_policy.
 
     Args:
         state: Current workflow state.
@@ -119,20 +133,42 @@ def route_after_review(
     Returns:
         Next node name or END.
     """
+    from assemblyzero.workflows.testing.nodes.revise_test_plan import (
+        MAX_REVISION_CYCLES,
+    )
+
     error = state.get("error_message", "")
     test_plan_status = state.get("test_plan_status", "")
     auto_mode = state.get("auto_mode", False)
+    policy = state.get("test_plan_policy", "revise")
+    revision_count = state.get("test_plan_revision_count", 0)
 
     if error and not auto_mode:
         return "end"
 
-    # BLOCKED means test plan needs revision - this requires returning
-    # to the LLD workflow (outside scope of this workflow)
-    # In auto_mode, continue anyway (skip human gate)
     if test_plan_status == "BLOCKED":
-        if auto_mode:
-            print("    [AUTO] Continuing despite BLOCKED verdict - auto mode enabled")
+        # Legacy auto_mode flag OR policy=auto bypasses the gate.
+        if auto_mode or policy == "auto":
+            print(
+                "    [AUTO] Continuing despite BLOCKED verdict "
+                "(test_plan_policy=auto)"
+            )
             return "N2_scaffold_tests"
+        # Strict policy preserves the original END-on-BLOCKED behavior.
+        if policy == "strict":
+            print("    [STRICT] BLOCKED → END (test_plan_policy=strict)")
+            return "end"
+        # Default revise policy: try to fix the test plan up to N cycles.
+        if revision_count < MAX_REVISION_CYCLES:
+            print(
+                f"    [REVISE] BLOCKED → N1.5 revise cycle "
+                f"{revision_count + 1}/{MAX_REVISION_CYCLES}"
+            )
+            return "N1_5_revise_test_plan"
+        print(
+            f"    [REVISE] BLOCKED after {MAX_REVISION_CYCLES} revision "
+            "cycles — END"
+        )
         return "end"
 
     return "N2_scaffold_tests"
@@ -382,6 +418,7 @@ def build_testing_workflow() -> StateGraph:
     # Add nodes
     workflow.add_node("N0_load_lld", load_lld)
     workflow.add_node("N1_review_test_plan", review_test_plan)
+    workflow.add_node("N1_5_revise_test_plan", revise_test_plan)  # Issue #1072
     workflow.add_node("N2_scaffold_tests", scaffold_tests)
     workflow.add_node("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
     workflow.add_node("N3_verify_red", verify_red_phase)
@@ -408,15 +445,19 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N1 -> N2 (with error/blocked check)
+    # N1 -> N2 / N1.5 / END (Issue #1072: revise on BLOCKED)
     workflow.add_conditional_edges(
         "N1_review_test_plan",
         route_after_review,
         {
             "N2_scaffold_tests": "N2_scaffold_tests",
+            "N1_5_revise_test_plan": "N1_5_revise_test_plan",
             "end": END,
         },
     )
+
+    # N1.5 -> N1 (revisions always loop back for re-review; Issue #1072)
+    workflow.add_edge("N1_5_revise_test_plan", "N1_review_test_plan")
 
     # N2 -> N2.5 (with scaffold_only check) - Issue #335
     workflow.add_conditional_edges(

@@ -481,6 +481,21 @@ def create_argument_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    # Issue #1072: Test-plan policy on BLOCKED at N1.
+    parser.add_argument(
+        "--test-plan-policy",
+        choices=["revise", "auto", "strict"],
+        default="revise",
+        help=(
+            "Behavior when N1 returns BLOCKED on the test plan. "
+            "'revise' (default): up to 2 revision cycles, then END. "
+            "'auto': continue to scaffold despite BLOCKED (legacy "
+            "auto_mode bypass). 'strict': END immediately on BLOCKED "
+            "(pre-#1072 behavior). The legacy auto_mode setting still "
+            "forces the auto path regardless of this flag. (#1072)"
+        ),
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -760,6 +775,9 @@ def main():
         "config_reviewer": args.reviewer,  # Issue #773
         "config_effort": args.effort,  # Issue #773
         "config_retry_policy": args.retry_policy,  # Issue #1071
+        "config_drafter": args.reviewer,  # Issue #1072: revisor reuses reviewer spec
+        "test_plan_policy": args.test_plan_policy,  # Issue #1072
+        "test_plan_revision_count": 0,  # Issue #1072
         "auto_mode": args.auto_mode,
         "mock_mode": args.mock,
         "skip_e2e": args.skip_e2e,
