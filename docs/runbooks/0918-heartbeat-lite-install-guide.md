@@ -1,8 +1,8 @@
 # 0918 - Claude Code Heartbeat Lite Install Guide
 
 **Category:** Runbook / Installation Guide
-**Version:** 1.0
-**Last Updated:** 2026-02-06
+**Version:** 1.1
+**Last Updated:** 2026-05-10
 **Platform:** Windows (PowerShell only)
 
 ---
@@ -68,7 +68,7 @@ If using the logging version, check that the log file was created next to the sc
 
 ### Step 3: Register the Scheduled Task
 
-Run this in an **elevated PowerShell** (right-click PowerShell, "Run as Administrator"):
+Run this in a **regular (non-elevated) PowerShell**. User-context scheduled tasks with the default principal do NOT require admin elevation. (v1.0 of this runbook claimed otherwise — that was wrong; see #1099.)
 
 ```powershell
 $action = New-ScheduledTaskAction `
@@ -85,6 +85,8 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Description 'Hourly Claude Code heartbeat to keep session alive'
 ```
+
+`-WindowStyle Hidden -NoProfile` keeps the scheduled run silent (no popup, no focus theft). Don't drop those flags.
 
 Verify it registered:
 
@@ -132,4 +134,6 @@ If you are a Claude Code agent setting this up for a user:
 2. Get the full path to `claude` via `Get-Command claude` in case it's not in the scheduled task's PATH
 3. Use the full path in the script if `claude` alone doesn't resolve
 4. Test the script (Step 2) before registering the scheduled task
-5. The scheduled task registration requires admin elevation — tell the user they may see a UAC prompt
+5. **`Register-ScheduledTask` runs in user context — no admin elevation needed.** Don't tell the user to "Run as Administrator." Earlier versions of this runbook claimed otherwise; that was wrong (#1099). The default principal is the current user, the default `-RunLevel` is `Limited`, neither needs UAC. If you see a UAC prompt, you've accidentally specified `-Principal` with a SYSTEM account or `-RunLevel Highest`; remove those.
+6. **Always include `-WindowStyle Hidden -NoProfile`** in the PowerShell argument string. Without those, the scheduled run will pop a console that steals focus.
+7. **Verify the task command and any subprocess it spawns don't open their own console.** `-WindowStyle Hidden` only affects the parent powershell.exe. Children that explicitly allocate a console (winpty PTY, interactive REPLs) will still appear. See root `CLAUDE.md` § Windows Scheduled Tasks for the full agent-side rules.
