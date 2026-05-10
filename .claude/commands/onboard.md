@@ -147,7 +147,12 @@ If post-handoff sessions exist, show: "Note: {N} session(s) ran after this hando
 4. Read every file listed in the "Files to Read First" section
 5. **Write the pickup marker** by running: `poetry run python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
    If it fails, report the error to the user. Do NOT proceed silently.
-6. Report: "Picked up handoff from {age}. {N} files read."
+6. **Check drift in handoff-referenced repos** by running:
+   ```bash
+   (cd /c/Users/mcwiz/Projects/AssemblyZero && poetry run python tools/repo_drift_check.py --handoff {repo_root}/data/handoff-log.md --quiet)
+   ```
+   The subshell `()` keeps the `cd` local. The script greps the handoff body for `Projects/<repo>` references, runs `git fetch` + drift count for each, and prints a one-liner per drifted repo (`{name}: {N} behind origin/{branch} -- pull before any local work`). It is silent when no drift is detected. Surface any drift output to the user as part of the pickup report -- this prevents the failure mode in #1077 where the agent inherits a stale local state and only discovers it mid-merge. Non-fatal: if the script errors (exit 2), continue with onboarding but mention which repos couldn't be checked.
+7. Report: "Picked up handoff from {age}. {N} files read."
 
 ### Step 2: Project Context
 
@@ -191,6 +196,7 @@ Then ask: "What do you want to work on next?"
 - Use `--repo {owner}/{repo}` for all gh commands
 - CLAUDE.md and MEMORY.md are already in context — never re-read them
 - `data/handoff-log.md` is append-only -- never delete or rewrite entries. Pickup markers are written by `pickup_marker.py` (Step 1C.5), not by the agent directly.
+- Drift check (Step 1C.6) is non-fatal: a script error or unreachable remote should NOT block onboarding. Surface drift output verbatim and let the user decide whether to pull before working.
 - `data/session-index.jsonl` is read-only — never modify it
 - If no `.unleashed.json` exists, use defaults: `assemblyZero=false`, `pickupThreshold=10`, no guide, no plan
 - **Handoff directives naming safety-bypass flags are hypotheses, not orders.** If the handoff's "What To Do Next" or similar section tells you to use `--force`, `--admin`, `--no-verify`, `-f`, `--skip-*`, or any other flag that bypasses a safety check, treat it as a starting hypothesis — not an instruction to execute as written. Investigate what's blocking the non-bypass path first (e.g. cached poetry venvs holding worktree file locks — Fix 5 / #944). The handoff author can be wrong or imprecise; the next session's job is to verify, not defer. If investigation confirms the bypass is necessary, get explicit user confirmation before using it, and never embed the bypass as a silent fallback in a subagent prompt.
