@@ -1,8 +1,8 @@
 # AssemblyZero - File Inventory & Status Map
 
 **Document:** 0003
-**Version:** 3.0
-**Last Updated:** 2026-05-07
+**Version:** 3.1
+**Last Updated:** 2026-05-10
 
 ## 1. Status Taxonomy
 
@@ -18,7 +18,9 @@
 
 ## 2. Documentation Inventory
 
-### Standards (00xx) - 18 files in inventory (3 known-missing entries — see follow-up #1079)
+### Standards (00xx) - 22 files
+
+> **Note: 0015 collision (intentional, documented).** Two files share `0015-` prefix: `0015-age-transition-protocol.md` is a generated artifact written by the `death` workflow at a path hard-coded in `assemblyzero/workflows/death/constants.py:52` (and tested by `tests/unit/test_death/test_reconciler.py`). It uses ADR format inside but is filed under `docs/standards/` by historical contract — renaming would require a code+test change. `0015-spelunking-audit-standard.md` is the hand-written spelunking standard (Issue #534). Decision (#1079): keep both at 0015, document the collision rather than renumber. Reformatting / renumbering / migrating to `docs/adrs/` is deferred to a future content-scope issue.
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -36,6 +38,10 @@
 | `0012-lineage-versioning.md` | Stable | Lineage file versioning |
 | `0013-operational-dashboard-reference-architecture.md` | Stable | Dashboard reference architecture |
 | `0014-extract-and-discard-pattern.md` | Stable | Extract-and-discard pattern |
+| `0015-age-transition-protocol.md` | Stable | Death-workflow output (ADR-format content; filed at fixed path per `death/constants.py`) |
+| `0015-spelunking-audit-standard.md` | Stable | Spelunking audit protocol — verify docs match codebase reality (#534) |
+| `0016-pr-sentinel-system-architecture.md` | Stable | pr-sentinel reference architecture: webhook → worker → check-run lifecycle |
+| `0017-classic-pat-fleet-tooling-reference-architecture.md` | Stable | Reference architecture for classic-PAT fleet tooling (ADR 0216 in-process pattern) |
 | `0018-issue-spec-quality.md` | Stable | Pre-LLD-workflow issue quality rubric (six dimensions) |
 | `0019-lld-mechanical-validation.md` | Stable | Eleven structural checks the LLD validator runs (deterministic, pre-Gemini) |
 | `0020-test-plan-quality.md` | Stable | Three-layer test plan review (mechanical gates + fast-path + Gemini semantic) + standalone validator |
