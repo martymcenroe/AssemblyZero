@@ -18,7 +18,7 @@
 
 ## 2. Documentation Inventory
 
-### Standards (00xx) - 16 files in inventory (3 known-missing entries — see follow-up #1079)
+### Standards (00xx) - 17 files in inventory (3 known-missing entries — see follow-up #1079)
 
 | File | Status | Description |
 |------|--------|-------------|
@@ -38,6 +38,7 @@
 | `0014-extract-and-discard-pattern.md` | Stable | Extract-and-discard pattern |
 | `0018-issue-spec-quality.md` | Stable | Pre-LLD-workflow issue quality rubric (six dimensions) |
 | `0019-lld-mechanical-validation.md` | Stable | Eleven structural checks the LLD validator runs (deterministic, pre-Gemini) |
+| `0020-test-plan-quality.md` | Stable | Three-layer test plan review (mechanical gates + fast-path + Gemini semantic) + standalone validator |
 
 ### Templates (01xx) - 10 files
 
