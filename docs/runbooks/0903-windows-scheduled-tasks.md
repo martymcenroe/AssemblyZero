@@ -1,14 +1,27 @@
 # 0903 - Windows Scheduled Tasks
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.0
-**Last Updated:** 2026-01-17
+**Version:** 1.1
+**Last Updated:** 2026-05-10
 
 ---
 
 ## Purpose
 
-Documents the Windows Task Scheduler tasks that automate Claude Code operations: daily rotating audits across projects and hourly health/usage monitoring.
+Documents the Windows Task Scheduler tasks that automate Claude Code operations: daily rotating audits across projects, hourly health/usage monitoring, and the daily fleet-wide dependabot sweep.
+
+This runbook is also the **canonical pattern** for any new scheduled task an agent (or operator) creates. The Hard Rules below are mandatory; root `CLAUDE.md § Windows Scheduled Tasks` mirrors them for agent visibility outside this repo.
+
+---
+
+## Hard Rules (#1099)
+
+When registering ANY new task — agent or operator:
+
+1. **No admin required.** `Register-ScheduledTask` with default principal (current user) and default `-RunLevel` (Limited) does NOT need UAC. Never use `-Principal` to set a SYSTEM account, never use `-RunLevel Highest`, never use `schtasks /Create /RU SYSTEM`.
+2. **Always include `-WindowStyle Hidden -NoProfile`** in the PowerShell argument string. Without those, the scheduled run pops a console that steals focus from whatever the user is doing — twice/hour for hourly tasks, daily for nightly tasks. The popup can intercept keystrokes and break the user's flow mid-sentence.
+3. **Verify subprocess silence too.** `-WindowStyle Hidden` only affects the parent `powershell.exe`. Children that allocate their own console (winpty `PtyProcess.spawn`, interactive REPLs like `claude`/`gh auth`, `cmd /c start`) WILL still appear regardless of the parent's window-style. Test by manually firing the task (`Start-ScheduledTask -TaskName <name>`) and watching for window flashes.
+4. **Use the user's gh credentials when the task does GitHub work.** Tasks running as the current user inherit `gh auth` from the user's profile. Don't try to thread a PAT through env vars or set up a service account; both lose review-attribution credit (cf. AssemblyZero #1091/#1092). The default current-user principal is also the right principal for credit.
 
 ---
 
@@ -18,6 +31,8 @@ Documents the Windows Task Scheduler tasks that automate Claude Code operations:
 |-----------|----------|---------|
 | Claude-DailyAudit | Daily 4:30 AM | Rotates through projects running `/audit` |
 | Claude-Heartbeat | Hourly | Monitors usage quotas and Claude availability |
+| Claude-Capture | Hourly :58 | Quota scrape just before hour boundary |
+| Claude-DependabotFleet | Daily 6:00 AM | Fleet-wide dependabot PR review + merge (#1091, #1092) |
 
 ---
 
@@ -318,3 +333,4 @@ Register-ScheduledTask -TaskName 'Claude-Heartbeat' -Action $action -Trigger $tr
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-17 | Initial version documenting existing scheduled tasks |
+| 1.1 | 2026-05-10 | (#1099) Added Hard Rules section — no-admin requirement, mandatory `-WindowStyle Hidden -NoProfile`, subprocess-silence verification, current-user principal for credit attribution. Added Claude-Capture + Claude-DependabotFleet to the overview. |
