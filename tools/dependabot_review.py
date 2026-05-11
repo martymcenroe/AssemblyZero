@@ -64,6 +64,12 @@ POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 900
 PYTEST_TIMEOUT_S = 1800
 POETRY_INSTALL_TIMEOUT_S = 600
+# Issue #1107: forensic worktrees from deferred PRs are retained for human
+# inspection but accumulate forever without a cleanup contract. Worktrees
+# older than this threshold are GC'd at the start of each /dependabot run.
+# 14 days covers the typical "I'll look at it next week" window without
+# letting the directory grow unboundedly.
+FORENSIC_WORKTREE_AGE_DAYS = 14
 
 
 @dataclass
@@ -171,7 +177,12 @@ def create_audit_worktree(main_repo: Path, pr_number: int) -> tuple[Path, str]:
 
 
 def checkout_pr_into_worktree(worktree: Path, pr_number: int, repo: str) -> bool:
-    result = run(["gh", "pr", "checkout", str(pr_number), "--repo", repo],
+    # --detach: do NOT create a local branch named after the PR's headRefName
+    # (e.g., "dependabot/pip/pip-foo"). cleanup_worktree only deletes the audit
+    # branch we created in create_audit_worktree; without --detach, the dep
+    # branch survives every "successful" cleanup and accumulates as orphan
+    # local refs. (#1107)
+    result = run(["gh", "pr", "checkout", str(pr_number), "--repo", repo, "--detach"],
                  cwd=str(worktree))
     return result.returncode == 0
 
@@ -366,10 +377,84 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
 # Cleanup
 # ---------------------------------------------------------------------------
 
+def gc_stale_forensic_worktrees(main_repo: Path,
+                                 max_age_days: int = FORENSIC_WORKTREE_AGE_DAYS) -> list[str]:
+    """Remove forensic worktrees from deferred PRs older than max_age_days.
+
+    Walks <projects-root>/<repo>-dependabot-* directories. For each that:
+    1. Is registered as a worktree of main_repo
+    2. Has a worktree-add timestamp older than max_age_days
+    -- run cleanup_worktree on it. Returns the list of cleaned-up worktree
+    paths (for reporting / logging).
+
+    The age signal is the worktree's HEAD .git file mtime, which git sets
+    when the worktree is created and updates only on git operations against
+    that worktree. Forensic worktrees see no git activity after deferral,
+    so the mtime accurately reflects "time since deferral".
+
+    Issue #1107.
+    """
+    import time as _time
+
+    cleaned: list[str] = []
+    pattern = f"{main_repo.name}-dependabot-*"
+    parent = main_repo.parent
+    if not parent.is_dir():
+        return cleaned
+
+    # Get the set of registered worktree paths (so we don't try to remove
+    # a directory that isn't actually a worktree -- could be user data).
+    wt_list = run(["git", "-C", str(main_repo), "worktree", "list", "--porcelain"])
+    if wt_list.returncode != 0:
+        return cleaned
+    registered = set()
+    for line in wt_list.stdout.splitlines():
+        if line.startswith("worktree "):
+            registered.add(line[len("worktree "):].strip())
+
+    cutoff = _time.time() - (max_age_days * 86400)
+    for candidate in sorted(parent.glob(pattern)):
+        candidate_str = str(candidate).replace("\\", "/")
+        # Only operate on registered worktrees; skip stray directories.
+        # (git uses forward slashes in worktree list output even on Windows.)
+        if candidate_str not in registered and str(candidate) not in registered:
+            continue
+        # Use the worktree's .git file mtime as the age signal.
+        # In a worktree, .git is a file (not a directory) pointing to the
+        # main repo's worktrees/<name>/ subdir; the file's mtime is set at
+        # creation and survives all PR-deferral operations untouched.
+        git_link = candidate / ".git"
+        if not git_link.exists():
+            continue
+        if git_link.stat().st_mtime >= cutoff:
+            continue  # too young -- keep for forensic value
+
+        # Derive the audit branch name (matches create_audit_worktree).
+        # candidate.name is "{repo}-dependabot-{N}"; extract N.
+        try:
+            pr_num = int(candidate.name.rsplit("-", 1)[-1])
+        except ValueError:
+            continue
+        audit_branch = f"dependabot-audit-{pr_num}"
+
+        print(f"  GC: removing stale forensic worktree {candidate} "
+              f"(age > {max_age_days}d)")
+        cleanup_worktree(main_repo, candidate, audit_branch)
+        cleaned.append(str(candidate))
+    return cleaned
+
+
 def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> None:
+    # `git branch -d` (lowercase, safe) is sufficient here because the audit
+    # branch is created from `main` by create_audit_worktree and never moves --
+    # checkout_pr_into_worktree uses `gh pr checkout --detach` (#1107), so the
+    # worktree's HEAD detaches without committing on the audit branch. After
+    # the dep PR is squash-merged, main fast-forwards past the original tip,
+    # leaving the audit branch fully reachable from main -> safe-delete works.
+    # `branch -D` is permanently banned per memory feedback_destructive_flag_scrutiny.
     evict_poetry_venv(worktree)
     run(["git", "-C", str(main_repo), "worktree", "remove", str(worktree)])
-    run(["git", "-C", str(main_repo), "branch", "-D", branch])
+    run(["git", "-C", str(main_repo), "branch", "-d", branch])
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +613,13 @@ def process_repo(
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
     print(f"{'=' * 60}")
+    # GC stale forensic worktrees before processing this repo's PRs (#1107).
+    # Forensic worktrees retained from prior deferred PRs are bounded by
+    # FORENSIC_WORKTREE_AGE_DAYS so the directory doesn't accumulate cruft.
+    cleaned = gc_stale_forensic_worktrees(main_repo)
+    if cleaned:
+        print(f"  GC removed {len(cleaned)} stale forensic worktree(s) "
+              f"(age > {FORENSIC_WORKTREE_AGE_DAYS}d)")
     prs = list_dependabot_prs(repo)
     if not prs:
         print(f"  No open dependabot PRs in {repo}.")
