@@ -91,6 +91,13 @@ def run_command(
         shell=shell,
         capture_output=kwargs.pop("capture_output", True),
         text=kwargs.pop("text", True),
+        # #837: Windows defaults to CP1252 for stdout decoding when text=True;
+        # any UTF-8 in subprocess output (unicode file paths, tracebacks with
+        # non-ASCII, emoji in test output) raises UnicodeDecodeError and
+        # crashes the workflow node. Force UTF-8 with replacement chars so the
+        # workflow keeps running and surfaces a readable error instead.
+        encoding=kwargs.pop("encoding", "utf-8"),
+        errors=kwargs.pop("errors", "replace"),
         check=kwargs.pop("check", False),
         **kwargs,
     )

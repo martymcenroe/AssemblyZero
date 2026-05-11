@@ -119,6 +119,8 @@ class ReviewAuditLog:
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",   # #837: Windows CP1252 default crashes on UTF-8 output
+                errors="replace",
                 timeout=10,
             )
         except FileNotFoundError:
