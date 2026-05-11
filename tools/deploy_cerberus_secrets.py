@@ -78,17 +78,25 @@ def get_all_repos() -> list[str]:
     return sorted(repos)
 
 
-def _get_repo_public_key(repo: str, pat: str) -> tuple[str, str] | None:
-    """Fetch the repo's Actions-secrets public key.
+_SCOPES = ("actions", "dependabot")
+
+
+def _get_public_key(repo: str, pat: str, scope: str = "actions") -> tuple[str, str] | None:
+    """Fetch the repo's secrets public key for a given scope.
+
+    Args:
+        scope: Either "actions" (default) or "dependabot". GitHub maintains
+            SEPARATE secret stores for these two contexts -- a secret set in
+            one is not visible to workflow runs in the other. Dependabot PRs
+            run with the Dependabot scope, regular workflow runs with the
+            Actions scope. (#1118)
 
     Returns (key_id, base64_public_key) on success, or None on failure.
-    GitHub requires the sealed-box encrypted secret value + key_id when
-    creating/updating a repo secret via the REST API.
     """
     try:
         resp = _request_with_retry(
             "GET",
-            f"{_GH_API}/repos/{GITHUB_USER}/{repo}/actions/secrets/public-key",
+            f"{_GH_API}/repos/{GITHUB_USER}/{repo}/{scope}/secrets/public-key",
             pat,
         )
     except requests.RequestException:
@@ -97,6 +105,10 @@ def _get_repo_public_key(repo: str, pat: str) -> tuple[str, str] | None:
         return None
     data = resp.json()
     return data["key_id"], data["key"]
+
+
+# Backwards-compat alias (still imported by external callers / tests).
+_get_repo_public_key = _get_public_key
 
 
 def _encrypt_secret(public_key_b64: str, secret_value: str) -> str:
@@ -111,19 +123,22 @@ def _encrypt_secret(public_key_b64: str, secret_value: str) -> str:
     return base64.b64encode(encrypted).decode("utf-8")
 
 
-def set_secret(repo: str, name: str, value: str, pat: str) -> bool:
-    """Set a GitHub Actions secret on a repo via REST API with in-process PAT.
+def set_secret(repo: str, name: str, value: str, pat: str, scope: str = "actions") -> bool:
+    """Set a GitHub secret on a repo via REST API in the given scope.
 
     Args:
         repo: Repo name (no owner prefix); paired with GITHUB_USER.
         name: Secret name (e.g. "REVIEWER_APP_ID").
         value: Plaintext secret value (will be sealed-box encrypted before PUT).
         pat: Classic PAT from classic_pat_session().
+        scope: "actions" (default) or "dependabot". The dependabot scope's
+            secrets are the ones visible to workflows triggered by Dependabot
+            PR events. Cerberus needs both scopes populated to function. (#1118)
 
     Returns:
         True on HTTP 2xx; False otherwise (including failure to fetch public key).
     """
-    pk = _get_repo_public_key(repo, pat)
+    pk = _get_public_key(repo, pat, scope=scope)
     if pk is None:
         return False
     key_id, public_key_b64 = pk
@@ -131,7 +146,7 @@ def set_secret(repo: str, name: str, value: str, pat: str) -> bool:
     try:
         resp = _request_with_retry(
             "PUT",
-            f"{_GH_API}/repos/{GITHUB_USER}/{repo}/actions/secrets/{name}",
+            f"{_GH_API}/repos/{GITHUB_USER}/{repo}/{scope}/secrets/{name}",
             pat,
             json={"encrypted_value": encrypted_value, "key_id": key_id},
         )
@@ -141,7 +156,8 @@ def set_secret(repo: str, name: str, value: str, pat: str) -> bool:
 
 
 def deploy_to_repo(repo: str, pem_content: str, pat: str) -> tuple[bool, list[str]]:
-    """Deploy REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY to a single repo.
+    """Deploy REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY to BOTH scopes
+    (Actions and Dependabot) on a single repo.
 
     Args:
         repo: Repo name (not owner/name) under GITHUB_USER.
@@ -149,18 +165,22 @@ def deploy_to_repo(repo: str, pem_content: str, pat: str) -> tuple[bool, list[st
         pat: Classic PAT from classic_pat_session().
 
     Returns:
-        (success, failed_secret_names). `success` is True iff both secrets set.
+        (success, failed_descriptors). Each failed entry is
+        "<scope>/<secret-name>" so the operator can see exactly which
+        scope-secret combo did not land. (#1118)
     """
     failed: list[str] = []
-    if not set_secret(repo, "REVIEWER_APP_ID", APP_ID, pat):
-        failed.append("REVIEWER_APP_ID")
-    if not set_secret(repo, "REVIEWER_APP_PRIVATE_KEY", pem_content, pat):
-        failed.append("REVIEWER_APP_PRIVATE_KEY")
+    for scope in _SCOPES:
+        if not set_secret(repo, "REVIEWER_APP_ID", APP_ID, pat, scope=scope):
+            failed.append(f"{scope}/REVIEWER_APP_ID")
+        if not set_secret(repo, "REVIEWER_APP_PRIVATE_KEY", pem_content, pat, scope=scope):
+            failed.append(f"{scope}/REVIEWER_APP_PRIVATE_KEY")
     return (len(failed) == 0, failed)
 
 
 def verify_secrets(repo: str, pat: str) -> tuple[bool, list[str]]:
-    """Check that both required Cerberus secrets are present on the repo.
+    """Check that both required Cerberus secrets are present on the repo
+    in BOTH the Actions and Dependabot scopes.
 
     Uses the same in-process PAT as deploy_to_repo for consistency (avoids
     depending on whatever gh auth happens to be pointed at).
@@ -170,21 +190,31 @@ def verify_secrets(repo: str, pat: str) -> tuple[bool, list[str]]:
         pat: Classic PAT from classic_pat_session().
 
     Returns:
-        (all_present, missing_secret_names).
+        (all_present, missing_descriptors). Each missing entry is
+        "<scope>/<secret-name>" so the caller can see which scope and
+        which secret is missing -- a repo with secrets only in Actions
+        scope (the pre-#1118 default) will report all 2 dependabot/*
+        entries as missing. (#1118)
     """
-    required = {"REVIEWER_APP_ID", "REVIEWER_APP_PRIVATE_KEY"}
-    try:
-        resp = _request_with_retry(
-            "GET",
-            f"{_GH_API}/repos/{GITHUB_USER}/{repo}/actions/secrets",
-            pat,
-        )
-    except requests.RequestException:
-        return (False, sorted(required))
-    if resp.status_code >= 300:
-        return (False, sorted(required))
-    present = {s["name"] for s in resp.json().get("secrets", [])}
-    missing = sorted(required - present)
+    required_names = {"REVIEWER_APP_ID", "REVIEWER_APP_PRIVATE_KEY"}
+    missing: list[str] = []
+    for scope in _SCOPES:
+        try:
+            resp = _request_with_retry(
+                "GET",
+                f"{_GH_API}/repos/{GITHUB_USER}/{repo}/{scope}/secrets",
+                pat,
+            )
+        except requests.RequestException:
+            missing.extend(f"{scope}/{n}" for n in sorted(required_names))
+            continue
+        if resp.status_code >= 300:
+            missing.extend(f"{scope}/{n}" for n in sorted(required_names))
+            continue
+        present = {s["name"] for s in resp.json().get("secrets", [])}
+        for n in sorted(required_names):
+            if n not in present:
+                missing.append(f"{scope}/{n}")
     return (len(missing) == 0, missing)
 
 
