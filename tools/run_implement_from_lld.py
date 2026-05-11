@@ -68,6 +68,8 @@ def get_current_branch(repo_path: Path) -> str:
         cwd=str(repo_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode == 0:
         return result.stdout.strip()
@@ -81,6 +83,8 @@ def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
         cwd=str(repo_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if result.returncode != 0:
         return None
@@ -135,6 +139,8 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
         cwd=str(repo_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
     if result.returncode != 0:
@@ -144,6 +150,8 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
             cwd=str(repo_path),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if result.returncode != 0:
             return worktree_path, f"Failed to create worktree: {result.stderr.strip()}"
@@ -154,6 +162,8 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
         cwd=str(worktree_path),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     if result.returncode != 0:

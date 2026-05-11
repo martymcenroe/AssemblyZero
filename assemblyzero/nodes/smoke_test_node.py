@@ -101,6 +101,8 @@ def run_smoke_test(entry_point: Path, timeout_seconds: int = 30) -> SmokeTestRes
             ["python", str(entry_point), "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",   # #837: Windows CP1252 default crashes on UTF-8 output
+            errors="replace",
             timeout=timeout_seconds,
             shell=False,
         )
