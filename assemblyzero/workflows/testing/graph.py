@@ -57,10 +57,11 @@ Graph structure:
                                                          END
 """
 
-from typing import Literal
+from typing import Any, Callable, Literal
 
 from langgraph.graph import END, StateGraph
 
+from assemblyzero.workflows.testing.checkpoints import commit_checkpoint
 from assemblyzero.workflows.testing.nodes import (
     cleanup,
     document,
@@ -74,6 +75,8 @@ from assemblyzero.workflows.testing.nodes import (
     verify_green_phase,
     verify_red_phase,
 )
+
+
 from assemblyzero.workflows.testing.nodes.completeness_gate import (
     completeness_gate,
     route_after_completeness_gate,
@@ -91,6 +94,34 @@ from assemblyzero.workflows.testing.nodes.adversarial_node import (
 )
 from assemblyzero.core.halt_node import create_halt_node
 from assemblyzero.core.llm_provider import get_cumulative_cost
+
+
+def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
+                            ckpt_name: str) -> Callable[..., dict[str, Any]]:
+    """Wrap a TDD node so it triggers a git checkpoint after it returns.
+
+    Pulls worktree_path and issue_number out of the workflow state. The
+    checkpoint itself is best-effort (see commit_checkpoint) -- any
+    failure is logged but never propagated to the node's caller, so a
+    flaky network or missing remote can't break the workflow.
+
+    Issue #689 -- 2026-01-31 lost 6,114 lines because TDD nodes didn't
+    commit between phases.
+    """
+    def wrapped(state: dict[str, Any]) -> dict[str, Any]:
+        result = node_fn(state)
+        worktree = state.get("worktree_path") or state.get("repo_path")
+        issue_obj = state.get("issue") or {}
+        issue_n = (
+            state.get("issue_number")
+            or (issue_obj.get("number") if isinstance(issue_obj, dict) else None)
+        )
+        try:
+            commit_checkpoint(worktree, issue_n, ckpt_name)
+        except Exception as e:
+            print(f"  [CP:{ckpt_name}] wrapper caught unexpected error: {e}")
+        return result
+    return wrapped
 
 
 def route_after_load(
@@ -419,12 +450,14 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N0_load_lld", load_lld)
     workflow.add_node("N1_review_test_plan", review_test_plan)
     workflow.add_node("N1_5_revise_test_plan", revise_test_plan)  # Issue #1072
-    workflow.add_node("N2_scaffold_tests", scaffold_tests)
+    # Issue #689: checkpoint after N2/N4/N5 so a crash between phases
+    # doesn't lose generated tests / implementation code.
+    workflow.add_node("N2_scaffold_tests", _wrap_with_checkpoint(scaffold_tests, "post-scaffold"))
     workflow.add_node("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
     workflow.add_node("N3_verify_red", verify_red_phase)
-    workflow.add_node("N4_implement_code", implement_code)
+    workflow.add_node("N4_implement_code", _wrap_with_checkpoint(implement_code, "post-impl"))
     workflow.add_node("N4b_completeness_gate", completeness_gate)  # Issue #147
-    workflow.add_node("N5_verify_green", verify_green_phase)
+    workflow.add_node("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
     workflow.add_node("N6_e2e_validation", e2e_validation)
     workflow.add_node("N7_finalize", finalize)
     workflow.add_node("N7_5_adversarial", run_adversarial_node)  # Issue #352
