@@ -1,15 +1,29 @@
 #!/usr/bin/env python3
-"""Deploy Cerberus (GitHub App) secrets to all repos.
+"""Deploy Cerberus (GitHub App) secrets to repos missing them.
 
 THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT.
-It handles a private key file — agents must never touch this.
+It handles a private key file -- agents must never touch this.
 
 Usage:
-    1. Download the .pem from GitHub App settings
-    2. Run:  poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem
-    3. DELETE the .pem file immediately after
+    1. Download the .pem from GitHub App settings (only if you'll deploy)
+    2. Run one of:
+         # Default: scan, deploy ONLY to repos missing both secrets (#763)
+         poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem
 
-The script sets two GitHub Actions secrets on every repo:
+         # All repos (use for key rotation -- old default behavior):
+         poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem --all
+
+         # Single repo:
+         poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem --repo NAME
+
+         # Dry-run: report which repos are missing secrets, no PUTs.
+         # .pem is optional in dry-run.
+         poetry run python tools/deploy_cerberus_secrets.py --dry-run
+         poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem --dry-run
+
+    3. DELETE the .pem file immediately after (skip if dry-run with no .pem)
+
+The script sets two GitHub Actions secrets on each target repo:
     - REVIEWER_APP_ID (3079970)
     - REVIEWER_APP_PRIVATE_KEY (contents of the .pem)
 
@@ -19,9 +33,10 @@ never placed in the shell env block or subprocess argv. Secret values
 are encrypted with libsodium sealed-box against the repo's public key
 per GitHub's API contract.
 
-Issue: #736 | Related: #732, #1007 (in-process PAT migration)
+Issue: #736 | Related: #732, #763 (auto-detect flags), #1007 (in-process PAT migration)
 """
 
+import argparse
 import base64
 import subprocess
 import sys
@@ -173,41 +188,122 @@ def verify_secrets(repo: str, pat: str) -> tuple[bool, list[str]]:
     return (len(missing) == 0, missing)
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: poetry run python tools/deploy_cerberus_secrets.py /path/to/cerberus.pem")
-        sys.exit(1)
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Deploy Cerberus GitHub App secrets to repos missing them.",
+        epilog="Default behavior: scan all repos, deploy only to ones missing both secrets.",
+    )
+    parser.add_argument(
+        "pem_path", nargs="?", default=None,
+        help="Path to the Cerberus .pem private key. "
+             "Required unless --dry-run is set.",
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="Deploy to all repos (skip the missing-secrets filter). "
+             "Use for key rotation.",
+    )
+    parser.add_argument(
+        "--repo", metavar="NAME", default=None,
+        help="Target a single repo by name (no owner prefix). "
+             "If the repo already has both secrets it is still skipped unless --all is set.",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Scan and print which repos would be deployed to. "
+             "Performs no PUTs. .pem is optional in this mode.",
+    )
+    return parser.parse_args(argv)
 
-    pem_path = Path(sys.argv[1])
+
+def _load_pem(pem_path: Path) -> str:
+    """Read and validate a .pem file. Exits the process on error."""
     if not pem_path.exists():
-        print(f"ERROR: File not found: {pem_path}")
+        print(f"ERROR: File not found: {pem_path}", file=sys.stderr)
         sys.exit(1)
-
-    if not pem_path.suffix == ".pem":
+    if pem_path.suffix != ".pem":
         print(f"WARNING: Expected .pem file, got: {pem_path.name}")
         response = input("Continue anyway? [y/N] ")
         if response.lower() != "y":
             sys.exit(1)
-
     pem_content = pem_path.read_text(encoding="utf-8").strip()
     if "PRIVATE KEY" not in pem_content:
-        print("ERROR: File doesn't look like a private key")
+        print("ERROR: File doesn't look like a private key", file=sys.stderr)
         sys.exit(1)
+    return pem_content
 
-    print(f"Cerberus App ID: {APP_ID}")
-    print(f"Private key: {pem_path.name} ({len(pem_content)} chars)")
-    print()
 
-    print("Fetching repo list...")
-    repos = get_all_repos()
-    print(f"Found {len(repos)} repos\n")
+def _select_target_repos(args: argparse.Namespace, pat: str) -> tuple[list[str], list[str]]:
+    """Return (target_repos, skipped_already_configured).
 
-    succeeded = 0
-    failed = []
+    Selection rules:
+        --repo NAME            -> only that repo (still respects missing-secrets filter unless --all)
+        --all                  -> every repo, no filtering
+        (default)              -> every repo MINUS those that already have both secrets
+    """
+    if args.repo:
+        candidates = [args.repo]
+    else:
+        candidates = get_all_repos()
+
+    if args.all:
+        return candidates, []
+
+    targets: list[str] = []
+    already_configured: list[str] = []
+    for repo in candidates:
+        all_present, _missing = verify_secrets(repo, pat)
+        if all_present:
+            already_configured.append(repo)
+        else:
+            targets.append(repo)
+    return targets, already_configured
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+
+    if not args.dry_run and args.pem_path is None:
+        print("ERROR: pem_path is required unless --dry-run is set.", file=sys.stderr)
+        return 1
+
+    pem_content: str | None = None
+    pem_path: Path | None = None
+    if args.pem_path is not None:
+        pem_path = Path(args.pem_path)
+        pem_content = _load_pem(pem_path)
+        print(f"Cerberus App ID: {APP_ID}")
+        print(f"Private key: {pem_path.name} ({len(pem_content)} chars)")
+        print()
+    elif args.dry_run:
+        print("Dry-run mode (no .pem provided). Scanning only.\n")
 
     with classic_pat_session() as pat:
-        for i, repo in enumerate(repos, 1):
-            prefix = f"[{i}/{len(repos)}] {repo}"
+        print("Fetching target repos...")
+        targets, skipped = _select_target_repos(args, pat)
+        print(f"Targets: {len(targets)} | Already configured: {len(skipped)}\n")
+
+        if args.dry_run:
+            if targets:
+                print("Would deploy to:")
+                for r in targets:
+                    print(f"  - {r}")
+            else:
+                print("All scanned repos already have both Cerberus secrets. Nothing to do.")
+            if skipped and not args.all:
+                print(f"\nAlready configured ({len(skipped)}): {', '.join(skipped)}")
+            return 0
+
+        if not targets:
+            print("All scanned repos already have both Cerberus secrets. Nothing to do.")
+            return 0
+
+        assert pem_content is not None  # _load_pem populated this above
+
+        succeeded = 0
+        failed: list[str] = []
+        for i, repo in enumerate(targets, 1):
+            prefix = f"[{i}/{len(targets)}] {repo}"
             ok, failed_names = deploy_to_repo(repo, pem_content, pat)
             if ok:
                 print(f"  {prefix}: OK")
@@ -217,12 +313,14 @@ def main():
                 failed.append(repo)
 
     print(f"\n{'=' * 50}")
-    print(f"Done: {succeeded}/{len(repos)} repos configured")
+    print(f"Done: {succeeded}/{len(targets)} repos configured")
     if failed:
         print(f"Failed: {', '.join(failed)}")
-    print(f"\n*** NOW DELETE THE .pem FILE: {pem_path} ***")
-    print("The secret is stored in GitHub — you never need the file again.")
+    if pem_path is not None:
+        print(f"\n*** NOW DELETE THE .pem FILE: {pem_path} ***")
+        print("The secret is stored in GitHub -- you never need the file again.")
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
