@@ -1,7 +1,6 @@
-"""Tests for tools/dependabot_review.py cleanup behavior (Issue #1107)."""
+"""Tests for tools/dependabot_review.py cleanup behavior (Issues #1107, #1116)."""
 import importlib.util
 import subprocess
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,134 +85,77 @@ def test_checkout_pr_into_worktree_uses_detach_flag(tmp_path):
     assert "owner/repo" in cmd
 
 
-# ---- Bug 3: gc_stale_forensic_worktrees age + registration filtering ----
+# ---- #1116: ALL deferred/errored exit paths must call cleanup_worktree.
+# No forensic retention. The PR + Actions output is the forensic record.
 
-def test_gc_returns_empty_when_no_dependabot_directories_exist(tmp_path):
+def test_gc_function_removed_no_forensic_retention():
+    """Regression guard: the #1107 GC function and constant must NOT exist.
+    #1116 removed them after user feedback that the 14-day retention window
+    was unacceptable."""
+    assert not hasattr(dependabot_review, "gc_stale_forensic_worktrees"), \
+        "gc_stale_forensic_worktrees was removed in #1116 -- no forensic retention"
+    assert not hasattr(dependabot_review, "FORENSIC_WORKTREE_AGE_DAYS"), \
+        "FORENSIC_WORKTREE_AGE_DAYS was removed in #1116 -- no forensic retention"
+
+
+def test_deferred_install_fail_path_calls_cleanup_worktree(tmp_path):
+    """When poetry install fails, the worktree must be removed before
+    returning 'deferred'. #1116."""
     main_repo = tmp_path / "repo"
     main_repo.mkdir()
-    with patch.object(dependabot_review, "run", return_value=_mk_completed()):
-        cleaned = dependabot_review.gc_stale_forensic_worktrees(main_repo)
-    assert cleaned == []
+    pr = dependabot_review.PRInfo(
+        number=42, title="bump foo", author_login="dependabot[bot]",
+        body="", head_ref="dependabot/pip/foo",
+    )
+
+    cleanup_called: list[tuple[Path, Path, str]] = []
+
+    def fake_cleanup(main_repo_arg, worktree_arg, branch_arg):
+        cleanup_called.append((main_repo_arg, worktree_arg, branch_arg))
+
+    with patch.object(dependabot_review, "verify_author", return_value=True), \
+         patch.object(dependabot_review, "create_audit_worktree",
+                      return_value=(tmp_path / "repo-dependabot-42", "dependabot-audit-42")), \
+         patch.object(dependabot_review, "checkout_pr_into_worktree", return_value=True), \
+         patch.object(dependabot_review, "evict_poetry_venv"), \
+         patch.object(dependabot_review, "install_deps", return_value=False), \
+         patch.object(dependabot_review, "review_comment_on_pr"), \
+         patch.object(dependabot_review, "cleanup_worktree", side_effect=fake_cleanup):
+        status = dependabot_review.process_pr(pr, "owner/repo", main_repo)
+
+    assert status == "deferred"
+    assert len(cleanup_called) == 1, \
+        f"cleanup_worktree must be called exactly once on install-fail path, got {len(cleanup_called)}"
 
 
-def test_gc_returns_empty_when_parent_directory_missing(tmp_path):
-    # main_repo points at something whose parent doesn't exist
-    nowhere = tmp_path / "deeply" / "missing" / "repo"
-    cleaned = dependabot_review.gc_stale_forensic_worktrees(nowhere)
-    assert cleaned == []
-
-
-def test_gc_skips_unregistered_directory_even_if_old(tmp_path):
-    """A dependabot-shaped directory that ISN'T a registered worktree must
-    be left alone -- could be user data."""
+def test_deferred_test_fail_path_calls_cleanup_worktree(tmp_path):
+    """When pytest exits non-zero, the worktree must be removed before
+    returning 'deferred'. #1116."""
     main_repo = tmp_path / "repo"
     main_repo.mkdir()
-    stray = tmp_path / "repo-dependabot-999"
-    stray.mkdir()
-    (stray / ".git").write_text("gitdir: irrelevant")
-    # Backdate the .git file mtime so the age filter would otherwise match.
-    old_ts = time.time() - (30 * 86400)
-    (stray / ".git").touch()
-    import os
-    os.utime(stray / ".git", (old_ts, old_ts))
+    pr = dependabot_review.PRInfo(
+        number=43, title="bump foo", author_login="dependabot[bot]",
+        body="", head_ref="dependabot/pip/foo",
+    )
 
-    # Mock run() so worktree list returns NOTHING (not registered).
-    def fake_run(cmd, cwd=None, timeout=None):
-        if "worktree" in cmd and "list" in cmd:
-            return _mk_completed(stdout="worktree /c/Users/mcwiz/Projects/repo\nHEAD abc\nbranch refs/heads/main\n")
-        return _mk_completed()
+    cleanup_called: list[tuple[Path, Path, str]] = []
 
-    with patch.object(dependabot_review, "run", side_effect=fake_run):
-        cleaned = dependabot_review.gc_stale_forensic_worktrees(main_repo, max_age_days=14)
+    def fake_cleanup(main_repo_arg, worktree_arg, branch_arg):
+        cleanup_called.append((main_repo_arg, worktree_arg, branch_arg))
 
-    assert cleaned == []  # stray dir not in worktree list -> skipped
-    assert stray.exists()
+    with patch.object(dependabot_review, "verify_author", return_value=True), \
+         patch.object(dependabot_review, "create_audit_worktree",
+                      return_value=(tmp_path / "repo-dependabot-43", "dependabot-audit-43")), \
+         patch.object(dependabot_review, "checkout_pr_into_worktree", return_value=True), \
+         patch.object(dependabot_review, "evict_poetry_venv"), \
+         patch.object(dependabot_review, "install_deps", return_value=True), \
+         patch.object(dependabot_review, "run_tests", return_value=1), \
+         patch.object(dependabot_review, "count_packages", return_value=1), \
+         patch.object(dependabot_review, "review_comment_on_pr"), \
+         patch.object(dependabot_review, "is_pr_branch_stale", return_value=False), \
+         patch.object(dependabot_review, "cleanup_worktree", side_effect=fake_cleanup):
+        status = dependabot_review.process_pr(pr, "owner/repo", main_repo)
 
-
-def test_gc_skips_young_registered_worktree(tmp_path):
-    main_repo = tmp_path / "repo"
-    main_repo.mkdir()
-    young = tmp_path / "repo-dependabot-100"
-    young.mkdir()
-    (young / ".git").write_text("gitdir: x")
-    # Default mtime = now -> too young
-
-    young_str = str(young).replace("\\", "/")
-
-    def fake_run(cmd, cwd=None, timeout=None):
-        if "worktree" in cmd and "list" in cmd:
-            return _mk_completed(stdout=f"worktree {young_str}\nHEAD x\nbranch refs/heads/y\n")
-        return _mk_completed()
-
-    with patch.object(dependabot_review, "run", side_effect=fake_run):
-        cleaned = dependabot_review.gc_stale_forensic_worktrees(main_repo, max_age_days=14)
-
-    assert cleaned == []
-    assert young.exists()
-
-
-def test_gc_removes_old_registered_worktree(tmp_path):
-    main_repo = tmp_path / "repo"
-    main_repo.mkdir()
-    old = tmp_path / "repo-dependabot-200"
-    old.mkdir()
-    (old / ".git").write_text("gitdir: x")
-    # Backdate the .git file mtime to look stale.
-    old_ts = time.time() - (30 * 86400)
-    import os
-    os.utime(old / ".git", (old_ts, old_ts))
-
-    old_str = str(old).replace("\\", "/")
-
-    captured: list[list[str]] = []
-
-    def fake_run(cmd, cwd=None, timeout=None):
-        captured.append(cmd)
-        if "worktree" in cmd and "list" in cmd:
-            return _mk_completed(stdout=f"worktree {old_str}\nHEAD x\nbranch refs/heads/y\n")
-        return _mk_completed()
-
-    with patch.object(dependabot_review, "run", side_effect=fake_run):
-        cleaned = dependabot_review.gc_stale_forensic_worktrees(main_repo, max_age_days=14)
-
-    assert cleaned == [str(old)]
-    # Verify cleanup_worktree was invoked (saw worktree remove + branch -d for audit-200)
-    cmd_strs = [" ".join(c) for c in captured]
-    assert any("worktree remove" in s for s in cmd_strs), cmd_strs
-    assert any("branch -d dependabot-audit-200" in s for s in cmd_strs), cmd_strs
-    # And critically: NEVER -D
-    assert not any("branch -D" in s for s in cmd_strs), \
-        f"BANNED: -D found in GC path -- {cmd_strs}"
-
-
-def test_gc_skips_directory_with_unparseable_pr_number(tmp_path):
-    main_repo = tmp_path / "repo"
-    main_repo.mkdir()
-    # Looks like a worktree dir but PR-number suffix is garbage
-    bad = tmp_path / "repo-dependabot-foobar"
-    bad.mkdir()
-    (bad / ".git").write_text("gitdir: x")
-    old_ts = time.time() - (30 * 86400)
-    import os
-    os.utime(bad / ".git", (old_ts, old_ts))
-
-    bad_str = str(bad).replace("\\", "/")
-
-    def fake_run(cmd, cwd=None, timeout=None):
-        if "worktree" in cmd and "list" in cmd:
-            return _mk_completed(stdout=f"worktree {bad_str}\nHEAD x\nbranch refs/heads/y\n")
-        return _mk_completed()
-
-    with patch.object(dependabot_review, "run", side_effect=fake_run):
-        cleaned = dependabot_review.gc_stale_forensic_worktrees(main_repo, max_age_days=14)
-
-    assert cleaned == []
-    assert bad.exists()
-
-
-# ---- Constants sanity ----
-
-def test_forensic_age_constant_is_reasonable_days():
-    # If anyone changes this to seconds-typed or zero, fail loudly.
-    assert isinstance(dependabot_review.FORENSIC_WORKTREE_AGE_DAYS, int)
-    assert 1 <= dependabot_review.FORENSIC_WORKTREE_AGE_DAYS <= 90
+    assert status == "deferred"
+    assert len(cleanup_called) == 1, \
+        f"cleanup_worktree must be called exactly once on test-fail path, got {len(cleanup_called)}"

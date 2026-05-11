@@ -24,16 +24,23 @@ For each open dependabot-authored PR:
     - `gh pr merge --squash`
     - Clean up worktree + audit branch
 - On red (non-zero):
-    - Comment on PR with exit code + forensics worktree path
+    - Comment on PR with exit code (PR + Actions output is the forensic
+      record -- no local artifact retained, #1116)
     - If multi-package PR: request `@dependabot recreate` to split into
       per-package PRs
-    - Leave worktree in place for forensics
+    - Clean up worktree + audit branch
     - Move to next PR (one failure does not block the queue)
+
+Cleanup contract: zero persistent disk artifacts on ANY exit path. Every
+return from process_pr (merged / deferred / errored) must call
+cleanup_worktree before returning. If a future maintainer wants to
+inspect a failure, they re-create the worktree via `gh pr checkout` --
+the PR + Actions output captures everything else (#1116).
 
 Usage:
     poetry run python tools/dependabot_review.py [--repo OWNER/REPO] [--dry-run]
 
-Issue: #949 | Related: #692 | Runbook: 0911 v2.0
+Issue: #949 | Related: #692, #1116 | Runbook: 0911 v2.0
 """
 
 import argparse
@@ -64,12 +71,6 @@ POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 900
 PYTEST_TIMEOUT_S = 1800
 POETRY_INSTALL_TIMEOUT_S = 600
-# Issue #1107: forensic worktrees from deferred PRs are retained for human
-# inspection but accumulate forever without a cleanup contract. Worktrees
-# older than this threshold are GC'd at the start of each /dependabot run.
-# 14 days covers the typical "I'll look at it next week" window without
-# letting the directory grow unboundedly.
-FORENSIC_WORKTREE_AGE_DAYS = 14
 
 
 @dataclass
@@ -377,73 +378,6 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
 # Cleanup
 # ---------------------------------------------------------------------------
 
-def gc_stale_forensic_worktrees(main_repo: Path,
-                                 max_age_days: int = FORENSIC_WORKTREE_AGE_DAYS) -> list[str]:
-    """Remove forensic worktrees from deferred PRs older than max_age_days.
-
-    Walks <projects-root>/<repo>-dependabot-* directories. For each that:
-    1. Is registered as a worktree of main_repo
-    2. Has a worktree-add timestamp older than max_age_days
-    -- run cleanup_worktree on it. Returns the list of cleaned-up worktree
-    paths (for reporting / logging).
-
-    The age signal is the worktree's HEAD .git file mtime, which git sets
-    when the worktree is created and updates only on git operations against
-    that worktree. Forensic worktrees see no git activity after deferral,
-    so the mtime accurately reflects "time since deferral".
-
-    Issue #1107.
-    """
-    import time as _time
-
-    cleaned: list[str] = []
-    pattern = f"{main_repo.name}-dependabot-*"
-    parent = main_repo.parent
-    if not parent.is_dir():
-        return cleaned
-
-    # Get the set of registered worktree paths (so we don't try to remove
-    # a directory that isn't actually a worktree -- could be user data).
-    wt_list = run(["git", "-C", str(main_repo), "worktree", "list", "--porcelain"])
-    if wt_list.returncode != 0:
-        return cleaned
-    registered = set()
-    for line in wt_list.stdout.splitlines():
-        if line.startswith("worktree "):
-            registered.add(line[len("worktree "):].strip())
-
-    cutoff = _time.time() - (max_age_days * 86400)
-    for candidate in sorted(parent.glob(pattern)):
-        candidate_str = str(candidate).replace("\\", "/")
-        # Only operate on registered worktrees; skip stray directories.
-        # (git uses forward slashes in worktree list output even on Windows.)
-        if candidate_str not in registered and str(candidate) not in registered:
-            continue
-        # Use the worktree's .git file mtime as the age signal.
-        # In a worktree, .git is a file (not a directory) pointing to the
-        # main repo's worktrees/<name>/ subdir; the file's mtime is set at
-        # creation and survives all PR-deferral operations untouched.
-        git_link = candidate / ".git"
-        if not git_link.exists():
-            continue
-        if git_link.stat().st_mtime >= cutoff:
-            continue  # too young -- keep for forensic value
-
-        # Derive the audit branch name (matches create_audit_worktree).
-        # candidate.name is "{repo}-dependabot-{N}"; extract N.
-        try:
-            pr_num = int(candidate.name.rsplit("-", 1)[-1])
-        except ValueError:
-            continue
-        audit_branch = f"dependabot-audit-{pr_num}"
-
-        print(f"  GC: removing stale forensic worktree {candidate} "
-              f"(age > {max_age_days}d)")
-        cleanup_worktree(main_repo, candidate, audit_branch)
-        cleaned.append(str(candidate))
-    return cleaned
-
-
 def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> None:
     # `git branch -d` (lowercase, safe) is sufficient here because the audit
     # branch is created from `main` by create_audit_worktree and never moves --
@@ -483,10 +417,12 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
         # path also accrues to the user's Code Review profile stat.
         review_comment_on_pr(
             pr.number, repo,
-            "Automated review via tools/dependabot_review.py — "
-            "`poetry install` failed. Check Actions / worktree for details.",
+            "Automated review via tools/dependabot_review.py -- "
+            "`poetry install` failed. See the PR's Actions output for the "
+            "captured stderr; re-run locally via `gh pr checkout` if needed.",
         )
-        # Leave worktree for forensics
+        # #1116: no retention. The PR + Actions output is the forensic record.
+        cleanup_worktree(main_repo, worktree, branch)
         return "deferred"
 
     exit_code = run_tests(worktree)
@@ -499,23 +435,25 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
         # user has audited the PR; the credit should reflect that.
         review_comment_on_pr(
             pr.number, repo,
-            f"Automated review via tools/dependabot_review.py — test suite "
-            f"FAILED (exit {exit_code}). Worktree retained at `{worktree}` "
-            f"for forensics. Not approving, not merging.",
+            f"Automated review via tools/dependabot_review.py -- test suite "
+            f"FAILED (exit {exit_code}). Not approving, not merging. "
+            f"Re-run locally via `gh pr checkout` if needed; the PR's Actions "
+            f"output is the forensic record.",
         )
         # Issue #994: prefer staleness diagnosis over recreate.
         # If the branch is behind main, the failure may be an artifact of a
         # missing fix on main; rebase first before considering the upgrade
         # incompatible.
         if is_pr_branch_stale(pr.number, repo):
-            print("  PR branch is stale (base behind main) — "
+            print("  PR branch is stale (base behind main) -- "
                   "requesting @dependabot rebase")
             request_dependabot_rebase(pr.number, repo)
         elif package_count > 1:
-            print(f"  Multi-package PR ({package_count} packages) — "
+            print(f"  Multi-package PR ({package_count} packages) -- "
                   f"requesting dependabot recreate")
             request_dependabot_recreate(pr.number, repo)
-        # Leave worktree in place for forensics
+        # #1116: no retention. The PR + Actions output is the forensic record.
+        cleanup_worktree(main_repo, worktree, branch)
         return "deferred"
 
     # ---- Green path ----
@@ -613,13 +551,6 @@ def process_repo(
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
     print(f"{'=' * 60}")
-    # GC stale forensic worktrees before processing this repo's PRs (#1107).
-    # Forensic worktrees retained from prior deferred PRs are bounded by
-    # FORENSIC_WORKTREE_AGE_DAYS so the directory doesn't accumulate cruft.
-    cleaned = gc_stale_forensic_worktrees(main_repo)
-    if cleaned:
-        print(f"  GC removed {len(cleaned)} stale forensic worktree(s) "
-              f"(age > {FORENSIC_WORKTREE_AGE_DAYS}d)")
     prs = list_dependabot_prs(repo)
     if not prs:
         print(f"  No open dependabot PRs in {repo}.")

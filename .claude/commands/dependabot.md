@@ -79,20 +79,19 @@ When the tool finishes, it prints a summary line like:
 
 Relay that summary to the user. If any PRs are in `Deferred`, note:
 
-- The worktree for each deferred PR has been retained at `C:/Users/mcwiz/Projects/AssemblyZero-dependabot-<N>` for forensics
-- **Forensic worktrees expire after 14 days.** At the start of every `/dependabot` run, the tool's `gc_stale_forensic_worktrees` pass removes deferred-PR worktrees whose `.git` mtime is older than `FORENSIC_WORKTREE_AGE_DAYS` (default 14). This prevents indefinite accumulation while preserving the standard human-inspection window. (#1107)
+- The PR's Actions output and `gh pr view` are the forensic record. The worktree is removed immediately on every path (#1116) -- if you need to reproduce locally, run `gh pr checkout <N>` to recreate a fresh worktree.
 - Multi-package PRs that failed tests will have an `@dependabot recreate` comment posted; dependabot will generate per-package PRs shortly, which can be processed with another `/dependabot` run
 
 If any PRs are in `Errored`, flag them plainly — those are infrastructure failures, not test failures, and likely need manual attention.
 
 ## Cleanup contract
 
-The tool produces no persistent artifacts on the green path:
+**Zero persistent disk artifacts on ANY exit path** (#1116). Every return from `process_pr` -- merged, deferred (install fail), deferred (test fail), errored -- invokes `cleanup_worktree` before returning.
 
 - **PR's local branch:** never created. `gh pr checkout --detach` is used so no `dependabot/<group>/<branch-name>` ref is left behind. (#1107)
-- **Audit branch (`dependabot-audit-<N>`):** safe-deleted via `git branch -d` after merge. (Banned: `git branch -D` -- this was a #1107 regression that left orphan refs.)
-- **Worktree:** removed via `git worktree remove` after merge. Poetry venv is evicted first to release Windows file locks (#944).
-- **Forensic worktrees from deferred PRs:** retained for 14 days then GC'd at the next run start.
+- **Audit branch (`dependabot-audit-<N>`):** safe-deleted via `git branch -d` after worktree removal. (Banned: `git branch -D`.)
+- **Worktree:** removed via `git worktree remove` after every PR. Poetry venv is evicted first to release Windows file locks (#944).
+- **No forensic retention.** The PR + GitHub Actions output captures the test output, exit codes, and error messages. If you need to reproduce locally days later, `gh pr checkout <N>` recreates a fresh worktree.
 
 ---
 
