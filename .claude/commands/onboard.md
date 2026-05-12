@@ -97,18 +97,6 @@ Read config + most recent session log + open issues. No pickup detection.
 
 The pickup decision is **event-ordered**, not age-based. Read `data/handoff-log.md` and pick up the handoff iff it has not been consumed by a `<!-- picked-up -->` marker. Age, post-handoff session count, and session activity DO NOT factor into this decision. A handoff that is the last unconsumed event in the log is exactly what the next session should resume — whether it's 5 minutes or 50 days old.
 
-**Pre-flight: Run `wrapper_status.py` for the running wrapper's version state:**
-
-```bash
-(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/wrapper_status.py --tier alpha --repo {repo_root})
-```
-
-The subshell `()` keeps the `cd` local. The script reads `~/.unleashed-usage.log` to find the most recent matching launch, stats the wrapper source file, and emits JSON with `status: current | stale | no_match | no_usage_log | wrapper_missing` plus a human-readable `summary`.
-
-**Why this runs before reading the handoff:** handoff text often references the wrapper version of the **handoff-writing** session ("this session ran under c-36 (pre-fix); the fix takes effect on the NEXT alpha launch"). The next session reads that verbatim and parrots "this session is pre-fix" — even though /handoff's spawn flow has already opened a fresh window that DOES have the fix loaded. wrapper_status gives ground truth for the CURRENT session before the handoff's framing has a chance to bias the report.
-
-When `status: current` AND the handoff text says "pre-fix", "fresh window", "NEXT alpha launch", or similar language implying the running wrapper lacks a recently merged fix, explicitly overrule the parroted framing in the Report — the current session IS the fresh window and the fix IS loaded. Cite the wrapper_status JSON (`wrapper_mtime`, `session_launch`) as evidence. Always include the result as "Wrapper: {summary}" in the Step 3 Report.
-
 **IF `--pickup` flag is set:** Skip detection. Go directly to Step 1D (import).
 
 **OTHERWISE:**
@@ -191,7 +179,6 @@ After Step 1B has decided pickup vs no-pickup, optionally surface these signals 
 Project: {name}
 Type: {from CLAUDE.md description — already in context}
 Focus: {from plan doc, handoff, or session log}
-Wrapper: {wrapper_status.summary — from the Step 1 pre-flight call}
 Top 3 issues: {from gh issue list}
 Model: {from system prompt} | Effort: {from config or "default"} | Window: {model window}
 ```
