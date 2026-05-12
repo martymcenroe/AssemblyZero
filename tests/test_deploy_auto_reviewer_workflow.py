@@ -562,26 +562,25 @@ def test_list_blocking_rulesets_5xx_returns_error():
 # ---------------------------------------------------------------------------
 
 def test_add_admin_bypass_captures_existing_actors():
-    """GET ruleset returns existing bypass_actors -> PATCH adds admin to
+    """GET ruleset returns existing bypass_actors -> PUT adds admin to
     the list AND returns the original for later restoration."""
     existing = [{"actor_id": 9999, "actor_type": "Team", "bypass_mode": "always"}]
-    get_resp = _fake_response(200, {"bypass_actors": existing})
-    patch_resp = _fake_response(200)
-
+    get_body = _fake_ruleset(14061333, bypass_actors=existing)
     captured: dict = {}
 
-    def fake_patch(url, **kwargs):
+    def fake_put(url, **kwargs):
+        captured["url"] = url
         captured["json"] = kwargs.get("json")
-        return patch_resp
+        return _fake_response(200)
 
-    with patch.object(deploy.requests, "get", return_value=get_resp), \
-         patch.object(deploy.requests, "patch", side_effect=fake_patch):
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put", side_effect=fake_put):
         ok, original, err = deploy.add_admin_bypass("repo", 14061333, "pat")
 
     assert ok is True
     assert err is None
     assert original == existing
-    # New list contains the original Team actor PLUS the admin role
     sent_actors = captured["json"]["bypass_actors"]
     assert len(sent_actors) == 2
     assert any(a["actor_type"] == "Team" for a in sent_actors)
@@ -593,55 +592,191 @@ def test_add_admin_bypass_captures_existing_actors():
     )
 
 
+def test_add_admin_bypass_put_body_excludes_server_managed_fields():
+    """#1141: PUT body must contain only writable fields. Server-managed
+    fields (id, source, source_type, node_id, created_at, updated_at,
+    current_user_can_bypass, _links) must be stripped before PUT."""
+    get_body = {
+        "id": 14061333,
+        "name": "main",
+        "target": "branch",
+        "source_type": "Repository",
+        "source": "martymcenroe/boostgauge",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+        "rules": [{"type": "pull_request", "parameters": {"required_approving_review_count": 0}}],
+        "node_id": "RRS_xxx",
+        "created_at": "2026-03-18T07:36:50.271-05:00",
+        "updated_at": "2026-03-18T07:36:50.294-05:00",
+        "bypass_actors": [],
+        "current_user_can_bypass": "never",
+        "_links": {"self": {"href": "https://api.github.com/..."}},
+    }
+    captured: dict = {}
+
+    def fake_put(url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return _fake_response(200)
+
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put", side_effect=fake_put):
+        deploy.add_admin_bypass("repo", 14061333, "pat")
+
+    body = captured["json"]
+    # Must contain writable fields
+    assert "name" in body
+    assert "target" in body
+    assert "enforcement" in body
+    assert "conditions" in body
+    assert "rules" in body
+    assert "bypass_actors" in body
+    # Must NOT contain server-managed fields
+    for forbidden in ("id", "source", "source_type", "node_id", "created_at",
+                      "updated_at", "current_user_can_bypass", "_links"):
+        assert forbidden not in body, (
+            f"PUT body contained server-managed field {forbidden!r}; "
+            "would be rejected or echoed back incorrectly by GitHub"
+        )
+
+
+def test_add_admin_bypass_uses_put_method_not_patch():
+    """#1141 regression guard: GitHub returns 404 for PATCH on this endpoint.
+    add_admin_bypass MUST use PUT, not PATCH."""
+    get_body = _fake_ruleset(14061333)
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put",
+                      return_value=_fake_response(200)) as mock_put, \
+         patch.object(deploy.requests, "patch") as mock_patch:
+        deploy.add_admin_bypass("repo", 14061333, "pat")
+    mock_put.assert_called_once()
+    mock_patch.assert_not_called()
+
+
 def test_add_admin_bypass_idempotent_when_already_present():
-    """If admin role is already a bypass_actor, no PATCH is sent."""
+    """If admin role is already a bypass_actor, no PUT is sent."""
     existing = [{
         "actor_id": deploy.REPO_ADMIN_ROLE_ID,
         "actor_type": "RepositoryRole",
         "bypass_mode": "always",
     }]
-    get_resp = _fake_response(200, {"bypass_actors": existing})
+    get_body = _fake_ruleset(14061333, bypass_actors=existing)
 
-    with patch.object(deploy.requests, "get", return_value=get_resp), \
-         patch.object(deploy.requests, "patch") as mock_patch:
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put") as mock_put:
         ok, original, err = deploy.add_admin_bypass("repo", 14061333, "pat")
 
     assert ok is True
     assert err is None
     assert original == existing
-    mock_patch.assert_not_called()
+    mock_put.assert_not_called()
 
 
-def test_add_admin_bypass_get_failure_no_patch():
+def test_add_admin_bypass_get_failure_no_put():
     with patch.object(deploy.requests, "get",
                       return_value=_fake_response(404, text="not found")), \
-         patch.object(deploy.requests, "patch") as mock_patch:
+         patch.object(deploy.requests, "put") as mock_put:
         ok, original, err = deploy.add_admin_bypass("repo", 999, "pat")
     assert ok is False
     assert original is None
     assert err is not None
+    mock_put.assert_not_called()
+
+
+def test_restore_bypass_uses_put_method_not_patch():
+    """#1141 regression guard: PATCH returns 404 here; restore must use PUT."""
+    get_body = _fake_ruleset(14061333)
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put",
+                      return_value=_fake_response(200)) as mock_put, \
+         patch.object(deploy.requests, "patch") as mock_patch:
+        deploy.restore_bypass("repo", 14061333, [], "pat")
+    mock_put.assert_called_once()
     mock_patch.assert_not_called()
 
 
 def test_restore_bypass_sends_original_list():
+    """restore_bypass GETs current state then PUTs with original bypass_actors."""
+    get_body = _fake_ruleset(
+        14061333,
+        bypass_actors=[{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+    )
+    original_to_restore = [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
     captured: dict = {}
 
-    def fake_patch(url, **kwargs):
+    def fake_put(url, **kwargs):
         captured["json"] = kwargs.get("json")
         return _fake_response(200)
 
-    original = [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
-    with patch.object(deploy.requests, "patch", side_effect=fake_patch):
-        ok, err = deploy.restore_bypass("repo", 123, original, "pat")
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put", side_effect=fake_put):
+        ok, err = deploy.restore_bypass("repo", 14061333, original_to_restore, "pat")
+
     assert ok is True
     assert err is None
-    assert captured["json"]["bypass_actors"] == original
+    assert captured["json"]["bypass_actors"] == original_to_restore
+    # And the full writable-fields shape is preserved (regression guard)
+    assert captured["json"].get("name") == "main"
+    assert captured["json"].get("target") == "branch"
 
 
-def test_restore_bypass_failure_returns_error():
-    with patch.object(deploy.requests, "patch",
-                      return_value=_fake_response(502, text="upstream")):
+def test_restore_bypass_put_body_excludes_server_managed_fields():
+    """#1141: same field-stripping requirement as add_admin_bypass."""
+    get_body = {
+        "id": 14061333,
+        "name": "main",
+        "target": "branch",
+        "enforcement": "active",
+        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+        "rules": [{"type": "pull_request"}],
+        "source": "x/y",
+        "source_type": "Repository",
+        "node_id": "z",
+        "created_at": "...",
+        "updated_at": "...",
+        "current_user_can_bypass": "never",
+        "_links": {},
+        "bypass_actors": [],
+    }
+    captured: dict = {}
+
+    def fake_put(url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return _fake_response(200)
+
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put", side_effect=fake_put):
+        deploy.restore_bypass("repo", 14061333, [], "pat")
+
+    body = captured["json"]
+    for forbidden in ("id", "source", "source_type", "node_id", "created_at",
+                      "updated_at", "current_user_can_bypass", "_links"):
+        assert forbidden not in body
+
+
+def test_restore_bypass_get_failure_no_put():
+    """If the pre-restore GET fails, no PUT attempt."""
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(503, text="upstream")), \
+         patch.object(deploy.requests, "put") as mock_put:
         ok, err = deploy.restore_bypass("repo", 123, [], "pat")
+    assert ok is False
+    assert err is not None
+    mock_put.assert_not_called()
+
+
+def test_restore_bypass_put_failure_returns_error():
+    get_body = _fake_ruleset(14061333)
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, get_body)), \
+         patch.object(deploy.requests, "put",
+                      return_value=_fake_response(502, text="upstream")):
+        ok, err = deploy.restore_bypass("repo", 14061333, [], "pat")
     assert ok is False
     assert err is not None
     assert "502" in err
