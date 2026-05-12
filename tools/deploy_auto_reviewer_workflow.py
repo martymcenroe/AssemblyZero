@@ -8,20 +8,31 @@ fine-grained PATs intentionally lack that scope.
 
 What this script does:
 
-  1. Determines the canonical auto-reviewer.yml content. By default,
-     reads it from the local AssemblyZero checkout (the one this
-     script lives in -- AssemblyZero's own auto-reviewer.yml IS the
-     canonical source since other repos call it as a reusable workflow
-     via `uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main`).
-     But wait -- each repo ALSO needs its own auto-reviewer.yml that
-     calls the reusable one. That caller file is the CALLER pattern
-     used by every other repo. We deploy THAT caller pattern.
+  1. Determines the canonical auto-reviewer.yml content. Each repo
+     gets the CALLER pattern (a 6-line YAML that invokes AZ's reusable
+     auto-reviewer workflow via `uses:`).
   2. For each target repo, PUTs the caller file via Contents API to
      `.github/workflows/auto-reviewer.yml` on the default branch.
   3. Idempotent: skips repos that already have the file.
 
-The canonical CALLER file is a 6-line YAML that invokes the AZ
-reusable workflow on PR events:
+#1135: bootstrap mode for STRICT-protected repos missing the workflow.
+The original (pre-#1135) tool only worked when direct PUT to main was
+allowed -- on STRICT repos (1 review + status checks + enforce_admins)
+the PUT is refused with "Repository rule violations found". When a
+repo's classic branch protection has enforce_admins=True, the tool now:
+
+  a. DELETEs the enforce_admins sub-resource (admins can bypass)
+  b. PUTs the workflow file (succeeds because PAT identity == owner == admin)
+  c. POSTs the enforce_admins sub-resource (restores admin enforcement)
+  d. All wrapped in try/finally so step (c) runs even if (b) fails.
+
+This is the sanctioned classic-PAT pattern per root CLAUDE.md
+("elevated-scope landings: workflow-file edits, branch-protection
+updates ... use in-process classic-PAT"). It is NOT the banned
+`--admin` flag (which is the `gh pr merge --admin` shortcut). The
+bypass window is one HTTP request, owner-only, atomic.
+
+The canonical CALLER file is:
 
     name: auto-reviewer
     on:
@@ -37,11 +48,11 @@ Usage:
     # Dry-run (default; safe)
     poetry run python tools/deploy_auto_reviewer_workflow.py --repos comp-environ,gh-galaxy-quest
 
-    # Apply
+    # Apply (auto-detects strict protection and bootstraps if needed)
     poetry run python tools/deploy_auto_reviewer_workflow.py \
-        --repos comp-environ,gh-galaxy-quest --apply --confirm-yes
+        --repos comp-environ,gh-galaxy-quest,boostgauge --apply --confirm-yes
 
-Issue: #1128 | Related: PR #1119 (#1118 dual-scope secrets), ADR-0216
+Issue: #1128, #1135 | Related: #1126 (protection remediation), ADR-0216
 """
 
 from __future__ import annotations
@@ -147,6 +158,140 @@ def put_workflow(repo: str, branch: str, existing_sha: str | None,
     return True, None
 
 
+# ---------------------------------------------------------------------------
+# #1135: bootstrap support for STRICT-protected repos
+# ---------------------------------------------------------------------------
+
+def get_protection(repo: str, branch: str,
+                   pat: str) -> tuple[dict | None, str | None]:
+    """GET classic branch protection.
+
+    Returns (protection_dict, error). protection_dict is None on 404
+    (unprotected) AND on GET failure -- callers should check error to
+    distinguish. error is None when the GET succeeded (200 or 404).
+    """
+    try:
+        r = requests.get(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}/protection",
+            headers=_headers(pat), timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return None, f"network: {e}"
+    if r.status_code == 404:
+        return None, None  # unprotected, not an error
+    if r.status_code >= 300:
+        return None, f"GET protection {r.status_code}: {r.text[:200]}"
+    return r.json(), None
+
+
+def is_enforce_admins_on(prot: dict | None) -> bool:
+    """True iff classic protection's enforce_admins.enabled is True.
+
+    When enforce_admins is True, admins (including the classic-PAT identity
+    acting as the repo owner) are subject to branch protection rules,
+    blocking direct Contents API PUT to the protected branch.
+    """
+    if prot is None:
+        return False
+    enforce = prot.get("enforce_admins")
+    if not isinstance(enforce, dict):
+        return False
+    return bool(enforce.get("enabled", False))
+
+
+def disable_enforce_admins(repo: str, branch: str,
+                           pat: str) -> tuple[bool, str | None]:
+    """DELETE the enforce_admins sub-resource. After this, admins bypass
+    branch protection rules (reviews, status checks, force-push, deletion).
+
+    The DELETE is the canonical GitHub API for toggling enforce_admins off;
+    it does NOT remove the rest of branch protection, only this dimension.
+    """
+    url = f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}/protection/enforce_admins"
+    try:
+        r = requests.delete(url, headers=_headers(pat), timeout=HTTP_TIMEOUT_S)
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if r.status_code >= 300:
+        return False, f"DELETE enforce_admins {r.status_code}: {r.text[:200]}"
+    return True, None
+
+
+def enable_enforce_admins(repo: str, branch: str,
+                          pat: str) -> tuple[bool, str | None]:
+    """POST the enforce_admins sub-resource. Restores admin enforcement
+    after a bootstrap PUT.
+    """
+    url = f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}/protection/enforce_admins"
+    try:
+        r = requests.post(url, headers=_headers(pat), timeout=HTTP_TIMEOUT_S)
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if r.status_code >= 300:
+        return False, f"POST enforce_admins {r.status_code}: {r.text[:200]}"
+    return True, None
+
+
+def deploy_with_bootstrap(repo: str, branch: str,
+                          pat: str) -> tuple[bool, str | None, bool]:
+    """Deploy auto-reviewer.yml to a repo, bootstrapping past strict
+    protection if necessary.
+
+    Returns (success, error, bootstrap_used). bootstrap_used is True
+    when enforce_admins was toggled. enforce_admins is always restored
+    on exit -- success OR failure -- via try/finally.
+
+    If enforce_admins restoration ITSELF fails, the error message
+    includes a manual recovery command. Operator MUST run that command;
+    the repo is left with weakened protection until they do.
+    """
+    prot, err = get_protection(repo, branch, pat)
+    if err:
+        return False, f"could not GET protection: {err}", False
+
+    if not is_enforce_admins_on(prot):
+        # Permissive branch -- direct PUT works
+        ok, put_err = put_workflow(repo, branch, None, pat)
+        return ok, put_err, False
+
+    # Strict path: relax enforce_admins, PUT, restore.
+    print(f"  bootstrap: strict protection detected (enforce_admins=True)")
+    print(f"  bootstrap: disabling enforce_admins on {repo}/{branch}")
+    ok, disable_err = disable_enforce_admins(repo, branch, pat)
+    if not ok:
+        return False, f"could not disable enforce_admins: {disable_err}", False
+
+    put_ok = False
+    put_err: str | None = None
+    restore_err: str | None = None
+    try:
+        put_ok, put_err = put_workflow(repo, branch, None, pat)
+    finally:
+        # Restoration ALWAYS runs (try/finally), even if put_workflow raised.
+        # Avoid `return` from `finally` -- it would swallow exceptions; instead
+        # capture the result and decide what to surface after the block.
+        print(f"  bootstrap: restoring enforce_admins on {repo}/{branch}")
+        enable_ok, enable_err = enable_enforce_admins(repo, branch, pat)
+        if not enable_ok:
+            recovery_url = (
+                f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}"
+                "/protection/enforce_admins"
+            )
+            print(
+                f"  CRITICAL: failed to restore enforce_admins on {repo}!\n"
+                f"  Branch protection is currently WEAKENED on this repo.\n"
+                f"  Recovery: POST {recovery_url} with classic PAT.\n"
+                f"  Error: {enable_err}",
+                file=sys.stderr,
+            )
+            restore_err = enable_err
+
+    # Restoration failure on top of PUT success is load-bearing -- surface it.
+    if put_ok and restore_err:
+        return False, f"PUT succeeded but enforce_admins restore failed: {restore_err}", True
+    return put_ok, put_err, True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
     parser.add_argument(
@@ -202,9 +347,14 @@ def main(argv: list[str] | None = None) -> int:
             if not args.apply:
                 continue
 
-            ok, err = put_workflow(repo, branch, None, pat)
+            # #1135: deploy_with_bootstrap auto-detects strict protection
+            # and toggles enforce_admins around the PUT when needed.
+            ok, err, bootstrap_used = deploy_with_bootstrap(repo, branch, pat)
             if ok:
-                print("  APPLIED")
+                if bootstrap_used:
+                    print("  APPLIED (via bootstrap)")
+                else:
+                    print("  APPLIED")
             else:
                 print(f"  FAILED: {err}")
                 failures.append(repo)
