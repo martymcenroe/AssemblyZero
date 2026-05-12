@@ -17,6 +17,21 @@ import tempfile
 import shutil
 
 
+@pytest.fixture(autouse=True)
+def _patch_lld_status_file(monkeypatch, tmp_path: Path) -> None:
+    """Redirect LLD_STATUS_FILE under tmp_path for test isolation (#1158).
+
+    PR #1156 made the constant absolute (~/.claude/assemblyzero/lld-status.json);
+    `target_repo / LLD_STATUS_FILE` now silently ignores target_repo. Tests that
+    pass `tmp_path` were reading the user's real ~/.claude file instead of the
+    test's tmp_path. This fixture restores per-test isolation.
+    """
+    monkeypatch.setattr(
+        "assemblyzero.workflows.requirements.audit.LLD_STATUS_FILE",
+        tmp_path / "docs" / "lld" / "lld-status.json",
+    )
+
+
 class TestCreateAuditDir:
     """Tests for create_audit_dir function."""
 

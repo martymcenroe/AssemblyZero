@@ -34,6 +34,26 @@ from assemblyzero.workflows.requirements.audit import (
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "lld_tracking"
 
 
+@pytest.fixture(autouse=True)
+def _patch_lld_status_file(monkeypatch, tmp_path: Path) -> None:
+    """Redirect LLD_STATUS_FILE under tmp_path for test isolation.
+
+    PR #1156 made LLD_STATUS_FILE an absolute Path (~/.claude/assemblyzero/...).
+    The function `load_lld_tracking(target_repo)` uses `target_repo / LLD_STATUS_FILE`
+    which collapses to the absolute path (Python Path `/` semantics), so passing
+    `tmp_path` is silently ignored. The function reads from the user's real
+    ~/.claude file instead of the test's tmp_path.
+
+    This autouse fixture monkeypatches the constant to live under tmp_path,
+    restoring per-test isolation. Tests still write to `tmp_path/docs/lld/...`
+    so the original test write locations remain valid. (#1158)
+    """
+    monkeypatch.setattr(
+        "assemblyzero.workflows.requirements.audit.LLD_STATUS_FILE",
+        tmp_path / "docs" / "lld" / "lld-status.json",
+    )
+
+
 @pytest.fixture
 def lld_with_review() -> str:
     """Load sample LLD content that contains a Gemini review section."""
