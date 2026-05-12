@@ -85,9 +85,12 @@ def test_audit_one_repo_missing_workflow_classified_not_ready():
     assert "branch_protection_not_strict" not in r.failures
 
 
-def test_audit_one_repo_missing_dependabot_secrets_classified_not_ready():
-    """The #1118 / PR #1119 failure mode."""
-    repo = {"name": "old-repo", "defaultBranchRef": {"name": "main"}}
+def test_audit_one_repo_missing_dependabot_secrets_still_classified_ready():
+    """Per #1131: Dependabot-scope is INFORMATIONAL ONLY -- not a readiness
+    blocker. Cerberus skips dependabot PRs at the workflow level so the
+    scope's emptiness is irrelevant to whether the repo can auto-merge
+    agent PRs."""
+    repo = {"name": "any-repo", "defaultBranchRef": {"name": "main"}}
 
     def fake_get(url, pat):
         if "/protection" in url:
@@ -97,14 +100,17 @@ def test_audit_one_repo_missing_dependabot_secrets_classified_not_ready():
         if "/actions/secrets" in url:
             return 200, _ready_secrets_body()
         if "/dependabot/secrets" in url:
-            return 200, {"secrets": []}  # empty -- the #1118 fail mode
+            return 200, {"secrets": []}  # empty -- previously failed; now OK
         return 200, {}
 
     with patch.object(audit, "_api_get", side_effect=fake_get):
         r = audit.audit_one(repo, "pat")
 
-    assert r.verdict == "NOT_READY"
-    assert "dependabot_secrets_incomplete" in r.failures
+    assert r.verdict == "READY", \
+        "Dependabot-scope emptiness must not flag a repo as NOT_READY (#1131)"
+    assert "dependabot_secrets_incomplete" not in r.failures
+    # The dimension is still reported for visibility
+    assert r.dependabot_secrets_complete is False
 
 
 def test_audit_one_repo_with_no_default_branch_unknown():
@@ -117,7 +123,10 @@ def test_audit_one_repo_with_no_default_branch_unknown():
 
 
 def test_audit_one_accumulates_multiple_failures():
-    """A repo can fail multiple dimensions; we report all of them."""
+    """A repo can fail multiple dimensions; we report all of them.
+
+    Post-#1131: only 3 dimensions count as readiness failures. Dependabot
+    scope is reported but not in failures."""
     repo = {"name": "x", "defaultBranchRef": {"name": "main"}}
 
     def fake_get(url, pat):
@@ -135,7 +144,10 @@ def test_audit_one_accumulates_multiple_failures():
         r = audit.audit_one(repo, "pat")
 
     assert r.verdict == "NOT_READY"
-    assert len(r.failures) == 4
+    # 3 readiness failures (protection, workflow, actions-secrets)
+    # Dependabot-scope is reported in the field but NOT in failures (#1131)
+    assert len(r.failures) == 3
+    assert "dependabot_secrets_incomplete" not in r.failures
 
 
 def test_audit_tsv_row_includes_all_four_dims():

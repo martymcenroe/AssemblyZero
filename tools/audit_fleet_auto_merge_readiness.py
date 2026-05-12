@@ -4,22 +4,29 @@
 THIS SCRIPT MUST BE RUN BY THE USER, NOT BY AN AGENT.
 Uses an in-process classic PAT (ADR-0216).
 
-A repo is auto-merge-ready iff ALL FOUR are true:
+A repo is auto-merge-ready iff ALL THREE are true:
 
   1. Branch protection is strict
        (>=1 review, status checks required, enforce_admins, no force pushes)
   2. .github/workflows/auto-reviewer.yml exists on the default branch
   3. Actions secrets contain REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
-  4. Dependabot secrets contain REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
 
-#1124 audited dimension 1. #1118 added dimension 4. This script checks
-all four and reports per-repo readiness.
+Dimension 4 (Dependabot-scope secrets) was originally included but
+DROPPED per #1131. Cerberus is the agent fence -- it gates PRs created
+by an agent acting under user credentials. Dependabot PRs have a
+separate governance path via tools/dependabot_review.py and do not
+go through Cerberus. The Dependabot scope's emptiness is therefore not
+a readiness blocker; the noisy auto-reviewer failure on dependabot PRs
+is fixed by the workflow-level skip landed in #1131.
+
+The Dependabot-scope check is still reported in the TSV for visibility,
+but no longer factors into the READY/NOT_READY verdict.
 
 Output:
   - audit_fleet_auto_merge_readiness_results.tsv (one row per repo)
   - Summary printed listing every NOT_READY repo with the failing dims
 
-Issue: #1128 | Related: #1124 (protection audit), #1118 (dependabot scope)
+Issue: #1128 | Related: #1131 (architectural correction), #1124 (protection)
 """
 
 from __future__ import annotations
@@ -206,14 +213,15 @@ def audit_one(repo_obj: dict, pat: str) -> RepoReadiness:
     if not has_act:
         r.failures.append("actions_secrets_incomplete")
 
-    # 4. Dependabot secrets
+    # 4. Dependabot secrets -- reported in TSV but NOT a failure per #1131.
+    # Cerberus skips dependabot PRs at the workflow level; this scope is
+    # informational only.
     has_dep, err = check_secrets(name, "dependabot", pat)
     r.dependabot_secrets_complete = has_dep
     if err:
-        r.error = err
-        return r
-    if not has_dep:
-        r.failures.append("dependabot_secrets_incomplete")
+        # An error querying dependabot scope shouldn't change the verdict;
+        # it's not a readiness dimension.
+        r.dependabot_secrets_complete = None
 
     return r
 
