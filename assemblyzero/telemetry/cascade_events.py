@@ -19,8 +19,17 @@ from assemblyzero.hooks.types import CascadeDetectionResult, CascadeRiskLevel
 
 logger = logging.getLogger(__name__)
 
-# Default log file location
-_DEFAULT_LOG_PATH = Path("tmp/cascade-events.jsonl")
+# Default log file location (#1134: must be an absolute path OUTSIDE any
+# git-tracked tree). The original relative path `tmp/cascade-events.jsonl`
+# coupled the detector's runtime state to whatever git repo the detector
+# happened to be invoked from -- worktrees inherited the tracked file and
+# became "dirty" the moment the detector fired, which broke
+# `git worktree remove` for tools like dependabot_review.py.
+#
+# The new path lives under ~/.claude/assemblyzero/ alongside other
+# Claude-config state. It is independent of CWD, never tracked by any
+# repo, and survives moves between worktrees / projects.
+_DEFAULT_LOG_PATH = Path.home() / ".claude" / "assemblyzero" / "cascade-events.jsonl"
 
 
 class CascadeEvent(TypedDict):
@@ -47,8 +56,9 @@ def log_cascade_event(
 
     Args:
         event: The CascadeEvent to log.
-        log_path: Path to JSONL log file. If None, uses default at
-                  tmp/cascade-events.jsonl.
+        log_path: Path to JSONL log file. If None, uses the absolute
+                  default at ~/.claude/assemblyzero/cascade-events.jsonl
+                  (#1134: deliberately outside any git-tracked tree).
     """
     if log_path is None:
         path = _DEFAULT_LOG_PATH

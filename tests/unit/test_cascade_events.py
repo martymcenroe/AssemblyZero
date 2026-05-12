@@ -13,12 +13,55 @@ from pathlib import Path
 import pytest
 
 from assemblyzero.hooks.types import CascadeRiskLevel
+from assemblyzero.telemetry import cascade_events as cascade_events_module
 from assemblyzero.telemetry.cascade_events import (
     CascadeEvent,
     create_cascade_event,
     get_cascade_stats,
     log_cascade_event,
 )
+
+
+# ── #1134: default log path must be absolute AND outside any git tree ──
+
+
+class TestDefaultLogPath:
+    """#1134 regression guards: the default cascade-events.jsonl path
+    must never live inside a git-tracked tree. The original
+    `tmp/cascade-events.jsonl` (relative) coupled the detector to
+    whatever CWD it was invoked from -- worktrees inherited a tracked
+    file and became dirty the moment the detector fired, breaking
+    `git worktree remove` for tools like dependabot_review.py.
+    """
+
+    def test_default_path_is_absolute(self) -> None:
+        assert cascade_events_module._DEFAULT_LOG_PATH.is_absolute(), (
+            "_DEFAULT_LOG_PATH must be absolute so it doesn't depend on CWD"
+        )
+
+    def test_default_path_is_under_claude_home(self) -> None:
+        """#1134: path should live under ~/.claude (the Claude config tree)."""
+        claude_home = Path.home() / ".claude"
+        try:
+            cascade_events_module._DEFAULT_LOG_PATH.relative_to(claude_home)
+        except ValueError:
+            pytest.fail(
+                f"_DEFAULT_LOG_PATH ({cascade_events_module._DEFAULT_LOG_PATH}) "
+                f"must live under {claude_home}, not anywhere else."
+            )
+
+    def test_default_path_is_not_relative_tmp(self) -> None:
+        """#1134 regression: the pre-fix `Path('tmp/cascade-events.jsonl')`
+        was relative, which caused the whole bug. A test that checks for
+        the literal old value would catch a regression to relative paths.
+        """
+        # str() because Path comparison normalizes; we want to catch the
+        # literal regression
+        path_str = str(cascade_events_module._DEFAULT_LOG_PATH).replace("\\", "/")
+        assert "tmp/cascade-events.jsonl" not in path_str or path_str.startswith("/") or path_str[1:3] == ":/", (
+            "_DEFAULT_LOG_PATH must not be the old relative 'tmp/cascade-events.jsonl' "
+            "form -- that path lived inside the repo tree and broke worktree cleanup."
+        )
 
 
 # ── T090: Event logging structure ──
