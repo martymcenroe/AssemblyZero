@@ -139,6 +139,7 @@ def test_enable_enforce_admins_403_fails():
 def test_deploy_permissive_uses_direct_put_no_bootstrap():
     """No protection on the branch -> direct PUT, bootstrap_used=False."""
     with patch.object(deploy, "get_protection", return_value=(None, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "put_workflow", return_value=(True, None)) as mock_put, \
          patch.object(deploy, "disable_enforce_admins") as mock_disable, \
          patch.object(deploy, "enable_enforce_admins") as mock_enable:
@@ -153,10 +154,10 @@ def test_deploy_permissive_uses_direct_put_no_bootstrap():
 
 
 def test_deploy_protected_but_enforce_admins_off_uses_direct_put():
-    """Protected branch with enforce_admins=False -> still direct PUT.
-    Admin push bypasses required reviews/checks naturally."""
+    """Protected branch with enforce_admins=False AND no rulesets -> direct PUT."""
     prot = {"enforce_admins": {"enabled": False}}
     with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "put_workflow", return_value=(True, None)) as mock_put, \
          patch.object(deploy, "disable_enforce_admins") as mock_disable:
         ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
@@ -168,7 +169,7 @@ def test_deploy_protected_but_enforce_admins_off_uses_direct_put():
 
 
 def test_deploy_strict_uses_bootstrap_path():
-    """enforce_admins=True -> DELETE enforce_admins, PUT, POST enforce_admins."""
+    """enforce_admins=True, no rulesets -> DELETE enforce_admins, PUT, POST enforce_admins."""
     prot = {"enforce_admins": {"enabled": True}}
     call_order: list[str] = []
 
@@ -185,6 +186,7 @@ def test_deploy_strict_uses_bootstrap_path():
         return (True, None)
 
     with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "disable_enforce_admins", side_effect=record_disable), \
          patch.object(deploy, "put_workflow", side_effect=record_put), \
          patch.object(deploy, "enable_enforce_admins", side_effect=record_enable):
@@ -209,6 +211,7 @@ def test_deploy_strict_restoration_happens_even_when_put_fails():
         return _fn
 
     with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "disable_enforce_admins",
                       side_effect=record("disable", (True, None))), \
          patch.object(deploy, "put_workflow",
@@ -220,17 +223,16 @@ def test_deploy_strict_restoration_happens_even_when_put_fails():
     assert ok is False
     assert "blocked" in err
     assert bootstrap_used is True
-    # finally must have run -- enable_enforce_admins was called
     assert "enable" in call_order
     assert call_order.index("enable") > call_order.index("put")
 
 
 def test_deploy_strict_restoration_failure_is_surfaced(capsys):
-    """If the PUT succeeds but the restore fails, the restore error is
-    surfaced (load-bearing) and a recovery hint is printed to stderr."""
+    """If PUT succeeds but enforce_admins restore fails, surface restore error."""
     prot = {"enforce_admins": {"enabled": True}}
 
     with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "disable_enforce_admins", return_value=(True, None)), \
          patch.object(deploy, "put_workflow", return_value=(True, None)), \
          patch.object(deploy, "enable_enforce_admins",
@@ -238,23 +240,22 @@ def test_deploy_strict_restoration_failure_is_surfaced(capsys):
         ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
 
     assert ok is False
-    assert "PUT succeeded but enforce_admins restore failed" in err
+    assert "PUT succeeded but restoration failed" in err
     assert "502" in err
     assert bootstrap_used is True
-    # Recovery hint must be printed
     err_stream = capsys.readouterr().err
     assert "CRITICAL" in err_stream
     assert "protection/enforce_admins" in err_stream
 
 
 def test_deploy_strict_disable_fails_no_put_attempt():
-    """If we can't disable enforce_admins, never attempt the PUT --
-    restoration also doesn't run because there's nothing to restore."""
+    """If we can't disable enforce_admins, never attempt the PUT."""
     prot = {"enforce_admins": {"enabled": True}}
 
     with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "disable_enforce_admins",
-                      return_value=((False, "DELETE 403: forbidden"))), \
+                      return_value=(False, "DELETE 403: forbidden")), \
          patch.object(deploy, "put_workflow") as mock_put, \
          patch.object(deploy, "enable_enforce_admins") as mock_enable:
         ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
@@ -267,9 +268,9 @@ def test_deploy_strict_disable_fails_no_put_attempt():
 
 
 def test_deploy_get_protection_error_aborts_early():
-    """GET protection failure is fatal -- never touch enforce_admins
-    or attempt PUT when we can't even see the current state."""
+    """GET protection failure is fatal."""
     with patch.object(deploy, "get_protection", return_value=(None, "GET 503: upstream")), \
+         patch.object(deploy, "list_blocking_rulesets") as mock_lrs, \
          patch.object(deploy, "disable_enforce_admins") as mock_disable, \
          patch.object(deploy, "put_workflow") as mock_put, \
          patch.object(deploy, "enable_enforce_admins") as mock_enable:
@@ -278,9 +279,372 @@ def test_deploy_get_protection_error_aborts_early():
     assert ok is False
     assert "could not GET protection" in err
     assert bootstrap_used is False
+    mock_lrs.assert_not_called()
     mock_disable.assert_not_called()
     mock_put.assert_not_called()
     mock_enable.assert_not_called()
+
+
+def test_deploy_get_rulesets_error_aborts_early():
+    """GET rulesets failure is fatal -- never touch any protection state."""
+    with patch.object(deploy, "get_protection", return_value=(None, None)), \
+         patch.object(deploy, "list_blocking_rulesets",
+                      return_value=([], "GET rulesets 503")), \
+         patch.object(deploy, "disable_enforce_admins") as mock_disable, \
+         patch.object(deploy, "put_workflow") as mock_put, \
+         patch.object(deploy, "enable_enforce_admins") as mock_enable:
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is False
+    assert "could not GET rulesets" in err
+    assert bootstrap_used is False
+    mock_disable.assert_not_called()
+    mock_put.assert_not_called()
+    mock_enable.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# #1137: ruleset bootstrap
+# ---------------------------------------------------------------------------
+
+def _fake_ruleset(rs_id: int, bypass_actors: list | None = None,
+                  target: str = "branch", include: list | None = None,
+                  enforcement: str = "active") -> dict:
+    return {
+        "id": rs_id,
+        "name": "main",
+        "target": target,
+        "enforcement": enforcement,
+        "conditions": {"ref_name": {"include": include or ["~DEFAULT_BRANCH"]}},
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
+        ],
+        "bypass_actors": bypass_actors or [],
+    }
+
+
+def test_deploy_ruleset_only_uses_bypass_path():
+    """No classic strict protection but ruleset present -> add admin bypass,
+    PUT, restore bypass."""
+    rs = _fake_ruleset(14061333)
+    call_order: list[str] = []
+
+    def record_add(repo, rs_id, pat):
+        call_order.append(f"add:{rs_id}")
+        return (True, [], None)
+
+    def record_put(*args, **kwargs):
+        call_order.append("put")
+        return (True, None)
+
+    def record_restore(repo, rs_id, original, pat):
+        call_order.append(f"restore:{rs_id}")
+        return (True, None)
+
+    with patch.object(deploy, "get_protection", return_value=(None, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([rs], None)), \
+         patch.object(deploy, "add_admin_bypass", side_effect=record_add), \
+         patch.object(deploy, "put_workflow", side_effect=record_put), \
+         patch.object(deploy, "restore_bypass", side_effect=record_restore), \
+         patch.object(deploy, "disable_enforce_admins") as mock_disable, \
+         patch.object(deploy, "enable_enforce_admins") as mock_enable:
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is True
+    assert err is None
+    assert bootstrap_used is True
+    assert call_order == ["add:14061333", "put", "restore:14061333"]
+    # Classic toggles never fired
+    mock_disable.assert_not_called()
+    mock_enable.assert_not_called()
+
+
+def test_deploy_classic_plus_ruleset_combined():
+    """Both classic enforce_admins=True AND ruleset present -> both bypasses
+    applied (classic first), PUT, both restored in reverse order (ruleset first)."""
+    prot = {"enforce_admins": {"enabled": True}}
+    rs = _fake_ruleset(14061333)
+    call_order: list[str] = []
+
+    def record(name, result):
+        def _fn(*args, **kwargs):
+            call_order.append(name)
+            return result
+        return _fn
+
+    with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([rs], None)), \
+         patch.object(deploy, "disable_enforce_admins",
+                      side_effect=record("classic_disable", (True, None))), \
+         patch.object(deploy, "add_admin_bypass",
+                      side_effect=lambda *a, **k: (call_order.append("rs_add"), (True, [], None))[1]), \
+         patch.object(deploy, "put_workflow",
+                      side_effect=record("put", (True, None))), \
+         patch.object(deploy, "restore_bypass",
+                      side_effect=lambda *a, **k: (call_order.append("rs_restore"), (True, None))[1]), \
+         patch.object(deploy, "enable_enforce_admins",
+                      side_effect=record("classic_enable", (True, None))):
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is True
+    assert bootstrap_used is True
+    # Apply order: classic_disable -> rs_add -> put
+    # Restore order (reverse): rs_restore -> classic_enable
+    assert call_order == ["classic_disable", "rs_add", "put", "rs_restore", "classic_enable"]
+
+
+def test_deploy_ruleset_restoration_runs_even_on_put_failure():
+    """PUT fails inside bootstrap -> ruleset bypass still gets restored."""
+    rs = _fake_ruleset(14061333)
+    call_order: list[str] = []
+
+    with patch.object(deploy, "get_protection", return_value=(None, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([rs], None)), \
+         patch.object(deploy, "add_admin_bypass",
+                      side_effect=lambda *a, **k: (call_order.append("add"), (True, [], None))[1]), \
+         patch.object(deploy, "put_workflow",
+                      side_effect=lambda *a, **k: (call_order.append("put"), (False, "PUT 409: blocked"))[1]), \
+         patch.object(deploy, "restore_bypass",
+                      side_effect=lambda *a, **k: (call_order.append("restore"), (True, None))[1]):
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is False
+    assert "blocked" in err
+    assert bootstrap_used is True
+    assert call_order == ["add", "put", "restore"]
+
+
+def test_deploy_ruleset_restoration_failure_is_surfaced(capsys):
+    """PUT succeeds but bypass restore fails -> CRITICAL stderr + restore error
+    surfaced as load-bearing."""
+    rs = _fake_ruleset(14061333)
+
+    with patch.object(deploy, "get_protection", return_value=(None, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([rs], None)), \
+         patch.object(deploy, "add_admin_bypass", return_value=(True, [], None)), \
+         patch.object(deploy, "put_workflow", return_value=(True, None)), \
+         patch.object(deploy, "restore_bypass",
+                      return_value=(False, "PATCH ruleset 502")):
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is False
+    assert "PUT succeeded but restoration failed" in err
+    assert "ruleset 14061333" in err
+    assert "502" in err
+    err_stream = capsys.readouterr().err
+    assert "CRITICAL" in err_stream
+    assert "rulesets/14061333" in err_stream
+
+
+def test_deploy_ruleset_add_bypass_fails_unwinds_prior_state(capsys):
+    """If add_admin_bypass fails on the Nth ruleset, prior rulesets' bypasses
+    AND classic enforce_admins must be unwound before returning."""
+    prot = {"enforce_admins": {"enabled": True}}
+    rs1 = _fake_ruleset(111)
+    rs2 = _fake_ruleset(222)
+
+    call_order: list[str] = []
+    add_results = iter([(True, [], None), (False, None, "PATCH 403")])
+
+    def fake_add(repo, rs_id, pat):
+        call_order.append(f"add:{rs_id}")
+        return next(add_results)
+
+    with patch.object(deploy, "get_protection", return_value=(prot, None)), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([rs1, rs2], None)), \
+         patch.object(deploy, "disable_enforce_admins",
+                      side_effect=lambda *a, **k: (call_order.append("classic_disable"), (True, None))[1]), \
+         patch.object(deploy, "add_admin_bypass", side_effect=fake_add), \
+         patch.object(deploy, "put_workflow") as mock_put, \
+         patch.object(deploy, "restore_bypass",
+                      side_effect=lambda *a, **k: (call_order.append("rs_restore"), (True, None))[1]), \
+         patch.object(deploy, "enable_enforce_admins",
+                      side_effect=lambda *a, **k: (call_order.append("classic_enable"), (True, None))[1]):
+        ok, err, bootstrap_used = deploy.deploy_with_bootstrap("repo", "main", "pat")
+
+    assert ok is False
+    assert "could not add bypass to ruleset 222" in err
+    assert bootstrap_used is True
+    # Sequence: classic_disable -> add:111 (ok) -> add:222 (fails) ->
+    #           emergency_unwind: rs_restore(111) -> classic_enable
+    # PUT is never called.
+    assert call_order == ["classic_disable", "add:111", "add:222", "rs_restore", "classic_enable"]
+    mock_put.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# list_blocking_rulesets
+# ---------------------------------------------------------------------------
+
+def test_list_blocking_rulesets_skips_inactive():
+    """enforcement != 'active' rulesets are not blocking."""
+    summaries = [{"id": 1, "name": "x", "target": "branch", "enforcement": "disabled"}]
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, summaries)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert rulesets == []
+    assert err is None
+
+
+def test_list_blocking_rulesets_filters_by_target():
+    """target != 'branch' rulesets are skipped."""
+    summaries = [{"id": 1, "name": "x", "target": "tag", "enforcement": "active"}]
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(200, summaries)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert rulesets == []
+
+
+def test_list_blocking_rulesets_filters_by_ref_include():
+    """Ruleset targeting a different branch is not returned for ours."""
+    summaries = [{"id": 1, "name": "x", "target": "branch", "enforcement": "active"}]
+    detail = _fake_ruleset(1, include=["refs/heads/dev"])  # not main
+    responses = iter([
+        _fake_response(200, summaries),
+        _fake_response(200, detail),
+    ])
+    with patch.object(deploy.requests, "get",
+                      side_effect=lambda *a, **k: next(responses)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert rulesets == []
+
+
+def test_list_blocking_rulesets_includes_default_branch_match():
+    """Ruleset with ~DEFAULT_BRANCH include is captured."""
+    summaries = [{"id": 99, "name": "main", "target": "branch", "enforcement": "active"}]
+    detail = _fake_ruleset(99, include=["~DEFAULT_BRANCH"])
+    responses = iter([
+        _fake_response(200, summaries),
+        _fake_response(200, detail),
+    ])
+    with patch.object(deploy.requests, "get",
+                      side_effect=lambda *a, **k: next(responses)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert len(rulesets) == 1
+    assert rulesets[0]["id"] == 99
+
+
+def test_list_blocking_rulesets_includes_explicit_ref_match():
+    """Ruleset with refs/heads/main include is captured."""
+    summaries = [{"id": 99, "name": "main", "target": "branch", "enforcement": "active"}]
+    detail = _fake_ruleset(99, include=["refs/heads/main"])
+    responses = iter([
+        _fake_response(200, summaries),
+        _fake_response(200, detail),
+    ])
+    with patch.object(deploy.requests, "get",
+                      side_effect=lambda *a, **k: next(responses)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert len(rulesets) == 1
+
+
+def test_list_blocking_rulesets_404_means_empty_no_error():
+    """Repo with no rulesets surface (404) returns empty list, no error."""
+    with patch.object(deploy.requests, "get", return_value=_fake_response(404)):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert rulesets == []
+    assert err is None
+
+
+def test_list_blocking_rulesets_5xx_returns_error():
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(503, text="upstream")):
+        rulesets, err = deploy.list_blocking_rulesets("repo", "main", "pat")
+    assert rulesets == []
+    assert err is not None
+    assert "503" in err
+
+
+# ---------------------------------------------------------------------------
+# add_admin_bypass / restore_bypass
+# ---------------------------------------------------------------------------
+
+def test_add_admin_bypass_captures_existing_actors():
+    """GET ruleset returns existing bypass_actors -> PATCH adds admin to
+    the list AND returns the original for later restoration."""
+    existing = [{"actor_id": 9999, "actor_type": "Team", "bypass_mode": "always"}]
+    get_resp = _fake_response(200, {"bypass_actors": existing})
+    patch_resp = _fake_response(200)
+
+    captured: dict = {}
+
+    def fake_patch(url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return patch_resp
+
+    with patch.object(deploy.requests, "get", return_value=get_resp), \
+         patch.object(deploy.requests, "patch", side_effect=fake_patch):
+        ok, original, err = deploy.add_admin_bypass("repo", 14061333, "pat")
+
+    assert ok is True
+    assert err is None
+    assert original == existing
+    # New list contains the original Team actor PLUS the admin role
+    sent_actors = captured["json"]["bypass_actors"]
+    assert len(sent_actors) == 2
+    assert any(a["actor_type"] == "Team" for a in sent_actors)
+    assert any(
+        a["actor_type"] == "RepositoryRole"
+        and a["actor_id"] == deploy.REPO_ADMIN_ROLE_ID
+        and a["bypass_mode"] == "always"
+        for a in sent_actors
+    )
+
+
+def test_add_admin_bypass_idempotent_when_already_present():
+    """If admin role is already a bypass_actor, no PATCH is sent."""
+    existing = [{
+        "actor_id": deploy.REPO_ADMIN_ROLE_ID,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always",
+    }]
+    get_resp = _fake_response(200, {"bypass_actors": existing})
+
+    with patch.object(deploy.requests, "get", return_value=get_resp), \
+         patch.object(deploy.requests, "patch") as mock_patch:
+        ok, original, err = deploy.add_admin_bypass("repo", 14061333, "pat")
+
+    assert ok is True
+    assert err is None
+    assert original == existing
+    mock_patch.assert_not_called()
+
+
+def test_add_admin_bypass_get_failure_no_patch():
+    with patch.object(deploy.requests, "get",
+                      return_value=_fake_response(404, text="not found")), \
+         patch.object(deploy.requests, "patch") as mock_patch:
+        ok, original, err = deploy.add_admin_bypass("repo", 999, "pat")
+    assert ok is False
+    assert original is None
+    assert err is not None
+    mock_patch.assert_not_called()
+
+
+def test_restore_bypass_sends_original_list():
+    captured: dict = {}
+
+    def fake_patch(url, **kwargs):
+        captured["json"] = kwargs.get("json")
+        return _fake_response(200)
+
+    original = [{"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
+    with patch.object(deploy.requests, "patch", side_effect=fake_patch):
+        ok, err = deploy.restore_bypass("repo", 123, original, "pat")
+    assert ok is True
+    assert err is None
+    assert captured["json"]["bypass_actors"] == original
+
+
+def test_restore_bypass_failure_returns_error():
+    with patch.object(deploy.requests, "patch",
+                      return_value=_fake_response(502, text="upstream")):
+        ok, err = deploy.restore_bypass("repo", 123, [], "pat")
+    assert ok is False
+    assert err is not None
+    assert "502" in err
 
 
 # ---------------------------------------------------------------------------

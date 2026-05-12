@@ -15,22 +15,32 @@ What this script does:
      `.github/workflows/auto-reviewer.yml` on the default branch.
   3. Idempotent: skips repos that already have the file.
 
-#1135: bootstrap mode for STRICT-protected repos missing the workflow.
+#1135 + #1137: bootstrap mode for STRICT-protected repos missing the workflow.
 The original (pre-#1135) tool only worked when direct PUT to main was
-allowed -- on STRICT repos (1 review + status checks + enforce_admins)
-the PUT is refused with "Repository rule violations found". When a
-repo's classic branch protection has enforce_admins=True, the tool now:
+allowed -- on protected repos (classic protection with enforce_admins
+and/or active rulesets with pull_request rule) the PUT is refused
+with "Repository rule violations found".
 
-  a. DELETEs the enforce_admins sub-resource (admins can bypass)
-  b. PUTs the workflow file (succeeds because PAT identity == owner == admin)
-  c. POSTs the enforce_admins sub-resource (restores admin enforcement)
-  d. All wrapped in try/finally so step (c) runs even if (b) fails.
+Bootstrap covers two independent protection mechanisms:
 
-This is the sanctioned classic-PAT pattern per root CLAUDE.md
+CLASSIC PROTECTION (#1135) -- enforce_admins toggle:
+  a. DELETEs the enforce_admins sub-resource (admins bypass)
+  b. PUTs the workflow file (admin push succeeds)
+  c. POSTs the enforce_admins sub-resource (restores)
+
+RULESETS (#1137) -- bypass_actors toggle:
+  a. GETs each active ruleset targeting the branch
+  b. PATCHes ruleset to add Repository admin role (actor_id=5) to
+     bypass_actors with bypass_mode=always
+  c. After PUT, PATCHes ruleset to restore original bypass_actors
+
+Both dimensions are detected first, applied in sequence, and restored
+in reverse via try/finally so restoration runs even if PUT fails. This
+is the sanctioned classic-PAT pattern per root CLAUDE.md
 ("elevated-scope landings: workflow-file edits, branch-protection
 updates ... use in-process classic-PAT"). It is NOT the banned
 `--admin` flag (which is the `gh pr merge --admin` shortcut). The
-bypass window is one HTTP request, owner-only, atomic.
+bypass window is bounded to a single PUT, owner-role-scoped, atomic.
 
 The canonical CALLER file is:
 
@@ -232,64 +242,275 @@ def enable_enforce_admins(repo: str, branch: str,
     return True, None
 
 
+REPO_ADMIN_ROLE_ID = 5  # GitHub repository role: admin
+
+
+def list_blocking_rulesets(repo: str, branch: str,
+                           pat: str) -> tuple[list[dict], str | None]:
+    """List active rulesets targeting the given branch.
+
+    Returns (rulesets_with_details, error). Each item in the returned
+    list is the FULL ruleset detail dict (caller needs `id` and current
+    `bypass_actors`). Rulesets are filtered to those with:
+      - enforcement="active"
+      - target="branch"
+      - conditions.ref_name.include containing "~DEFAULT_BRANCH" or the
+        explicit "refs/heads/{branch}" entry
+
+    Empty list means no ruleset bootstrap is needed (or no rulesets exist).
+    """
+    try:
+        r = requests.get(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets",
+            headers=_headers(pat), timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return [], f"network: {e}"
+    if r.status_code == 404:
+        # Repo has no rulesets surface at all -- treat as empty
+        return [], None
+    if r.status_code >= 300:
+        return [], f"GET rulesets {r.status_code}: {r.text[:200]}"
+
+    summaries = r.json()
+    if not isinstance(summaries, list):
+        return [], None
+
+    blocking: list[dict] = []
+    explicit_ref = f"refs/heads/{branch}"
+    for summary in summaries:
+        if summary.get("enforcement") != "active":
+            continue
+        if summary.get("target") != "branch":
+            continue
+        # Fetch full detail to get conditions + bypass_actors
+        rs_id = summary.get("id")
+        if rs_id is None:
+            continue
+        try:
+            rd = requests.get(
+                f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{rs_id}",
+                headers=_headers(pat), timeout=HTTP_TIMEOUT_S,
+            )
+        except requests.RequestException as e:
+            return [], f"network on ruleset {rs_id}: {e}"
+        if rd.status_code >= 300:
+            return [], f"GET ruleset {rs_id} -> {rd.status_code}: {rd.text[:200]}"
+        details = rd.json()
+        ref_name = (details.get("conditions") or {}).get("ref_name") or {}
+        include = ref_name.get("include") or []
+        if "~DEFAULT_BRANCH" in include or explicit_ref in include:
+            blocking.append(details)
+    return blocking, None
+
+
+def add_admin_bypass(repo: str, ruleset_id: int,
+                     pat: str) -> tuple[bool, list[dict] | None, str | None]:
+    """Add Repository admin role to a ruleset's bypass_actors.
+
+    Captures and returns the ORIGINAL bypass_actors so the caller can
+    restore exactly what was there (instead of assuming the list was
+    empty). Returns (success, original_bypass_actors, error).
+
+    On 404 / failure during the initial GET, original is None and the
+    PATCH is not attempted.
+    """
+    try:
+        r = requests.get(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
+            headers=_headers(pat), timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return False, None, f"network: {e}"
+    if r.status_code >= 300:
+        return False, None, f"GET ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+
+    original = r.json().get("bypass_actors") or []
+    # Don't double-add if the admin role is already a bypass actor.
+    already_present = any(
+        a.get("actor_id") == REPO_ADMIN_ROLE_ID
+        and a.get("actor_type") == "RepositoryRole"
+        for a in original
+    )
+    if already_present:
+        return True, original, None  # No-op; caller restores to identical state
+
+    new_actors = list(original) + [{
+        "actor_id": REPO_ADMIN_ROLE_ID,
+        "actor_type": "RepositoryRole",
+        "bypass_mode": "always",
+    }]
+    try:
+        r = requests.patch(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
+            headers=_headers(pat),
+            json={"bypass_actors": new_actors},
+            timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return False, original, f"network: {e}"
+    if r.status_code >= 300:
+        return False, original, f"PATCH ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+    return True, original, None
+
+
+def restore_bypass(repo: str, ruleset_id: int, original: list[dict],
+                   pat: str) -> tuple[bool, str | None]:
+    """Restore a ruleset's bypass_actors to the original list."""
+    try:
+        r = requests.patch(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
+            headers=_headers(pat),
+            json={"bypass_actors": original},
+            timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if r.status_code >= 300:
+        return False, f"PATCH ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+    return True, None
+
+
 def deploy_with_bootstrap(repo: str, branch: str,
                           pat: str) -> tuple[bool, str | None, bool]:
     """Deploy auto-reviewer.yml to a repo, bootstrapping past strict
-    protection if necessary.
+    protection (classic + rulesets) if necessary.
 
     Returns (success, error, bootstrap_used). bootstrap_used is True
-    when enforce_admins was toggled. enforce_admins is always restored
-    on exit -- success OR failure -- via try/finally.
+    when any protection toggle (classic enforce_admins or ruleset
+    bypass_actors) was applied. Restoration always runs via try/finally.
 
-    If enforce_admins restoration ITSELF fails, the error message
-    includes a manual recovery command. Operator MUST run that command;
-    the repo is left with weakened protection until they do.
+    Restoration failures emit CRITICAL stderr messages with recovery
+    commands; if the PUT succeeded but any restoration failed, the
+    function returns the restoration error as load-bearing.
     """
+    # Probe both protection dimensions BEFORE touching anything.
     prot, err = get_protection(repo, branch, pat)
     if err:
         return False, f"could not GET protection: {err}", False
+    classic_strict = is_enforce_admins_on(prot)
 
-    if not is_enforce_admins_on(prot):
-        # Permissive branch -- direct PUT works
+    rulesets, err = list_blocking_rulesets(repo, branch, pat)
+    if err:
+        return False, f"could not GET rulesets: {err}", False
+    has_rulesets = bool(rulesets)
+
+    if not classic_strict and not has_rulesets:
+        # Permissive: direct PUT
         ok, put_err = put_workflow(repo, branch, None, pat)
         return ok, put_err, False
 
-    # Strict path: relax enforce_admins, PUT, restore.
-    print(f"  bootstrap: strict protection detected (enforce_admins=True)")
-    print(f"  bootstrap: disabling enforce_admins on {repo}/{branch}")
-    ok, disable_err = disable_enforce_admins(repo, branch, pat)
-    if not ok:
-        return False, f"could not disable enforce_admins: {disable_err}", False
+    # Bootstrap path
+    if classic_strict:
+        print(f"  bootstrap: classic protection strict (enforce_admins=True)")
+    if has_rulesets:
+        rs_ids = [rs.get("id") for rs in rulesets]
+        print(f"  bootstrap: {len(rulesets)} active ruleset(s) targeting {branch}: {rs_ids}")
 
+    classic_disabled = False
+    rs_originals: dict[int, list[dict]] = {}  # ruleset_id -> original bypass_actors
+
+    # Step 1: apply both bypasses (classic first so the unwind order is
+    # symmetric: rulesets restored first, classic last).
+    if classic_strict:
+        print(f"  bootstrap: disabling enforce_admins on {repo}/{branch}")
+        ok, disable_err = disable_enforce_admins(repo, branch, pat)
+        if not ok:
+            return False, f"could not disable enforce_admins: {disable_err}", False
+        classic_disabled = True
+
+    for rs in rulesets:
+        rs_id = rs["id"]
+        print(f"  bootstrap: adding admin bypass to ruleset {rs_id}")
+        ok, original, err = add_admin_bypass(repo, rs_id, pat)
+        if not ok:
+            # Unwind whatever was already applied via the finally block by
+            # raising into try.
+            # NOTE: rs_originals already captures what to restore;
+            # classic_disabled flag will trigger enforce_admins restore.
+            # Return into the outer flow by jumping to finally via the put
+            # never executing.
+            # We do this by setting put_ok=False with the bypass error and
+            # falling into the try/finally below.
+            # Simplest implementation: short-circuit by returning here only
+            # AFTER running the same unwind logic.
+            # Manually unwind here to keep the finally block focused on the
+            # PUT lifecycle.
+            crit = _emergency_unwind(repo, branch, pat, rs_originals, classic_disabled)
+            full_err = f"could not add bypass to ruleset {rs_id}: {err}"
+            if crit:
+                full_err += f"; unwind issues: {crit}"
+            return False, full_err, True
+        rs_originals[rs_id] = original or []
+
+    # Step 2: PUT inside try/finally so step 3 always runs.
     put_ok = False
     put_err: str | None = None
-    restore_err: str | None = None
+    restore_errs: list[str] = []
     try:
         put_ok, put_err = put_workflow(repo, branch, None, pat)
     finally:
-        # Restoration ALWAYS runs (try/finally), even if put_workflow raised.
-        # Avoid `return` from `finally` -- it would swallow exceptions; instead
-        # capture the result and decide what to surface after the block.
-        print(f"  bootstrap: restoring enforce_admins on {repo}/{branch}")
-        enable_ok, enable_err = enable_enforce_admins(repo, branch, pat)
-        if not enable_ok:
-            recovery_url = (
-                f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}"
-                "/protection/enforce_admins"
-            )
-            print(
-                f"  CRITICAL: failed to restore enforce_admins on {repo}!\n"
-                f"  Branch protection is currently WEAKENED on this repo.\n"
-                f"  Recovery: POST {recovery_url} with classic PAT.\n"
-                f"  Error: {enable_err}",
-                file=sys.stderr,
-            )
-            restore_err = enable_err
+        # Step 3: restore in reverse order -- rulesets first, then classic.
+        for rs_id, original in rs_originals.items():
+            print(f"  bootstrap: restoring bypass_actors on ruleset {rs_id}")
+            ok2, err2 = restore_bypass(repo, rs_id, original, pat)
+            if not ok2:
+                recovery = (
+                    f"PATCH {GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{rs_id} "
+                    f"with classic PAT: bypass_actors={original}"
+                )
+                print(
+                    f"  CRITICAL: failed to restore bypass_actors on ruleset {rs_id}!\n"
+                    f"  Ruleset is currently WEAKENED on {repo}.\n"
+                    f"  Recovery: {recovery}\n"
+                    f"  Error: {err2}",
+                    file=sys.stderr,
+                )
+                restore_errs.append(f"ruleset {rs_id}: {err2}")
+        if classic_disabled:
+            print(f"  bootstrap: restoring enforce_admins on {repo}/{branch}")
+            ok2, err2 = enable_enforce_admins(repo, branch, pat)
+            if not ok2:
+                recovery_url = (
+                    f"{GH_API}/repos/{GITHUB_USER}/{repo}/branches/{branch}"
+                    "/protection/enforce_admins"
+                )
+                print(
+                    f"  CRITICAL: failed to restore enforce_admins on {repo}!\n"
+                    f"  Branch protection is currently WEAKENED on this repo.\n"
+                    f"  Recovery: POST {recovery_url} with classic PAT.\n"
+                    f"  Error: {err2}",
+                    file=sys.stderr,
+                )
+                restore_errs.append(f"enforce_admins: {err2}")
 
-    # Restoration failure on top of PUT success is load-bearing -- surface it.
-    if put_ok and restore_err:
-        return False, f"PUT succeeded but enforce_admins restore failed: {restore_err}", True
+    if put_ok and restore_errs:
+        return False, f"PUT succeeded but restoration failed: {'; '.join(restore_errs)}", True
     return put_ok, put_err, True
+
+
+def _emergency_unwind(repo: str, branch: str, pat: str,
+                      rs_originals: dict[int, list[dict]],
+                      classic_disabled: bool) -> str | None:
+    """Best-effort unwind when bootstrap set-up itself fails partway.
+
+    Called when add_admin_bypass on the Nth ruleset fails: prior rulesets
+    have already been modified, classic protection may have been
+    weakened, and we never reached the try/finally that handles normal
+    restoration. This function restores any state that was already
+    applied. Returns a comma-joined error string if any restoration
+    fails, else None.
+    """
+    errs: list[str] = []
+    for rs_id, original in rs_originals.items():
+        ok, err = restore_bypass(repo, rs_id, original, pat)
+        if not ok:
+            errs.append(f"ruleset {rs_id}: {err}")
+    if classic_disabled:
+        ok, err = enable_enforce_admins(repo, branch, pat)
+        if not ok:
+            errs.append(f"enforce_admins: {err}")
+    return "; ".join(errs) if errs else None
 
 
 def main(argv: list[str] | None = None) -> int:
