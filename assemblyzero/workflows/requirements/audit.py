@@ -35,7 +35,13 @@ AUDIT_ACTIVE_DIR = Path("docs/lineage/active")
 AUDIT_DONE_DIR = Path("docs/lineage/done")
 LLD_ACTIVE_DIR = Path("docs/lld/active")
 LLD_DONE_DIR = Path("docs/lld/done")
-LLD_STATUS_FILE = Path("docs/lld/lld-status.json")
+# #1151: LLD approval cache lives OUTSIDE any repo tree. Pre-#1151 this
+# was relative and dirtied every worktree the moment a workflow run
+# wrote an approval entry. Operational cache state shouldn't live in
+# tracked repo paths. Caller pattern `target_repo / LLD_STATUS_FILE`
+# now resolves to the absolute path -- cache is shared across target
+# repos. Each entry self-identifies via issue_number / target_repo.
+LLD_STATUS_FILE = Path.home() / ".claude" / "assemblyzero" / "lld-status.json"
 IDEAS_ACTIVE_DIR = Path("ideas/active")
 IDEAS_DONE_DIR = Path("ideas/done")
 

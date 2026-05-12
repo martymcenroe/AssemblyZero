@@ -16,6 +16,19 @@ tmpclaude-*
 # nothing accidentally reintroduces it as a tracked artifact.
 tmp/cascade-events.jsonl
 
+# #1151: operational log/state writers were relocated to absolute paths
+# under ~/.claude/assemblyzero/. Their legacy tracked locations are
+# .gitignore'd as defense in depth (so any caller that ignored the
+# relocation can't reintroduce dirty-worktree breakage). See audit
+# tools/audit_tracked_log_writers.py.
+data/hourglass/history.json
+data/hourglass/age_meter.json
+docs/lineage/workflow-audit.jsonl
+docs/lld/lld-status.json
+
+# #1151: audit script output (TSV at repo root)
+audit_tracked_log_writers_results.tsv
+
 # Generated files
 *.generated.json
 

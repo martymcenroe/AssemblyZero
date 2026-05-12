@@ -5,6 +5,8 @@ Issue #535: Weight tables, thresholds, and configuration.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 # Issue weight mapping: label -> weight
 LABEL_WEIGHTS: dict[str, int] = {
     # +1: Fixes reality but doesn't change the shape
@@ -47,7 +49,14 @@ DRIFT_SEVERITY_WEIGHTS: dict[str, float] = {
 }
 
 # Paths
-AGE_METER_STATE_PATH: str = "data/hourglass/age_meter.json"
-HISTORY_PATH: str = "data/hourglass/history.json"
+# #1151: hourglass state lives OUTSIDE any repo tree. Pre-#1151 these were
+# relative paths (e.g., "data/hourglass/history.json"), which meant every
+# git worktree inherited a tracked file that hooks/workflows dirtied the
+# moment they fired -- blocking `git worktree remove` (no --force per policy)
+# and producing the orphan-worktree class of bugs that #1133 then made loud.
+# Operational state belongs under ~/.claude/assemblyzero/, never in repo.
+_HOURGLASS_DIR = Path.home() / ".claude" / "assemblyzero" / "hourglass"
+AGE_METER_STATE_PATH: str = str(_HOURGLASS_DIR / "age_meter.json")
+HISTORY_PATH: str = str(_HOURGLASS_DIR / "history.json")
 ADR_OUTPUT_PATH: str = "docs/standards/0015-age-transition-protocol.md"
 ADR_TEMPLATE_PATH: str = "docs/standards/"

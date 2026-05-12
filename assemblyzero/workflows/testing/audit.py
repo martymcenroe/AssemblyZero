@@ -56,7 +56,17 @@ class TestReportMetadata(TypedDict):
 # Base directories relative to repo root
 AUDIT_ACTIVE_DIR = Path("docs/lineage/active")
 REPORTS_ACTIVE_DIR = Path("docs/reports/active")
-WORKFLOW_AUDIT_FILE = Path("docs/lineage/workflow-audit.jsonl")
+# #1151: workflow audit log lives OUTSIDE any repo tree. Pre-#1151 this
+# was `Path("docs/lineage/workflow-audit.jsonl")` -- a relative path that
+# was joined onto target_repo by callers (line below), but resolves to
+# cwd when called from a test/hook with cwd=worktree, dirtying every
+# worktree the moment a workflow audit entry was written.
+# Note for callers: `target_repo / WORKFLOW_AUDIT_FILE` now resolves to
+# just the absolute path (Path semantics: joining onto an absolute path
+# is a no-op), so workflow audit entries from ALL target_repos consolidate
+# into one log. That's an architectural improvement -- each entry already
+# carries `target_repo` as a field, so the consolidation loses no info.
+WORKFLOW_AUDIT_FILE = Path.home() / ".claude" / "assemblyzero" / "workflow-audit.jsonl"
 
 
 def get_repo_root() -> Path:
