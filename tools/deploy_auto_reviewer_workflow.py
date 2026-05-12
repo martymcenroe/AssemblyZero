@@ -244,6 +244,28 @@ def enable_enforce_admins(repo: str, branch: str,
 
 REPO_ADMIN_ROLE_ID = 5  # GitHub repository role: admin
 
+# Fields from a GET ruleset response that are writable via PUT (the canonical
+# "Update a repository ruleset" endpoint). Other fields are server-managed
+# (id, source, source_type, node_id, created_at, updated_at,
+# current_user_can_bypass, _links) and must NOT be sent in the PUT body.
+RULESET_WRITABLE_FIELDS = ("name", "target", "enforcement", "conditions", "rules")
+
+
+def _ruleset_put_body(ruleset: dict, bypass_actors: list[dict]) -> dict:
+    """Build a PUT body for `Update a repository ruleset` from a GET response.
+
+    Copies only the writable fields (skipping server-managed ones) and
+    overwrites bypass_actors with the caller's value. GitHub returns 404
+    on PATCH against this endpoint (#1141) -- PUT is the only supported
+    update method.
+    """
+    body: dict = {}
+    for field in RULESET_WRITABLE_FIELDS:
+        if field in ruleset:
+            body[field] = ruleset[field]
+    body["bypass_actors"] = bypass_actors
+    return body
+
 
 def list_blocking_rulesets(repo: str, branch: str,
                            pat: str) -> tuple[list[dict], str | None]:
@@ -313,7 +335,11 @@ def add_admin_bypass(repo: str, ruleset_id: int,
     empty). Returns (success, original_bypass_actors, error).
 
     On 404 / failure during the initial GET, original is None and the
-    PATCH is not attempted.
+    PUT is not attempted.
+
+    #1141: uses PUT with the full ruleset body. PATCH is not a supported
+    method on this endpoint -- GitHub returns 404 (not 405) when method
+    and resource don't match.
     """
     try:
         r = requests.get(
@@ -325,7 +351,8 @@ def add_admin_bypass(repo: str, ruleset_id: int,
     if r.status_code >= 300:
         return False, None, f"GET ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
 
-    original = r.json().get("bypass_actors") or []
+    current = r.json()
+    original = current.get("bypass_actors") or []
     # Don't double-add if the admin role is already a bypass actor.
     already_present = any(
         a.get("actor_id") == REPO_ADMIN_ROLE_ID
@@ -340,34 +367,51 @@ def add_admin_bypass(repo: str, ruleset_id: int,
         "actor_type": "RepositoryRole",
         "bypass_mode": "always",
     }]
+    put_body = _ruleset_put_body(current, new_actors)
     try:
-        r = requests.patch(
+        r = requests.put(
             f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
             headers=_headers(pat),
-            json={"bypass_actors": new_actors},
+            json=put_body,
             timeout=HTTP_TIMEOUT_S,
         )
     except requests.RequestException as e:
         return False, original, f"network: {e}"
     if r.status_code >= 300:
-        return False, original, f"PATCH ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+        return False, original, f"PUT ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
     return True, original, None
 
 
 def restore_bypass(repo: str, ruleset_id: int, original: list[dict],
                    pat: str) -> tuple[bool, str | None]:
-    """Restore a ruleset's bypass_actors to the original list."""
+    """Restore a ruleset's bypass_actors to the original list.
+
+    #1141: GET to capture the current writable fields (in case they
+    changed between add and restore -- defensive), then PUT with the
+    original bypass_actors. PATCH is not supported on this endpoint.
+    """
     try:
-        r = requests.patch(
+        r = requests.get(
+            f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
+            headers=_headers(pat), timeout=HTTP_TIMEOUT_S,
+        )
+    except requests.RequestException as e:
+        return False, f"network on GET: {e}"
+    if r.status_code >= 300:
+        return False, f"GET ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+    current = r.json()
+    put_body = _ruleset_put_body(current, original)
+    try:
+        r = requests.put(
             f"{GH_API}/repos/{GITHUB_USER}/{repo}/rulesets/{ruleset_id}",
             headers=_headers(pat),
-            json={"bypass_actors": original},
+            json=put_body,
             timeout=HTTP_TIMEOUT_S,
         )
     except requests.RequestException as e:
         return False, f"network: {e}"
     if r.status_code >= 300:
-        return False, f"PATCH ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
+        return False, f"PUT ruleset {ruleset_id} -> {r.status_code}: {r.text[:200]}"
     return True, None
 
 
