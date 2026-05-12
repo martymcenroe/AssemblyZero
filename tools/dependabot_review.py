@@ -31,11 +31,19 @@ For each open dependabot-authored PR:
     - Clean up worktree + audit branch
     - Move to next PR (one failure does not block the queue)
 
-Cleanup contract: zero persistent disk artifacts on ANY exit path. Every
-return from process_pr (merged / deferred / errored) must call
-cleanup_worktree before returning. If a future maintainer wants to
-inspect a failure, they re-create the worktree via `gh pr checkout` --
-the PR + Actions output captures everything else (#1116).
+Cleanup contract (#1116, hardened in #1133): zero persistent disk
+artifacts on ANY exit path -- normal return, deferred, errored, OR
+exception. Exit paths through `return` are covered by the try/finally
+wrapper in process_pr; exception paths are covered by the same finally
+block. If `git worktree remove` itself fails (e.g., the working tree
+went dirty mid-run), cleanup_worktree prints a CLEANUP FAILURE warning
+to stderr with the captured exit code and stderr -- the operator MUST
+investigate that path before the next run, because a leaked worktree
+breaks subsequent `git worktree add` for the same PR number.
+
+On startup, a canary lists pre-existing `*-dependabot-N` worktrees and
+refuses to proceed unless --ignore-orphans is passed (so accumulating
+debt is loud rather than silent).
 
 Usage:
     poetry run python tools/dependabot_review.py [--repo OWNER/REPO] [--dry-run]
@@ -378,35 +386,95 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
 # Cleanup
 # ---------------------------------------------------------------------------
 
-def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> None:
-    # `git branch -d` (lowercase, safe) is sufficient here because the audit
-    # branch is created from `main` by create_audit_worktree and never moves --
-    # checkout_pr_into_worktree uses `gh pr checkout --detach` (#1107), so the
-    # worktree's HEAD detaches without committing on the audit branch. After
-    # the dep PR is squash-merged, main fast-forwards past the original tip,
-    # leaving the audit branch fully reachable from main -> safe-delete works.
-    # `branch -D` is permanently banned per memory feedback_destructive_flag_scrutiny.
+def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
+    """Remove the audit worktree and its branch. Returns True iff both
+    operations exited with status 0.
+
+    `git branch -d` (lowercase, safe) is sufficient here because the audit
+    branch is created from `main` by create_audit_worktree and never moves --
+    checkout_pr_into_worktree uses `gh pr checkout --detach` (#1107), so the
+    worktree's HEAD detaches without committing on the audit branch. After
+    the dep PR is squash-merged, main fast-forwards past the original tip,
+    leaving the audit branch fully reachable from main -> safe-delete works.
+    `branch -D` is permanently banned per memory feedback_destructive_flag_scrutiny.
+
+    #1133: previously this function discarded subprocess exit codes, so
+    a dirty worktree (e.g., cascade detector having appended to a tracked
+    file -- pre-#1134) caused `git worktree remove` to fail silently and
+    leak the worktree. Now exit codes are inspected; failures are printed
+    LOUDLY to stderr with the captured stderr text so the operator can
+    diagnose. The bool return lets the caller decide whether to escalate;
+    process_pr's try/finally surfaces failures as a WARNING but does not
+    flip the PR processing result.
+    """
+    success = True
     evict_poetry_venv(worktree)
-    run(["git", "-C", str(main_repo), "worktree", "remove", str(worktree)])
-    run(["git", "-C", str(main_repo), "branch", "-d", branch])
+
+    wt_remove = run(["git", "-C", str(main_repo), "worktree", "remove", str(worktree)])
+    if wt_remove.returncode != 0:
+        success = False
+        print(
+            f"  CLEANUP FAILURE: `git worktree remove {worktree}` returned "
+            f"{wt_remove.returncode}\n"
+            f"  stderr: {wt_remove.stderr.strip()[:300] if wt_remove.stderr else '(none)'}\n"
+            f"  This worktree is now an ORPHAN. Investigate before next run "
+            f"-- a stuck worktree blocks `git worktree add` for the same PR.",
+            file=sys.stderr,
+        )
+
+    br_delete = run(["git", "-C", str(main_repo), "branch", "-d", branch])
+    if br_delete.returncode != 0:
+        success = False
+        # branch -d failing post-worktree-remove-failure is expected (the
+        # branch is still associated with the leaked worktree). Print
+        # diagnostically rather than crying wolf separately when the root
+        # cause is already surfaced above.
+        if wt_remove.returncode == 0:
+            print(
+                f"  CLEANUP FAILURE: `git branch -d {branch}` returned "
+                f"{br_delete.returncode}\n"
+                f"  stderr: {br_delete.stderr.strip()[:300] if br_delete.stderr else '(none)'}",
+                file=sys.stderr,
+            )
+
+    return success
+
+
+def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
+    """#1133: enumerate pre-existing dependabot worktrees so the operator
+    can be warned at startup. Returns list of orphan worktree paths
+    matching the `{main_name}-dependabot-N` pattern. Empty list = clean.
+    """
+    result = run(["git", "-C", str(main_repo), "worktree", "list", "--porcelain"])
+    if result.returncode != 0:
+        # If we can't even list, return empty -- don't block the script on
+        # a diagnostic that itself errored.
+        return []
+    orphans: list[str] = []
+    prefix = f"{main_repo.name}-dependabot-"
+    for line in result.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        path = line[len("worktree "):].strip()
+        if prefix in Path(path).name:
+            orphans.append(path)
+    return orphans
 
 
 # ---------------------------------------------------------------------------
 # Per-PR processing
 # ---------------------------------------------------------------------------
 
-def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
-    """Process a single PR. Returns 'merged', 'deferred', or 'errored'."""
-    print(f"\n=== PR #{pr.number}: {pr.title} ===")
+def _process_pr_inside_worktree(
+    pr: PRInfo, repo: str, worktree: Path,
+) -> str:
+    """Inner pipeline that assumes the audit worktree has been created.
 
-    if not verify_author(pr):
-        return "errored"
-
-    worktree, branch = create_audit_worktree(main_repo, pr.number)
-
+    Returns 'merged', 'deferred', or 'errored'. Does NOT clean up --
+    cleanup is the caller's responsibility (process_pr's try/finally).
+    """
     if not checkout_pr_into_worktree(worktree, pr.number, repo):
         print("  ERROR: gh pr checkout failed")
-        cleanup_worktree(main_repo, worktree, branch)
         return "errored"
 
     evict_poetry_venv(worktree)
@@ -421,8 +489,6 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
             "`poetry install` failed. See the PR's Actions output for the "
             "captured stderr; re-run locally via `gh pr checkout` if needed.",
         )
-        # #1116: no retention. The PR + Actions output is the forensic record.
-        cleanup_worktree(main_repo, worktree, branch)
         return "deferred"
 
     exit_code = run_tests(worktree)
@@ -452,14 +518,11 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
             print(f"  Multi-package PR ({package_count} packages) -- "
                   f"requesting dependabot recreate")
             request_dependabot_recreate(pr.number, repo)
-        # #1116: no retention. The PR + Actions output is the forensic record.
-        cleanup_worktree(main_repo, worktree, branch)
         return "deferred"
 
     # ---- Green path ----
     if not inject_no_issue(pr, repo):
         print("  ERROR: inject No-Issue failed")
-        cleanup_worktree(main_repo, worktree, branch)
         return "errored"
 
     # Small wait for pr-sentinel to re-evaluate the edited body
@@ -467,21 +530,48 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
 
     if not approve_pr(pr.number, repo):
         print("  ERROR: approve failed")
-        cleanup_worktree(main_repo, worktree, branch)
         return "errored"
 
     if not wait_for_mergeable(pr.number, repo):
         print(f"  ERROR: mergeable_state never reached 'clean' within {MERGEABLE_TIMEOUT_S}s")
-        cleanup_worktree(main_repo, worktree, branch)
         return "errored"
 
     if not squash_merge(pr.number, repo):
         print("  ERROR: merge failed")
-        cleanup_worktree(main_repo, worktree, branch)
         return "errored"
 
-    cleanup_worktree(main_repo, worktree, branch)
     return "merged"
+
+
+def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
+    """Process a single PR. Returns 'merged', 'deferred', or 'errored'.
+
+    #1133: cleanup is wrapped in try/finally so it runs on every exit
+    path -- normal return, sub-helper return, OR exception (Ctrl-C,
+    subprocess timeout, network blip). The pre-#1133 design only
+    covered explicit return statements, so any exception leaked the
+    worktree.
+    """
+    print(f"\n=== PR #{pr.number}: {pr.title} ===")
+
+    if not verify_author(pr):
+        return "errored"
+
+    worktree, branch = create_audit_worktree(main_repo, pr.number)
+
+    try:
+        return _process_pr_inside_worktree(pr, repo, worktree)
+    finally:
+        cleanup_ok = cleanup_worktree(main_repo, worktree, branch)
+        if not cleanup_ok:
+            # cleanup_worktree already printed the diagnostic. Add a
+            # one-line WARNING for the operator who's scanning the
+            # summary -- this is a leaked worktree they need to address.
+            print(
+                f"  WARNING: leftover state for PR #{pr.number} at {worktree}. "
+                f"Manual cleanup required before next run.",
+                file=sys.stderr,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -601,11 +691,47 @@ def main() -> None:
                         help="Path to main repo (default: cwd)")
     parser.add_argument("--dry-run", action="store_true",
                         help="List PRs that would be processed; take no action")
+    parser.add_argument(
+        "--ignore-orphans", action="store_true",
+        help=(
+            "#1133: by default the script refuses to run if pre-existing "
+            "`*-dependabot-N` worktrees are detected (signal that a prior "
+            "run leaked state). Pass this to proceed anyway -- but resolve "
+            "the orphans first or they accumulate."
+        ),
+    )
     args = parser.parse_args()
 
     main_repo = Path(args.main_repo).resolve()
     if not (main_repo / ".git").exists():
         sys.exit(f"Not a git repo: {main_repo}")
+
+    # #1133: orphan-worktree canary BEFORE any new worktrees are created.
+    # If a prior run leaked state, refuse to proceed unless explicitly
+    # overridden -- accumulating orphans is what got us into the #1133
+    # situation in the first place.
+    orphans = check_for_orphan_worktrees(main_repo)
+    if orphans:
+        print(
+            f"\nWARNING: pre-existing dependabot worktrees detected on "
+            f"{main_repo.name}:",
+            file=sys.stderr,
+        )
+        for o in orphans:
+            print(f"  {o}", file=sys.stderr)
+        if not args.ignore_orphans:
+            print(
+                "\nThese are leftovers from prior runs that didn't reach "
+                "cleanup.\nAborting to prevent further pile-up. Investigate "
+                "the orphans, clean them up, then re-run. Pass "
+                "--ignore-orphans to override (not recommended).",
+                file=sys.stderr,
+            )
+            sys.exit(3)
+        print(
+            "  proceeding anyway because --ignore-orphans was set",
+            file=sys.stderr,
+        )
 
     # Issue #1091: fleet mode enumerates user-owned Poetry repos.
     if args.fleet:
