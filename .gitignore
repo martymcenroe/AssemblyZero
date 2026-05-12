@@ -10,6 +10,12 @@
 # Claude Code temporary files
 tmpclaude-*
 
+# #1134: cascade detector runtime log -- now writes to
+# ~/.claude/assemblyzero/cascade-events.jsonl (absolute, outside any repo
+# tree). Defense in depth: also ignore the legacy relative path so
+# nothing accidentally reintroduces it as a tracked artifact.
+tmp/cascade-events.jsonl
+
 # Generated files
 *.generated.json
 
