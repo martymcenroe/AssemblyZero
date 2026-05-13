@@ -255,9 +255,22 @@ def evict_poetry_venv(worktree: Path) -> None:
 
 
 def install_deps(worktree: Path) -> bool:
+    """Install project dependencies + the `dev` group so pytest is in the
+    venv. AssemblyZero declares pytest under PEP 735 `[dependency-groups]
+    dev = [...]`, which `poetry install` (no flags) does NOT include by
+    default -- the audit venv ends up without pytest and every test run
+    fails with `ModuleNotFoundError: No module named 'pytest'` regardless
+    of whether the dep upgrade actually broke anything. The fleet CI
+    workflow already passes `--with dev` for the same reason; mirroring
+    that here makes the audit venv match production.
+
+    `--with dev` is tolerant on repos that don't have a `dev` group:
+    Poetry warns rather than failing, so this is safe across the fleet
+    of varying repo layouts.
+    """
     if not (worktree / "pyproject.toml").exists():
         return True  # Not a poetry project
-    result = run(["poetry", "install"], cwd=str(worktree),
+    result = run(["poetry", "install", "--with", "dev"], cwd=str(worktree),
                  timeout=POETRY_INSTALL_TIMEOUT_S)
     return result.returncode == 0
 
@@ -475,6 +488,20 @@ def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
     """
     success = True
     evict_poetry_venv(worktree)
+
+    # Defensive: discard any working-tree modifications before the
+    # worktree-remove attempt. Something in the audit run (still
+    # unidentified after #1155's inventory.py fix -- not gh pr checkout,
+    # not poetry install, not pytest collection in standalone testing)
+    # auto-modifies docs/0003-file-inventory.md inside the worktree.
+    # That dirties the worktree, making `git worktree remove` (no --force)
+    # refuse and leak the worktree. `git restore .` reverts working-tree
+    # changes to HEAD without touching the index or refs -- no --force,
+    # no --hard, just standard restore. Any commits that the audit run
+    # made (it doesn't make any; gh pr checkout uses --detach and we
+    # never commit on the audit branch) would be untouched.
+    if worktree.exists():
+        run(["git", "-C", str(worktree), "restore", "."])
 
     wt_remove = run(["git", "-C", str(main_repo), "worktree", "remove", str(worktree)])
     if wt_remove.returncode != 0:
