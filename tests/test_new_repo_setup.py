@@ -427,9 +427,17 @@ class TestPythonBootstrap:
         project = tmp_path / "TestProject"
         project.mkdir()
         # poetry init normally writes this; with mocked run_command,
-        # we pre-create it so the append step has a target.
+        # we pre-create it so the append step has a target. Must
+        # include `description = ""` because create_python_project
+        # anchors its `packages` directive injection on that line --
+        # poetry init always emits it (even with --description "")
+        # but the mocked run_command skips the actual poetry call,
+        # so the fixture has to include it explicitly.
         (project / "pyproject.toml").write_text(
-            "[tool.poetry]\nname = \"testproject\"\nversion = \"0.1.0\"\n",
+            "[tool.poetry]\n"
+            "name = \"testproject\"\n"
+            "version = \"0.1.0\"\n"
+            "description = \"\"\n",
             encoding="utf-8",
         )
         from new_repo_setup import create_python_project

@@ -213,8 +213,22 @@ def test_deploy_skips_repo_that_already_has_workflow():
 
 
 def test_deploy_puts_when_missing():
+    # Test was missing two mocks. deploy.main probes BOTH classic
+    # branch protection AND repository rulesets before deciding the
+    # repo is "permissive" enough for a direct PUT. Without those
+    # mocks the live GitHub API got hit with the fake "pat" string
+    # and returned 401. Returning non-strict-protection + empty
+    # rulesets sends deploy.main down the direct-PUT path -- which
+    # is the path this test exercises (put_workflow called once
+    # per repo, no bootstrap toggle).
+    non_strict_protection = (
+        {"enforce_admins": {"enabled": False}, "required_pull_request_reviews": None},
+        None,
+    )
     with patch.object(deploy, "classic_pat_session") as mock_ctx, \
          patch.object(deploy, "get_default_branch", return_value="main"), \
+         patch.object(deploy, "get_protection", return_value=non_strict_protection), \
+         patch.object(deploy, "list_blocking_rulesets", return_value=([], None)), \
          patch.object(deploy, "workflow_status", return_value=(False, None)), \
          patch.object(deploy, "put_workflow", return_value=(True, None)) as mock_put:
         mock_ctx.return_value.__enter__.return_value = "pat"
