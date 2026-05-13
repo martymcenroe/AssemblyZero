@@ -22,13 +22,35 @@ def scan_docs_directory(docs_dir: Path) -> list[Path]:
 
 
 def update_inventory_node(state: dict[str, Any]) -> dict[str, Any]:
-    """LangGraph node execution: orchestrates the scan, diff, and update process."""
+    """LangGraph node execution: orchestrates the scan, diff, and update process.
+
+    Requires `state["repo_path"]`. A missing or empty repo_path raises
+    ValueError -- the previous default to "." (cwd) silently scanned
+    and WROTE to whatever directory the caller happened to be in,
+    which dirtied audit worktrees and blocked the dependabot review
+    tool's cleanup step (#1155). Callers that genuinely want to scan
+    cwd must now pass repo_path=Path.cwd() explicitly.
+    """
     print("[Inventory] Starting documentation inventory scan...")
 
+    # Validate required state BEFORE the try/except wrapper below. The
+    # except block exists to soften I/O errors during the scan (missing
+    # dirs, permission denied, etc.) and turn them into structured
+    # {"errors": [...]} return values. A missing repo_path is NOT a
+    # runtime I/O issue -- it's a caller bug (a test that forgot to
+    # set up state, a workflow graph that didn't wire the input). Fast
+    # fail with a clear message so callers see it instead of silently
+    # scribbling on cwd.
+    repo_path_str = state.get("repo_path")
+    if not repo_path_str:
+        raise ValueError(
+            "update_inventory_node requires 'repo_path' in state. "
+            "The previous default of '.' silently scanned and wrote to "
+            "the caller's cwd, which dirtied worktrees and broke "
+            "cleanup-by-removal (#1155). Pass an explicit Path."
+        )
+
     try:
-        # Resolve target repo docs path
-        # Fallback to local '.' if repo_path not strictly provided in state
-        repo_path_str = state.get("repo_path", ".")
         repo_path = Path(repo_path_str)
         docs_dir = repo_path / "docs"
         inventory_file = docs_dir / "0003-file-inventory.md"

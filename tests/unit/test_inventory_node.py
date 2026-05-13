@@ -384,18 +384,30 @@ class TestGracefulFailure:
         # succeeds with 0 entries or fails gracefully with an error
         assert result["inventory_entries_added"] >= 0
 
-    def test_missing_repo_path_key_uses_default(self, tmp_path):
-        """If repo_path is missing from state, should use default '.'."""
-        state = {}
-        result = update_inventory_node(state)
+    def test_missing_repo_path_key_raises_value_error(self, tmp_path):
+        """Regression test for #1155: missing repo_path must raise instead
+        of silently defaulting to '.' and scribbling on the caller's cwd.
 
-        # Should not crash
-        assert isinstance(result, dict)
-        assert "errors" in result
+        Pre-fix behavior: state.get("repo_path", ".") meant `state = {}`
+        scanned the test runner's cwd, which inside a git worktree dirtied
+        docs/0003-file-inventory.md and blocked subsequent cleanup. Fix
+        flips the default to a hard failure.
+        """
+        state = {}
+
+        with pytest.raises(ValueError, match="repo_path"):
+            update_inventory_node(state)
+
+    def test_empty_repo_path_value_raises_value_error(self, tmp_path):
+        """Empty string repo_path is also a caller bug -- treat the same
+        as missing rather than coercing to cwd via Path("")."""
+        state = {"repo_path": ""}
+
+        with pytest.raises(ValueError, match="repo_path"):
+            update_inventory_node(state)
 
     def test_readonly_file_handled(self, tmp_path):
         """If inventory file is read-only, node should handle gracefully."""
-        import os
         import platform
 
         docs_dir = tmp_path / "docs"
