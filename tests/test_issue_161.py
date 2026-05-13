@@ -226,16 +226,18 @@ def test_060():
     Handle malformed UTF-8 gracefully | Unit | Invalid byte sequence |
     Graceful error or replacement | No crash, clear error message
     """
-    # TDD: Arrange
-    # Python's subprocess with encoding='utf-8' and text=True handles this automatically
-    # by using error handler (default is 'strict' but subprocess uses 'replace')
-    # This test verifies the error handling behavior
-
-    # TDD: Act
-    # subprocess.run with encoding='utf-8' will handle malformed UTF-8
-    # by replacing invalid sequences with replacement character
+    # TDD: Arrange / Act
+    # Use sys.executable -c so the test works on ANY platform without
+    # depending on PATH containing `echo`. Previously this test ran
+    # `subprocess.run(["echo", "test"])` which failed with WinError 2
+    # (file not found) in environments where Git Bash wasn't on PATH
+    # (e.g. the scheduled-task subprocess tree). echo is a cmd builtin
+    # on Windows, not a standalone executable -- Python's subprocess
+    # can't find it without an `echo.exe` in PATH. sys.executable is
+    # the running Python interpreter; it's always available.
+    import sys
     result = subprocess.run(
-        ["echo", "test"],
+        [sys.executable, "-c", "print('test')"],
         capture_output=True,
         text=True,
         encoding="utf-8",
