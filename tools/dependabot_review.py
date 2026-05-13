@@ -52,6 +52,7 @@ Issue: #949 | Related: #692, #1116 | Runbook: 0911 v2.0
 """
 
 import argparse
+import datetime
 import json
 import re
 import subprocess
@@ -136,7 +137,8 @@ def run(cmd: list[str], cwd: str | None = None,
     existence of a file in the fleet enumeration -- a 404 just means
     "this repo doesn't have pyproject.toml", not "something broke").
     """
-    print(f"  $ {' '.join(cmd)}")
+    ts = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"  [{ts}] $ {' '.join(cmd)}")
     try:
         result = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
@@ -145,17 +147,19 @@ def run(cmd: list[str], cwd: str | None = None,
             creationflags=_CREATION_FLAGS,
         )
     except subprocess.TimeoutExpired:
-        print(f"  TIMEOUT after {timeout}s")
+        ts2 = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"  [{ts2}] TIMEOUT after {timeout}s")
         return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="TIMEOUT")
     if result.returncode != 0 and not quiet_on_failure:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
+        ts3 = datetime.datetime.now().strftime("%H:%M:%S")
         if stderr:
-            print(f"  [exit {result.returncode}] stderr: {stderr[:500]}")
+            print(f"  [{ts3}] [exit {result.returncode}] stderr: {stderr[:500]}")
         elif stdout:
-            print(f"  [exit {result.returncode}] stdout: {stdout[:500]}")
+            print(f"  [{ts3}] [exit {result.returncode}] stdout: {stdout[:500]}")
         else:
-            print(f"  [exit {result.returncode}] (no output)")
+            print(f"  [{ts3}] [exit {result.returncode}] (no output)")
     return result
 
 
@@ -911,6 +915,21 @@ def main() -> None:
     print(
         f"  Review events created: {approved_events} APPROVED "
         f"+ {commented_events} COMMENTED = {total_events} total"
+    )
+
+    # Self-marked completion line. The PowerShell wrapper's OK/EXIT
+    # marker write proved unreliable in the scheduled-task context
+    # (Status:Ready, Last Result:0, but no | OK | line ever lands).
+    # Printing a marker as the last line of the python tool's output
+    # bypasses that -- cmd /c >> $LogFile captures it reliably, since
+    # we already know the per-line streaming works. morning_status_tool
+    # can grep for this marker as a secondary completion signal.
+    end_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(
+        f"\n=== {end_stamp} | FLEET-COMPLETE | "
+        f"merged={len(results['merged'])} "
+        f"deferred={len(results['deferred'])} "
+        f"errored={len(results['errored'])} ==="
     )
 
 
