@@ -96,11 +96,23 @@ class PRInfo:
 
 def run(cmd: list[str], cwd: str | None = None,
         timeout: int | None = None) -> subprocess.CompletedProcess:
-    """Run a subprocess and echo the command to stdout."""
+    """Run a subprocess and echo the command to stdout.
+
+    `encoding="utf-8", errors="replace"` is mandatory on Windows.
+    Default `text=True` decodes with the system locale (cp1252 on most
+    Windows installs), which crashes in `_readerthread` if any
+    subprocess emits a non-cp1252 byte (e.g. `git worktree list` output,
+    `gh pr` body containing an em-dash, pytest output with a non-ASCII
+    test name). The reader thread crash leaves stdout silently empty,
+    so the caller sees CompletedProcess with no output and proceeds as
+    if the command succeeded -- which is catastrophic on the merge path.
+    UTF-8 + replace tolerates any byte stream without crashing.
+    """
     print(f"  $ {' '.join(cmd)}")
     try:
         return subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:

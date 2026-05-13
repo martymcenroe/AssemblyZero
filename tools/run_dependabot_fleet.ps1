@@ -26,6 +26,12 @@
 
 $ErrorActionPreference = 'Continue'
 
+# Force UTF-8 for Python stdout/stderr so em-dashes and other non-ASCII
+# characters in tool output don't crash the cp1252 default codec. Also
+# applies to subprocess output captured via Tee-Object below.
+$env:PYTHONIOENCODING = 'utf-8'
+$env:PYTHONUTF8 = '1'
+
 $LogFile = 'C:\Users\mcwiz\Projects\dependabot-fleet.log'
 $RepoRoot = 'C:\Users\mcwiz\Projects\AssemblyZero'
 $Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -38,11 +44,17 @@ Set-Location -Path $RepoRoot
 Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet"
 
 try {
-    # Capture both stdout and stderr to the log. The tool prints a
-    # detailed per-PR trace; the log is the durable record.
-    $output = & poetry run python tools/dependabot_review.py --fleet 2>&1
+    # Stream subprocess output to the log line-by-line. The previous
+    # design buffered all output into `$output = & ...` and only flushed
+    # to the log after the subprocess returned, which meant a hung
+    # subprocess (e.g. gh waiting on an unanswerable auth prompt in the
+    # scheduled-task context) produced a "START with no completion"
+    # log forever. Tee-Object writes each line as produced so partial
+    # output survives subprocess failure and the operator can see WHERE
+    # it died.
+    & poetry run python tools/dependabot_review.py --fleet 2>&1 |
+        Tee-Object -FilePath $LogFile -Append
     $exitCode = $LASTEXITCODE
-    $output | Add-Content -Path $LogFile
 
     $endStamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     if ($exitCode -eq 0) {
