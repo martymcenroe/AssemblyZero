@@ -107,10 +107,17 @@ def run(cmd: list[str], cwd: str | None = None,
     so the caller sees CompletedProcess with no output and proceeds as
     if the command succeeded -- which is catastrophic on the merge path.
     UTF-8 + replace tolerates any byte stream without crashing.
+
+    On non-zero exit, prints stderr (or stdout if stderr is empty) so
+    the operator sees WHY a command failed. Without this, every "ERROR:
+    X failed" line in the per-PR trace was uninformative -- and worse,
+    sometimes gh CLI returns non-zero on success (e.g. emits a warning
+    but the operation completed), so the caller can't trust the exit
+    code alone. Truncated to 500 chars to bound the noise.
     """
     print(f"  $ {' '.join(cmd)}")
     try:
-        return subprocess.run(
+        result = subprocess.run(
             cmd, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=timeout, check=False,
@@ -118,6 +125,16 @@ def run(cmd: list[str], cwd: str | None = None,
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT after {timeout}s")
         return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="TIMEOUT")
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        if stderr:
+            print(f"  [exit {result.returncode}] stderr: {stderr[:500]}")
+        elif stdout:
+            print(f"  [exit {result.returncode}] stdout: {stdout[:500]}")
+        else:
+            print(f"  [exit {result.returncode}] (no output)")
+    return result
 
 
 def run_gh_with_body(args_pre: list[str], body: str) -> subprocess.CompletedProcess:
@@ -295,8 +312,23 @@ def wait_for_mergeable(pr_number: int, repo: str) -> bool:
 
 
 def squash_merge(pr_number: int, repo: str) -> bool:
-    result = run(["gh", "pr", "merge", str(pr_number), "--repo", repo, "--squash"])
-    return result.returncode == 0
+    """Squash-merge the PR. Returns True iff the PR is actually merged
+    according to GitHub's `merged` field.
+
+    `gh pr merge --squash` returns non-zero in cases where the merge
+    actually succeeded -- e.g. gh prints a warning during cleanup, or
+    a transient connection blip drops the post-merge status response.
+    Trusting the exit code alone caused tonight's automation-scripts
+    #29 to print "ERROR: merge failed" even though the merge had
+    landed. Re-query the PR after the merge attempt to find out what
+    really happened.
+    """
+    run(["gh", "pr", "merge", str(pr_number), "--repo", repo, "--squash"])
+    check = run([
+        "gh", "api", f"repos/{repo}/pulls/{pr_number}",
+        "--jq", ".merged",
+    ])
+    return (check.stdout or "").strip().lower() == "true"
 
 
 def comment_on_pr(pr_number: int, repo: str, body: str) -> None:
@@ -545,7 +577,25 @@ def _process_pr_inside_worktree(
         return "errored"
 
     if not wait_for_mergeable(pr.number, repo):
-        print(f"  ERROR: mergeable_state never reached 'clean' within {MERGEABLE_TIMEOUT_S}s")
+        # Distinguish failure modes. Re-query mergeable_state to decide
+        # remediation. The approval from approve_pr has already been
+        # posted -- on the dirty branch (merge conflict), dependabot
+        # rebase resolves the conflict without us touching the
+        # approval (GitHub auto-dismisses stale reviews on force-push
+        # if dismiss_stale_reviews is on; otherwise it persists and
+        # the next tool run skips re-approval). Without this branch,
+        # the tool would mark green-but-dirty PRs as "errored" forever
+        # even though dependabot can fix them with one comment.
+        final_state_result = run([
+            "gh", "api", f"repos/{repo}/pulls/{pr.number}",
+            "--jq", ".mergeable_state",
+        ])
+        final_state = (final_state_result.stdout or "").strip().strip('"')
+        print(f"  ERROR: mergeable_state failed to reach 'clean' (got '{final_state}')")
+        if final_state == "dirty":
+            print("  Merge conflict -- requesting @dependabot rebase. "
+                  "Approval persists; next run re-evaluates post-rebase.")
+            request_dependabot_rebase(pr.number, repo)
         return "errored"
 
     if not squash_merge(pr.number, repo):
@@ -810,4 +860,18 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Ctrl-C while ThreadPoolExecutor is alive prints a multi-frame
+        # traceback through threading.wait that looks like a crash even
+        # though it's the user's intentional stop. Catch and exit
+        # cleanly. Worker threads may still be finishing their current
+        # PR -- their try/finally in process_pr will clean up worktrees
+        # before they exit. Subsequent runs pick up where this left off.
+        print(
+            "\nInterrupted by user (Ctrl-C). Letting worker threads "
+            "finish current PR cleanup; next run resumes from here.",
+            file=sys.stderr,
+        )
+        sys.exit(130)
