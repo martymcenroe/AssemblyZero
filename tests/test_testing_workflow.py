@@ -639,7 +639,16 @@ class TestNodeFunctions:
         assert result == "N2_scaffold_tests"
 
     def test_route_after_review_stops_on_blocked_without_auto(self, tmp_path):
-        """route_after_review stops at end when BLOCKED without auto mode."""
+        """route_after_review stops at end when BLOCKED under strict policy.
+
+        Issue #1072 changed the default `test_plan_policy` from "strict"
+        (END on BLOCKED) to "revise" (try revisions before ending). The
+        original test asserted the legacy "end" behavior without setting
+        policy explicitly, which now incorrectly hits the revise path
+        and returns "N1_5_revise_test_plan". Setting policy="strict"
+        restores the original test intent: verify that BLOCKED+non-auto
+        under strict policy ends the workflow.
+        """
         from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
@@ -648,11 +657,12 @@ class TestNodeFunctions:
             "auto_mode": False,  # Not auto mode - should stop
             "test_plan_status": "BLOCKED",
             "error_message": "",
+            "test_plan_policy": "strict",  # legacy END-on-BLOCKED behavior
         }
 
         result = route_after_review(state)
 
-        # Without auto mode, BLOCKED should end the workflow
+        # strict policy: BLOCKED ends the workflow
         assert result == "end"
 
     def test_scaffold_tests_creates_files(self, tmp_path):
