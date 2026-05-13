@@ -64,6 +64,21 @@ from pathlib import Path
 
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
+# Windows-only creationflag that isolates each child subprocess in its
+# own process group. Without this, parent + child share a console
+# group, so a child-side console event (e.g. pytest dying during
+# config init when an import-time error fires, or `gh` shutting down
+# after an HTTP error) can propagate as a CTRL_C_EVENT to the parent
+# Python process and be received as SIGINT -- which the main thread
+# raises as `KeyboardInterrupt`. This was tonight's "phantom Ctrl-C"
+# (#1172): the user wasn't pressing anything, but pytest's collection
+# crash on AZ #1097 (langchain-core 1.3.3 breaks test_auth_middleware
+# import) propagated a console signal up. On non-Windows platforms
+# the flag value is 0 (no-op); subprocess.CREATE_NEW_PROCESS_GROUP is
+# only defined on Windows so the conditional protects portability.
+_CREATION_FLAGS = (
+    subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+)
 # Issue #1091: --fleet mode uses gh repo list to enumerate user-owned repos.
 # Cap at 200 — well above current ~60-repo count without paginating.
 FLEET_REPO_LIMIT = 200
@@ -127,6 +142,7 @@ def run(cmd: list[str], cwd: str | None = None,
             cmd, cwd=cwd, capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=timeout, check=False,
+            creationflags=_CREATION_FLAGS,
         )
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT after {timeout}s")
@@ -875,15 +891,19 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        # Ctrl-C while ThreadPoolExecutor is alive prints a multi-frame
-        # traceback through threading.wait that looks like a crash even
-        # though it's the user's intentional stop. Catch and exit
-        # cleanly. Worker threads may still be finishing their current
-        # PR -- their try/finally in process_pr will clean up worktrees
-        # before they exit. Subsequent runs pick up where this left off.
+        # SIGINT can reach the parent for two distinct reasons on
+        # Windows: (a) the user actually pressed Ctrl-C, or (b) a
+        # child subprocess crashed and its console-group event
+        # propagated up. The old message blamed the user
+        # unconditionally -- which is wrong, and was reported as
+        # #1172 after multiple phantom interruptions during tonight's
+        # fleet runs. After landing the _CREATION_FLAGS isolation,
+        # case (b) should be largely eliminated, but the message
+        # stays neutral so we don't lie if it ever does fire.
         print(
-            "\nInterrupted by user (Ctrl-C). Letting worker threads "
-            "finish current PR cleanup; next run resumes from here.",
+            "\nInterrupted (SIGINT received) -- shutting down "
+            "cleanly. Worker threads will finish their current PR's "
+            "cleanup. Next run resumes from this state.",
             file=sys.stderr,
         )
         sys.exit(130)
