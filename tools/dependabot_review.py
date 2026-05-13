@@ -154,10 +154,25 @@ def run(cmd: list[str], cwd: str | None = None,
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
         ts3 = datetime.datetime.now().strftime("%H:%M:%S")
+        # Show the TAIL of the output (last 2000 chars), not the head.
+        # Pytest's failure summary, mypy's error counts, gh's last
+        # response, git's actual error line -- all live at the END of
+        # subprocess output. The original 500-char head capture was
+        # consistently showing only the boring lead-in (e.g. pytest
+        # progress dots) and missing the actual failure details that
+        # make diagnosis possible.
         if stderr:
-            print(f"  [{ts3}] [exit {result.returncode}] stderr: {stderr[:500]}")
+            tail = stderr[-2000:] if len(stderr) > 2000 else stderr
+            prefix = "tail" if len(stderr) > 2000 else "all"
+            print(f"  [{ts3}] [exit {result.returncode}] stderr ({prefix}, {len(stderr)} chars):")
+            for line in tail.splitlines():
+                print(f"  | {line}")
         elif stdout:
-            print(f"  [{ts3}] [exit {result.returncode}] stdout: {stdout[:500]}")
+            tail = stdout[-2000:] if len(stdout) > 2000 else stdout
+            prefix = "tail" if len(stdout) > 2000 else "all"
+            print(f"  [{ts3}] [exit {result.returncode}] stdout ({prefix}, {len(stdout)} chars):")
+            for line in tail.splitlines():
+                print(f"  | {line}")
         else:
             print(f"  [{ts3}] [exit {result.returncode}] (no output)")
     return result
@@ -867,70 +882,87 @@ def main() -> None:
         "merged": [], "deferred": [], "errored": [],
     }
 
-    # Issue #1093: parallelize across repos in --fleet mode. Single-
-    # repo mode (or --workers=1) keeps the sequential path. Within a
-    # repo, processing is always sequential.
-    if args.fleet and args.workers > 1 and not args.dry_run:
-        print(f"\nProcessing {len(repos)} repo(s) with {args.workers} "
-              f"worker(s)...")
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            futures = {
-                executor.submit(process_repo, repo, main_repo, args.dry_run): repo
-                for repo in repos
-            }
-            for future in as_completed(futures):
-                repo = futures[future]
-                try:
-                    sub = future.result()
-                except Exception as e:
-                    print(f"\n  [ERROR] worker for {repo} raised: {e}")
-                    sub = {"merged": [], "deferred": [], "errored": [repo]}
+    # Wrap the worker dispatch + summary print in try/finally so the
+    # Summary block ALWAYS prints, even when a stray SIGINT trips the
+    # KeyboardInterrupt handler in __main__ before we'd otherwise
+    # reach the summary section. Without this, the previous run
+    # finished processing every PR but exited via SIGINT during
+    # executor.shutdown() teardown, losing the entire Summary +
+    # FLEET-COMPLETE marker. (Despite #1173's CREATE_NEW_PROCESS_GROUP
+    # fix, SIGINT is still arriving from somewhere in the Windows
+    # scheduled-task subprocess tree. Not worth chasing further --
+    # belt-and-suspenders: print summary in finally.)
+    try:
+        # Issue #1093: parallelize across repos in --fleet mode. Single-
+        # repo mode (or --workers=1) keeps the sequential path. Within a
+        # repo, processing is always sequential.
+        if args.fleet and args.workers > 1 and not args.dry_run:
+            print(f"\nProcessing {len(repos)} repo(s) with {args.workers} "
+                  f"worker(s)...")
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                futures = {
+                    executor.submit(process_repo, repo, main_repo, args.dry_run): repo
+                    for repo in repos
+                }
+                for future in as_completed(futures):
+                    repo = futures[future]
+                    try:
+                        sub = future.result()
+                    except Exception as e:
+                        print(f"\n  [ERROR] worker for {repo} raised: {e}")
+                        sub = {"merged": [], "deferred": [], "errored": [repo]}
+                    for k in ("merged", "deferred", "errored"):
+                        results[k].extend(sub[k])
+        else:
+            for repo in repos:
+                sub = process_repo(repo, main_repo, args.dry_run)
                 for k in ("merged", "deferred", "errored"):
                     results[k].extend(sub[k])
-    else:
-        for repo in repos:
-            sub = process_repo(repo, main_repo, args.dry_run)
-            for k in ("merged", "deferred", "errored"):
-                results[k].extend(sub[k])
+    finally:
+        # Dry-run skips the result-aggregation summary -- it only
+        # listed PRs without taking action, so there's nothing to
+        # summarize. Real runs always print Summary + FLEET-COMPLETE,
+        # even if a stray SIGINT cut the processing loop short --
+        # try/finally ensures we get the partial-results report.
+        # No `return` here; return-in-finally would swallow any
+        # KeyboardInterrupt being propagated up to __main__'s catch.
+        if args.dry_run:
+            print("\n(dry-run; exiting)")
+        else:
+            # Issue #1093: review-event counter — every merged PR generated
+            # one APPROVED review event; every deferred PR generated one
+            # COMMENTED review event (per change A in #1091). Errored PRs
+            # generated nothing (the script bailed before any gh pr review
+            # call). The counter makes Code Review profile-stat math visible
+            # so the operator can verify credit was earned each run.
+            approved_events = len(results["merged"])
+            commented_events = len(results["deferred"])
+            total_events = approved_events + commented_events
 
-    if args.dry_run:
-        print("\n(dry-run; exiting)")
-        return
+            print("\n=== Summary ===")
+            print(f"  Merged:   {results['merged']}")
+            print(f"  Deferred (test failures / install errors, worktree retained): "
+                  f"{results['deferred']}")
+            print(f"  Errored:  {results['errored']}")
+            print(
+                f"  Review events created: {approved_events} APPROVED "
+                f"+ {commented_events} COMMENTED = {total_events} total"
+            )
 
-    # Issue #1093: review-event counter — every merged PR generated
-    # one APPROVED review event; every deferred PR generated one
-    # COMMENTED review event (per change A in #1091). Errored PRs
-    # generated nothing (the script bailed before any gh pr review
-    # call). The counter makes Code Review profile-stat math visible
-    # so the operator can verify credit was earned each run.
-    approved_events = len(results["merged"])
-    commented_events = len(results["deferred"])
-    total_events = approved_events + commented_events
-
-    print("\n=== Summary ===")
-    print(f"  Merged:   {results['merged']}")
-    print(f"  Deferred (test failures / install errors, worktree retained): "
-          f"{results['deferred']}")
-    print(f"  Errored:  {results['errored']}")
-    print(
-        f"  Review events created: {approved_events} APPROVED "
-        f"+ {commented_events} COMMENTED = {total_events} total"
-    )
-
-    # Self-marked completion line. The PowerShell wrapper's OK/EXIT
-    # marker write proved unreliable in the scheduled-task context
-    # (Status:Ready, Last Result:0, but no | OK | line ever lands).
-    # Printing a marker as the last line of the python tool's output
-    # bypasses that -- cmd /c >> $LogFile captures it reliably, since
-    # we already know the per-line streaming works. morning_status_tool
-    # can grep for this marker as a secondary completion signal.
-    end_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(
-        f"\n=== {end_stamp} | FLEET-COMPLETE | "
-        f"merged={len(results['merged'])} "
-        f"deferred={len(results['deferred'])} "
-        f"errored={len(results['errored'])} ==="
-    )
+            # Self-marked completion line. The PowerShell wrapper's OK/EXIT
+            # marker write proved unreliable in the scheduled-task context
+            # (Status:Ready, Last Result:0, but no | OK | line ever lands).
+            # Printing a marker as the last line of the python tool's output
+            # bypasses that -- cmd /c >> $LogFile captures it reliably, since
+            # we already know the per-line streaming works. morning_status_tool
+            # can grep for this marker as a secondary completion signal.
+            end_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(
+                f"\n=== {end_stamp} | FLEET-COMPLETE | "
+                f"merged={len(results['merged'])} "
+                f"deferred={len(results['deferred'])} "
+                f"errored={len(results['errored'])} ==="
+            )
 
 
 if __name__ == "__main__":
