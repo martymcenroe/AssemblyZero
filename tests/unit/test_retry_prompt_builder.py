@@ -15,7 +15,6 @@ import pytest
 
 from assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder import (
     SNIPPET_MAX_LINES,
-    PrunedRetryPrompt,
     RetryContext,
     _build_tier1_prompt,
     _build_tier2_prompt,
@@ -566,7 +565,17 @@ class TestTypeAnnotations:
     """Tests for type annotation completeness (T160, T170)."""
 
     def test_mypy_retry_prompt_builder(self) -> None:
-        """T160: mypy reports zero errors on retry_prompt_builder module."""
+        """T160: mypy reports zero errors on retry_prompt_builder module.
+
+        Uses --follow-imports=skip so mypy checks only the target file's
+        own annotations, not the transitive import graph. Without that,
+        --strict descends into the entire AZ codebase, finds 219 type
+        errors across 59 files in dependencies the target module doesn't
+        own, and the test fails permanently. The test's name and intent
+        ("reports zero errors on retry_prompt_builder module") matches
+        the --follow-imports=skip scope; the original invocation was
+        accidentally checking the whole world.
+        """
         module_path = (
             Path(__file__).parent.parent.parent
             / "assemblyzero"
@@ -576,7 +585,11 @@ class TestTypeAnnotations:
             / "retry_prompt_builder.py"
         )
         result = subprocess.run(
-            [sys.executable, "-m", "mypy", str(module_path), "--strict", "--ignore-missing-imports"],
+            [
+                sys.executable, "-m", "mypy", str(module_path),
+                "--strict", "--ignore-missing-imports",
+                "--follow-imports=skip",
+            ],
             capture_output=True,
             text=True,
         )
@@ -585,7 +598,11 @@ class TestTypeAnnotations:
         )
 
     def test_mypy_lld_section_extractor(self) -> None:
-        """T170: mypy reports zero errors on lld_section_extractor module."""
+        """T170: mypy reports zero errors on lld_section_extractor module.
+
+        See test_mypy_retry_prompt_builder for the rationale on
+        --follow-imports=skip. Same scope-creep fix.
+        """
         module_path = (
             Path(__file__).parent.parent.parent
             / "assemblyzero"
@@ -593,7 +610,11 @@ class TestTypeAnnotations:
             / "lld_section_extractor.py"
         )
         result = subprocess.run(
-            [sys.executable, "-m", "mypy", str(module_path), "--strict", "--ignore-missing-imports"],
+            [
+                sys.executable, "-m", "mypy", str(module_path),
+                "--strict", "--ignore-missing-imports",
+                "--follow-imports=skip",
+            ],
             capture_output=True,
             text=True,
         )
