@@ -95,7 +95,8 @@ class PRInfo:
 # ---------------------------------------------------------------------------
 
 def run(cmd: list[str], cwd: str | None = None,
-        timeout: int | None = None) -> subprocess.CompletedProcess:
+        timeout: int | None = None,
+        quiet_on_failure: bool = False) -> subprocess.CompletedProcess:
     """Run a subprocess and echo the command to stdout.
 
     `encoding="utf-8", errors="replace"` is mandatory on Windows.
@@ -114,6 +115,11 @@ def run(cmd: list[str], cwd: str | None = None,
     sometimes gh CLI returns non-zero on success (e.g. emits a warning
     but the operation completed), so the caller can't trust the exit
     code alone. Truncated to 500 chars to bound the noise.
+
+    `quiet_on_failure=True` suppresses the error print for calls where
+    non-zero is the expected filter signal (e.g. probing for the
+    existence of a file in the fleet enumeration -- a 404 just means
+    "this repo doesn't have pyproject.toml", not "something broke").
     """
     print(f"  $ {' '.join(cmd)}")
     try:
@@ -125,7 +131,7 @@ def run(cmd: list[str], cwd: str | None = None,
     except subprocess.TimeoutExpired:
         print(f"  TIMEOUT after {timeout}s")
         return subprocess.CompletedProcess(cmd, returncode=124, stdout="", stderr="TIMEOUT")
-    if result.returncode != 0:
+    if result.returncode != 0 and not quiet_on_failure:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
         if stderr:
@@ -670,10 +676,16 @@ def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     # user can't actually approve. Skip silently instead.
     processable: list[str] = []
     for repo in candidates:
-        check = run([
-            "gh", "api", f"repos/{repo}/contents/pyproject.toml",
-            "--jq", ".name",
-        ])
+        # 404 = "no pyproject.toml in this repo" = "not a Python repo we
+        # can run pytest in". That's the FILTER signal, not an error;
+        # suppress the stderr noise for these calls.
+        check = run(
+            [
+                "gh", "api", f"repos/{repo}/contents/pyproject.toml",
+                "--jq", ".name",
+            ],
+            quiet_on_failure=True,
+        )
         if check.returncode == 0 and check.stdout.strip():
             processable.append(repo)
 
