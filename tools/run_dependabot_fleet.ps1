@@ -41,29 +41,34 @@ $Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 # the current directory).
 Set-Location -Path $RepoRoot
 
-Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet"
+Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet" -Encoding utf8
 
 try {
-    # Stream subprocess output to the log line-by-line. Tee-Object (used
-    # in the first attempt at this fix) holds a single .NET StreamWriter
-    # alive for the duration of the pipeline; in a 10-30 min run the
-    # writer's buffer accumulates output and only flushes at pipeline
-    # disposal, which defeats the whole point. The user observed the
-    # log sit at "START" for 3+ minutes with the task confirmed running.
-    # ForEach-Object + Add-Content opens a fresh writer per line and
-    # auto-flushes on close, so each line hits disk as produced.
-    & poetry run python tools/dependabot_review.py --fleet 2>&1 |
-        ForEach-Object { Add-Content -Path $LogFile -Value $_ }
+    # Bypass PowerShell's pipeline and use cmd.exe's native >>
+    # redirection. Three prior attempts to stream via PowerShell
+    # (Tee-Object in #1163, ForEach-Object+Add-Content in #1166)
+    # all produced START-only log files in the scheduled-task
+    # -WindowStyle Hidden context -- the subprocess ran fine and
+    # merged PRs, but per-line output and the terminal OK/EXIT line
+    # never reached the log. Suspected cause: Add-Content in Windows
+    # PowerShell 5.1 defaults to ASCII encoding; Python's UTF-8 output
+    # (em-dashes, etc.) trips a silent encoding error that aborts the
+    # pipeline with $ErrorActionPreference = 'Continue' swallowing it.
+    # cmd.exe's >> is byte-level, format-agnostic, and unaffected by
+    # PowerShell's pipeline mechanics. The OK/EXIT marker is then
+    # written by PowerShell with explicit -Encoding utf8 so the same
+    # encoding wire doesn't trip later writes. See #1176.
+    & cmd.exe /c "poetry run python tools\dependabot_review.py --fleet >> `"$LogFile`" 2>&1"
     $exitCode = $LASTEXITCODE
 
     $endStamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     if ($exitCode -eq 0) {
-        Add-Content -Path $LogFile -Value "$endStamp | OK | exit 0"
+        Add-Content -Path $LogFile -Value "$endStamp | OK | exit 0" -Encoding utf8
     } else {
-        Add-Content -Path $LogFile -Value "$endStamp | EXIT $exitCode"
+        Add-Content -Path $LogFile -Value "$endStamp | EXIT $exitCode" -Encoding utf8
     }
 } catch {
     $errStamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Add-Content -Path $LogFile -Value "$errStamp | ERROR | $($_.Exception.Message)"
+    Add-Content -Path $LogFile -Value "$errStamp | ERROR | $($_.Exception.Message)" -Encoding utf8
     exit 1
 }
