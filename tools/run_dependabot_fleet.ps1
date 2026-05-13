@@ -44,16 +44,16 @@ Set-Location -Path $RepoRoot
 Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet"
 
 try {
-    # Stream subprocess output to the log line-by-line. The previous
-    # design buffered all output into `$output = & ...` and only flushed
-    # to the log after the subprocess returned, which meant a hung
-    # subprocess (e.g. gh waiting on an unanswerable auth prompt in the
-    # scheduled-task context) produced a "START with no completion"
-    # log forever. Tee-Object writes each line as produced so partial
-    # output survives subprocess failure and the operator can see WHERE
-    # it died.
+    # Stream subprocess output to the log line-by-line. Tee-Object (used
+    # in the first attempt at this fix) holds a single .NET StreamWriter
+    # alive for the duration of the pipeline; in a 10-30 min run the
+    # writer's buffer accumulates output and only flushes at pipeline
+    # disposal, which defeats the whole point. The user observed the
+    # log sit at "START" for 3+ minutes with the task confirmed running.
+    # ForEach-Object + Add-Content opens a fresh writer per line and
+    # auto-flushes on close, so each line hits disk as produced.
     & poetry run python tools/dependabot_review.py --fleet 2>&1 |
-        Tee-Object -FilePath $LogFile -Append
+        ForEach-Object { Add-Content -Path $LogFile -Value $_ }
     $exitCode = $LASTEXITCODE
 
     $endStamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
