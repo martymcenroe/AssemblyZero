@@ -107,32 +107,41 @@ The pickup decision is **event-ordered**, not age-based. Read `data/handoff-log.
 (cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/pickup_decide.py --repo {repo_root})
 ```
 
-The subshell `()` keeps the `cd` local. The script reads `data/handoff-log.md`, walks `~/.claude/projects/<encoded>/*.jsonl`, classifies each session by start-time + post-handoff user prompts + clean-close markers, and emits a JSON verdict.
+The subshell `()` keeps the `cd` local. The script reads `data/handoff-log.md`, walks `~/.claude/projects/<encoded>/*.jsonl`, classifies each session, and emits a JSON verdict. Parse the JSON. The `decision` field tells you what to do. The `summary` and `surfaces` fields are pre-rendered text for the user.
 
-Parse the JSON. Pay attention to the `decision` field plus the `summary` field (already human-readable). The `sessions_analyzed` array gives per-session context for surfacing to the user.
-
-**Timestamp comparison:** the JSON has `handoff_ts` (local wall clock, no tz tag) and `handoff_ts_utc` (tz-aware ISO). Per-session `start_ts` and `last_user_prompt_ts` are UTC ISO with offset. When comparing them — including for the diagnostic signals in (C) — use `handoff_ts_utc`, NOT `handoff_ts`. Mixing the two leads to false post-handoff alarms because the local↔UTC offset is invisible at a glance (unleashed #530).
+**This skill is a thin shim.** All classification and decision logic lives in `pickup_decide.py` per #575. Do not interpret session categories yourself, do not second-guess the script's verdict, do not add LLM-judgment branches. Print what the script gives you and dispatch on the verdict name only.
 
 **B) Dispatch on the `decision` field:**
 
-| `decision` | What it means | Action |
-|---|---|---|
-| `auto_pickup` | Handoff is genuinely the last load-bearing event. The writing session ended cleanly with no further user prompts. | Proceed to Step 1D (pickup import). |
-| `skip_already_picked_up` | A `<!-- picked-up -->` marker is present after the latest handoff. | No pickup. Proceed to Step 2. |
-| `skip_no_handoff` | No handoffs in the log. | No pickup. Proceed to Step 2. |
-| `skip_orphan` | A session started AFTER the handoff was written, without picking it up. The handoff is genuinely orphaned. | No pickup. Surface the `summary` to the user. Suggest resuming the orphan session via panopticon if they want that context, or onboarding fresh. Proceed to Step 2. |
-| `ask_user_ambiguous` | The session that wrote the handoff continued with NEW user prompts after the handoff timestamp — the user kept working past the checkpoint. Pickup loses that post-handoff work; resume preserves it. | Surface the `summary`. List the ambiguous session id(s) (`sessions_analyzed[].id` for items where `category == "ambiguous"`). Ask the user: "Resume one of those sessions to keep the post-handoff work, or pickup the handoff and lose it?" Wait for input. |
-| `ask_user_suspect` | The session that wrote the handoff has no clean-close marker (no `/exit`, `/park`, `/handoff`, or `away_summary`). Possibly crashed mid-handoff. | Surface the `summary`. Ask: "Resume the suspect session to inspect what happened, or pickup the handoff anyway?" Wait for input. |
+| `decision` | Action |
+|---|---|
+| `auto_pickup` | The latest checkpoint is a clean handoff with importable body, no gating post-checkpoint events. Proceed to Step 1D (pickup import). |
+| `auto_park_pickup` | The latest checkpoint is a deliberate `/park` (or `/handoff --park` / `/handoff --reboot`) with importable body, no gating post-checkpoint events. Proceed to Step 1D (pickup import). |
+| `skip_already_picked_up` | A `<!-- picked-up -->` marker is present after the latest checkpoint. No pickup. Proceed to Step 2. |
+| `skip_no_handoff` | No checkpoint exists in the log. No pickup. Proceed to Step 2. |
+| `surface_to_user` | Real content-based activity exists between the checkpoint and now, OR the checkpoint has a structural problem (no body, marker post-dating body). DO NOT silently choose. Run the **Surface protocol** below and wait for user input. |
 
 **`--pickup` flag override:** If `$ARGUMENTS` contains `--pickup`, ignore the script's verdict and proceed to Step 1D unconditionally. The user is asserting they want the pickup regardless.
 
-**C) Diagnostic signals (informational only — do not gate the pickup decision):**
+**Surface protocol (`decision == "surface_to_user"`):**
 
-After Step 1B has decided pickup vs no-pickup, optionally surface these signals to the user. They DO NOT change the decision; they are context to flag patterns the user might want to investigate.
+Print every entry in `surfaces` to the user verbatim, in order, one per line. Each entry has `kind` (`checkpoint` or `session`), `headline`, `detail`, and `danger_flags`. Render as:
 
-- **Thrashing**: from `data/session-index.jsonl`, if 3+ entries have start timestamps within a 30-minute window AND each has `line_count < 50` → "Note: detected {N} brief sessions in last 30 min — possible resume thrashing or recovery."
-- **Crash signal**: last session-index entry has `line_count >= 50` AND started AFTER the most recent handoff timestamp AND no later `<!-- handoff-start -->` exists in the log → "Note: a substantive session ({start}, {duration_min}m) ran after the last handoff without producing a new handoff. Session log at `docs/session-logs/{date}.md` may have additional context. Pickup is still proceeding (handoff is the last unconsumed event)."
-- **Stacked unconsumed handoffs**: walk the log; if any prior `<!-- handoff-end -->` lacks a `<!-- picked-up -->` before the next `<!-- handoff-start -->` → "Anomaly: handoff at {prior_ts} was never picked up before the {newer_ts} handoff was written. Pickup uses the most recent handoff."
+```
+{kind | upper}: {headline}
+  {detail}
+  (danger: {danger_flags joined by comma})       # only if non-empty
+```
+
+Then print the `summary` field.
+
+Then offer three options. Use prose, never numbered lists or `(Y/n)` — those auto-fire under unleashed (see [CLAUDE.md](C:\Users\mcwiz\Projects\CLAUDE.md) "NEVER offer numbered options or yes/no menus in questions to the user"):
+
+> The checkpoint is at {checkpoint.ts_local} ({checkpoint.kind}). You can: pick it up anyway (run `/onboard --pickup`), investigate a specific session (its id is in the surface above; use `claude --resume <sid>` to spelunk), or onboard fresh and start a new direction. What would you like to do?
+
+WAIT for user input. Do not act on your own judgment. Do not assume.
+
+Full detail JSON is at `result.detail_path` — if the user asks for more detail on any session, read that file.
 
 **D) Pickup import (when triggered):**
 
