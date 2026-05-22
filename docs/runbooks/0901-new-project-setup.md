@@ -110,7 +110,7 @@ MyNewProject/
 | `CLAUDE.md` | Claude agent instructions |
 | `GEMINI.md` | Gemini agent instructions |
 | `README.md` | Project overview |
-| `LICENSE` | MIT License |
+| `LICENSE` | PolyForm Noncommercial 1.0.0 (default; pass `--license mit` for MIT) |
 | `.gitignore` | Standard ignore patterns |
 | `.unleashed.json` | Unleashed wrapper configuration (model, effort, onboard settings) |
 | `.github/workflows/auto-reviewer.yml` | Cerberus auto-approval caller workflow |
@@ -273,3 +273,4 @@ The script automates all of this in one command.
 | 2.1 | 2026-04-05 | Added `.unleashed.json` to file table (was in script/schema but missing from docs) |
 | 2.2 | 2026-04-05 | Added workflow files to file table. Updated post-setup: branch protection is now automated, Cerberus is the remaining human step. |
 | 2.3 | 2026-05-22 | `--cerberus-pem` is now **required** for GitHub-creating invocations (#1206). Quick Start examples updated to include the flag. Post-setup verification extended with GitHub-side checks (#1200) and `pr-sentinel-mm` Worker installation detection (#1202). |
+| 2.4 | 2026-05-22 | Fixed `Files Created` table — `LICENSE` row was documented as MIT but the script defaults to PolyForm Noncommercial 1.0.0 (#1198). |
