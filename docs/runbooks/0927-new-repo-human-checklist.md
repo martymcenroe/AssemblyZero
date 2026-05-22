@@ -52,17 +52,19 @@ With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (ins
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} [--public] [--cerberus-pem PATH]
+poetry run python tools/new_repo_setup.py {name} --cerberus-pem PATH [--public]
 ```
+
+`--cerberus-pem` is **required** when creating a GitHub repo (#1206). The script exits with a guide if it's missing — Cerberus auto-approval is part of the new-repo contract, and without the secrets every PR sits blocked. The only override is `--no-github` (local scaffold only, skips the GitHub side entirely).
 
 gpg-agent will prompt for your passphrase once per cache window (controlled by `~/.gnupg/gpg-agent.conf`) and the script handles the rest.
 
 **Defaults the script picks unless you override:**
 - **License**: PolyForm Noncommercial 1.0.0. Pass `--license mit` if you want MIT instead.
 - **Visibility**: private. Pass `--public` to override.
-- **Cerberus secrets**: NOT deployed unless you pass `--cerberus-pem PATH` (see [Cerberus](#what-cerberus-is-and-why-you-want-it) below).
+- **Cerberus secrets**: deployed when `--cerberus-pem PATH` is provided (required for new GitHub repos per #1206 — see [Cerberus](#what-cerberus-is-and-why-you-want-it) below).
 
-**Before using `--cerberus-pem`**, download the `.pem`:
+**Before running the script**, download the `.pem`:
 
 1. Go to <https://github.com/settings/apps/cerberus-az> → **Private keys**
 2. Click **Generate a private key** — the browser downloads a `.pem` file (typically to `C:\Users\mcwiz\Downloads\`)
@@ -161,7 +163,7 @@ After step 3 the secret value lives in GitHub Actions encrypted storage. The loc
 
 The script can't auto-do steps 1 and 3 (browser-only). It needs a flag to know whether YOU did step 1 and where you put the .pem. That's what `--cerberus-pem PATH` is for.
 
-**Recommendation: always pass `--cerberus-pem` on first creation of a new repo.** Skipping it leaves auto-approval broken until you fix it (either by re-running with `--cerberus-pem` later, or running `tools/deploy_cerberus_secrets.py` standalone fleet-wide).
+**`--cerberus-pem` is REQUIRED on new GitHub repos (#1206).** The script exits 1 with the .pem-acquisition guide if you forget it. The only way to skip Cerberus deploy is `--no-github` (local scaffold only). For repos already created without the flag, the fallback path below (standalone `tools/deploy_cerberus_secrets.py`) still applies.
 
 Two procedural variants follow — **preferred** (integrated into `new_repo_setup.py`, what `--cerberus-pem` does) or **fallback** (standalone fleet-wide script when you want to deploy to many repos at once).
 
@@ -272,3 +274,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-04-22 | v5.3: #1014 — made the \`--cerberus-pem\` path-format explicit. Git Bash Unix-style (\`/c/Users/mcwiz/Downloads/...\`) is preferred; noted MSYS translation and the Windows-style fallback with its quoting caveat. Concrete example given in the Step 1 block. |
 | 2026-05-07 | v6.0: #1037 — dropped \`--license mit\` from invocation examples (script default is \`polyform\`, was misleading to show MIT as if recommended). Added an explicit "Defaults the script picks unless you override" block. Rewrote Section 4 with three subsections explaining what Cerberus is (auto-approver of your own PRs after pr-sentinel passes), why the secrets must be per-repo (App's RSA private key, used by the auto-reviewer workflow to authenticate as Cerberus), and why \`--cerberus-pem\` is recommended on every new-repo creation. Updated the env-block exposure note to reflect that #1036/#1037 closes the last \`GH_TOKEN\` hold-out. |
 | 2026-05-09 | v6.1: #1058 + #1059 + #1060 + #1061 — bundle of post-boostgauge-readiness-audit fixes. Script now bootstraps a Python project by default (\`poetry init\` + \`poetry add --group dev pytest pytest-cov\` + \`[tool.pytest.ini_options]\` + \`tests/conftest.py\`); \`--lang none\` skips for non-Python repos. \`.unleashed.json\` defaults to \`assemblyZero: true\` and no longer emits the deprecated \`pickupThresholdMinutes\`. Two canonical GitHub labels (\`implementation\`, \`lld\`) created on the new repo. |
+| 2026-05-22 | v6.2: #1206 — `--cerberus-pem` is REQUIRED for new GitHub repos. Script exits 1 with the .pem-acquisition guide if omitted. Override is `--no-github` (local scaffold only). #1200 + #1202 — extended post-setup verification to GitHub-side state (branch protection, repo settings, workflow content, Cerberus secrets) and added a best-effort `pr-sentinel-mm` Worker installation check that surfaces App-scope drift at creation time instead of when the first PR opens. |

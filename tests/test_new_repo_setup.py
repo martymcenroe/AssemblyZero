@@ -728,3 +728,223 @@ class TestMainLocalWorkflow:
         with patch("sys.argv", ["new_repo_setup.py", "ForceProject", "--no-github", "--force"]):
             main()
         assert (tmp_path / "ForceProject").exists()
+
+
+# ===========================================================================
+# Pillar 1 — Required --cerberus-pem (#1206) + GitHub-side verification (#1200, #1202)
+# ===========================================================================
+
+import base64 as _base64  # noqa: E402
+
+from new_repo_setup import (  # noqa: E402
+    _CANONICAL_AUTO_REVIEWER_CALLER,
+    verify_branch_protection_on_origin,
+    verify_pr_sentinel_installation,
+    verify_repo_settings_on_origin,
+    verify_workflow_content_on_origin,
+)
+
+
+class TestCerberusPemRequired:
+    """T290-T292: --cerberus-pem is REQUIRED for new GitHub repos (#1206)."""
+
+    @patch("new_repo_setup.config")
+    def test_T290_missing_pem_without_no_github_exits_one(self, mock_config, tmp_path):
+        """Without --cerberus-pem and without --no-github, exit 1 BEFORE any creation."""
+        _setup_config_mock(mock_config, tmp_path)
+        with patch("sys.argv", ["new_repo_setup.py", "RequiredTest"]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+        # Pre-flight must exit BEFORE creating the local directory.
+        assert not (tmp_path / "RequiredTest").exists()
+
+    @patch("new_repo_setup.config")
+    @patch("new_repo_setup.run_command")
+    def test_T291_no_github_bypasses_requirement(self, mock_run, mock_config, tmp_path):
+        """--no-github skips the requirement — local scaffold proceeds without --cerberus-pem."""
+        _setup_config_mock(mock_config, tmp_path)
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch("sys.argv", ["new_repo_setup.py", "NoGitTest", "--no-github"]):
+            main()  # should NOT raise
+        assert (tmp_path / "NoGitTest").exists()
+
+    @patch("new_repo_setup.config")
+    def test_T292_cerberus_pem_plus_no_github_still_conflict(self, mock_config, tmp_path):
+        """Pre-existing conflict check still fires: --cerberus-pem + --no-github → exit 1."""
+        _setup_config_mock(mock_config, tmp_path)
+        with patch("sys.argv", [
+            "new_repo_setup.py", "ConflictTest", "--no-github", "--cerberus-pem", "/tmp/fake.pem",
+        ]):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+
+
+class TestVerifyBranchProtection:
+    """T293-T295: verify_branch_protection_on_origin (#1200)."""
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T293_pass_when_all_dimensions_match(self, mock_req):
+        """enforce_admins=True, 1 review, pr-sentinel check present → (True, ...)."""
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "enforce_admins": {"enabled": True},
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "required_status_checks": {
+                "contexts": ["pr-sentinel / issue-reference"],
+            },
+        }
+        mock_req.return_value = mock_resp
+        ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
+        assert ok is True
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T294_fail_when_enforce_admins_off(self, mock_req):
+        """enforce_admins=False → (False, msg) and msg names the dimension."""
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "enforce_admins": {"enabled": False},
+            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "required_status_checks": {
+                "contexts": ["pr-sentinel / issue-reference"],
+            },
+        }
+        mock_req.return_value = mock_resp
+        ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
+        assert ok is False
+        assert "enforce_admins" in msg
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T295_fail_on_404(self, mock_req):
+        """404 → (False, 'no branch protection set on origin')."""
+        mock_resp = MagicMock(status_code=404, text="Not Found")
+        mock_req.return_value = mock_resp
+        ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
+        assert ok is False
+        assert "no branch protection" in msg
+
+
+class TestVerifyRepoSettings:
+    """T296-T297: verify_repo_settings_on_origin (#1200)."""
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T296_pass_when_squash_only_no_wiki(self, mock_req):
+        """All settings match fleet standard → (True, ...)."""
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "has_wiki": False,
+            "has_projects": False,
+            "allow_merge_commit": False,
+            "allow_rebase_merge": False,
+            "allow_squash_merge": True,
+            "delete_branch_on_merge": True,
+        }
+        mock_req.return_value = mock_resp
+        ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
+        assert ok is True
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T297_fail_when_wiki_enabled(self, mock_req):
+        """has_wiki=True → (False, msg) and msg names the violation."""
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {
+            "has_wiki": True,
+            "has_projects": False,
+            "allow_merge_commit": False,
+            "allow_rebase_merge": False,
+            "allow_squash_merge": True,
+            "delete_branch_on_merge": True,
+        }
+        mock_req.return_value = mock_resp
+        ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
+        assert ok is False
+        assert "has_wiki" in msg
+
+
+class TestVerifyWorkflowContent:
+    """T298-T299: verify_workflow_content_on_origin — the #1193 regression test."""
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T298_pass_when_content_matches_canonical(self, mock_req):
+        """Origin content == _CANONICAL_AUTO_REVIEWER_CALLER → (True, ...)."""
+        encoded = _base64.b64encode(
+            _CANONICAL_AUTO_REVIEWER_CALLER.encode("utf-8")
+        ).decode("ascii")
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"content": encoded}
+        mock_req.return_value = mock_resp
+        ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
+        assert ok is True
+
+    @patch("new_repo_setup._request_with_retry")
+    def test_T299_fail_when_old_format_signature(self, mock_req):
+        """Origin content uses OLD caller format → (False, ...). The #1193 failure mode.
+
+        OLD format: `name: auto-reviewer` (lowercase), no permissions: block,
+        no with: required_checks input, secrets: inherit. Reusable workflow
+        fails with startup_failure.
+        """
+        old_format = (
+            "name: auto-reviewer\n"
+            "\n"
+            "on:\n"
+            "  pull_request:\n"
+            "    types: [opened, synchronize, reopened]\n"
+            "\n"
+            "jobs:\n"
+            "  review:\n"
+            "    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main\n"
+            "    secrets: inherit\n"
+        )
+        encoded = _base64.b64encode(old_format.encode("utf-8")).decode("ascii")
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.json.return_value = {"content": encoded}
+        mock_req.return_value = mock_resp
+        ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
+        assert ok is False
+        assert "differs from canonical" in msg
+
+
+class TestVerifyPrSentinelInstallation:
+    """T300-T302: verify_pr_sentinel_installation (#1202)."""
+
+    @patch("new_repo_setup.run_command")
+    def test_T300_pass_when_repo_in_installation(self, mock_run):
+        """Worker installation found AND covers the new repo → (True, ...)."""
+        mock_run.side_effect = [
+            # /user/installations filter → installation id
+            MagicMock(returncode=0, stdout="12345\n", stderr=""),
+            # /user/installations/12345/repositories → list of full_names
+            MagicMock(
+                returncode=0,
+                stdout="martymcenroe/some-other\nmartymcenroe/repo-name\n",
+                stderr="",
+            ),
+        ]
+        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        assert ok is True
+        assert "covers" in msg
+
+    @patch("new_repo_setup.run_command")
+    def test_T301_warn_when_installation_missing(self, mock_run):
+        """No pr-sentinel-mm in /user/installations → (False, 'not found')."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        assert ok is False
+        assert "not found" in msg
+
+    @patch("new_repo_setup.run_command")
+    def test_T302_warn_when_repo_not_in_installation_repos(self, mock_run):
+        """Installation exists but doesn't cover the new repo → App scope drift warning."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="12345\n", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout="martymcenroe/some-other-only\n",
+                stderr="",
+            ),
+        ]
+        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        assert ok is False
+        assert "does NOT cover" in msg or "drift" in msg.lower()
