@@ -4,6 +4,8 @@
 **Created:** 2026-01-20
 **Applies to:** All projects under AssemblyZero governance
 
+> **Note on scope.** "All projects under AssemblyZero governance" means CHILD projects — repositories that AZ governs and bootstraps via `tools/new_repo_setup.py`. **AssemblyZero itself, the governance layer, uses a parallel 4-digit numbering scheme** (`docs/0003-file-inventory.md`, `docs/standards/0009-...`, `docs/runbooks/0901-...`). The dual scheme is intentional — it originated in the 2026-01-13 Aletheia/AgentOS extraction so docs that briefly existed in both repos were glance-able. This standard governs CHILD projects (5-digit). AZ's own 4-digit scheme is its own convention, separate from this document. See `docs/index.md` for the historical record.
+
 ---
 
 ## Purpose
