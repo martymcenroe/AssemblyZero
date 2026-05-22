@@ -29,6 +29,13 @@ docs/lld/lld-status.json
 # #1151: audit script output (TSV at repo root)
 audit_tracked_log_writers_results.tsv
 
+# #1196: audit script outputs (TSV at repo root) — regenerable
+audit_fleet_auto_merge_readiness_results.tsv
+audit_fleet_branch_protection_results.tsv
+
+# #1196: pickup-decide hot state (10K+ lines, regenerable per session)
+data/.pickup-surface.json
+
 # Generated files
 *.generated.json
 

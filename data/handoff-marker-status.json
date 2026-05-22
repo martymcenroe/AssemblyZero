@@ -1,8 +1,8 @@
 {
   "status": "ok",
-  "marker": "handoff",
-  "timestamp": "2026-05-12 09:59:42",
-  "handoff_timestamp": "2026-05-12 09:58:27",
+  "marker": "park",
+  "timestamp": "2026-05-13 20:34:26",
+  "handoff_timestamp": "2026-05-13 20:32:30",
   "repo": "AssemblyZero",
-  "message": "Marked handoff from 2026-05-12 09:58:27 as handoff at 2026-05-12 09:59:42"
+  "message": "Marked handoff from 2026-05-13 20:32:30 as park at 2026-05-13 20:34:26"
 }
