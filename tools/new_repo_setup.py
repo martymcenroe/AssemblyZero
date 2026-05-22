@@ -22,6 +22,7 @@ See: docs/standards/0009-canonical-project-structure.md
 """
 
 import argparse
+import base64
 import json
 import logging
 import os
@@ -1294,6 +1295,38 @@ def create_python_project(
     return True
 
 
+# Canonical auto-reviewer.yml caller content. Single source of truth used
+# by both create_github_workflows() (write at creation time) and
+# verify_workflow_content_on_origin() (post-setup verification). Lifted
+# to module scope so both paths compare against the same bytes — the
+# #1193 failure mode was exactly this kind of divergent-template drift.
+_CANONICAL_AUTO_REVIEWER_CALLER = '''\
+name: Auto Review
+
+# Caller workflow: invokes the reusable auto-reviewer from AssemblyZero.
+# Requires Cerberus secrets (REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY).
+# Deploy secrets fleet-wide: poetry run python tools/deploy_cerberus_secrets.py
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  checks: read
+
+jobs:
+  auto-review:
+    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
+    with:
+      required_checks: "issue-reference"
+    secrets:
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+'''
+
+
 def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> None:
     """Create GitHub Actions workflow files for PR governance + PyPI release.
 
@@ -1319,37 +1352,11 @@ def create_github_workflows(project_path: Path, enable_pypi: bool = True) -> Non
     workflows_dir = project_path / ".github" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
 
-    # auto-reviewer caller: invokes AssemblyZero's reusable workflow
-    auto_reviewer = '''\
-name: Auto Review
-
-# Caller workflow: invokes the reusable auto-reviewer from AssemblyZero.
-# Requires Cerberus secrets (REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY).
-# Deploy secrets fleet-wide: poetry run python tools/deploy_cerberus_secrets.py
-
-on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-
-permissions:
-  pull-requests: write
-  checks: read
-
-jobs:
-  auto-review:
-    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
-    with:
-      required_checks: "issue-reference"
-    secrets:
-      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
-      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-'''
     # newline="" disables Python's Windows LF→CRLF translation. The
     # workflow file lands on disk with LF — same as every other repo
     # in the fleet, and matches what the Contents API upload sends.
     (workflows_dir / "auto-reviewer.yml").write_text(
-        auto_reviewer, encoding="utf-8", newline="",
+        _CANONICAL_AUTO_REVIEWER_CALLER, encoding="utf-8", newline="",
     )
 
     # release.yml (#1074): tag-triggered PyPI publish via OIDC Trusted
@@ -1760,6 +1767,179 @@ def audit_structure(project_path: Path, name: str) -> int:
         return 1
 
 
+# ---------------------------------------------------------------------------
+# Post-setup verification helpers (#1200, #1202)
+#
+# The pre-#1200 verification block only checked LOCAL filesystem state — same
+# blind spot as the boostgauge #1193 incident, where file presence was OK
+# but file CONTENT was wrong on origin. These helpers verify GitHub-side
+# state end-to-end. Each returns (passed: bool, message: str) so the caller
+# can decide how to format output.
+# ---------------------------------------------------------------------------
+
+
+def verify_branch_protection_on_origin(
+    github_user: str, repo_name: str, pat: str,
+) -> tuple[bool, str]:
+    """Verify branch protection on origin matches fleet standard.
+
+    Required for parity with configure_branch_protection(): enforce_admins
+    enabled, required_approving_review_count == 1, pr-sentinel/issue-reference
+    in required checks. Reading classic Branch Protection needs Admin scope
+    so this requires the classic PAT, not the fine-grained one.
+    """
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{_GH_API}/repos/{github_user}/{repo_name}/branches/main/protection",
+            pat,
+        )
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if resp.status_code == 404:
+        return False, "no branch protection set on origin"
+    if resp.status_code != 200:
+        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+    p = resp.json()
+    failures: list[str] = []
+    if not (p.get("enforce_admins") or {}).get("enabled"):
+        failures.append("enforce_admins not enabled")
+    reviews = p.get("required_pull_request_reviews") or {}
+    if reviews.get("required_approving_review_count") != 1:
+        actual = reviews.get("required_approving_review_count")
+        failures.append(f"required_approving_review_count={actual!r}, want 1")
+    checks = (p.get("required_status_checks") or {}).get("contexts") or []
+    if "pr-sentinel / issue-reference" not in checks:
+        failures.append(
+            f"'pr-sentinel / issue-reference' not in required checks ({checks!r})"
+        )
+    if failures:
+        return False, "; ".join(failures)
+    return True, "enforce_admins=on, 1 review, pr-sentinel check"
+
+
+def verify_repo_settings_on_origin(
+    github_user: str, repo_name: str, pat: str,
+) -> tuple[bool, str]:
+    """Verify repo settings match fleet standard (squash-only, no wiki/projects)."""
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{_GH_API}/repos/{github_user}/{repo_name}",
+            pat,
+        )
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if resp.status_code != 200:
+        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+    r = resp.json()
+    expected = {
+        "has_wiki": False,
+        "has_projects": False,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+        "allow_squash_merge": True,
+        "delete_branch_on_merge": True,
+    }
+    failures = [
+        f"{k}={r.get(k)!r}, want {v!r}"
+        for k, v in expected.items()
+        if r.get(k) is not v
+    ]
+    if failures:
+        return False, "; ".join(failures)
+    return True, "squash-only, no wiki/projects, delete-branch-on-merge"
+
+
+def verify_workflow_content_on_origin(
+    github_user: str, repo_name: str, pat: str,
+) -> tuple[bool, str]:
+    """Verify .github/workflows/auto-reviewer.yml on origin matches canonical.
+
+    Catches the #1193 failure mode: file exists but content is wrong (e.g.,
+    the OLD caller format that triggers startup_failure). Byte-for-byte
+    compare against the same constant that create_github_workflows() writes,
+    after CRLF normalization (Contents API stores bytes verbatim).
+    """
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{_GH_API}/repos/{github_user}/{repo_name}/contents/.github/workflows/auto-reviewer.yml",
+            pat,
+        )
+    except requests.RequestException as e:
+        return False, f"network: {e}"
+    if resp.status_code == 404:
+        return False, "auto-reviewer.yml not present on origin"
+    if resp.status_code != 200:
+        return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
+    encoded = (resp.json().get("content") or "").replace("\n", "")
+    try:
+        content = base64.b64decode(encoded).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as e:
+        return False, f"could not decode content: {e}"
+    if content.replace("\r\n", "\n") == _CANONICAL_AUTO_REVIEWER_CALLER:
+        return True, "content matches canonical NEW format"
+    return False, "content differs from canonical (#1193 failure mode)"
+
+
+def verify_pr_sentinel_installation(
+    github_user: str, repo_name: str,
+) -> tuple[bool, str]:
+    """Best-effort check that pr-sentinel-mm Cloudflare Worker covers this repo.
+
+    The Worker delivers the `pr-sentinel / issue-reference` check that branch
+    protection requires. If the Worker's GitHub App installation scope has
+    drifted from 'All repositories', the check never fires and every PR sits
+    blocked. Catches that at creation time instead of when the first PR opens.
+
+    Uses gh CLI's authenticated user-to-server token (fine-grained PAT is
+    sufficient for /user/installations) — no classic PAT needed.
+    """
+    # Step 1: find the pr-sentinel-mm installation id on the user account.
+    try:
+        r = run_command(
+            ["gh", "api", "/user/installations", "--jq",
+             '.installations[] | select(.app_slug == "pr-sentinel-mm") | .id'],
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return False, f"could not query /user/installations: {e}"
+    if r.returncode != 0:
+        # 403 / 401 / 404 — token doesn't have the right scope or API is
+        # unavailable. Surface but don't fail the verification — this is
+        # an advisory check.
+        return False, f"gh api /user/installations failed: {(r.stderr or '').strip()[:200]}"
+    out = (r.stdout or "").strip().splitlines()
+    if not out or not out[0].strip():
+        return False, "pr-sentinel-mm not found in /user/installations"
+    installation_id = out[0].strip()
+
+    # Step 2: list repositories covered by this installation; confirm the
+    # new repo is in the list. --paginate handles users with many repos.
+    try:
+        r = run_command(
+            ["gh", "api", f"/user/installations/{installation_id}/repositories",
+             "--paginate", "--jq", ".repositories[].full_name"],
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return False, f"could not query installation repos: {e}"
+    if r.returncode != 0:
+        return False, (
+            f"gh api installation/{installation_id}/repositories failed: "
+            f"{(r.stderr or '').strip()[:200]}"
+        )
+    covered = set((r.stdout or "").strip().splitlines())
+    full_name = f"{github_user}/{repo_name}"
+    if full_name in covered:
+        return True, f"installation {installation_id} covers this repo"
+    return False, (
+        f"installation {installation_id} does NOT cover {full_name} — "
+        "App scope may have drifted from 'All repositories'"
+    )
+
+
 def _deploy_cerberus(repo_name: str, pem_path: Path, pat: str) -> str:
     """Deploy Cerberus secrets to a single repo and handle pem file lifecycle.
 
@@ -1908,6 +2088,35 @@ Examples:
     # --cerberus-pem requires --no-github not set (need the repo to deploy to)
     if args.cerberus_pem and args.no_github:
         print("ERROR: --cerberus-pem requires GitHub repo creation (cannot be combined with --no-github)")
+        sys.exit(1)
+
+    # --cerberus-pem is REQUIRED when creating a GitHub repo (#1206).
+    # Without Cerberus secrets the new repo's PRs sit blocked indefinitely
+    # because branch protection requires 1 approving review and the
+    # auto-reviewer workflow can't authenticate without the App secrets.
+    # Catching this at the CLI gate keeps the failure loud and pre-creation,
+    # not silent and only-visible-on-first-PR. Audit mode is exempt — it
+    # only inspects an existing project, never creates anything.
+    if not args.cerberus_pem and not args.no_github and not args.audit:
+        print("ERROR: --cerberus-pem is required.")
+        print()
+        print("Cerberus auto-approval is part of the new-repo contract. Without it,")
+        print("every PR on the new repo will sit blocked indefinitely waiting for")
+        print("a review (branch protection requires 1 approval; the auto-reviewer")
+        print("workflow can't approve without the Cerberus App secrets).")
+        print()
+        print("To get the .pem file:")
+        print("  1. Open https://github.com/settings/apps/cerberus-az")
+        print("  2. Click 'Private keys' > 'Generate a private key'")
+        print("  3. The browser downloads a .pem file (typically to ~/Downloads/)")
+        print("  4. Re-run with --cerberus-pem /path/to/the.pem")
+        print()
+        print("The script will deploy the secrets, verify them, delete the .pem,")
+        print("and remind you to revoke the key in the GitHub App UI (browser-only).")
+        print()
+        print("Full procedure: docs/runbooks/0927-new-repo-human-checklist.md#4")
+        print()
+        print("Override: --no-github (skip GitHub repo entirely; local scaffold only).")
         sys.exit(1)
 
     # Validate name
@@ -2389,6 +2598,87 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         except RuntimeError as e:
             print(f"\n  WARNING: gpg decrypt failed: {e}")
             cerberus_status = "GPG_FAILED"
+
+    # GitHub-side verification (#1200, #1202). The local-only post-setup
+    # verification above checks the working tree; this block verifies
+    # origin state end-to-end — branch protection actually applied, repo
+    # settings actually applied, auto-reviewer.yml content matches the
+    # canonical NEW format (the #1193 failure mode), Cerberus secrets
+    # actually present, pr-sentinel Worker actually covers this repo.
+    # Boostgauge #1193 slipped through audits for ~10 days because nothing
+    # verified content on origin — same blind spot was here too.
+    gh_checks_passed = 0
+    gh_checks_total = 0
+    if not args.no_github and github_created:
+        print("\n" + "=" * 60)
+        print("GITHUB-SIDE VERIFICATION")
+        print("=" * 60)
+
+        try:
+            with classic_pat_session() as pat:
+                gh_checks_total += 1
+                ok, msg = verify_branch_protection_on_origin(
+                    github_user, repo_name_lower, pat,
+                )
+                if ok:
+                    print(f"  [PASS] Branch protection: {msg}")
+                    gh_checks_passed += 1
+                else:
+                    print(f"  [FAIL] Branch protection: {msg}")
+
+                gh_checks_total += 1
+                ok, msg = verify_repo_settings_on_origin(
+                    github_user, repo_name_lower, pat,
+                )
+                if ok:
+                    print(f"  [PASS] Repo settings: {msg}")
+                    gh_checks_passed += 1
+                else:
+                    print(f"  [FAIL] Repo settings: {msg}")
+
+                gh_checks_total += 1
+                ok, msg = verify_workflow_content_on_origin(
+                    github_user, repo_name_lower, pat,
+                )
+                if ok:
+                    print(f"  [PASS] auto-reviewer.yml: {msg}")
+                    gh_checks_passed += 1
+                else:
+                    print(f"  [FAIL] auto-reviewer.yml: {msg}")
+
+                if args.cerberus_pem:
+                    gh_checks_total += 1
+                    secrets_ok, missing = verify_secrets(
+                        repo_name_lower, pat,
+                    )
+                    if secrets_ok:
+                        print("  [PASS] Cerberus secrets present "
+                              "(REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY)")
+                        gh_checks_passed += 1
+                    else:
+                        print(f"  [FAIL] Cerberus secrets missing: {missing}")
+        except FileNotFoundError as e:
+            print(f"  [SKIP] classic PAT not configured: {e}")
+        except RuntimeError as e:
+            print(f"  [SKIP] gpg decrypt failed: {e}")
+
+        # pr-sentinel installation check — no classic PAT needed, fine-grained
+        # gh CLI auth is sufficient for /user/installations.
+        gh_checks_total += 1
+        ok, msg = verify_pr_sentinel_installation(github_user, repo_name_lower)
+        if ok:
+            print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
+            gh_checks_passed += 1
+        else:
+            print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
+            print("         If pr-sentinel checks don't appear on the first PR,")
+            print("         the App's installation scope likely drifted from "
+                  "'All repositories'.")
+
+        print(f"\nGitHub-side verification: {gh_checks_passed}/{gh_checks_total} checks passed")
+
+        if gh_checks_passed < gh_checks_total:
+            print("\nWARNING: GitHub-side checks failed. Investigate before opening PRs!")
 
     # Final summary
     if not args.no_github:

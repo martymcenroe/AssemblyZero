@@ -31,16 +31,18 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 
 ## Quick Start (Automated)
 
+> **`--cerberus-pem` is required** for any invocation that creates a GitHub repo (#1206). Download the .pem first from https://github.com/settings/apps/cerberus-az > Private keys > Generate, then pass its path to the script. The only override is `--no-github` (local scaffold only). Full procedure in [0927](0927-new-repo-human-checklist.md#4-deploy-cerberus-secrets-if-needed).
+
 ### Create a New Private Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
 ```
 
 ### Create a Public Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --public
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --public --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
 ```
 
 ### Create Local Only (No GitHub)
@@ -270,3 +272,4 @@ The script automates all of this in one command.
 | 2.0 | 2026-01-29 | Automated with new_repo_setup.py, added 4 new dirs |
 | 2.1 | 2026-04-05 | Added `.unleashed.json` to file table (was in script/schema but missing from docs) |
 | 2.2 | 2026-04-05 | Added workflow files to file table. Updated post-setup: branch protection is now automated, Cerberus is the remaining human step. |
+| 2.3 | 2026-05-22 | `--cerberus-pem` is now **required** for GitHub-creating invocations (#1206). Quick Start examples updated to include the flag. Post-setup verification extended with GitHub-side checks (#1200) and `pr-sentinel-mm` Worker installation detection (#1202). |
