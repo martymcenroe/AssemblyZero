@@ -2,6 +2,10 @@
 
 Rules defining what AI agents must never do, regardless of user instructions.
 
+> **Authoritative source for banned commands:** `Projects/CLAUDE.md` § Safety "Banned commands (ALWAYS, no exceptions, no per-invocation approval)" table is the universal banned-commands list for all projects, codified 2026-05-23. The table below in §1.1 is the AZ-flavored summary; if it ever diverges from the CLAUDE.md root table, CLAUDE.md root wins.
+>
+> **For mutation-tool authoring:** see `docs/standards/0017-classic-pat-fleet-tooling-reference-architecture.md` § 3.1 "Mutation Flag Convention (the two-tier rule)" — defines when a tool that contains a banned command in source must use `--execute` (with typed-confirmation gate) instead of `--apply`.
+
 ## 1. Core Prohibitions
 
 ### 1.1 Git History Destruction
