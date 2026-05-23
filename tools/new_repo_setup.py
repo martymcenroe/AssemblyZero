@@ -2722,6 +2722,55 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  # Cerberus secrets deployed and verified.")
         print("  # REMEMBER to revoke the key in the app UI (browser-only step).")
 
+    _maybe_print_pypi_reminder(
+        lang=args.lang,
+        no_pypi=args.no_pypi,
+        no_github=args.no_github,
+        github_user=github_user,
+        repo_name=args.name.lower(),
+    )
+
+
+def _maybe_print_pypi_reminder(
+    *,
+    lang: str,
+    no_pypi: bool,
+    no_github: bool,
+    github_user: str,
+    repo_name: str,
+) -> None:
+    """Print the PyPI 0934 reminder if release.yml shipped on this repo.
+
+    release.yml is deployed by create_github_workflows() when
+    enable_pypi == (lang == "python") and (not no_pypi). The first
+    `git push origin v0.1.0` tag will fail at the publish step unless
+    the user has done the one-time PyPI pending-publisher registration
+    first — runbook 0934 covers the browser step. Surface here so the
+    user can't miss it. (#1201)
+
+    No-op when:
+    - --no-github was passed (no remote to release from)
+    - --lang none was passed (no Python project, no release.yml shipped)
+    - --no-pypi was passed (explicit opt-out, release.yml suppressed)
+
+    Keyword-only args so callers must be explicit about the flag state.
+    """
+    if no_github or lang != "python" or no_pypi:
+        return
+    print()
+    print("  # PyPI publish needs ONE-TIME pending-publisher registration")
+    print("  # BEFORE the first tag push (otherwise release.yml fails):")
+    print("  #   1. https://pypi.org/manage/account/publishing/")
+    print("  #   2. Add new pending publisher:")
+    print(f"  #        Project name:     {repo_name}")
+    print(f"  #        Owner:            {github_user}")
+    print(f"  #        Repository name:  {repo_name}")
+    print("  #        Workflow filename: release.yml")
+    print("  #        Environment name:  pypi")
+    print("  #   3. Click Add. Then `git tag v0.1.0 && git push origin v0.1.0`.")
+    print("  # Full procedure: docs/runbooks/0934-pypi-trusted-publisher-setup.md")
+    print("  # Not publishing to PyPI? Delete .github/workflows/release.yml.")
+
 
 if __name__ == "__main__":
     main()
