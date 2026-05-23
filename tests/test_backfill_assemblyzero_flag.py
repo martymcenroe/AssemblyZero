@@ -11,13 +11,17 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
 from backfill_assemblyzero_flag import (
     SKIP_REPOS,
+    current_branch,
     discover_repos,
     flip_file,
+    is_safe_to_backfill,
+    is_unleashed_json_clean,
     needs_flip,
 )
 
@@ -163,3 +167,113 @@ class TestDiscoverRepos:
 def test_skip_repos_contains_assemblyzero():
     """Defensive: AssemblyZero must always be in SKIP_REPOS."""
     assert "AssemblyZero" in SKIP_REPOS
+
+
+# ===========================================================================
+# #1222 — precise safety check (replaces coarse working-tree check)
+# ===========================================================================
+
+
+class TestIsUnleashedJsonClean:
+    """T300-T320: is_unleashed_json_clean."""
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T300_returns_true_when_porcelain_empty(self, mock_run, tmp_path):
+        """git status --porcelain returns empty → clean."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        assert is_unleashed_json_clean(tmp_path) is True
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T310_returns_false_when_modified(self, mock_run, tmp_path):
+        """M .unleashed.json → dirty."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=" M .unleashed.json\n", stderr="",
+        )
+        assert is_unleashed_json_clean(tmp_path) is False
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T315_returns_false_when_untracked(self, mock_run, tmp_path):
+        """?? .unleashed.json → dirty (file exists locally, not in git)."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="?? .unleashed.json\n", stderr="",
+        )
+        assert is_unleashed_json_clean(tmp_path) is False
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T320_returns_false_on_git_error(self, mock_run, tmp_path):
+        """Non-zero exit (not a git repo, etc.) → not safe."""
+        mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="not a git repo")
+        assert is_unleashed_json_clean(tmp_path) is False
+
+
+class TestCurrentBranch:
+    """T400-T420: current_branch."""
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T400_returns_branch_name(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(returncode=0, stdout="main\n", stderr="")
+        assert current_branch(tmp_path) == "main"
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T410_returns_feature_branch(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="feature-foo\n", stderr="",
+        )
+        assert current_branch(tmp_path) == "feature-foo"
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T420_returns_none_on_error(self, mock_run, tmp_path):
+        mock_run.return_value = MagicMock(
+            returncode=128, stdout="", stderr="not a git repo",
+        )
+        assert current_branch(tmp_path) is None
+
+
+class TestIsSafeToBackfill:
+    """T500-T530: is_safe_to_backfill (the precise replacement for the
+    coarse working-tree check). Per #1222, only .unleashed.json clean +
+    on main matter."""
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T500_safe_when_on_main_and_clean(self, mock_run, tmp_path):
+        """on main, .unleashed.json clean → safe."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),       # porcelain check
+            MagicMock(returncode=0, stdout="main\n", stderr=""),  # branch check
+        ]
+        ok, reason = is_safe_to_backfill(tmp_path)
+        assert ok is True
+        assert reason == ""
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T510_unsafe_when_unleashed_json_dirty_on_main(self, mock_run, tmp_path):
+        """on main, .unleashed.json modified → not safe."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=" M .unleashed.json\n", stderr=""),
+        ]
+        ok, reason = is_safe_to_backfill(tmp_path)
+        assert ok is False
+        assert ".unleashed.json" in reason
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T520_unsafe_when_on_feature_branch_clean(self, mock_run, tmp_path):
+        """on feature-branch, .unleashed.json clean → not safe (other agent owns)."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="feature-foo\n", stderr=""),
+        ]
+        ok, reason = is_safe_to_backfill(tmp_path)
+        assert ok is False
+        assert "feature-foo" in reason
+        assert "main" in reason
+
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T530_unsafe_when_on_feature_branch_and_dirty(self, mock_run, tmp_path):
+        """on feature-branch, .unleashed.json dirty → not safe (dirty fires first)."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=" M .unleashed.json\n", stderr=""),
+        ]
+        ok, reason = is_safe_to_backfill(tmp_path)
+        assert ok is False
+        # Implementation short-circuits on dirty before checking branch.
+        assert ".unleashed.json" in reason
