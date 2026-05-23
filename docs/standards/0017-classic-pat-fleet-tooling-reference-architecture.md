@@ -90,9 +90,68 @@ Every fleet tool that imports `classic_pat_session()` should have:
 - [ ] **Distinct status categories** — at least: success, no-op, permission-denied, error
 - [ ] **Final summary** — counts per status
 - [ ] **Non-zero exit code** on any errors or permission-denied
-- [ ] **`--dry-run` flag** — list what would happen, take no action
+- [ ] **Mutation flag follows the two-tier rule** (Section 3.1 + `Projects/CLAUDE.md` § "Destructive Scripts — `--apply` and `--execute`"):
+  - Default behavior is dry-run (no flag = list-only, take no action)
+  - `--apply` is the opt-in mutation flag for normal scripts (no banned command in source)
+  - `--execute` is substituted for `--apply` IFF the script's source contains any command from the CLAUDE.md root § Safety **Banned commands (ALWAYS)** table
+- [ ] **For `--execute`-tier tools**: import `require_confirmation` from `tools/_gate.py` and call it after the dry-run preview prints, before any mutation. Per-target call if the tool loops over N targets — no batch shortcut. See AZ #1231 for the gate spec.
+- [ ] **CLI surface test** — at minimum, assert that every flag named in help text, `--help` output, dry-run print statements, and docstring usage examples is actually recognized by the argparse parser. Catches the #1228 class of bug where a tool advertised `--apply` to execute but only knew `--dry-run`.
 - [ ] **`--repos` (or similar) flag** — let the user run against a subset for testing
 - [ ] **Safety cap** — refuse to process > N targets in one run unless explicitly waived (prevents fat-finger fleet-wide damage)
+
+---
+
+## 3.1 Mutation Flag Convention (the two-tier rule)
+
+Codified in `Projects/CLAUDE.md` § "Destructive Scripts — `--apply` and `--execute`" (universal for all projects); this section is the AZ-canonical mirror.
+
+### The rule
+
+A fleet tool that mutates state defaults to dry-run. Opt-in mutation requires a flag whose name signals the tool's risk class:
+
+| Flag | When | Behavior on opt-in |
+|---|---|---|
+| **`--apply`** | Tool's source contains NO command from CLAUDE.md root § Safety "Banned commands (ALWAYS)" table | Tool performs mutation directly |
+| **`--execute`** | Tool's source contains ANY banned command (operationally executed via subprocess / os.system / equivalent) | Tool performs mutation only after `require_confirmation(operation, target)` succeeds |
+
+The name difference is itself the signal — `--apply` reads as routine, `--execute` reads as elevated. The rule is **lint-enforceable**: a tool that imports `subprocess` and runs `git push --force` MUST use `--execute`, and `grep -rl 'args\.execute' tools/` enumerates every script in the elevated tier.
+
+### The typed-confirmation gate (`--execute` tier only)
+
+`require_confirmation(operation, target)` lives in `tools/_gate.py`. It prompts the operator to type:
+
+```
+approve forbidden <operation> for <target>
+```
+
+verbatim, on stdin. Wrong input or EOF → exit code 2 + structured log line to `~/.cache/classic-pat-tools/gate-refusals.jsonl`. No retry loop. Gate placement in the tool's flow: after `--execute` parsed → after pre-flight `/user` check → after the dry-run preview is FULLY printed → visual divider → THEN gate prompt.
+
+Modeled on GitHub Settings → Danger Zone (type the repo name to confirm deletion). See AZ #1231 for full v1 specification and design rationale.
+
+### Why not just one flag for everything?
+
+Two reasons:
+
+1. **The name change is the signal.** An operator running `--execute` reads the flag and remembers "this one is the elevated kind." Single-flag schemes (e.g., always `--apply`) collapse the risk-class distinction into runtime behavior that the operator must trust the tool to know.
+2. **Lint-enforceability.** With the name tied to source content (banned-command presence), a CI check can grep tool source and verify the flag name matches the tool's risk class. A single-flag scheme has nothing to lint against.
+
+### Reference implementation
+
+- `tools/_gate.py` — the `require_confirmation()` function
+- `tests/test_gate.py` — coverage for correct-phrase / wrong-phrase / EOF / log-truncation / multi-target / stdin fallback / log-dir-auto-creation
+- `docs/audits/0853-fleet-mutation-flag-audit-2026-05-23.md` — fleet-wide audit verifying compliance (per AZ #1230)
+
+### Migration path for existing tools
+
+A tool that currently uses `--apply` but contains a banned command is non-conformant under this rule. Fix sequence:
+
+1. File a per-tool issue (one issue per concern, no bundling — per root CLAUDE.md "One Issue Per Concern")
+2. Rename `--apply` → `--execute` in the argparse declaration
+3. Add `from _gate import require_confirmation` and call it after the dry-run preview prints
+4. Update tool docstring usage examples
+5. Update any CLI surface test to assert `--execute` is the recognized flag
+
+The audit clause (`docs/audits/0853-...`) identified zero such migrations needed in the AZ-managed fleet as of 2026-05-23. The Hermes session owns the lone outstanding candidate (`Hermes#476`).
 
 ---
 
