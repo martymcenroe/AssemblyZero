@@ -24,7 +24,13 @@ Idempotent:
 
 Usage:
     cd /c/Users/mcwiz/Projects/AssemblyZero
-    poetry run python tools/remediate_patent_general_protection.py [--dry-run]
+    poetry run python tools/remediate_patent_general_protection.py            # dry-run (default)
+    poetry run python tools/remediate_patent_general_protection.py --apply    # execute
+
+Default mode is dry-run per the fleet convention used by
+backfill_canonical_labels.py, backfill_assemblyzero_flag.py,
+deploy_auto_reviewer_workflow.py, and update-doc-refs.py. --apply is the
+opt-in mutation flag.
 
 Issue: #1203
 """
@@ -144,13 +150,14 @@ def verify_classic_protection(pat: str) -> tuple[bool, str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.strip().split("\n")[0])
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Probe state and print plan without DELETE or PUT.")
+    parser.add_argument("--apply", action="store_true",
+                        help="Actually DELETE the ruleset and PUT classic protection. "
+                             "Default is dry-run.")
     args = parser.parse_args(argv)
 
     print(f"Target: {GITHUB_USER}/{REPO} branch={BRANCH}")
     print(f"Ruleset to remove: {RULESET_ID}")
-    print(f"Mode: {'DRY-RUN' if args.dry_run else 'APPLY'}")
+    print(f"Mode: {'APPLY' if args.apply else 'DRY-RUN'}")
     print()
 
     with classic_pat_session() as pat:
@@ -158,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         exists, status = get_ruleset(pat, RULESET_ID)
         print(f"  Ruleset {RULESET_ID}: {status}")
 
-        if args.dry_run:
+        if not args.apply:
             print()
             print("  Plan (--apply to execute):")
             if exists:
