@@ -1,163 +1,104 @@
-# Gemini Credential Rotation Instructions
+# Gemini CLI Notes — Rotation, Encoding, and Model Selection
 
-**For agents stuck on Gemini quota exhaustion errors.**
+**For agents using Gemini for reviews / quota-rotation situations / Windows prompt encoding issues.**
+
+> **Why this file exists:** `/onboard` skill loads it into every session whose repo has `.unleashed.json` `assemblyZero: true`. Keep it concise — it pays per-session context cost.
 
 ---
 
-## ⛔ HARD GATE: Model Verification Required (READ FIRST)
+## 1. Expected model
 
-**EVERY Gemini review MUST include model verification in your response to the user.**
+Reviews should run on the current Gemini Pro family model — at time of writing that's `gemini-3-pro-preview`, but Google's preview-model naming is in flux. The rotation tool (`tools/gemini-rotate.py`) accepts whatever `--model` string you pass and surfaces the response model name in its output; treat that as authoritative for "what actually ran."
 
-### After EVERY Gemini call, you MUST state:
+**Quality reminder:** Pro-family models are meaningfully stronger for code review than Flash/Lite variants. If the orchestrator is asking for a real review, use Pro. If a Flash result comes back from the API anyway (model-fallback by Google), surface that to the operator and let them decide whether to retry — don't silently treat it as a Pro review.
+
+What used to be in this section: a hard-stop gate that refused to proceed on any non-`3-pro` model name. Removed because Google's model naming is moving, and a hard match against literal strings produces false-positive blocks during the transition windows.
+
+---
+
+## 2. Windows console encoding (common failure)
+
+If a Gemini call fails with encoding errors, garbled output, or truncated responses — this is almost always Windows console encoding handling Unicode poorly.
+
+### The problem
+
+Windows console (`cp1252` / `cp437` by default) cannot represent Unicode box-drawing characters in prompts:
 
 ```
-**Gemini Review Model:** [gemini-3-pro-preview | OTHER]
+│ ─ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ◀ ▶
 ```
 
-### VALID models (proceed with workflow):
-- `gemini-3-pro-preview` ✅
-
-### INVALID models (DEAD STOP - DO NOT PROCEED):
-- `gemini-2.0-flash` ❌ INVALID
-- `gemini-2.5-flash` ❌ INVALID
-- `gemini-*-lite` ❌ INVALID
-- Any model not containing `3-pro` ❌ INVALID
-
-### If you used an INVALID model:
-
-1. **STOP IMMEDIATELY** - Do not proceed with workflow
-2. **TELL THE USER:**
-   > "⚠️ Gemini review was performed with [model name], which is INVALID for reviews. This review does not count. Gemini 3 Pro is required. Cannot proceed until Pro model is available."
-3. **DO NOT create issues, merge PRs, or take any action based on the invalid review**
-4. **Use rotation tool to retry with Pro model:**
-   ```bash
-   python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "..."
-   ```
-
-### Why This Matters
-
-Flash/Lite models lack the reasoning depth for quality reviews. A Flash review that says "APPROVE" may miss critical issues that Pro would catch. **A review by the wrong model is worse than no review** because it creates false confidence.
-
-**The orchestrator (user) cares deeply about review quality. Do not cheat.**
-
----
-
----
-
-## ⚠️ Windows Encoding Issue (COMMON FAILURE)
-
-**If your Gemini call fails with encoding errors, garbled output, or truncated responses - READ THIS.**
-
-### The Problem
-
-Windows console cannot handle Unicode box-drawing characters in prompts:
-- `│` `─` `┌` `┐` `└` `┘` `├` `┤` `┬` `┴` `┼` `◀` `▶`
-
-These characters cause `UnicodeEncodeError` or garbled output on Windows.
-
-### Symptoms
-
-- Error mentions `encoding`, `charmap`, or `codec`
+Symptoms:
+- `UnicodeEncodeError` mentioning `charmap` or `codec`
 - Output shows `?????` or garbled characters
-- Python crashes with `UnicodeEncodeError`
-- Prompt gets truncated at the first special character
+- Python crashes immediately, or prompt gets truncated at the first non-ASCII character
 
-### The Fix
+### Three remediations
 
-**Option 1: Remove Unicode characters from prompts**
-Use ASCII alternatives:
-- `|` instead of `│`
-- `-` instead of `─`
-- `+` instead of `└` `┌` `┐` `┘`
-- `<` `>` instead of `◀` `▶`
+**Substitute ASCII** — `|` for `│`, `-` for `─`, `+` for `└` `┌` `┐` `┘`, `<` `>` for `◀` `▶`. Simplest; works everywhere.
 
-**Option 2: Use stdin with UTF-8 file**
-Write your prompt to a file (UTF-8 encoded), then pipe it:
+**Pipe a UTF-8 file** — write the prompt to disk with UTF-8 encoding, pipe via stdin:
+
 ```bash
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
+poetry run python tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
 ```
 
-**Option 3: Use the Write tool first**
-```
-1. Use Write tool to save prompt to scratchpad (UTF-8)
-2. Then use Bash to pipe the file to gemini-rotate.py
-```
+**Use Write tool first** — Write the prompt to a scratchpad (UTF-8 by default), then Bash to pipe the file. Same as above but explicit.
 
 ### Prevention
 
-**When creating prompts for Gemini, NEVER use box-drawing characters.**
-Stick to basic ASCII: `| - + * # = _ [ ] ( ) < >`
+When generating prompts programmatically for any CLI tool on Windows, stay in basic ASCII: `| - + * # = _ [ ] ( ) < >`. The encoding issue isn't Gemini-specific; it bites any CLI invocation where Python writes Unicode to stdin/argv on a Windows console.
 
 ---
 
-## Quota Exhaustion Problem
+## 3. Quota rotation (`tools/gemini-rotate.py`)
 
-When you see errors like:
+Use when:
+
 - `TerminalQuotaError`
 - `You have exhausted your capacity on this model`
 - `QUOTA_EXHAUSTED`
 
-**Exponential backoff will NOT help.** These are account-level quota limits that reset in ~24 hours. Retrying wastes time.
-
-## The Solution
-
-Use `gemini-rotate.py` instead of calling `gemini` directly. It rotates through multiple credentials automatically.
+These are account-level quota limits, typically ~24h reset. Exponential backoff does not help.
 
 ### Usage
 
 ```bash
-# Instead of:
-gemini --model gemini-3-pro-preview -p "your prompt"
+# Instead of bare `gemini --model ... -p "prompt"`:
+poetry run python tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "prompt text"
 
-# Use:
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "your prompt"
+# Long prompts via stdin (preferred on Windows):
+poetry run python tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
 
-# For long prompts via stdin:
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/prompt.txt
-
-# Check credential status:
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
+# Credential status:
+poetry run python tools/gemini-rotate.py --status
 ```
 
-### What It Does
+### What it does
 
 1. Loads credentials from `~/.assemblyzero/gemini-credentials.json`
-2. Skips credentials marked as quota-exhausted
+2. Skips credentials marked quota-exhausted
 3. Tries each available credential until one succeeds
 4. Tracks exhaustion per credential with reset times
-5. Reports when ALL credentials are exhausted
+5. Reports when all credentials are exhausted
 
-### If ALL Credentials Are Exhausted
+### If all credentials exhausted
 
-When you see: `All credentials exhausted`
+When the tool prints `All credentials exhausted`:
 
-**STOP. Do not retry. Report to user:**
-> "Gemini 3 Pro quota exhausted across all configured credentials. Cannot proceed with review until quota resets or new credentials are added."
-
-The user can:
-1. Wait for quota reset (~24h)
-2. Add more API keys to `~/.assemblyzero/gemini-credentials.json`
-
-## Model Requirements (MANDATORY)
-
-**ONLY use this model for reviews:**
-- `gemini-3-pro-preview`
-
-**NEVER substitute Flash or Lite models.** A review with the wrong model is INVALID.
-
-## Quick Copy-Paste Commands
-
-Check status:
-```bash
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --status
+```
+STOP. Do not retry. Report to user:
+"Gemini Pro quota exhausted across all configured credentials.
+Cannot proceed with review until quota resets or new credentials are added."
 ```
 
-Simple test:
-```bash
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview --prompt "Say hello"
-```
+User actions: wait for quota reset (~24h), or add credentials to `~/.assemblyzero/gemini-credentials.json`.
 
-Review with rotation:
-```bash
-python /c/Users/mcwiz/Projects/AssemblyZero/tools/gemini-rotate.py --model gemini-3-pro-preview < /path/to/review-prompt.txt
-```
+---
+
+## Change history
+
+| Date | Change | Why |
+|---|---|---|
+| 2026-05-23 | Removed §1 hard-gate that DEAD-STOPped on non-`3-pro` model names. Softened to advisory. Reformatted to reduce per-onboard context cost. | Hard match against literal model names produces false-positive blocks during Google's preview-model rename transitions; user signal "gemini cli is changing and it's all a mess." Issue: #1221. |
+| 2026-02-28 | Initial version with hard gate. | — |
