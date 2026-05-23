@@ -948,3 +948,63 @@ class TestVerifyPrSentinelInstallation:
         ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
         assert ok is False
         assert "does NOT cover" in msg or "drift" in msg.lower()
+
+
+# ===========================================================================
+# #1201 — PyPI 0934 reminder
+# ===========================================================================
+
+from new_repo_setup import _maybe_print_pypi_reminder  # noqa: E402
+
+
+class TestPypiReminder:
+    """T303-T306: _maybe_print_pypi_reminder fires only when release.yml shipped."""
+
+    def test_T303_prints_when_python_pypi_github(self, capsys):
+        """Default config (python + pypi + github) → reminder prints with repo-specific values."""
+        _maybe_print_pypi_reminder(
+            lang="python",
+            no_pypi=False,
+            no_github=False,
+            github_user="owner",
+            repo_name="myproject",
+        )
+        out = capsys.readouterr().out
+        assert "pending-publisher registration" in out
+        assert "myproject" in out
+        assert "owner" in out
+        assert "release.yml" in out
+        assert "0934" in out
+
+    def test_T304_silent_when_no_github(self, capsys):
+        """--no-github → no remote, reminder suppressed."""
+        _maybe_print_pypi_reminder(
+            lang="python",
+            no_pypi=False,
+            no_github=True,
+            github_user="owner",
+            repo_name="myproject",
+        )
+        assert capsys.readouterr().out == ""
+
+    def test_T305_silent_when_lang_none(self, capsys):
+        """--lang none → no Python project, no release.yml shipped, no reminder."""
+        _maybe_print_pypi_reminder(
+            lang="none",
+            no_pypi=False,
+            no_github=False,
+            github_user="owner",
+            repo_name="myproject",
+        )
+        assert capsys.readouterr().out == ""
+
+    def test_T306_silent_when_no_pypi(self, capsys):
+        """--no-pypi → release.yml explicitly suppressed, no reminder."""
+        _maybe_print_pypi_reminder(
+            lang="python",
+            no_pypi=True,
+            no_github=False,
+            github_user="owner",
+            repo_name="myproject",
+        )
+        assert capsys.readouterr().out == ""
