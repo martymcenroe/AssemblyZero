@@ -144,11 +144,57 @@ def run(cmd: list[str], cwd: Path | None = None, check: bool = False) -> subproc
 
 
 def is_working_tree_clean(repo_path: Path) -> bool:
-    """True iff `git status --porcelain` returns no output."""
+    """True iff `git status --porcelain` returns no output.
+
+    Kept for backwards-compatibility; callers should prefer
+    is_safe_to_backfill which checks only what actually matters for
+    this script's scope.
+    """
     r = run(["git", "status", "--porcelain"], cwd=repo_path)
     if r.returncode != 0:
         return False
     return r.stdout.strip() == ""
+
+
+def is_unleashed_json_clean(repo_path: Path) -> bool:
+    """True iff `.unleashed.json` has no pending changes (staged or worktree).
+
+    Other untracked or modified files don't matter — this script only
+    stages `.unleashed.json`, so they're inert. (#1222)
+    """
+    r = run(
+        ["git", "status", "--porcelain", "--", ".unleashed.json"],
+        cwd=repo_path,
+    )
+    if r.returncode != 0:
+        return False
+    return r.stdout.strip() == ""
+
+
+def current_branch(repo_path: Path) -> str | None:
+    """Return the current branch name, or None on error."""
+    r = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_path)
+    if r.returncode != 0:
+        return None
+    return r.stdout.strip() or None
+
+
+def is_safe_to_backfill(repo_path: Path) -> tuple[bool, str]:
+    """Precise safety check for the backfill. Returns (ok, reason_if_not).
+
+    Two predicates (#1222):
+      1. `.unleashed.json` has no pending changes
+      2. Currently on `main` branch (avoid disrupting active feature branches)
+
+    Other untracked/modified files are not blockers — the script only
+    stages `.unleashed.json` so they're never picked up.
+    """
+    if not is_unleashed_json_clean(repo_path):
+        return False, ".unleashed.json has uncommitted changes"
+    branch = current_branch(repo_path)
+    if branch != "main":
+        return False, f"on branch '{branch}' (not main; agent in another session may own)"
+    return True, ""
 
 
 def gh_owner_of(repo_path: Path) -> str | None:
@@ -191,9 +237,9 @@ def process_repo(repo_path: Path, dry_run: bool) -> RepoResult:
     if dry_run:
         return RepoResult(name, "NEEDS_FLIP", "would set assemblyZero=true")
 
-    if not is_working_tree_clean(repo_path):
-        return RepoResult(name, "SKIPPED_DIRTY",
-                          "working tree has uncommitted changes")
+    safe, reason = is_safe_to_backfill(repo_path)
+    if not safe:
+        return RepoResult(name, "SKIPPED_UNSAFE", reason)
     repo_full = gh_owner_of(repo_path)
     if not repo_full:
         return RepoResult(name, "SKIPPED_NO_GH", "no github.com origin remote")
