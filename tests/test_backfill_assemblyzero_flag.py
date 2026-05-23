@@ -169,6 +169,15 @@ def test_skip_repos_contains_assemblyzero():
     assert "AssemblyZero" in SKIP_REPOS
 
 
+def test_pr_body_has_no_issue_exemption():
+    """#1226: PR_BODY must contain the No-Issue: exemption tag so pr-sentinel
+    doesn't block cross-repo PRs that have no per-repo issue to close."""
+    from backfill_assemblyzero_flag import PR_BODY
+    assert "No-Issue:" in PR_BODY
+    # And the body should still reference the tracking issue for traceability
+    assert "AssemblyZero#" in PR_BODY
+
+
 # ===========================================================================
 # #1222 — precise safety check (replaces coarse working-tree check)
 # ===========================================================================
