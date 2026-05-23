@@ -96,3 +96,6 @@ data/hourglass/age_meter.json
 data/closed-issues-snapshot-*.json
 data/issue-state-index-*.json
 data/deferred-scope-llm-cache.json
+# Session logs — internal-only; never publish (added 2026-05-23 after exposure discovery, see #1216)
+docs/session-logs/
+docs/dom-dumps/
