@@ -75,6 +75,8 @@ PR_BODY = (
     f"- [x] No code changes; no tests affected\n"
     f"- [ ] After merge, next `/onboard` in this repo loads AZ rules\n\n"
     f"Refs AssemblyZero#{ISSUE_NUMBER}\n\n"
+    f"No-Issue: AssemblyZero fleet backfill — tracking issue is "
+    f"AssemblyZero#{ISSUE_NUMBER} (cross-repo; no per-repo issue needed)\n\n"
     f"🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
 )
 
