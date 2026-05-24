@@ -23,7 +23,7 @@ These are different mechanisms with different invocation patterns. A name like `
 |---|---|---|---|
 | `co` | `gh co <pr>` | `gh pr checkout` shortcut | built-in `gh` shortcut |
 | `gh-count` | `gh gh-count` | Today's contribution breakdown (commits, issues, PRs, reviews, repos) | `automation-scripts/tools/gh_daily_contributions.py` |
-| `reviews` | `gh reviews` | All-time review count + 12-month breakdown + projection to 1% graph spoke | `automation-scripts/tools/gh_review_projection.py` |
+| `gh-reviews` | `gh gh-reviews` | All-time review count + 12-month breakdown + projection to 1% graph spoke | `automation-scripts/tools/gh_review_projection.py` |
 
 ### Shell aliases (inspect with `alias` or `type`)
 
@@ -78,5 +78,5 @@ The orphaned aliases are tracked for cleanup in AZ#1245.
 - AZ#1244 — work that produced this runbook
 - AZ#1245 — orphaned dotfiles aliases cleanup (follow-up)
 - `automation-scripts/tools/gh_daily_contributions.py` — `gh-count` implementation
-- `automation-scripts/tools/gh_review_projection.py` — `gh reviews` implementation
+- `automation-scripts/tools/gh_review_projection.py` — `gh gh-reviews` implementation
 - `~/.bash_profile` SECTION 0 — dotfiles auto-sync mechanism

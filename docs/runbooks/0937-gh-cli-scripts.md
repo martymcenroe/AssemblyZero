@@ -17,7 +17,7 @@ The tool is stdlib + the `gh` CLI only — no third-party deps. Tools shell out 
 | Tool | Invoked as | What it reports |
 |---|---|---|
 | `tools/gh_daily_contributions.py` | `gh gh-count` | Today's contribution breakdown (commits, issues, PRs, reviews, repos) |
-| `tools/gh_review_projection.py` | `gh reviews` | All-time review count, 12-month state, current pace, projection to 1% graph spoke |
+| `tools/gh_review_projection.py` | `gh gh-reviews` | All-time review count, 12-month state, current pace, projection to 1% graph spoke |
 
 When adding a new sibling tool: update this table, update the alias inventory in 0936, then `gh alias set <name> '!...'`.
 
@@ -131,7 +131,7 @@ This recipe catches:
 
 - [`0936-gh-cli-aliases.md`](0936-gh-cli-aliases.md) — alias mechanism, inventory, dotfiles divergence trap
 - AZ#1247 — work that produced this runbook
-- AZ#1244 — parent (gh reviews + projection tool ship)
+- AZ#1244 — parent (`gh gh-reviews` + projection tool ship)
 - `automation-scripts#49` — original tool ship
 - `automation-scripts#51` — denominator-fix issue + analysis
 - `automation-scripts/tools/gh_review_projection.py` — reference implementation of the math + verification recipe
