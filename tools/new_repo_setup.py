@@ -418,32 +418,25 @@ def create_claude_md(project_path: Path, name: str, github_user: str) -> None:
     """
     Create the project CLAUDE.md file.
 
+    Emits the lean per-repo template per ADR 0219 (#1258): identifiers and a
+    Project-Specific Context TODO stub. Everything else (merge sequence, PR
+    rules, branch protection, GitHub CLI safety) lives in the universal
+    CLAUDE.md auto-loaded by Claude Code's parent-directory traversal --
+    NOT restated here, to avoid drift on every universal-CLAUDE.md edit.
+
     Args:
         project_path: Path to the project root
         name: Project name
         github_user: GitHub username
+
+    See: #1266 (minimum-viable slice), #1259 (parent refactor, remaining
+    scope: lint tool + project-type branching), #1258 (ADR 0219).
     """
     projects_root_unix = config.projects_root_unix()
 
     content = f"""# CLAUDE.md - {name} Project
 
 You are a team member on the {name} project, not a tool.
-
-## CRITICAL: Read these BEFORE any PR work
-
-The root file `C:\\Users\\mcwiz\\Projects\\CLAUDE.md` is **auto-loaded** for every project. It contains the universal rules. Two sections are non-negotiable — skipping them wastes hours:
-
-1. **"Merging PRs (Universal)"** — exact `gh` command sequence. Never `--admin` (branch protection has `enforce_admins: true`). Never `gh pr review --approve` on your own PR (GitHub blocks self-approval). Never ask the human to approve manually — **Cerberus-AZ auto-approves after pr-sentinel passes**, typically 10-30 seconds after checks go green.
-
-2. **"PR Issue References (Mandatory)"** — `Closes #N` must appear in **ALL THREE** places: commit message, PR title, AND PR body. `pr-sentinel` validates the **PR body specifically**; the commit message alone will NOT pass the check.
-
-If a merge shows `mergeable_state: blocked`, do NOT retry blindly. Check the PR body for `Closes #N` pointing to an **OPEN** issue. Fix with:
-
-```bash
-gh pr edit {{NUMBER}} --body "...Closes #N..." --repo {github_user}/{name}
-```
-
----
 
 ## Project Identifiers
 
@@ -452,49 +445,15 @@ gh pr edit {{NUMBER}} --body "...Closes #N..." --repo {github_user}/{name}
 - **Project Root (Unix):** `{projects_root_unix}/{name}`
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
----
+## Project-Specific Context
 
-## Branch Protection Contract (main)
-
-| Setting | Value | What it means for you |
-|---------|-------|----------------------|
-| `enforce_admins` | `true` | `--admin` bypass will fail. Do not try. |
-| `required_approving_review_count` | `1` | Cerberus-AZ provides this automatically after pr-sentinel passes. |
-| `required_status_checks` | `pr-sentinel / issue-reference` | Must conclude `success` before merge. |
-| `allow_force_pushes` | `false` | `git push --force` to main will fail. |
-
-### Merge sequence — use this exact flow
-
-```bash
-# 1. Poll mergeable_state until clean
-#    Do NOT use `gh pr checks --watch` — it returns GraphQL 403 with the fine-grained PAT.
-while [ "$(gh api repos/{github_user}/{name}/pulls/$PR --jq '.mergeable_state')" != "clean" ]; do sleep 10; done
-
-# 2. Merge (Cerberus auto-approves after pr-sentinel passes — no separate approval poll needed)
-gh pr merge $PR --squash --repo {github_user}/{name}
-```
-
----
-
-## GitHub CLI Safety
-
-- ALWAYS use `--repo {github_user}/{name}` explicitly — never rely on default repo inference
-- NEVER use `--admin` — will 403
-- NEVER use `gh pr review --approve` on your own PR — GitHub blocks self-approval
-- NEVER use `--no-verify` — if a hook fails, diagnose the root cause instead
-- NEVER reference a **closed** issue in `Closes #N` — create a new issue first if needed
-
----
-
-## Session Logging
-
-At end of session, append a summary to `docs/session-logs/YYYY-MM-DD.md`.
-
----
-
-## You Are Not Alone
-
-Other agents may work on this project. Check `docs/session-logs/` for recent context before starting work.
+_TODO: Add tech stack, architecture, file map, project-type-specific notes,
+and any workflow overrides specific to this project. The universal
+CLAUDE.md (auto-loaded by Claude Code's parent-directory traversal) covers
+all fleet-wide rules -- merge sequence, PR-issue references, branch
+protection, GitHub CLI safety, banned commands, etc. This file only adds
+what is true for THIS repo specifically. Restating universal content here
+creates drift on every universal-CLAUDE.md edit (ADR 0219)._
 """
     claude_md_path = project_path / "CLAUDE.md"
     claude_md_path.write_text(content, encoding='utf-8')
