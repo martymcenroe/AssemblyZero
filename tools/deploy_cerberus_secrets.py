@@ -47,10 +47,10 @@ from nacl import encoding, public
 
 # Shared with new_repo_setup.py and other v3 callers.
 try:
-    from _pat_session import classic_pat_session
+    from _pat_session import classic_pat_session, cerberus_pem_session
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from _pat_session import classic_pat_session
+    from _pat_session import classic_pat_session, cerberus_pem_session
 
 APP_ID = "3079970"
 GITHUB_USER = "martymcenroe"
@@ -225,8 +225,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "pem_path", nargs="?", default=None,
-        help="Path to the Cerberus .pem private key. "
-             "Required unless --dry-run is set.",
+        help="Path to the PLAINTEXT Cerberus .pem private key. "
+             "Single-use; mutually exclusive with --cerberus-pem-gpg. "
+             "Required unless --dry-run is set or --cerberus-pem-gpg is.",
+    )
+    parser.add_argument(
+        "--cerberus-pem-gpg",
+        metavar="PATH",
+        default=None,
+        help="Path to GPG-ENCRYPTED Cerberus .pem (typically "
+             "~/.secrets/cerberus-pem.gpg per ADR-0216 / runbook 0927). "
+             "Decrypted in-process via cerberus_pem_session(); never "
+             "written to plaintext disk. Mutually exclusive with the "
+             "positional pem_path. The encrypted blob is NOT deleted "
+             "after deploy -- reusable across runs (#1254).",
     )
     parser.add_argument(
         "--all", action="store_true",
@@ -293,9 +305,40 @@ def _select_target_repos(args: argparse.Namespace, pat: str) -> tuple[list[str],
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    if not args.dry_run and args.pem_path is None:
-        print("ERROR: pem_path is required unless --dry-run is set.", file=sys.stderr)
+    # Mutual exclusion -- pick one PEM source
+    if args.pem_path and args.cerberus_pem_gpg:
+        print("ERROR: positional pem_path and --cerberus-pem-gpg are mutually "
+              "exclusive. Pick one source.", file=sys.stderr)
         return 1
+
+    if not args.dry_run and not args.pem_path and not args.cerberus_pem_gpg:
+        print("ERROR: pem_path (plaintext) or --cerberus-pem-gpg PATH "
+              "(encrypted) is required unless --dry-run is set.",
+              file=sys.stderr)
+        return 1
+
+    # The --cerberus-pem-gpg path wraps the existing flow in a
+    # cerberus_pem_session context manager so the decrypted content
+    # only ever lives in the Python heap during this run.
+    if args.cerberus_pem_gpg:
+        gpg_path = Path(args.cerberus_pem_gpg)
+        try:
+            with cerberus_pem_session(gpg_path) as decrypted:
+                if "PRIVATE KEY" not in decrypted:
+                    print("ERROR: decrypted contents do not look like a "
+                          "private key.", file=sys.stderr)
+                    return 1
+                print(f"Cerberus App ID: {APP_ID}")
+                print(f"Private key:     gpg-decrypted from "
+                      f"{gpg_path.name} ({len(decrypted)} chars in-process)")
+                print()
+                return _deploy_loop(args, decrypted, source_path=None)
+        except FileNotFoundError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1
+        except RuntimeError as e:
+            print(f"ERROR: gpg decrypt failed: {e}", file=sys.stderr)
+            return 1
 
     pem_content: str | None = None
     pem_path: Path | None = None
@@ -308,6 +351,26 @@ def main(argv: list[str] | None = None) -> int:
     elif args.dry_run:
         print("Dry-run mode (no .pem provided). Scanning only.\n")
 
+    return _deploy_loop(args, pem_content, source_path=pem_path)
+
+
+def _deploy_loop(
+    args: argparse.Namespace,
+    pem_content: str | None,
+    *,
+    source_path: Path | None,
+) -> int:
+    """Run the selection + deploy loop. Shared by both PEM source paths.
+
+    Args:
+        args: Parsed CLI args.
+        pem_content: PEM contents string (loaded from disk via _load_pem,
+            or decrypted in-process via cerberus_pem_session). None in
+            dry-run-with-no-PEM mode.
+        source_path: If not None, prints the "delete the .pem" reminder
+            at end (legacy plaintext path). None for the gpg-encrypted
+            path -- nothing on disk to delete (#1254).
+    """
     with classic_pat_session() as pat:
         print("Fetching target repos...")
         targets, skipped = _select_target_repos(args, pat)
@@ -328,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
             print("All scanned repos already have both Cerberus secrets. Nothing to do.")
             return 0
 
-        assert pem_content is not None  # _load_pem populated this above
+        assert pem_content is not None  # required at this point (caller validated)
 
         succeeded = 0
         failed: list[str] = []
@@ -346,8 +409,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Done: {succeeded}/{len(targets)} repos configured")
     if failed:
         print(f"Failed: {', '.join(failed)}")
-    if pem_path is not None:
-        print(f"\n*** NOW DELETE THE .pem FILE: {pem_path} ***")
+    if source_path is not None:
+        print(f"\n*** NOW DELETE THE .pem FILE: {source_path} ***")
         print("The secret is stored in GitHub -- you never need the file again.")
     return 0 if not failed else 1
 

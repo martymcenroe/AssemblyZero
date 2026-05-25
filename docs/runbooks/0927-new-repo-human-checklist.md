@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.0
-**Last Updated:** 2026-05-07
+**Version:** 6.3
+**Last Updated:** 2026-05-24
 
 ---
 
@@ -44,18 +44,46 @@ gpgconf --kill gpg-agent
 
 With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (instead of caching for ~10 minutes). Your choice on the ergonomics-vs-security tradeoff.
 
+**Encrypt the Cerberus App private key** (recommended for any repeat use):
+
+The first time you generate a Cerberus `.pem`, encrypt it the same way as the classic PAT and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want — single browser-trip to generate, single browser-trip to revoke, no plaintext on disk in between.
+
+```bash
+# After generating the .pem at https://github.com/settings/apps/cerberus-az:
+cat ~/Downloads/cerberus.pem | gpg -c -o ~/.secrets/cerberus-pem.gpg
+rm ~/Downloads/cerberus.pem
+```
+
+The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo_setup.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
+
+When the key is eventually revoked in the GitHub App UI, you can delete the encrypted blob too (`rm ~/.secrets/cerberus-pem.gpg`). The next batch of repos uses a fresh `.pem` generation cycle.
+
 ---
 
 ## Checklist
 
 ### 1. Run the setup script (bare — no env prefix needed)
 
+**Recommended path — `--cerberus-pem-gpg` (encrypted at rest, reusable):**
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/new_repo_setup.py {name} \
+    --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--public]
+```
+
+This requires the one-time gpg-encrypt of the Cerberus `.pem` (see "One-time setup" above). The decrypted key only ever lives in the Python heap during the script's run; nothing plaintext touches disk. **You can run this same invocation for as many new repos as you want against the same encrypted blob — one browser trip to generate the `.pem` covers all of them, one browser trip to revoke when done.**
+
+**Legacy / single-shot path — `--cerberus-pem` (plaintext, deleted after deploy):**
+
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/new_repo_setup.py {name} --cerberus-pem PATH [--public]
 ```
 
-`--cerberus-pem` is **required** when creating a GitHub repo (#1206). The script exits with a guide if it's missing — Cerberus auto-approval is part of the new-repo contract, and without the secrets every PR sits blocked. The only override is `--no-github` (local scaffold only, skips the GitHub side entirely).
+The script reads the plaintext `.pem`, deploys, then unlinks the file. Fine for occasional one-off repo creation; for any repeat use the gpg path is strictly better (security + ergonomics).
+
+Either `--cerberus-pem-gpg` OR `--cerberus-pem` is **required** when creating a GitHub repo (#1206) — Cerberus auto-approval is part of the new-repo contract, and without the secrets every PR sits blocked. The only override is `--no-github` (local scaffold only, skips the GitHub side entirely). The two flags are mutually exclusive.
 
 gpg-agent will prompt for your passphrase once per cache window (controlled by `~/.gnupg/gpg-agent.conf`) and the script handles the rest.
 
@@ -275,3 +303,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-07 | v6.0: #1037 — dropped \`--license mit\` from invocation examples (script default is \`polyform\`, was misleading to show MIT as if recommended). Added an explicit "Defaults the script picks unless you override" block. Rewrote Section 4 with three subsections explaining what Cerberus is (auto-approver of your own PRs after pr-sentinel passes), why the secrets must be per-repo (App's RSA private key, used by the auto-reviewer workflow to authenticate as Cerberus), and why \`--cerberus-pem\` is recommended on every new-repo creation. Updated the env-block exposure note to reflect that #1036/#1037 closes the last \`GH_TOKEN\` hold-out. |
 | 2026-05-09 | v6.1: #1058 + #1059 + #1060 + #1061 — bundle of post-boostgauge-readiness-audit fixes. Script now bootstraps a Python project by default (\`poetry init\` + \`poetry add --group dev pytest pytest-cov\` + \`[tool.pytest.ini_options]\` + \`tests/conftest.py\`); \`--lang none\` skips for non-Python repos. \`.unleashed.json\` defaults to \`assemblyZero: true\` and no longer emits the deprecated \`pickupThresholdMinutes\`. Two canonical GitHub labels (\`implementation\`, \`lld\`) created on the new repo. |
 | 2026-05-22 | v6.2: #1206 — `--cerberus-pem` is REQUIRED for new GitHub repos. Script exits 1 with the .pem-acquisition guide if omitted. Override is `--no-github` (local scaffold only). #1200 + #1202 — extended post-setup verification to GitHub-side state (branch protection, repo settings, workflow content, Cerberus secrets) and added a best-effort `pr-sentinel-mm` Worker installation check that surfaces App-scope drift at creation time instead of when the first PR opens. |
+| 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo_setup.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo_setup.py` invocations. Added one-time-setup subsection for the encryption step. |

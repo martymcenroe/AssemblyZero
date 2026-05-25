@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Iterator
 
 DEFAULT_PAT_PATH: Path = Path.home() / ".secrets" / "classic-pat.gpg"
+DEFAULT_CERBERUS_PEM_PATH: Path = Path.home() / ".secrets" / "cerberus-pem.gpg"
 GPG_TIMEOUT_S: int = 180
 MAX_GPG_ATTEMPTS: int = 5
 
@@ -125,5 +126,95 @@ def classic_pat_session(
 
     raise RuntimeError(
         f"gpg decrypt failed after {MAX_GPG_ATTEMPTS} attempts. "
+        f"Last error: {last_stderr}"
+    )
+
+
+@contextmanager
+def cerberus_pem_session(
+    pem_path: Path = DEFAULT_CERBERUS_PEM_PATH,
+) -> Iterator[str]:
+    """Yield the gpg-decrypted Cerberus App private-key PEM.
+
+    Same threat model as classic_pat_session: the PEM lives at rest
+    gpg-symmetric-encrypted (passphrase-gated), is decrypted only into
+    this Python process's heap inside the context-manager scope, and
+    never touches disk in plaintext form during script execution.
+
+    Solves the multi-repo Cerberus deploy problem (#1254): the operator
+    runs new_repo_setup.py once per repo against the SAME encrypted
+    PEM, so a single browser-trip generates the key and a single
+    browser-trip revokes it, regardless of how many repos are created.
+    The plaintext PEM is deleted right after the one-time gpg-encrypt
+    step and never reappears.
+
+    One-time setup (operator):
+        # Generate .pem in browser, then encrypt + delete the plaintext:
+        cat ~/Downloads/cerberus.pem | gpg -c -o ~/.secrets/cerberus-pem.gpg
+        rm ~/Downloads/cerberus.pem
+
+    Same operational rules apply as classic_pat_session:
+        - gpg-agent default-cache-ttl 0 (silent sibling-decrypt attempts
+          surface pinentry — see ADR-0216 and the classic_pat_session
+          docstring above)
+        - The OPERATOR runs the script that opens this context; an
+          agent must never invoke it via its Bash tool
+
+    Args:
+        pem_path: Path to the gpg-encrypted Cerberus PEM file.
+
+    Yields:
+        The decrypted PEM as a string. Lives only in this generator's
+        scope; the local binding is deleted on exit.
+
+    Raises:
+        FileNotFoundError: If the encrypted PEM file does not exist.
+        RuntimeError: After MAX_GPG_ATTEMPTS consecutive gpg failures.
+        subprocess.TimeoutExpired: Same hung-pinentry handling as
+            classic_pat_session.
+
+    Implementation note: the body intentionally duplicates
+    classic_pat_session's structure rather than sharing a helper.
+    Keeping the load-bearing PAT path untouched is worth ~30 lines of
+    duplication.
+    """
+    if not pem_path.exists():
+        raise FileNotFoundError(
+            f"Cerberus PEM not found at {pem_path}.\n"
+            f"One-time setup (after downloading the .pem from the Cerberus "
+            f"App settings page):\n"
+            f"  mkdir -p {pem_path.parent}\n"
+            f"  cat ~/Downloads/cerberus.pem | gpg -c -o {pem_path}\n"
+            f"  rm ~/Downloads/cerberus.pem"
+        )
+
+    last_stderr = ""
+    for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        result = subprocess.run(
+            ["gpg", "--quiet", "--decrypt", str(pem_path)],
+            capture_output=True,
+            text=True,
+            timeout=GPG_TIMEOUT_S,
+        )
+        if result.returncode == 0:
+            pem = result.stdout.strip()
+            try:
+                yield pem
+            finally:
+                del pem
+            return
+        last_stderr = result.stderr.strip()
+        if attempt < MAX_GPG_ATTEMPTS:
+            print(
+                f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
+                file=sys.stderr,
+            )
+            print(
+                "Retrying -- pinentry will prompt again. (Ctrl-C to abort.)",
+                file=sys.stderr,
+            )
+
+    raise RuntimeError(
+        f"gpg decrypt of Cerberus PEM failed after {MAX_GPG_ATTEMPTS} attempts. "
         f"Last error: {last_stderr}"
     )
