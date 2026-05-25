@@ -2061,15 +2061,23 @@ Examples:
              "for non-Python projects. (#1058)"
     )
     parser.add_argument(
+        "--pypi",
+        action="store_true",
+        default=False,
+        help="Include the PyPI publishing scaffold (entry point, src/<pkg>/ "
+             "skeleton, [tool.poetry.scripts]/[urls] blocks, release.yml). "
+             "Default: OMITTED. Runbook 0934 describes the one-time "
+             "pending-publisher registration on PyPI that release.yml "
+             "expects. Pass this flag ONLY for repos you intend to "
+             "publish to PyPI. (#1269)"
+    )
+    parser.add_argument(
         "--no-pypi",
         action="store_true",
         default=False,
-        help="Skip the PyPI publishing scaffold (entry point, src/<pkg>/ "
-             "skeleton, [tool.poetry.scripts]/[urls] blocks, release.yml). "
-             "Default: include all of those — runbook 0934 then describes "
-             "the one-time browser step on PyPI's side to enable the first "
-             "tag-push publish. Pass this flag for internal-only packages "
-             "that won't ever publish to PyPI. (#1074)"
+        help="DEPRECATED -- this is now the default. Accepted as a no-op "
+             "for backward compatibility; will print a deprecation warning. "
+             "Use --pypi to opt INTO the PyPI scaffold. (#1269)"
     )
 
     args = parser.parse_args()
@@ -2080,6 +2088,16 @@ Examples:
         print("Pick one: --cerberus-pem PATH (plaintext, deleted after) OR "
               "--cerberus-pem-gpg PATH (encrypted at rest, reusable).")
         sys.exit(1)
+
+    # --pypi and --no-pypi are mutually exclusive (#1269)
+    if args.pypi and args.no_pypi:
+        print("ERROR: --pypi and --no-pypi are mutually exclusive.")
+        sys.exit(1)
+
+    # --no-pypi is now the default; emit deprecation notice if it's used
+    if args.no_pypi:
+        print("NOTE: --no-pypi is deprecated -- this is now the default. "
+              "The flag is a no-op; remove it from your invocation. (#1269)")
 
     # Cerberus deploy requires --no-github not set (need the repo to deploy to)
     if (args.cerberus_pem or args.cerberus_pem_gpg) and args.no_github:
@@ -2332,13 +2350,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
     # pytest, pytest-cov, conftest.py. Required for AZ implementation
     # workflow's red/green TDD phases. Skippable via --lang none.
-    # Step also installs PyPI publishing scaffold (#1074) unless --no-pypi.
-    enable_pypi = (args.lang == "python") and (not args.no_pypi)
+    # PyPI publishing scaffold (#1074) is OPT-IN via --pypi (#1269 --
+    # inverted from earlier opt-out via --no-pypi).
+    enable_pypi = (args.lang == "python") and args.pypi
     if args.lang == "python":
         if enable_pypi:
             print("\n11b2. Bootstrapping Python project (poetry init + pytest + PyPI scaffold)...")
         else:
-            print("\n11b2. Bootstrapping Python project (poetry init + pytest, --no-pypi)...")
+            print("\n11b2. Bootstrapping Python project (poetry init + pytest)...")
         if create_python_project(
             project_path,
             args.name,
@@ -2787,9 +2806,12 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  # Cerberus secrets deployed and verified.")
         print("  # REMEMBER to revoke the key in the app UI (browser-only step).")
 
+    # The internal function uses `no_pypi` (legacy parameter name); compute
+    # it as "did the operator OPT IN via --pypi?" -- false = no_pypi=True =
+    # reminder suppressed; true = no_pypi=False = reminder fires. (#1269)
     _maybe_print_pypi_reminder(
         lang=args.lang,
-        no_pypi=args.no_pypi,
+        no_pypi=not args.pypi,
         no_github=args.no_github,
         github_user=github_user,
         repo_name=args.name.lower(),

@@ -2,15 +2,15 @@
 
 **Runbook 0934 — one-time per-repo browser steps to enable tag-push PyPI publishes from a repo bootstrapped by `tools/new_repo_setup.py` (#1074).**
 
-`new_repo_setup.py` deploys `release.yml` to every new Python repo by default. The workflow is wired to publish to PyPI via OIDC Trusted Publisher — no API token is stored in GitHub secrets. But OIDC trust requires a one-time registration on PyPI's side, and **PyPI's publisher-registration UI is browser-only**. There is no API. This runbook covers the human steps; the script handles everything else.
+`new_repo_setup.py` deploys `release.yml` to new Python repos **only when `--pypi` is passed** (as of #1269 — was default-on, now opt-in). The workflow is wired to publish to PyPI via OIDC Trusted Publisher — no API token is stored in GitHub secrets. But OIDC trust requires a one-time registration on PyPI's side, and **PyPI's publisher-registration UI is browser-only**. There is no API. This runbook covers the human steps; the script handles everything else.
 
-If you used `--no-pypi` when creating the repo, this runbook does not apply — the repo has no `release.yml` and won't try to publish.
+If you did NOT pass `--pypi` when creating the repo, this runbook does not apply — the repo has no `release.yml` and won't try to publish. To add PyPI publishing to an existing repo, re-run scaffolding or add `release.yml` manually.
 
 ---
 
 ## Prerequisites
 
-- Repo created via `tools/new_repo_setup.py <name>` (without `--no-pypi`).
+- Repo created via `tools/new_repo_setup.py <name> --pypi`.
 - The script's output should include `Created auto-reviewer.yml + release.yml (PyPI publish on tag)`.
 - `pyproject.toml` in the repo has `[tool.poetry.scripts]` and `[tool.poetry.urls]` blocks populated. Verify with `grep -A3 "tool.poetry.scripts" pyproject.toml`.
 - `.github/workflows/release.yml` exists and uses `environment: pypi` (this is the default; don't edit unless you know what you're doing).
