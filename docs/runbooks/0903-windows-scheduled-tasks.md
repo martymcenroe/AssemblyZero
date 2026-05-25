@@ -1,8 +1,8 @@
 # 0903 - Windows Scheduled Tasks
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.1
-**Last Updated:** 2026-05-10
+**Version:** 1.2
+**Last Updated:** 2026-05-25
 
 ---
 
@@ -32,6 +32,7 @@ When registering ANY new task — agent or operator:
 | Claude-DailyAudit | Daily 4:30 AM | Rotates through projects running `/audit` |
 | Claude-Heartbeat | Hourly | Monitors usage quotas and Claude availability |
 | Claude-Capture | Hourly :58 | Quota scrape just before hour boundary |
+| Claude-UniversalClaudeMdBackup | Daily 5:55 AM | Nightly versioned snapshot of `C:\Users\mcwiz\Projects\CLAUDE.md` into `AssemblyZero/docs/canonical/`. Opens a PR on drift; never auto-merges. (#1262) |
 | Claude-DependabotFleet | Daily 6:00 AM | Fleet-wide dependabot PR review + merge (#1091, #1092) |
 
 ---
@@ -133,6 +134,62 @@ Warnings appended when:
 - Session usage >= 90%: `WARN:HIGH_USAGE`
 - Scraper fails: `usage:ERROR(reason)`
 - Heartbeat fails: `heartbeat:ERROR`
+
+---
+
+## Claude-UniversalClaudeMdBackup
+
+Nightly versioned snapshot of the universal CLAUDE.md (`C:\Users\mcwiz\Projects\CLAUDE.md`) into `AssemblyZero/docs/canonical/universal-CLAUDE.md`. Opens a PR if the canonical copy on origin/main has drifted from the live universal file; **never auto-merges** — operator reviews each rule change.
+
+### Configuration
+
+| Property | Value |
+|----------|-------|
+| **Trigger** | Daily at 5:55 AM local (Central) |
+| **Wrapper** | `C:\Users\mcwiz\Projects\AssemblyZero\tools\backup-universal-claude-md.ps1` |
+| **Script** | `C:\Users\mcwiz\Projects\AssemblyZero\tools\backup_universal_claude_md.py` |
+| **Canonical destination** | `AssemblyZero/docs/canonical/universal-CLAUDE.md` |
+
+### Why 5:55 AM
+
+Five minutes before the 6:00 AM `Claude-DependabotFleet` sweep. Any rule change to the universal CLAUDE.md lands before dependabot starts processing the day's PRs — relevant if a rule change affects PR handling.
+
+### Why no auto-merge
+
+The universal CLAUDE.md is the load-bearing instruction set for every agent across the fleet. Auto-merging an unreviewed change to it would defeat the audit-trail purpose. The operator must lay eyes on any rule change before it becomes the fleet's canon.
+
+### What gets committed
+
+- Branch: `backup-universal-claude-md-YYYYMMDD`
+- Commit: `chore: nightly backup of universal CLAUDE.md` with `No-Issue: scheduled nightly backup (tracking #1262)` (per pr-sentinel's exemption)
+- Worktree-based to avoid disrupting the main working tree
+
+### Output
+
+| Output | Location |
+|--------|----------|
+| **Python script log (JSONL)** | `C:\Users\mcwiz\Projects\.universal-claude-md-backup.jsonl` |
+| **Wrapper log** | `C:\Users\mcwiz\Projects\.universal-claude-md-backup-wrapper.log` |
+
+Statuses logged: `no_drift`, `pr_exists`, `pr_opened`, `pr_open_failed`, `error`.
+
+### One-time registration (operator runs)
+
+```powershell
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+    -Argument '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File C:\Users\mcwiz\Projects\AssemblyZero\tools\backup-universal-claude-md.ps1'
+$trigger = New-ScheduledTaskTrigger -Daily -At '05:55'
+Register-ScheduledTask -TaskName 'Claude-UniversalClaudeMdBackup' `
+    -Action $action -Trigger $trigger `
+    -Description 'Nightly backup of universal CLAUDE.md to AssemblyZero/docs/canonical/'
+```
+
+No admin elevation needed (Hard Rule #1). Verify silence after registration:
+
+```powershell
+Start-ScheduledTask -TaskName 'Claude-UniversalClaudeMdBackup'
+# Watch for any window flash. None should appear.
+```
 
 ---
 
