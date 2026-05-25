@@ -907,45 +907,68 @@ class TestVerifyWorkflowContent:
 
 
 class TestVerifyPrSentinelInstallation:
-    """T300-T302: verify_pr_sentinel_installation (#1202)."""
+    """T300-T302: verify_pr_sentinel_installation (#1202, refactored #1274).
 
-    @patch("new_repo_setup.run_command")
-    def test_T300_pass_when_repo_in_installation(self, mock_run):
+    Post-#1274: function uses requests + classic PAT (not gh CLI). Tests
+    mock requests.get with status-code/json-shaped responses.
+    """
+
+    @patch("new_repo_setup.requests.get")
+    def test_T300_pass_when_repo_in_installation(self, mock_get):
         """Worker installation found AND covers the new repo → (True, ...)."""
-        mock_run.side_effect = [
-            # /user/installations filter → installation id
-            MagicMock(returncode=0, stdout="12345\n", stderr=""),
-            # /user/installations/12345/repositories → list of full_names
-            MagicMock(
-                returncode=0,
-                stdout="martymcenroe/some-other\nmartymcenroe/repo-name\n",
-                stderr="",
-            ),
-        ]
-        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        installations_resp = MagicMock(status_code=200)
+        installations_resp.json.return_value = {
+            "installations": [
+                {"app_slug": "pr-sentinel-mm", "id": 12345},
+            ],
+        }
+        repos_resp = MagicMock(status_code=200)
+        repos_resp.json.return_value = {
+            "repositories": [
+                {"full_name": "martymcenroe/some-other"},
+                {"full_name": "martymcenroe/repo-name"},
+            ],
+        }
+        mock_get.side_effect = [installations_resp, repos_resp]
+        ok, msg = verify_pr_sentinel_installation(
+            "martymcenroe", "repo-name", "fake-pat",
+        )
         assert ok is True
         assert "covers" in msg
 
-    @patch("new_repo_setup.run_command")
-    def test_T301_warn_when_installation_missing(self, mock_run):
+    @patch("new_repo_setup.requests.get")
+    def test_T301_warn_when_installation_missing(self, mock_get):
         """No pr-sentinel-mm in /user/installations → (False, 'not found')."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"installations": [
+            {"app_slug": "some-other-app", "id": 99},
+        ]}
+        mock_get.return_value = resp
+        ok, msg = verify_pr_sentinel_installation(
+            "martymcenroe", "repo-name", "fake-pat",
+        )
         assert ok is False
         assert "not found" in msg
 
-    @patch("new_repo_setup.run_command")
-    def test_T302_warn_when_repo_not_in_installation_repos(self, mock_run):
+    @patch("new_repo_setup.requests.get")
+    def test_T302_warn_when_repo_not_in_installation_repos(self, mock_get):
         """Installation exists but doesn't cover the new repo → App scope drift warning."""
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="12345\n", stderr=""),
-            MagicMock(
-                returncode=0,
-                stdout="martymcenroe/some-other-only\n",
-                stderr="",
-            ),
-        ]
-        ok, msg = verify_pr_sentinel_installation("martymcenroe", "repo-name")
+        installations_resp = MagicMock(status_code=200)
+        installations_resp.json.return_value = {
+            "installations": [
+                {"app_slug": "pr-sentinel-mm", "id": 12345},
+            ],
+        }
+        repos_resp = MagicMock(status_code=200)
+        repos_resp.json.return_value = {
+            "repositories": [
+                {"full_name": "martymcenroe/some-other-only"},
+            ],
+        }
+        mock_get.side_effect = [installations_resp, repos_resp]
+        ok, msg = verify_pr_sentinel_installation(
+            "martymcenroe", "repo-name", "fake-pat",
+        )
         assert ok is False
         assert "does NOT cover" in msg or "drift" in msg.lower()
 

@@ -1843,7 +1843,7 @@ def verify_workflow_content_on_origin(
 
 
 def verify_pr_sentinel_installation(
-    github_user: str, repo_name: str,
+    github_user: str, repo_name: str, pat: str,
 ) -> tuple[bool, str]:
     """Best-effort check that pr-sentinel-mm Cloudflare Worker covers this repo.
 
@@ -1852,49 +1852,82 @@ def verify_pr_sentinel_installation(
     drifted from 'All repositories', the check never fires and every PR sits
     blocked. Catches that at creation time instead of when the first PR opens.
 
-    Uses gh CLI's authenticated user-to-server token (fine-grained PAT is
-    sufficient for /user/installations) — no classic PAT needed.
+    Uses the in-process classic PAT per ADR-0216 (#1274). The
+    /user/installations endpoint requires elevated scope that the
+    fine-grained PAT deliberately lacks; prior versions of this function
+    shelled out via gh and reliably 403'd on every run.
+
+    Args:
+        github_user: GitHub username (org or user account that owns the repo).
+        repo_name: Repository name (no owner prefix).
+        pat: Classic PAT from classic_pat_session(). Passed in the
+            Authorization header; never reaches env or argv.
     """
+    headers = {
+        "Authorization": f"token {pat}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
     # Step 1: find the pr-sentinel-mm installation id on the user account.
     try:
-        r = run_command(
-            ["gh", "api", "/user/installations", "--jq",
-             '.installations[] | select(.app_slug == "pr-sentinel-mm") | .id'],
-            check=False,
+        r = requests.get(
+            "https://api.github.com/user/installations",
+            headers=headers, timeout=30,
         )
-    except (subprocess.TimeoutExpired, OSError) as e:
+    except requests.RequestException as e:
         return False, f"could not query /user/installations: {e}"
-    if r.returncode != 0:
-        # 403 / 401 / 404 — token doesn't have the right scope or API is
-        # unavailable. Surface but don't fail the verification — this is
-        # an advisory check.
-        return False, f"gh api /user/installations failed: {(r.stderr or '').strip()[:200]}"
-    out = (r.stdout or "").strip().splitlines()
-    if not out or not out[0].strip():
+    if r.status_code != 200:
+        return False, (
+            f"GET /user/installations failed: {r.status_code} "
+            f"{r.text[:200]}"
+        )
+    try:
+        installations = r.json().get("installations", [])
+    except ValueError as e:
+        return False, f"could not parse /user/installations: {e}"
+    sentinel = next(
+        (inst for inst in installations if inst.get("app_slug") == "pr-sentinel-mm"),
+        None,
+    )
+    if sentinel is None:
         return False, "pr-sentinel-mm not found in /user/installations"
-    installation_id = out[0].strip()
+    installation_id = sentinel.get("id")
+    if installation_id is None:
+        return False, "pr-sentinel-mm installation has no id field"
 
     # Step 2: list repositories covered by this installation; confirm the
-    # new repo is in the list. --paginate handles users with many repos.
-    try:
-        r = run_command(
-            ["gh", "api", f"/user/installations/{installation_id}/repositories",
-             "--paginate", "--jq", ".repositories[].full_name"],
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, f"could not query installation repos: {e}"
-    if r.returncode != 0:
-        return False, (
-            f"gh api installation/{installation_id}/repositories failed: "
-            f"{(r.stderr or '').strip()[:200]}"
-        )
-    covered = set((r.stdout or "").strip().splitlines())
+    # new repo is in the list. GitHub paginates installation repositories
+    # at 100 per page; loop until exhausted.
     full_name = f"{github_user}/{repo_name}"
-    if full_name in covered:
-        return True, f"installation {installation_id} covers this repo"
+    page = 1
+    while True:
+        try:
+            r = requests.get(
+                f"https://api.github.com/user/installations/{installation_id}/repositories",
+                headers=headers,
+                params={"per_page": 100, "page": page},
+                timeout=30,
+            )
+        except requests.RequestException as e:
+            return False, f"could not query installation repos: {e}"
+        if r.status_code != 200:
+            return False, (
+                f"GET /user/installations/{installation_id}/repositories "
+                f"failed: {r.status_code} {r.text[:200]}"
+            )
+        try:
+            repos = r.json().get("repositories", [])
+        except ValueError as e:
+            return False, f"could not parse installation repos: {e}"
+        for repo in repos:
+            if repo.get("full_name") == full_name:
+                return True, f"installation {installation_id} covers this repo"
+        if len(repos) < 100:
+            break  # last page
+        page += 1
     return False, (
-        f"installation {installation_id} does NOT cover {full_name} — "
+        f"installation {installation_id} does NOT cover {full_name} -- "
         "App scope may have drifted from 'All repositories'"
     )
 
@@ -2726,6 +2759,23 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         else:
                             print(f"  [FAIL] Cerberus secrets missing: {missing}")
 
+                    # pr-sentinel installation check -- elevated; needs the
+                    # classic PAT (the /user/installations endpoint is NOT
+                    # accessible to the fine-grained PAT). Inside the
+                    # with-block, shares pat -- no extra pinentry. (#1274)
+                    gh_checks_total += 1
+                    ok, msg = verify_pr_sentinel_installation(
+                        github_user, repo_name_lower, pat,
+                    )
+                    if ok:
+                        print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
+                        gh_checks_passed += 1
+                    else:
+                        print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
+                        print("         If pr-sentinel checks don't appear on the first PR,")
+                        print("         the App's installation scope likely drifted from "
+                              "'All repositories'.")
+
         except FileNotFoundError as e:
             print(f"\n  ERROR: classic PAT not configured: {e}")
             print("  Local scaffold preserved. Set up classic PAT per ADR-0216 /")
@@ -2736,20 +2786,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print(f"\n  ERROR: gpg decrypt failed: {e}")
             print("  Re-enter passphrase carefully and re-run.")
 
-        # pr-sentinel installation check -- non-elevated, no classic PAT
-        # needed. Runs OUTSIDE the with-block; pat is already out of scope.
         if github_created:
-            gh_checks_total += 1
-            ok, msg = verify_pr_sentinel_installation(github_user, repo_name_lower)
-            if ok:
-                print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
-                gh_checks_passed += 1
-            else:
-                print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
-                print("         If pr-sentinel checks don't appear on the first PR,")
-                print("         the App's installation scope likely drifted from "
-                      "'All repositories'.")
-
             print(f"\nGitHub-side verification: {gh_checks_passed}/{gh_checks_total} checks passed")
 
             if gh_checks_passed < gh_checks_total:
