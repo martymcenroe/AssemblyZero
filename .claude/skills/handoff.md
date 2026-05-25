@@ -177,10 +177,16 @@ archive_path: {from the Step 5.4B archive call result, or omit if archive failed
 
 ## Files to Read First
 
-{Ordered list of files the next session should read to get oriented:}
-1. `{plan file}` — the master plan
-2. `{key file}` — because...
-3. ...
+For each file: ONE sentence describing what signal the next session gets that auto-loaded files (universal CLAUDE.md, repo CLAUDE.md, MEMORY.md) don't already provide. If you can't articulate that, don't list it.
+
+**Do NOT include:**
+- The universal CLAUDE.md, repo CLAUDE.md, or MEMORY.md (auto-loaded — listing them implies the agent has a choice)
+- Snapshots / audit-trail copies of any of the above (e.g. `docs/canonical/*`)
+- Files the next session will Read on-demand anyway (list the spec, not the target the spec changes)
+
+Format:
+1. `{path}` — **{one-line signal the next session gets}**
+2. ...
 ```
 
 ### Step 2B: Memory Line Check
