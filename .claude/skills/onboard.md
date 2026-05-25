@@ -152,7 +152,35 @@ Full detail JSON is at `result.detail_path` — if the user asks for more detail
    - `plan_state: active` with `remaining_steps > 0` → Tell user: "Resuming plan `{plan_slug}`: {completed_steps}/{total_steps} steps done." Read `{plan_path}` and treat it as the active plan for this session.
    - `plan_path` is set but the file is missing → Fall back to `{archive_path}`. Warn user: "Live plan missing, reading archived copy instead."
    - No plan-state block, or `plan_state: none` → Continue without a plan.
-4. Read every file listed in the "Files to Read First" section
+4. Read every file listed in the "Files to Read First" section. **As you read (or decide to skip) each one, record a one-line takeaway or skip-reason** — you'll persist these in step 4b.
+4b. **Persist a per-file read log to `data/pickup-read-log.md` (#1255).** This is the structural countermeasure to silent file-skipping: it creates an auditable record of what was actually consumed, makes silent skips visible, and lets future sessions see what prior sessions covered. Required for every file in the handoff's "Files to Read First" list — both reads AND skips.
+
+   **Gitignore check (one-time per repo):** Run `git -C {repo_root} check-ignore -q data/pickup-read-log.md`. If exit code is 1 (not ignored), append `data/pickup-read-log.md` to the repo's `.gitignore` (create if missing) and tell user: "Added `data/pickup-read-log.md` to .gitignore."
+
+   **Append a session block** to `{repo_root}/data/pickup-read-log.md` (create file if missing):
+
+   ```markdown
+   ---
+   ## Pickup — {YYYY-MM-DD HH:MM:SS}
+
+   ### `{file_path}`
+   - Read at: {HH:MM:SS}
+   - Source: handoff item N
+   - Key takeaway: {one-line, specific — what does this file change about what the next session does}
+
+   ### `{file_path}` (SKIPPED)
+   - Skipped at: {HH:MM:SS}
+   - Reason: {plan_state=completed | file missing | duplicate of auto-loaded | judgment-cut for context (state what context limit AND what was sacrificed) | other-specific-reason}
+
+   ---
+   ```
+
+   **Required per entry:**
+   - **Read entries:** Key takeaway must be specific to the file's content — NOT a description of what the file is. "Defines failure Mode B as auto-reviewer firing on dependabot PRs" beats "discusses failure modes."
+   - **Skip entries:** Reason must name the specific cause. "Judgment-cut for context" is acceptable only if you ALSO record what context limit you were protecting and what signal you sacrificed by skipping.
+
+   Padded or generic entries defeat the log's purpose. If you can't write a specific takeaway, you didn't read the file — go read it before continuing.
+
 5. **Write the pickup marker** by running it from inside the unleashed repo so poetry resolves correctly even when the target repo (e.g. a TypeScript project like `career`) has no `pyproject.toml`:
    ```bash
    (cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/pickup_marker.py --repo {repo_root})
@@ -163,7 +191,7 @@ Full detail JSON is at `result.detail_path` — if the user asks for more detail
    (cd /c/Users/mcwiz/Projects/AssemblyZero && poetry run python tools/repo_drift_check.py --handoff {repo_root}/data/handoff-log.md --quiet)
    ```
    The subshell `()` keeps the `cd` local. The script greps the handoff body for `Projects/<repo>` references, runs `git fetch` + drift count for each, and prints a one-liner per drifted repo (`{name}: {N} behind origin/{branch} -- pull before any local work`). It is silent when no drift is detected. Surface any drift output to the user as part of the pickup report -- this prevents the failure mode in #1077 where the agent inherits a stale local state and only discovers it mid-merge. Non-fatal: if the script errors (exit 2), continue with onboarding but mention which repos couldn't be checked.
-7. Report: "Picked up handoff from {timestamp}. {N} files read."
+7. Report: "Picked up handoff from {timestamp}. {N} files read, {M} skipped. Log: `data/pickup-read-log.md`."
 
 ### Step 2: Project Context
 
@@ -207,6 +235,7 @@ Then ask: "What do you want to work on next?"
 - Use `--repo {owner}/{repo}` for all gh commands
 - CLAUDE.md and MEMORY.md are already in context — never re-read them
 - `data/handoff-log.md` is append-only -- never delete or rewrite entries. Pickup markers are written by `pickup_marker.py` (Step 1D.5), not by the agent directly.
+- `data/pickup-read-log.md` is append-only -- never delete or rewrite entries. Future sessions read it to see what prior sessions covered. Writing it is part of pickup (Step 1D.4b), not optional.
 - Drift check (Step 1D.6) is non-fatal: a script error or unreachable remote should NOT block onboarding. Surface drift output verbatim and let the user decide whether to pull before working.
 - `data/session-index.jsonl` is read-only — never modify it
 - If no `.unleashed.json` exists, use defaults: `assemblyZero=false`, no guide, no plan
