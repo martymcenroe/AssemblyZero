@@ -2401,145 +2401,15 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     workflows_deployed = False
     repo_settings_ok = False
     protection_ok = False
+    cerberus_status: str | None = None
+    gh_checks_passed = 0
+    gh_checks_total = 0
 
-    if not args.no_github:
-        print("\n" + "=" * 60)
-        print("GITHUB REMOTE")
-        print("=" * 60)
-        print("\n  Post-#1000: GH_TOKEN is not required.")
-        print("  - Step 13 pushes non-workflow files with your fine-grained gh auth.")
-        print("  - Step 15 uploads workflows via Contents API + in-process classic PAT.")
-        print("  - Steps 17-18 configure settings + protection via in-process classic PAT.\n")
-
-        # Step 13: Create GitHub repo + push non-workflow files.
-        # The initial commit excludes .github/workflows (step 12), so this
-        # push succeeds with fine-grained PAT — it does not cross the
-        # `workflow` scope boundary. If GH_TOKEN happens to be set (legacy
-        # invocation), `gh` still honors it, which is harmless.
-        repo_name_lower = args.name.lower()
-        print(f"\n13. Creating GitHub repository ({repo_name_lower})...")
-        visibility = "--public" if args.public else "--private"
-        try:
-            run_command(
-                ["gh", "repo", "create", f"{github_user}/{repo_name_lower}", visibility, "--source", ".", "--push"],
-                cwd=project_path
-            )
-            print(f"  Created: https://github.com/{github_user}/{repo_name_lower}")
-            github_created = True
-            push_succeeded = True
-        except Exception as e:
-            print(f"  WARNING: gh repo create failed: {e}")
-            print("  The local repo is fully valid. To finish manually:")
-            print("    1. Create repo at https://github.com/new")
-            print(f"    2. git remote add origin https://github.com/{github_user}/{repo_name_lower}.git")
-            print("    3. git push -u origin main  # workflows are NOT in this push — fine-grained PAT OK")
-            print("    4. Re-run this script (it will skip create+push and proceed to workflow upload + settings).")
-
-        if github_created:
-            # Step 14: Star the repo (non-privileged — uses gh auth).
-            print("\n14. Starring repository...")
-            run_command(
-                ["gh", "api", "-X", "PUT", f"/user/starred/{github_user}/{repo_name_lower}"],
-                cwd=project_path,
-                check=False  # Don't fail if starring fails
-            )
-            print("  Starred repository")
-
-            # Steps 15, 17, 18 are privileged (need workflow / admin scope).
-            # Step 16 is a local `git pull` that uses gh auth. All four run
-            # inside a single classic_pat_session so gpg-agent is prompted
-            # at most once per run (ADR-0216).
-            # Exceptions propagate to _create_repo's outer try/except:
-            # FileNotFoundError means the user hasn't run the one-time gpg
-            # setup (docs/runbooks/0927); RuntimeError means gpg decryption
-            # failed.
-            with classic_pat_session() as pat:
-                # Step 15: Upload workflow files via Contents API.
-                # Fine-grained PATs can't push workflow changes via git,
-                # so we create them on the remote directly. Each PUT is a
-                # separate commit (one per workflow file).
-                print("\n15. Uploading workflow files via Contents API...")
-                success, count = _deploy_workflows_via_contents_api(
-                    project_path, github_user, repo_name_lower, pat,
-                )
-                if success:
-                    workflows_deployed = True
-                    if count > 0:
-                        print(f"  Uploaded {count} workflow file(s) to main")
-                    else:
-                        print("  No workflow files to upload (skipped)")
-                else:
-                    print("  WARNING: Workflow upload failed. You can retry manually with:")
-                    print(f"    cd {project_path}")
-                    print("    git add .github/workflows && git commit -m 'chore: add workflows'")
-                    print("    git push  # requires classic PAT in gh auth or GH_TOKEN")
-
-                # Step 16: Sync local repo with the Contents API commits.
-                # The remote now has workflow file(s) that the local repo
-                # doesn't track yet; the local filesystem already has the
-                # same files (untracked). We remove them, then pull, which
-                # fast-forwards and checks them out tracked.
-                if workflows_deployed and count > 0:
-                    print("\n16. Syncing local repo with remote workflow commits...")
-                    import shutil as _shutil
-                    workflows_dir = project_path / ".github" / "workflows"
-                    if workflows_dir.exists():
-                        _shutil.rmtree(workflows_dir)
-                    pull = subprocess.run(
-                        ["git", "pull", "--rebase", "origin", "main"],
-                        cwd=str(project_path), capture_output=True, text=True, timeout=60,
-                    )
-                    if pull.returncode == 0:
-                        print("  Synced — local is now at remote HEAD with workflows tracked.")
-                    else:
-                        print(f"  WARNING: git pull failed: {pull.stderr.strip()}")
-
-                # Step 17: Configure repo settings (was step 15).
-                print("\n17. Configuring repo settings...")
-                if configure_repo_settings(github_user, repo_name_lower, pat):
-                    print("  Repo settings configured:")
-                    print("    - Wiki: disabled")
-                    print("    - Projects: disabled")
-                    print("    - Merge strategy: squash only")
-                    print("    - Delete branch on merge: enabled")
-                    repo_settings_ok = True
-                else:
-                    print("  WARNING: Could not configure repo settings.")
-
-                # Step 18: Configure branch protection (was step 16).
-                print("\n18. Configuring branch protection...")
-                if push_succeeded:
-                    if configure_branch_protection(github_user, repo_name_lower, pat):
-                        print("  Branch protection configured:")
-                        print("    - Force push: blocked")
-                        print("    - Deletion: blocked")
-                        print("    - enforce_admins: enabled")
-                        print("    - Required reviews: 1 (Cerberus auto-approves)")
-                        print("    - Required check: pr-sentinel / issue-reference")
-                        print("    - strict: false")
-                        protection_ok = True
-                    else:
-                        print("  WARNING: Could not configure branch protection.")
-                        print("  This may fail if the PAT lacks admin scope.")
-                        print("  Configure manually or re-run after fixing the PAT.")
-                else:
-                    print("  SKIPPED: Push failed — no remote branch to protect.")
-                    print("  After pushing, configure branch protection manually.")
-
-                # Step 19: Create canonical AZ workflow labels (#1061).
-                print("\n19. Creating canonical labels...")
-                if push_succeeded:
-                    created, total = create_canonical_labels(
-                        github_user, repo_name_lower
-                    )
-                    print(f"  {created}/{total} labels created or updated "
-                          f"({', '.join(n for n, _, _ in _CANONICAL_LABELS)})")
-                else:
-                    print("  SKIPPED: Push failed — no remote repo to label.")
-
-    # Post-setup verification
+    # Local post-setup verification (no PAT required, runs BEFORE the
+    # GitHub-side elevated batch so scaffold problems surface before any
+    # pinentry prompt).
     print("\n" + "=" * 60)
-    print("POST-SETUP VERIFICATION")
+    print("POST-SETUP VERIFICATION (local)")
     print("=" * 60)
 
     checks_passed = 0
@@ -2580,134 +2450,291 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         else:
             print("  [FAIL] settings.json missing hook configuration!")
 
-    print(f"\nVerification: {checks_passed}/{checks_total} checks passed")
+    print(f"\nLocal verification: {checks_passed}/{checks_total} checks passed")
 
     if checks_passed < checks_total:
-        print("\nWARNING: Some checks failed. Review and fix before starting work!")
+        print("\nWARNING: Some local checks failed. Review and fix before starting work!")
 
-    # Cerberus secrets deploy. Two source paths (mutually exclusive):
-    #   --cerberus-pem PATH       plaintext file, deleted after deploy
-    #   --cerberus-pem-gpg PATH   gpg-encrypted file, decrypted in-process,
-    #                             never written to plaintext disk (#1254)
-    # Both share the same deploy logic via _deploy_cerberus(pem_content,...).
-    # Acquire the classic PAT in-process — no env GH_TOKEN needed. gpg-agent
-    # typically reuses the cached passphrase from the earlier session.
-    cerberus_status: str | None = None
-    if not args.no_github and push_succeeded and (
-            args.cerberus_pem or args.cerberus_pem_gpg):
-        if args.cerberus_pem:
-            pem_source_path = Path(args.cerberus_pem)
-            try:
-                pem_content = pem_source_path.read_text(encoding="utf-8").strip()
-                with classic_pat_session() as pat:
-                    cerberus_status = _deploy_cerberus(
-                        args.name.lower(), pem_content, pat,
-                        source_path=pem_source_path,
-                    )
-            except FileNotFoundError as e:
-                print(f"\n  WARNING: source file not found: {e}")
-                print("  Skipping Cerberus deploy. Retry later with:")
-                print(f"    poetry run python tools/deploy_cerberus_secrets.py {args.cerberus_pem}")
-                cerberus_status = "PAT_NOT_CONFIGURED"
-            except RuntimeError as e:
-                print(f"\n  WARNING: gpg decrypt failed: {e}")
-                cerberus_status = "GPG_FAILED"
-        else:  # args.cerberus_pem_gpg
-            pem_gpg_path = Path(args.cerberus_pem_gpg)
-            try:
-                with cerberus_pem_session(pem_gpg_path) as pem_content:
-                    with classic_pat_session() as pat:
-                        cerberus_status = _deploy_cerberus(
-                            args.name.lower(), pem_content, pat,
-                            source_path=None,
-                        )
-            except FileNotFoundError as e:
-                print(f"\n  WARNING: encrypted PEM not configured: {e}")
-                cerberus_status = "PEM_GPG_NOT_CONFIGURED"
-            except RuntimeError as e:
-                print(f"\n  WARNING: gpg decrypt failed: {e}")
-                cerberus_status = "GPG_FAILED"
+    if not args.no_github:
+        repo_name_lower = args.name.lower()
 
-    # GitHub-side verification (#1200, #1202). The local-only post-setup
-    # verification above checks the working tree; this block verifies
-    # origin state end-to-end — branch protection actually applied, repo
-    # settings actually applied, auto-reviewer.yml content matches the
-    # canonical NEW format (the #1193 failure mode), Cerberus secrets
-    # actually present, pr-sentinel Worker actually covers this repo.
-    # Boostgauge #1193 slipped through audits for ~10 days because nothing
-    # verified content on origin — same blind spot was here too.
-    gh_checks_passed = 0
-    gh_checks_total = 0
-    if not args.no_github and github_created:
         print("\n" + "=" * 60)
-        print("GITHUB-SIDE VERIFICATION")
+        print("GITHUB REMOTE (single classic-PAT session per ADR-0216)")
         print("=" * 60)
+        print("\n  All elevated operations -- repo create, workflow upload,")
+        print("  repo settings, branch protection, Cerberus deploy, and")
+        print("  GitHub-side verification -- run inside ONE classic_pat_session().")
+        print("  Single pinentry prompt; the PAT lives only in this Python")
+        print("  process's heap and is removed programmatically when the block")
+        print("  exits. No env vars, no subprocess argv. (#1268)\n")
 
         try:
             with classic_pat_session() as pat:
-                gh_checks_total += 1
-                ok, msg = verify_branch_protection_on_origin(
-                    github_user, repo_name_lower, pat,
-                )
-                if ok:
-                    print(f"  [PASS] Branch protection: {msg}")
-                    gh_checks_passed += 1
-                else:
-                    print(f"  [FAIL] Branch protection: {msg}")
+                _api_headers = {
+                    "Authorization": f"token {pat}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                }
 
-                gh_checks_total += 1
-                ok, msg = verify_repo_settings_on_origin(
-                    github_user, repo_name_lower, pat,
+                # Step 13: Create the GitHub repo via REST API.
+                # Replaces `gh repo create --source . --push` which fails for
+                # fine-grained PATs that lack Administration: write (per
+                # ADR-0216 the fine-grained PAT is intentionally lean; admin
+                # operations use the in-process classic PAT). (#1268)
+                print(f"\n13. Creating GitHub repository ({repo_name_lower})...")
+                create_resp = requests.post(
+                    "https://api.github.com/user/repos",
+                    headers=_api_headers,
+                    json={
+                        "name": repo_name_lower,
+                        "private": not args.public,
+                        "description": f"{args.name} project",
+                    },
+                    timeout=30,
                 )
-                if ok:
-                    print(f"  [PASS] Repo settings: {msg}")
-                    gh_checks_passed += 1
-                else:
-                    print(f"  [FAIL] Repo settings: {msg}")
-
-                gh_checks_total += 1
-                ok, msg = verify_workflow_content_on_origin(
-                    github_user, repo_name_lower, pat,
-                )
-                if ok:
-                    print(f"  [PASS] auto-reviewer.yml: {msg}")
-                    gh_checks_passed += 1
-                else:
-                    print(f"  [FAIL] auto-reviewer.yml: {msg}")
-
-                if args.cerberus_pem or args.cerberus_pem_gpg:
-                    gh_checks_total += 1
-                    secrets_ok, missing = verify_secrets(
-                        repo_name_lower, pat,
+                if create_resp.status_code == 201:
+                    print(f"  Created: https://github.com/{github_user}/{repo_name_lower}")
+                    github_created = True
+                elif create_resp.status_code == 422:
+                    # 422 typically means "name already exists" -- check
+                    # whether it's THIS user's repo (rerun mode) before failing.
+                    check_resp = requests.get(
+                        f"https://api.github.com/repos/{github_user}/{repo_name_lower}",
+                        headers=_api_headers, timeout=30,
                     )
-                    if secrets_ok:
-                        print("  [PASS] Cerberus secrets present "
-                              "(REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY)")
+                    if check_resp.status_code == 200:
+                        print(f"  Already exists: https://github.com/{github_user}/{repo_name_lower}")
+                        print("  Proceeding in rerun mode against existing repo.")
+                        github_created = True
+                    else:
+                        print(f"  ERROR: 422 from POST /user/repos but repo not found")
+                        print(f"  Response: {create_resp.text[:300]}")
+                else:
+                    print(f"  ERROR: POST /user/repos returned {create_resp.status_code}")
+                    print(f"  Response: {create_resp.text[:400]}")
+
+                # Step 13b: Set remote + push the initial (non-workflow) commit.
+                # The initial commit excludes .github/workflows (step 12), so
+                # this push goes through git's credential helper (typically
+                # `gh` with the fine-grained PAT) and works WITHOUT needing
+                # the workflow scope.
+                if github_created:
+                    print("\n13b. Setting remote and pushing initial commit...")
+                    remote_check = subprocess.run(
+                        ["git", "remote", "get-url", "origin"],
+                        cwd=str(project_path),
+                        capture_output=True, text=True,
+                    )
+                    if remote_check.returncode != 0:
+                        try:
+                            run_command(
+                                ["git", "remote", "add", "origin",
+                                 f"https://github.com/{github_user}/{repo_name_lower}.git"],
+                                cwd=project_path,
+                            )
+                        except Exception as e:
+                            print(f"  WARNING: git remote add failed: {e}")
+                    try:
+                        run_command(
+                            ["git", "push", "-u", "origin", "main"],
+                            cwd=project_path,
+                        )
+                        push_succeeded = True
+                        print("  Pushed initial commit (workflows uploaded separately via Contents API).")
+                    except Exception as e:
+                        print(f"  WARNING: git push failed: {e}")
+                        print("  Diagnose: `gh auth status` + `git remote -v`.")
+                        print("  Re-run the script after fixing -- it will resume against this repo.")
+
+                # Step 14: Star the repo (non-fatal, uses pat via REST).
+                if github_created:
+                    print("\n14. Starring repository...")
+                    star_resp = requests.put(
+                        f"https://api.github.com/user/starred/{github_user}/{repo_name_lower}",
+                        headers=_api_headers, timeout=30,
+                    )
+                    if star_resp.status_code in (204, 304):
+                        print("  Starred repository")
+                    else:
+                        print(f"  (star non-fatal: {star_resp.status_code})")
+
+                # Step 15: Upload workflow files via Contents API.
+                if github_created and push_succeeded:
+                    print("\n15. Uploading workflow files via Contents API...")
+                    success, count = _deploy_workflows_via_contents_api(
+                        project_path, github_user, repo_name_lower, pat,
+                    )
+                    if success:
+                        workflows_deployed = True
+                        if count > 0:
+                            print(f"  Uploaded {count} workflow file(s) to main")
+                        else:
+                            print("  No workflow files to upload (skipped)")
+                    else:
+                        print("  WARNING: Workflow upload failed.")
+
+                    # Step 16: Sync local repo with the Contents API commits.
+                    if workflows_deployed and count > 0:
+                        print("\n16. Syncing local repo with remote workflow commits...")
+                        import shutil as _shutil
+                        workflows_dir = project_path / ".github" / "workflows"
+                        if workflows_dir.exists():
+                            _shutil.rmtree(workflows_dir)
+                        pull = subprocess.run(
+                            ["git", "pull", "--rebase", "origin", "main"],
+                            cwd=str(project_path), capture_output=True, text=True, timeout=60,
+                        )
+                        if pull.returncode == 0:
+                            print("  Synced -- local is now at remote HEAD with workflows tracked.")
+                        else:
+                            print(f"  WARNING: git pull failed: {pull.stderr.strip()}")
+
+                    # Step 17: Configure repo settings.
+                    print("\n17. Configuring repo settings...")
+                    if configure_repo_settings(github_user, repo_name_lower, pat):
+                        print("  Repo settings configured:")
+                        print("    - Wiki: disabled")
+                        print("    - Projects: disabled")
+                        print("    - Merge strategy: squash only")
+                        print("    - Delete branch on merge: enabled")
+                        repo_settings_ok = True
+                    else:
+                        print("  WARNING: Could not configure repo settings.")
+
+                    # Step 18: Configure branch protection.
+                    print("\n18. Configuring branch protection...")
+                    if configure_branch_protection(github_user, repo_name_lower, pat):
+                        print("  Branch protection configured:")
+                        print("    - Force push: blocked")
+                        print("    - Deletion: blocked")
+                        print("    - enforce_admins: enabled")
+                        print("    - Required reviews: 1 (Cerberus auto-approves)")
+                        print("    - Required check: pr-sentinel / issue-reference")
+                        print("    - strict: false")
+                        protection_ok = True
+                    else:
+                        print("  WARNING: Could not configure branch protection.")
+
+                    # Step 19: Create canonical AZ workflow labels (#1061).
+                    print("\n19. Creating canonical labels...")
+                    created, total = create_canonical_labels(
+                        github_user, repo_name_lower
+                    )
+                    print(f"  {created}/{total} labels created or updated "
+                          f"({', '.join(n for n, _, _ in _CANONICAL_LABELS)})")
+
+                # Cerberus secrets deploy. Inside the same with-block so it
+                # shares `pat` -- no extra pinentry. cerberus_pem_session
+                # (if --cerberus-pem-gpg) is nested separately because it
+                # decrypts a different encrypted blob with a different
+                # passphrase.
+                if (github_created and push_succeeded
+                        and (args.cerberus_pem or args.cerberus_pem_gpg)):
+                    if args.cerberus_pem:
+                        pem_source_path = Path(args.cerberus_pem)
+                        try:
+                            pem_content = pem_source_path.read_text(
+                                encoding="utf-8"
+                            ).strip()
+                            cerberus_status = _deploy_cerberus(
+                                repo_name_lower, pem_content, pat,
+                                source_path=pem_source_path,
+                            )
+                        except FileNotFoundError as e:
+                            print(f"\n  WARNING: source PEM file not found: {e}")
+                            cerberus_status = "PEM_NOT_FOUND"
+                    else:  # args.cerberus_pem_gpg
+                        pem_gpg_path = Path(args.cerberus_pem_gpg)
+                        try:
+                            with cerberus_pem_session(pem_gpg_path) as pem_content:
+                                cerberus_status = _deploy_cerberus(
+                                    repo_name_lower, pem_content, pat,
+                                    source_path=None,
+                                )
+                        except FileNotFoundError as e:
+                            print(f"\n  WARNING: encrypted PEM not configured: {e}")
+                            cerberus_status = "PEM_GPG_NOT_CONFIGURED"
+                        except RuntimeError as e:
+                            print(f"\n  WARNING: PEM gpg decrypt failed: {e}")
+                            cerberus_status = "PEM_GPG_FAILED"
+
+                # GitHub-side verification. Also inside the with-block --
+                # shares `pat`, no extra pinentry. (#1200, #1202)
+                if github_created:
+                    print("\n" + "=" * 60)
+                    print("GITHUB-SIDE VERIFICATION")
+                    print("=" * 60)
+
+                    gh_checks_total += 1
+                    ok, msg = verify_branch_protection_on_origin(
+                        github_user, repo_name_lower, pat,
+                    )
+                    if ok:
+                        print(f"  [PASS] Branch protection: {msg}")
                         gh_checks_passed += 1
                     else:
-                        print(f"  [FAIL] Cerberus secrets missing: {missing}")
+                        print(f"  [FAIL] Branch protection: {msg}")
+
+                    gh_checks_total += 1
+                    ok, msg = verify_repo_settings_on_origin(
+                        github_user, repo_name_lower, pat,
+                    )
+                    if ok:
+                        print(f"  [PASS] Repo settings: {msg}")
+                        gh_checks_passed += 1
+                    else:
+                        print(f"  [FAIL] Repo settings: {msg}")
+
+                    gh_checks_total += 1
+                    ok, msg = verify_workflow_content_on_origin(
+                        github_user, repo_name_lower, pat,
+                    )
+                    if ok:
+                        print(f"  [PASS] auto-reviewer.yml: {msg}")
+                        gh_checks_passed += 1
+                    else:
+                        print(f"  [FAIL] auto-reviewer.yml: {msg}")
+
+                    if args.cerberus_pem or args.cerberus_pem_gpg:
+                        gh_checks_total += 1
+                        secrets_ok, missing = verify_secrets(
+                            repo_name_lower, pat,
+                        )
+                        if secrets_ok:
+                            print("  [PASS] Cerberus secrets present "
+                                  "(REVIEWER_APP_ID, REVIEWER_APP_PRIVATE_KEY)")
+                            gh_checks_passed += 1
+                        else:
+                            print(f"  [FAIL] Cerberus secrets missing: {missing}")
+
         except FileNotFoundError as e:
-            print(f"  [SKIP] classic PAT not configured: {e}")
+            print(f"\n  ERROR: classic PAT not configured: {e}")
+            print("  Local scaffold preserved. Set up classic PAT per ADR-0216 /")
+            print("  runbook 0927, then re-run this script (it will resume against")
+            print("  the existing scaffold and against the existing GitHub repo if")
+            print("  one was created before the failure).")
         except RuntimeError as e:
-            print(f"  [SKIP] gpg decrypt failed: {e}")
+            print(f"\n  ERROR: gpg decrypt failed: {e}")
+            print("  Re-enter passphrase carefully and re-run.")
 
-        # pr-sentinel installation check — no classic PAT needed, fine-grained
-        # gh CLI auth is sufficient for /user/installations.
-        gh_checks_total += 1
-        ok, msg = verify_pr_sentinel_installation(github_user, repo_name_lower)
-        if ok:
-            print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
-            gh_checks_passed += 1
-        else:
-            print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
-            print("         If pr-sentinel checks don't appear on the first PR,")
-            print("         the App's installation scope likely drifted from "
-                  "'All repositories'.")
+        # pr-sentinel installation check -- non-elevated, no classic PAT
+        # needed. Runs OUTSIDE the with-block; pat is already out of scope.
+        if github_created:
+            gh_checks_total += 1
+            ok, msg = verify_pr_sentinel_installation(github_user, repo_name_lower)
+            if ok:
+                print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
+                gh_checks_passed += 1
+            else:
+                print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
+                print("         If pr-sentinel checks don't appear on the first PR,")
+                print("         the App's installation scope likely drifted from "
+                      "'All repositories'.")
 
-        print(f"\nGitHub-side verification: {gh_checks_passed}/{gh_checks_total} checks passed")
+            print(f"\nGitHub-side verification: {gh_checks_passed}/{gh_checks_total} checks passed")
 
-        if gh_checks_passed < gh_checks_total:
-            print("\nWARNING: GitHub-side checks failed. Investigate before opening PRs!")
+            if gh_checks_passed < gh_checks_total:
+                print("\nWARNING: GitHub-side checks failed. Investigate before opening PRs!")
 
     # Final summary
     if not args.no_github:
@@ -2731,12 +2758,19 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         repo_name_lower = args.name.lower()
         print(f"  # Repository: https://github.com/{github_user}/{repo_name_lower}")
         if not push_succeeded:
-            print("  # IMPORTANT: Push failed. Preferred recovery — env-scoped classic PAT:")
-            print("  #   env GH_TOKEN=$(gpg -d ~/.secrets/classic-pat.gpg) git push -u origin main")
-            print("  # Fallback — swap gh auth storage:")
-            print("  #   gh auth login -h github.com -p https  # paste classic PAT")
-            print("  #   git push -u origin main")
-            print("  #   gh auth login -h github.com -p https  # paste fine-grained PAT back")
+            print("  # IMPORTANT: Initial push failed.")
+            print("  # Diagnose first -- the push uses git's credential helper")
+            print("  # (typically `gh` with the fine-grained PAT), and the initial")
+            print("  # commit contains NO workflow files so the fine-grained PAT")
+            print("  # has sufficient scope. Common causes:")
+            print("  #   - gh auth not configured: `gh auth status`")
+            print("  #   - remote URL wrong: `git remote -v`")
+            print("  #   - network / proxy issue")
+            print("  # Then re-run the script; it will resume against this repo.")
+            print("  # DO NOT escalate to env GH_TOKEN or `gh auth login` swap --")
+            print("  # those violate ADR-0216 (PAT in env block / globally-")
+            print("  # visible gh storage). The fine-grained PAT is sufficient")
+            print("  # for this push; if it isn't, the problem is elsewhere.")
     if (args.cerberus_pem is None and args.cerberus_pem_gpg is None
             and not args.no_github):
         print()
