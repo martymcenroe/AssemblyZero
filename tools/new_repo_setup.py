@@ -56,10 +56,10 @@ except ImportError:
 # GH_TOKEN for the workflow-scoped initial push — tracked in #1000.
 import requests  # noqa: E402
 try:
-    from _pat_session import classic_pat_session
+    from _pat_session import classic_pat_session, cerberus_pem_session
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from _pat_session import classic_pat_session
+    from _pat_session import classic_pat_session, cerberus_pem_session
 
 
 # ---------------------------------------------------------------------------
@@ -1940,19 +1940,31 @@ def verify_pr_sentinel_installation(
     )
 
 
-def _deploy_cerberus(repo_name: str, pem_path: Path, pat: str) -> str:
-    """Deploy Cerberus secrets to a single repo and handle pem file lifecycle.
+def _deploy_cerberus(
+    repo_name: str,
+    pem_content: str,
+    pat: str,
+    *,
+    source_path: Path | None = None,
+) -> str:
+    """Deploy Cerberus secrets to a single repo.
 
-    Reads the .pem file, deploys REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY
-    to the specified repo via in-process classic PAT (sealed-box encrypted
-    per GitHub's secrets API), verifies they landed, deletes the .pem, and
-    prints a reminder to revoke the key in the app UI. (#1007)
+    Deploys REVIEWER_APP_ID + REVIEWER_APP_PRIVATE_KEY to the specified
+    repo via in-process classic PAT (sealed-box encrypted per GitHub's
+    secrets API), then verifies they landed. (#1007)
 
     Args:
         repo_name: The new repo name (lowercased, owner-less).
-        pem_path: Path to the Cerberus App .pem file.
+        pem_content: PEM contents as a string. Already loaded from
+            disk (--cerberus-pem flow) or decrypted in-process via
+            cerberus_pem_session() (--cerberus-pem-gpg flow).
         pat: Classic PAT from classic_pat_session() — consumed by
             deploy_to_repo / verify_secrets, never placed in env.
+        source_path: If provided, the plaintext file at this path is
+            unlinked after successful verification (legacy
+            --cerberus-pem flow). If None, no file is unlinked --
+            used by --cerberus-pem-gpg, which has nothing plaintext
+            on disk to delete (#1254).
 
     Returns a short status string for the summary table.
     """
@@ -1960,39 +1972,46 @@ def _deploy_cerberus(repo_name: str, pem_path: Path, pat: str) -> str:
     print("CERBERUS SECRETS DEPLOY")
     print("=" * 60)
 
-    if not pem_path.exists():
-        print(f"  ERROR: .pem file not found: {pem_path}")
-        return "PEM_MISSING"
-
-    pem_content = pem_path.read_text(encoding="utf-8").strip()
     if "PRIVATE KEY" not in pem_content:
-        print(f"  ERROR: File does not look like a private key: {pem_path}")
+        print("  ERROR: PEM contents do not look like a private key.")
         return "INVALID_PEM"
 
     print(f"  Target repo: {repo_name}")
-    print(f"  .pem file:   {pem_path.name} ({len(pem_content)} chars)")
+    if source_path is not None:
+        print(f"  Source:      {source_path.name} (plaintext, "
+              f"will be deleted after deploy)")
+    else:
+        print("  Source:      gpg-decrypted in-process "
+              "(no plaintext on disk; encrypted blob preserved)")
+    print(f"  Key length:  {len(pem_content)} chars")
 
     ok, failed = deploy_to_repo(repo_name, pem_content, pat)
     if not ok:
         print(f"  FAILED to deploy: {', '.join(failed)}")
-        print(f"  .pem file NOT deleted — retry manually:")
-        print(f"    poetry run python tools/deploy_cerberus_secrets.py {pem_path}")
+        if source_path is not None:
+            print(f"  .pem file NOT deleted -- retry manually:")
+            print(f"    poetry run python tools/deploy_cerberus_secrets.py {source_path}")
         return f"FAILED: {', '.join(failed)}"
     print("  Secrets set.")
 
     ok, missing = verify_secrets(repo_name, pat)
     if not ok:
         print(f"  WARNING: verification failed; missing {missing}")
-        print(f"  .pem file NOT deleted — investigate before deleting.")
+        if source_path is not None:
+            print(f"  .pem file NOT deleted -- investigate before deleting.")
         return f"UNVERIFIED: {', '.join(missing)}"
     print("  Secrets verified on GitHub (both REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY present).")
 
-    try:
-        pem_path.unlink()
-        print(f"  .pem file deleted: {pem_path}")
-    except OSError as e:
-        print(f"  WARNING: could not delete .pem file: {e}")
-        print(f"  DELETE MANUALLY: {pem_path}")
+    if source_path is not None:
+        try:
+            source_path.unlink()
+            print(f"  .pem file deleted: {source_path}")
+        except OSError as e:
+            print(f"  WARNING: could not delete .pem file: {e}")
+            print(f"  DELETE MANUALLY: {source_path}")
+    else:
+        print("  (gpg-encrypted PEM preserved at "
+              "the path you provided; reuse it for additional repos.)")
 
     print()
     print("  NEXT STEP (browser-only, cannot be automated):")
@@ -2055,12 +2074,23 @@ Examples:
         "--cerberus-pem",
         metavar="PATH",
         default=None,
-        help="Path to Cerberus App .pem file. When provided, after repo "
-             "creation the script deploys REVIEWER_APP_ID and "
-             "REVIEWER_APP_PRIVATE_KEY secrets to the new repo, verifies "
-             "they landed, deletes the .pem file, and prints a reminder "
-             "to revoke the key in the app UI. When omitted, runbook "
-             "0927 step 4 is printed as manual fallback."
+        help="Path to PLAINTEXT Cerberus App .pem file. After deploy the "
+             "script DELETES this file. Single-use; for repeat/multi-repo "
+             "creation, use --cerberus-pem-gpg instead (encrypted at rest, "
+             "decrypted in-process per ADR-0216, no plaintext on disk). "
+             "When omitted, runbook 0927 step 4 is printed as manual fallback."
+    )
+    parser.add_argument(
+        "--cerberus-pem-gpg",
+        metavar="PATH",
+        default=None,
+        help="Path to GPG-ENCRYPTED Cerberus App .pem file (typically "
+             "~/.secrets/cerberus-pem.gpg per ADR-0216 / runbook 0927). "
+             "Decrypted in-process via cerberus_pem_session(); never written "
+             "to plaintext disk. Pinentry prompts per gpg-agent TTL. The "
+             "encrypted blob is NOT deleted -- reuse it across as many "
+             "new-repo invocations as you need, then revoke the key in the "
+             "browser when done (#1254)."
     )
     parser.add_argument(
         "--lang",
@@ -2085,34 +2115,50 @@ Examples:
 
     args = parser.parse_args()
 
-    # --cerberus-pem requires --no-github not set (need the repo to deploy to)
-    if args.cerberus_pem and args.no_github:
-        print("ERROR: --cerberus-pem requires GitHub repo creation (cannot be combined with --no-github)")
+    # --cerberus-pem and --cerberus-pem-gpg are mutually exclusive
+    if args.cerberus_pem and args.cerberus_pem_gpg:
+        print("ERROR: --cerberus-pem and --cerberus-pem-gpg are mutually exclusive.")
+        print("Pick one: --cerberus-pem PATH (plaintext, deleted after) OR "
+              "--cerberus-pem-gpg PATH (encrypted at rest, reusable).")
         sys.exit(1)
 
-    # --cerberus-pem is REQUIRED when creating a GitHub repo (#1206).
+    # Cerberus deploy requires --no-github not set (need the repo to deploy to)
+    if (args.cerberus_pem or args.cerberus_pem_gpg) and args.no_github:
+        print("ERROR: --cerberus-pem / --cerberus-pem-gpg requires GitHub repo "
+              "creation (cannot be combined with --no-github)")
+        sys.exit(1)
+
+    # A Cerberus PEM source is REQUIRED when creating a GitHub repo (#1206).
     # Without Cerberus secrets the new repo's PRs sit blocked indefinitely
     # because branch protection requires 1 approving review and the
     # auto-reviewer workflow can't authenticate without the App secrets.
     # Catching this at the CLI gate keeps the failure loud and pre-creation,
     # not silent and only-visible-on-first-PR. Audit mode is exempt — it
     # only inspects an existing project, never creates anything.
-    if not args.cerberus_pem and not args.no_github and not args.audit:
-        print("ERROR: --cerberus-pem is required.")
+    if (not args.cerberus_pem and not args.cerberus_pem_gpg
+            and not args.no_github and not args.audit):
+        print("ERROR: --cerberus-pem or --cerberus-pem-gpg is required.")
         print()
         print("Cerberus auto-approval is part of the new-repo contract. Without it,")
         print("every PR on the new repo will sit blocked indefinitely waiting for")
         print("a review (branch protection requires 1 approval; the auto-reviewer")
         print("workflow can't approve without the Cerberus App secrets).")
         print()
-        print("To get the .pem file:")
-        print("  1. Open https://github.com/settings/apps/cerberus-az")
-        print("  2. Click 'Private keys' > 'Generate a private key'")
-        print("  3. The browser downloads a .pem file (typically to ~/Downloads/)")
-        print("  4. Re-run with --cerberus-pem /path/to/the.pem")
+        print("Two ways to provide the .pem (per runbook 0927):")
         print()
-        print("The script will deploy the secrets, verify them, delete the .pem,")
-        print("and remind you to revoke the key in the GitHub App UI (browser-only).")
+        print("  RECOMMENDED -- --cerberus-pem-gpg PATH (encrypted at rest,")
+        print("  reusable across many new-repo runs, no plaintext on disk):")
+        print("    1. Open https://github.com/settings/apps/cerberus-az")
+        print("    2. Generate a private key -- browser downloads cerberus.pem")
+        print("    3. cat ~/Downloads/cerberus.pem | gpg -c -o ~/.secrets/cerberus-pem.gpg")
+        print("    4. rm ~/Downloads/cerberus.pem")
+        print("    5. Re-run with --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg")
+        print()
+        print("  LEGACY single-shot -- --cerberus-pem PATH (plaintext, deleted")
+        print("  after deploy; one-and-done, fresh .pem per repo):")
+        print("    1. Open https://github.com/settings/apps/cerberus-az")
+        print("    2. Generate a private key -- browser downloads cerberus.pem")
+        print("    3. Re-run with --cerberus-pem /path/to/the.pem")
         print()
         print("Full procedure: docs/runbooks/0927-new-repo-human-checklist.md#4")
         print()
@@ -2580,24 +2626,48 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     if checks_passed < checks_total:
         print("\nWARNING: Some checks failed. Review and fix before starting work!")
 
-    # Cerberus secrets deploy (if --cerberus-pem provided, and repo was created).
+    # Cerberus secrets deploy. Two source paths (mutually exclusive):
+    #   --cerberus-pem PATH       plaintext file, deleted after deploy
+    #   --cerberus-pem-gpg PATH   gpg-encrypted file, decrypted in-process,
+    #                             never written to plaintext disk (#1254)
+    # Both share the same deploy logic via _deploy_cerberus(pem_content,...).
     # Acquire the classic PAT in-process — no env GH_TOKEN needed. gpg-agent
-    # will typically reuse the cached passphrase from the earlier session.
+    # typically reuses the cached passphrase from the earlier session.
     cerberus_status: str | None = None
-    if not args.no_github and push_succeeded and args.cerberus_pem:
-        try:
-            with classic_pat_session() as pat:
-                cerberus_status = _deploy_cerberus(
-                    args.name.lower(), Path(args.cerberus_pem), pat,
-                )
-        except FileNotFoundError as e:
-            print(f"\n  WARNING: classic PAT not configured: {e}")
-            print("  Skipping Cerberus deploy. Retry later with:")
-            print(f"    poetry run python tools/deploy_cerberus_secrets.py {args.cerberus_pem}")
-            cerberus_status = "PAT_NOT_CONFIGURED"
-        except RuntimeError as e:
-            print(f"\n  WARNING: gpg decrypt failed: {e}")
-            cerberus_status = "GPG_FAILED"
+    if not args.no_github and push_succeeded and (
+            args.cerberus_pem or args.cerberus_pem_gpg):
+        if args.cerberus_pem:
+            pem_source_path = Path(args.cerberus_pem)
+            try:
+                pem_content = pem_source_path.read_text(encoding="utf-8").strip()
+                with classic_pat_session() as pat:
+                    cerberus_status = _deploy_cerberus(
+                        args.name.lower(), pem_content, pat,
+                        source_path=pem_source_path,
+                    )
+            except FileNotFoundError as e:
+                print(f"\n  WARNING: source file not found: {e}")
+                print("  Skipping Cerberus deploy. Retry later with:")
+                print(f"    poetry run python tools/deploy_cerberus_secrets.py {args.cerberus_pem}")
+                cerberus_status = "PAT_NOT_CONFIGURED"
+            except RuntimeError as e:
+                print(f"\n  WARNING: gpg decrypt failed: {e}")
+                cerberus_status = "GPG_FAILED"
+        else:  # args.cerberus_pem_gpg
+            pem_gpg_path = Path(args.cerberus_pem_gpg)
+            try:
+                with cerberus_pem_session(pem_gpg_path) as pem_content:
+                    with classic_pat_session() as pat:
+                        cerberus_status = _deploy_cerberus(
+                            args.name.lower(), pem_content, pat,
+                            source_path=None,
+                        )
+            except FileNotFoundError as e:
+                print(f"\n  WARNING: encrypted PEM not configured: {e}")
+                cerberus_status = "PEM_GPG_NOT_CONFIGURED"
+            except RuntimeError as e:
+                print(f"\n  WARNING: gpg decrypt failed: {e}")
+                cerberus_status = "GPG_FAILED"
 
     # GitHub-side verification (#1200, #1202). The local-only post-setup
     # verification above checks the working tree; this block verifies
@@ -2646,7 +2716,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 else:
                     print(f"  [FAIL] auto-reviewer.yml: {msg}")
 
-                if args.cerberus_pem:
+                if args.cerberus_pem or args.cerberus_pem_gpg:
                     gh_checks_total += 1
                     secrets_ok, missing = verify_secrets(
                         repo_name_lower, pat,
@@ -2708,7 +2778,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print("  #   gh auth login -h github.com -p https  # paste classic PAT")
             print("  #   git push -u origin main")
             print("  #   gh auth login -h github.com -p https  # paste fine-grained PAT back")
-    if args.cerberus_pem is None and not args.no_github:
+    if (args.cerberus_pem is None and args.cerberus_pem_gpg is None
+            and not args.no_github):
         print()
         print("  # Cerberus secrets (manual):")
         print("  #   Without secrets, PRs pass pr-sentinel but are never auto-approved.")
@@ -2716,7 +2787,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  #   2. poetry run python tools/deploy_cerberus_secrets.py /path/to/downloaded.pem")
         print("  #   3. Delete the .pem, revoke the key in the app UI")
         print("  #   See runbook 0927 step 4 for full procedure.")
-        print("  #   OR re-run this script with --cerberus-pem PATH to automate.")
+        print("  #   OR re-run this script with --cerberus-pem PATH (single-shot)")
+        print("  #   or --cerberus-pem-gpg PATH (reusable, encrypted at rest).")
     elif cerberus_status == "OK":
         print()
         print("  # Cerberus secrets deployed and verified.")
