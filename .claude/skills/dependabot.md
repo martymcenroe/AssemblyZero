@@ -24,7 +24,7 @@ Usage: `/dependabot [--help] [--dry-run] [--fleet]`
 
 The tool operates ONLY on PRs authored by `dependabot[bot]`. Any other author is refused at the author gate. Tests must exit 0; non-zero exit means the PR gets a `gh pr review --comment` posted (deferred PRs accrue Code Review credit too — #1091) and is left for human review. No LLM in the decision loop — decisions are pure exit-code / string-match.
 
-Reference: runbook `docs/runbooks/0911-dependabot-pr-audit.md` v2.1.
+Reference: runbook `docs/runbooks/0911-dependabot-pr-audit.md` v2.3.
 
 ---
 
