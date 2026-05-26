@@ -148,10 +148,16 @@ def cerberus_pem_session(
     The plaintext PEM is deleted right after the one-time gpg-encrypt
     step and never reappears.
 
-    One-time setup (operator):
-        # Generate .pem in browser, then encrypt + delete the plaintext:
-        cat ~/Downloads/cerberus.pem | gpg -c -o ~/.secrets/cerberus-pem.gpg
-        rm ~/Downloads/cerberus.pem
+    One-time setup (operator, Save-As pattern — preferred per #1265):
+        # 1. Browser: Generate a private key, then Save As ~/.secrets/cerberus.pem
+        #    (NOT ~/Downloads/ — that path is often OneDrive-synced and the
+        #    cloud-sync race can upload the plaintext before local rm fires).
+        #    mkdir -p ~/.secrets first if the directory doesn't exist.
+        # 2. Encrypt and delete plaintext (shell rm, NOT File Explorer):
+        gpg -c -o ~/.secrets/cerberus-pem.gpg ~/.secrets/cerberus.pem
+        rm ~/.secrets/cerberus.pem
+        # 3. Clear-RecycleBin + browser download history (see runbook 0927
+        #    "Hygiene surfaces" table for the full audit gate).
 
     Same operational rules apply as classic_pat_session:
         - gpg-agent default-cache-ttl 0 (silent sibling-decrypt attempts
