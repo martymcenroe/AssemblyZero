@@ -1,8 +1,8 @@
 # 0901 - New Project Setup
 
 **Category:** Runbook / Operational Procedure
-**Version:** 2.2
-**Last Updated:** 2026-04-05
+**Version:** 2.6
+**Last Updated:** 2026-05-26
 
 ---
 
@@ -294,3 +294,4 @@ The script automates all of this in one command.
 | 2.3 | 2026-05-22 | `--cerberus-pem` is now **required** for GitHub-creating invocations (#1206). Quick Start examples updated to include the flag. Post-setup verification extended with GitHub-side checks (#1200) and `pr-sentinel-mm` Worker installation detection (#1202). |
 | 2.4 | 2026-05-22 | Fixed `Files Created` table — `LICENSE` row was documented as MIT but the script defaults to PolyForm Noncommercial 1.0.0 (#1198). |
 | 2.5 | 2026-05-23 | Multi-section sweep (#1210): `.claude/settings.json` row corrected (not empty — wires the hook); added rows for `.github/workflows/release.yml`, `.claude/hooks/secret-file-guard.sh`, `src/<module>/__init__.py`, `src/<module>/__main__.py`; Directory Structure tree includes `.github/workflows/` and `src/<module>/`; Command Reference adds `--no-pypi` flag and notes `--cerberus-pem` is required; Post-Setup Steps Section 1 rewritten — Cerberus is now automated, not a manual remaining step; added Section 1a for PyPI pending-publisher registration. |
+| 2.6 | 2026-05-26 | #1331 — Dependabot now enabled automatically at repo settings level (step 20 in the script). Without this step, the scaffolded `.github/dependabot.yml` was inert on private repos (defect confirmed on `dependabot-honeypot`). Companion tool `tools/enable_dependabot.py` backfills existing repos. See runbook 0927 v6.7 history entry for the under-the-hood table change. |
