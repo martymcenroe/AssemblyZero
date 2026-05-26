@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.3
-**Last Updated:** 2026-05-24
+**Version:** 6.4
+**Last Updated:** 2026-05-26
 
 ---
 
@@ -46,13 +46,66 @@ With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (ins
 
 **Encrypt the Cerberus App private key** (recommended for any repeat use):
 
-The first time you generate a Cerberus `.pem`, encrypt it the same way as the classic PAT and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want — single browser-trip to generate, single browser-trip to revoke, no plaintext on disk in between.
+The first time you generate a Cerberus `.pem`, encrypt it and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want — single browser-trip to generate, single browser-trip to revoke, no plaintext on disk in between.
+
+#### Hygiene surfaces (audit gate)
+
+Any plaintext `.pem` passes through a finite set of surfaces between "downloaded from browser" and "encrypted at rest." Every surface is a potential leak vector. The recipe below names every surface it touches and the step that closes it.
+
+| Surface | Risk | This recipe's mitigation |
+|---|---|---|
+| **Plaintext file on disk** | Same-user FS access; cloud-sync (OneDrive) could upload before local `rm` fires | Save-As directly to `~/.secrets/cerberus.pem` (sibling of where the encrypted blob will land; never synced anywhere). Do NOT route through `~/Downloads/` (often OneDrive-synced). |
+| **Browser download history** | Filename + path persists after the file is deleted | Use private/incognito mode for the download, OR clear download history immediately after. |
+| **Recycle Bin** | File Explorer delete (drag-to-trash or right-click) lands plaintext in Recycle Bin even after you "deleted" it | Use shell `rm`, not File Explorer. `Clear-RecycleBin -Force` as belt-and-suspenders. |
+| **Clipboard** | If clipboard-pattern variant is used (see "Alternative" below), the PEM persists in the OS clipboard until overwritten. Windows clipboard-history (Win+V) caches up to 25 entries if enabled. | The Save-As recipe (preferred) avoids the clipboard entirely. If using the clipboard variant, clear with `Set-Clipboard -Value $null` and clear clipboard-history from Settings → System → Clipboard. |
+| **Editor undo / hot-exit cache** | VS Code, Sublime, Notepad++ retain open buffers across restarts | Don't open the `.pem` in an editor. The Save-As recipe doesn't require it. |
+| **gpg-agent passphrase cache** | Cached passphrase lets any same-user process silently decrypt the encrypted blob later | `default-cache-ttl 0` in `~/.gnupg/gpg-agent.conf` (per ADR-0216). Already covered in the "Tighten gpg-agent caching" subsection above. |
+
+#### The recipe (Save-As pattern — preferred)
+
+This pattern touches the fewest surfaces.
 
 ```bash
-# After generating the .pem at https://github.com/settings/apps/cerberus-az:
-cat ~/Downloads/cerberus.pem | gpg -c -o ~/.secrets/cerberus-pem.gpg
-rm ~/Downloads/cerberus.pem
+# 1. In browser at https://github.com/settings/apps/cerberus-az → Private keys
+#    → Generate a private key. When the browser opens the Save-As dialog,
+#    target ~/.secrets/cerberus.pem  (NOT ~/Downloads/; ~/.secrets is the
+#    sibling of where the encrypted blob will land, owned by user, never
+#    synced anywhere). Create the directory if needed: mkdir -p ~/.secrets
+
+# 2. Encrypt and delete plaintext (shell rm, not File Explorer):
+gpg -c -o ~/.secrets/cerberus-pem.gpg ~/.secrets/cerberus.pem
+rm ~/.secrets/cerberus.pem
+
+# 3. Belt-and-suspenders: empty Recycle Bin in case any tool routed through it:
+powershell.exe -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
+
+# 4. Browser hygiene: open browser download history, find the .pem entry, delete it.
+#    (Or use private/incognito for step 1 — no history entry is ever created.)
 ```
+
+Surfaces touched: filesystem (briefly, outside `~/Downloads/`) + browser download history (none if incognito). No clipboard, no editor cache, no Recycle Bin (if shell `rm` is used; the `Clear-RecycleBin` is paranoia insurance).
+
+#### Alternative: clipboard pattern (consistent with classic-PAT recipe)
+
+If you prefer parity with the classic-PAT one-time-setup recipe above, the clipboard pattern works too — but touches more surfaces:
+
+```bash
+# 1. Browser downloads .pem (anywhere — Downloads is fine if you'll rm it shortly).
+# 2. Open .pem in a text editor, Ctrl+A, Ctrl+C.
+# 3. Pipe from clipboard:
+cat /dev/clipboard | gpg -c -o ~/.secrets/cerberus-pem.gpg
+# 4. CLEAR clipboard immediately:
+echo -n "" | clip
+#    OR powershell.exe -NoProfile -Command "Set-Clipboard -Value $null"
+# 5. Close the editor; verify it doesn't preserve the file in recent-tabs.
+# 6. Delete the downloaded .pem with shell rm:
+rm ~/Downloads/cerberus.pem      # or wherever the browser saved it
+# 7. Clear-RecycleBin (insurance) + clear browser download history.
+```
+
+Surfaces touched: filesystem + clipboard + editor cache + browser history. **Not recommended unless you specifically want classic-PAT recipe parity** — every additional surface is a step the operator might forget at 2am during an incident.
+
+#### After encryption (both patterns)
 
 The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo_setup.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
 
@@ -304,3 +357,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-09 | v6.1: #1058 + #1059 + #1060 + #1061 — bundle of post-boostgauge-readiness-audit fixes. Script now bootstraps a Python project by default (\`poetry init\` + \`poetry add --group dev pytest pytest-cov\` + \`[tool.pytest.ini_options]\` + \`tests/conftest.py\`); \`--lang none\` skips for non-Python repos. \`.unleashed.json\` defaults to \`assemblyZero: true\` and no longer emits the deprecated \`pickupThresholdMinutes\`. Two canonical GitHub labels (\`implementation\`, \`lld\`) created on the new repo. |
 | 2026-05-22 | v6.2: #1206 — `--cerberus-pem` is REQUIRED for new GitHub repos. Script exits 1 with the .pem-acquisition guide if omitted. Override is `--no-github` (local scaffold only). #1200 + #1202 — extended post-setup verification to GitHub-side state (branch protection, repo settings, workflow content, Cerberus secrets) and added a best-effort `pr-sentinel-mm` Worker installation check that surfaces App-scope drift at creation time instead of when the first PR opens. |
 | 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo_setup.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo_setup.py` invocations. Added one-time-setup subsection for the encryption step. |
+| 2026-05-26 | v6.4: #1265 — rewrote "Encrypt the Cerberus App private key" subsection. Save-As pattern (target `~/.secrets/cerberus.pem` directly via browser Save-As dialog, bypassing `~/Downloads/`) is now primary; clipboard pattern documented as alternative for classic-PAT recipe parity. Added inline Hygiene Surfaces audit-gate table naming every surface the recipe touches (Downloads, browser history, Recycle Bin, clipboard, editor cache, gpg-agent) and which step closes it. Eliminates the "operator forgets a step" failure mode that compounds under stress. |
