@@ -17,8 +17,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
 from new_repo_setup import (
+    PROJECT_TYPES,
     SchemaValidationError,
+    _project_specific_context,
     audit_project_structure,
+    create_claude_md,
     create_structure,
     flatten_directories,
     flatten_files,
@@ -1031,3 +1034,142 @@ class TestPypiReminder:
             repo_name="myproject",
         )
         assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md emission per ADR 0219 (#1258) + --project-type branching (#1291)
+# Tests #1292 — assert lean shape + per-type stubs + no banned content.
+# ---------------------------------------------------------------------------
+
+# Phrases that MUST NOT appear in any scaffolded CLAUDE.md per ADR 0219 —
+# these belong to the universal CLAUDE.md, and restating them creates drift
+# on every universal-CLAUDE.md edit.
+BANNED_PHRASES = [
+    "merge sequence",
+    "Closes #N must appear in ALL THREE",
+    "enforce_admins",
+    "FIRST: Read AssemblyZero",
+    "banned commands",
+    "pr-sentinel / issue-reference",
+]
+
+
+class TestCreateClaudeMdLeanShape:
+    """ADR 0219 — emitted CLAUDE.md must be additive only, no duplicated content."""
+
+    def test_minimal_is_default_and_emits_todo_stub(self, tmp_path):
+        create_claude_md(tmp_path, "myrepo", "alice")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "## Project Identifiers" in text
+        assert "myrepo" in text
+        assert "alice/myrepo" in text
+        # default minimal emits the TODO block (not a typed stack note)
+        assert "**Stack:**" not in text
+        assert "TODO: Add tech stack" in text
+
+    def test_no_banned_universal_content_in_minimal(self, tmp_path):
+        create_claude_md(tmp_path, "myrepo", "alice")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        for phrase in BANNED_PHRASES:
+            assert phrase not in text, (
+                f"Banned phrase {phrase!r} found in scaffolded CLAUDE.md — "
+                f"ADR 0219 forbids restating universal CLAUDE.md content."
+            )
+
+    def test_no_banned_universal_content_in_any_project_type(self, tmp_path):
+        """Across all project types, no stub may restate universal content."""
+        for pt in PROJECT_TYPES:
+            target = tmp_path / pt
+            target.mkdir()
+            create_claude_md(target, f"sample-{pt}", "alice", pt)
+            text = (target / "CLAUDE.md").read_text(encoding="utf-8")
+            for phrase in BANNED_PHRASES:
+                assert phrase not in text, (
+                    f"Banned phrase {phrase!r} found in {pt!r} stub — "
+                    f"per ADR 0219 stubs must be ADDITIVE only."
+                )
+
+    def test_invalid_project_type_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Unknown project_type"):
+            create_claude_md(tmp_path, "myrepo", "alice", "nonexistent-type")
+
+
+class TestProjectTypeStubs:
+    """Each project type emits a recognizable stack identifier + ADR 0219 ref."""
+
+    def test_python_stub_mentions_poetry_and_pytest(self):
+        text = _project_specific_context("python", "myrepo")
+        assert "**Stack:**" in text
+        assert "Poetry" in text
+        assert "pytest" in text
+        assert "src/myrepo/" in text
+        assert "ADR 0219" in text
+
+    def test_chrome_extension_stub_mentions_mv3(self):
+        text = _project_specific_context("chrome-extension", "myrepo")
+        assert "Manifest V3" in text
+        assert "jest" in text
+        assert "ADR 0219" in text
+
+    def test_pypi_stub_mentions_release_yml(self):
+        text = _project_specific_context("pypi", "myrepo")
+        assert "PyPI" in text
+        assert "release.yml" in text
+        assert "[tool.poetry.scripts]" in text
+        assert "runbook 0934" in text
+        assert "ADR 0219" in text
+
+    def test_cf_worker_stub_mentions_wrangler(self):
+        text = _project_specific_context("cf-worker", "myrepo")
+        assert "Cloudflare Worker" in text
+        assert "wrangler" in text
+        assert "ADR 0219" in text
+
+    def test_web_stub_mentions_deploy_targets(self):
+        text = _project_specific_context("web", "myrepo")
+        assert "Web (static or SPA)" in text
+        # at least one of the listed deploy targets
+        assert any(t in text for t in ("Cloudflare Pages", "GitHub Pages", "Netlify"))
+        assert "ADR 0219" in text
+
+    def test_minimal_stub_has_no_stack_line(self):
+        text = _project_specific_context("minimal", "myrepo")
+        assert "**Stack:**" not in text
+        assert "TODO: Add tech stack" in text
+        assert "ADR 0219" in text
+
+    def test_each_stub_includes_project_specific_context_header(self):
+        for pt in PROJECT_TYPES:
+            text = _project_specific_context(pt, "myrepo")
+            assert text.startswith("## Project-Specific Context"), pt
+
+    def test_each_typed_stub_includes_todo(self):
+        """Even typed stubs must leave a TODO — the stack note is a head start, not a finish."""
+        for pt in PROJECT_TYPES:
+            text = _project_specific_context(pt, "myrepo")
+            assert "TODO" in text, f"{pt} stub has no TODO marker"
+
+
+class TestProjectTypeBranchingCallSite:
+    """End-to-end: create_claude_md passes the project_type through to the stub."""
+
+    def test_python_call_site_emits_stack_line(self, tmp_path):
+        create_claude_md(tmp_path, "myrepo", "alice", "python")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "**Stack:** Python (Poetry)" in text
+
+    def test_cf_worker_call_site_emits_wrangler(self, tmp_path):
+        create_claude_md(tmp_path, "myrepo", "alice", "cf-worker")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "wrangler" in text
+
+    def test_chrome_extension_call_site_emits_mv3(self, tmp_path):
+        create_claude_md(tmp_path, "myrepo", "alice", "chrome-extension")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "Manifest V3" in text
+
+    def test_default_call_site_emits_minimal(self, tmp_path):
+        """No explicit project_type = minimal stub (TODO, no stack note)."""
+        create_claude_md(tmp_path, "myrepo", "alice")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "**Stack:**" not in text
