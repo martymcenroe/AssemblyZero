@@ -414,25 +414,132 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
     project_json_path.write_text(json.dumps(project_json, indent=2) + "\n", encoding='utf-8')
 
 
-def create_claude_md(project_path: Path, name: str, github_user: str) -> None:
+PROJECT_TYPES = ("minimal", "python", "chrome-extension", "pypi", "cf-worker", "web")
+
+
+def _project_specific_context(project_type: str, name: str) -> str:
+    """Return the "## Project-Specific Context" section for the given project type.
+
+    Each stub:
+      - Names the stack concretely so the next agent doesn't have to guess
+      - Leaves a TODO for project-specific additions
+      - References ADR 0219 explicitly so the boundary stays load-bearing
+
+    Stubs MUST be ADDITIVE only — no restating of universal CLAUDE.md content
+    (merge sequence, Closes #N rules, branch protection, banned commands,
+    GitHub CLI safety). Verified by tests/test_new_repo_setup.py.
+
+    Per #1291: default 'minimal' on operator silence — better to emit a blank
+    that the operator fills in than guess wrong for unrecognized types.
+    """
+    if project_type == "minimal":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            "_TODO: Add tech stack, architecture, file map, project-type-specific notes,\n"
+            "and any workflow overrides specific to this project. The universal\n"
+            "CLAUDE.md (auto-loaded by Claude Code's parent-directory traversal) covers\n"
+            "fleet-wide rules -- this file only adds what's true for THIS repo\n"
+            "specifically. Restating universal content here creates drift on every\n"
+            "universal-CLAUDE.md edit (ADR 0219)._\n"
+        )
+    if project_type == "python":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            f"**Stack:** Python (Poetry); pytest suite at `tests/`; source under `src/{name}/`.\n"
+            "\n"
+            "_TODO: Add architecture notes, key modules, project-specific gotchas, and\n"
+            "any workflow overrides. The universal CLAUDE.md (auto-loaded) covers\n"
+            "fleet-wide rules -- only add what's true for THIS repo specifically (ADR 0219)._\n"
+        )
+    if project_type == "chrome-extension":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            "**Stack:** Chrome extension, Manifest V3. Source under `extensions/` (or `src/`).\n"
+            "Tests via jest + jsdom. Build/bundle via the project's chosen tooling (esbuild,\n"
+            "webpack, or vite -- confirm in `package.json` scripts).\n"
+            "\n"
+            "_TODO: Add MV3 service-worker entry point, content-script layout,\n"
+            "message-passing notes, and the manifest version. The universal CLAUDE.md\n"
+            "(auto-loaded) covers fleet-wide rules -- only add what's true for THIS\n"
+            "repo specifically (ADR 0219)._\n"
+        )
+    if project_type == "pypi":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            f"**Stack:** Python (Poetry), published to PyPI. Source under `src/{name}/`,\n"
+            "entry points in `[tool.poetry.scripts]`, release via\n"
+            "`.github/workflows/release.yml` on tag push. Pending-publisher registration\n"
+            "on PyPI documented in runbook 0934.\n"
+            "\n"
+            "_TODO: Add public-API stability notes, versioning policy, and any\n"
+            "release-time checks the project requires. The universal CLAUDE.md\n"
+            "(auto-loaded) covers fleet-wide rules -- only add what's true for THIS\n"
+            "repo specifically (ADR 0219)._\n"
+        )
+    if project_type == "cf-worker":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            "**Stack:** Cloudflare Worker. Source under `src/`. Deploy via `wrangler`\n"
+            "(config in `wrangler.toml`). Local dev: `wrangler dev`. Secrets / env\n"
+            "via `wrangler secret put`.\n"
+            "\n"
+            "_TODO: Add the Worker's route map, KV/D1/R2 bindings, observability\n"
+            "notes, and the staging-vs-prod environment split. The universal\n"
+            "CLAUDE.md (auto-loaded) covers fleet-wide rules -- only add what's true\n"
+            "for THIS repo specifically (ADR 0219)._\n"
+        )
+    if project_type == "web":
+        return (
+            "## Project-Specific Context\n"
+            "\n"
+            "**Stack:** Web (static or SPA). Confirm the framework in `package.json`.\n"
+            "Deploy target documented in the project's own README (commonly Cloudflare\n"
+            "Pages, GitHub Pages, or Netlify for this fleet).\n"
+            "\n"
+            "_TODO: Add the routing structure, asset pipeline, and any deploy hooks\n"
+            "specific to this repo. The universal CLAUDE.md (auto-loaded) covers\n"
+            "fleet-wide rules -- only add what's true for THIS repo specifically\n"
+            "(ADR 0219)._\n"
+        )
+    raise ValueError(
+        f"Unknown project_type: {project_type!r}. "
+        f"Choose one of: {', '.join(PROJECT_TYPES)}"
+    )
+
+
+def create_claude_md(
+    project_path: Path,
+    name: str,
+    github_user: str,
+    project_type: str = "minimal",
+) -> None:
     """
     Create the project CLAUDE.md file.
 
-    Emits the lean per-repo template per ADR 0219 (#1258): identifiers and a
-    Project-Specific Context TODO stub. Everything else (merge sequence, PR
-    rules, branch protection, GitHub CLI safety) lives in the universal
-    CLAUDE.md auto-loaded by Claude Code's parent-directory traversal --
-    NOT restated here, to avoid drift on every universal-CLAUDE.md edit.
+    Emits the lean per-repo template per ADR 0219 (#1258): identifiers plus
+    a project-type-specific Project-Specific Context stub (per #1291).
+    Everything else (merge sequence, PR rules, branch protection, GitHub CLI
+    safety) lives in the universal CLAUDE.md auto-loaded by Claude Code's
+    parent-directory traversal -- NOT restated here, to avoid drift on every
+    universal-CLAUDE.md edit.
 
     Args:
         project_path: Path to the project root
         name: Project name
         github_user: GitHub username
+        project_type: One of PROJECT_TYPES. Default 'minimal' on operator
+            silence -- better to emit a TODO than guess wrong (#1291).
 
-    See: #1266 (minimum-viable slice), #1259 (parent refactor, remaining
-    scope: lint tool + project-type branching), #1258 (ADR 0219).
+    See: #1266 (minimum-viable slice), #1291 (project-type branching),
+    #1292 (test coverage), #1258 (ADR 0219).
     """
     projects_root_unix = config.projects_root_unix()
+    context_block = _project_specific_context(project_type, name)
 
     content = f"""# CLAUDE.md - {name} Project
 
@@ -445,16 +552,7 @@ You are a team member on the {name} project, not a tool.
 - **Project Root (Unix):** `{projects_root_unix}/{name}`
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
-## Project-Specific Context
-
-_TODO: Add tech stack, architecture, file map, project-type-specific notes,
-and any workflow overrides specific to this project. The universal
-CLAUDE.md (auto-loaded by Claude Code's parent-directory traversal) covers
-all fleet-wide rules -- merge sequence, PR-issue references, branch
-protection, GitHub CLI safety, banned commands, etc. This file only adds
-what is true for THIS repo specifically. Restating universal content here
-creates drift on every universal-CLAUDE.md edit (ADR 0219)._
-"""
+{context_block}"""
     claude_md_path = project_path / "CLAUDE.md"
     claude_md_path.write_text(content, encoding='utf-8')
 
@@ -2094,6 +2192,18 @@ Examples:
              "for non-Python projects. (#1058)"
     )
     parser.add_argument(
+        "--project-type",
+        choices=list(PROJECT_TYPES),
+        default="minimal",
+        help="Project-type-specific stub for the scaffolded CLAUDE.md's "
+             "Project-Specific Context section. 'minimal' (default) emits a "
+             "TODO block. Other choices ('python', 'chrome-extension', 'pypi', "
+             "'cf-worker', 'web') emit a one-paragraph stack note plus a "
+             "type-specific TODO. Default is intentionally 'minimal' -- "
+             "better to leave a TODO than guess wrong for an unrecognized "
+             "type. (#1291; ADR 0219)"
+    )
+    parser.add_argument(
         "--pypi",
         action="store_true",
         default=False,
@@ -2347,7 +2457,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     # Step 6: Create CLAUDE.md
     print("\n6. Creating CLAUDE.md...")
-    create_claude_md(project_path, args.name, github_user)
+    create_claude_md(project_path, args.name, github_user, args.project_type)
     print("  Created CLAUDE.md")
 
     # Step 7: Create GEMINI.md
