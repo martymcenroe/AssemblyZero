@@ -1102,8 +1102,22 @@ class TestProjectTypeStubs:
         assert "**Stack:**" in text
         assert "Poetry" in text
         assert "pytest" in text
-        assert "src/myrepo/" in text
         assert "ADR 0219" in text
+
+    def test_python_stub_stack_line_is_layout_agnostic(self):
+        """#1304: Python stub's Stack line doesn't hardcode src/{name}/.
+
+        The Stack line names Poetry + pytest + tests/ but defers source layout
+        to the TODO block so script-collection repos (e.g. automation-scripts)
+        don't get a factually wrong claim. The TODO MAY mention src/{name}/ as
+        one example shape, but the Stack line itself must not claim it.
+        """
+        text = _project_specific_context("python", "myrepo")
+        stack_line = next(
+            line for line in text.splitlines() if line.startswith("**Stack:**")
+        )
+        assert "src/myrepo/" not in stack_line
+        assert "src/" not in stack_line
 
     def test_chrome_extension_stub_mentions_mv3(self):
         text = _project_specific_context("chrome-extension", "myrepo")

@@ -455,11 +455,14 @@ def _project_specific_context(project_type: str, name: str) -> str:
         return (
             "## Project-Specific Context\n"
             "\n"
-            f"**Stack:** Python (Poetry); pytest suite at `tests/`; source under `src/{name}/`.\n"
+            "**Stack:** Python (Poetry); pytest suite at `tests/`. Layout details in\n"
+            "the TODO block below.\n"
             "\n"
-            "_TODO: Add architecture notes, key modules, project-specific gotchas, and\n"
-            "any workflow overrides. The universal CLAUDE.md (auto-loaded) covers\n"
-            "fleet-wide rules -- only add what's true for THIS repo specifically (ADR 0219)._\n"
+            "_TODO: Add source layout (single-package under `src/{name}/`, script\n"
+            "collection in `tools/`, or another shape), architecture notes, key modules,\n"
+            "project-specific gotchas, and any workflow overrides. The universal CLAUDE.md\n"
+            "(auto-loaded) covers fleet-wide rules -- only add what's true for THIS repo\n"
+            "specifically (ADR 0219)._\n"
         )
     if project_type == "chrome-extension":
         return (
