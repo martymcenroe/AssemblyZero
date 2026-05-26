@@ -34,6 +34,14 @@ Always use `--repo` flag with `gh` CLI.
 
 **NEVER use `~` - Windows doesn't support it.**
 
+### Clickable file links in chat output
+
+When surfacing a path the user is likely to open (runbooks, generated reports, ZIPs, screenshots, listing assets), render it as a Markdown link with a `file:///` URI. The user's terminal makes the label clickable.
+
+`[docs/runbooks/30002-chrome-web-store-publish.md](file:///C:/Users/mcwiz/Projects/Clio/docs/runbooks/30002-chrome-web-store-publish.md)`
+
+Use forward slashes inside the URI — backslashes do not work. The plain Windows path can still appear in a code block alongside the link for copy-paste, but the clickable Markdown link is the primary affordance.
+
 ## Dangerous Paths (I/O Safety)
 
 **NEVER search or traverse:**
@@ -90,6 +98,33 @@ Scripts that mutate fleet state (repo settings, branch protection, file content,
 
 The line between `--apply` and `--execute` is lint-enforceable: greppable presence of a banned command in the script source → `--execute` required.
 
+## Secret-Handling Hygiene (Operator Recipes)
+
+Any operator-handled secret (PEM, PAT, API key, anything you copy/paste/save outside the agent) passes through a finite set of surfaces between "secret in the wild" and "secret encrypted at rest." Every surface is a potential leak vector. The recipe for each secret must enumerate them all and have an explicit step for each. "I'll remember to delete it" is not a step.
+
+### Surface checklist (generic)
+
+| Surface | Risk | Mitigation |
+|---|---|---|
+| **Plaintext file on disk** | Same-user FS access; cloud sync (OneDrive) uploads it before local `rm` can fire | Don't route through `~/Downloads/` (often OneDrive-synced). Save directly to `~/.secrets/staging/` or similar non-synced path. |
+| **Browser download history** | Filename + path persists after the file is deleted | Use private/incognito mode for the download, OR clear download history immediately after. |
+| **Recycle Bin** | File Explorer delete (drag-to-trash or right-click) lands plaintext in Recycle Bin even after you "deleted" it | Use shell `rm`, not File Explorer. `powershell.exe -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"` as insurance. |
+| **Clipboard** | Cut/copy from editor or `clip` leaves the secret in OS clipboard until overwritten. Windows clipboard-history (Win+V) caches up to 25 entries if enabled — secret could persist in that ring buffer. | Clear immediately: `Set-Clipboard -Value $null` or `echo -n "" \| clip`. If clipboard-history is enabled, clear from Settings → System → Clipboard. |
+| **Editor undo / hot-exit cache** | VS Code, Sublime, Notepad++ retain open buffers across restarts. Closing the file does not always purge. | Don't open secrets in an editor. If you must, close the editor and verify no recent-tabs preservation. |
+| **Shell history** | Path or content in any command persists in `~/.bash_history` | The operator's shell config sets `HISTCONTROL=ignoreboth:erasedups` (per their dotfiles). Operators who care can additionally set `HISTCONTROL=ignorespace` and prefix sensitive commands with a leading space. |
+| **gpg-agent cache** | Cached passphrase lets any same-user process silently decrypt | `default-cache-ttl 0` in `~/.gnupg/gpg-agent.conf` per ADR-0216. |
+| **Process argv** | Command-line arguments readable by same-user processes via OS APIs (`/proc/<pid>/cmdline` on Linux, `NtQueryInformationProcess` on Windows) | Paths in argv are acceptable. Secret VALUES in argv are not — pass via stdin, files, or in-process bytes. |
+
+### The audit gate
+
+Before considering a secret-handling operation done, mentally walk the surface table and confirm an explicit step exists for each surface the operation touched. If a surface was touched and the recipe has no step for it, **the secret has leaked into that surface and the operation is incomplete.**
+
+### Per-secret recipes (canonical references)
+
+- **Classic PAT**: `AssemblyZero/tools/_pat_session.py:classic_pat_session` docstring + ADR-0216
+- **Cerberus PEM**: `AssemblyZero/docs/runbooks/0927-new-repo-human-checklist.md` § "Encrypt the Cerberus App private key"
+- **Any new secret class**: write the recipe with this surface checklist as the audit gate. No new secret-handling pattern ships without naming every surface it touches.
+
 ## Security Validation (Linter-First)
 
 Before concluding any task that modifies application code (JS/TS/Python), run the project's linter:
@@ -130,6 +165,9 @@ When creating a Windows scheduled task on the user's machine:
 
 - After completing a task, ask "What do you want to work on next?" â€” never offer numbered options
 - If blocked, stop and report
+- **Never use self-invented technical labels in operator questions or options.** No "marker 7", "stage 3 fault", "phase B condition", or any internal numbering the agent made up. Describe the behavior or user-visible outcome in plain English. The operator should be able to make a decision from your question without consulting any code, doc, or prior message. If they'd need to look something up to understand, the question is wrong.
+- **Never use self-invented technical labels in operator questions or options.** No "marker 7", "stage 3 fault", "phase B condition", or any internal numbering the agent made up. Describe the behavior or user-visible outcome in plain English. The operator should be able to make a decision from your question without consulting any code, doc, or prior message. If they'd need to look something up to understand, the question is wrong.
+- **Surface timestamps in US Central, not UTC.** Operator is in US Central time. Raw UTC timestamps from `gh` / AWS / GitHub Events are a recurring source of friction — convert before surfacing. Format like `2026-05-25 4:01 PM Central`. If the source timestamp matters too, parenthesize: `4:01 PM Central (21:01 UTC)`.
 
 ## When Blocked or Uncertain (Overrides Anthropic Defaults)
 
@@ -156,6 +194,8 @@ A task is NOT done until:
 5. **Cleaned up** â€” worktrees removed, temp files deleted, no dangling branches
 
 "I wrote a script that creates it" â‰  done. "I ran the script and verified it exists" = done.
+
+**Claims need tests.** When asserting a system is "shipped/complete/working," back it with an automated test that fails fast on regression. Narrative completion ("PR merged") is not enough. If a sibling tool exists that detects what your producer should NOT emit, make them test each other (e.g., scaffolder + lint via `tests/test_scaffolder_lint_integration.py`). The right answer to "is X done?" is *"Yes — verified by `tests/test_X.py::test_Y` which would fail fast if not,"* not *"Yes — I merged PR #N."*
 
 ## Implicit Commit/Push/Deploy Authorization (Overrides Anthropic Defaults)
 
@@ -209,7 +249,7 @@ git checkout main && git merge origin/main --ff-only && git branch -d {BRANCH}
 
 Full procedure: `AssemblyZero/docs/runbooks/0935-pr-stuck-recovery.md`.
 
-Do NOT escalate to `--admin`, ask the user to approve, force-push, push noise commits, or retry merge in a loop. Force-push is BANNED (memory `feedback_never_force_overwrite_user_data`). Squash merge collapses any noise commits into one clean main commit — no manual cleanup needed.
+Do NOT escalate to `--admin`, ask the user to approve, force-push, push noise commits, or retry merge in a loop. Force-push is BANNED (see Banned Commands table). Squash merge collapses any noise commits into one clean main commit — no manual cleanup needed.
 
 **Per-repo overrides** (e.g., AssemblyZero's worktree lineage archival) belong in that repo's CLAUDE.md, not here.
 
@@ -287,11 +327,19 @@ These are the mistakes that turn a 5-minute land into a 60-minute mess. Read the
 
 ## PR Issue References (Mandatory)
 
-All code has an issue number. No exceptions.
+All code has an issue number. No exceptions by default.
 The naked `(#N)` format is permanently banned. `Closes #N` must appear in ALL THREE places: **commit message**, **PR title**, and **PR body**. pr-sentinel validates the PR body — if it's missing there, checks fail even if the commit message is correct.
 If blocked by pr-sentinel, fix the PR body with `gh pr edit {NUMBER} --body "...Closes #N..."` (the `edited` event re-triggers the check). Only amend the commit as a last resort.
 No issue exists? Create one first.
 Issue already closed? Create a new one — do NOT reference closed issues.
+
+### `No-Issue:` exemption (operator-authorized only)
+
+pr-sentinel ALSO accepts `No-Issue: <reason>` as a valid exemption (per `sentinel/src/validate.js`). This bypasses the issue-required rule. Use ONLY when the operator has explicitly authorized one — never as a convenience to skip filing an issue.
+
+Sanctioned cases observed: same-day cleanup of just-created repos where filing an inaugural issue would be embarrassing (e.g., the 2026-05-26 Chiron / Heuriskon / dependabot-honeypot cleanups). The reason text should be specific (`No-Issue: scaffolder catch-up — applies tightened template per AZ#1298 to a repo created before that PR landed`) — not generic (`No-Issue: cleanup`).
+
+Default remains: file an issue. The exemption is the exception, not the escape hatch.
 
 ## Closing Discipline (Deferred Scope Rule)
 
@@ -300,6 +348,17 @@ If closing an issue or merging a PR with any scope deferred — "follow-up issue
 Unfiled deferrals are completion theater — indistinguishable from abandonment. If you write "Phase 2 will be a separate issue" in a closing comment, Phase 2's issue number must already exist at the time of closing.
 
 Applies to PR descriptions that defer follow-on work ("follow-up PR coming") and to skill outputs that say "file this separately."
+
+## Learnings Discipline (File-Issue-Per-Learning Rule)
+
+After any cleanup, audit, or calibration task, file a GitHub issue for each distinct unactioned learning. Don't just write a "Learnings" section in a chat report — chat history gets summarized; issues persist past the session.
+
+- If a learning is already actioned in the same session (with a merged PR), skip
+- If it's pure confirmation ("the tool worked"), skip
+- If it's actionable (code fix, runbook entry, doc change) — file an issue
+- If it's an operator-confirmed preference — save as a memory AND consider whether the universal CLAUDE.md needs a coverage addition (file an issue for that addition too)
+
+The chat report's "Learnings" section is the working notes; the GitHub issues are the persistent record. Without filing, learnings disappear when the session ends.
 
 ## One Issue Per Concern (NEVER Bundle)
 
