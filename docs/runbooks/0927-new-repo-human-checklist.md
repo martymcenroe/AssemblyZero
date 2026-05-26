@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.5
-**Last Updated:** 2026-05-25
+**Version:** 6.6
+**Last Updated:** 2026-05-26
 
 ---
 
@@ -196,6 +196,7 @@ The script handles all of the following automatically:
 - `.unleashed.json`, `.claude/settings.json`, security hooks
 - **Python project bootstrap**: `pyproject.toml`, `poetry.lock`, `pytest`+`pytest-cov` in dev deps, `[tool.pytest.ini_options]` for deterministic test discovery, `tests/conftest.py` for `src/` import path. Pass `--lang none` to skip for non-Python projects. (#1058)
 - **Canonical labels**: `implementation` and `lld` on the GitHub repo (#1061)
+- **Per-repo `CLAUDE.md` (lean shape per ADR 0219)**: `## Project Identifiers` block plus a project-type-specific `## Project-Specific Context` stub. The scaffolded file is intentionally short (~15-25 lines) and ADDITIVE only — no merge-sequence / branch-protection / PR-rules content; those live in the auto-loaded universal `CLAUDE.md`. Pass `--project-type {minimal,python,chrome-extension,pypi,cf-worker,web}` to pick the stub; default `minimal` is a pure TODO block. Per-repo drift is auditable via `tools/lint_per_repo_claude_md.py` (#1290). See [ADR 0219](../adrs/0219-claude-md-division-of-responsibility.md) for the full division-of-responsibility rule. (#1258, #1291, #1266)
 - Cerberus secrets deploy (if `--cerberus-pem` supplied)
 
 The script prints a summary showing what succeeded and what failed.
@@ -368,3 +369,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo_setup.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo_setup.py` invocations. Added one-time-setup subsection for the encryption step. |
 | 2026-05-26 | v6.4: #1265 — rewrote "Encrypt the Cerberus App private key" subsection. Save-As pattern (target `~/.secrets/cerberus.pem` directly via browser Save-As dialog, bypassing `~/Downloads/`) is now primary; clipboard pattern documented as alternative for classic-PAT recipe parity. Added inline Hygiene Surfaces audit-gate table naming every surface the recipe touches (Downloads, browser history, Recycle Bin, clipboard, editor cache, gpg-agent) and which step closes it. Eliminates the "operator forgets a step" failure mode that compounds under stress. |
 | 2026-05-25 | v6.5: #1295 — removed all "revoke after deploy" instructions (lines 49, 128, 264, 283, 287 of prior version). Per `unleashed#658`: revoking the key on the App page removes only the public-half registration; every per-repo `REVIEWER_APP_PRIVATE_KEY` Actions secret becomes unusable (GitHub rejects JWTs signed by the revoked key) — silently breaks every repo holding the just-revoked key. Added "Three independent copies of the key" explanation. All revoke guidance now points at runbook 0939 for the canonical deploy-new → audit → revoke-old rotation pattern. Operator question that surfaced this: "i don't understand. i don't need a pem private key on github? then how does it work?" |
+| 2026-05-26 | v6.6: #1293 — documented the per-repo `CLAUDE.md` lean shape per ADR 0219 (#1258) in the "What the script handles automatically" block. Surfaced the new `--project-type` flag (#1291) and pointed at the drift-detector lint tool (#1290). Per-repo CLAUDE.md is now explicitly framed as ADDITIVE only — no restatement of universal-CLAUDE.md content — with the lint tool as the audit-gate that catches regressions. |
