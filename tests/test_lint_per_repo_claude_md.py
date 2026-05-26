@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from lint_per_repo_claude_md import (  # noqa: E402
+    _strip_identifiers_block,
     detect_drift,
     format_json,
     format_text,
@@ -192,6 +193,125 @@ def test_marker_9_hardcoded_mcwiz_path(tmp_path: Path) -> None:
     repo = make_repo(tmp_path, "drifted", content)
     result = detect_drift(repo / "CLAUDE.md", repo)
     assert any(f.marker == 9 for f in result.findings)
+
+
+def test_marker_9_skipped_when_only_in_identifiers(tmp_path: Path) -> None:
+    """Scaffolder-emitted path in Identifiers block must NOT trip marker 9 (#1300)."""
+    content = """# CLAUDE.md - test Project
+
+You are a team member on the test project, not a tool.
+
+## Project Identifiers
+
+- **Repository:** `martymcenroe/test`
+- **Project Root (Windows):** `C:\\Users\\mcwiz\\Projects\\test`
+- **Project Root (Unix):** `/c/Users/mcwiz/Projects/test`
+- **Worktree Pattern:** `test-{IssueID}`
+
+## Project-Specific Context
+
+Filler so we clear stub threshold.
+More filler.
+Even more.
+Filler line.
+Another line.
+And another.
+And more.
+Last filler.
+"""
+    repo = make_repo(tmp_path, "ident-only", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert not any(f.marker == 9 for f in result.findings), (
+        f"Marker 9 fired on Identifiers-only path: {[(f.marker, f.description) for f in result.findings]}"
+    )
+
+
+def test_marker_9_fires_outside_identifiers_even_when_also_inside(tmp_path: Path) -> None:
+    """Identifiers + body occurrence => marker 9 fires (on the body one)."""
+    content = """# CLAUDE.md - test Project
+
+You are a team member on the test project, not a tool.
+
+## Project Identifiers
+
+- **Repository:** `martymcenroe/test`
+- **Project Root (Windows):** `C:\\Users\\mcwiz\\Projects\\test`
+- **Project Root (Unix):** `/c/Users/mcwiz/Projects/test`
+- **Worktree Pattern:** `test-{IssueID}`
+
+## Notes
+
+For more info see `C:\\Users\\mcwiz\\Projects\\SomeOther\\bar.md` in the body.
+Filler to clear stub threshold.
+More filler.
+And more.
+"""
+    repo = make_repo(tmp_path, "both", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert any(f.marker == 9 for f in result.findings)
+
+
+def test_marker_9_fires_when_no_identifiers_heading(tmp_path: Path) -> None:
+    """No `## Project Identifiers` heading => no exception, marker 9 fires on any match."""
+    content = """# CLAUDE.md - test Project
+
+Body content with no Identifiers heading.
+
+See `C:\\Users\\mcwiz\\Projects\\X\\foo.md` for details.
+Filler to clear stub threshold.
+More filler.
+And more.
+And more lines.
+Even more.
+"""
+    repo = make_repo(tmp_path, "no-ident", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert any(f.marker == 9 for f in result.findings)
+
+
+def test_strip_identifiers_block_removes_section(tmp_path: Path) -> None:
+    text = """# Title
+
+Body before.
+
+## Project Identifiers
+
+- a
+- b
+- c
+
+## Next Section
+
+Body after.
+"""
+    out = _strip_identifiers_block(text)
+    assert "## Project Identifiers" not in out
+    assert "- a" not in out
+    assert "Body before" in out
+    assert "Body after" in out
+    assert "## Next Section" in out
+
+
+def test_strip_identifiers_block_no_heading_returns_unchanged(tmp_path: Path) -> None:
+    text = "# Title\n\nBody with no Identifiers heading.\n"
+    assert _strip_identifiers_block(text) == text
+
+
+def test_strip_identifiers_block_at_eof(tmp_path: Path) -> None:
+    """Identifiers block at EOF (no following h2) is stripped to EOF."""
+    text = """# Title
+
+Body before.
+
+## Project Identifiers
+
+- a
+- b
+"""
+    out = _strip_identifiers_block(text)
+    assert "## Project Identifiers" not in out
+    assert "- a" not in out
+    assert "Body before" in out
 
 
 def test_missing_claude_md(tmp_path: Path) -> None:

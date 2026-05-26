@@ -125,6 +125,12 @@ RE_FIRST_READ_AZ = re.compile(
 # Marker 9: hardcoded user-specific paths.
 RE_HARDCODED_MCWIZ = re.compile(r"C:[\\/]Users[\\/]mcwiz[\\/]")
 
+# Project Identifiers block boundaries — used by marker 9 to skip the
+# scaffolder-emitted literal path in the Identifiers section, which is
+# load-bearing (it IS the project root on this dev machine) and not drift.
+RE_IDENTIFIERS_HEADING = re.compile(r"^## Project Identifiers\s*$", re.MULTILINE)
+RE_NEXT_H2 = re.compile(r"^## ", re.MULTILINE)
+
 # Marker 7: phrases that indicate restated universal-CLAUDE.md content.
 # These are ADVISORY — legitimate per-repo overrides use the same phrases
 # (e.g., Aletheia overrides the merge sequence), so we hedge via the
@@ -191,6 +197,32 @@ def _match_excerpt(text: str, m: re.Match[str], context: int = 60) -> str:
     end = min(len(text), m.end() + context)
     excerpt = text[start:end].replace("\n", " ").strip()
     return f"...{excerpt}..."
+
+
+def _strip_identifiers_block(text: str) -> str:
+    """Return text with the `## Project Identifiers` section removed.
+
+    Used by marker 9 to ignore the scaffolder-emitted literal Windows path
+    that appears in every per-repo CLAUDE.md's Identifiers block (e.g.
+    `C:\\Users\\mcwiz\\Projects\\boostgauge`). That literal IS the project
+    root on this dev machine — load-bearing, not drift. Marker 9 should
+    only fire on `C:\\Users\\mcwiz\\...` occurrences OUTSIDE this block
+    (in body prose, example commands, etc.).
+
+    If the file has no `## Project Identifiers` heading, returns the
+    original text unchanged (no exception to apply).
+
+    Block boundaries: starts at the `## Project Identifiers` line, ends
+    at the next `## ` heading or EOF.
+    """
+    m = RE_IDENTIFIERS_HEADING.search(text)
+    if not m:
+        return text
+    start = m.start()
+    rest = text[m.end():]
+    next_m = RE_NEXT_H2.search(rest)
+    end = m.end() + next_m.start() if next_m else len(text)
+    return text[:start] + text[end:]
 
 
 def detect_drift(claude_md: Path, repo_root: Path) -> RepoResult:
@@ -293,14 +325,18 @@ def detect_drift(claude_md: Path, repo_root: Path) -> RepoResult:
                 ))
                 break  # one finding per pattern is enough
 
-    # Marker 9: hardcoded mcwiz paths.
-    m = RE_HARDCODED_MCWIZ.search(text)
+    # Marker 9: hardcoded mcwiz paths. Skip the Project Identifiers block —
+    # the literal Windows path there is scaffolder-emitted (load-bearing),
+    # not drift. Only fires on occurrences OUTSIDE the Identifiers block.
+    text_excl_identifiers = _strip_identifiers_block(text)
+    m = RE_HARDCODED_MCWIZ.search(text_excl_identifiers)
     if m:
         result.findings.append(Finding(
             9, "WARNING",
-            "Hardcoded C:\\Users\\mcwiz\\... path "
-            "(should be parameterized via config.projects_root())",
-            _match_excerpt(text, m),
+            "Hardcoded C:\\Users\\mcwiz\\... path outside Project "
+            "Identifiers block (should be parameterized via "
+            "config.projects_root())",
+            _match_excerpt(text_excl_identifiers, m),
         ))
 
     # Decide final status. STUB takes precedence over DRIFT for display
