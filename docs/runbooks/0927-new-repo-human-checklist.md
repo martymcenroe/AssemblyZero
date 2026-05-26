@@ -1,8 +1,8 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.4
-**Last Updated:** 2026-05-26
+**Version:** 6.5
+**Last Updated:** 2026-05-25
 
 ---
 
@@ -46,7 +46,7 @@ With `default-cache-ttl 0`, gpg prompts for the passphrase every decryption (ins
 
 **Encrypt the Cerberus App private key** (recommended for any repeat use):
 
-The first time you generate a Cerberus `.pem`, encrypt it and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want — single browser-trip to generate, single browser-trip to revoke, no plaintext on disk in between.
+The first time you generate a Cerberus `.pem`, encrypt it and delete the plaintext immediately. After that, the encrypted blob is reusable across as many repo creations as you want against the same active App key. **Do NOT revoke the key after deploying** — every repo's `REVIEWER_APP_PRIVATE_KEY` Actions secret depends on it remaining active. Periodic key rotation is its own procedure — see [runbook 0939](0939-cerberus-key-rotation.md).
 
 #### Hygiene surfaces (audit gate)
 
@@ -109,7 +109,19 @@ Surfaces touched: filesystem + clipboard + editor cache + browser history. **Not
 
 The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo_setup.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
 
-When the key is eventually revoked in the GitHub App UI, you can delete the encrypted blob too (`rm ~/.secrets/cerberus-pem.gpg`). The next batch of repos uses a fresh `.pem` generation cycle.
+#### Three independent copies of the key (read this once)
+
+After encryption + deploy, the same key exists in three places:
+
+1. **App-side public-half registration** — on https://github.com/settings/apps/cerberus-az → Private keys. Used by GitHub to verify JWTs signed by the corresponding private key.
+2. **Operator-side encrypted blob** — `~/.secrets/cerberus-pem.gpg`. Offline copy enabling re-deploy without regenerating.
+3. **Per-repo Actions secret** — `REVIEWER_APP_PRIVATE_KEY` in each repo. The bytes `auto-reviewer.yml` reads at run time to sign JWTs.
+
+**Revoking the key on the App page (copy 1) makes copies 2 and 3 useless** — GitHub no longer accepts JWTs signed by it. Every repo's auto-approval silently breaks the next time a PR opens.
+
+The previous version of this runbook told operators to revoke right after deploying. **That was wrong** (per unleashed#658). The right pattern: keep the key active on the App for as long as it's deployed in any repo. When you want to rotate, follow [runbook 0939](0939-cerberus-key-rotation.md) — deploy the new key fleet-wide, audit via `tools/audit_cerberus_health.py`, THEN revoke the old key.
+
+You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your offline copy; the GitHub-side copies remain functional). Keep it if you want to re-deploy without regenerating.
 
 ---
 
@@ -125,7 +137,7 @@ poetry run python tools/new_repo_setup.py {name} \
     --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--public]
 ```
 
-This requires the one-time gpg-encrypt of the Cerberus `.pem` (see "One-time setup" above). The decrypted key only ever lives in the Python heap during the script's run; nothing plaintext touches disk. **You can run this same invocation for as many new repos as you want against the same encrypted blob — one browser trip to generate the `.pem` covers all of them, one browser trip to revoke when done.**
+This requires the one-time gpg-encrypt of the Cerberus `.pem` (see "One-time setup" above). The decrypted key only ever lives in the Python heap during the script's run; nothing plaintext touches disk. **You can run this same invocation for as many new repos as you want against the same encrypted blob.** Keep the App-side key active as long as any repo holds it (do NOT revoke per "Three independent copies" above). When you want to rotate the key, follow [runbook 0939](0939-cerberus-key-rotation.md).
 
 **Legacy / single-shot path — `--cerberus-pem` (plaintext, deleted after deploy):**
 
@@ -155,7 +167,7 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
      --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.2026-04-22.private-key.pem
    ```
    MSYS translates `/c/Users/...` → `C:\Users\...` before `python.exe` sees argv, so pathlib handles it correctly. Windows-style `'C:\Users\mcwiz\Downloads\foo.pem'` also works if single-quoted (or with escaped backslashes), but the Unix-style form matches every other path example in this runbook.
-4. Full walkthrough (deploy + delete + revoke) is in [Section 4](#4-deploy-cerberus-secrets-if-needed) below.
+4. Full walkthrough (deploy + delete local `.pem`; key stays active on App page) is in [Section 4](#4-deploy-cerberus-secrets-if-needed) below.
 
 *Why you have to do this manually:* the GitHub App management API does not expose programmatic key generation or revocation — both are browser-only.
 
@@ -259,9 +271,8 @@ When you invoke `new_repo_setup.py` with the flag, the script handles steps 3-5 
    cd /c/Users/mcwiz/Projects/AssemblyZero
    poetry run python tools/new_repo_setup.py MyNewRepo --cerberus-pem /c/Users/mcwiz/Downloads/THE-FILE.pem
    ```
-   The script deploys both secrets to ONLY the new repo, verifies they landed via `gh api`, then deletes the `.pem`.
-4. Go to https://github.com/settings/apps/cerberus-az > Private keys
-5. Click **Revoke** on the key you just generated (browser-only — the GitHub App management API does not expose programmatic revocation).
+   The script deploys both secrets to ONLY the new repo, verifies they landed via `gh api`, then deletes the local `.pem` file.
+4. **Keep the key active on the App page** — the deployed Actions secret depends on it remaining active. Do NOT revoke. When you want to rotate the key, follow [runbook 0939](0939-cerberus-key-rotation.md).
 
 #### Fallback: standalone fleet-wide script
 
@@ -279,14 +290,12 @@ Use this path if the new repo was already created (without the flag) or if you w
    ```bash
    rm /c/Users/mcwiz/Downloads/THE-FILE.pem
    ```
-6. Go back to https://github.com/settings/apps/cerberus-az > Private keys
-7. Click **Revoke** on the key you just generated.
-   - The secrets are already stored in GitHub Actions — the .pem is never needed again.
-   - Revoking prevents the key from being used if the file wasn't fully deleted.
-   - **Note:** GitHub Apps require at least one active key. If only one exists, you cannot revoke it. File deletion (step 5) is your only protection.
-8. **Done.** Secrets deployed, .pem deleted, key revoked.
+6. **Keep the App-side key active.** The deployed Actions secrets depend on it. **Do NOT revoke after deploy** — revoking removes the public-half registration on the App page, and every repo's secret becomes unusable (GitHub rejects JWTs signed by the revoked key). Per `unleashed#658` / runbook 0939, the only safe time to revoke is during a structured rotation: deploy a NEW key fleet-wide, audit via `tools/audit_cerberus_health.py`, THEN revoke the old.
+7. **Done.** Secrets deployed, local `.pem` deleted, App-side key still active.
 
 **What happens without secrets:** PRs pass pr-sentinel but don't get auto-approved. You can merge manually via the GitHub UI until secrets are deployed.
+
+**To rotate the key later:** see [runbook 0939](0939-cerberus-key-rotation.md). The procedure is deploy-new → audit → revoke-old, never deploy-then-revoke.
 
 ### 5. Create wiki (if needed)
 
@@ -358,3 +367,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-22 | v6.2: #1206 — `--cerberus-pem` is REQUIRED for new GitHub repos. Script exits 1 with the .pem-acquisition guide if omitted. Override is `--no-github` (local scaffold only). #1200 + #1202 — extended post-setup verification to GitHub-side state (branch protection, repo settings, workflow content, Cerberus secrets) and added a best-effort `pr-sentinel-mm` Worker installation check that surfaces App-scope drift at creation time instead of when the first PR opens. |
 | 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo_setup.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo_setup.py` invocations. Added one-time-setup subsection for the encryption step. |
 | 2026-05-26 | v6.4: #1265 — rewrote "Encrypt the Cerberus App private key" subsection. Save-As pattern (target `~/.secrets/cerberus.pem` directly via browser Save-As dialog, bypassing `~/Downloads/`) is now primary; clipboard pattern documented as alternative for classic-PAT recipe parity. Added inline Hygiene Surfaces audit-gate table naming every surface the recipe touches (Downloads, browser history, Recycle Bin, clipboard, editor cache, gpg-agent) and which step closes it. Eliminates the "operator forgets a step" failure mode that compounds under stress. |
+| 2026-05-25 | v6.5: #1295 — removed all "revoke after deploy" instructions (lines 49, 128, 264, 283, 287 of prior version). Per `unleashed#658`: revoking the key on the App page removes only the public-half registration; every per-repo `REVIEWER_APP_PRIVATE_KEY` Actions secret becomes unusable (GitHub rejects JWTs signed by the revoked key) — silently breaks every repo holding the just-revoked key. Added "Three independent copies of the key" explanation. All revoke guidance now points at runbook 0939 for the canonical deploy-new → audit → revoke-old rotation pattern. Operator question that surfaced this: "i don't understand. i don't need a pem private key on github? then how does it work?" |
