@@ -541,6 +541,18 @@ def create_claude_md(
     projects_root_unix = config.projects_root_unix()
     context_block = _project_specific_context(project_type, name)
 
+    # Footer: invitation to document workflow overrides explicitly. Pushes
+    # the minimal-type emission over the lint stub threshold AND signals to
+    # the next agent where overrides belong (per ADR 0219). Cheap content,
+    # high signal — "no overrides yet" is itself a useful claim.
+    overrides_footer = (
+        "## Workflow Overrides\n"
+        "\n"
+        "_None yet. If this project needs to override any universal CLAUDE.md\n"
+        "rule (e.g., a custom merge tool, a special test convention), document\n"
+        "the override here with explicit language (\"override\") per ADR 0219._\n"
+    )
+
     content = f"""# CLAUDE.md - {name} Project
 
 You are a team member on the {name} project, not a tool.
@@ -552,7 +564,8 @@ You are a team member on the {name} project, not a tool.
 - **Project Root (Unix):** `{projects_root_unix}/{name}`
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
-{context_block}"""
+{context_block}
+{overrides_footer}"""
     claude_md_path = project_path / "CLAUDE.md"
     claude_md_path.write_text(content, encoding='utf-8')
 
