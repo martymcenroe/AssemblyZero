@@ -46,6 +46,14 @@ try:
     from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
+
+# Dependabot enablement (#1331) — runs at step 20, inside the same
+# classic_pat_session as steps 13-19 so it shares the in-process PAT.
+try:
+    from enable_dependabot import enable_dependabot_for_repo
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from enable_dependabot import enable_dependabot_for_repo
     from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
 
 # In-process classic PAT for privileged REST calls (ADR-0216).
@@ -2801,6 +2809,24 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     )
                     print(f"  {created}/{total} labels created or updated "
                           f"({', '.join(n for n, _, _ in _CANONICAL_LABELS)})")
+
+                    # Step 20: Enable Dependabot (#1331).
+                    # Private repos default to Dependabot DISABLED at the
+                    # repo settings level. Without this step, .github/
+                    # dependabot.yml is inert -- no PRs emit, wedge starves.
+                    # Confirmed defect 2026-05-26 on dependabot-honeypot.
+                    print("\n20. Enabling Dependabot (security updates, alerts, "
+                          "automated fixes)...")
+                    db_result = enable_dependabot_for_repo(
+                        github_user, repo_name_lower, pat, apply=True,
+                    )
+                    for endpoint, status in db_result.actions.items():
+                        print(f"  {endpoint}: {status}")
+                    if not db_result.ok:
+                        print("  WARNING: Dependabot enablement had errors. "
+                              "Re-run `tools/enable_dependabot.py --repo "
+                              f"{github_user}/{repo_name_lower} --apply` "
+                              "after diagnosing.")
 
                 # Cerberus secrets deploy. Inside the same with-block so it
                 # shares `pat` -- no extra pinentry. cerberus_pem_session
