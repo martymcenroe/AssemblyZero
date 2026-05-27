@@ -286,11 +286,18 @@ def install_deps(worktree: Path) -> bool:
     `--with dev` is tolerant on repos that don't have a `dev` group:
     Poetry warns rather than failing, so this is safe across the fleet
     of varying repo layouts.
+
+    `--no-root` skips installing the project itself, only its dependencies.
+    Required for decorative-deps repos like dependabot-honeypot that have
+    no src/ directory -- without --no-root, every fleet sweep on such a
+    PR errors with "No file/folder found for package <name>". The fleet
+    sweep tests dep upgrades, not the project's own code, so installing
+    the root is unnecessary in every case.
     """
     if not (worktree / "pyproject.toml").exists():
         return True  # Not a poetry project
-    result = run(["poetry", "install", "--with", "dev"], cwd=str(worktree),
-                 timeout=POETRY_INSTALL_TIMEOUT_S)
+    result = run(["poetry", "install", "--no-root", "--with", "dev"],
+                 cwd=str(worktree), timeout=POETRY_INSTALL_TIMEOUT_S)
     return result.returncode == 0
 
 
