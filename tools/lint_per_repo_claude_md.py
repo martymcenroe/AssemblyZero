@@ -147,6 +147,15 @@ UNIVERSAL_DUPE_PATTERNS: list[re.Pattern[str]] = [
 OVERRIDE_PROXIMITY_CHARS = 200
 RE_OVERRIDE = re.compile(r"override", re.IGNORECASE)
 
+# #1307: second hedge — explanatory-paragraph exception. A paragraph that
+# names the auto-load mechanism, ADR 0219, or the universal CLAUDE.md is
+# explaining what lives elsewhere, not restating it. Same proximity window
+# as the override hedge.
+RE_EXPLANATORY = re.compile(
+    r"auto-loaded|ADR\s*0219|universal\s+CLAUDE\.md",
+    re.IGNORECASE,
+)
+
 STUB_LINE_THRESHOLD = 20
 
 
@@ -318,14 +327,21 @@ def detect_drift(claude_md: Path, repo_root: Path) -> RepoResult:
             window_start = max(0, m.start() - OVERRIDE_PROXIMITY_CHARS)
             window_end = m.end() + OVERRIDE_PROXIMITY_CHARS
             window = text[window_start:window_end]
-            if not RE_OVERRIDE.search(window):
-                result.findings.append(Finding(
-                    7, "WARNING",
-                    f"May duplicate universal CLAUDE.md content "
-                    f"(pattern: {pattern.pattern!r})",
-                    _match_excerpt(text, m),
-                ))
-                break  # one finding per pattern is enough
+            # Existing hedge: "override" qualifier nearby = legitimate per-repo override
+            if RE_OVERRIDE.search(window):
+                continue
+            # #1307 hedge: explanatory keyword nearby ("auto-loaded" / "ADR 0219" /
+            # "universal CLAUDE.md") = paragraph is describing what lives elsewhere,
+            # not restating it
+            if RE_EXPLANATORY.search(window):
+                continue
+            result.findings.append(Finding(
+                7, "WARNING",
+                f"May duplicate universal CLAUDE.md content "
+                f"(pattern: {pattern.pattern!r})",
+                _match_excerpt(text, m),
+            ))
+            break  # one finding per pattern is enough
 
     # Marker 9: hardcoded mcwiz paths. Skip the Project Identifiers block —
     # the literal Windows path there is scaffolder-emitted (load-bearing),

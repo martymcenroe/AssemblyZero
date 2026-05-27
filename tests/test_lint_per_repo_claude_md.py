@@ -187,6 +187,55 @@ def test_marker_7_universal_dupe_no_override(tmp_path: Path) -> None:
     assert any(f.marker == 7 for f in result.findings)
 
 
+def test_marker_7_skipped_in_explanatory_todo(tmp_path: Path) -> None:
+    """#1307: 'merge sequence' near 'auto-loaded' is descriptive, not drift. (Tests are careful to avoid the word 'override' in appended content — the existing override-proximity hedge would mask this test otherwise.)"""
+    content = lean_template() + (
+        "\n\n## Project Notes\n\n"
+        "_TODO: Document repo specifics. The universal CLAUDE.md (auto-loaded) "
+        "covers fleet-wide rules like the merge sequence and banned commands._\n"
+    )
+    repo = make_repo(tmp_path, "explanatory-todo", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert not any(f.marker == 7 for f in result.findings), \
+        f"M7 should be skipped due to 'auto-loaded' proximity; findings: {[(f.marker, f.description) for f in result.findings]}"
+
+
+def test_marker_7_skipped_near_adr_0219(tmp_path: Path) -> None:
+    """#1307: 'enforce_admins true' near 'ADR 0219' is descriptive."""
+    content = lean_template() + (
+        "\n\n## Notes\n\n"
+        "Per ADR 0219, fleet rules like enforce_admins=true on branch protection "
+        "live in the universal layer, not here.\n"
+    )
+    repo = make_repo(tmp_path, "adr-0219-mention", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert not any(f.marker == 7 for f in result.findings)
+
+
+def test_marker_7_skipped_near_universal_claude_md(tmp_path: Path) -> None:
+    """#1307: 'banned commands' near 'universal CLAUDE.md' is descriptive."""
+    content = lean_template() + (
+        "\n\n## Workflow\n\n"
+        "The universal CLAUDE.md is authoritative on banned commands.\n"
+    )
+    repo = make_repo(tmp_path, "universal-mention", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert not any(f.marker == 7 for f in result.findings)
+
+
+def test_marker_7_still_fires_when_explanation_keywords_absent(tmp_path: Path) -> None:
+    """#1307 regression guard: M7 must STILL fire when 'merge sequence' appears without any explanatory keywords nearby."""
+    content = lean_template() + (
+        "\n\n## How To Merge\n\n"
+        "Step 1: poll mergeable_state. Step 2: gh pr merge --squash. Step 3: clean up.\n"
+        "This is the standard merge sequence we use on every PR in this repo.\n"
+    )
+    repo = make_repo(tmp_path, "no-hedge", content)
+    result = detect_drift(repo / "CLAUDE.md", repo)
+    assert any(f.marker == 7 for f in result.findings), \
+        "M7 must still fire when 'merge sequence' appears without override/auto-loaded/ADR 0219/universal CLAUDE.md nearby"
+
+
 def test_marker_7_skipped_when_override_nearby(tmp_path: Path) -> None:
     """Aletheia-style: 'merge sequence override' must not trip marker 7."""
     content = lean_template() + (
