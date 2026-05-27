@@ -326,8 +326,23 @@ class TestProcessPrTryFinallyContract:
         assert "WARNING" not in err
 
 
+def _fake_run_canary(branches_stdout: str, worktrees_stdout: str,
+                     branches_rc: int = 0, worktrees_rc: int = 0):
+    """Build a side_effect for `dependabot_review.run` that returns
+    different CompletedProcess values for the canary's two git calls:
+    `git branch --list dependabot-audit-*` and `git worktree list
+    --porcelain`. #1357.
+    """
+    def fake(cmd, *args, **kwargs):
+        if "branch" in cmd:
+            return _mk_completed(branches_rc, stdout=branches_stdout)
+        return _mk_completed(worktrees_rc, stdout=worktrees_stdout)
+    return fake
+
+
 class TestCheckForOrphanWorktrees:
-    """#1133: startup canary that enumerates pre-existing dependabot worktrees."""
+    """#1133/#1357: startup canary that enumerates pre-existing dependabot
+    worktrees created by this script (path pattern + paired audit branch)."""
 
     def test_returns_empty_when_no_orphans(self, tmp_path):
         main_repo = tmp_path / "AssemblyZero"
@@ -338,7 +353,7 @@ class TestCheckForOrphanWorktrees:
             "\n"
         )
         with patch.object(dependabot_review, "run",
-                          return_value=_mk_completed(0, stdout=porcelain)):
+                          side_effect=_fake_run_canary("", porcelain)):
             orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
         assert orphans == []
 
@@ -358,8 +373,10 @@ class TestCheckForOrphanWorktrees:
             "detached\n"
             "\n"
         )
+        # Paired audit branches exist -> both worktrees are real orphans.
+        branches = "dependabot-audit-1095\ndependabot-audit-1097\n"
         with patch.object(dependabot_review, "run",
-                          return_value=_mk_completed(0, stdout=porcelain)):
+                          side_effect=_fake_run_canary(branches, porcelain)):
             orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
         assert len(orphans) == 2
         assert any("dependabot-1095" in o for o in orphans)
@@ -380,15 +397,86 @@ class TestCheckForOrphanWorktrees:
             "\n"
         )
         with patch.object(dependabot_review, "run",
-                          return_value=_mk_completed(0, stdout=porcelain)):
+                          side_effect=_fake_run_canary("", porcelain)):
             orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
         assert orphans == []
 
     def test_returns_empty_on_subprocess_error(self, tmp_path):
-        """Diagnostic must not block the script: if `git worktree list` itself
-        fails, return [] so the operator's run can proceed."""
+        """Diagnostic must not block the script: if the first git call
+        (branch listing) itself fails, return [] so the operator's run
+        can proceed."""
         main_repo = tmp_path / "AssemblyZero"
         with patch.object(dependabot_review, "run",
                           return_value=_mk_completed(128, stderr="not a git repo")):
+            orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
+        assert orphans == []
+
+    def test_ignores_unpaired_dependabot_worktrees(self, tmp_path):
+        """#1357 regression: worktrees matching the path pattern but with
+        NO paired `dependabot-audit-N` branch are not this script's
+        orphans. Pre-#1357 the canary flagged them anyway and aborted
+        the fleet sweep. Operator-incident shape: another agent's
+        worktrees happened to use `{repo}-dependabot-N` naming for
+        unrelated work; pre-fix canary couldn't tell them apart and
+        nearly led to deletion of unrelated active work."""
+        main_repo = tmp_path / "AssemblyZero"
+        porcelain = (
+            "worktree /c/Users/foo/Projects/AssemblyZero\n"
+            "HEAD abc123\n"
+            "branch refs/heads/main\n"
+            "\n"
+            "worktree /c/Users/foo/Projects/AssemblyZero-dependabot-123\n"
+            "HEAD def456\n"
+            "detached\n"
+            "\n"
+            "worktree /c/Users/foo/Projects/AssemblyZero-dependabot-124\n"
+            "HEAD ghi789\n"
+            "detached\n"
+            "\n"
+        )
+        # No `dependabot-audit-*` branches -> no script-created orphans.
+        with patch.object(dependabot_review, "run",
+                          side_effect=_fake_run_canary("", porcelain)):
+            orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
+        assert orphans == []
+
+    def test_ignores_audit_branch_with_no_worktree(self, tmp_path):
+        """A stray `dependabot-audit-N` branch with no matching worktree
+        is not what this canary flags. The canary's job is to surface
+        worktrees that will block `git worktree add` -- stale branches
+        are a different cleanup problem (`git branch -d`) and not in
+        scope here."""
+        main_repo = tmp_path / "AssemblyZero"
+        porcelain = (
+            "worktree /c/Users/foo/Projects/AssemblyZero\n"
+            "HEAD abc123\n"
+            "branch refs/heads/main\n"
+            "\n"
+        )
+        branches = "dependabot-audit-1095\n"
+        with patch.object(dependabot_review, "run",
+                          side_effect=_fake_run_canary(branches, porcelain)):
+            orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
+        assert orphans == []
+
+    def test_pairs_only_matching_n_suffix(self, tmp_path):
+        """Audit branch for N=1095 with a worktree for a different N
+        (1097) is not a match. Each orphan worktree must be paired to
+        its OWN audit branch."""
+        main_repo = tmp_path / "AssemblyZero"
+        porcelain = (
+            "worktree /c/Users/foo/Projects/AssemblyZero\n"
+            "HEAD abc123\n"
+            "branch refs/heads/main\n"
+            "\n"
+            "worktree /c/Users/foo/Projects/AssemblyZero-dependabot-1097\n"
+            "HEAD def456\n"
+            "detached\n"
+            "\n"
+        )
+        # Branch is for 1095, worktree is for 1097 -- no pair.
+        branches = "dependabot-audit-1095\n"
+        with patch.object(dependabot_review, "run",
+                          side_effect=_fake_run_canary(branches, porcelain)):
             orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
         assert orphans == []

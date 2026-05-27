@@ -560,14 +560,46 @@ def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
 
 
 def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
-    """#1133: enumerate pre-existing dependabot worktrees so the operator
-    can be warned at startup. Returns list of orphan worktree paths
-    matching the `{main_name}-dependabot-N` pattern. Empty list = clean.
+    """#1133/#1357: enumerate pre-existing dependabot worktrees that match
+    BOTH the script's path pattern (`{main_name}-dependabot-N`) AND a
+    paired `dependabot-audit-N` branch. Returns list of orphan worktree
+    paths created by this script. Empty list = clean.
+
+    The branch is the strong-provenance signal. `create_audit_worktree`
+    creates worktrees via `git worktree add ... -b dependabot-audit-N`,
+    so the branch always exists when this script leaves a worktree behind.
+    `cleanup_worktree` deletes the branch via `git branch -d`. A real
+    leaked worktree from a crashed run therefore has BOTH the matching
+    path AND the matching branch; if the branch is missing, the worktree
+    is not this script's orphan.
+
+    Before #1357 the canary matched on path name alone (`if prefix in
+    Path(path).name`), which false-positived on any worktree whose name
+    happened to contain `{main_name}-dependabot-` regardless of origin.
     """
+    # Provenance step: enumerate the script's own audit branches. If
+    # none exist, there cannot be any real script orphans.
+    branch_result = run([
+        "git", "-C", str(main_repo), "branch", "--list",
+        "--format=%(refname:short)", "dependabot-audit-*",
+    ])
+    if branch_result.returncode != 0:
+        # Diagnostic-on-diagnostic failure: don't block the script.
+        return []
+    audit_ns: set[str] = set()
+    for raw in branch_result.stdout.splitlines():
+        name = raw.strip()
+        if not name.startswith("dependabot-audit-"):
+            continue
+        n_str = name[len("dependabot-audit-"):]
+        if n_str.isdigit():
+            audit_ns.add(n_str)
+    if not audit_ns:
+        return []
+
+    # Now pair worktrees against the audit-branch set.
     result = run(["git", "-C", str(main_repo), "worktree", "list", "--porcelain"])
     if result.returncode != 0:
-        # If we can't even list, return empty -- don't block the script on
-        # a diagnostic that itself errored.
         return []
     orphans: list[str] = []
     prefix = f"{main_repo.name}-dependabot-"
@@ -575,7 +607,11 @@ def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
         if not line.startswith("worktree "):
             continue
         path = line[len("worktree "):].strip()
-        if prefix in Path(path).name:
+        name = Path(path).name
+        if not name.startswith(prefix):
+            continue
+        n_str = name[len(prefix):]
+        if n_str in audit_ns:
             orphans.append(path)
     return orphans
 
