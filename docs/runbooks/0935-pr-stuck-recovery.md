@@ -1,8 +1,8 @@
-# 0935 - PR Stuck on `mergeable_state=blocked`: Recovery Procedures
+# 0935 - PR Stuck on `mergeable_state=blocked` or `behind`: Recovery Procedures
 
 **Category:** Runbook / Operational Procedure
-**Version:** 1.0
-**Last Updated:** 2026-05-10
+**Version:** 1.1
+**Last Updated:** 2026-05-27
 
 ---
 
@@ -10,9 +10,12 @@
 
 Diagnose and recover when a PR stays at `mergeable_state=blocked` long after creation. Standard 0016 documents the PR governance architecture; this runbook documents recovery when that architecture rejects a PR for a non-obvious reason.
 
-**Use when:** `gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state'` returns `blocked` and the typical 30-second auto-approval window has passed (Cerberus-AZ should approve within 10–30s after pr-sentinel passes).
+**Use when:** `gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state'` returns:
 
-**Do NOT use this for:** legitimate failures where pr-sentinel reported `failure` (those are diagnosed by reading the check output and fixing the actual problem). This runbook is for the harder case where a check stays `pending` forever or `action_required` is silently misclassified.
+- **`blocked`** and the typical 30-second auto-approval window has passed (Cerberus-AZ should approve within 10–30s after pr-sentinel passes) — follow Steps 1–7 below.
+- **`behind`** and stays there indefinitely (branch protection's "Require branches to be up to date" gate; the standard poll-until-clean loop never terminates) — follow the "Behind-State Recovery" section after Step 7.
+
+**Do NOT use this for:** legitimate failures where pr-sentinel reported `failure` (those are diagnosed by reading the check output and fixing the actual problem). This runbook is for the harder case where a check stays `pending` forever, `action_required` is silently misclassified, or branch protection requires an update that the standard merge sequence doesn't perform.
 
 ---
 
@@ -174,6 +177,57 @@ Squash merge collapses any noise commits on the branch into ONE commit on main w
 
 ---
 
+## Behind-State Recovery: `mergeable_state=behind`
+
+**Symptom:** Polling `gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state'` returns `behind` and stays there. The standard merge-sequence poll-until-`clean` loop never terminates because `behind` is neither `clean` nor any of the failure states it knows to abort on.
+
+**Distinct from:**
+
+| State | What it means | Action |
+|-------|---------------|--------|
+| `blocked` | pr-sentinel failure or required-check failed | Steps 1–7 above |
+| `behind` | Branch behind main, branch-protection gate requires up-to-date | This section |
+| `unstable` | Required checks still running | Just wait — not this runbook |
+| `unknown` | GitHub hasn't computed yet | Wait a few seconds, usually resolves transiently |
+| `dirty` | Merge conflicts in working tree | Manual conflict resolution; not this runbook |
+
+**Cause:** Branch protection has "Require branches to be up to date before merging" enabled (the operator's fleet-wide default). The PR's branch is N commits behind main on origin; the gate refuses merge until the branch is updated.
+
+**The wrong fix:** manually rebasing the branch + force-pushing (banned — see "Banned Recovery Actions" below). Manual rebase + force-push violates the no-force-push rule even if technically it would work.
+
+**The right fix:** GitHub's `update-branch` API merges `main` into the PR's branch non-destructively (creates a real merge commit on the branch, no history rewrite, no force-push).
+
+```bash
+head=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha')
+gh api -X PUT repos/{owner}/{repo}/pulls/{N}/update-branch -f expected_head_sha=$head
+```
+
+**The `expected_head_sha` parameter is required.** It's GitHub's concurrency-control token — if anything else pushes to the PR's branch between your `.head.sha` read and your `update-branch` call, the request fails with `422 Unprocessable Entity` and the PR is left untouched. Re-read the head SHA and retry.
+
+**State progression after success:** `behind → unstable → clean` in approximately 20 seconds. The new merge commit appended to the branch re-fires the required checks; once those pass, Cerberus-AZ re-approves and the merge gate opens.
+
+**Resumed polling pattern (handles `behind` mid-loop):**
+
+```bash
+attempt=0
+while true; do
+  state=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.mergeable_state')
+  if [ "$state" = "clean" ]; then break; fi
+  if [ "$state" = "behind" ]; then
+    head=$(gh api repos/{owner}/{repo}/pulls/{N} --jq '.head.sha')
+    gh api -X PUT repos/{owner}/{repo}/pulls/{N}/update-branch -f expected_head_sha=$head
+  fi
+  attempt=$((attempt+1))
+  if [ $attempt -ge 30 ]; then echo "TIMEOUT (last state=$state)"; exit 1; fi
+  sleep 10
+done
+gh pr merge {N} --squash --repo {owner}/{repo}
+```
+
+**Documented incident:** Hermes PR #475 (2026-05-27). The PR sat `mergeable_state=behind` after a close+reopen cycle; main had moved by one commit while the PR was being unblocked from a different pr-sentinel issue. The standard poll-until-`clean` loop would have spun forever. The Hermes-side agent worked out the `update-branch` recovery during execution and persisted the lesson to `docs/lessons-learned.md` (PR #488). Closes AssemblyZero #1347.
+
+---
+
 ## Banned Recovery Actions
 
 These have all been attempted; all violate user-set rules. Memory: `feedback_never_force_overwrite_user_data`. Root CLAUDE.md "Hard Rules" section.
@@ -210,6 +264,23 @@ mergeable_state == "blocked"
 │
 └─ All above pass + Auto Review last run >10 min ago
     └─→ Step 6 (close/reopen) to re-trigger, Step 7
+
+mergeable_state == "behind"
+│
+└─→ "Behind-State Recovery" section above
+    └─→ gh api -X PUT .../update-branch -f expected_head_sha=$head
+    └─→ resume polling → merge
+
+mergeable_state == "unstable" / "unknown"
+│
+└─→ Wait — required checks running or GitHub still computing.
+    NOT this runbook. Re-read mergeable_state every 10s; usually
+    resolves to `clean` or `blocked` within ~20s.
+
+mergeable_state == "dirty"
+│
+└─→ Merge conflicts — manual resolution required.
+    NOT this runbook. Pull main, resolve conflicts, push.
 ```
 
 ---
@@ -228,3 +299,4 @@ mergeable_state == "blocked"
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-05-10 | Initial. Captures the PR #527 incident (negation-parsed-as-Closes) and codifies the broader recovery procedures. |
+| 1.1 | 2026-05-27 | Added "Behind-State Recovery" section for `mergeable_state=behind`. Documents the `update-branch` API technique discovered during Hermes PR #475 unblock and persisted to Hermes `docs/lessons-learned.md` (PR #488). Decision tree extended to handle `behind`, `unstable`, `unknown`, `dirty`. Closes #1347. |
