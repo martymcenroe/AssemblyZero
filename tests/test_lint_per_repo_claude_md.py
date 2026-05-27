@@ -26,10 +26,28 @@ from lint_per_repo_claude_md import (  # noqa: E402
 
 
 def make_repo(tmp_path: Path, name: str, claude_md: str | None,
-              unleashed: dict | None = None) -> Path:
-    """Create a fake repo dir with optional CLAUDE.md and .unleashed.json."""
+              unleashed: dict | None = None,
+              git_kind: str = "dir") -> Path:
+    """Create a fake repo dir with optional CLAUDE.md and .unleashed.json.
+
+    git_kind controls the .git presence:
+    - "dir": .git/ directory (normal repo). Default — matches real repos.
+    - "file": .git file containing 'gitdir: ...' (worktree of a parent repo).
+    - "none": no .git anywhere (not a git repo at all).
+    """
     repo = tmp_path / name
     repo.mkdir()
+    if git_kind == "dir":
+        (repo / ".git").mkdir()
+    elif git_kind == "file":
+        (repo / ".git").write_text(
+            f"gitdir: /some/parent/.git/worktrees/{name}\n",
+            encoding="utf-8",
+        )
+    elif git_kind == "none":
+        pass
+    else:
+        raise ValueError(f"Unknown git_kind: {git_kind}")
     if claude_md is not None:
         (repo / "CLAUDE.md").write_text(claude_md, encoding="utf-8")
     if unleashed is not None:
@@ -402,3 +420,84 @@ def test_format_json_is_valid(tmp_path: Path) -> None:
     assert parsed[0]["repo"] == "good"
     assert parsed[0]["status"] == "PASS"
     assert parsed[0]["findings"] == []
+
+
+# ────────────────────────────────────────────────────────────────────
+# #1343 — noise-filter tests (worktree, non-git, wiki-sidecar)
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_scan_fleet_skips_non_git_dirs(tmp_path: Path) -> None:
+    """Directory without .git is silently excluded (default show_skipped=False)."""
+    make_repo(tmp_path, "real", lean_template("real"), git_kind="dir")
+    make_repo(tmp_path, "notrepo", lean_template("notrepo"), git_kind="none")
+    results = scan_fleet(tmp_path, set())
+    names = {r.repo_name for r in results}
+    assert "real" in names
+    assert "notrepo" not in names
+
+
+def test_scan_fleet_skips_worktree_dirs(tmp_path: Path) -> None:
+    """Directory with .git as a file (worktree pointer) is silently excluded."""
+    make_repo(tmp_path, "parent", lean_template("parent"), git_kind="dir")
+    make_repo(tmp_path, "parent-123", lean_template("parent-123"), git_kind="file")
+    results = scan_fleet(tmp_path, set())
+    names = {r.repo_name for r in results}
+    assert "parent" in names
+    assert "parent-123" not in names
+
+
+def test_scan_fleet_skips_wiki_sidecars(tmp_path: Path) -> None:
+    """Directory name ending in .wiki is silently excluded."""
+    make_repo(tmp_path, "real", lean_template("real"), git_kind="dir")
+    make_repo(tmp_path, "Repo.wiki", lean_template("Repo.wiki"), git_kind="dir")
+    results = scan_fleet(tmp_path, set())
+    names = {r.repo_name for r in results}
+    assert "real" in names
+    assert "Repo.wiki" not in names
+
+
+def test_scan_fleet_does_not_skip_repos_with_wiki_in_name(tmp_path: Path) -> None:
+    """Repo named HermesWiki (no .wiki suffix) is NOT skipped — only the .wiki suffix triggers the filter."""
+    make_repo(tmp_path, "HermesWiki", lean_template("HermesWiki"), git_kind="dir")
+    make_repo(tmp_path, "wiki-content", lean_template("wiki-content"), git_kind="dir")
+    results = scan_fleet(tmp_path, set())
+    names = {r.repo_name for r in results}
+    assert "HermesWiki" in names
+    assert "wiki-content" in names
+
+
+def test_scan_fleet_show_skipped_includes_filtered_with_reason(tmp_path: Path) -> None:
+    """When show_skipped=True, filtered entries appear as SKIPPED with skipped_reason populated."""
+    make_repo(tmp_path, "real", lean_template("real"), git_kind="dir")
+    make_repo(tmp_path, "notrepo", None, git_kind="none")
+    make_repo(tmp_path, "worktree-dir", None, git_kind="file")
+    make_repo(tmp_path, "Sidecar.wiki", None, git_kind="dir")
+    results = scan_fleet(tmp_path, set(), show_skipped=True)
+    by_name = {r.repo_name: r for r in results}
+    assert "real" in by_name
+    assert by_name["real"].status == "PASS"
+    assert by_name["notrepo"].status == "SKIPPED"
+    assert by_name["notrepo"].skipped_reason == "not-a-git-repo"
+    assert by_name["worktree-dir"].status == "SKIPPED"
+    assert by_name["worktree-dir"].skipped_reason == "worktree"
+    assert by_name["Sidecar.wiki"].status == "SKIPPED"
+    assert by_name["Sidecar.wiki"].skipped_reason == "wiki-sidecar"
+
+
+def test_scan_fleet_show_skipped_default_filters_silently(tmp_path: Path) -> None:
+    """Without show_skipped, filtered entries don't appear in results at all."""
+    make_repo(tmp_path, "notrepo", None, git_kind="none")
+    make_repo(tmp_path, "worktree-dir", None, git_kind="file")
+    make_repo(tmp_path, "Sidecar.wiki", None, git_kind="dir")
+    results = scan_fleet(tmp_path, set())
+    assert len(results) == 0
+
+
+def test_scan_fleet_allowlisted_still_shows_with_reason(tmp_path: Path) -> None:
+    """Existing allowlist behavior: SKIPPED with skipped_reason='allowlisted'. Visible regardless of show_skipped."""
+    make_repo(tmp_path, "skipme", lean_template("skipme"), git_kind="dir")
+    results = scan_fleet(tmp_path, {"skipme"})
+    by_name = {r.repo_name: r for r in results}
+    assert by_name["skipme"].status == "SKIPPED"
+    assert by_name["skipme"].skipped_reason == "allowlisted"
