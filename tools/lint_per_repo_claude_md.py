@@ -171,6 +171,8 @@ class RepoResult:
     line_count: int = 0
     findings: list[Finding] = field(default_factory=list)
     unleashed_assemblyzero: Optional[bool] = None  # from .unleashed.json
+    # #1343: when SKIPPED, names why (allowlisted | not-a-git-repo | worktree | wiki-sidecar)
+    skipped_reason: Optional[str] = None
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -373,21 +375,69 @@ def load_allowlist(allowlist_path: Optional[Path]) -> set[str]:
 def scan_fleet(
     projects_root: Path,
     allowlist: set[str],
+    show_skipped: bool = False,
 ) -> list[RepoResult]:
-    """Scan every {projects_root}/*/CLAUDE.md (one level deep) and return results."""
+    """Scan every {projects_root}/*/CLAUDE.md (one level deep) and return results.
+
+    #1343 filters (silently excluded unless show_skipped=True):
+    - Non-git directories (no .git present) — not a repo
+    - Worktree directories (.git is a file, not a dir) — already linted via parent
+    - Wiki sidecar repos (name ends in .wiki) — out of ADR 0219 scope
+
+    Existing behavior (visible regardless of show_skipped):
+    - Allowlisted repos — explicit operator-curated skip, shown as SKIPPED
+    """
     results: list[RepoResult] = []
     for repo_dir in sorted(projects_root.iterdir()):
         if not repo_dir.is_dir():
             continue
         if repo_dir.name.startswith("."):
             continue
+
+        # #1343: filter non-git directories (not a repo at all)
+        git_path = repo_dir / ".git"
+        if not git_path.exists():
+            if show_skipped:
+                results.append(RepoResult(
+                    repo_name=repo_dir.name,
+                    claude_md_path=repo_dir / "CLAUDE.md",
+                    status="SKIPPED",
+                    skipped_reason="not-a-git-repo",
+                ))
+            continue
+
+        # #1343: filter worktrees (.git is a file pointing at parent's gitdir)
+        if git_path.is_file():
+            if show_skipped:
+                results.append(RepoResult(
+                    repo_name=repo_dir.name,
+                    claude_md_path=repo_dir / "CLAUDE.md",
+                    status="SKIPPED",
+                    skipped_reason="worktree",
+                ))
+            continue
+
+        # #1343: filter wiki sidecars (name ends in .wiki)
+        if repo_dir.name.endswith(".wiki"):
+            if show_skipped:
+                results.append(RepoResult(
+                    repo_name=repo_dir.name,
+                    claude_md_path=repo_dir / "CLAUDE.md",
+                    status="SKIPPED",
+                    skipped_reason="wiki-sidecar",
+                ))
+            continue
+
+        # Existing: allowlist (always visible)
         if repo_dir.name in allowlist:
             results.append(RepoResult(
                 repo_name=repo_dir.name,
                 claude_md_path=repo_dir / "CLAUDE.md",
                 status="SKIPPED",
+                skipped_reason="allowlisted",
             ))
             continue
+
         claude_md = repo_dir / "CLAUDE.md"
         results.append(detect_drift(claude_md, repo_dir))
     return results
@@ -401,7 +451,8 @@ def format_text(results: list[RepoResult]) -> str:
         elif r.status == "MISSING":
             tag = "MISSING"
         elif r.status == "SKIPPED":
-            tag = "SKIPPED (allowlisted)"
+            reason = r.skipped_reason or "allowlisted"
+            tag = f"SKIPPED ({reason})"
         elif r.status == "STUB":
             marker_ids = ",".join(str(f.marker) for f in r.findings)
             tag = f"STUB({r.line_count} lines; markers: {marker_ids})"
@@ -447,6 +498,7 @@ def format_json(results: list[RepoResult]) -> str:
             "status": r.status,
             "line_count": r.line_count,
             "unleashed_assemblyzero": r.unleashed_assemblyzero,
+            "skipped_reason": r.skipped_reason,
             "findings": [
                 {
                     "marker": f.marker,
@@ -489,6 +541,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         default="text",
         help="Output format (default: text)",
     )
+    parser.add_argument(
+        "--show-skipped",
+        action="store_true",
+        help="Include silently-filtered entries (non-git dirs, worktrees, "
+             "wiki sidecars) in the output with skipped_reason populated. "
+             "Default: silently exclude these. Allowlisted repos are "
+             "always shown regardless of this flag.",
+    )
     args = parser.parse_args(argv)
 
     projects_root = args.projects_root or Path(config.projects_root())
@@ -502,7 +562,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    results = scan_fleet(projects_root, allowlist)
+    results = scan_fleet(projects_root, allowlist, show_skipped=args.show_skipped)
 
     if args.format == "json":
         print(format_json(results))
