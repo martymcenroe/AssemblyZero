@@ -41,9 +41,17 @@ to stderr with the captured exit code and stderr -- the operator MUST
 investigate that path before the next run, because a leaked worktree
 breaks subsequent `git worktree add` for the same PR number.
 
-On startup, a canary lists pre-existing `*-dependabot-N` worktrees and
-refuses to proceed unless --ignore-orphans is passed (so accumulating
-debt is loud rather than silent).
+#1360: each fleet repo's PRs are processed in worktrees against THAT
+repo's local clone -- not against AssemblyZero's git (which pre-#1360
+hosted every fleet PR's content and accumulated foreign refs). Repos
+without a local clone at `~/Projects/<name>` are skipped with a clear
+diagnostic; no on-the-fly clone is created.
+
+Per-repo orphan canary (also #1360): before processing a repo, scan
+that repo's worktrees for leaked `dependabot-audit-N` pairs from prior
+crashed runs. If any are found the repo is skipped this run (or
+proceeds anyway with --ignore-orphans). Pre-#1360 a single global
+canary aborted the whole fleet on AssemblyZero's state alone.
 
 Usage:
     poetry run python tools/dependabot_review.py [--repo OWNER/REPO] [--dry-run]
@@ -245,10 +253,15 @@ def verify_author(pr: PRInfo) -> bool:
 # Worktree + env setup
 # ---------------------------------------------------------------------------
 
-def create_audit_worktree(main_repo: Path, pr_number: int) -> tuple[Path, str]:
-    worktree = main_repo.parent / f"{main_repo.name}-dependabot-{pr_number}"
+def create_audit_worktree(target_repo: Path, pr_number: int) -> tuple[Path, str]:
+    """#1360: operate on `target_repo`'s git, not the script's invocation
+    directory. Worktree path is `{target_repo.parent}/{target_repo.name}-
+    dependabot-{N}`, hosted by `target_repo.git/worktrees/`. Pre-#1360
+    this used a single main_repo (AssemblyZero) for every fleet repo's
+    PRs, polluting AZ's git objects."""
+    worktree = target_repo.parent / f"{target_repo.name}-dependabot-{pr_number}"
     branch = f"dependabot-audit-{pr_number}"
-    result = run(["git", "-C", str(main_repo), "worktree", "add",
+    result = run(["git", "-C", str(target_repo), "worktree", "add",
                   str(worktree), "-b", branch, "main"])
     if result.returncode != 0:
         sys.exit(f"Could not create worktree: {result.stderr}")
@@ -491,7 +504,7 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
 # Cleanup
 # ---------------------------------------------------------------------------
 
-def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
+def cleanup_worktree(target_repo: Path, worktree: Path, branch: str) -> bool:
     """Remove the audit worktree and its branch. Returns True iff both
     operations exited with status 0.
 
@@ -529,7 +542,7 @@ def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
     if worktree.exists():
         run(["git", "-C", str(worktree), "restore", "."])
 
-    wt_remove = run(["git", "-C", str(main_repo), "worktree", "remove", str(worktree)])
+    wt_remove = run(["git", "-C", str(target_repo), "worktree", "remove", str(worktree)])
     if wt_remove.returncode != 0:
         success = False
         print(
@@ -541,7 +554,7 @@ def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
             file=sys.stderr,
         )
 
-    br_delete = run(["git", "-C", str(main_repo), "branch", "-d", branch])
+    br_delete = run(["git", "-C", str(target_repo), "branch", "-d", branch])
     if br_delete.returncode != 0:
         success = False
         # branch -d failing post-worktree-remove-failure is expected (the
@@ -559,11 +572,11 @@ def cleanup_worktree(main_repo: Path, worktree: Path, branch: str) -> bool:
     return success
 
 
-def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
-    """#1133/#1357: enumerate pre-existing dependabot worktrees that match
-    BOTH the script's path pattern (`{main_name}-dependabot-N`) AND a
-    paired `dependabot-audit-N` branch. Returns list of orphan worktree
-    paths created by this script. Empty list = clean.
+def check_for_orphan_worktrees(target_repo: Path) -> list[str]:
+    """#1133/#1357/#1360: enumerate pre-existing dependabot worktrees in
+    `target_repo`'s git that match BOTH the script's path pattern
+    (`{target_name}-dependabot-N`) AND a paired `dependabot-audit-N`
+    branch. Returns list of orphan worktree paths. Empty list = clean.
 
     The branch is the strong-provenance signal. `create_audit_worktree`
     creates worktrees via `git worktree add ... -b dependabot-audit-N`,
@@ -573,14 +586,18 @@ def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
     path AND the matching branch; if the branch is missing, the worktree
     is not this script's orphan.
 
+    #1360: the canary is now per-repo — each fleet repo's git is scanned
+    separately rather than one global scan against AssemblyZero's git
+    that aborted the whole fleet on per-repo state.
+
     Before #1357 the canary matched on path name alone (`if prefix in
     Path(path).name`), which false-positived on any worktree whose name
-    happened to contain `{main_name}-dependabot-` regardless of origin.
+    happened to contain `{target_name}-dependabot-` regardless of origin.
     """
     # Provenance step: enumerate the script's own audit branches. If
     # none exist, there cannot be any real script orphans.
     branch_result = run([
-        "git", "-C", str(main_repo), "branch", "--list",
+        "git", "-C", str(target_repo), "branch", "--list",
         "--format=%(refname:short)", "dependabot-audit-*",
     ])
     if branch_result.returncode != 0:
@@ -598,11 +615,11 @@ def check_for_orphan_worktrees(main_repo: Path) -> list[str]:
         return []
 
     # Now pair worktrees against the audit-branch set.
-    result = run(["git", "-C", str(main_repo), "worktree", "list", "--porcelain"])
+    result = run(["git", "-C", str(target_repo), "worktree", "list", "--porcelain"])
     if result.returncode != 0:
         return []
     orphans: list[str] = []
-    prefix = f"{main_repo.name}-dependabot-"
+    prefix = f"{target_repo.name}-dependabot-"
     for line in result.stdout.splitlines():
         if not line.startswith("worktree "):
             continue
@@ -716,8 +733,12 @@ def _process_pr_inside_worktree(
     return "merged"
 
 
-def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
+def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> str:
     """Process a single PR. Returns 'merged', 'deferred', or 'errored'.
+
+    #1360: `target_repo` is the local clone of the PR's repo. Pre-#1360
+    this was `main_repo` (always AssemblyZero), which forced foreign
+    PR content into AZ's git.
 
     #1133: cleanup is wrapped in try/finally so it runs on every exit
     path -- normal return, sub-helper return, OR exception (Ctrl-C,
@@ -730,12 +751,12 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
     if not verify_author(pr):
         return "errored"
 
-    worktree, branch = create_audit_worktree(main_repo, pr.number)
+    worktree, branch = create_audit_worktree(target_repo, pr.number)
 
     try:
         return _process_pr_inside_worktree(pr, repo, worktree)
     finally:
-        cleanup_ok = cleanup_worktree(main_repo, worktree, branch)
+        cleanup_ok = cleanup_worktree(target_repo, worktree, branch)
         if not cleanup_ok:
             # cleanup_worktree already printed the diagnostic. Add a
             # one-line WARNING for the operator who's scanning the
@@ -750,6 +771,33 @@ def process_pr(pr: PRInfo, repo: str, main_repo: Path) -> str:
 # ---------------------------------------------------------------------------
 # Fleet enumeration (Issue #1091)
 # ---------------------------------------------------------------------------
+
+def resolve_target_repo_dir(repo_full: str, default_parent: Path) -> Path | None:
+    """#1360: resolve the local clone path for a fleet repo.
+
+    Returns Path to the local clone, or None if not found. Lookup:
+
+    1. If `repo_full`'s short name matches the script's working-dir name
+       (`default_parent.name`), return `default_parent` itself — this is
+       the AZ-self path (or whatever repo the script runs from).
+    2. Sibling-clone path: `default_parent.parent / <short_name>` with a
+       `.git` directory or file inside.
+
+    When neither is present the caller skips the repo with a clear
+    diagnostic; the script does NOT silently fall back to hosting the
+    foreign PR in `default_parent.git` (which was the pre-#1360 design
+    that polluted AZ's `.git/objects` with every fleet repo's commits
+    and caused cleanup failures on foreign untracked-file paths).
+    """
+    repo_name = repo_full.split("/")[-1]
+    if repo_name == default_parent.name:
+        return default_parent
+    candidate = default_parent.parent / repo_name
+    git_path = candidate / ".git"
+    if git_path.exists():
+        return candidate
+    return None
+
 
 def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     """List user-owned repos that we should attempt to process.
@@ -805,8 +853,14 @@ def process_repo(
     repo: str,
     main_repo: Path,
     dry_run: bool = False,
+    ignore_orphans: bool = False,
 ) -> dict[str, list[str]]:
     """Process all dependabot PRs in one repo, sequentially.
+
+    #1360: `main_repo` here is only used as a parent-dir hint for finding
+    the sibling clone of `repo`. The actual worktree machinery operates
+    on the target repo's git, not main_repo's. Skips the repo entirely
+    if no local clone is found.
 
     Within a repo, PR processing is sequential — each merge moves
     `main` and subsequent PRs need to test against the new HEAD.
@@ -820,6 +874,47 @@ def process_repo(
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
     print(f"{'=' * 60}")
+
+    # #1360: resolve the target repo's local clone. Required for per-repo
+    # worktree hosting (the foreign-PR-in-AZ-git pollution fix).
+    target_repo = resolve_target_repo_dir(repo, main_repo)
+    if target_repo is None:
+        repo_name = repo.split("/")[-1]
+        expected_path = main_repo.parent / repo_name
+        print(
+            f"  SKIP: no local clone for {repo} (looked at {expected_path}). "
+            f"Clone the repo locally and re-run.",
+            file=sys.stderr,
+        )
+        sub["errored"].append(f"{repo}#missing-clone")
+        return sub
+
+    # #1360/#1358: per-repo orphan canary. Pre-#1360 a global canary ran
+    # once against AssemblyZero's worktree list and aborted the whole
+    # fleet on per-repo state. Now each repo's git is scanned independently
+    # — an orphan on dispatch blocks only dispatch's PRs, AZ proceeds.
+    orphans = check_for_orphan_worktrees(target_repo)
+    if orphans:
+        print(
+            f"  WARNING: pre-existing dependabot worktrees on "
+            f"{target_repo.name}:",
+            file=sys.stderr,
+        )
+        for o in orphans:
+            print(f"    {o}", file=sys.stderr)
+        if not ignore_orphans:
+            print(
+                f"  SKIP: {repo} this run. Resolve the orphans, then re-run. "
+                f"Pass --ignore-orphans to override.",
+                file=sys.stderr,
+            )
+            sub["errored"].append(f"{repo}#orphan-worktrees")
+            return sub
+        print(
+            f"  proceeding anyway because --ignore-orphans was set",
+            file=sys.stderr,
+        )
+
     prs = list_dependabot_prs(repo)
     if not prs:
         print(f"  No open dependabot PRs in {repo}.")
@@ -831,7 +926,7 @@ def process_repo(
     if dry_run:
         return sub
     for pr in prs:
-        status = process_pr(pr, repo, main_repo)
+        status = process_pr(pr, repo, target_repo)
         sub[status].append(f"{repo}#{pr.number}")
     return sub
 
@@ -885,32 +980,13 @@ def main() -> None:
     if not (main_repo / ".git").exists():
         sys.exit(f"Not a git repo: {main_repo}")
 
-    # #1133: orphan-worktree canary BEFORE any new worktrees are created.
-    # If a prior run leaked state, refuse to proceed unless explicitly
-    # overridden -- accumulating orphans is what got us into the #1133
-    # situation in the first place.
-    orphans = check_for_orphan_worktrees(main_repo)
-    if orphans:
-        print(
-            f"\nWARNING: pre-existing dependabot worktrees detected on "
-            f"{main_repo.name}:",
-            file=sys.stderr,
-        )
-        for o in orphans:
-            print(f"  {o}", file=sys.stderr)
-        if not args.ignore_orphans:
-            print(
-                "\nThese are leftovers from prior runs that didn't reach "
-                "cleanup.\nAborting to prevent further pile-up. Investigate "
-                "the orphans, clean them up, then re-run. Pass "
-                "--ignore-orphans to override (not recommended).",
-                file=sys.stderr,
-            )
-            sys.exit(3)
-        print(
-            "  proceeding anyway because --ignore-orphans was set",
-            file=sys.stderr,
-        )
+    # #1360: the orphan-worktree canary is now per-repo (inside
+    # process_repo). Pre-#1360 there was a global canary here that
+    # aborted the whole fleet on AssemblyZero's worktree state; that
+    # blocked work across 16 repos every time AZ had even one orphan,
+    # and conflated foreign-repo worktrees (which pre-#1360 lived in
+    # AZ's namespace) with AZ's own orphans. See #1360 for the full
+    # investigation; #1358 closed by this same change.
 
     # Issue #1091: fleet mode enumerates user-owned Poetry repos.
     if args.fleet:
@@ -944,7 +1020,10 @@ def main() -> None:
                   f"worker(s)...")
             with ThreadPoolExecutor(max_workers=args.workers) as executor:
                 futures = {
-                    executor.submit(process_repo, repo, main_repo, args.dry_run): repo
+                    executor.submit(
+                        process_repo, repo, main_repo, args.dry_run,
+                        args.ignore_orphans,
+                    ): repo
                     for repo in repos
                 }
                 for future in as_completed(futures):
@@ -958,7 +1037,9 @@ def main() -> None:
                         results[k].extend(sub[k])
         else:
             for repo in repos:
-                sub = process_repo(repo, main_repo, args.dry_run)
+                sub = process_repo(
+                    repo, main_repo, args.dry_run, args.ignore_orphans,
+                )
                 for k in ("merged", "deferred", "errored"):
                     results[k].extend(sub[k])
     finally:

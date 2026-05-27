@@ -480,3 +480,182 @@ class TestCheckForOrphanWorktrees:
                           side_effect=_fake_run_canary(branches, porcelain)):
             orphans = dependabot_review.check_for_orphan_worktrees(main_repo)
         assert orphans == []
+
+
+# ---- #1360: target-repo resolution + per-repo processing ----
+
+
+class TestResolveTargetRepoDir:
+    """#1360: each fleet repo's PRs must be processed against THAT repo's
+    local clone, not the script's invocation directory."""
+
+    def test_returns_default_parent_for_self_repo(self, tmp_path):
+        """When the fleet repo matches the script's working directory by
+        name, return that directory directly. This is the AZ-self path
+        when processing AssemblyZero's own dependabot PRs."""
+        default_parent = tmp_path / "AssemblyZero"
+        default_parent.mkdir()
+        (default_parent / ".git").mkdir()
+        resolved = dependabot_review.resolve_target_repo_dir(
+            "martymcenroe/AssemblyZero", default_parent,
+        )
+        assert resolved == default_parent
+
+    def test_returns_sibling_clone_when_present(self, tmp_path):
+        """For a foreign fleet repo (e.g., dispatch), look for a sibling
+        clone in `default_parent.parent / <repo_name>`."""
+        default_parent = tmp_path / "AssemblyZero"
+        default_parent.mkdir()
+        (default_parent / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        (sibling / ".git").mkdir()
+        resolved = dependabot_review.resolve_target_repo_dir(
+            "martymcenroe/dispatch", default_parent,
+        )
+        assert resolved == sibling
+
+    def test_returns_none_when_sibling_missing(self, tmp_path):
+        """If the sibling clone is missing, return None so the caller
+        skips the repo. Pre-#1360 the script silently used the script's
+        own .git as a fallback, polluting AZ's objects with foreign refs."""
+        default_parent = tmp_path / "AssemblyZero"
+        default_parent.mkdir()
+        (default_parent / ".git").mkdir()
+        resolved = dependabot_review.resolve_target_repo_dir(
+            "martymcenroe/dispatch", default_parent,
+        )
+        assert resolved is None
+
+    def test_returns_none_when_sibling_is_not_a_git_repo(self, tmp_path):
+        """A directory that exists but doesn't have a `.git` is not a
+        local clone — return None."""
+        default_parent = tmp_path / "AssemblyZero"
+        default_parent.mkdir()
+        (default_parent / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        # No .git inside `sibling`.
+        resolved = dependabot_review.resolve_target_repo_dir(
+            "martymcenroe/dispatch", default_parent,
+        )
+        assert resolved is None
+
+    def test_accepts_git_as_file_for_worktree_layouts(self, tmp_path):
+        """git worktrees use `.git` as a FILE (gitlink), not a directory.
+        The resolver must accept either form."""
+        default_parent = tmp_path / "AssemblyZero"
+        default_parent.mkdir()
+        (default_parent / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        (sibling / ".git").write_text("gitdir: ../other/.git/worktrees/foo\n")
+        resolved = dependabot_review.resolve_target_repo_dir(
+            "martymcenroe/dispatch", default_parent,
+        )
+        assert resolved == sibling
+
+
+class TestProcessRepoPerRepoBehavior:
+    """#1360: process_repo resolves the target repo per fleet entry and
+    skips the repo when the local clone is missing or has orphan
+    worktrees. Replaces the pre-#1360 fleet-wide abort on AZ state."""
+
+    def test_skips_repo_when_local_clone_missing(self, tmp_path, capsys):
+        main_repo = tmp_path / "AssemblyZero"
+        main_repo.mkdir()
+        (main_repo / ".git").mkdir()
+        # No `tmp_path / "dispatch"` exists -- resolver returns None.
+        sub = dependabot_review.process_repo("martymcenroe/dispatch", main_repo)
+        assert sub["merged"] == []
+        assert sub["deferred"] == []
+        assert sub["errored"] == ["martymcenroe/dispatch#missing-clone"]
+        err = capsys.readouterr().err
+        assert "SKIP: no local clone for martymcenroe/dispatch" in err
+
+    def test_skips_repo_when_orphan_worktrees_present(self, tmp_path, capsys):
+        """A clone exists but has paired audit-branch+worktree orphans
+        from a prior crashed run -- skip this repo with a clear log,
+        but DO NOT abort the rest of the fleet (#1358)."""
+        main_repo = tmp_path / "AssemblyZero"
+        main_repo.mkdir()
+        (main_repo / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        (sibling / ".git").mkdir()
+
+        # Mock the canary to return one orphan path.
+        with patch.object(
+            dependabot_review, "check_for_orphan_worktrees",
+            return_value=["/tmp/dispatch-dependabot-99"],
+        ), patch.object(dependabot_review, "list_dependabot_prs") as mock_list:
+            sub = dependabot_review.process_repo(
+                "martymcenroe/dispatch", main_repo, ignore_orphans=False,
+            )
+
+        # Should NOT have called list_dependabot_prs -- skipped before that.
+        mock_list.assert_not_called()
+        assert sub["errored"] == ["martymcenroe/dispatch#orphan-worktrees"]
+        err = capsys.readouterr().err
+        assert "SKIP: martymcenroe/dispatch this run" in err
+
+    def test_proceeds_past_orphans_with_ignore_orphans(self, tmp_path):
+        """`--ignore-orphans` still lets the repo proceed despite orphans."""
+        main_repo = tmp_path / "AssemblyZero"
+        main_repo.mkdir()
+        (main_repo / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        (sibling / ".git").mkdir()
+
+        with patch.object(
+            dependabot_review, "check_for_orphan_worktrees",
+            return_value=["/tmp/dispatch-dependabot-99"],
+        ), patch.object(
+            dependabot_review, "list_dependabot_prs", return_value=[],
+        ):
+            sub = dependabot_review.process_repo(
+                "martymcenroe/dispatch", main_repo, ignore_orphans=True,
+            )
+
+        # Reached list_dependabot_prs (returned [] -- no PRs), no skip recorded.
+        assert sub["errored"] == []
+        assert sub["merged"] == []
+        assert sub["deferred"] == []
+
+    def test_passes_target_repo_not_main_repo_to_process_pr(self, tmp_path):
+        """#1360 invariant: when processing a foreign repo's PR, the
+        third arg to process_pr is the foreign clone, NOT the script's
+        invocation directory. This is what stops AZ's .git from being
+        polluted with foreign PR heads."""
+        main_repo = tmp_path / "AssemblyZero"
+        main_repo.mkdir()
+        (main_repo / ".git").mkdir()
+        sibling = tmp_path / "dispatch"
+        sibling.mkdir()
+        (sibling / ".git").mkdir()
+
+        pr = dependabot_review.PRInfo(
+            number=42, title="bump foo", author_login="dependabot[bot]",
+            body="", head_ref="dependabot/pip/foo",
+        )
+        process_pr_calls: list[tuple] = []
+        def fake_process_pr(p, r, target):
+            process_pr_calls.append((p.number, r, target))
+            return "merged"
+
+        with patch.object(
+            dependabot_review, "check_for_orphan_worktrees", return_value=[],
+        ), patch.object(
+            dependabot_review, "list_dependabot_prs", return_value=[pr],
+        ), patch.object(dependabot_review, "process_pr", side_effect=fake_process_pr):
+            dependabot_review.process_repo("martymcenroe/dispatch", main_repo)
+
+        assert len(process_pr_calls) == 1
+        pr_num, repo, target = process_pr_calls[0]
+        assert pr_num == 42
+        assert repo == "martymcenroe/dispatch"
+        assert target == sibling, (
+            f"process_pr received {target} as target_repo; expected "
+            f"the foreign clone at {sibling}, not main_repo {main_repo}"
+        )
