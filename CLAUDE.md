@@ -1,6 +1,6 @@
 # CLAUDE.md - AssemblyZero
 
-Universal rules are in `C:\Users\mcwiz\Projects\CLAUDE.md` (auto-loaded for all projects).
+Universal rules at `Projects/CLAUDE.md` are auto-loaded for all projects.
 
 AssemblyZero is the canonical source for core rules, tools, and workflow.
 Fix things in AssemblyZero, not in local project copies. Tools execute from `AssemblyZero/tools/`, not copied locally.
