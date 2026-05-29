@@ -6,6 +6,7 @@ Issue #305: End-to-End Orchestration Workflow (Issue → Code)
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TypedDict
 
 from assemblyzero.workflows.orchestrator.config import OrchestratorConfig
@@ -26,6 +27,10 @@ class OrchestrationState(TypedDict, total=False):
 
     issue_number: int
     current_stage: str  # "triage", "lld", "spec", "impl", "pr", "done"
+
+    # Repo targeting (Issue #1374)
+    target_repo: str  # Where the work happens (outputs, worktree, gh CLI)
+    assemblyzero_root: str  # Where AssemblyZero lives (templates/prompts)
 
     # Artifacts produced at each stage
     issue_brief_path: str
@@ -62,19 +67,41 @@ _STAGE_ARTIFACT_KEY: dict[str, str] = {
 }
 
 
+def default_assemblyzero_root() -> str:
+    """Resolve the AssemblyZero repo root from this module's location.
+
+    state.py lives at assemblyzero/workflows/orchestrator/state.py, so the
+    repo root is three parents up from the package directory.
+    """
+    return str(Path(__file__).resolve().parents[3])
+
+
 def create_initial_state(
     issue_number: int,
     config: OrchestratorConfig,
+    target_repo: str | None = None,
+    assemblyzero_root: str | None = None,
 ) -> OrchestrationState:
-    """Create a fresh orchestration state for a new pipeline run."""
+    """Create a fresh orchestration state for a new pipeline run.
+
+    Issue #1374: ``target_repo`` is where the work happens (outputs, worktree,
+    gh CLI); ``assemblyzero_root`` is where AssemblyZero lives (templates).
+    Both default to the AssemblyZero root, so omitting them builds AssemblyZero
+    (backward compatible).
+    """
     if issue_number < 1:
         msg = "issue_number must be positive"
         raise ValueError(msg)
+
+    resolved_root = assemblyzero_root or default_assemblyzero_root()
+    resolved_target = target_repo or resolved_root
 
     now = datetime.now(tz=timezone.utc).isoformat()
     return OrchestrationState(
         issue_number=issue_number,
         current_stage="triage",
+        target_repo=resolved_target,
+        assemblyzero_root=resolved_root,
         issue_brief_path="",
         lld_path="",
         spec_path="",

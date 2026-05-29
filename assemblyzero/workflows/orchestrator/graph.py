@@ -34,6 +34,7 @@ from assemblyzero.workflows.orchestrator.state import (
     OrchestrationState,
     StageResult,
     create_initial_state,
+    default_assemblyzero_root,
     get_next_stage,
     update_stage_result,
 )
@@ -192,6 +193,8 @@ def orchestrate(
     config: OrchestratorConfig | None = None,
     resume_from: str | None = None,
     dry_run: bool = False,
+    target_repo: str | None = None,
+    assemblyzero_root: str | None = None,
 ) -> OrchestrationResult:
     """Run full pipeline from issue to PR.
 
@@ -200,11 +203,21 @@ def orchestrate(
         config: Override default configuration (merged with defaults)
         resume_from: Stage name to resume from (uses persisted state)
         dry_run: If True, show planned stages without execution
+        target_repo: Repo the pipeline builds (outputs, worktree, gh CLI).
+            Defaults to the AssemblyZero root, so omitting it builds
+            AssemblyZero (Issue #1374).
+        assemblyzero_root: Where AssemblyZero lives (templates). Defaults to
+            the resolved AssemblyZero root.
 
     Returns:
         OrchestrationResult with final status and artifacts
     """
     start_time = time.monotonic()
+
+    # Resolve repo targeting once (Issue #1374). target_repo defaults to the
+    # AssemblyZero root, so omitting --repo builds AssemblyZero.
+    resolved_root = assemblyzero_root or default_assemblyzero_root()
+    resolved_target = target_repo or resolved_root
 
     # Load configuration
     effective_config = load_config(config)
@@ -240,11 +253,21 @@ def orchestrate(
             state_dict = dict(state)
             state_dict["current_stage"] = resume_stage
             state_dict["config"] = effective_config
+            # Repo targeting on resume: explicit arg wins, else keep what was
+            # persisted, else fall back to the default (Issue #1374).
+            state_dict["assemblyzero_root"] = (
+                assemblyzero_root or state_dict.get("assemblyzero_root") or resolved_root
+            )
+            state_dict["target_repo"] = (
+                target_repo or state_dict.get("target_repo") or state_dict["assemblyzero_root"]
+            )
             state = OrchestrationState(**state_dict)
         else:
-            state = create_initial_state(issue_number, effective_config)
+            state = create_initial_state(
+                issue_number, effective_config, resolved_target, resolved_root
+            )
             # Detect existing artifacts and skip completed stages
-            existing = detect_existing_artifacts(issue_number)
+            existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
             for stage in STAGE_ORDER:
                 skip, artifact_path = should_skip_stage(state, stage, existing)
                 if skip and artifact_path:
@@ -264,7 +287,7 @@ def orchestrate(
             print(f"\n[ORCHESTRATOR] Dry run for issue #{issue_number}")
             print(f"{'Stage':<10} {'Status':<12} {'Artifact'}")
             print("-" * 60)
-            existing = detect_existing_artifacts(issue_number)
+            existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
             for stage in STAGE_ORDER:
                 stage_result = state.get("stage_results", {}).get(stage, {})
                 status = stage_result.get("status", "pending")
