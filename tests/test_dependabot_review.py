@@ -26,7 +26,7 @@ def test_cleanup_worktree_uses_safe_branch_d_not_capital_D(tmp_path):
     (worktree / "pyproject.toml").write_text("")  # so evict_poetry_venv runs
 
     calls: list[list[str]] = []
-    def fake_run(cmd, cwd=None, timeout=None):
+    def fake_run(cmd, *args, **kwargs):
         calls.append(cmd)
         return _mk_completed()
 
@@ -48,7 +48,7 @@ def test_cleanup_worktree_call_order_evict_remove_branch(tmp_path):
     (worktree / "pyproject.toml").write_text("")
 
     calls: list[list[str]] = []
-    def fake_run(cmd, cwd=None, timeout=None):
+    def fake_run(cmd, *args, **kwargs):
         calls.append(cmd)
         return _mk_completed()
 
