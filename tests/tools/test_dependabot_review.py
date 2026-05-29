@@ -409,3 +409,54 @@ class TestRunTestsDisablesBytecode:
 
         assert captured["env"] is not None, "run_tests must pass env to run()"
         assert captured["env"].get("PYTHONDONTWRITEBYTECODE") == "1"
+
+
+class TestCleanupWorktreeNoGitRestore:
+    """#1377: cleanup_worktree must NOT use `git restore` (banned B7 pattern).
+    A dirty worktree is surfaced loudly and left for the non-`--force`
+    `git worktree remove` to refuse, never silently wiped.
+    """
+
+    def _run_cleanup(self, monkeypatch, tmp_path, dirt: str):
+        """Drive cleanup_worktree with a stubbed run() that reports `dirt`
+        (a git status --porcelain string) and otherwise succeeds. Returns
+        (result, list_of_commands_run)."""
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
+        commands: list[list[str]] = []
+
+        def _fake_run(cmd, *args, **kwargs):
+            commands.append(list(cmd))
+            stdout = ""
+            if "status" in cmd and "--porcelain" in cmd:
+                stdout = dirt
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(dependabot_review, "run", _fake_run)
+        result = dependabot_review.cleanup_worktree(tmp_path, tmp_path, "dependabot-audit-1")
+        return result, commands
+
+    def test_never_invokes_git_restore_when_clean(self, monkeypatch, tmp_path):
+        result, commands = self._run_cleanup(monkeypatch, tmp_path, dirt="")
+        assert result is True
+        assert not any("restore" in c for c in commands), \
+            f"cleanup_worktree must not call git restore; saw: {commands}"
+
+    def test_never_invokes_git_restore_when_dirty(self, monkeypatch, tmp_path):
+        # Even with a dirty tree, the banned restore must NOT appear.
+        result, commands = self._run_cleanup(
+            monkeypatch, tmp_path, dirt=" M docs/0003-file-inventory.md"
+        )
+        assert not any("restore" in c for c in commands), \
+            f"cleanup_worktree must not call git restore even when dirty; saw: {commands}"
+
+    def test_dirty_worktree_emits_warning(self, monkeypatch, tmp_path, capsys):
+        self._run_cleanup(monkeypatch, tmp_path, dirt=" M docs/0003-file-inventory.md")
+        err = capsys.readouterr().err
+        assert "dirty" in err.lower()
+        assert "docs/0003-file-inventory.md" in err
+        assert "do NOT add a `git restore`" in err
+
+    def test_clean_worktree_emits_no_dirty_warning(self, monkeypatch, tmp_path, capsys):
+        self._run_cleanup(monkeypatch, tmp_path, dirt="")
+        err = capsys.readouterr().err
+        assert "dirty" not in err.lower()

@@ -538,19 +538,34 @@ def cleanup_worktree(target_repo: Path, worktree: Path, branch: str) -> bool:
     success = True
     evict_poetry_venv(worktree)
 
-    # Defensive: discard any working-tree modifications before the
-    # worktree-remove attempt. Something in the audit run (still
-    # unidentified after #1155's inventory.py fix -- not gh pr checkout,
-    # not poetry install, not pytest collection in standalone testing)
-    # auto-modifies docs/0003-file-inventory.md inside the worktree.
-    # That dirties the worktree, making `git worktree remove` (no --force)
-    # refuse and leak the worktree. `git restore .` reverts working-tree
-    # changes to HEAD without touching the index or refs -- no --force,
-    # no --hard, just standard restore. Any commits that the audit run
-    # made (it doesn't make any; gh pr checkout uses --detach and we
-    # never commit on the audit branch) would be untouched.
+    # #1377: do NOT `git restore .` here. The two historical sources of
+    # worktree dirt are both fixed at the source now: the inventory-node
+    # cwd-write (#1155, raises instead of scribbling on cwd) and pytest
+    # bytecode caching (#1371, PYTHONDONTWRITEBYTECODE=1 in run_tests).
+    # `git restore <path>` is a banned working-tree-destroying pattern
+    # (Projects/CLAUDE.md) -- it silently discards any uncommitted change.
+    # If a worktree is unexpectedly dirty after those fixes, that is a NEW
+    # writer we want to SEE, not silently wipe. Surface it loudly and let
+    # the non-`--force` `git worktree remove` below refuse (its failure is
+    # already reported LOUDLY). The audit run makes no commits -- gh pr
+    # checkout uses --detach (#1107) -- so a dirty tree is always a bug to
+    # diagnose, never expected state.
     if worktree.exists():
-        run(["git", "-C", str(worktree), "restore", "."])
+        dirty = run(["git", "-C", str(worktree), "status", "--porcelain"],
+                    quiet_on_failure=True)
+        dirt = (dirty.stdout or "").strip()
+        if dirt:
+            print(
+                f"  CLEANUP WARNING: audit worktree {worktree} is dirty before "
+                f"removal. This is unexpected (the audit run commits nothing and "
+                f"the known dirt sources are fixed: #1155 inventory, #1371 .pyc). "
+                f"Investigate the writer -- do NOT add a `git restore`. "
+                f"`git worktree remove` (no --force) will refuse below if this "
+                f"dirt blocks it.\n"
+                f"  git status --porcelain:\n"
+                + "\n".join(f"    {line}" for line in dirt.splitlines()),
+                file=sys.stderr,
+            )
 
     wt_remove = run(["git", "-C", str(target_repo), "worktree", "remove", str(worktree)])
     if wt_remove.returncode != 0:
