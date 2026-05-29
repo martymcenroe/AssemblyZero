@@ -1087,8 +1087,11 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 def create_unleashed_json(project_path: Path) -> None:
     """Create .unleashed.json with standard wrapper configuration.
 
-    Sets model=opus, effort=max so unleashed wrappers pass the correct
-    CLI flags. Without this file, wrappers fall back to tool defaults.
+    Sets model=claude-opus-4-7[1M], effort=max so unleashed wrappers pass
+    the correct CLI flags. Without this file, wrappers fall back to tool
+    defaults. The explicit model literal (not the bare "opus" alias) pins
+    to 4.7[1M] — the alias would resolve to LATEST in Claude CLI and
+    bypass the user's pin.
 
     `assemblyZero` defaults to True (#1059): repos created by this tool
     are by definition AssemblyZero-managed, so /onboard should load
@@ -1104,7 +1107,7 @@ def create_unleashed_json(project_path: Path) -> None:
     content = json.dumps({
         "profile": "default",
         "claude": {
-            "model": "opus",
+            "model": "claude-opus-4-7[1M]",
             "effort": "max"
         },
         "assemblyZero": True,
@@ -2516,7 +2519,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11b: Create .unleashed.json (wrapper configuration)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
-    print("  Created .unleashed.json (model=opus, effort=max)")
+    print("  Created .unleashed.json (model=claude-opus-4-7[1M], effort=max)")
 
     # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
     # pytest, pytest-cov, conftest.py. Required for AZ implementation
