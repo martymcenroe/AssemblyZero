@@ -62,6 +62,7 @@ Issue: #949 | Related: #692, #1116 | Runbook: 0911 v2.0
 import argparse
 import datetime
 import json
+import os
 import re
 import subprocess
 import sys
@@ -120,7 +121,8 @@ class PRInfo:
 
 def run(cmd: list[str], cwd: str | None = None,
         timeout: int | None = None,
-        quiet_on_failure: bool = False) -> subprocess.CompletedProcess:
+        quiet_on_failure: bool = False,
+        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run a subprocess and echo the command to stdout.
 
     `encoding="utf-8", errors="replace"` is mandatory on Windows.
@@ -153,6 +155,7 @@ def run(cmd: list[str], cwd: str | None = None,
             encoding="utf-8", errors="replace",
             timeout=timeout, check=False,
             creationflags=_CREATION_FLAGS,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         ts2 = datetime.datetime.now().strftime("%H:%M:%S")
@@ -319,8 +322,15 @@ def install_deps(worktree: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 def run_tests(worktree: Path) -> int:
+    # #1371: PYTHONDONTWRITEBYTECODE=1 stops Python from writing
+    # __pycache__/*.pyc next to the target repo's test files during the audit
+    # run. Without it, any target repo whose .gitignore lacks __pycache__/
+    # ends up with untracked .pyc files that dirty the audit worktree, making
+    # `git worktree remove` (no --force) refuse and leak the worktree.
+    pytest_env = os.environ.copy()
+    pytest_env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = run(["poetry", "run", "pytest", "-q", "--tb=short"],
-                 cwd=str(worktree), timeout=PYTEST_TIMEOUT_S)
+                 cwd=str(worktree), timeout=PYTEST_TIMEOUT_S, env=pytest_env)
     print(f"  pytest exit code: {result.returncode}")
     return result.returncode
 

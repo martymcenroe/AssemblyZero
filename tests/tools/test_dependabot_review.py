@@ -387,3 +387,25 @@ class TestProcessPrDeferralStaleBranchPriority:
         assert result == "deferred"
         assert "REBASE" not in actions
         assert "RECREATE" not in actions
+
+
+class TestRunTestsDisablesBytecode:
+    """#1371: run_tests must disable Python bytecode caching so pytest does not
+    write __pycache__/*.pyc into the audit worktree. Untracked .pyc files dirty
+    the worktree and make `git worktree remove` (no --force) refuse, leaking it.
+    """
+
+    def test_run_tests_sets_pythondontwritebytecode(self, monkeypatch, tmp_path):
+        captured: dict = {}
+
+        def _capture(cmd, *args, **kwargs):
+            captured["cmd"] = list(cmd)
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+
+        dependabot_review.run_tests(tmp_path)
+
+        assert captured["env"] is not None, "run_tests must pass env to run()"
+        assert captured["env"].get("PYTHONDONTWRITEBYTECODE") == "1"
