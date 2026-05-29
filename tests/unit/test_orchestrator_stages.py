@@ -11,6 +11,7 @@ from assemblyzero.workflows.orchestrator.config import get_default_config
 from assemblyzero.workflows.orchestrator.stages import (
     STAGE_RUNNERS,
     check_human_gate,
+    run_pr_stage,
     run_triage_stage,
     should_skip_stage,
 )
@@ -123,3 +124,57 @@ class TestStageRunners:
         from assemblyzero.workflows.orchestrator.state import STAGE_ORDER
         for stage in STAGE_ORDER:
             assert stage in STAGE_RUNNERS, f"Missing runner for stage: {stage}"
+
+
+class TestRunPrStage:
+    """run_pr_stage must emit a pr-sentinel-compliant PR (Closes #1366).
+
+    pr-sentinel validates the PR *body* for ``Closes #N``; the universal rule
+    also requires it in the title. The head branch must be the branch actually
+    checked out in the worktree, not a hardcoded ``issue-{N}``.
+    """
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_pr_body_title_carry_closes_and_branch_matches_worktree(self, mock_run):
+        issue = 1366
+        worktree_branch = "1366-pr-stage-closes-ref"
+
+        def fake_run(cmd, *args, **kwargs):
+            out = MagicMock()
+            if cmd[:2] == ["git", "rev-parse"]:
+                out.stdout = f"{worktree_branch}\n"
+            elif cmd[:3] == ["gh", "pr", "create"]:
+                out.stdout = "https://github.com/martymcenroe/AssemblyZero/pull/9999\n"
+            else:
+                out.stdout = ""
+            return out
+
+        mock_run.side_effect = fake_run
+
+        config = get_default_config()
+        state = create_initial_state(issue, config)
+        state["worktree_path"] = "/tmp/AssemblyZero-1366"
+
+        new_state = run_pr_stage(state)
+
+        assert new_state["stage_results"]["pr"]["status"] == "passed"
+
+        # The `gh pr create` invocation must carry Closes #N in body + title
+        # and point --head at the real worktree branch.
+        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
+        assert len(pr_calls) == 1, "expected exactly one `gh pr create` call"
+        argv = pr_calls[0].args[0]
+        body = argv[argv.index("--body") + 1]
+        title = argv[argv.index("--title") + 1]
+        head = argv[argv.index("--head") + 1]
+
+        assert f"Closes #{issue}" in body, f"PR body missing Closes #{issue}: {body!r}"
+        assert f"Closes #{issue}" in title, f"PR title missing Closes #{issue}: {title!r}"
+        assert head == worktree_branch, f"--head {head!r} != worktree branch {worktree_branch!r}"
+
+        # The branch is pushed by its real name, never the hardcoded issue-{N}.
+        push_calls = [c for c in mock_run.call_args_list if c.args[0][:2] == ["git", "push"]]
+        assert len(push_calls) == 1, "expected exactly one `git push` call"
+        pushed_argv = push_calls[0].args[0]
+        assert worktree_branch in pushed_argv
+        assert f"issue-{issue}" not in pushed_argv
