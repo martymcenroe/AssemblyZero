@@ -17,6 +17,7 @@ from pathlib import Path
 from assemblyzero.workflows.orchestrator.artifacts import (
     detect_existing_artifacts,
     validate_artifact,
+    worktree_path_for,
 )
 from assemblyzero.workflows.orchestrator.state import (
     OrchestrationState,
@@ -107,7 +108,7 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
     start_time = time.monotonic()
 
     # Check for existing artifact
-    existing = detect_existing_artifacts(issue_number)
+    existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
     skip, artifact_path = should_skip_stage(state, stage, existing)
     if skip and artifact_path:
         result = _make_stage_result(
@@ -121,13 +122,15 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
     # Execute triage sub-workflow
     try:
         # Import here to avoid circular dependencies and allow mocking
-        from assemblyzero.workflows.requirements.graph import create_graph as create_requirements_graph
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         app = graph.compile()
         sub_result = app.invoke({
             "issue_number": issue_number,
             "workflow_type": "issue",
+            "target_repo": state.get("target_repo", ""),
+            "assemblyzero_root": state.get("assemblyzero_root", ""),
         })
 
         # Check for artifact
@@ -169,7 +172,7 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
     start_time = time.monotonic()
 
     # Check for existing artifact
-    existing = detect_existing_artifacts(issue_number)
+    existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
     skip, artifact_path = should_skip_stage(state, stage, existing)
     if skip and artifact_path:
         result = _make_stage_result(
@@ -181,13 +184,15 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
         return update_stage_result(state, stage, result)
 
     try:
-        from assemblyzero.workflows.requirements.graph import create_graph as create_requirements_graph
+        from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
         graph = create_requirements_graph()
         app = graph.compile()
         sub_result = app.invoke({
             "issue_number": issue_number,
             "workflow_type": "lld",
+            "target_repo": state.get("target_repo", ""),
+            "assemblyzero_root": state.get("assemblyzero_root", ""),
         })
 
         lld_path = sub_result.get("lld_path", "")
@@ -238,7 +243,7 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     start_time = time.monotonic()
 
     # Check for existing artifact
-    existing = detect_existing_artifacts(issue_number)
+    existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
     skip, artifact_path = should_skip_stage(state, stage, existing)
     if skip and artifact_path:
         result = _make_stage_result(
@@ -250,7 +255,7 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         return update_stage_result(state, stage, result)
 
     try:
-        from assemblyzero.workflows.implementation_spec.graph import create_graph as create_spec_graph
+        from assemblyzero.workflows.implementation_spec.graph import create_implementation_spec_graph as create_spec_graph
 
         lld_path = state.get("lld_path", "")
         graph = create_spec_graph()
@@ -258,6 +263,8 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         sub_result = app.invoke({
             "issue_number": issue_number,
             "lld_path": lld_path,
+            "repo_root": state.get("target_repo", ""),
+            "assemblyzero_root": state.get("assemblyzero_root", ""),
         })
 
         spec_path = sub_result.get("spec_path", "")
@@ -299,21 +306,29 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
 
     import subprocess
 
-    worktree_path = Path(f"../AssemblyZero-{issue_number}")
+    target_repo = state.get("target_repo", "")
+    worktree_path = worktree_path_for(issue_number, target_repo or None)
     branch_name = f"issue-{issue_number}"
 
     try:
-        # Ensure worktree exists
+        # Ensure the worktree exists, carved from the TARGET repo (Issue #1374).
+        # `git -C {target_repo}` makes the worktree belong to the target, not
+        # the orchestrator's own cwd. Without target_repo we fall back to the
+        # orchestrator's repo (AssemblyZero self-build).
         if not worktree_path.is_dir():
+            add_cmd = ["git"]
+            if target_repo:
+                add_cmd += ["-C", target_repo]
+            add_cmd += ["worktree", "add", str(worktree_path), "-b", branch_name]
             run_command(
-                ["git", "worktree", "add", str(worktree_path), "-b", branch_name],
+                add_cmd,
                 check=True,
                 capture_output=True,
                 text=True,
             )
 
         # Run implementation workflow
-        from assemblyzero.workflows.testing.graph import create_graph as create_impl_graph
+        from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
 
         spec_path = state.get("spec_path", "")
         graph = create_impl_graph()
@@ -322,6 +337,8 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "issue_number": issue_number,
             "spec_path": spec_path,
             "worktree_path": str(worktree_path),
+            "repo_root": target_repo,
+            "original_repo_root": target_repo,
         })
 
         error_msg = sub_result.get("error_message", "")

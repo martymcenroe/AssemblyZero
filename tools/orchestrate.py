@@ -111,6 +111,7 @@ Examples:
         """,
     )
     parser.add_argument("--issue", type=int, required=True, help="GitHub issue number")
+    parser.add_argument("--repo", type=str, default=None, help="Target repository path to build (default: AssemblyZero)")
     parser.add_argument("--dry-run", action="store_true", help="Show planned stages without execution")
     parser.add_argument("--resume-from", type=str, default=None, choices=STAGE_ORDER, help="Stage to resume from")
     parser.add_argument("--skip-lld", action="store_true", help="Skip LLD stage if artifact exists")
@@ -139,7 +140,14 @@ Examples:
 
     config = overrides if overrides else None
 
+    # Resolve repo targeting (Issue #1374). This file lives at
+    # AssemblyZero/tools/orchestrate.py, so parent.parent is the AssemblyZero
+    # root. target_repo defaults to it, so omitting --repo builds AssemblyZero.
+    assemblyzero_root = str(Path(__file__).resolve().parent.parent)
+    target_repo = str(Path(args.repo).resolve()) if args.repo else assemblyzero_root
+
     print(f"[ORCHESTRATOR] Starting pipeline for issue #{args.issue}")
+    print(f"[ORCHESTRATOR] Target repo: {target_repo}")
     if args.dry_run:
         print("[ORCHESTRATOR] DRY RUN -- no stages will execute")
     if args.resume_from:
@@ -151,6 +159,8 @@ Examples:
             config=config,
             resume_from=args.resume_from,
             dry_run=args.dry_run,
+            target_repo=target_repo,
+            assemblyzero_root=assemblyzero_root,
         )
 
         if result["success"]:
