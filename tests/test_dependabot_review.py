@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 # Load the tools/ script as a module without polluting sys.path.
 TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
 _spec = importlib.util.spec_from_file_location(
@@ -659,3 +661,142 @@ class TestProcessRepoPerRepoBehavior:
             f"process_pr received {target} as target_repo; expected "
             f"the foreign clone at {sibling}, not main_repo {main_repo}"
         )
+
+
+# ---- #1370: sys.exit in worker threads must not corrupt the fleet summary ----
+
+class TestWorktreeFailureDoesNotSysExit:
+    """#1370: create_audit_worktree returns (None, None) on failure instead
+    of sys.exit, and process_pr converts that to 'errored' without raising
+    SystemExit (which would escape main()'s worker-aggregation and truncate
+    the summary)."""
+
+    def test_create_audit_worktree_returns_none_on_failure(self, tmp_path, capsys):
+        main_repo = tmp_path / "repo"
+
+        def fake_run(cmd, *args, **kwargs):
+            # Simulate `git worktree add` failing (path already exists).
+            return _mk_completed(
+                returncode=128,
+                stderr="fatal: 'foo-dependabot-7' already exists",
+            )
+
+        with patch.object(dependabot_review, "run", side_effect=fake_run):
+            worktree, branch = dependabot_review.create_audit_worktree(main_repo, 7)
+
+        assert worktree is None
+        assert branch is None
+        err = capsys.readouterr().err
+        assert "could not create worktree" in err.lower()
+
+    def test_process_pr_returns_errored_without_systemexit(self, tmp_path):
+        """The headline #1370 contract: a worktree-add failure inside a
+        worker yields 'errored', NOT a propagating SystemExit."""
+        main_repo = tmp_path / "repo"
+        pr = dependabot_review.PRInfo(
+            number=127, title="bump foo", author_login="dependabot[bot]",
+            body="", head_ref="dependabot/pip/foo",
+        )
+        cleanup_called: list = []
+
+        with patch.object(dependabot_review, "verify_author", return_value=True), \
+             patch.object(dependabot_review, "create_audit_worktree",
+                          return_value=(None, None)), \
+             patch.object(dependabot_review, "cleanup_worktree",
+                          side_effect=lambda *a, **k: cleanup_called.append(a)):
+            # Must NOT raise SystemExit.
+            status = dependabot_review.process_pr(pr, "owner/repo", main_repo)
+
+        assert status == "errored"
+        # cleanup must NOT run on a None worktree (early return before finally).
+        assert cleanup_called == [], \
+            "cleanup_worktree must not be called when worktree creation failed"
+
+    def test_list_dependabot_prs_raises_catchable_exception_not_systemexit(self, tmp_path):
+        """#1370: list_dependabot_prs runs in workers too; on gh failure it
+        must raise a plain Exception (caught), never SystemExit."""
+        def fake_run(cmd, *args, **kwargs):
+            return _mk_completed(returncode=1, stderr="gh: API error")
+
+        with patch.object(dependabot_review, "run", side_effect=fake_run):
+            with pytest.raises(dependabot_review.PRListError):
+                dependabot_review.list_dependabot_prs("owner/repo")
+
+    def test_process_repo_records_pr_list_failure_as_errored(self, tmp_path):
+        """A PRListError for one repo is recorded as errored, sweep continues."""
+        main_repo = tmp_path / "AssemblyZero"
+        main_repo.mkdir()
+
+        with patch.object(dependabot_review, "resolve_target_repo_dir",
+                          return_value=main_repo), \
+             patch.object(dependabot_review, "check_for_orphan_worktrees",
+                          return_value=[]), \
+             patch.object(dependabot_review, "list_dependabot_prs",
+                          side_effect=dependabot_review.PRListError("boom")):
+            sub = dependabot_review.process_repo("owner/repo", main_repo)
+
+        assert sub["errored"] == ["owner/repo#pr-list-failed"]
+        assert sub["merged"] == []
+        assert sub["deferred"] == []
+
+
+class TestWorkerAggregationSurvivesBaseException:
+    """#1370: the as_completed aggregation must catch BaseException (not just
+    Exception) so a worker raising SystemExit doesn't drop the results of
+    workers that already completed. This reproduces the loop's contract."""
+
+    def test_systemexit_worker_does_not_drop_other_workers(self):
+        import concurrent.futures as cf
+
+        def good_worker(name):
+            return {"merged": [f"{name}#1"], "deferred": [], "errored": []}
+
+        def bad_worker(name):
+            raise SystemExit("could not create worktree")  # the #1370 trigger
+
+        repos = ["repoA", "repoB", "repoC"]
+        results = {"merged": [], "deferred": [], "errored": []}
+
+        with cf.ThreadPoolExecutor(max_workers=3) as ex:
+            futures = {
+                ex.submit(bad_worker if r == "repoB" else good_worker, r): r
+                for r in repos
+            }
+            for fut in cf.as_completed(futures):
+                repo = futures[fut]
+                try:
+                    sub = fut.result()
+                except KeyboardInterrupt:
+                    raise
+                except BaseException:
+                    sub = {"merged": [], "deferred": [], "errored": [repo]}
+                for k in ("merged", "deferred", "errored"):
+                    results[k].extend(sub[k])
+
+        # The two good workers' results survive; the bad one is recorded errored.
+        assert sorted(results["merged"]) == ["repoA#1", "repoC#1"]
+        assert results["errored"] == ["repoB"]
+
+    def test_keyboardinterrupt_still_propagates(self):
+        """Ctrl-C must NOT be swallowed by the BaseException catch -- it has
+        its own re-raise branch so __main__'s sys.exit(130) handler runs."""
+        import concurrent.futures as cf
+
+        def interrupt_worker():
+            raise KeyboardInterrupt()
+
+        raised = False
+        try:
+            with cf.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(interrupt_worker)
+                for f in cf.as_completed({fut: "r"}):
+                    try:
+                        f.result()
+                    except KeyboardInterrupt:
+                        raise
+                    except BaseException:
+                        pass  # would WRONGLY swallow Ctrl-C if reached
+        except KeyboardInterrupt:
+            raised = True
+
+        assert raised, "KeyboardInterrupt must propagate, not be swallowed"

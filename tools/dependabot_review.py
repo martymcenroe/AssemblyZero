@@ -212,6 +212,17 @@ def run_gh_with_body(args_pre: list[str], body: str) -> subprocess.CompletedProc
 # PR enumeration
 # ---------------------------------------------------------------------------
 
+class PRListError(Exception):
+    """#1370: raised by list_dependabot_prs when `gh pr list` fails.
+
+    Replaces a former sys.exit. list_dependabot_prs runs inside
+    ThreadPoolExecutor workers (process_repo) in --fleet mode; sys.exit
+    raised SystemExit (BaseException), which escaped main()'s
+    worker-aggregation `except Exception` and truncated the fleet
+    summary. A plain Exception is caught by process_repo, recorded as an
+    errored entry for that repo, and the sweep continues."""
+
+
 def list_dependabot_prs(repo: str) -> list[PRInfo]:
     result = run([
         "gh", "pr", "list", "--repo", repo,
@@ -220,7 +231,9 @@ def list_dependabot_prs(repo: str) -> list[PRInfo]:
         "--json", "number,title,author,body,headRefName",
     ])
     if result.returncode != 0:
-        sys.exit(f"Failed to list PRs: {result.stderr}")
+        raise PRListError(
+            f"Failed to list PRs for {repo}: {(result.stderr or '').strip()[:200]}"
+        )
     raw = json.loads(result.stdout or "[]")
     return [
         PRInfo(
@@ -256,18 +269,35 @@ def verify_author(pr: PRInfo) -> bool:
 # Worktree + env setup
 # ---------------------------------------------------------------------------
 
-def create_audit_worktree(target_repo: Path, pr_number: int) -> tuple[Path, str]:
+def create_audit_worktree(
+    target_repo: Path, pr_number: int
+) -> tuple[Path, str] | tuple[None, None]:
     """#1360: operate on `target_repo`'s git, not the script's invocation
     directory. Worktree path is `{target_repo.parent}/{target_repo.name}-
     dependabot-{N}`, hosted by `target_repo.git/worktrees/`. Pre-#1360
     this used a single main_repo (AssemblyZero) for every fleet repo's
-    PRs, polluting AZ's git objects."""
+    PRs, polluting AZ's git objects.
+
+    #1370: returns (None, None) on worktree-add failure instead of
+    sys.exit. This function runs inside ThreadPoolExecutor workers in
+    --fleet mode; sys.exit raises SystemExit (a BaseException, not
+    Exception), which escaped the worker-aggregation `except Exception`
+    in main() and silently truncated the fleet summary -- every PR
+    processed AFTER the failing one was dropped from the merged/deferred/
+    errored counts even though the work had completed. Returning a
+    sentinel lets process_pr record this PR as 'errored' and the sweep
+    continue to the next PR / repo, so the summary stays truthful."""
     worktree = target_repo.parent / f"{target_repo.name}-dependabot-{pr_number}"
     branch = f"dependabot-audit-{pr_number}"
     result = run(["git", "-C", str(target_repo), "worktree", "add",
                   str(worktree), "-b", branch, "main"])
     if result.returncode != 0:
-        sys.exit(f"Could not create worktree: {result.stderr}")
+        print(
+            f"  ERROR: could not create worktree at {worktree}: "
+            f"{(result.stderr or '').strip()[:200]}",
+            file=sys.stderr,
+        )
+        return None, None
     return worktree, branch
 
 
@@ -777,6 +807,12 @@ def process_pr(pr: PRInfo, repo: str, target_repo: Path) -> str:
         return "errored"
 
     worktree, branch = create_audit_worktree(target_repo, pr.number)
+    if worktree is None:
+        # #1370: worktree-add failed (e.g. an orphan already occupies the
+        # path). create_audit_worktree already printed the diagnostic.
+        # Record this PR as errored and let the sweep continue -- do NOT
+        # enter the cleanup try/finally below with a None worktree.
+        return "errored"
 
     try:
         return _process_pr_inside_worktree(pr, repo, worktree)
@@ -940,7 +976,15 @@ def process_repo(
             file=sys.stderr,
         )
 
-    prs = list_dependabot_prs(repo)
+    try:
+        prs = list_dependabot_prs(repo)
+    except PRListError as e:
+        # #1370: a PR-list failure for this repo must not abort the whole
+        # fleet sweep. Record it as errored and move on; other repos'
+        # results still aggregate into the summary.
+        print(f"  ERROR: {e}", file=sys.stderr)
+        sub["errored"].append(f"{repo}#pr-list-failed")
+        return sub
     if not prs:
         print(f"  No open dependabot PRs in {repo}.")
         return sub
@@ -1055,8 +1099,23 @@ def main() -> None:
                     repo = futures[future]
                     try:
                         sub = future.result()
-                    except Exception as e:
-                        print(f"\n  [ERROR] worker for {repo} raised: {e}")
+                    except KeyboardInterrupt:
+                        # Intentional Ctrl-C: let it propagate to __main__'s
+                        # handler (sys.exit(130)). The finally below still
+                        # prints the partial summary first.
+                        raise
+                    except BaseException as e:
+                        # #1370: catch BaseException, not just Exception. A
+                        # worker that raised SystemExit (e.g. a stray sys.exit
+                        # deep in a helper) previously escaped an
+                        # `except Exception` here, propagated out of the
+                        # as_completed loop, and dropped every worker that
+                        # hadn't been iterated yet -- truncating the summary
+                        # even though those workers had completed. Recording
+                        # the failing repo and continuing keeps the summary
+                        # truthful regardless of the exception class.
+                        print(f"\n  [ERROR] worker for {repo} raised: "
+                              f"{type(e).__name__}: {e}")
                         sub = {"merged": [], "deferred": [], "errored": [repo]}
                     for k in ("merged", "deferred", "errored"):
                         results[k].extend(sub[k])
