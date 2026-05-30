@@ -501,6 +501,12 @@ class TestExitCodeFiveIsPass:
         return success, so a non-deferred run reaches the green path."""
         monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
                             lambda worktree, pr_number, repo: True)
+        # #1400: force the Python gate ON so these exit-code tests actually
+        # exercise the install/test path they are testing. (#1400 added a
+        # pr_touches_python check that would otherwise skip the gate when
+        # the stubbed `run` returns empty diff output.)
+        monkeypatch.setattr(dependabot_review, "pr_touches_python",
+                            lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: exit_code)
@@ -685,3 +691,159 @@ class TestWaitForMergeableTimeoutDeferred:
         assert rebase_calls == [(42, "owner/repo")], (
             "dirty path must still request @dependabot rebase"
         )
+
+
+class TestPrTouchesPython:
+    """#1400: pr_touches_python decides whether to run the Python gate
+    (poetry install + pytest). True iff the PR's diff contains any Python
+    file (*.py) or Python manifest (pyproject.toml, poetry.lock, etc.).
+    Conservative: returns True if the diff query fails (no false-pass)."""
+
+    def _stub_diff(self, monkeypatch, files, returncode=0):
+        """Make `run` return the given file list as gh pr diff --name-only output."""
+        stdout = "\n".join(files) + ("\n" if files else "")
+
+        def _capture(cmd, *args, **kwargs):
+            assert "diff" in cmd and "--name-only" in cmd, (
+                f"pr_touches_python must shell out to gh pr diff --name-only; saw {cmd}"
+            )
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=returncode, stdout=stdout, stderr="",
+            )
+
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+
+    def test_python_source_file_is_relevant(self, monkeypatch):
+        self._stub_diff(monkeypatch, ["src/foo.py"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_pyproject_toml_is_relevant(self, monkeypatch):
+        self._stub_diff(monkeypatch, ["pyproject.toml", "poetry.lock"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_requirements_txt_is_relevant(self, monkeypatch):
+        self._stub_diff(monkeypatch, ["requirements.txt"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_requirements_dev_txt_is_relevant(self, monkeypatch):
+        """requirements-dev.txt, requirements/base.txt etc. all count."""
+        self._stub_diff(monkeypatch, ["requirements-dev.txt"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_setup_py_is_relevant(self, monkeypatch):
+        self._stub_diff(monkeypatch, ["setup.py"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_dockerfile_only_is_not_relevant(self, monkeypatch):
+        """The exact #52/#53/#55 honeypot case: docker bump alone."""
+        self._stub_diff(monkeypatch, ["Dockerfile"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is False
+
+    def test_package_json_only_is_not_relevant(self, monkeypatch):
+        """npm bump should NOT trigger the Python gate."""
+        self._stub_diff(monkeypatch, ["package.json", "package-lock.json"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is False
+
+    def test_workflow_only_is_not_relevant(self, monkeypatch):
+        self._stub_diff(monkeypatch, [".github/workflows/ci.yml"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is False
+
+    def test_empty_diff_is_not_relevant(self, monkeypatch):
+        """Edge case: empty diff (unlikely for dependabot but defensive)."""
+        self._stub_diff(monkeypatch, [])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is False
+
+    def test_mixed_diff_with_one_python_file_is_relevant(self, monkeypatch):
+        """A single .py file in the diff is enough to trigger the gate."""
+        self._stub_diff(monkeypatch, ["Dockerfile", "src/util.py", "README.md"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+    def test_gh_diff_failure_returns_true_conservatively(self, monkeypatch, capsys):
+        """If gh pr diff fails, default to running the Python gate (no
+        false-pass). A WARNING is logged so the operator sees why."""
+        self._stub_diff(monkeypatch, [], returncode=1)
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+        err = capsys.readouterr().err
+        assert "could not list" in err.lower()
+        assert "#1400" in err
+
+    def test_nested_pyproject_is_relevant(self, monkeypatch):
+        """Monorepo pattern: pyproject.toml at any depth, not just root."""
+        self._stub_diff(monkeypatch, ["services/api/pyproject.toml"])
+        assert dependabot_review.pr_touches_python(1, "owner/repo") is True
+
+
+class TestPipelineSkippedForNonPythonPR:
+    """#1400: _process_pr_inside_worktree skips poetry install + pytest
+    when the PR touches no Python files. Goes straight to the green path
+    (inject_no_issue -> approve -> merge)."""
+
+    def _stub_green_path(self, monkeypatch):
+        """Stub the green-path helpers as success no-ops, so we can run
+        the function without hitting the network."""
+        monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
+                            lambda worktree, pr_number, repo: True)
+        monkeypatch.setattr(dependabot_review, "inject_no_issue",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "approve_pr",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "squash_merge",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=52, title="bump alpine", author_login="app/dependabot",
+            body="", head_ref="dependabot/docker/alpine-3.23.4",
+        )
+
+    def test_non_python_pr_skips_install_and_test(self, monkeypatch, capsys):
+        """The headline #1400 contract: docker-only PR never invokes
+        install_deps or run_tests."""
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(dependabot_review, "pr_touches_python",
+                            lambda pr, repo: False)
+        install_called = []
+        tests_called = []
+        monkeypatch.setattr(dependabot_review, "install_deps",
+                            lambda wt: install_called.append(wt) or True)
+        monkeypatch.setattr(dependabot_review, "run_tests",
+                            lambda wt: tests_called.append(wt) or 0)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        assert install_called == [], (
+            "install_deps must NOT be called when PR touches no Python files"
+        )
+        assert tests_called == [], (
+            "run_tests must NOT be called when PR touches no Python files"
+        )
+        assert result == "merged"
+        out = capsys.readouterr().out
+        assert "skipping poetry install + pytest gate" in out
+        assert "#1400" in out
+
+    def test_python_pr_still_runs_install_and_test(self, monkeypatch):
+        """Existing behavior preserved for Python PRs."""
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(dependabot_review, "pr_touches_python",
+                            lambda pr, repo: True)
+        install_called = []
+        tests_called = []
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
+        monkeypatch.setattr(dependabot_review, "install_deps",
+                            lambda wt: install_called.append(wt) or True)
+        monkeypatch.setattr(dependabot_review, "run_tests",
+                            lambda wt: tests_called.append(wt) or 0)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        assert len(install_called) == 1, "install_deps must run for Python PRs"
+        assert len(tests_called) == 1, "run_tests must run for Python PRs"
+        assert result == "merged"

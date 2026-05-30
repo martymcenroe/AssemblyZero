@@ -567,6 +567,60 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
     return pr_base != main_head
 
 
+# #1400: file patterns that mean "this PR could affect the Python test
+# environment" -- standard manifests, lockfiles, and any Python source.
+# Order matters only for readability; we check every changed file.
+_PYTHON_RELEVANT_FILES = frozenset({
+    "pyproject.toml",
+    "poetry.lock",
+    "setup.py",
+    "setup.cfg",
+    "Pipfile",
+    "Pipfile.lock",
+})
+
+
+def pr_touches_python(pr_number: int, repo: str) -> bool:
+    """#1400: True iff the PR's diff includes any Python-relevant file.
+
+    Used by _process_pr_inside_worktree to decide whether to run the
+    `poetry install` + `pytest` gate. A PR that does not touch any Python
+    file or manifest cannot break the Python venv by construction --
+    running the Python gate on it is wasted work AND creates false
+    negatives when the worktree's lockfile has any pre-existing issue
+    unrelated to the PR (the bug that bit honeypot's docker PRs #52, #53,
+    #55 on 2026-05-29/30 -- their branches predate the LLM-cleanup
+    martymcenroe/dependabot-honeypot#67/#71/#72/#76 and still carry the
+    jiter manifest, but the docker bump itself cannot have caused that).
+
+    Conservative on failure: if `gh pr diff` cannot list the changed
+    files, return True so the Python gate still runs (no false-pass).
+    """
+    result = run(
+        ["gh", "pr", "diff", str(pr_number), "--repo", repo, "--name-only"],
+        quiet_on_failure=True,
+    )
+    if result.returncode != 0:
+        print(f"  WARNING: could not list PR #{pr_number} changed files "
+              f"(gh pr diff --name-only failed); running Python gate as "
+              f"the safe default (#1400).",
+              file=sys.stderr)
+        return True
+    files = [f.strip() for f in (result.stdout or "").splitlines() if f.strip()]
+    for f in files:
+        # Any *.py file anywhere in the repo.
+        if f.endswith(".py"):
+            return True
+        # Any known Python manifest/lockfile at any path depth.
+        basename = f.rsplit("/", 1)[-1]
+        if basename in _PYTHON_RELEVANT_FILES:
+            return True
+        # requirements.txt, requirements-dev.txt, requirements/*.txt, etc.
+        if basename.startswith("requirements") and basename.endswith(".txt"):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
@@ -731,30 +785,50 @@ def _process_pr_inside_worktree(
         print("  ERROR: gh pr checkout failed")
         return "errored"
 
-    evict_poetry_venv(worktree)
+    # #1400: only run the Python gate (poetry install + pytest) when the
+    # PR actually touches a Python file or manifest. A Dockerfile-only
+    # bump, an npm bump, or a github-actions workflow pin cannot break
+    # the Python venv by construction; running the Python gate on those
+    # PRs is wasted work and creates false-negative deferrals when the
+    # PR's branch has any pre-existing lockfile issue (e.g. honeypot's
+    # docker PRs #52/#53/#55 carried the pre-cleanup jiter manifest).
+    if pr_touches_python(pr.number, repo):
+        evict_poetry_venv(worktree)
 
-    if not install_deps(worktree):
-        print("  ERROR: poetry install failed")
-        # Issue #1091: post as a formal review-comment so the failure
-        # path also accrues to the user's Code Review profile stat.
-        review_comment_on_pr(
-            pr.number, repo,
-            "Automated review via tools/dependabot_review.py -- "
-            "`poetry install` failed. See the PR's Actions output for the "
-            "captured stderr; re-run locally via `gh pr checkout` if needed.",
-        )
-        return "deferred"
+        if not install_deps(worktree):
+            print("  ERROR: poetry install failed")
+            # Issue #1091: post as a formal review-comment so the failure
+            # path also accrues to the user's Code Review profile stat.
+            review_comment_on_pr(
+                pr.number, repo,
+                "Automated review via tools/dependabot_review.py -- "
+                "`poetry install` failed. See the PR's Actions output for the "
+                "captured stderr; re-run locally via `gh pr checkout` if needed.",
+            )
+            return "deferred"
 
-    exit_code = run_tests(worktree)
+        exit_code = run_tests(worktree)
 
-    # #1397: exit 5 = "no tests collected" is a normal pytest result for
-    # test-less repos (decorative-deps honeypots, scaffold stubs), not a
-    # failure. A dep bump cannot turn N>0 tests into 0, so exit 5 means
-    # "this repo has no test suite" -- safe to treat as pass for the
-    # dep-bump gate. Log loudly so the run output reflects the decision.
-    if exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
-        print("  pytest: no tests collected (exit 5) -- treating as PASS "
-              "(decorative-deps repo with no test suite)")
+        # #1397: exit 5 = "no tests collected" is a normal pytest result for
+        # test-less repos (decorative-deps honeypots, scaffold stubs), not a
+        # failure. A dep bump cannot turn N>0 tests into 0, so exit 5 means
+        # "this repo has no test suite" -- safe to treat as pass for the
+        # dep-bump gate. Log loudly so the run output reflects the decision.
+        if exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
+            print("  pytest: no tests collected (exit 5) -- treating as PASS "
+                  "(decorative-deps repo with no test suite)")
+            exit_code = 0
+    else:
+        # #1400: PR did not touch any Python-relevant file. Skip the Python
+        # gate entirely and treat as pass for the dep-bump gate. The PR
+        # can only have changed Docker / npm / workflow / docs content;
+        # those cannot break a Python venv. Eventual follow-up: add
+        # ecosystem-specific gates here (npm test, docker build, etc.)
+        # if/when needed -- the honeypot's decorative-deps purpose means
+        # "skip gate, pass through" is currently the right semantic.
+        print(f"  PR #{pr.number} touches no Python-relevant files -- "
+              f"skipping poetry install + pytest gate (#1400). "
+              f"Treating as PASS for the dep-bump gate.")
         exit_code = 0
 
     if exit_code != 0:
