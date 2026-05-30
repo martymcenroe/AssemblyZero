@@ -460,3 +460,112 @@ class TestCleanupWorktreeNoGitRestore:
         self._run_cleanup(monkeypatch, tmp_path, dirt="")
         err = capsys.readouterr().err
         assert "dirty" not in err.lower()
+
+
+class TestExitCodeFiveIsPass:
+    """#1397: pytest exit 5 (no tests collected) is the normal result for
+    test-less repos (decorative-deps honeypots, scaffold stubs). The gate
+    must treat exit 5 as pass, not failure. A dep bump cannot turn N>0
+    tests into 0, so exit 5 reliably means "this repo has no test suite"
+    -- safe to merge for the dep-bump gate's purpose."""
+
+    def _stub_inner_pipeline(self, monkeypatch, exit_code):
+        """Stub everything _process_pr_inside_worktree calls except the gate,
+        so we can isolate the exit-code decision. Green-path helpers all
+        return success, so a non-deferred run reaches the green path."""
+        monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
+                            lambda worktree, pr_number, repo: True)
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
+        monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
+        monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: exit_code)
+        # Green-path stubs (only used when the gate doesn't defer).
+        monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "approve_pr", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
+                            lambda pr, repo, timeout=900: True)
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+        # Catch-all for the gh pr merge subprocess call on the green path.
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda cmd, *a, **kw: subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout="", stderr=""),
+        )
+
+    def _track_review_comments(self, monkeypatch):
+        """Capture (pr, body) tuples for every review_comment_on_pr call so
+        we can assert the deferral comment was/wasn't posted."""
+        calls: list[tuple[int, str]] = []
+        monkeypatch.setattr(dependabot_review, "review_comment_on_pr",
+                            lambda pr, repo, body: calls.append((pr, body)) or True)
+        return calls
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=42, title="bump foo", author_login="app/dependabot",
+            body="Updates `foo`", head_ref="dependabot/pip/foo",
+        )
+
+    def test_exit_5_does_not_defer(self, monkeypatch, capsys):
+        """The bug: clean test-less PR with pytest exit 5 must NOT be deferred."""
+        self._stub_inner_pipeline(monkeypatch, exit_code=5)
+        calls = self._track_review_comments(monkeypatch)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        # The deferral path posts a review-comment containing "FAILED".
+        failed_comments = [body for _, body in calls if "FAILED" in body]
+        assert not failed_comments, (
+            f"exit 5 must NOT trigger the deferral review-comment; "
+            f"got: {failed_comments}"
+        )
+        # Result must not be 'deferred' -- we took the green path.
+        assert result != "deferred", f"exit 5 must not defer; got {result!r}"
+
+    def test_exit_5_logs_treating_as_pass(self, monkeypatch, capsys):
+        """The fix must log loudly so operators see why a no-tests repo passed."""
+        self._stub_inner_pipeline(monkeypatch, exit_code=5)
+        self._track_review_comments(monkeypatch)
+
+        dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        out = capsys.readouterr().out
+        assert "no tests collected" in out
+        assert "treating as PASS" in out
+
+    def test_exit_0_unchanged_green_path(self, monkeypatch):
+        """Exit 0 (tests passed) must continue to take the green path."""
+        self._stub_inner_pipeline(monkeypatch, exit_code=0)
+        calls = self._track_review_comments(monkeypatch)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        failed_comments = [body for _, body in calls if "FAILED" in body]
+        assert not failed_comments
+        assert result != "deferred"
+
+    def test_exit_1_still_defers(self, monkeypatch):
+        """Real test failure (exit 1) must still defer -- existing behavior."""
+        self._stub_inner_pipeline(monkeypatch, exit_code=1)
+        # Stub the deferral-only helpers we'd otherwise miss.
+        monkeypatch.setattr(dependabot_review, "is_pr_branch_stale",
+                            lambda pr, repo: False)
+        monkeypatch.setattr(dependabot_review, "count_packages", lambda body: 1)
+        calls = self._track_review_comments(monkeypatch)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        failed_comments = [body for _, body in calls if "FAILED (exit 1)" in body]
+        assert failed_comments, "exit 1 must still post the FAILED deferral comment"
+        assert result == "deferred"
+
+    def test_constant_is_five(self):
+        """Lock the named constant to pytest's documented exit code."""
+        assert dependabot_review.PYTEST_EXIT_NO_TESTS_COLLECTED == 5

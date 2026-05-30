@@ -104,6 +104,23 @@ POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 900
 PYTEST_TIMEOUT_S = 1800
 POETRY_INSTALL_TIMEOUT_S = 600
+# Pytest exit codes since pytest 5.0 (2019):
+#   0 = all tests passed
+#   1 = a test failed
+#   2 = interrupted (Ctrl-C, etc.)
+#   3 = internal error
+#   4 = usage error
+#   5 = no tests collected
+# Exit 5 means the repo has no test suite (decorative-deps honeypot,
+# scaffold-only repos). A dependency bump cannot turn N>0 tests into 0,
+# so exit 5 reliably means "nothing to break" -- safe to treat as a
+# pass for the dep-bump gate. Pre-#1397 the gate was `if exit_code != 0`
+# which deferred every clean PR in any test-less repo (the honeypot
+# never merged a single dependabot PR in 7 months for this reason).
+# ADR 00001 sec 6 + the honeypot CLAUDE.md previously claimed
+# "pytest returns 0 when no tests collected" -- that was true on
+# pytest <5.0; doc fix tracked separately.
+PYTEST_EXIT_NO_TESTS_COLLECTED = 5
 
 
 @dataclass
@@ -719,6 +736,16 @@ def _process_pr_inside_worktree(
         return "deferred"
 
     exit_code = run_tests(worktree)
+
+    # #1397: exit 5 = "no tests collected" is a normal pytest result for
+    # test-less repos (decorative-deps honeypots, scaffold stubs), not a
+    # failure. A dep bump cannot turn N>0 tests into 0, so exit 5 means
+    # "this repo has no test suite" -- safe to treat as pass for the
+    # dep-bump gate. Log loudly so the run output reflects the decision.
+    if exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
+        print("  pytest: no tests collected (exit 5) -- treating as PASS "
+              "(decorative-deps repo with no test suite)")
+        exit_code = 0
 
     if exit_code != 0:
         package_count = count_packages(pr.body)
