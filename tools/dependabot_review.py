@@ -421,24 +421,34 @@ def wait_for_mergeable(pr_number: int, repo: str) -> bool:
     on dependabot PRs even though the worker check passes; mergeable_state
     reports `unstable`, not `clean`. Branch protection is the actual gate.
 
-    Tolerates one cycle of `blocked` to absorb the Cerberus-arrival race
-    where the App posts approval between two of our polls.
+    Issue #1399: 'blocked' is NOT a terminal state. It usually means
+    cerberus-az has not approved yet (the body edit in inject_no_issue
+    invalidates cerberus's prior approval; cerberus then re-evaluates,
+    typically within 30s-300s but with a tail past 5+ minutes). Pre-#1399
+    the loop bailed after the SECOND poll of 'blocked' (~10s total), which
+    silently failed every PR where cerberus took longer than one
+    POLL_INTERVAL_S cycle to arrive — #84 and #47 on 2026-05-29/30 are
+    the documented cases. The fix: poll through 'blocked' until the full
+    MERGEABLE_TIMEOUT_S budget is exhausted. The caller reclassifies a
+    non-'dirty' timeout as deferred (not errored) since the approval
+    persists and the next run picks the PR up cleanly.
     """
-    deadline = time.time() + MERGEABLE_TIMEOUT_S
-    polled_at_least_once = False
+    start = time.time()
+    deadline = start + MERGEABLE_TIMEOUT_S
     while time.time() < deadline:
         result = run(["gh", "api", f"repos/{repo}/pulls/{pr_number}",
                       "--jq", ".mergeable_state"])
         state = (result.stdout or "").strip().strip('"')
-        print(f"  mergeable_state: {state}")
+        elapsed = int(time.time() - start)
+        print(f"  mergeable_state: {state} (elapsed {elapsed}s)")
         if state in ("clean", "unstable"):
             return True
         if state == "dirty":
             return False  # merge conflict; waiting won't help
-        if state == "blocked" and polled_at_least_once:
-            return False
-        polled_at_least_once = True
         time.sleep(POLL_INTERVAL_S)
+    elapsed = int(time.time() - start)
+    print(f"  mergeable_state: timed out after {elapsed}s "
+          f"(MERGEABLE_TIMEOUT_S={MERGEABLE_TIMEOUT_S})")
     return False
 
 
@@ -801,12 +811,24 @@ def _process_pr_inside_worktree(
             "--jq", ".mergeable_state",
         ])
         final_state = (final_state_result.stdout or "").strip().strip('"')
-        print(f"  ERROR: mergeable_state failed to reach 'clean' (got '{final_state}')")
         if final_state == "dirty":
-            print("  Merge conflict -- requesting @dependabot rebase. "
-                  "Approval persists; next run re-evaluates post-rebase.")
+            print(f"  ERROR: mergeable_state '{final_state}' -- merge conflict, "
+                  f"requesting @dependabot rebase. Approval persists; next run "
+                  f"re-evaluates post-rebase.")
             request_dependabot_rebase(pr.number, repo)
-        return "errored"
+            return "errored"
+        # #1399: blocked/behind/unknown after timeout = state is genuinely
+        # in-flight (cerberus arrival tail, required check still running,
+        # base branch lag, etc.), NOT a permanent failure. Classify as
+        # "deferred" so the summary shows "try again next run" instead of
+        # "investigate this error". The approval persists; the next run
+        # finds the PR mergeable and merges it. This is the actual fix
+        # for the #84 (2026-05-29) and #47 (2026-05-30) cases where the
+        # tool reported errored but a re-run merged the PR within seconds.
+        print(f"  DEFER: mergeable_state '{final_state}' after wait timeout -- "
+              f"likely cerberus-arrival tail or pending check. Approval "
+              f"persists; next run will re-evaluate. (See #1399.)")
+        return "deferred"
 
     if not squash_merge(pr.number, repo):
         print("  ERROR: merge failed")
