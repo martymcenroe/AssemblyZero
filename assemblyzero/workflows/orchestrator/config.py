@@ -37,26 +37,30 @@ def get_default_config() -> OrchestratorConfig:
         skip_existing_lld=True,
         skip_existing_spec=True,
         stages={
+            # #1432: Default to Gemini drafter/reviewer to bypass the Claude
+            # json_schema crash (#1431) and reduce default-config cost.
+            # Operator-confirmed 2026-05-30: "i don't think it matters which
+            # llm writes and which reviews or even if one does both."
             "triage": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="claude:opus",
+                drafter="gemini:2.5-flash",
+                reviewer="gemini:2.5-flash",
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="claude:opus",
+                drafter="gemini:2.5-flash",
+                reviewer="gemini:2.5-flash",
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
-                drafter="claude:opus-4.5",
-                reviewer="claude:opus",
+                drafter="gemini:2.5-flash",
+                reviewer="gemini:2.5-flash",
                 max_revisions=3,
                 timeout_seconds=600,
             ),
             "impl": StageConfig(
-                drafter="claude:opus-4.5",
+                drafter="gemini:2.5-flash",
                 reviewer="",
                 max_revisions=3,
                 timeout_seconds=1800,
