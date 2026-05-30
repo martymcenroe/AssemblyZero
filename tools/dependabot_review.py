@@ -68,6 +68,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -336,9 +337,24 @@ def evict_poetry_venv(worktree: Path) -> None:
     run(["poetry", "env", "remove", "--all"], cwd=str(worktree))
 
 
+def _has_dev_group(pyproject: Path) -> bool:
+    """Return True iff pyproject.toml declares a `dev` poetry group.
+
+    Recognizes [tool.poetry.group.dev] (Poetry-native) and
+    [dependency-groups] dev = [...] (PEP 735).
+    """
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+    poetry_groups = data.get("tool", {}).get("poetry", {}).get("group", {})
+    if "dev" in poetry_groups:
+        return True
+    return "dev" in data.get("dependency-groups", {})
+
+
 def install_deps(worktree: Path) -> bool:
-    """Install project dependencies + the `dev` group so pytest is in the
-    venv. AssemblyZero declares pytest under PEP 735 `[dependency-groups]
+    """Install project dependencies, plus the `dev` group when present.
+
+    AssemblyZero declares pytest under PEP 735 `[dependency-groups]
     dev = [...]`, which `poetry install` (no flags) does NOT include by
     default -- the audit venv ends up without pytest and every test run
     fails with `ModuleNotFoundError: No module named 'pytest'` regardless
@@ -346,9 +362,10 @@ def install_deps(worktree: Path) -> bool:
     workflow already passes `--with dev` for the same reason; mirroring
     that here makes the audit venv match production.
 
-    `--with dev` is tolerant on repos that don't have a `dev` group:
-    Poetry warns rather than failing, so this is safe across the fleet
-    of varying repo layouts.
+    `--with dev` is only added when pyproject.toml actually declares the
+    group. Poetry errors out (does NOT warn) on `--with dev` when the
+    group is absent, so passing it unconditionally defers any repo that
+    has no dev group for a tool-level reason unrelated to the dep upgrade.
 
     `--no-root` skips installing the project itself, only its dependencies.
     Required for decorative-deps repos like dependabot-honeypot that have
@@ -357,10 +374,13 @@ def install_deps(worktree: Path) -> bool:
     sweep tests dep upgrades, not the project's own code, so installing
     the root is unnecessary in every case.
     """
-    if not (worktree / "pyproject.toml").exists():
+    pyproject = worktree / "pyproject.toml"
+    if not pyproject.exists():
         return True  # Not a poetry project
-    result = run(["poetry", "install", "--no-root", "--with", "dev"],
-                 cwd=str(worktree), timeout=POETRY_INSTALL_TIMEOUT_S)
+    cmd = ["poetry", "install", "--no-root"]
+    if _has_dev_group(pyproject):
+        cmd.extend(["--with", "dev"])
+    result = run(cmd, cwd=str(worktree), timeout=POETRY_INSTALL_TIMEOUT_S)
     return result.returncode == 0
 
 

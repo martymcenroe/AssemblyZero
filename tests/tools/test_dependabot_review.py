@@ -847,3 +847,113 @@ class TestPipelineSkippedForNonPythonPR:
         assert len(install_called) == 1, "install_deps must run for Python PRs"
         assert len(tests_called) == 1, "run_tests must run for Python PRs"
         assert result == "merged"
+
+
+class TestHasDevGroup:
+    """#1406: detect whether pyproject.toml declares a `dev` poetry group so
+    install_deps can decide whether to pass `--with dev`. The flag was passed
+    unconditionally; the docstring claimed Poetry warns when the group is
+    absent, but Poetry actually errors out -- deferring every repo without a
+    dev group (e.g. patent-general) for a tool-level reason unrelated to the
+    dep upgrade."""
+
+    def _write(self, tmp_path, body):
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text(body, encoding="utf-8")
+        return pyproject
+
+    def test_dep_groups_dev_present(self, tmp_path):
+        """PEP 735 [dependency-groups] dev = [...] (the AssemblyZero pattern)."""
+        pyproject = self._write(tmp_path, '[dependency-groups]\ndev = ["pytest>=8.0"]\n')
+        assert dependabot_review._has_dev_group(pyproject) is True
+
+    def test_poetry_group_dev_present(self, tmp_path):
+        """Poetry-native [tool.poetry.group.dev] section."""
+        pyproject = self._write(
+            tmp_path,
+            '[tool.poetry.group.dev]\noptional = false\n\n'
+            '[tool.poetry.group.dev.dependencies]\npytest = "^8.0"\n',
+        )
+        assert dependabot_review._has_dev_group(pyproject) is True
+
+    def test_poetry_group_dev_dependencies_only(self, tmp_path):
+        """Compact form: only [tool.poetry.group.dev.dependencies]."""
+        pyproject = self._write(
+            tmp_path,
+            '[tool.poetry.group.dev.dependencies]\npytest = "^8.0"\n',
+        )
+        assert dependabot_review._has_dev_group(pyproject) is True
+
+    def test_other_group_only_returns_false(self, tmp_path):
+        """A test group is not a dev group; PEP 735 docs group is not dev."""
+        pyproject = self._write(
+            tmp_path,
+            '[tool.poetry.group.test]\noptional = false\n\n'
+            '[dependency-groups]\ndocs = ["mkdocs"]\n',
+        )
+        assert dependabot_review._has_dev_group(pyproject) is False
+
+    def test_no_groups_returns_false(self, tmp_path):
+        """The patent-general case: pyproject exists, no dev group."""
+        pyproject = self._write(
+            tmp_path,
+            '[tool.poetry]\nname = "patent-general"\nversion = "0.1.0"\n\n'
+            '[tool.poetry.dependencies]\npython = "^3.11"\n',
+        )
+        assert dependabot_review._has_dev_group(pyproject) is False
+
+    def test_empty_pyproject_returns_false(self, tmp_path):
+        pyproject = self._write(tmp_path, "")
+        assert dependabot_review._has_dev_group(pyproject) is False
+
+
+class TestInstallDepsDevGroupConditional:
+    """#1406: install_deps must only pass --with dev when the group exists."""
+
+    def _stub_run(self, monkeypatch, captured, returncode=0):
+        def _capture(cmd, *args, **kwargs):
+            captured["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=returncode, stdout="", stderr="",
+            )
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+
+    def test_with_dev_group_passes_flag(self, monkeypatch, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[dependency-groups]\ndev = ["pytest"]\n', encoding="utf-8",
+        )
+        captured: dict = {}
+        self._stub_run(monkeypatch, captured)
+
+        assert dependabot_review.install_deps(tmp_path) is True
+        assert "--with" in captured["cmd"]
+        assert "dev" in captured["cmd"]
+
+    def test_without_dev_group_omits_flag(self, monkeypatch, tmp_path):
+        """The patent-general case that motivated #1406."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.poetry]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8",
+        )
+        captured: dict = {}
+        self._stub_run(monkeypatch, captured)
+
+        assert dependabot_review.install_deps(tmp_path) is True
+        assert "--with" not in captured["cmd"], (
+            f"install_deps must NOT pass --with when pyproject has no dev "
+            f"group; got {captured['cmd']}"
+        )
+
+    def test_no_pyproject_returns_true_without_running_poetry(
+        self, monkeypatch, tmp_path,
+    ):
+        """Pre-existing behavior: no pyproject = not a poetry project = skip."""
+        called = []
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda *a, **kw: called.append(a) or subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""),
+        )
+        assert dependabot_review.install_deps(tmp_path) is True
+        assert called == [], (
+            "install_deps must not invoke poetry when pyproject is absent"
+        )
