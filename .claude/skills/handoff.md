@@ -290,7 +290,7 @@ Lessons learned are institutional knowledge — they get committed, unlike the h
    - Append one line per lesson: `| {date} | {repo_name} | {one-line summary} |`
    - The summary is the bold portion of the Lesson column (the "what happened" part).
 
-3. **Do NOT commit these files during handoff.** The next session or a manual commit handles that. Handoff just appends.
+3. **Do NOT commit inline here** — Step 5D below commits all session artifacts in ALL modes.
 
 ### Step 5C: Append Session Log
 
@@ -310,7 +310,126 @@ Brief backward-looking record of the session. One entry per session.
      - **Next:** {one-line summary of what to do next}
      ```
 
-2. **Do NOT commit.** Same as 5B — handoff appends, next session commits.
+2. **Do NOT commit inline here** — Step 5D below commits the session log along with the other artifacts in ALL modes.
+
+### Step 5D: Commit Session Artifacts (ALL modes)
+
+**This step runs unconditionally — plain `/handoff`, `--park`, and `--reboot` all reach it.** The prior design ("next session commits") was fragile: `--park` and `--reboot` skip the spawn entirely so there is no next session, and even the plain-spawn case sometimes ended without a `/cleanup` ever running. Handoff is now fully responsible for committing its own writes. (See AssemblyZero #1348 for the gap analysis.)
+
+**Scope (mirrors `/cleanup` Phase 4):** stage and commit ONLY session-artifact ALLOWED paths:
+
+- `docs/session-logs/*.md`
+- `docs/lessons-learned.md`
+- `data/session-index.jsonl`
+- `data/pickup-status.json`
+
+NEVER stage anything outside this list from Step 5D — no user code, no binaries, no credentials. If non-ALLOWED files are dirty, report them in the handoff output and leave them uncommitted.
+
+#### 5D.1 — Detect ALLOWED-scope changes
+
+```bash
+git -C {REPO_ROOT} status --porcelain
+```
+
+Filter for paths matching the ALLOWED list above. If none of the ALLOWED paths are modified or untracked → skip the rest of Step 5D and report "no session artifacts to commit." This is the common case when `/cleanup` already ran or when nothing changed this session.
+
+#### 5D.2 — Detect branch protection
+
+```bash
+gh api repos/{OWNER}/{REPO}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
+```
+
+- Output `true`: tracked-PR flow (5D.3)
+- Output `false` / error / 404: direct-push fallback (5D.9)
+
+#### 5D.3 — Tracked-PR flow (protected main)
+
+**a) Create tracking issue:**
+```bash
+gh issue create --repo {OWNER}/{REPO} \
+  --title "chore: handoff session artifacts {DATE} — {SESSION_NAME}" \
+  --body "Auto-created by /handoff to track session-artifact commit.
+
+Files:
+{LIST_OF_ALLOWED_FILES}
+
+Session: {SESSION_NAME}"
+```
+Capture issue number → `ISSUE_N`.
+
+**b) Branch + stage ALLOWED paths + commit:**
+```bash
+BRANCH="handoff-{DATE}-{session-slug}"
+git -C {REPO_ROOT} checkout -b $BRANCH
+git -C {REPO_ROOT} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {REPO_ROOT} diff --cached --stat
+git -C {REPO_ROOT} commit -m "chore: handoff session artifacts {DATE} (Closes #${ISSUE_N})
+
+Session: {SESSION_NAME}
+
+Co-Authored-By: Claude [model] <noreply@anthropic.com>"
+```
+
+**c) Push and open PR:**
+```bash
+git -C {REPO_ROOT} push -u origin $BRANCH
+gh pr create --repo {OWNER}/{REPO} --head $BRANCH --base main \
+  --title "chore: handoff session artifacts {DATE} (Closes #${ISSUE_N})" \
+  --body "## Summary
+
+Session artifacts from /handoff ({SESSION_NAME}).
+
+Closes #${ISSUE_N}"
+```
+Capture PR number → `PR_N`.
+
+**d) Wait for checks, merge, clean up the squash-merge-orphan branch via ADR-0217:**
+```bash
+# Poll mergeable_state — handle 'behind' via update-branch (per AssemblyZero/docs/runbooks/0935-pr-stuck-recovery.md)
+until [ "$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do
+  state=$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.mergeable_state')
+  if [ "$state" = "behind" ]; then
+    head=$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.head.sha')
+    gh api -X PUT repos/{OWNER}/{REPO}/pulls/$PR_N/update-branch -f expected_head_sha=$head
+  fi
+  sleep 10
+done
+gh pr merge $PR_N --squash --repo {OWNER}/{REPO}
+git -C {REPO_ROOT} checkout main
+git -C {REPO_ROOT} pull --rebase
+# ADR-0217 graft cleanup (the only correct path to delete a squash-merge-orphan local branch):
+SQUASH=$(git -C {REPO_ROOT} log --format='%h' -1 origin/main)
+ORPHAN=$(git -C {REPO_ROOT} rev-parse $BRANCH)
+BASE=$(git -C {REPO_ROOT} rev-parse ${SQUASH}^)
+git -C {REPO_ROOT} replace --graft $SQUASH "$BASE" $ORPHAN
+git -C {REPO_ROOT} branch -d $BRANCH
+git -C {REPO_ROOT} replace -d $SQUASH
+```
+
+#### 5D.9 — Direct-push fallback (unprotected main only)
+
+```bash
+git -C {REPO_ROOT} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {REPO_ROOT} commit -m "chore: handoff session artifacts {DATE} — {SESSION_NAME}"
+git -C {REPO_ROOT} push
+```
+
+#### 5D.10 — Failure handling
+
+If any step in 5D.3 fails: STOP and REPORT to user. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D`. Report:
+- Tracking issue number
+- Branch name
+- Files still uncommitted
+
+Let user decide next step.
+
+#### 5D.11 — Confirm to user
+
+After successful commit, report in the handoff output:
+
+> Session artifacts committed: PR #{PR_N} (Closes #{ISSUE_N}), {N} files. Branch cleaned up via ADR-0217.
+
+This step closes the gap documented in AssemblyZero #1348 — without it, `/cleanup --full` followed by `/handoff --park` (or any `/handoff` whose next session never runs `/cleanup`) leaves session-artifact writes uncommitted.
 
 ### Step 6: Spawn New Unleashed Session
 
