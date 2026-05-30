@@ -183,8 +183,10 @@ class TestCommentOnPr:
 
 
 class TestWaitForMergeable:
-    """Issue #971: accept 'unstable' in addition to 'clean', tolerate one
-    cycle of 'blocked' to absorb the Cerberus-arrival race."""
+    """Issue #971: accept 'unstable' in addition to 'clean'.
+    Issue #1399: poll through 'blocked' until MERGEABLE_TIMEOUT_S timeout
+    (was: bailed after the second poll, which silently failed every PR
+    where cerberus-az took longer than POLL_INTERVAL_S to arrive)."""
 
     def _stub_state(self, monkeypatch, states):
         """Make `run` return a sequence of mergeable_state values."""
@@ -213,14 +215,30 @@ class TestWaitForMergeable:
         self._stub_state(monkeypatch, ["dirty"])
         assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
 
-    def test_persistent_blocked_returns_false(self, monkeypatch):
-        """After tolerating one cycle, persistent blocked gives up."""
-        self._stub_state(monkeypatch, ["blocked", "blocked", "blocked"])
+    def test_persistent_blocked_returns_false_at_timeout(self, monkeypatch):
+        """#1399: persistent blocked polls until the full timeout, then
+        returns False. Pre-#1399 it bailed after poll #2 (~10s), which
+        silently failed every PR where cerberus took longer than one
+        POLL_INTERVAL_S to arrive (#84, #47 on 2026-05-29/30)."""
+        # Tiny timeout so the test exits quickly without burning 15 min.
+        monkeypatch.setattr(dependabot_review, "MERGEABLE_TIMEOUT_S", 0.01)
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda *a, **kw: subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="blocked", stderr=""),
+        )
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
         assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
 
     def test_blocked_then_clean_returns_true(self, monkeypatch):
         """Race tolerance: Cerberus arrives between two of our polls."""
         self._stub_state(monkeypatch, ["blocked", "clean"])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
+
+    def test_multiple_blocked_then_clean_returns_true(self, monkeypatch):
+        """#1399: blocked-blocked-blocked-clean now succeeds. Pre-#1399 it
+        would have bailed at poll #2 even though cerberus arrived at #4."""
+        self._stub_state(monkeypatch, ["blocked", "blocked", "blocked", "clean"])
         assert dependabot_review.wait_for_mergeable(1, "owner/repo") is True
 
     def test_pending_then_clean_returns_true(self, monkeypatch):
@@ -231,6 +249,14 @@ class TestWaitForMergeable:
     def test_default_timeout_is_900s(self):
         """Issue #971: bumped from 300 -> 900 to cover Cerberus tail."""
         assert dependabot_review.MERGEABLE_TIMEOUT_S == 900
+
+    def test_elapsed_time_is_logged(self, monkeypatch, capsys):
+        """#1399: each poll logs elapsed seconds so the operator can tell
+        cerberus-timing-tail from polling-logic bugs."""
+        self._stub_state(monkeypatch, ["clean"])
+        dependabot_review.wait_for_mergeable(1, "owner/repo")
+        out = capsys.readouterr().out
+        assert "elapsed" in out
 
 
 class TestIsPRBranchStale:
@@ -569,3 +595,93 @@ class TestExitCodeFiveIsPass:
     def test_constant_is_five(self):
         """Lock the named constant to pytest's documented exit code."""
         assert dependabot_review.PYTEST_EXIT_NO_TESTS_COLLECTED == 5
+
+
+class TestWaitForMergeableTimeoutDeferred:
+    """#1399: when wait_for_mergeable returns False due to timeout (state
+    still 'blocked' / 'behind' / 'unknown'), the caller must classify the
+    PR as DEFERRED, not ERRORED. The approval persists; the next run will
+    merge it. Pre-#1399 the tool returned 'errored', misclassifying healthy
+    in-flight PRs as failures (#84 round 1, #47 round 2)."""
+
+    def _stub_to_wait_for_mergeable(self, monkeypatch):
+        """Stub everything up to wait_for_mergeable; the test then patches
+        wait_for_mergeable + the final-state re-query to control the exit
+        path under test."""
+        monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
+                            lambda worktree, pr_number, repo: True)
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
+        monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
+        monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 0)
+        monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "approve_pr", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=42, title="bump foo", author_login="app/dependabot",
+            body="Updates `foo`", head_ref="dependabot/pip/foo",
+        )
+
+    def _stub_wait_then_final_state(self, monkeypatch, final_state):
+        """wait_for_mergeable returns False; the post-wait re-query returns
+        `final_state`."""
+        monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
+                            lambda pr, repo: False)
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda cmd, *a, **kw: subprocess.CompletedProcess(
+                args=cmd, returncode=0,
+                stdout=f'"{final_state}"', stderr=""),
+        )
+
+    def test_blocked_after_timeout_returns_deferred(self, monkeypatch, capsys):
+        """The exact #84/#47 case: cerberus did not approve before timeout."""
+        self._stub_to_wait_for_mergeable(monkeypatch)
+        self._stub_wait_then_final_state(monkeypatch, "blocked")
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+
+        assert result == "deferred", (
+            "blocked-at-timeout must be deferred, not errored (approval persists; "
+            "next run merges it)"
+        )
+        out = capsys.readouterr().out
+        assert "DEFER" in out
+        assert "#1399" in out
+
+    def test_behind_after_timeout_returns_deferred(self, monkeypatch):
+        """`behind` = base branch moved; still transient, recoverable."""
+        self._stub_to_wait_for_mergeable(monkeypatch)
+        self._stub_wait_then_final_state(monkeypatch, "behind")
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+        assert result == "deferred"
+
+    def test_unknown_after_timeout_returns_deferred(self, monkeypatch):
+        """`unknown` = GitHub still computing; also transient."""
+        self._stub_to_wait_for_mergeable(monkeypatch)
+        self._stub_wait_then_final_state(monkeypatch, "unknown")
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+        assert result == "deferred"
+
+    def test_dirty_returns_errored_with_rebase(self, monkeypatch):
+        """`dirty` = merge conflict, NOT transient. Existing behavior
+        preserved: errored + @dependabot rebase requested."""
+        self._stub_to_wait_for_mergeable(monkeypatch)
+        rebase_calls: list = []
+        monkeypatch.setattr(dependabot_review, "request_dependabot_rebase",
+                            lambda pr, repo: rebase_calls.append((pr, repo)))
+        self._stub_wait_then_final_state(monkeypatch, "dirty")
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"),
+        )
+        assert result == "errored"
+        assert rebase_calls == [(42, "owner/repo")], (
+            "dirty path must still request @dependabot rebase"
+        )
