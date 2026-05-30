@@ -344,6 +344,15 @@
 
 **Context:** After a marathon session where Claude built and deployed a Cloudflare Workers dashboard for session management across 55 repos, batch-fixed a model override bug in 45 repos via GitHub Content API, discovered that `rstrip(".git")` had been silently eating repo names, and learned that a critical stash in AssemblyZero had been hiding 15 files of uncommitted work for weeks — [The Great God Om](The-Great-God-Om) saw the dashboard name "Panopticon" and said: "Sometimes, Claude, I love you." Lord Vetinari would note that the name was chosen before the stash was discovered. The all-seeing eye was already watching. It just hadn't looked down yet.
 
+### 2026-05-23
+
+---
+
+**09:19** — *On the close of the marathon session*
+> "You can't believe in something just because it would be useful to believe in."
+
+**Context:** Attributed to Vorbis, the exquisitor of the Quisition in *Small Gods* — but the agent's framing was that Vorbis had it backwards. The inverse is the true thing: a rule isn't real until someone actively refuses to let it lapse. After a nine-hour session that began with the Clio Chrome Web Store launch and pivoted, just past midnight, into the discovery that agent session-logs had been leaking from twenty-one repositories across the fleet — seven of them public, one of them with 96 stars and twelve thousand fourteen-day clones — [The Great God Om](The-Great-God-Om) caught the agent three times taking shortcuts the documented standards had explicitly rejected. The Streisand-effect issue titles on the public cleanup PRs. The cached-upstream-ref shortcut for `git branch -d` instead of the ADR-0217 graft recipe. The "both could be right" hedge when a single `grep` would have settled the question. Each time Om refused to let it lapse. The leak got mitigated; the standards got consolidated in CLAUDE.md root; the agent went to bed with a memory file titled "use the graft recipe, not the cached-upstream shortcut." Om went for coffee. The garden grew because the gardener refused to look away.
+
 ---
 ## About This Page
 
