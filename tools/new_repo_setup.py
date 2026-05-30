@@ -971,6 +971,13 @@ coverage.xml
 
 # Unleashed session transcripts (auto-generated, untracked)
 data/unleashed/
+
+# Agent-parked files (mv $file $file.bak / $file.parked-{timestamp})
+# CLAUDE.md "Destroying uncommitted state" principle: the agent uses
+# mv-to-bak instead of rm to preserve recoverability. Ignored here so
+# the parked artifacts don't pollute git status across the fleet.
+*.bak
+*.parked-*
 """
     gitignore_path = project_path / ".gitignore"
     gitignore_path.write_text(content, encoding='utf-8')
@@ -2631,6 +2638,18 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             print(f"  [FAIL] .gitignore missing patterns: {missing}")
     else:
         print("  [FAIL] .gitignore not found!")
+
+    # Verify .gitignore has agent-parked-file patterns (#1425)
+    checks_total += 1
+    if gitignore.exists():
+        gi_content = gitignore.read_text(encoding="utf-8")
+        parked_missing = [p for p in ["*.bak", "*.parked-*"]
+                          if p not in gi_content]
+        if not parked_missing:
+            print("  [PASS] .gitignore agent-parked-file patterns present")
+            checks_passed += 1
+        else:
+            print(f"  [FAIL] .gitignore missing agent-parked patterns: {parked_missing}")
 
     # Verify settings.json has hooks configured
     checks_total += 1
