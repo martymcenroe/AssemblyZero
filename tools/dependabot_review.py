@@ -337,6 +337,27 @@ def evict_poetry_venv(worktree: Path) -> None:
     run(["poetry", "env", "remove", "--all"], cwd=str(worktree))
 
 
+def _clean_subprocess_env() -> dict[str, str]:
+    """Return os.environ minus poetry-activation hints.
+
+    The tool is invoked via `poetry run python tools/dependabot_review.py`,
+    which sets VIRTUAL_ENV (and sometimes POETRY_ACTIVE) in this process'
+    environment pointing at AssemblyZero's own venv. If those leak into the
+    subprocess env when we shell out to `poetry install` / `poetry run
+    pytest` against a TARGET repo's worktree, poetry treats the venv as
+    already-activated and skips per-cwd resolution -- every audit then runs
+    in AZ's venv instead of the target's own.
+
+    Symptom that surfaced this: sqlalchemy/sqlite tracebacks in pytest
+    output for dispatch/Talos/patent-general (none of which depend on
+    sqlalchemy), all routed through `assemblyzero-tools-{hash}` venv paths.
+    """
+    env = os.environ.copy()
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("POETRY_ACTIVE", None)
+    return env
+
+
 def _has_dev_group(pyproject: Path) -> bool:
     """Return True iff pyproject.toml declares a `dev` poetry group.
 
@@ -380,7 +401,8 @@ def install_deps(worktree: Path) -> bool:
     cmd = ["poetry", "install", "--no-root"]
     if _has_dev_group(pyproject):
         cmd.extend(["--with", "dev"])
-    result = run(cmd, cwd=str(worktree), timeout=POETRY_INSTALL_TIMEOUT_S)
+    result = run(cmd, cwd=str(worktree), timeout=POETRY_INSTALL_TIMEOUT_S,
+                 env=_clean_subprocess_env())
     return result.returncode == 0
 
 
@@ -394,7 +416,7 @@ def run_tests(worktree: Path) -> int:
     # run. Without it, any target repo whose .gitignore lacks __pycache__/
     # ends up with untracked .pyc files that dirty the audit worktree, making
     # `git worktree remove` (no --force) refuse and leak the worktree.
-    pytest_env = os.environ.copy()
+    pytest_env = _clean_subprocess_env()
     pytest_env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = run(["poetry", "run", "pytest", "-q", "--tb=short"],
                  cwd=str(worktree), timeout=PYTEST_TIMEOUT_S, env=pytest_env)

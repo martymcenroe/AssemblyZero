@@ -957,3 +957,109 @@ class TestInstallDepsDevGroupConditional:
         assert called == [], (
             "install_deps must not invoke poetry when pyproject is absent"
         )
+
+
+class TestCleanSubprocessEnv:
+    """#1415: strip poetry-activation hints (VIRTUAL_ENV, POETRY_ACTIVE) so
+    subprocess `poetry` calls resolve the venv per cwd. The tool is invoked
+    via `poetry run python tools/dependabot_review.py`, so the inherited env
+    has those vars pointing at AZ's venv -- if they leak through, every
+    audit runs in AZ's venv instead of the target repo's."""
+
+    def test_strips_virtual_env(self, monkeypatch):
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/some/venv/path")
+        env = dependabot_review._clean_subprocess_env()
+        assert "VIRTUAL_ENV" not in env
+
+    def test_strips_poetry_active(self, monkeypatch):
+        monkeypatch.setenv("POETRY_ACTIVE", "1")
+        env = dependabot_review._clean_subprocess_env()
+        assert "POETRY_ACTIVE" not in env
+
+    def test_strips_both_when_both_set(self, monkeypatch):
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/some/venv/path")
+        monkeypatch.setenv("POETRY_ACTIVE", "1")
+        env = dependabot_review._clean_subprocess_env()
+        assert "VIRTUAL_ENV" not in env
+        assert "POETRY_ACTIVE" not in env
+
+    def test_preserves_other_env_vars(self, monkeypatch):
+        """PATH and other env must still be present so subprocess can run."""
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/some/venv/path")
+        monkeypatch.setenv("MY_TEST_VAR", "preserved")
+        env = dependabot_review._clean_subprocess_env()
+        assert "VIRTUAL_ENV" not in env
+        assert env.get("MY_TEST_VAR") == "preserved"
+        assert "PATH" in env
+
+    def test_no_op_when_neither_set(self, monkeypatch):
+        """Doesn't crash if neither var is in the env (idempotent)."""
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("POETRY_ACTIVE", raising=False)
+        env = dependabot_review._clean_subprocess_env()
+        assert "VIRTUAL_ENV" not in env
+        assert "POETRY_ACTIVE" not in env
+
+
+class TestInstallDepsStripsVirtualEnv:
+    """#1415: install_deps must pass a cleaned env to poetry so the target's
+    venv is resolved, not AZ's."""
+
+    def test_install_deps_passes_clean_env_to_run(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/AZ/venv/that/should/not/leak")
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.poetry]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8",
+        )
+        captured: dict = {}
+
+        def _capture(cmd, *args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+        assert dependabot_review.install_deps(tmp_path) is True
+
+        assert captured["env"] is not None, (
+            "install_deps must pass env= to run() so VIRTUAL_ENV is stripped"
+        )
+        assert "VIRTUAL_ENV" not in captured["env"], (
+            "VIRTUAL_ENV must be stripped before poetry install — otherwise "
+            "poetry uses AZ venv instead of the target's"
+        )
+
+
+class TestRunTestsStripsVirtualEnv:
+    """#1415: run_tests must pass a cleaned env to pytest so the target's
+    venv is used, not AZ's. Composes with #1371's PYTHONDONTWRITEBYTECODE."""
+
+    def test_run_tests_strips_virtual_env(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/AZ/venv/that/should/not/leak")
+        captured: dict = {}
+
+        def _capture(cmd, *args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+        dependabot_review.run_tests(tmp_path)
+
+        assert captured["env"] is not None
+        assert "VIRTUAL_ENV" not in captured["env"], (
+            "VIRTUAL_ENV must be stripped before pytest — otherwise pytest "
+            "runs in AZ venv and target tests see foreign deps (sqlalchemy "
+            "via langgraph-checkpoint-sqlite was the recurring case)"
+        )
+
+    def test_run_tests_still_sets_pythondontwritebytecode(self, monkeypatch, tmp_path):
+        """Compose with #1371: env stripping must not remove the bytecode-
+        suppression that prevents __pycache__/*.pyc dirtying the worktree."""
+        captured: dict = {}
+
+        def _capture(cmd, *args, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(dependabot_review, "run", _capture)
+        dependabot_review.run_tests(tmp_path)
+
+        assert captured["env"].get("PYTHONDONTWRITEBYTECODE") == "1"
