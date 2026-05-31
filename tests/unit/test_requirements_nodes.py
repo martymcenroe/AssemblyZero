@@ -1013,12 +1013,18 @@ class TestFinalizeNodeAdditional:
 
         assert result.get("final_lld_path") is None
 
-    @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_push")
-    def test_commit_and_push_success(self, mock_commit, tmp_path):
-        """Test _commit_and_push_files sets commit_sha on success."""
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.setup_lld_worktree")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_pr")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._mirror_to_worktree")
+    def test_commit_lld_dispatches_to_pr_path(
+        self, mock_mirror, mock_commit_and_pr, mock_setup, tmp_path
+    ):
+        """LLD workflow now flows through worktree+PR. Closes #1459."""
         from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
 
-        mock_commit.return_value = "abc123"
+        mock_setup.return_value = (tmp_path / "wt", "42-lld")
+        mock_mirror.return_value = ["mirrored/file1.md"]
+        mock_commit_and_pr.return_value = ("abc123", "https://example.com/pr/1")
 
         state = {
             "created_files": ["file1.md"],
@@ -1029,25 +1035,55 @@ class TestFinalizeNodeAdditional:
 
         result = _commit_and_push_files(state)
 
+        mock_setup.assert_called_once()
+        mock_commit_and_pr.assert_called_once()
         assert result.get("commit_sha") == "abc123"
+        assert result.get("final_lld_pr_url") == "https://example.com/pr/1"
 
     @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_push")
-    def test_commit_and_push_error_logged(self, mock_commit, tmp_path):
-        """Test _commit_and_push_files logs error but doesn't fail."""
+    def test_commit_issue_workflow_uses_legacy_push(self, mock_commit, tmp_path):
+        """Issue workflow keeps the legacy direct-push behavior (no PR).
+        Closes #1459 — only the LLD path was rewired."""
+        from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
+
+        mock_commit.return_value = "abc123"
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "issue",
+            "target_repo": str(tmp_path),
+            "slug": "my-feature",
+        }
+
+        result = _commit_and_push_files(state)
+
+        assert result.get("commit_sha") == "abc123"
+        mock_commit.assert_called_once()
+
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.setup_lld_worktree")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_pr")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._mirror_to_worktree")
+    def test_commit_lld_error_logged(
+        self, mock_mirror, mock_commit_and_pr, mock_setup, tmp_path
+    ):
+        """LLD-path PR failure is logged but doesn't fail the workflow."""
         from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
         from assemblyzero.workflows.requirements.git_operations import GitOperationError
 
-        mock_commit.side_effect = GitOperationError("push failed")
+        mock_setup.return_value = (tmp_path / "wt", "42-lld")
+        mock_mirror.return_value = ["mirrored/file1.md"]
+        mock_commit_and_pr.side_effect = GitOperationError("pr failed")
 
         state = {
             "created_files": ["file1.md"],
             "workflow_type": "lld",
             "target_repo": str(tmp_path),
+            "issue_number": 42,
         }
 
         result = _commit_and_push_files(state)
 
-        assert "push failed" in result.get("commit_error", "")
+        assert "pr failed" in result.get("commit_error", "")
 
 
 class TestFinalizeLineageFiles:
