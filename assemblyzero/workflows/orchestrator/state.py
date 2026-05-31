@@ -54,6 +54,18 @@ class OrchestrationState(TypedDict, total=False):
     # Error handling
     error_message: str
 
+    # #1443: Revise-with-context — carried across retries within a stage so
+    # the sub-workflow's drafter can iterate on the prior attempt instead of
+    # regenerating from scratch. The orchestrator's stage runner populates
+    # these from the failed sub_result; the runner reads them on the next
+    # attempt and threads them into the sub-workflow's app.invoke().
+    previous_lld_draft_path: str
+    previous_lld_verdict_text: str
+    previous_triage_brief_path: str
+    previous_triage_verdict_text: str
+    previous_spec_draft_path: str
+    previous_spec_verdict_text: str
+
 
 STAGE_ORDER: list[str] = ["triage", "lld", "spec", "impl", "pr"]
 
