@@ -357,10 +357,34 @@ class GeminiClient:
         gemini_md_backup = Path.cwd() / "GEMINI.md.bak"
         gemini_md_renamed = False
 
+        # #1436 (extended): If a prior invocation crashed before its finally
+        # block restored GEMINI.md, a stale .bak is sitting where we want to
+        # write. On Windows, Path.rename() fails when the target exists
+        # (WinError 183), making every subsequent OAuth call fail. Park any
+        # stale .bak out of the way at the start of each call. Use a
+        # timestamped suffix so the operator can still recover the parked
+        # content if needed; subsequent runs will park their own .bak with
+        # a different timestamp.
+        if gemini_md_backup.exists():
+            import datetime as _dt
+            stale_park = gemini_md_backup.with_suffix(
+                f".bak.stale-{_dt.datetime.now(_dt.timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+            )
+            try:
+                gemini_md_backup.replace(stale_park)
+            except OSError:
+                pass
+
         try:
-            # Temporarily rename GEMINI.md to prevent CLI from loading it
+            # Temporarily rename GEMINI.md to prevent CLI from loading it.
+            # Use Path.replace() instead of Path.rename() — replace() is the
+            # cross-platform "atomic move that overwrites if target exists"
+            # primitive. Path.rename() refuses to overwrite on Windows
+            # (WinError 183). The stale-bak cleanup above means there should
+            # be no .bak to overwrite by the time we reach here, but
+            # replace() is the safer primitive regardless.
             if gemini_md_path.exists():
-                gemini_md_path.rename(gemini_md_backup)
+                gemini_md_path.replace(gemini_md_backup)
                 gemini_md_renamed = True
 
             # Use stdin to pass the prompt to avoid agentic file reading.
@@ -402,10 +426,11 @@ class GeminiClient:
         except OSError as e:
             return False, "", str(e)
         finally:
-            # Restore GEMINI.md
+            # Restore GEMINI.md using replace() for Windows-safe atomic
+            # overwrite of the path we moved it FROM.
             if gemini_md_renamed and gemini_md_backup.exists():
                 try:
-                    gemini_md_backup.rename(gemini_md_path)
+                    gemini_md_backup.replace(gemini_md_path)
                 except OSError:
                     pass
 
