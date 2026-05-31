@@ -1185,6 +1185,103 @@ class TestCompletenessChecks:
         assert result["passed"] is False
 
 
+class TestImportResolvesSourceLayouts:
+    """Tests for _import_resolves source-layout handling. Closes #1461.
+
+    Verifies the validator honors src-layout (`src/foo/bar.py`), lib-layout
+    (`lib/foo/bar.py`), and flat-layout (`foo/bar.py`) for both on-disk modules
+    and modules declared as Add files in the spec's Files Changed table.
+    """
+
+    def test_resolves_flat_layout_on_disk(self, tmp_path):
+        """Flat-layout: chiron.provenance → repo/chiron/provenance.py exists."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "chiron").mkdir()
+        (tmp_path / "chiron" / "provenance.py").write_text("")
+        assert _import_resolves("chiron.provenance", tmp_path, set()) is True
+
+    def test_resolves_src_layout_on_disk(self, tmp_path):
+        """Src-layout: chiron.provenance → repo/src/chiron/provenance.py exists."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "src" / "chiron").mkdir(parents=True)
+        (tmp_path / "src" / "chiron" / "provenance.py").write_text("")
+        assert _import_resolves("chiron.provenance", tmp_path, set()) is True
+
+    def test_resolves_lib_layout_on_disk(self, tmp_path):
+        """Lib-layout: foo.bar → repo/lib/foo/bar.py exists."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "lib" / "foo").mkdir(parents=True)
+        (tmp_path / "lib" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_resolves_new_file_flat_layout(self, tmp_path):
+        """Spec declares Add `chiron/provenance.py` — flat-layout match."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        new_files = {"chiron/provenance.py"}
+        assert _import_resolves("chiron.provenance", tmp_path, new_files) is True
+
+    def test_resolves_new_file_src_layout(self, tmp_path):
+        """Spec declares Add `src/chiron/provenance.py` — src-layout suffix match."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        new_files = {"src/chiron/provenance.py"}
+        assert _import_resolves("chiron.provenance", tmp_path, new_files) is True
+
+    def test_resolves_new_file_src_layout_windows_separators(self, tmp_path):
+        """Windows-style separators in new_file_paths must still match."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        new_files = {"src\\chiron\\provenance.py"}
+        assert _import_resolves("chiron.provenance", tmp_path, new_files) is True
+
+    def test_resolves_package_init(self, tmp_path):
+        """from foo.bar import X where foo/bar/__init__.py exists in src."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "src" / "foo" / "bar").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "bar" / "__init__.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_resolves_parent_module_src_layout(self, tmp_path):
+        """from foo.bar import Baz where foo/bar.py exists (Baz lives inside)."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar.Baz", tmp_path, set()) is True
+
+    def test_unresolvable_returns_false(self, tmp_path):
+        """Module that exists nowhere returns False."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        assert _import_resolves("nonexistent.module", tmp_path, set()) is False
+
+    def test_chiron_provenance_smoke_build_repro(self, tmp_path):
+        """Reproduction of the Chiron #4 smoke build failure: src-layout repo
+        with `src/chiron/` parent dir missing on disk but `src/chiron/provenance.py`
+        declared as Add in the LLD's Files Changed list. Must resolve.
+        """
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        # No on-disk files. Only the Add declaration.
+        new_files = {"src/chiron/provenance.py"}
+        assert _import_resolves("chiron.provenance", tmp_path, new_files) is True
+
+
 # =============================================================================
 # N4: Human Gate
 # =============================================================================
