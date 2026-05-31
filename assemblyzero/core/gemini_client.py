@@ -363,7 +363,10 @@ class GeminiClient:
                 gemini_md_path.rename(gemini_md_backup)
                 gemini_md_renamed = True
 
-            # Use stdin to pass the prompt to avoid agentic file reading
+            # Use stdin to pass the prompt to avoid agentic file reading.
+            # --approval-mode plan = read-only (replaces --sandbox which required
+            # Docker/Podman — broken on machines without either). --skip-trust
+            # prevents the workspace-trust prompt in headless invocations.
             result = subprocess.run(
                 [
                     self._gemini_cli,
@@ -373,7 +376,9 @@ class GeminiClient:
                     self.model,
                     "--output-format",
                     "text",
-                    "--sandbox",  # Disable agentic features
+                    "--approval-mode",
+                    "plan",  # Read-only; no Docker requirement
+                    "--skip-trust",  # No workspace-trust prompt
                 ],
                 input=full_prompt,
                 capture_output=True,
