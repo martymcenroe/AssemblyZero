@@ -40,7 +40,7 @@ A Python script (not a LangGraph workflow — no LLM needed, this is determinist
    - Test files that test the target
 3. **Dry run** — show the plan, ask for confirmation
 4. **Execute** — `git rm` the target and its dedicated test files. Remove import lines from referencing files.
-5. **Verify** — run `pytest`. If green, commit. If red, `git restore` everything and report what failed.
+5. **Verify** — run `pytest`. If green, commit. If red, `git stash` everything and report what failed.
 
 ### CLI Interface
 
@@ -52,7 +52,7 @@ poetry run python tools/run_inhumer.py --target workflows/issue/ --dry-run  # Pl
 ### Safety Rails
 
 - Always dry-run first (unless `--no-dry-run` is explicit)
-- `git restore` rollback if tests fail after deletion
+- `git stash` rollback if tests fail after deletion
 - Never delete files outside the target and its direct references
 - Commit only on green tests
 
@@ -67,7 +67,7 @@ poetry run python tools/run_inhumer.py --target workflows/issue/ --dry-run  # Pl
 - [ ] Finds all imports and references for a given target
 - [ ] Dry-run mode shows full deletion plan without changing anything
 - [ ] Executes deletion and runs tests
-- [ ] Rolls back via `git restore` if tests fail
+- [ ] Rolls back via `git stash` if tests fail
 - [ ] Commits only on green test suite
 - [ ] Works on single files and directories
 - [ ] Successfully handles Issue #206 (inhume `workflows/issue/`)
