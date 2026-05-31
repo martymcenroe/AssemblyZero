@@ -296,9 +296,11 @@ sequenceDiagram
 
 | ID | Scenario | Type | Input | Expected Output | Pass Criteria |
 |----|----------|------|-------|-----------------|---------------|
-| 010 | {Happy path} | Auto | {input} | {output} | {criteria} |
-| 020 | {Edge case} | Auto | {input} | {output} | {criteria} |
-| 030 | {Error case} | Auto | {input} | {output} | {criteria} |
+| 010 | {Happy path} (REQ-1) | Auto | {input} | {output} | {criteria} |
+| 020 | {Edge case} (REQ-2) | Auto | {input} | {output} | {criteria} |
+| 030 | {Error case} (REQ-2) | Auto | {input} | {output} | {criteria} |
+
+**CRITICAL — coverage mapping:** Every scenario's `Scenario` column MUST end with `(REQ-N)` where N is the requirement number from Section 3 the scenario covers. Multiple scenarios may cover the same requirement (e.g. `(REQ-2)` for both error cases above). **Every requirement listed in Section 3 MUST be covered by at least one scenario.** Mechanical validation rejects the LLD if coverage is incomplete; the `(REQ-N)` suffix is how the validator maps tests to requirements.
 
 *Note: Use 3-digit IDs with gaps of 10 (010, 020, 030...) to allow insertions.*
 
