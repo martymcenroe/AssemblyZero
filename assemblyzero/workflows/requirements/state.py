@@ -195,6 +195,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
     draft_count: int
     verdict_count: int
     max_iterations: int
+    # Closes #1467: per-run subdirectory ID for the audit_dir; load_input
+    # generates one if absent so that successive workflow runs against the
+    # same target don't interleave their lineage files.
+    workflow_run_id: str
 
     # Current artifacts
     current_draft_path: str
