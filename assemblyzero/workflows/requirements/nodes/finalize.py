@@ -353,11 +353,9 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     created_files = list(state.get("created_files", []))
     created_files.append(str(lld_path))
 
-    # Add ALL lineage files to created_files (Issue #241)
-    if audit_dir.exists():
-        for lineage_file in audit_dir.glob("*"):
-            if lineage_file.is_file():
-                created_files.append(str(lineage_file))
+    # Lineage files are workflow audit data, not project history. Target repos
+    # should gitignore docs/lineage/ and keep the audit trail on-disk only.
+    # Closes #1458 (superseded #241 which committed lineage to target main).
 
     # Add lld-status.json to commit (Issue #279: was missing, causing stale status)
     lld_status_path = target_repo / "docs" / "lld" / "lld-status.json"
@@ -478,8 +476,16 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
             details=completion_details,
         )
 
-    # Then, commit and push artifacts to git
-    state = _commit_and_push_files(state)
+    # For LLD workflow, commit only on APPROVED — REVISE / BLOCKED outputs
+    # are not project history and must not land on target main. Issue workflow
+    # commits unconditionally (no per-verdict gate exists for that path).
+    # Closes #1456.
+    workflow_type = state.get("workflow_type", "lld")
+    lld_blocked = (
+        workflow_type == "lld" and state.get("lld_status") != "APPROVED"
+    )
+    if not state.get("error_message") and not lld_blocked:
+        state = _commit_and_push_files(state)
 
     # Issue #100: Move lineage from active/ to done/ on successful completion
     if not state.get("error_message"):

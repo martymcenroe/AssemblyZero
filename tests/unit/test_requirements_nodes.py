@@ -1051,20 +1051,22 @@ class TestFinalizeNodeAdditional:
 
 
 class TestFinalizeLineageFiles:
-    """Tests for lineage files being included in created_files.
+    """Tests for lineage files being excluded from created_files.
 
-    Issue #241: requirements workflow does not commit lineage files.
+    Closes #1458: requirements workflow committed entire lineage subtree to
+    target main on every run, producing per-run churn. Lineage is workflow
+    audit data; it stays on-disk in docs/lineage/ and target repos gitignore
+    that path. Supersedes #241 (which originally added the unwanted commit).
     """
 
-    def test_finalize_includes_lineage_files_in_created_files(self, tmp_path):
-        """Finalize should add all lineage files to created_files for commit."""
+    def test_finalize_excludes_lineage_files_from_created_files(self, tmp_path):
+        """Finalize must not enumerate lineage files into created_files."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
 
-        # Create audit directory with lineage files
         audit_dir = target_repo / "docs" / "lineage" / "active" / "42-lld"
         audit_dir.mkdir(parents=True)
         (audit_dir / "001-issue.md").write_text("# Issue content")
@@ -1084,36 +1086,40 @@ class TestFinalizeLineageFiles:
 
         result = finalize(state)
 
-        # Should have no error
         assert result.get("error_message", "") == ""
 
-        # created_files should contain lineage files, not just LLD
         created_files = result.get("created_files", [])
-        assert len(created_files) > 1, "Should have more than just the LLD file"
+        # Match the lineage directory segment, not the substring "lineage"
+        # (pytest tmp_path embeds the test name, which contains "lineage").
+        lineage_segments = (
+            str(Path("docs") / "lineage" / "active"),
+            str(Path("docs") / "lineage" / "done"),
+        )
+        lineage_files = [
+            f for f in created_files
+            if any(seg in f for seg in lineage_segments)
+        ]
+        assert lineage_files == [], (
+            f"Lineage files must not be in created_files; got {lineage_files}"
+        )
 
-        # Should contain at least the lineage files
-        lineage_files = [f for f in created_files if "lineage" in f]
-        assert len(lineage_files) >= 3, f"Expected lineage files, got: {created_files}"
-
-    def test_finalize_commits_entire_audit_directory(self, tmp_path):
-        """All files in audit_dir should be staged for commit."""
+    def test_finalize_created_files_contains_only_lld_and_status(self, tmp_path):
+        """Only the LLD file and lld-status.json belong in created_files."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize
         from assemblyzero.workflows.requirements.state import create_initial_state
 
         target_repo = tmp_path / "repo"
         target_repo.mkdir()
 
-        # Create audit directory with multiple files
         audit_dir = target_repo / "docs" / "lineage" / "active" / "99-lld"
         audit_dir.mkdir(parents=True)
-        expected_files = [
+        for filename in [
             "001-issue.md",
             "002-draft.md",
             "003-verdict.md",
             "004-draft.md",
             "005-verdict.md",
-        ]
-        for filename in expected_files:
+        ]:
             (audit_dir / filename).write_text(f"# {filename}")
 
         state = create_initial_state(
@@ -1130,11 +1136,71 @@ class TestFinalizeLineageFiles:
         result = finalize(state)
 
         created_files = result.get("created_files", [])
+        lineage_segments = (
+            str(Path("docs") / "lineage" / "active"),
+            str(Path("docs") / "lineage" / "done"),
+        )
+        non_durable = [
+            f for f in created_files
+            if any(seg in f for seg in lineage_segments)
+            or f.endswith(".md.bak")
+        ]
+        assert non_durable == [], (
+            f"Only durable files belong in created_files; got non-durable {non_durable}"
+        )
+        assert any("LLD-099.md" in f for f in created_files), (
+            f"LLD file must be in created_files; got {created_files}"
+        )
 
-        # Verify each lineage file is in created_files
-        for expected in expected_files:
-            found = any(expected in f for f in created_files)
-            assert found, f"Expected {expected} in created_files, got: {created_files}"
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._commit_and_push_files")
+    def test_finalize_skips_commit_on_revise_lld_verdict(self, mock_commit, tmp_path):
+        """REVISE-verdict LLDs must not commit to target main. Closes #1456."""
+        from assemblyzero.workflows.requirements.nodes.finalize import finalize
+        from assemblyzero.workflows.requirements.state import create_initial_state
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
+            target_repo=str(target_repo),
+            issue_number=42,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Add Feature"
+        state["lld_status"] = "REVISE"
+        state["audit_dir"] = str(target_repo / "audit")
+
+        finalize(state)
+
+        mock_commit.assert_not_called()
+
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._commit_and_push_files")
+    def test_finalize_commits_on_approved_lld_verdict(self, mock_commit, tmp_path):
+        """APPROVED-verdict LLDs commit. Closes #1456 positive case."""
+        from assemblyzero.workflows.requirements.nodes.finalize import finalize
+        from assemblyzero.workflows.requirements.state import create_initial_state
+
+        mock_commit.side_effect = lambda s: s
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
+            target_repo=str(target_repo),
+            issue_number=42,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Add Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(target_repo / "audit")
+
+        finalize(state)
+
+        mock_commit.assert_called_once()
 
     def test_finalize_handles_empty_audit_dir(self, tmp_path):
         """Should handle case where audit_dir exists but is empty."""
