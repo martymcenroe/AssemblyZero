@@ -124,6 +124,11 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
         # Import here to avoid circular dependencies and allow mocking
         from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
+        # #1440: Plumb orchestrator config into the sub-workflow state.
+        config = state.get("config", {})
+        stage_cfg = config.get("stages", {}).get("triage", {})
+        gate_enabled = bool(config.get("gates", {}).get("triage", False))
+
         graph = create_requirements_graph()
         app = graph.compile()
         sub_result = app.invoke({
@@ -131,6 +136,11 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
             "workflow_type": "issue",
             "target_repo": state.get("target_repo", ""),
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            "config_drafter": stage_cfg.get("drafter", ""),
+            "config_reviewer": stage_cfg.get("reviewer", ""),
+            "config_effort": stage_cfg.get("effort", ""),
+            "config_gates_draft": gate_enabled,
+            "config_gates_verdict": gate_enabled,
         })
 
         # Check for artifact
@@ -186,6 +196,11 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
     try:
         from assemblyzero.workflows.requirements.graph import create_requirements_graph
 
+        # #1440: Plumb orchestrator config into the sub-workflow state.
+        config = state.get("config", {})
+        stage_cfg = config.get("stages", {}).get("lld", {})
+        gate_enabled = bool(config.get("gates", {}).get("lld", False))
+
         graph = create_requirements_graph()
         app = graph.compile()
         sub_result = app.invoke({
@@ -193,6 +208,11 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "workflow_type": "lld",
             "target_repo": state.get("target_repo", ""),
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            "config_drafter": stage_cfg.get("drafter", ""),
+            "config_reviewer": stage_cfg.get("reviewer", ""),
+            "config_effort": stage_cfg.get("effort", ""),
+            "config_gates_draft": gate_enabled,
+            "config_gates_verdict": gate_enabled,
         })
 
         lld_path = sub_result.get("lld_path", "")
@@ -258,6 +278,11 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         from assemblyzero.workflows.implementation_spec.graph import create_implementation_spec_graph as create_spec_graph
 
         lld_path = state.get("lld_path", "")
+        # #1440: Plumb orchestrator config into the sub-workflow state.
+        config = state.get("config", {})
+        stage_cfg = config.get("stages", {}).get("spec", {})
+        gate_enabled = bool(config.get("gates", {}).get("spec", False))
+
         graph = create_spec_graph()
         app = graph.compile()
         sub_result = app.invoke({
@@ -265,6 +290,11 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             "lld_path": lld_path,
             "repo_root": state.get("target_repo", ""),
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            "config_drafter": stage_cfg.get("drafter", ""),
+            "config_reviewer": stage_cfg.get("reviewer", ""),
+            "config_effort": stage_cfg.get("effort", ""),
+            "config_mock_mode": False,
+            "human_gate_enabled": gate_enabled,
         })
 
         spec_path = sub_result.get("spec_path", "")
@@ -331,6 +361,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
 
         spec_path = state.get("spec_path", "")
+        # #1440: Plumb orchestrator config into the sub-workflow state.
+        config = state.get("config", {})
+        stage_cfg = config.get("stages", {}).get("impl", {})
+
         graph = create_impl_graph()
         app = graph.compile()
         sub_result = app.invoke({
@@ -339,6 +373,9 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "worktree_path": str(worktree_path),
             "repo_root": target_repo,
             "original_repo_root": target_repo,
+            "config_drafter": stage_cfg.get("drafter", ""),
+            "config_reviewer": stage_cfg.get("reviewer", ""),
+            "config_effort": stage_cfg.get("effort", ""),
         })
 
         error_msg = sub_result.get("error_message", "")
