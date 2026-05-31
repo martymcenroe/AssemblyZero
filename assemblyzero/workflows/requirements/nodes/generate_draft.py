@@ -169,6 +169,12 @@ CRITICAL FORMATTING RULES:
 - Output ONLY the raw markdown content
 - First line MUST be the title starting with #
 
+CRITICAL — REQUIREMENT/TEST MAPPING (failure to follow halts the workflow):
+- Section 3 (Requirements) MUST be a plain numbered markdown list (1. 2. 3. ...). NO REQ-ID prefixes, NO tables, NO bullets.
+- Section 10.1 (Test Scenarios) MUST be a markdown table. Each scenario's `Scenario` column MUST end with `(REQ-N)` where N is the requirement number from Section 3 the scenario covers. Example: `| 010 | Happy path object creation (REQ-1) | Auto | ... |`
+- EVERY requirement in Section 3 MUST be covered by at least one test scenario via the `(REQ-N)` suffix. A mechanical validator counts coverage by regex-matching `(REQ-N)` patterns in Section 10.1 against the numbered list in Section 3. Missing coverage halts the workflow.
+- Multiple scenarios may cover the same requirement (e.g. two error-case scenarios both ending in `(REQ-2)`). That's fine. What's NOT fine: a requirement with zero matching `(REQ-N)` references.
+
 Use the template structure provided. Include all sections. Be specific about:
 - Files to be created/modified
 - Function signatures
