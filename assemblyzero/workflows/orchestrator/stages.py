@@ -86,15 +86,33 @@ def _make_stage_result(
     error_message: str = "",
     duration_seconds: float = 0.0,
     attempts: int = 0,
+    transient: bool | None = None,
 ) -> StageResult:
-    """Helper to create a StageResult."""
-    return StageResult(
+    """Helper to create a StageResult.
+
+    transient: Pass False to mark this failure as non-transient so the
+    orchestrator's retry loop skips it (Closes #1463). Pass True to force
+    a retry attempt. Leave None to use the retry-default (current behavior:
+    retry up to max_retries). Only meaningful for status="failed" results.
+    """
+    result: StageResult = StageResult(
         status=status,
         artifact_path=artifact_path,
         error_message=error_message,
         duration_seconds=duration_seconds,
         attempts=attempts,
     )
+    if transient is not None:
+        result["transient"] = transient
+    return result
+
+
+def _is_non_transient_halt(sub_result: dict) -> bool:
+    """Sub-workflow halts write a recovery_plan_path. Non-transient by default
+    since the resume command — not a 10-second retry — is the recovery path.
+    Closes #1463.
+    """
+    return bool(sub_result.get("recovery_plan_path", ""))
 
 
 def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
@@ -159,6 +177,7 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
+                transient=False if _is_non_transient_halt(sub_result) else None,
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -285,6 +304,7 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
+                transient=False if _is_non_transient_halt(sub_result) else None,
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -361,6 +381,7 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
+                transient=False if _is_non_transient_halt(sub_result) else None,
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -442,6 +463,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
+                transient=False if _is_non_transient_halt(sub_result) else None,
             )
     except subprocess.CalledProcessError as exc:
         result = _make_stage_result(

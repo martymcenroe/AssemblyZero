@@ -178,3 +178,167 @@ class TestRunPrStage:
         pushed_argv = push_calls[0].args[0]
         assert worktree_branch in pushed_argv
         assert f"issue-{issue}" not in pushed_argv
+
+
+class TestMakeStageResultTransient:
+    """Tests for transient field plumbing through _make_stage_result. Closes #1463."""
+
+    def test_transient_omitted_by_default(self):
+        from assemblyzero.workflows.orchestrator.stages import _make_stage_result
+
+        result = _make_stage_result(status="failed", error_message="boom")
+        assert "transient" not in result
+
+    def test_transient_false_recorded(self):
+        from assemblyzero.workflows.orchestrator.stages import _make_stage_result
+
+        result = _make_stage_result(status="failed", transient=False)
+        assert result["transient"] is False
+
+    def test_transient_true_recorded(self):
+        from assemblyzero.workflows.orchestrator.stages import _make_stage_result
+
+        result = _make_stage_result(status="failed", transient=True)
+        assert result["transient"] is True
+
+
+class TestIsNonTransientHalt:
+    """Tests for the sub-workflow halt detection helper. Closes #1463."""
+
+    def test_recovery_plan_path_set_means_halt(self):
+        from assemblyzero.workflows.orchestrator.stages import _is_non_transient_halt
+
+        assert _is_non_transient_halt({"recovery_plan_path": "/tmp/recovery.json"}) is True
+
+    def test_no_recovery_plan_path_means_not_halt(self):
+        from assemblyzero.workflows.orchestrator.stages import _is_non_transient_halt
+
+        assert _is_non_transient_halt({}) is False
+        assert _is_non_transient_halt({"recovery_plan_path": ""}) is False
+
+    def test_other_state_fields_ignored(self):
+        from assemblyzero.workflows.orchestrator.stages import _is_non_transient_halt
+
+        assert _is_non_transient_halt({"error_message": "foo"}) is False
+
+
+class TestRunStageNodeRetrySkip:
+    """Tests that _run_stage_node skips retry on non-transient failures.
+
+    Closes #1463. The smoke build burned ~24 Gemini calls retrying a halt
+    that printed `Transient: No`; the retry loop now reads the transient
+    field and breaks out instead of running the sub-workflow twice more.
+    """
+
+    def _make_state(self):
+        config = get_default_config()
+        state = create_initial_state(305, config)
+        state["current_stage"] = "triage"
+        return state
+
+    def test_non_transient_failure_skips_retry(self):
+        from assemblyzero.workflows.orchestrator import graph as graph_mod
+
+        call_count = {"n": 0}
+
+        def fake_runner(s):
+            call_count["n"] += 1
+            new_state = dict(s)
+            new_state["stage_results"] = {
+                "triage": {
+                    "status": "failed",
+                    "error_message": "halted",
+                    "duration_seconds": 0.0,
+                    "attempts": 1,
+                    "transient": False,
+                }
+            }
+            return new_state
+
+        with patch.dict(graph_mod.STAGE_RUNNERS, {"triage": fake_runner}, clear=False), \
+             patch("assemblyzero.workflows.orchestrator.graph.save_orchestration_state"):
+            result = graph_mod._run_stage_node(self._make_state())
+
+        assert call_count["n"] == 1, "non-transient failure must not be retried"
+        assert result["stage_results"]["triage"]["status"] == "failed"
+
+    def test_transient_failure_retries_up_to_max(self):
+        from assemblyzero.workflows.orchestrator import graph as graph_mod
+
+        call_count = {"n": 0}
+
+        def fake_runner(s):
+            call_count["n"] += 1
+            new_state = dict(s)
+            new_state["stage_results"] = {
+                "triage": {
+                    "status": "failed",
+                    "error_message": "transient",
+                    "duration_seconds": 0.0,
+                    "attempts": 1,
+                    "transient": True,
+                }
+            }
+            return new_state
+
+        with patch.dict(graph_mod.STAGE_RUNNERS, {"triage": fake_runner}, clear=False), \
+             patch("assemblyzero.workflows.orchestrator.graph.save_orchestration_state"), \
+             patch("assemblyzero.workflows.orchestrator.graph.time.sleep"):
+            result = graph_mod._run_stage_node(self._make_state())
+
+        assert call_count["n"] == 3, "transient failure must retry up to max_retries"
+        assert result["stage_results"]["triage"]["status"] == "failed"
+
+    def test_failure_without_transient_field_retries_as_today(self):
+        """Backward-compat: absent transient field preserves the current
+        retry behavior so non-halt failure paths (e.g. gh CLI flakes) keep
+        their retry budget."""
+        from assemblyzero.workflows.orchestrator import graph as graph_mod
+
+        call_count = {"n": 0}
+
+        def fake_runner(s):
+            call_count["n"] += 1
+            new_state = dict(s)
+            new_state["stage_results"] = {
+                "triage": {
+                    "status": "failed",
+                    "error_message": "no transient field",
+                    "duration_seconds": 0.0,
+                    "attempts": 1,
+                }
+            }
+            return new_state
+
+        with patch.dict(graph_mod.STAGE_RUNNERS, {"triage": fake_runner}, clear=False), \
+             patch("assemblyzero.workflows.orchestrator.graph.save_orchestration_state"), \
+             patch("assemblyzero.workflows.orchestrator.graph.time.sleep"):
+            result = graph_mod._run_stage_node(self._make_state())
+
+        assert call_count["n"] == 3, "absent transient field defaults to retry-as-today"
+        assert result["stage_results"]["triage"]["status"] == "failed"
+
+    def test_passed_status_does_not_retry(self):
+        from assemblyzero.workflows.orchestrator import graph as graph_mod
+
+        call_count = {"n": 0}
+
+        def fake_runner(s):
+            call_count["n"] += 1
+            new_state = dict(s)
+            new_state["stage_results"] = {
+                "triage": {
+                    "status": "passed",
+                    "artifact_path": "/tmp/brief.md",
+                    "duration_seconds": 0.0,
+                    "attempts": 1,
+                }
+            }
+            return new_state
+
+        with patch.dict(graph_mod.STAGE_RUNNERS, {"triage": fake_runner}, clear=False), \
+             patch("assemblyzero.workflows.orchestrator.graph.save_orchestration_state"):
+            result = graph_mod._run_stage_node(self._make_state())
+
+        assert call_count["n"] == 1
+        assert result["stage_results"]["triage"]["status"] == "passed"

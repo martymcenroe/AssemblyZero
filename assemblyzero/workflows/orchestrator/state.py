@@ -20,6 +20,11 @@ class StageResult(TypedDict, total=False):
     error_message: str
     duration_seconds: float
     attempts: int
+    # When False, the orchestrator's retry loop skips this stage — the failure
+    # is known not to resolve on retry (e.g. sub-workflow halted with a
+    # non-transient recovery plan). When True or absent, the retry loop runs
+    # as today. Closes #1463.
+    transient: bool
 
 
 class OrchestrationState(TypedDict, total=False):
