@@ -90,7 +90,17 @@ def test_lld_threads_target_repo(mock_detect, mock_create_graph):
 def test_spec_threads_repo_root(mock_detect, mock_create_graph):
     mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
     captured: dict = {}
-    mock_create_graph.return_value = _capturing_graph(captured, {"spec_path": ""})
+    # create_implementation_spec_graph returns a CompiledStateGraph (already
+    # compiled) — see implementation_spec/graph.py:273 type hint. The
+    # orchestrator's run_spec_stage uses the returned graph directly without
+    # calling .compile() on it. Mock the factory to return an "app" mock
+    # whose .invoke captures the payload — matching production shape.
+    app = MagicMock()
+    def _invoke(payload):
+        captured.update(payload)
+        return {"spec_path": ""}
+    app.invoke.side_effect = _invoke
+    mock_create_graph.return_value = app
 
     run_spec_stage(_external_state())
 
