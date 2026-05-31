@@ -581,23 +581,39 @@ class ClaudeCLIProvider(LLMProvider):
                 try:
                     response_data = json.loads(stdout)
 
-                    # Issue #779: When --json-schema is used, claude -p puts the
-                    # structured output in "structured_output" (dict), not "result"
-                    # (which is empty). Serialize it back to JSON string so
-                    # downstream consumers (parse_structured_verdict) can parse it.
-                    structured_out = response_data.get("structured_output")
-                    if structured_out is not None and active_schema:
-                        response_text = json.dumps(structured_out)
+                    # #1431: Defensive — claude -p sometimes returns a top-level
+                    # JSON array (rare; observed under certain --json-schema /
+                    # error conditions). Calling .get() on a list raises
+                    # AttributeError that the bare-except below swallows with a
+                    # cryptic "'list' object has no attribute 'get'" message.
+                    # Treat any non-dict shape as "use raw stdout" so the call
+                    # still completes with a useful response and the raw bytes
+                    # are preserved for debugging.
+                    if not isinstance(response_data, dict):
+                        logger.warning(
+                            "claude -p returned non-dict JSON (type=%s); "
+                            "falling back to raw stdout. stdout[:500]=%r",
+                            type(response_data).__name__, stdout[:500]
+                        )
+                        response_text = stdout.strip()
                     else:
-                        response_text = response_data.get("result", "")
+                        # Issue #779: When --json-schema is used, claude -p puts the
+                        # structured output in "structured_output" (dict), not "result"
+                        # (which is empty). Serialize it back to JSON string so
+                        # downstream consumers (parse_structured_verdict) can parse it.
+                        structured_out = response_data.get("structured_output")
+                        if structured_out is not None and active_schema:
+                            response_text = json.dumps(structured_out)
+                        else:
+                            response_text = response_data.get("result", "")
 
-                    # Extract usage from claude -p JSON
-                    usage = response_data.get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
-                    output_tokens = usage.get("output_tokens", 0)
-                    cache_read_tokens = usage.get("cache_read_input_tokens", 0)
-                    cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
-                    cost_usd = response_data.get("total_cost_usd", 0.0)
+                        # Extract usage from claude -p JSON
+                        usage = response_data.get("usage", {})
+                        input_tokens = usage.get("input_tokens", 0)
+                        output_tokens = usage.get("output_tokens", 0)
+                        cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+                        cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
+                        cost_usd = response_data.get("total_cost_usd", 0.0)
 
                 except json.JSONDecodeError:
                     # Fall back to raw stdout if not valid JSON
