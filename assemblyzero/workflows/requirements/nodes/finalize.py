@@ -236,7 +236,13 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
 
         if match:
             open_questions_section = match.group(1)
-            if re.search(r"^- \[ \]", open_questions_section, re.MULTILINE):
+            # Closes #1470: strip fenced code blocks so example syntax inside
+            # backticks (`- [ ]` as documentation, not as a real checkbox) does
+            # not trip the regex.
+            section_no_blocks = re.sub(
+                r"```[\s\S]*?```", "", open_questions_section
+            )
+            if re.search(r"^- \[ \]", section_no_blocks, re.MULTILINE):
                 errors.append("Unresolved open questions remain")
 
     # Issue #775: Use structured detection for questions/TODOs (REQ-1)
@@ -476,6 +482,19 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
             details=completion_details,
         )
 
+    # Closes #1457: move-to-done runs BEFORE the commit. Previously the commit
+    # captured lineage in active/ then this move relocated those files to done/,
+    # leaving the working tree dirty after every successful workflow run. With
+    # AZ #1458 (lineage no longer in created_files) the dirty-state was mostly
+    # defused, but the order is still wrong: post-commit working-tree mutation
+    # is incoherent. Moving first ensures that whatever lineage is committed —
+    # if any — lives at its final on-disk location.
+    if not state.get("error_message"):
+        audit_dir = Path(state.get("audit_dir", ""))
+        target_repo = Path(state.get("target_repo", "."))
+        if audit_dir.exists():
+            move_lineage_to_done(audit_dir, target_repo)
+
     # For LLD workflow, commit only on APPROVED — REVISE / BLOCKED outputs
     # are not project history and must not land on target main. Issue workflow
     # commits unconditionally (no per-verdict gate exists for that path).
@@ -486,13 +505,6 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     if not state.get("error_message") and not lld_blocked:
         state = _commit_and_push_files(state)
-
-    # Issue #100: Move lineage from active/ to done/ on successful completion
-    if not state.get("error_message"):
-        audit_dir = Path(state.get("audit_dir", ""))
-        target_repo = Path(state.get("target_repo", "."))
-        if audit_dir.exists():
-            move_lineage_to_done(audit_dir, target_repo)
 
     # Cleanup source idea after successful issue creation
     if workflow_type == "issue" and not state.get("error_message"):
