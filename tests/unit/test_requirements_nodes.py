@@ -1202,6 +1202,43 @@ class TestFinalizeLineageFiles:
 
         mock_commit.assert_called_once()
 
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._commit_and_push_files")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.move_lineage_to_done")
+    def test_finalize_moves_to_done_before_commit(
+        self, mock_move, mock_commit, tmp_path
+    ):
+        """Move-to-done runs BEFORE the commit so post-commit working-tree
+        mutation doesn't leave the target repo dirty. Closes #1457."""
+        from assemblyzero.workflows.requirements.nodes.finalize import finalize
+        from assemblyzero.workflows.requirements.state import create_initial_state
+
+        mock_commit.side_effect = lambda s: s
+        call_order: list[str] = []
+        mock_move.side_effect = lambda *a, **kw: call_order.append("move")
+        mock_commit.side_effect = lambda s: (call_order.append("commit") or s)
+
+        target_repo = tmp_path / "repo"
+        target_repo.mkdir()
+        audit_dir = target_repo / "docs" / "lineage" / "active" / "77-lld"
+        audit_dir.mkdir(parents=True)
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root=str(tmp_path / "assemblyzero"),
+            target_repo=str(target_repo),
+            issue_number=77,
+        )
+        state["current_draft"] = "# LLD Content"
+        state["issue_title"] = "Feature"
+        state["lld_status"] = "APPROVED"
+        state["audit_dir"] = str(audit_dir)
+
+        finalize(state)
+
+        assert call_order == ["move", "commit"], (
+            f"Expected move-before-commit, got: {call_order}"
+        )
+
     def test_finalize_handles_empty_audit_dir(self, tmp_path):
         """Should handle case where audit_dir exists but is empty."""
         from assemblyzero.workflows.requirements.nodes.finalize import finalize

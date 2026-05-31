@@ -157,6 +157,63 @@ class TestValidateLldFinalStructured:
         assert isinstance(issues, list)
 
 
+class TestOpenQuestionsCheckboxIgnoresCodeBlocks:
+    """The unchecked-checkbox regex must not match inside fenced code blocks.
+
+    Closes #1470. A draft that documents the Open Questions section format
+    by showing the `- [ ]` syntax in a code block was falsely flagging
+    "Unresolved open questions remain" even when all real checkboxes were
+    checked or resolved.
+    """
+
+    def test_unchecked_inside_fenced_block_does_not_trigger(self):
+        content = (
+            "# LLD\n\n"
+            "## Open Questions\n\n"
+            "All questions resolved. The format for tracking is:\n\n"
+            "```markdown\n"
+            "- [ ] Example unchecked question\n"
+            "- [x] Example resolved question\n"
+            "```\n\n"
+            "## Next Section\n"
+        )
+        issues = validate_lld_final(content, open_questions_resolved=False)
+        assert not any(
+            "Unresolved open questions remain" in i for i in issues
+        ), f"got: {issues}"
+
+    def test_real_unchecked_outside_block_still_triggers(self):
+        content = (
+            "# LLD\n\n"
+            "## Open Questions\n\n"
+            "- [ ] What is the timeout?\n\n"
+            "## Next Section\n"
+        )
+        issues = validate_lld_final(content, open_questions_resolved=False)
+        assert any(
+            "Unresolved open questions remain" in i for i in issues
+        ), f"got: {issues}"
+
+    def test_unchecked_in_block_with_real_unchecked_outside_still_triggers(self):
+        """Mixed case: code-block example AND a real unchecked item — the
+        real one must still trigger the error."""
+        content = (
+            "# LLD\n\n"
+            "## Open Questions\n\n"
+            "Format example:\n\n"
+            "```markdown\n"
+            "- [ ] example only\n"
+            "```\n\n"
+            "Real questions:\n\n"
+            "- [ ] Actual question that needs answering\n\n"
+            "## Next Section\n"
+        )
+        issues = validate_lld_final(content, open_questions_resolved=False)
+        assert any(
+            "Unresolved open questions remain" in i for i in issues
+        ), f"got: {issues}"
+
+
 class TestDetectOpenQuestionsReturnType:
     """Verify FinalizeQuestionsResult TypedDict structure."""
 
