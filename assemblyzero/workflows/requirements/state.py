@@ -181,6 +181,13 @@ class RequirementsWorkflowState(TypedDict, total=False):
     context_files: list[str]
     context_content: str
 
+    # #1443: Revise-with-context — populated by orchestrator on retry so the
+    # drafter can iterate on the prior attempt instead of starting fresh.
+    # Empty on first attempt; non-empty when the orchestrator's stage runner
+    # captures a prior failed sub_result and passes it into the next invoke.
+    previous_draft_path: str
+    previous_verdict_text: str
+
     # Workflow tracking
     audit_dir: str
     file_counter: int

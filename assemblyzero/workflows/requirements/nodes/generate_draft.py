@@ -181,6 +181,55 @@ Use the template structure provided. Include all sections. Be specific about:
 - Data structures
 - Error handling approach"""
 
+    # #1443: Revise-with-context — when the orchestrator's stage runner has
+    # populated previous_draft_path and/or previous_verdict_text (set on retry
+    # of a stage that previously failed), augment the system prompt so the
+    # drafter REVISES instead of regenerating. Without this, each retry rolls
+    # dice on a fresh prompt and can't converge on what the reviewer / human
+    # flagged.
+    previous_draft_path = state.get("previous_draft_path", "")
+    previous_verdict_text = state.get("previous_verdict_text", "")
+    if previous_draft_path or previous_verdict_text:
+        previous_draft_text = ""
+        if previous_draft_path:
+            try:
+                previous_draft_text = Path(previous_draft_path).read_text(
+                    encoding="utf-8"
+                )
+            except OSError:
+                previous_draft_text = (
+                    f"(unable to read previous draft at {previous_draft_path})"
+                )
+        system_prompt += (
+            "\n\n========================================================\n"
+            "REVISION MODE — you have a prior attempt to learn from.\n"
+            "========================================================\n\n"
+            "This stage previously failed. Do NOT regenerate from scratch. "
+            "Produce a revision that:\n"
+            "  - Addresses every concrete reviewer-flagged issue below\n"
+            "  - Preserves content the reviewer did NOT flag\n"
+            "  - Keeps the same overall document shape (sections, ordering)\n"
+            "  - Improves the issues; does not paraphrase the whole document\n\n"
+        )
+        if previous_draft_text:
+            system_prompt += (
+                "PRIOR DRAFT (begin):\n"
+                "```markdown\n"
+                f"{previous_draft_text}\n"
+                "```\n"
+                "PRIOR DRAFT (end).\n\n"
+            )
+        if previous_verdict_text:
+            system_prompt += (
+                "REVIEWER FEEDBACK ON PRIOR DRAFT (begin):\n\n"
+                f"{previous_verdict_text}\n\n"
+                "REVIEWER FEEDBACK (end).\n\n"
+            )
+        system_prompt += (
+            "Now produce the revised document. Emit ONLY the revised markdown, "
+            "starting with the # title — same rules as before.\n"
+        )
+
     # Call drafter
     print(f"    Drafter: {drafter_spec}")
 

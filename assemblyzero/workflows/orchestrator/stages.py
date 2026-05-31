@@ -201,6 +201,12 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
         stage_cfg = config.get("stages", {}).get("lld", {})
         gate_enabled = bool(config.get("gates", {}).get("lld", False))
 
+        # #1443: Revise-with-context. On retry, state carries the prior
+        # attempt's draft and reviewer feedback so the drafter can iterate
+        # instead of starting fresh.
+        previous_draft_path = state.get("previous_lld_draft_path", "")
+        previous_verdict_text = state.get("previous_lld_verdict_text", "")
+
         graph = create_requirements_graph()
         app = graph.compile()
         sub_result = app.invoke({
@@ -213,10 +219,26 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "config_effort": stage_cfg.get("effort", ""),
             "config_gates_draft": gate_enabled,
             "config_gates_verdict": gate_enabled,
+            "previous_draft_path": previous_draft_path,
+            "previous_verdict_text": previous_verdict_text,
         })
 
         lld_path = sub_result.get("lld_path", "")
         review_verdict = sub_result.get("review_verdict", "")
+
+        # #1443: Capture this attempt's outputs onto orchestrator state so
+        # the NEXT retry (if any) sees them as previous_*. We snapshot the
+        # sub-workflow's current_verdict (actionable feedback) and the LLD
+        # path so retry can revise rather than regenerate.
+        state = dict(state)
+        if lld_path:
+            state["previous_lld_draft_path"] = lld_path
+        verdict_for_next = sub_result.get("current_verdict", "") or sub_result.get(
+            "verdict_text", ""
+        )
+        if verdict_for_next:
+            state["previous_lld_verdict_text"] = verdict_for_next
+        state = OrchestrationState(**state)
 
         if lld_path and Path(lld_path).is_file():
             # #1440 (extended): When the human verdict gate is bypassed
