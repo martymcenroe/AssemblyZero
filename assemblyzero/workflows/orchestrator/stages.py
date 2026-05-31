@@ -223,8 +223,22 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "previous_verdict_text": previous_verdict_text,
         })
 
-        lld_path = sub_result.get("lld_path", "")
-        review_verdict = sub_result.get("review_verdict", "")
+        # The requirements workflow's finalize node writes the saved LLD
+        # path as `final_lld_path` and the verdict as `final_verdict`
+        # (see assemblyzero/workflows/requirements/nodes/finalize.py
+        # lines 340, 368). The orchestrator previously read `lld_path` /
+        # `review_verdict` which were never set — every reviewer-APPROVED
+        # run was misclassified as `status="failed"` and retried 3/3.
+        # Fall back to the legacy names for mock_mode and any future
+        # alternate writers.
+        lld_path = (
+            sub_result.get("final_lld_path", "")
+            or sub_result.get("lld_path", "")
+        )
+        review_verdict = (
+            sub_result.get("final_verdict", "")
+            or sub_result.get("review_verdict", "")
+        )
 
         # #1443: Capture this attempt's outputs onto orchestrator state so
         # the NEXT retry (if any) sees them as previous_*. We snapshot the
