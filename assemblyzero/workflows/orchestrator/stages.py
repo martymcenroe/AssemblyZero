@@ -327,8 +327,13 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         stage_cfg = config.get("stages", {}).get("spec", {})
         gate_enabled = bool(config.get("gates", {}).get("spec", False))
 
-        graph = create_spec_graph()
-        app = graph.compile()
+        # create_implementation_spec_graph already returns CompiledStateGraph
+        # (see implementation_spec/graph.py:273 + line 370 `return graph.compile()`).
+        # Calling .compile() again raises AttributeError. Use the returned
+        # graph directly. Requirements + testing graph factories return the
+        # uncompiled StateGraph and still need .compile() — those stages are
+        # unchanged.
+        app = create_spec_graph()
         sub_result = app.invoke({
             "issue_number": issue_number,
             "lld_path": lld_path,
