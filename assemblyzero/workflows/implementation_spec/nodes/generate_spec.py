@@ -53,8 +53,8 @@ logger = logging.getLogger(__name__)
 # Template path relative to assemblyzero_root
 SPEC_TEMPLATE_PATH = Path("docs/standards/0701-implementation-spec-template.md")
 
-# Default drafter model spec
-DEFAULT_DRAFTER = "claude:opus"
+# Default drafter model spec (top-tier; AZ #1434)
+DEFAULT_DRAFTER = "gemini:3.1-pro-preview"
 
 # Maximum characters for pattern reference excerpts in the prompt
 MAX_PATTERN_EXCERPT_CHARS = 3_000

@@ -488,7 +488,7 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
 
     # Issue #773: Use unified LLM provider instead of hardcoded GeminiClient
-    reviewer_spec = state.get("config_reviewer", "claude:opus")
+    reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro-preview")
     if state.get("mock_mode", False):
         reviewer_spec = "mock:review"
     print(f"    Reviewer: {reviewer_spec}")

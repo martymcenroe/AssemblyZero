@@ -45,8 +45,8 @@ from assemblyzero.workflows.implementation_spec.state import ImplementationSpecS
 # Constants
 # =============================================================================
 
-# Default reviewer model spec
-DEFAULT_REVIEWER = "claude:opus"
+# Default reviewer model spec (top-tier; AZ #1434)
+DEFAULT_REVIEWER = "gemini:3.1-pro-preview"
 
 # Minimum spec size to be considered valid (bytes)
 MIN_SPEC_SIZE = 100

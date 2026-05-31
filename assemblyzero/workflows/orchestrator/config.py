@@ -37,30 +37,31 @@ def get_default_config() -> OrchestratorConfig:
         skip_existing_lld=True,
         skip_existing_spec=True,
         stages={
-            # #1432: Default to Gemini drafter/reviewer to bypass the Claude
-            # json_schema crash (#1431) and reduce default-config cost.
-            # Operator-confirmed 2026-05-30: "i don't think it matters which
-            # llm writes and which reviews or even if one does both."
+            # #1434: Default to Gemini 3.1 Pro Preview (top-tier production
+            # model). Earlier #1432/PR #1433 incorrectly used gemini:2.5-flash;
+            # operator runs top-tier models by default. The Claude json_schema
+            # crash (#1431) remains the reason this defaults to Gemini rather
+            # than Claude — but with the right tier this time.
             "triage": StageConfig(
-                drafter="gemini:2.5-flash",
-                reviewer="gemini:2.5-flash",
+                drafter="gemini:3.1-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
-                drafter="gemini:2.5-flash",
-                reviewer="gemini:2.5-flash",
+                drafter="gemini:3.1-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
-                drafter="gemini:2.5-flash",
-                reviewer="gemini:2.5-flash",
+                drafter="gemini:3.1-pro-preview",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=3,
                 timeout_seconds=600,
             ),
             "impl": StageConfig(
-                drafter="gemini:2.5-flash",
+                drafter="gemini:3.1-pro-preview",
                 reviewer="",
                 max_revisions=3,
                 timeout_seconds=1800,
