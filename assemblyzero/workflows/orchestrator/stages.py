@@ -219,7 +219,15 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
         review_verdict = sub_result.get("review_verdict", "")
 
         if lld_path and Path(lld_path).is_file():
-            if review_verdict.upper() == "APPROVED":
+            # #1440 (extended): When the human verdict gate is bypassed
+            # (config_gates_verdict=False), the reviewer's verdict becomes
+            # ADVISORY — not authoritative. A finalized LLD on disk means the
+            # sub-workflow's finalize step ran to completion; that's stage
+            # success. Without this guard, the orchestrator considers every
+            # bypassed-gate run BLOCKED whenever the reviewer says REVISE,
+            # which is the dominant outcome when reviewer-context-bleed
+            # (#1441) makes the reviewer wrong.
+            if review_verdict.upper() == "APPROVED" or not gate_enabled:
                 result = _make_stage_result(
                     status="passed",
                     artifact_path=lld_path,
