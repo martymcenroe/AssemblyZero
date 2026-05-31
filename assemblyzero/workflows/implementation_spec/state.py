@@ -179,3 +179,10 @@ class ImplementationSpecState(TypedDict, total=False):
     previous_attempt_snippet: str | None
     target_file: str
     completed_files: list[str]
+
+    # Closes #1465: Cumulative N3 completeness failures across iterations so
+    # the drafter sees "iteration K failed on these checks" history, not just
+    # the current iteration's failures. Without this, identical failure
+    # messages produce identical revisions and the loop never converges.
+    # Each entry: {"iteration": int, "failures": list[str]}.
+    prior_completeness_breakdown: list[dict]

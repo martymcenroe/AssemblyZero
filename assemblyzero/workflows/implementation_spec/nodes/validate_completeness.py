@@ -168,9 +168,22 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
         for issue in completeness_issues:
             print(f"      - {issue[:120]}...")
 
+    # Closes #1465: Persist this iteration's failures into a cumulative
+    # breakdown so the next N2 revision sees "we already tried fixing this
+    # K times" history. Without it, identical failure text yields identical
+    # revisions and the spec-revision loop never converges.
+    prior_breakdown = list(state.get("prior_completeness_breakdown", []))
+    if not validation_passed:
+        iteration = state.get("review_iteration", 0)
+        prior_breakdown.append({
+            "iteration": iteration,
+            "failures": list(completeness_issues),
+        })
+
     return {
         "completeness_issues": completeness_issues,
         "validation_passed": validation_passed,
+        "prior_completeness_breakdown": prior_breakdown,
         "error_message": "",
     }
 
