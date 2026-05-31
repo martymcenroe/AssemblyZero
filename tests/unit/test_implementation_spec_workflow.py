@@ -1480,6 +1480,144 @@ class TestBuildDrafterPrompt:
         assert "Similar node" in prompt
 
 
+class TestPriorCompletenessBreakdownInPrompt:
+    """Cumulative prior-iteration failures appear in revision prompt. Closes #1465."""
+
+    def _make_revision_prompt(self, prior_breakdown):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            build_drafter_prompt,
+        )
+        # Revision mode requires existing_draft + (review_feedback OR completeness_issues)
+        return build_drafter_prompt(
+            lld_content="# LLD",
+            current_state={},
+            patterns=[],
+            existing_draft="# Current draft",
+            completeness_issues=["import_targets_exist: chiron.provenance"],
+            prior_completeness_breakdown=prior_breakdown,
+        )
+
+    def test_empty_prior_breakdown_no_history_section(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[])
+        assert "PRIOR ITERATION HISTORY" not in prompt
+
+    def test_single_prior_iteration_renders_history(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: thing missing"]},
+        ])
+        assert "PRIOR ITERATION HISTORY" in prompt
+        assert "Iteration 0" in prompt
+        assert "check_X: thing missing" in prompt
+
+    def test_recurring_failure_synthesizes_warning(self):
+        """When the same failure appears in >=2 prior iterations, the prompt
+        explicitly tells the drafter prior fixes did not work and to change
+        approach — not just retry a minor tweak."""
+        same = "check_X: thing missing"
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": [same]},
+            {"iteration": 1, "failures": [same]},
+            {"iteration": 2, "failures": [same]},
+        ])
+        assert "RECURRING FAILURES" in prompt
+        assert "Tried 3 times" in prompt
+        assert "Change approach" in prompt or "change the spec" in prompt.lower()
+
+    def test_distinct_failures_do_not_trigger_recurring_section(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: A"]},
+            {"iteration": 1, "failures": ["check_Y: B"]},
+        ])
+        assert "PRIOR ITERATION HISTORY" in prompt
+        assert "RECURRING FAILURES" not in prompt
+
+
+class TestValidateCompletenessAccumulatesPriorBreakdown:
+    """N3 appends each failed iteration to prior_completeness_breakdown so
+    N2 sees the full history. Closes #1465."""
+
+    def test_first_failure_creates_first_breakdown_entry(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            validate_completeness,
+        )
+        state = {
+            "spec_draft": "# Spec\n" + ("content " * 30),
+            "files_to_modify": [{
+                "path": "src/chiron/provenance.py",
+                "change_type": "Add", "description": "Add module",
+                "current_content": "",
+            }],
+            "pattern_references": [],
+            "repo_root": str(tmp_path),
+            "review_iteration": 0,
+            "prior_completeness_breakdown": [],
+        }
+        result = validate_completeness(state)
+        breakdown = result.get("prior_completeness_breakdown", [])
+        assert result["validation_passed"] is False
+        assert len(breakdown) == 1
+        assert breakdown[0]["iteration"] == 0
+        assert len(breakdown[0]["failures"]) > 0
+
+    def test_subsequent_failure_appends_without_dropping_prior(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            validate_completeness,
+        )
+        prior = [{"iteration": 0, "failures": ["old failure"]}]
+        state = {
+            "spec_draft": "# Spec\n" + ("content " * 30),
+            "files_to_modify": [{
+                "path": "src/chiron/provenance.py",
+                "change_type": "Add", "description": "Add module",
+                "current_content": "",
+            }],
+            "pattern_references": [],
+            "repo_root": str(tmp_path),
+            "review_iteration": 1,
+            "prior_completeness_breakdown": prior,
+        }
+        result = validate_completeness(state)
+        breakdown = result.get("prior_completeness_breakdown", [])
+        assert len(breakdown) == 2
+        assert breakdown[0] == {"iteration": 0, "failures": ["old failure"]}
+        assert breakdown[1]["iteration"] == 1
+
+    def test_passing_validation_does_not_append(self, tmp_path):
+        """When N3 passes, the breakdown is unchanged (passing iterations
+        aren't part of the failure history)."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            validate_completeness,
+        )
+        prior = [{"iteration": 0, "failures": ["earlier failure"]}]
+        # A long substantive spec with no Modify files passes most checks
+        # (the import check is the harshest gate; with no Add files in the
+        # spec and no imports declared, the test passes the bar — but only
+        # for the purpose of this test we use a draft that will pass).
+        # Easiest: use the existing sample_spec_complete pattern from
+        # base_state fixtures. For unit isolation, give it an empty files
+        # list and a basic but >100-char draft.
+        state = {
+            "spec_draft": "# Implementation Spec\n\n## Overview\n\n"
+                          "This spec does nothing structural; no Modify, "
+                          "no Add. " + ("filler " * 20),
+            "files_to_modify": [],
+            "pattern_references": [],
+            "repo_root": str(tmp_path),
+            "review_iteration": 1,
+            "prior_completeness_breakdown": prior,
+        }
+        result = validate_completeness(state)
+        # Even if validation_passed varies (it depends on other checks),
+        # the contract is: prior_breakdown is only appended on failure.
+        breakdown = result.get("prior_completeness_breakdown", [])
+        if result["validation_passed"]:
+            assert breakdown == prior
+        else:
+            # On failure the new entry is appended; original prior still present
+            assert breakdown[0] == prior[0]
+            assert len(breakdown) == 2
+
+
 class TestPromptProjectContext:
     """Tests for Issue #409: project context and import deps in prompt."""
 

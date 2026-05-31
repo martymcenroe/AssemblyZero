@@ -228,6 +228,9 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             project_context=state.get("project_context", ""),
             import_dependencies=state.get("import_dependencies", ""),
             repo_structure=state.get("repo_structure", ""),
+            prior_completeness_breakdown=(
+                state.get("prior_completeness_breakdown", []) if is_revision else []
+            ),
         )
 
     # -------------------------------------------------------------------------
@@ -355,6 +358,7 @@ def build_drafter_prompt(
     project_context: str = "",
     import_dependencies: str = "",
     repo_structure: str = "",
+    prior_completeness_breakdown: list[dict] | None = None,
 ) -> str:
     """Build the prompt for Claude spec generation.
 
@@ -391,6 +395,8 @@ def build_drafter_prompt(
         completeness_issues = []
     if files_to_modify is None:
         files_to_modify = []
+    if prior_completeness_breakdown is None:
+        prior_completeness_breakdown = []
 
     is_revision = bool(existing_draft and (review_feedback or completeness_issues))
 
@@ -407,6 +413,7 @@ def build_drafter_prompt(
             repo_root=repo_root,
             files_to_modify=files_to_modify,
             repo_structure=repo_structure,
+            prior_completeness_breakdown=prior_completeness_breakdown,
         )
     else:
         return _build_initial_prompt(
@@ -517,6 +524,7 @@ def _build_revision_prompt(
     repo_root: str,
     files_to_modify: list,
     repo_structure: str = "",
+    prior_completeness_breakdown: list[dict] | None = None,
 ) -> str:
     """Build prompt for spec revision based on feedback.
 
@@ -593,6 +601,45 @@ def _build_revision_prompt(
             issues_text += f"```\n{repo_structure}\n```\n"
 
         sections.append(issues_text)
+
+    # Closes #1465: Cumulative prior-iteration failures. Show the drafter the
+    # full history of which checks failed in which iterations, so identical
+    # error messages don't yield identical revisions. If the same check has
+    # failed K times, the drafter is told explicitly: "your last K attempts
+    # did NOT fix this — try a fundamentally different approach."
+    if prior_completeness_breakdown:
+        history = "## PRIOR ITERATION HISTORY (DO NOT REPEAT)\n\n"
+        history += (
+            "Each entry shows checks that failed in a prior iteration. "
+            "If the same failure recurs across multiple iterations, your "
+            "earlier fixes did NOT work — change approach, do not minor-tweak:\n\n"
+        )
+        for entry in prior_completeness_breakdown:
+            iteration = entry.get("iteration", "?")
+            failures = entry.get("failures", [])
+            history += f"### Iteration {iteration} failures\n"
+            for failure in failures:
+                history += f"- {failure}\n"
+            history += "\n"
+        # Synthesize the "tried K times" warning if any check repeats
+        all_failures = [
+            f
+            for entry in prior_completeness_breakdown
+            for f in entry.get("failures", [])
+        ]
+        from collections import Counter
+        repeat_counts = Counter(all_failures)
+        repeated = [f for f, n in repeat_counts.items() if n >= 2]
+        if repeated:
+            history += "### RECURRING FAILURES (your prior fixes did NOT work)\n\n"
+            for failure in repeated:
+                count = repeat_counts[failure]
+                history += f"- Tried {count} times: {failure}\n"
+            history += (
+                "\n**Stop refining the prior approach. Change the spec's "
+                "structure or strategy fundamentally for these failures.**\n"
+            )
+        sections.append(history)
 
     # Review feedback (from N5 Gemini review)
     if review_feedback:
