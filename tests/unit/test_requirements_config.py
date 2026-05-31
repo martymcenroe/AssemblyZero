@@ -106,8 +106,8 @@ class TestWorkflowConfig:
         """Test issue workflow has correct default paths."""
         config = WorkflowConfig(workflow_type="issue")
         assert config.workflow_type == "issue"
-        assert config.drafter == "claude:sonnet"
-        assert config.reviewer == "claude:opus"
+        assert config.drafter == "gemini:3.1-pro-preview"
+        assert config.reviewer == "gemini:3.1-pro-preview"
         assert "0101" in str(config.draft_template_path)
         assert "0701c" in str(config.review_prompt_path)
 
@@ -205,8 +205,8 @@ class TestCreateIssueConfig:
         """Test default issue config (auto, no review)."""
         config = create_issue_config()
         assert config.workflow_type == "issue"
-        assert config.drafter == "claude:sonnet"
-        assert config.reviewer == "claude:opus"
+        assert config.drafter == "gemini:3.1-pro-preview"
+        assert config.reviewer == "gemini:3.1-pro-preview"
         assert config.gates.draft_gate is False
         assert config.gates.verdict_gate is False
 
@@ -234,8 +234,8 @@ class TestCreateLLDConfig:
         """Test default LLD config."""
         config = create_lld_config()
         assert config.workflow_type == "lld"
-        assert config.drafter == "claude:sonnet"
-        assert config.reviewer == "claude:opus"
+        assert config.drafter == "gemini:3.1-pro-preview"
+        assert config.reviewer == "gemini:3.1-pro-preview"
 
     def test_custom_drafter_reviewer(self):
         """Test custom drafter and reviewer."""
