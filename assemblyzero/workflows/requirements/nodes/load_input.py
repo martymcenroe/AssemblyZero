@@ -24,6 +24,7 @@ from assemblyzero.workflows.requirements.audit import (
     create_audit_dir,
     generate_slug,
     get_repo_structure,
+    make_run_id,
     next_file_number,
     save_audit_file,
 )
@@ -99,11 +100,16 @@ def _load_brief(state: RequirementsWorkflowState) -> Dict[str, Any]:
     # Generate slug
     slug = generate_slug(str(brief_file))
 
+    # Closes #1467: scope this run's lineage to its own subdirectory so
+    # successive workflow runs against the same target don't interleave.
+    run_id = state.get("workflow_run_id", "") or make_run_id()
+
     # Create audit directory
     audit_dir = create_audit_dir(
         workflow_type="issue",
         slug=slug,
         target_repo=target_repo,
+        run_id=run_id,
     )
 
     # Save brief to audit trail
@@ -119,6 +125,7 @@ def _load_brief(state: RequirementsWorkflowState) -> Dict[str, Any]:
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
         "repo_structure": repo_structure,
+        "workflow_run_id": run_id,
         "error_message": "",
     }
 
@@ -204,11 +211,15 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
     if context_files:
         context_content = assemble_context(context_files, target_repo)
 
+    # Closes #1467: per-run subdirectory.
+    run_id = state.get("workflow_run_id", "") or make_run_id()
+
     # Create audit directory
     audit_dir = create_audit_dir(
         workflow_type="lld",
         issue_number=issue_number,
         target_repo=target_repo,
+        run_id=run_id,
     )
 
     # Save issue to audit trail with provenance frontmatter (Issue #169)
@@ -234,6 +245,7 @@ def _load_issue(state: RequirementsWorkflowState) -> Dict[str, Any]:
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
         "repo_structure": repo_structure,
+        "workflow_run_id": run_id,
         "error_message": "",
     }
 
@@ -261,11 +273,15 @@ This is a mock issue for testing.
 - [ ] Tests passing
 """
 
+    # Closes #1467: per-run subdirectory.
+    run_id = state.get("workflow_run_id", "") or make_run_id()
+
     # Create audit directory
     audit_dir = create_audit_dir(
         workflow_type="lld",
         issue_number=issue_number,
         target_repo=target_repo,
+        run_id=run_id,
     )
 
     # Save to audit with provenance frontmatter (Issue #169)
@@ -289,6 +305,7 @@ This is a mock issue for testing.
         "audit_dir": str(audit_dir),
         "file_counter": file_num,
         "repo_structure": repo_structure,
+        "workflow_run_id": run_id,
         "error_message": "",
     }
 

@@ -93,3 +93,59 @@ def test_creates_done_parent(tmp_path: Path) -> None:
 
     assert result is not None
     assert done_parent.exists()
+
+
+def test_preserves_run_subdir_under_done(tmp_path: Path) -> None:
+    """Run-scoped subdir layout: docs/lineage/active/{N}-lld/{run_id}/ moves
+    to docs/lineage/done/{N}-lld/{run_id}/. The {N}-lld/ parent is preserved
+    so operators can browse done/ by issue, then by run, in the same
+    hierarchy. Closes #1467.
+    """
+    target_repo = tmp_path / "repo"
+    run_id = "2026-05-31T17-27-26Z"
+    active_dir = target_repo / "docs" / "lineage" / "active" / "42-lld" / run_id
+    active_dir.mkdir(parents=True)
+    (active_dir / "001-draft.md").write_text("# Draft\n")
+
+    result = move_lineage_to_done(active_dir, target_repo)
+
+    expected = target_repo / "docs" / "lineage" / "done" / "42-lld" / run_id
+    assert result == expected, f"Expected {expected}, got {result}"
+    assert result.exists()
+    assert (result / "001-draft.md").read_text() == "# Draft\n"
+    assert not active_dir.exists()
+
+
+def test_multiple_runs_under_same_issue_dont_collide(tmp_path: Path) -> None:
+    """Two runs of issue #4 produce two separate done/ subdirectories;
+    moving the second does not overwrite the first. Closes #1467."""
+    target_repo = tmp_path / "repo"
+    run_a = "2026-05-31T17-27-26Z"
+    run_b = "2026-05-31T18-14-09Z"
+
+    active_a = target_repo / "docs" / "lineage" / "active" / "4-lld" / run_a
+    active_a.mkdir(parents=True)
+    (active_a / "001-draft.md").write_text("A\n")
+
+    active_b = target_repo / "docs" / "lineage" / "active" / "4-lld" / run_b
+    active_b.mkdir(parents=True)
+    (active_b / "001-draft.md").write_text("B\n")
+
+    result_a = move_lineage_to_done(active_a, target_repo)
+    result_b = move_lineage_to_done(active_b, target_repo)
+
+    assert result_a == target_repo / "docs" / "lineage" / "done" / "4-lld" / run_a
+    assert result_b == target_repo / "docs" / "lineage" / "done" / "4-lld" / run_b
+    assert (result_a / "001-draft.md").read_text() == "A\n"
+    assert (result_b / "001-draft.md").read_text() == "B\n"
+
+
+def test_legacy_layout_without_run_id_still_moves(tmp_path: Path) -> None:
+    """Old flat-layout audit_dirs (no run_id subdir) keep moving correctly —
+    backward compat. Closes #1467."""
+    target_repo, active_dir, done_parent = _setup_lineage(tmp_path)
+
+    result = move_lineage_to_done(active_dir, target_repo)
+
+    assert result == done_parent / "42-lld"
+    assert (result / "001-brief.md").read_text() == "# Brief\n"

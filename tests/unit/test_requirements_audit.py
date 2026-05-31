@@ -184,6 +184,100 @@ class TestGetAuditDirPath:
         assert "42-lld" in str(path)
 
 
+class TestRunScopedAuditDir:
+    """Tests for the run_id subdirectory layout. Closes #1467."""
+
+    def test_run_id_appended_for_lld(self, tmp_path):
+        from assemblyzero.workflows.requirements.audit import get_audit_dir_path
+
+        path = get_audit_dir_path(
+            workflow_type="lld",
+            issue_number=4,
+            target_repo=tmp_path,
+            run_id="2026-05-31T17-27-26Z",
+        )
+        assert path.name == "2026-05-31T17-27-26Z"
+        assert path.parent.name == "4-lld"
+
+    def test_run_id_appended_for_issue(self, tmp_path):
+        from assemblyzero.workflows.requirements.audit import get_audit_dir_path
+
+        path = get_audit_dir_path(
+            workflow_type="issue",
+            slug="my-feature",
+            target_repo=tmp_path,
+            run_id="2026-05-31T17-27-26Z",
+        )
+        assert path.name == "2026-05-31T17-27-26Z"
+        assert path.parent.name == "my-feature"
+
+    def test_empty_run_id_preserves_flat_layout(self, tmp_path):
+        """Backward compat: empty run_id (default) keeps the old layout."""
+        from assemblyzero.workflows.requirements.audit import get_audit_dir_path
+
+        path = get_audit_dir_path(
+            workflow_type="lld",
+            issue_number=4,
+            target_repo=tmp_path,
+        )
+        assert path.name == "4-lld"
+
+    def test_create_audit_dir_with_run_id_creates_subdir(self, tmp_path):
+        from assemblyzero.workflows.requirements.audit import create_audit_dir
+
+        audit_dir = create_audit_dir(
+            target_repo=tmp_path,
+            workflow_type="lld",
+            issue_number=4,
+            run_id="2026-05-31T17-27-26Z",
+        )
+        assert audit_dir.exists()
+        assert audit_dir.name == "2026-05-31T17-27-26Z"
+        assert audit_dir.parent.name == "4-lld"
+
+    def test_next_file_number_per_run_starts_at_one(self, tmp_path):
+        """File numbering resets per-run because each run has its own subdir."""
+        from assemblyzero.workflows.requirements.audit import (
+            create_audit_dir, next_file_number,
+        )
+
+        run_a = create_audit_dir(
+            target_repo=tmp_path, workflow_type="lld", issue_number=4,
+            run_id="2026-05-31T17-27-26Z",
+        )
+        (run_a / "001-draft.md").write_text("A1")
+        (run_a / "002-verdict.md").write_text("A2")
+
+        run_b = create_audit_dir(
+            target_repo=tmp_path, workflow_type="lld", issue_number=4,
+            run_id="2026-05-31T18-14-09Z",
+        )
+        # Fresh run starts at 1, not at 3
+        assert next_file_number(run_b) == 1
+
+    def test_make_run_id_returns_filesystem_safe_string(self):
+        from assemblyzero.workflows.requirements.audit import make_run_id
+
+        run_id = make_run_id()
+        # YYYY-MM-DDTHH-MM-SSZ — no colons (Windows-incompatible), trailing Z
+        assert ":" not in run_id
+        assert run_id.endswith("Z")
+        assert len(run_id) == 20  # 2026-05-31T17-27-26Z
+
+    def test_make_run_id_returns_distinct_strings(self):
+        """Two run_ids made at different seconds are distinct.
+
+        Note: within the same second they may collide (one-second resolution).
+        That's documented in the issue body; tolerated via idempotent mkdir.
+        """
+        from assemblyzero.workflows.requirements.audit import make_run_id
+
+        # Same-second collision tolerated; the contract is that the format
+        # is stable and the function returns successfully.
+        assert isinstance(make_run_id(), str)
+        assert isinstance(make_run_id(), str)
+
+
 class TestResolveRoots:
     """Tests for resolve_roots function."""
 

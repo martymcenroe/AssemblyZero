@@ -215,6 +215,7 @@ def get_audit_dir_path(
     target_repo: Path,
     slug: str = "",
     issue_number: int = 0,
+    run_id: str = "",
 ) -> Path:
     """Get the audit directory path for a workflow.
 
@@ -223,14 +224,19 @@ def get_audit_dir_path(
         target_repo: Path to target repository.
         slug: Workflow slug (for issue workflow).
         issue_number: GitHub issue number (for LLD workflow).
+        run_id: Optional per-run subdirectory. When non-empty, files for
+            this run land under {issue}-{type}/{run_id}/ so successive
+            runs against the same issue don't interleave their lineage.
+            Closes #1467.
 
     Returns:
         Path to audit directory.
     """
     if workflow_type == "issue":
-        return target_repo / AUDIT_ACTIVE_DIR / slug
+        base = target_repo / AUDIT_ACTIVE_DIR / slug
     else:
-        return target_repo / AUDIT_ACTIVE_DIR / f"{issue_number}-lld"
+        base = target_repo / AUDIT_ACTIVE_DIR / f"{issue_number}-lld"
+    return base / run_id if run_id else base
 
 
 # =============================================================================
@@ -243,6 +249,7 @@ def create_audit_dir(
     workflow_type: Literal["issue", "lld"],
     slug: str = "",
     issue_number: int | None = None,
+    run_id: str = "",
 ) -> Path:
     """Create audit directory for a workflow.
 
@@ -251,6 +258,10 @@ def create_audit_dir(
         workflow_type: Either "issue" or "lld".
         slug: Workflow slug (for issue workflow).
         issue_number: GitHub issue number (for LLD workflow).
+        run_id: Optional per-run subdirectory. When empty (default), behaves
+            as before. When non-empty, creates and returns
+            {issue}-{type}/{run_id}/ so this run's lineage doesn't interleave
+            with prior runs against the same issue. Closes #1467.
 
     Returns:
         Path to created directory.
@@ -260,10 +271,22 @@ def create_audit_dir(
         target_repo=target_repo,
         slug=slug,
         issue_number=issue_number or 0,
+        run_id=run_id,
     )
 
     audit_dir.mkdir(parents=True, exist_ok=True)
     return audit_dir
+
+
+def make_run_id() -> str:
+    """Filesystem-safe ISO8601-ish timestamp for run-scoped audit dirs.
+
+    Format: YYYY-MM-DDTHH-MM-SSZ (UTC, with ':' replaced by '-' so the value
+    is valid in a path on every supported OS). Closes #1467.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(tz=timezone.utc)
+    return now.strftime("%Y-%m-%dT%H-%M-%SZ")
 
 
 # =============================================================================
@@ -288,8 +311,17 @@ def move_lineage_to_done(audit_dir: Path, target_repo: Path) -> Path | None:
         logger.info("Lineage dir not found, skipping move: %s", audit_dir)
         return None
 
-    # Build destination: swap active/ for done/ in the path
-    done_dir = target_repo / AUDIT_DONE_DIR / audit_dir.name
+    # Build destination by mirroring the structure under active/ to done/.
+    # Previously this used audit_dir.name (last segment only), which threw
+    # away the parent {issue}-{type}/ when the run-scoped subdirectory layout
+    # introduced an extra path segment. Closes #1467.
+    active_root = target_repo / AUDIT_ACTIVE_DIR
+    try:
+        relative = audit_dir.relative_to(active_root)
+    except ValueError:
+        # audit_dir is not under active/ — fall back to legacy behavior
+        relative = Path(audit_dir.name)
+    done_dir = target_repo / AUDIT_DONE_DIR / relative
     done_dir.parent.mkdir(parents=True, exist_ok=True)
 
     # Idempotent: if done/ target already exists, skip
