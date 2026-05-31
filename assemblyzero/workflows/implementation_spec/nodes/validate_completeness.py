@@ -737,38 +737,61 @@ def check_import_targets_exist(
     )
 
 
+_SOURCE_ROOT_PREFIXES: tuple[str, ...] = ("", "src", "lib")
+
+
+def _candidate_matches_new_file(candidate: Path, new_file_paths: set[str]) -> bool:
+    """Suffix-match a candidate module path against the spec's Add file paths.
+
+    Honors src-layout: `chiron/provenance.py` matches `src/chiron/provenance.py`
+    in new_file_paths because the latter ends with `/` + the former.
+    Closes #1461.
+    """
+    cand_str = str(candidate).replace("\\", "/")
+    for new_path in new_file_paths:
+        np = new_path.replace("\\", "/")
+        if np == cand_str or np.endswith("/" + cand_str):
+            return True
+    return False
+
+
+def _candidate_exists_under_source_roots(
+    candidate: Path, repo_root: Path
+) -> bool:
+    """Probe `repo_root / {prefix} / candidate` for common source-root prefixes.
+
+    Handles src-layout, lib-layout, and flat-layout uniformly. Closes #1461.
+    """
+    for prefix in _SOURCE_ROOT_PREFIXES:
+        probe = (repo_root / prefix / candidate) if prefix else (repo_root / candidate)
+        if probe.exists():
+            return True
+    return False
+
+
 def _import_resolves(
     module_path: str, repo_root: Path, new_file_paths: set[str]
 ) -> bool:
-    """Check if an import resolves to an existing file or a new file in the spec."""
+    """Check if an import resolves to an existing file or a new file in the spec.
+
+    Recognizes both flat-layout (`chiron/provenance.py` at repo root) and
+    src-layout (`src/chiron/provenance.py`). Closes #1461.
+    """
     parts = module_path.split(".")
-
-    # Check as module file: a/b/c.py
-    file_path = Path(*parts).with_suffix(".py")
-    if (repo_root / file_path).exists():
-        return True
-    # Check if the spec is creating this file
-    if str(file_path).replace("\\", "/") in new_file_paths:
-        return True
-
-    # Check as package: a/b/c/__init__.py
-    package_path = Path(*parts) / "__init__.py"
-    if (repo_root / package_path).exists():
-        return True
-    if str(package_path).replace("\\", "/") in new_file_paths:
-        return True
-
-    # Check parent (from a.b import c — c might be a name inside a.b.py)
+    candidates: list[Path] = [
+        Path(*parts).with_suffix(".py"),
+        Path(*parts) / "__init__.py",
+    ]
     if len(parts) > 1:
-        parent_file = Path(*parts[:-1]).with_suffix(".py")
-        if (repo_root / parent_file).exists():
+        candidates.extend([
+            Path(*parts[:-1]).with_suffix(".py"),
+            Path(*parts[:-1]) / "__init__.py",
+        ])
+
+    for candidate in candidates:
+        if _candidate_exists_under_source_roots(candidate, repo_root):
             return True
-        if str(parent_file).replace("\\", "/") in new_file_paths:
-            return True
-        parent_pkg = Path(*parts[:-1]) / "__init__.py"
-        if (repo_root / parent_pkg).exists():
-            return True
-        if str(parent_pkg).replace("\\", "/") in new_file_paths:
+        if _candidate_matches_new_file(candidate, new_file_paths):
             return True
 
     return False
