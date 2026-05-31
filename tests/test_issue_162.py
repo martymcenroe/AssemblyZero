@@ -239,108 +239,101 @@ def test_080(tmp_path):
 # Integration Tests
 # -----------------
 
-def test_090(tmp_path):
-    """
-    Integration: LLD then implement | Auto-Live | Full workflow sequence
-    | Implementation finds LLD | Worktree contains LLD file
-    """
-    # TDD: Arrange
-    # Create a bare remote repo for push target
-    remote_path = tmp_path / "remote.git"
-    remote_path.mkdir()
-    subprocess.run(["git", "init", "--bare"], cwd=str(remote_path), check=True, capture_output=True)
+# test_090 (Issue #162 integration) was deleted with #1459. The LLD path
+# of _commit_and_push_files now dispatches to setup_lld_worktree +
+# commit_and_pr (worktree + PR) instead of direct push, which requires gh
+# CLI access and a real GitHub remote — out of scope for a unit-level
+# integration test. Mock-based coverage of the new dispatch lives in
+# tests/unit/test_requirements_nodes.py::TestFinalizeNodeAdditional
+# (test_commit_lld_dispatches_to_pr_path,
+#  test_commit_issue_workflow_uses_legacy_push,
+#  test_commit_lld_error_logged).
 
-    # Create a minimal git repo
-    work_path = tmp_path / "work"
-    work_path.mkdir()
-    subprocess.run(["git", "init"], cwd=str(work_path), check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(work_path), check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=str(work_path), check=True, capture_output=True)
-    subprocess.run(["git", "remote", "add", "origin", str(remote_path)], cwd=str(work_path), check=True, capture_output=True)
-    
-    # Create directory structure
-    lld_dir = work_path / "docs" / "lld" / "active"
-    lld_dir.mkdir(parents=True)
 
-    lineage_dir = work_path / "docs" / "lineage" / "active" / "162-lld"
-    lineage_dir.mkdir(parents=True)
+# Issue #1459 — LLD worktree + PR
+# --------------------------------
 
-    # Create LLD file
-    lld_file = lld_dir / "LLD-162.md"
-    lld_file.write_text("# LLD-162\n\nTest LLD content")
+def test_lld_worktree_path_for_appends_lld_suffix():
+    """Worktree path is `{parent}/{name}-{N}-lld`, distinct from impl's
+    `{parent}/{name}-{N}` so LLD and impl worktrees don't collide."""
+    from assemblyzero.workflows.requirements.git_operations import lld_worktree_path_for
 
-    # Create status file
-    status_file = work_path / "docs" / "lld" / "lld-status.json"
-    status_file.write_text('{"version": "1.0", "last_updated": "2024-01-01T00:00:00Z", "issues": {}}')
+    path = lld_worktree_path_for("/c/Users/x/Projects/Chiron", 4)
+    assert path.name == "Chiron-4-lld"
+    assert path.parent.name == "Projects"
 
-    # Create audit final file
-    final_file = lineage_dir / "001-final.md"
-    final_file.write_text("# LLD Finalized\n\nFinal content")
 
-    # Initial commit and push to set up tracking
-    subprocess.run(["git", "add", "."], cwd=str(work_path), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Initial"], cwd=str(work_path), check=True, capture_output=True)
-    # Get the current branch name (could be main or master depending on git config)
-    branch_result = subprocess.run(["git", "branch", "--show-current"], cwd=str(work_path), capture_output=True, text=True)
-    current_branch = branch_result.stdout.strip()
-    subprocess.run(["git", "push", "-u", "origin", current_branch], cwd=str(work_path), check=True, capture_output=True)
+def test_commit_and_pr_returns_empty_for_empty_created_files():
+    """No-op when nothing to commit (mirrors commit_and_push behavior)."""
+    from assemblyzero.workflows.requirements.git_operations import commit_and_pr
 
-    # Now modify the files to simulate the workflow creating new content
-    lld_file.write_text("# LLD-162\n\nUpdated LLD content after workflow")
-    status_file.write_text('{"version": "1.0", "last_updated": "2024-01-02T00:00:00Z", "issues": {"162": "APPROVED"}}')
-    final_file.write_text("# LLD Finalized\n\nUpdated final content")
-
-    # Create state
-    state = create_initial_state(
-        workflow_type="lld",
-        assemblyzero_root=str(work_path),
-        target_repo=str(work_path),
-        issue_number=162,
+    sha, url = commit_and_pr(
+        created_files=[],
+        worktree_path="/tmp/wt",
+        target_repo="/tmp/target",
+        issue_number=4,
+        branch_name="4-lld",
     )
-    state["audit_dir"] = str(lineage_dir)
-    state["current_draft"] = "# LLD-162\n\nTest content"
-    state["lld_status"] = "APPROVED"
-    state["created_files"] = [
-        "docs/lld/active/LLD-162.md",
-        "docs/lld/lld-status.json",
-        "docs/lineage/active/162-lld/001-final.md",
-    ]
+    assert sha == ""
+    assert url == ""
 
-    # TDD: Act
-    # Call the internal function that does commit/push
-    # This will actually commit and push (to local bare remote)
-    try:
-        updated_state = _commit_and_push_files(state)
-        commit_error = updated_state.get("commit_error", "")
-        if commit_error:
-            print(f"Commit error: {commit_error}")
-        # Success = no error message (empty string is OK, means no error)
-        commit_succeeded = not commit_error
-    except Exception as e:
-        print(f"Exception: {e}")
-        commit_succeeded = False
-        updated_state = {"commit_error": str(e)}
 
-    # TDD: Assert
-    assert commit_succeeded, f"Commit failed. State: {updated_state.get('commit_error', 'no error in state')}"
+def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
+    """The LLD PR body must contain `No-Issue:` (not `Closes #N`) so the
+    referenced issue stays open through the implementation phase.
+    Encodes the architectural decision from Issue #238."""
+    from unittest.mock import MagicMock, patch
+    from assemblyzero.workflows.requirements.git_operations import commit_and_pr
 
-    # Verify commit exists
-    log_result = subprocess.run(
-        ["git", "log", "--oneline"],
-        cwd=str(work_path),
-        capture_output=True,
-        text=True,
-    )
-    assert "docs: add LLD-162 via requirements workflow" in log_result.stdout
+    captured = {}
 
-    # Verify files are in git
-    ls_result = subprocess.run(
-        ["git", "ls-files"],
-        cwd=str(work_path),
-        capture_output=True,
-        text=True,
-    )
-    assert "docs/lld/active/LLD-162.md" in ls_result.stdout
+    def fake_run(cmd, *args, **kwargs):
+        out = MagicMock()
+        out.returncode = 0
+        if cmd[:1] == ["git"] and len(cmd) > 1 and cmd[1] == "add":
+            out.stdout = ""
+        elif cmd[:2] == ["git", "commit"]:
+            out.stdout = "[main abc123] commit message\n"
+        elif cmd[:2] == ["git", "push"]:
+            out.stdout = ""
+        elif cmd[:3] == ["gh", "pr", "create"]:
+            captured["pr_argv"] = list(cmd)
+            out.stdout = "https://github.com/owner/repo/pull/9999\n"
+        elif cmd[:1] == ["git"] and "remote" in cmd:
+            out.stdout = "https://github.com/owner/repo.git\n"
+        else:
+            out.stdout = ""
+        return out
+
+    target = tmp_path / "repo"
+    target.mkdir()
+    wt = tmp_path / "repo-4-lld"
+    wt.mkdir()
+    file_in_wt = wt / "docs" / "lld" / "active" / "LLD-004.md"
+    file_in_wt.parent.mkdir(parents=True)
+    file_in_wt.write_text("# LLD")
+
+    with patch("assemblyzero.workflows.requirements.git_operations.run_command",
+               side_effect=fake_run):
+        sha, url = commit_and_pr(
+            created_files=[str(file_in_wt)],
+            worktree_path=wt,
+            target_repo=target,
+            issue_number=4,
+            branch_name="4-lld",
+        )
+
+    assert sha == "abc123"
+    assert url == "https://github.com/owner/repo/pull/9999"
+    pr_argv = captured["pr_argv"]
+    body = pr_argv[pr_argv.index("--body") + 1]
+    title = pr_argv[pr_argv.index("--title") + 1]
+    assert "No-Issue:" in body, f"PR body must contain No-Issue: — got {body!r}"
+    assert "Closes #4" not in body, f"LLD PR must NOT close — got {body!r}"
+    assert "Closes #4" not in title, f"LLD PR title must NOT close — got {title!r}"
+    assert "Ref #4" in title, f"PR title should reference — got {title!r}"
+    # The branch is pushed by its real name with --set-upstream
+    # (mirrors orchestrator/stages.py:493-509 pattern for impl stage).
 
 
 # Issue #238 - Ref instead of Closes

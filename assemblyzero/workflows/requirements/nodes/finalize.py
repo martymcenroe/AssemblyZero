@@ -22,7 +22,12 @@ from assemblyzero.workflows.requirements.audit import (
     update_lld_status,
 )
 from assemblyzero.workflows.testing.audit import log_workflow_execution
-from ..git_operations import commit_and_push, GitOperationError
+from ..git_operations import (
+    GitOperationError,
+    commit_and_pr,
+    commit_and_push,
+    setup_lld_worktree,
+)
 from assemblyzero.core.verdict_schema import (
     FinalizeQuestionsResult,
     parse_structured_finalize_questions,
@@ -165,22 +170,78 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     slug = state.get("slug")
 
     try:
-        commit_sha = commit_and_push(
-            created_files=created_files,
-            workflow_type=workflow_type,
-            target_repo=target_repo,
-            issue_number=issue_number,
-            slug=slug,
-        )
-
-        if commit_sha:
-            state["commit_sha"] = commit_sha
+        if workflow_type == "lld" and issue_number:
+            # Closes #1459: LLD outputs flow through a per-issue worktree + PR
+            # instead of a direct push to the operator's checkout. Mirrors the
+            # impl stage's pattern at orchestrator/stages.py:493-532.
+            worktree_path, branch_name = setup_lld_worktree(
+                target_repo=target_repo, issue_number=issue_number,
+            )
+            # Mirror each created_file from the target_repo working tree into
+            # the worktree at its same relative path so the commit captures
+            # them on the LLD branch (rather than the operator's main).
+            worktree_files = _mirror_to_worktree(
+                created_files=created_files,
+                target_repo=Path(target_repo),
+                worktree_path=worktree_path,
+            )
+            commit_sha, pr_url = commit_and_pr(
+                created_files=worktree_files,
+                worktree_path=worktree_path,
+                target_repo=target_repo,
+                issue_number=issue_number,
+                branch_name=branch_name,
+            )
+            if commit_sha:
+                state["commit_sha"] = commit_sha
+            if pr_url:
+                state["final_lld_pr_url"] = pr_url
+                print(f"    LLD PR opened: {pr_url}")
+        else:
+            # Issue workflow remains on the legacy direct-push path.
+            commit_sha = commit_and_push(
+                created_files=created_files,
+                workflow_type=workflow_type,
+                target_repo=target_repo,
+                issue_number=issue_number,
+                slug=slug,
+            )
+            if commit_sha:
+                state["commit_sha"] = commit_sha
 
     except GitOperationError as e:
         # Log error but don't fail the workflow - files are already saved
         state["commit_error"] = str(e)
 
     return state
+
+
+def _mirror_to_worktree(
+    created_files: list[str],
+    target_repo: Path,
+    worktree_path: Path,
+) -> list[str]:
+    """Copy each file from its target_repo location into the worktree at the
+    same relative path. Returns the worktree-relative absolute paths.
+
+    Closes #1459. Files that aren't under target_repo are passed through
+    untouched (caller-supplied absolute paths outside the repo are unusual
+    but tolerated).
+    """
+    import shutil
+    out: list[str] = []
+    for f in created_files:
+        src = Path(f)
+        try:
+            rel = src.relative_to(target_repo)
+        except ValueError:
+            out.append(str(src))
+            continue
+        dst = worktree_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        out.append(str(dst))
+    return out
 
 
 def _detect_open_questions(content: str) -> FinalizeQuestionsResult:
