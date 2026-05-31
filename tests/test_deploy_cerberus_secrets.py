@@ -130,7 +130,7 @@ def test_main_returns_1_when_no_pem_and_no_dry_run(capsys):
     rc = deploy_cerberus_secrets.main([])  # neither pem nor --dry-run
     assert rc == 1
     err = capsys.readouterr().err
-    assert "pem_path is required" in err
+    assert "pem_path (plaintext) or --cerberus-pem-gpg PATH (encrypted) is required" in err
 
 
 # ---- #1118: dual-scope (Actions + Dependabot) deployment ----
