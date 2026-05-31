@@ -127,10 +127,17 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
 
     # Issue #491: Build review content with diff-aware support
     previous_draft = state.get("previous_draft", "")
+    # #1441: Inject target_repo context so reviewer doesn't grade the LLD
+    # against AssemblyZero's structure (cwd-bleed via Gemini CLI).
+    target_repo_context = _build_target_repo_context(
+        target_repo=state.get("target_repo", ""),
+        assemblyzero_root=state.get("assemblyzero_root", ""),
+    )
     review_content = _build_review_content(
         current_draft=current_draft,
         review_prompt=review_prompt,
         previous_draft=previous_draft,
+        target_repo_context=target_repo_context,
     )
 
     # Call reviewer
@@ -250,10 +257,88 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     }
 
 
+def _build_target_repo_context(
+    target_repo: str,
+    assemblyzero_root: str,
+) -> str:
+    """Build a TARGET REPOSITORY CONTEXT block for the reviewer.
+
+    #1441: The Gemini CLI reads cwd's project context (AssemblyZero) and
+    judges the LLD against AssemblyZero's structure. When the target is a
+    different repo (e.g., Chiron), the reviewer flags correct LLD paths
+    as "Path Structure Mismatch" because they don't match AssemblyZero's.
+
+    This block tells the reviewer explicitly: the LLD is for a DIFFERENT
+    repo at the given path, the LLD's file paths refer to the TARGET's
+    conventions (per the issue spec), and AssemblyZero's structure is
+    NOT the comparison target.
+
+    When target_repo == assemblyzero_root (orchestrator self-build), no
+    block is needed — reviewer's cwd context is correct.
+
+    Args:
+        target_repo: Absolute path to the target repository.
+        assemblyzero_root: Absolute path to AssemblyZero root.
+
+    Returns:
+        Markdown block for prepending to review content, or empty string
+        when no context override is needed.
+    """
+    if not target_repo or target_repo == assemblyzero_root:
+        return ""
+
+    target_path = Path(target_repo)
+    target_name = target_path.name
+
+    # Compute top-level structure of the target repo (dirs + key root files).
+    # This grounds the reviewer in the actual target, not the cwd.
+    structure_lines: list[str] = []
+    if target_path.is_dir():
+        try:
+            entries = sorted(target_path.iterdir())
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                if entry.is_dir():
+                    structure_lines.append(f"- `{entry.name}/`")
+                elif entry.suffix in (".md", ".toml", ".yaml", ".yml", ".cfg", ".ini", ".txt"):
+                    structure_lines.append(f"- `{entry.name}`")
+        except OSError:
+            pass
+
+    structure_block = (
+        "\n".join(structure_lines) if structure_lines else "_(structure could not be enumerated)_"
+    )
+
+    return (
+        f"## TARGET REPOSITORY CONTEXT (READ FIRST)\n\n"
+        f"The LLD you are about to review is for the TARGET REPOSITORY at:\n"
+        f"`{target_repo}`\n\n"
+        f"This is a SEPARATE codebase from AssemblyZero (the orchestrator's "
+        f"home). All file paths, module names, and structural conventions in "
+        f"the LLD refer to **`{target_name}`**'s structure as defined by "
+        f"`{target_name}`'s issue body and the existing files in "
+        f"`{target_name}`. The authoritative source for what paths the LLD "
+        f"SHOULD use is the issue body that the LLD was generated from, NOT "
+        f"AssemblyZero's structure.\n\n"
+        f"### `{target_name}`'s top-level structure (ground truth)\n\n"
+        f"{structure_block}\n\n"
+        f"**Do NOT flag the LLD as having a 'Path Structure Mismatch' on "
+        f"the grounds that its paths don't match AssemblyZero's "
+        f"`assemblyzero/` layout. That comparison is incorrect — the target "
+        f"is `{target_name}`, not AssemblyZero.** A real path issue would "
+        f"be: the LLD specifies a path that conflicts with `{target_name}`'s "
+        f"existing structure shown above, OR the LLD's path violates the "
+        f"issue body's explicit file specification.\n\n"
+        f"---\n\n"
+    )
+
+
 def _build_review_content(
     current_draft: str,
     review_prompt: str,
     previous_draft: str = "",
+    target_repo_context: str = "",
 ) -> str:
     """Build review content, optionally using diff format for revisions.
 
@@ -261,17 +346,22 @@ def _build_review_content(
     send diff format instead of full draft. This reduces token usage
     significantly on revision reviews.
 
+    Issue #1441: Optionally prepends target_repo_context to ground the
+    reviewer in the target repository's structure rather than cwd's.
+
     Args:
         current_draft: Current draft to review.
         review_prompt: Review instructions.
         previous_draft: Previous draft for diff comparison.
+        target_repo_context: Optional TARGET REPOSITORY CONTEXT block
+            from _build_target_repo_context. Prepended to all return paths.
 
     Returns:
         Formatted review content string.
     """
     if not previous_draft:
         # First review — send full draft
-        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+        return f"{target_repo_context}## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
 
     # Calculate diff
     prev_lines = previous_draft.splitlines(keepends=True)
@@ -280,7 +370,7 @@ def _build_review_content(
 
     if not diff:
         # No changes — send full draft (shouldn't happen in practice)
-        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+        return f"{target_repo_context}## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
 
     # Count changed lines in current (additions only, exclude diff headers)
     changed_lines = sum(
@@ -293,11 +383,12 @@ def _build_review_content(
 
     if change_ratio > 0.20:
         # Too many changes — diff won't help, send full draft
-        return f"## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
+        return f"{target_repo_context}## Document to Review\n\n{current_draft}\n\n## Review Instructions\n\n{review_prompt}"
 
     # Send diff format with context
     diff_text = "".join(diff)
     return (
+        f"{target_repo_context}"
         f"## CHANGES SINCE LAST REVIEW (unified diff)\n\n"
         f"Focus your review on these changes. The rest of the document is unchanged.\n\n"
         f"```diff\n{diff_text}```\n\n"
