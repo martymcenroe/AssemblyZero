@@ -109,8 +109,10 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
             return dict(new_state)
         if status == "blocked":
             return dict(new_state)
-        # failed — retry
-        if attempt < max_retries:
+        # failed — retry only when the failure is transient or unmarked
+        # (preserve current behavior for non-halt failures). Closes #1463.
+        transient = stage_result.get("transient", True)
+        if attempt < max_retries and transient:
             print(
                 f"[ORCHESTRATOR] Stage '{current_stage}' failed (attempt {attempt}/{max_retries}). "
                 f"Retrying in {retry_delay}s..."
@@ -119,6 +121,13 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
             stage_result["attempts"] = attempt
             time.sleep(retry_delay)
             last_state = new_state
+        else:
+            if not transient:
+                print(
+                    f"[ORCHESTRATOR] Stage '{current_stage}' halted non-transient — "
+                    f"skipping retry. Use the sub-workflow's Resume hint above."
+                )
+            break
 
     # All retries exhausted — update attempt count
     final_results = dict(new_state.get("stage_results", {}))
