@@ -312,11 +312,15 @@ def route_after_review(
         return "N4_human_gate_verdict"
 
     # If UNANSWERED, loop back to review (not draft - this is a review followup)
-    # But respect max_iterations to prevent infinite loops
+    # But respect max_iterations to prevent infinite loops.
+    # Closes #1509: gate on verdict_count (incremented exactly once per N3
+    # review in review.py:86), NOT iteration_count (bumped by N1, Ponder,
+    # N1B etc. on every state-touching node — exhausts max before the
+    # first revise round can fire).
     if open_questions_status == "UNANSWERED":
-        iteration_count = state.get("iteration_count", 0)
+        verdict_count = state.get("verdict_count", 0)
         max_iterations = state.get("max_iterations", 3)
-        if iteration_count >= max_iterations:
+        if verdict_count >= max_iterations:
             print(f"    [ROUTING] Max iterations ({max_iterations}) reached with unanswered questions - going to human gate")
             return "N4_human_gate_verdict"
         print("    [ROUTING] Open questions unanswered - looping back to drafter for revision")
@@ -342,10 +346,15 @@ def route_after_review(
                     emit("workflow.halt_and_plan", repo=state.get("repo_root", ""), metadata={"reason": "stagnation", "issue": state.get("issue_number")})
                     return "HALT"
 
-            # Check max iterations before looping back
-            iteration_count = state.get("iteration_count", 0)
+            # Check max iterations before looping back.
+            # Closes #1509: gate on verdict_count (one increment per N3
+            # review) so the revise loop can actually fire. iteration_count
+            # is bumped by N1, Ponder, N1B, etc. and exhausts the cap on
+            # the first forward pass — that gated the revise loop closed
+            # before the first reviewer verdict could trigger a re-draft.
+            verdict_count = state.get("verdict_count", 0)
             max_iterations = state.get("max_iterations", 3)
-            if iteration_count >= max_iterations:
+            if verdict_count >= max_iterations:
                 # Max iterations reached - finalize with current status
                 return "N5_finalize"
             return "N1_generate_draft"

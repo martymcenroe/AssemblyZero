@@ -197,22 +197,23 @@ class TestRouteAfterReviewOpenQuestions:
         assert route_after_review(state) == "N4_human_gate_verdict"
 
     def test_unanswered_loops_to_drafter(self):
-        """UNANSWERED should loop back to N1 if under max iterations."""
+        """UNANSWERED should loop back to N1 if verdict_count < max."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
+        # Closes #1509: gate is on verdict_count, not iteration_count.
         state = {
             "error_message": "",
             "config_gates_verdict": False,
             "lld_status": "APPROVED",
             "open_questions_status": "UNANSWERED",
-            "iteration_count": 5,
+            "verdict_count": 5,
             "max_iterations": 20,
         }
 
         assert route_after_review(state) == "N1_generate_draft"
 
     def test_unanswered_at_max_iterations_goes_to_gate(self):
-        """UNANSWERED at max iterations should go to human gate."""
+        """UNANSWERED at verdict_count >= max should go to human gate."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
@@ -220,7 +221,7 @@ class TestRouteAfterReviewOpenQuestions:
             "config_gates_verdict": False,
             "lld_status": "APPROVED",
             "open_questions_status": "UNANSWERED",
-            "iteration_count": 20,
+            "verdict_count": 20,
             "max_iterations": 20,
         }
 
