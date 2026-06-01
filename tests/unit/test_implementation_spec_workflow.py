@@ -1545,6 +1545,32 @@ class TestBuildDrafterPrompt:
         assert "Missing excerpts" in prompt
         assert "Old draft" in prompt
 
+    def test_revision_prompt_frames_as_targeted_patch(self):
+        """#1521: revision prompt must frame the task as a TARGETED PATCH
+        (not a regeneration) and explicitly name the known failure mode
+        (writer drifting on unflagged content). Pinning the framing here so
+        a future edit can't accidentally weaken it back to the regenerate-style
+        wording that caused Chiron #43 to halt on iter01/02/04/05."""
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            build_drafter_prompt,
+        )
+
+        prompt = build_drafter_prompt(
+            lld_content="# LLD",
+            current_state={},
+            patterns=[],
+            existing_draft="# Old draft with a malformed decorator",
+            review_feedback="Fix the malformed decorator on line 42.",
+            completeness_issues=[],
+        )
+        # Reframing: TARGETED PATCH not regeneration
+        assert "TARGETED PATCH" in prompt
+        assert "NOT writing a new spec" in prompt
+        # Byte-identical / verbatim preservation directive
+        assert "byte-identical" in prompt or "VERBATIM" in prompt
+        # The failure-mode call-out by issue number
+        assert "#1521" in prompt
+
     def test_includes_pattern_references(self):
         """Prompt includes patterns."""
         from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
