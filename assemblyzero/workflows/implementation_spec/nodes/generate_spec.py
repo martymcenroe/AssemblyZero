@@ -99,6 +99,26 @@ Do not skip or abbreviate any section."""
 
 
 # =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _normalize_failure_text(text: str) -> str:
+    """Lexically normalize a completeness-failure message for clustering.
+
+    Collapses whitespace runs to a single space, strips leading/trailing
+    whitespace, lowercases, and trims trailing punctuation. Used by
+    `_build_revision_prompt` to detect recurring failures across iterations
+    even when the surface text differs by trivial lexical variation.
+    Closes #1479.
+    """
+    t = text.strip().lower()
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"[.,;:!?]+$", "", t)
+    return t
+
+
+# =============================================================================
 # Main Node
 # =============================================================================
 
@@ -621,20 +641,30 @@ def _build_revision_prompt(
             for failure in failures:
                 history += f"- {failure}\n"
             history += "\n"
-        # Synthesize the "tried K times" warning if any check repeats
+        # Synthesize the "tried K times" warning if any check repeats.
+        # Closes #1479: cluster by lexically-normalized text so near-duplicate
+        # failure messages (extra whitespace, trailing punctuation, case)
+        # collapse into a single recurring entry instead of slipping past as
+        # distinct.
         all_failures = [
             f
             for entry in prior_completeness_breakdown
             for f in entry.get("failures", [])
         ]
         from collections import Counter
-        repeat_counts = Counter(all_failures)
-        repeated = [f for f, n in repeat_counts.items() if n >= 2]
+        normalized_pairs = [(_normalize_failure_text(f), f) for f in all_failures]
+        repeat_counts = Counter(norm for norm, _ in normalized_pairs)
+        # Map each normalized key to the LATEST verbatim text (last occurrence
+        # wins) so the warning shows real wording, not the normalized form.
+        latest_verbatim: dict[str, str] = {}
+        for norm, verbatim in normalized_pairs:
+            latest_verbatim[norm] = verbatim
+        repeated = [norm for norm, n in repeat_counts.items() if n >= 2]
         if repeated:
             history += "### RECURRING FAILURES (your prior fixes did NOT work)\n\n"
-            for failure in repeated:
-                count = repeat_counts[failure]
-                history += f"- Tried {count} times: {failure}\n"
+            for norm in repeated:
+                count = repeat_counts[norm]
+                history += f"- Tried {count} times: {latest_verbatim[norm]}\n"
             history += (
                 "\n**Stop refining the prior approach. Change the spec's "
                 "structure or strategy fundamentally for these failures.**\n"
