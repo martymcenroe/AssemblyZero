@@ -140,34 +140,42 @@ def validate_imports(
     return len(bad_imports) == 0, bad_imports
 
 
+# Closes #1500: src-layout repos place importable modules under a
+# source-root prefix (src/ is canonical; lib/, source/, python/, apps/ are
+# common alternatives — same list as the spec-stage validator extended in
+# #1477). The earlier resolver only checked repo_root/Path(*parts), which
+# missed every external target that uses src-layout.
+_SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
+    "", "src", "lib", "source", "python", "apps",
+)
+
+
 def _resolve_internal_import(module_path: str, repo_root: Path) -> bool:
     """Check if an internal import resolves to a file or package on disk.
 
-    Handles both:
-    - `import assemblyzero.utils.foo` -> assemblyzero/utils/foo.py or foo/__init__.py
-    - `from assemblyzero.utils import foo` -> same resolution
+    Handles both flat-layout and src-layout (and lib/source/python/apps
+    variants). Mirrors the spec-stage validator at
+    assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py
+    (PR #1462 + #1477). Closes #1500.
     """
     parts = module_path.split(".")
-
-    # Try as a module file: assemblyzero/utils/foo.py
-    file_path = repo_root / Path(*parts).with_suffix(".py")
-    if file_path.exists():
-        return True
-
-    # Try as a package: assemblyzero/utils/foo/__init__.py
-    package_path = repo_root / Path(*parts) / "__init__.py"
-    if package_path.exists():
-        return True
-
-    # Try parent module (for `from assemblyzero.utils import foo`):
-    # The import might target a name inside a module, not a submodule file.
-    # Check if the parent path resolves.
+    candidates: list[Path] = [
+        Path(*parts).with_suffix(".py"),
+        Path(*parts) / "__init__.py",
+    ]
     if len(parts) > 1:
-        parent_file = repo_root / Path(*parts[:-1]).with_suffix(".py")
-        if parent_file.exists():
-            return True
-        parent_package = repo_root / Path(*parts[:-1]) / "__init__.py"
-        if parent_package.exists():
-            return True
+        candidates.extend([
+            Path(*parts[:-1]).with_suffix(".py"),
+            Path(*parts[:-1]) / "__init__.py",
+        ])
+
+    for candidate in candidates:
+        for prefix in _SOURCE_ROOT_PREFIXES:
+            probe = (
+                repo_root / prefix / candidate if prefix
+                else repo_root / candidate
+            )
+            if probe.exists():
+                return True
 
     return False
