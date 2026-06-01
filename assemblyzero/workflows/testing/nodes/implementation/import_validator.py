@@ -24,8 +24,16 @@ _KNOWN_THIRD_PARTY: frozenset[str] = frozenset({
 def _read_third_party_packages(repo_root: Path) -> set[str]:
     """Extract third-party package names from pyproject.toml.
 
-    Reads [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies]
-    to build a set of top-level import names.
+    Reads three pyproject layouts:
+    - `[tool.poetry.dependencies]` + `[tool.poetry.group.*.dependencies]`
+      (Poetry, legacy).
+    - `[project] dependencies = [...]` + `[project.optional-dependencies]`
+      (PEP 621, canonical).
+    - `[dependency-groups]` (PEP 735, used by uv / hatch / modern tooling).
+
+    Closes #1515: previously only the Poetry tables were read, so every
+    external repo using PEP 621 lost its declared dependencies and every
+    third-party import got misclassified as "unresolvable internal."
     """
     pyproject = repo_root / "pyproject.toml"
     if not pyproject.exists():
@@ -44,17 +52,62 @@ def _read_third_party_packages(repo_root: Path) -> set[str]:
 
     packages: set[str] = set()
 
-    # Main dependencies
+    # Poetry: [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies]
     poetry = data.get("tool", {}).get("poetry", {})
     for dep_name in poetry.get("dependencies", {}):
         packages.add(_normalize_package_name(dep_name))
-
-    # Group dependencies (dev, test, etc.)
     for group in poetry.get("group", {}).values():
         for dep_name in group.get("dependencies", {}):
             packages.add(_normalize_package_name(dep_name))
 
+    # PEP 621: [project] dependencies = ["pypdf>=5.0.0", ...]
+    project = data.get("project", {})
+    for spec in project.get("dependencies", []):
+        name = _extract_package_name_from_pep508(spec)
+        if name:
+            packages.add(_normalize_package_name(name))
+    # PEP 621: [project.optional-dependencies]
+    for group_specs in project.get("optional-dependencies", {}).values():
+        for spec in group_specs:
+            name = _extract_package_name_from_pep508(spec)
+            if name:
+                packages.add(_normalize_package_name(name))
+
+    # PEP 735: [dependency-groups] dev = ["pytest>=9.0.3", ...]
+    for group_specs in data.get("dependency-groups", {}).values():
+        if not isinstance(group_specs, list):
+            continue
+        for spec in group_specs:
+            if not isinstance(spec, str):
+                continue
+            name = _extract_package_name_from_pep508(spec)
+            if name:
+                packages.add(_normalize_package_name(name))
+
     return packages
+
+
+def _extract_package_name_from_pep508(spec: str) -> str:
+    """Extract the package name from a PEP 508 dependency spec.
+
+    Handles common forms:
+    - `"pypdf"` -> `"pypdf"`
+    - `"pypdf>=5.0.0"` -> `"pypdf"`
+    - `"pytest (>=9.0.3,<10.0.0)"` -> `"pytest"`  (Poetry whitespace form)
+    - `"pytest-cov[extra]>=7"` -> `"pytest-cov"`
+
+    Returns empty string on malformed input rather than raising.
+    """
+    if not spec or not isinstance(spec, str):
+        return ""
+    # Strip whitespace, then take the part before any version/extras marker.
+    s = spec.strip()
+    # Cut on the first occurrence of any spec-terminator char.
+    for ch in (" ", "[", "(", ">", "<", "=", "!", "~", ";"):
+        idx = s.find(ch)
+        if idx > 0:
+            s = s[:idx]
+    return s.strip()
 
 
 def _normalize_package_name(name: str) -> str:
@@ -101,6 +154,13 @@ def validate_imports(
             for alias in node.names:
                 imports.append((alias.name, node.lineno))
         elif isinstance(node, ast.ImportFrom):
+            # Closes #1516: relative imports (level > 0, e.g. `from .chunker
+            # import X`) are intra-package by definition. Without knowing
+            # the importing file's package the validator can't resolve them
+            # against repo_root paths; Python's import machinery will catch
+            # genuine misses at test/runtime, so skip rather than flag.
+            if node.level and node.level > 0:
+                continue
             if node.module:
                 imports.append((node.module, node.lineno))
 
