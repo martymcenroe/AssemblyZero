@@ -287,11 +287,22 @@ These are the mistakes that turn a 5-minute land into a 60-minute mess. Read the
 
 ## PR Issue References (Mandatory)
 
-All code has an issue number. No exceptions.
+All code has an issue number. No exceptions by default.
 The naked `(#N)` format is permanently banned. `Closes #N` must appear in ALL THREE places: **commit message**, **PR title**, and **PR body**. pr-sentinel validates the PR body — if it's missing there, checks fail even if the commit message is correct.
 If blocked by pr-sentinel, fix the PR body with `gh pr edit {NUMBER} --body "...Closes #N..."` (the `edited` event re-triggers the check). Only amend the commit as a last resort.
 No issue exists? Create one first.
 Issue already closed? Create a new one — do NOT reference closed issues.
+
+### `No-Issue:` exemption (operator-authorized only)
+
+pr-sentinel ALSO accepts `No-Issue: <reason>` as a valid exemption (per `sentinel/src/validate.js`). This bypasses the issue-required rule. Use ONLY when the operator has explicitly authorized one — never as a convenience to skip filing an issue.
+
+Sanctioned cases observed:
+
+- **Same-day repo cleanup.** Cleanup of just-created repos where filing an inaugural issue would be embarrassing (e.g., the 2026-05-26 Chiron / Heuriskon / dependabot-honeypot cleanups). The reason text should be specific (`No-Issue: scaffolder catch-up — applies tightened template per AZ#1298 to a repo created before that PR landed`) — not generic (`No-Issue: cleanup`).
+- **LLD-workflow PRs (AZ #1459).** The LLD requirements workflow opens its PR with a fixed body: `No-Issue: LLD design artifact for issue #<N>; the issue remains open through the implementation phase, which is what closes it. Ref #<N>.` This is emitted automatically by `assemblyzero/workflows/requirements/git_operations.py::commit_and_pr`. Preserves Issue #238's architectural decision that LLDs *reference*, not *close* — the impl PR is what closes the issue when the work lands. Greppable via `gh pr list --search "No-Issue: LLD design artifact"`.
+
+Default remains: file an issue. The exemption is the exception, not the escape hatch.
 
 ## Closing Discipline (Deferred Scope Rule)
 
