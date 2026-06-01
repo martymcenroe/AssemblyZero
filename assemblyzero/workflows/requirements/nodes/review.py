@@ -32,6 +32,49 @@ from assemblyzero.workflows.requirements.audit import (
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 
 
+# Closes #1511: lines under "## Tier 1: BLOCKING Issues" that mean "no
+# real issues" — boilerplate subcategory placeholders the reviewer emits
+# for Cost / Safety / Security / Legal when nothing is wrong.
+_TIER1_PLACEHOLDER_PATTERNS = (
+    "no issues found",
+    "no blocking issues found",
+)
+
+
+def _count_tier1_blocking_issues(rationale: str) -> int:
+    """Count real Tier 1 BLOCKING issues in the reviewer's rationale.
+
+    The reviewer emits a `## Tier 1: BLOCKING Issues` section containing
+    one subsection per concern category (Cost, Safety, Security, Legal).
+    When no blocking issues exist, each subcategory shows `- [ ] No issues
+    found.` — those are placeholders, not real issues.
+
+    Returns the count of real Tier 1 issue lines after filtering placeholders.
+    Returns 0 if the Tier 1 section is absent or all lines are placeholders.
+
+    Closes #1511.
+    """
+    tier1_match = re.search(
+        r"## Tier 1: BLOCKING Issues\s*\n(.*?)(?=\n## Tier 2|\Z)",
+        rationale,
+        re.DOTALL,
+    )
+    if not tier1_match:
+        return 0
+
+    tier1_section = tier1_match.group(1)
+    issue_lines = re.findall(
+        r"^\s*-\s*\[.\]\s*(.+)$", tier1_section, re.MULTILINE
+    )
+
+    real_issues = [
+        line.strip()
+        for line in issue_lines
+        if not any(p in line.lower() for p in _TIER1_PLACEHOLDER_PATTERNS)
+    ]
+    return len(real_issues)
+
+
 def _invoke_reviewer_with_feedback_schema(
     provider,
     prompt: str,
@@ -172,11 +215,41 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # Backward compat: derive `structured` dict for any remaining callers
     structured = {"verdict": verdict_status, "rationale": feedback_result["rationale"]}
 
-    # Map REVISE -> BLOCKED for workflow purposes
-    if verdict_status == "REVISE":
-        lld_status = "BLOCKED"
-    elif verdict_status == "APPROVED":
+    # Closes #1511: REVISE means "there's something to address." Tier 1 =
+    # BLOCKING (must fix). Tier 2 = HIGH PRIORITY (should fix but not a
+    # release blocker). Conflating them halts pipelines when the writer
+    # has converged on Tier 1 but the reviewer still has Tier 2 polish
+    # items. When REVISE has zero Tier 1 issues AND the rationale is
+    # well-formed (has both Tier sections), treat as APPROVED — Tier 2
+    # feedback stays in the review log as known-issues but does not
+    # block the spec stage. Empty / malformed rationales (API failures,
+    # unparseable responses that map UNKNOWN → REVISE) stay BLOCKED.
+    rationale_text = feedback_result.get("rationale", "")
+    well_formed_rationale = (
+        "## Tier 1: BLOCKING Issues" in rationale_text
+        and "## Tier 2:" in rationale_text
+    )
+    if verdict_status == "APPROVED":
         lld_status = "APPROVED"
+    elif verdict_status == "REVISE":
+        tier1_count = _count_tier1_blocking_issues(rationale_text)
+        if well_formed_rationale and tier1_count == 0:
+            lld_status = "APPROVED"
+            print(
+                "    [VERDICT] REVISE with no Tier 1 BLOCKING issues — "
+                "treating as APPROVED (#1511). Tier 2 feedback retained "
+                "in review log as known issues."
+            )
+        elif well_formed_rationale:
+            lld_status = "BLOCKED"
+            print(
+                f"    [VERDICT] REVISE with {tier1_count} Tier 1 "
+                f"BLOCKING issue(s) — BLOCKED."
+            )
+        else:
+            # Malformed rationale (API failure, parser fallback): stay
+            # conservative — BLOCKED rather than silently approving.
+            lld_status = "BLOCKED"
     elif verdict_status == "DISCUSS":
         lld_status = "BLOCKED"
     else:
