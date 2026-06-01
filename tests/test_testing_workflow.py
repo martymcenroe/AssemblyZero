@@ -620,6 +620,37 @@ class TestNodeFunctions:
         # With <100% coverage, mock mode should BLOCK (mechanical check fails)
         assert result.get("test_plan_status") == "BLOCKED"
         assert "REQ-2" in result.get("gemini_feedback", "")
+        # Closes #1490: BLOCKED must NOT set error_message (it short-circuits
+        # route_after_review's revise routing to END).
+        assert result.get("error_message", "") == "", (
+            f"BLOCKED must leave error_message empty so revise routing fires; "
+            f"got: {result.get('error_message')!r}"
+        )
+
+    def test_route_after_review_routes_to_revise_on_blocked_without_error(self, tmp_path):
+        """When N1 returns BLOCKED with empty error_message and policy=revise
+        (the default), route_after_review must route to N1_5_revise_test_plan.
+        Closes #1490 — without the fix, the N1 node's own error_message
+        forced END before the revise branch could fire.
+        """
+        from assemblyzero.workflows.testing.graph import route_after_review
+
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "auto_mode": False,
+            "test_plan_status": "BLOCKED",
+            "error_message": "",  # post-#1490 N1 sets this empty on BLOCKED
+            "test_plan_policy": "revise",
+            "test_plan_revision_count": 0,
+        }
+
+        result = route_after_review(state)
+
+        assert result == "N1_5_revise_test_plan", (
+            f"BLOCKED + empty error_message + policy=revise must route to "
+            f"revise node; got {result!r}"
+        )
 
     def test_route_after_review_auto_mode_continues_on_blocked(self, tmp_path):
         """route_after_review continues to scaffold in auto mode even when BLOCKED."""
