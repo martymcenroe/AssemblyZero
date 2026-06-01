@@ -639,12 +639,18 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
             gemini_feedback = "\n".join(feedback_parts) if feedback_parts else _extract_feedback(verdict_content)
         else:
             gemini_feedback = _extract_feedback(verdict_content)
+        # Closes #1490: BLOCKED is an actionable verdict, not an error.
+        # Setting error_message previously short-circuited
+        # route_after_review's "revise" policy, forcing END instead of
+        # routing to N1_5_revise_test_plan. The BLOCKED state is already
+        # preserved in test_plan_status + gemini_feedback; error_message
+        # stays empty so the revision loop can fire.
         return {
             "test_plan_status": "BLOCKED",
             "test_plan_verdict": f"BLOCKED: {gemini_feedback[:200]}",
             "gemini_feedback": gemini_feedback,
             "file_counter": file_num,
-            "error_message": "Test plan review BLOCKED - requires LLD revision",
+            "error_message": "",
             "node_costs": node_costs,  # Issue #511
             "node_tokens": node_tokens,  # Issue #511
         }
@@ -744,10 +750,14 @@ def _mock_review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    [MOCK] Verdict: {test_plan_status}")
 
+    # Closes #1490: BLOCKED is an actionable verdict; do NOT set
+    # error_message (it short-circuits the revise routing). Both mock and
+    # real paths now report empty error_message and rely on
+    # test_plan_status + gemini_feedback for downstream decisions.
     return {
         "test_plan_status": test_plan_status,
         "test_plan_verdict": f"{test_plan_status}: {gemini_feedback[:200]}" if gemini_feedback else test_plan_status,
         "gemini_feedback": gemini_feedback,
         "file_counter": file_num,
-        "error_message": "" if test_plan_status == "APPROVED" else "Test plan review BLOCKED",
+        "error_message": "",
     }
