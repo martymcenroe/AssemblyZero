@@ -18,6 +18,7 @@ falls back to the Anthropic API if an API key is configured in .env.
 """
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -25,6 +26,14 @@ import subprocess
 import sys
 import tempfile
 import time
+
+# Closes #1495: llm_provider.py uses logger.warning at line 593 for the
+# #1431 defensive non-dict-JSON branch, but no logger was ever defined at
+# module scope. Every call through that branch raised
+# `NameError: name 'logger' is not defined`, surfaced by the testing
+# workflow's N4 (implement_code) as "API error: name 'logger' is not
+# defined" -- halting the impl stage.
+logger = logging.getLogger(__name__)
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from dataclasses import dataclass, field
