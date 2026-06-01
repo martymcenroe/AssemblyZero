@@ -126,6 +126,71 @@ class TestStageRunners:
             assert stage in STAGE_RUNNERS, f"Missing runner for stage: {stage}"
 
 
+class TestRunImplStageRepoRoot:
+    """Closes #1504. The impl stage carved a worktree but plumbed
+    repo_root=target_repo (not the worktree). Testing workflow wrote
+    files to target_repo; issue-{N} branch stayed empty; pr stage
+    halted with "No commits between main and issue-N."
+    """
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_impl_invokes_testing_with_repo_root_eq_worktree(
+        self, mock_run, tmp_path,
+    ):
+        from assemblyzero.workflows.orchestrator.stages import run_impl_stage
+
+        # subprocess.run is mocked; treat all calls as successful no-ops.
+        out = MagicMock()
+        out.stdout = ""
+        out.stderr = ""
+        out.returncode = 0
+        mock_run.return_value = out
+
+        config = get_default_config()
+        state = create_initial_state(
+            4,
+            config,
+            target_repo=str(tmp_path / "target"),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+        # spec_path needs to look real to the impl stage
+        state["spec_path"] = str(tmp_path / "spec.md")
+        (tmp_path / "spec.md").write_text("# spec")
+
+        captured: dict[str, dict] = {}
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                captured["payload"] = payload
+                # Pretend the testing workflow succeeded.
+                return {"error_message": ""}
+
+        class _StubGraph:
+            def compile(self) -> _StubApp:
+                return _StubApp()
+
+        with patch(
+            "assemblyzero.workflows.testing.graph.build_testing_workflow",
+            return_value=_StubGraph(),
+        ):
+            run_impl_stage(state)
+
+        payload = captured.get("payload", {})
+        worktree_path = payload.get("worktree_path", "")
+        repo_root = payload.get("repo_root", "")
+        original_repo_root = payload.get("original_repo_root", "")
+        assert worktree_path, "worktree_path must be set"
+        assert repo_root == worktree_path, (
+            f"repo_root must equal worktree_path so the testing workflow "
+            f"writes into the worktree; got repo_root={repo_root!r}, "
+            f"worktree_path={worktree_path!r}"
+        )
+        assert original_repo_root == str(tmp_path / "target"), (
+            "original_repo_root must remain the target_repo so the LLD "
+            "fallback at load_lld.py:815 can find the spec"
+        )
+
+
 class TestRunPrStage:
     """run_pr_stage must emit a pr-sentinel-compliant PR (Closes #1366).
 

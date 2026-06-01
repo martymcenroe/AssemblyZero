@@ -469,11 +469,16 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
 
         graph = create_impl_graph()
         app = graph.compile()
+        # Closes #1504: testing workflow writes files to repo_root. Plumb
+        # the worktree path here so generated implementation + tests land
+        # on the issue-{N} branch. original_repo_root stays as target_repo
+        # so load_lld.py's fallback (Issue #380) can find the LLD that
+        # lives on target_repo's main.
         sub_result = app.invoke({
             "issue_number": issue_number,
             "spec_path": spec_path,
             "worktree_path": str(worktree_path),
-            "repo_root": target_repo,
+            "repo_root": str(worktree_path),
             "original_repo_root": target_repo,
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
