@@ -1678,6 +1678,100 @@ class TestResponseSchema:
         assert "response_schema" in sig.parameters
 
 
+class TestExtractTextFromStreamEvents:
+    """Closes #1498. Claude CLI v2.1.x returns streaming-events JSON arrays
+    on --output-format json. The provider must extract the actual response
+    text from the events list (priority: result event -> assistant message
+    -> raw stdout) instead of discarding the structure.
+    """
+
+    def test_extracts_from_result_event(self):
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        events = [
+            {"type": "system", "subtype": "init"},
+            {"type": "result", "result": "```python\nprint('hi')\n```"},
+        ]
+        result = _extract_text_from_stream_events(events, raw_stdout="ignored")
+        assert result == "```python\nprint('hi')\n```"
+
+    def test_falls_back_to_assistant_message_text(self):
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        events = [
+            {"type": "system", "subtype": "init"},
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "asst-text-here"}]},
+            },
+            # no result event
+        ]
+        result = _extract_text_from_stream_events(events, raw_stdout="ignored")
+        assert result == "asst-text-here"
+
+    def test_result_event_takes_priority_over_assistant(self):
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        events = [
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "asst"}]},
+            },
+            {"type": "result", "result": "canonical-result"},
+        ]
+        assert (
+            _extract_text_from_stream_events(events, raw_stdout="ignored")
+            == "canonical-result"
+        )
+
+    def test_falls_back_to_raw_stdout_when_no_extractable_event(self):
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        events = [
+            {"type": "system", "subtype": "init"},
+            {"type": "rate_limit_event"},
+        ]
+        result = _extract_text_from_stream_events(events, raw_stdout="raw-fallback")
+        assert result == "raw-fallback"
+
+    def test_non_list_falls_back_to_raw_stdout(self):
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        # Defensive: only lists carry the streaming-events shape.
+        result = _extract_text_from_stream_events(
+            "not a list", raw_stdout="raw-fallback"
+        )
+        assert result == "raw-fallback"
+
+    def test_smoke_build_iter05_repro(self):
+        """Verbatim shape from Chiron iter05's 091-response-...md."""
+        from assemblyzero.core.llm_provider import _extract_text_from_stream_events
+        code = (
+            "```python\n"
+            "from dataclasses import dataclass\n"
+            "\n"
+            "@dataclass(frozen=True)\n"
+            "class Citation:\n"
+            "    document: str\n"
+            "```"
+        )
+        events = [
+            {"type": "system", "subtype": "init", "cwd": "/tmp"},
+            {"type": "rate_limit_event", "rate_limit_info": {"status": "allowed"}},
+            {
+                "type": "assistant",
+                "message": {
+                    "model": "claude-sonnet-4-6",
+                    "content": [{"type": "text", "text": code}],
+                },
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": code,
+            },
+        ]
+        result = _extract_text_from_stream_events(events, raw_stdout="ignored")
+        assert "Citation" in result
+        assert "```python" in result
+
+
 class TestModuleLoggerDefined:
     """Regression for #1495. llm_provider used logger.warning at the
     #1431 defensive branch (non-dict JSON) but never imported logging or

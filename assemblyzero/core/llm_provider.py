@@ -71,6 +71,53 @@ def _filter_stderr(stderr: str) -> str:
     return "\n".join(filtered).strip()
 
 
+def _extract_text_from_stream_events(events: object, raw_stdout: str) -> str:
+    """Extract the response text from claude -p's streaming-events array.
+
+    Claude CLI v2.1.x returns `[{type: "system", ...}, {type: "assistant",
+    message: {content: [{type: "text", text: "..."}]}}, {type: "result",
+    result: "..."}]` on `--output-format json`. Closes #1498.
+
+    Priority:
+    1. The `result` event's `result` field (canonical, full final text).
+    2. The first assistant message's text content (fallback if no result
+       event is present in the array — happens on some error paths).
+    3. The raw stdout (last resort, preserves the existing behavior for
+       unknown shapes).
+    """
+    if not isinstance(events, list):
+        return raw_stdout.strip()
+
+    # 1. result event
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "result":
+            result_text = event.get("result")
+            if isinstance(result_text, str) and result_text:
+                return result_text
+
+    # 2. assistant message content
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") != "assistant":
+            continue
+        message = event.get("message", {})
+        if not isinstance(message, dict):
+            continue
+        for content in message.get("content", []) or []:
+            if not isinstance(content, dict):
+                continue
+            if content.get("type") == "text":
+                text = content.get("text", "")
+                if isinstance(text, str) and text:
+                    return text
+
+    # 3. last-resort raw stdout
+    return raw_stdout.strip()
+
+
 @dataclass
 class LLMCallResult:
     """Result of an LLM API call with full observability.
@@ -599,12 +646,23 @@ class ClaudeCLIProvider(LLMProvider):
                     # still completes with a useful response and the raw bytes
                     # are preserved for debugging.
                     if not isinstance(response_data, dict):
+                        # Closes #1498: Claude CLI v2.1.x returns a streaming-
+                        # events JSON array even on `--output-format json`.
+                        # Extract the actual response from the `result` event,
+                        # or fall back to assistant message content, before
+                        # last-resort raw stdout. The earlier behavior (just
+                        # stringify stdout) discarded a perfectly parseable
+                        # response and the downstream consumer couldn't find a
+                        # code block.
                         logger.warning(
                             "claude -p returned non-dict JSON (type=%s); "
-                            "falling back to raw stdout. stdout[:500]=%r",
+                            "attempting streaming-events extraction. "
+                            "stdout[:500]=%r",
                             type(response_data).__name__, stdout[:500]
                         )
-                        response_text = stdout.strip()
+                        response_text = _extract_text_from_stream_events(
+                            response_data, stdout
+                        )
                     else:
                         # Issue #779: When --json-schema is used, claude -p puts the
                         # structured output in "structured_output" (dict), not "result"
