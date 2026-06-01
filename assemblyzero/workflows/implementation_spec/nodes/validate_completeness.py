@@ -829,8 +829,16 @@ def _import_resolves(
 
     Recognizes both flat-layout (`chiron/provenance.py` at repo root) and
     src-layout (`src/chiron/provenance.py`). Closes #1461.
+
+    Filters empty segments from the dotted path before constructing
+    candidate file paths. A leading dot (`from . import X` → `module_path="."`)
+    or doubled dot (`foo..bar`) would otherwise produce `Path("")` which
+    pathlib treats as `Path(".")`, and `.with_suffix(".py")` raises
+    ValueError on a path with no name. Closes #1513.
     """
-    parts = module_path.split(".")
+    parts = [p for p in module_path.split(".") if p]
+    if not parts:
+        return False
     candidates: list[Path] = [
         Path(*parts).with_suffix(".py"),
         Path(*parts) / "__init__.py",
