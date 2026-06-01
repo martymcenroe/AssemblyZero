@@ -224,13 +224,27 @@ _COV_SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
 )
 
 
+def _is_python_package_dir(d: Path) -> bool:
+    """True if `d` is a Python package — regular (`__init__.py`) or PEP 420
+    namespace (directory with `.py` files but no `__init__.py`)."""
+    try:
+        if not d.is_dir():
+            return False
+        if (d / "__init__.py").exists():
+            return True
+        return any(f.suffix == ".py" for f in d.iterdir() if f.is_file())
+    except (OSError, PermissionError):
+        return False
+
+
 def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     """Convert a relative file path to the correct --cov target.
 
     For Python packages (top-level dir has ``__init__.py``), returns dotted
     module format (e.g., ``assemblyzero.utils.file_type``).
     For src-layout packages (``src/<pkg>/...``), strips the source-root
-    prefix and returns the dotted module form (Closes #1502).
+    prefix and returns the dotted module form (Closes #1502). The nested
+    package may be a regular or PEP 420 namespace package (Closes #1506).
     For standalone scripts (no ``__init__.py``, e.g., ``tools/``), returns
     the file path so pytest-cov measures the right file.
     """
@@ -245,13 +259,17 @@ def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     )
 
     # src-layout package: top_level is a source-root prefix and the
-    # immediately-nested dir is a package.
+    # immediately-nested dir is a package. Accept BOTH regular packages
+    # (have __init__.py) and PEP 420 namespace packages (no __init__.py
+    # but the dir contains .py files). Without this, namespace-package
+    # src-layouts fall through to file-path form and pytest-cov reports
+    # 0% coverage (Closes #1506).
     is_src_layout_package = bool(
         top_level
         and top_level in _COV_SOURCE_ROOT_PREFIXES
         and len(rel.parts) > 1
         and repo_root is not None
-        and (repo_root / top_level / rel.parts[1] / "__init__.py").exists()
+        and _is_python_package_dir(repo_root / top_level / rel.parts[1])
     )
 
     rel_str = str(rel)

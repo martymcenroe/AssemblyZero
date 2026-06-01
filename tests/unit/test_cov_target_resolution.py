@@ -62,6 +62,41 @@ def test_real_src_layout_no_src_init(tmp_path: Path) -> None:
     assert result == "chiron.provenance"
 
 
+def test_src_layout_namespace_package(tmp_path: Path) -> None:
+    """Closes #1506. PEP 420 namespace package under src/: no __init__.py
+    anywhere, but src/<pkg>/<file>.py is importable as <pkg>.<file> via
+    Python 3.3+ namespace-package import. The cov target must be dotted
+    form, not file path — pytest-cov's path-style --cov= reports 0%
+    coverage on namespace packages because the module is imported as
+    <pkg>.<file>, not src.<pkg>.<file>.
+
+    Empirically reproduced 2026-06-01 on Chiron-4 iter09 smoke build:
+    --cov=src/chiron/provenance.py emits "Module ... was never imported"
+    and reports 0%; --cov=chiron.provenance reports 100% on the same
+    test invocation.
+    """
+    (tmp_path / "src" / "chiron").mkdir(parents=True)
+    (tmp_path / "src" / "chiron" / "provenance.py").touch()
+    # No __init__.py anywhere — PEP 420 namespace package.
+
+    result = _path_to_cov_target("src/chiron/provenance.py", tmp_path)
+    assert result == "chiron.provenance"
+
+
+def test_src_layout_empty_subdir_falls_back_to_path(tmp_path: Path) -> None:
+    """Closes #1506. Guard against accidental over-acceptance: when
+    src/<subdir>/ exists but is EMPTY (no __init__.py, no .py files),
+    do NOT treat it as a namespace package — fall through to file path
+    form. Keeps the existing tools/-style "non-package dir" semantics
+    intact when an empty placeholder happens to be under src/."""
+    (tmp_path / "src" / "data").mkdir(parents=True)
+    # Empty dir: no .py, no __init__.py.
+
+    result = _path_to_cov_target("src/data/example.py", tmp_path)
+    # The directory exists but isn't a package — file-path fallback.
+    assert result == "src/data/example.py"
+
+
 def test_lib_layout_strips_prefix(tmp_path: Path) -> None:
     """Closes #1502. lib-layout variant."""
     (tmp_path / "lib" / "foo").mkdir(parents=True)
