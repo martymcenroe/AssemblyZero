@@ -67,6 +67,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -236,19 +237,74 @@ def _strip_identifiers_block(text: str) -> str:
     return text[:start] + text[end:]
 
 
-def detect_drift(claude_md: Path, repo_root: Path) -> RepoResult:
-    """Run all 9 detectors against a single CLAUDE.md and return findings."""
+def read_claude_md_text(
+    claude_md: Path,
+    repo_root: Path,
+    source: str,
+) -> Optional[str]:
+    """Read CLAUDE.md content from the configured source.
+
+    Returns None if the source has no CLAUDE.md (caller interprets as MISSING).
+
+    Sources:
+      - "working-tree": read from `claude_md` on disk
+      - "origin-main": read via `git show origin/main:CLAUDE.md` so lint
+        reflects the canonical branch's CLAUDE.md regardless of the
+        currently-checked-out local branch (#1302). Fails (returns None)
+        if `origin/main` does not exist or has no CLAUDE.md at its root.
+
+    Note: `origin-main` does NOT fetch — it reads whatever the last
+    `git fetch` saw. Run `git fetch --all` first if you want fresh data.
+    """
+    if source == "working-tree":
+        if not claude_md.exists():
+            return None
+        return claude_md.read_text(encoding="utf-8", errors="replace")
+
+    if source == "origin-main":
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "show", "origin/main:CLAUDE.md"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout
+
+    raise ValueError(f"Unknown source: {source!r}")
+
+
+def detect_drift(
+    claude_md: Path,
+    repo_root: Path,
+    source: str = "working-tree",
+) -> RepoResult:
+    """Run all 9 detectors against a single CLAUDE.md and return findings.
+
+    The `source` kwarg controls where the CLAUDE.md text comes from:
+      - "working-tree" (default for backward compat): read from disk at `claude_md`
+      - "origin-main": read via `git show origin/main:CLAUDE.md` so lint
+        reflects what's on the canonical branch regardless of which local
+        branch is currently checked out (#1302). Returns MISSING if
+        origin/main does not have CLAUDE.md (or origin/main does not exist).
+
+    Note: when called from main(), the CLI default is "origin-main" — this
+    backward-compatible function default exists so the existing test suite
+    (40 tests using tmp_path repos without git remotes) continues to work.
+    """
     result = RepoResult(
         repo_name=repo_root.name,
         claude_md_path=claude_md,
         status="PASS",
     )
 
-    if not claude_md.exists():
+    text = read_claude_md_text(claude_md, repo_root, source)
+    if text is None:
         result.status = "MISSING"
         return result
 
-    text = claude_md.read_text(encoding="utf-8", errors="replace")
     result.line_count = len(text.splitlines())
     result.unleashed_assemblyzero = load_unleashed_assemblyzero(repo_root)
 
@@ -392,6 +448,7 @@ def scan_fleet(
     projects_root: Path,
     allowlist: set[str],
     show_skipped: bool = False,
+    source: str = "working-tree",
 ) -> list[RepoResult]:
     """Scan every {projects_root}/*/CLAUDE.md (one level deep) and return results.
 
@@ -402,6 +459,8 @@ def scan_fleet(
 
     Existing behavior (visible regardless of show_skipped):
     - Allowlisted repos — explicit operator-curated skip, shown as SKIPPED
+
+    The `source` kwarg is passed through to `detect_drift` (see #1302).
     """
     results: list[RepoResult] = []
     for repo_dir in sorted(projects_root.iterdir()):
@@ -455,7 +514,7 @@ def scan_fleet(
             continue
 
         claude_md = repo_dir / "CLAUDE.md"
-        results.append(detect_drift(claude_md, repo_dir))
+        results.append(detect_drift(claude_md, repo_dir, source=source))
     return results
 
 
@@ -565,6 +624,18 @@ def main(argv: Optional[list[str]] = None) -> int:
              "Default: silently exclude these. Allowlisted repos are "
              "always shown regardless of this flag.",
     )
+    parser.add_argument(
+        "--source",
+        choices=["origin-main", "working-tree"],
+        default="origin-main",
+        help="CLAUDE.md text source (#1302). "
+             "'origin-main' (default): read via `git show origin/main:CLAUDE.md` "
+             "so lint reflects the canonical branch regardless of which local "
+             "branch is checked out. Does NOT fetch — reads whatever the last "
+             "`git fetch` saw. "
+             "'working-tree': read from disk (legacy behavior; useful when "
+             "linting an in-progress edit before push).",
+    )
     args = parser.parse_args(argv)
 
     projects_root = args.projects_root or Path(config.projects_root())
@@ -578,7 +649,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    results = scan_fleet(projects_root, allowlist, show_skipped=args.show_skipped)
+    results = scan_fleet(
+        projects_root, allowlist,
+        show_skipped=args.show_skipped,
+        source=args.source,
+    )
 
     if args.format == "json":
         print(format_json(results))

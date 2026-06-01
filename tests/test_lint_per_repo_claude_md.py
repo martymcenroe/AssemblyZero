@@ -550,3 +550,54 @@ def test_scan_fleet_allowlisted_still_shows_with_reason(tmp_path: Path) -> None:
     by_name = {r.repo_name: r for r in results}
     assert by_name["skipme"].status == "SKIPPED"
     assert by_name["skipme"].skipped_reason == "allowlisted"
+
+
+# ────────────────────────────────────────────────────────────────────
+# #1302: source=origin-main reads from canonical branch, not working tree
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_origin_main_source_ignores_working_tree_drift(tmp_path: Path) -> None:
+    """#1302: with source='origin-main', drift on a feature branch's working
+    tree must NOT appear in the lint result — origin/main is the source of truth."""
+    import subprocess as sp
+    repo = tmp_path / "test-repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        sp.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    # Clean lean template at the initial commit
+    (repo / "CLAUDE.md").write_text(lean_template(), encoding="utf-8")
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "test@test.local")
+    git("config", "user.name", "test")
+    git("add", "CLAUDE.md")
+    git("commit", "-q", "-m", "init")
+    # Fake origin/main remote-tracking ref (no real remote needed for `git show`)
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    # Pollute working tree with marker-5 drift (simulates a stale feature branch)
+    drifted = lean_template() + "\n\n## FIRST: Read AssemblyZero Core Rules\n"
+    (repo / "CLAUDE.md").write_text(drifted, encoding="utf-8")
+
+    # source=origin-main: must not see the drift
+    result_om = detect_drift(repo / "CLAUDE.md", repo, source="origin-main")
+    assert result_om.status == "PASS", (
+        f"Expected PASS reading origin/main, got {result_om.status}; "
+        f"findings markers={[f.marker for f in result_om.findings]}"
+    )
+
+    # source=working-tree (legacy): must see marker 5
+    result_wt = detect_drift(repo / "CLAUDE.md", repo, source="working-tree")
+    assert result_wt.status == "DRIFT"
+    assert any(f.marker == 5 for f in result_wt.findings)
+
+
+def test_origin_main_source_missing_when_no_origin_ref(tmp_path: Path) -> None:
+    """source='origin-main' returns MISSING when origin/main ref doesn't exist
+    (e.g., repo has no remote or no `git fetch` has run yet). The working-tree
+    CLAUDE.md is NOT a fallback — the strict semantic is 'origin/main is truth.'"""
+    repo = make_repo(tmp_path, "no-origin", lean_template())  # has .git/ dir but no real git history
+    result = detect_drift(repo / "CLAUDE.md", repo, source="origin-main")
+    assert result.status == "MISSING"
