@@ -1676,3 +1676,25 @@ class TestResponseSchema:
         import inspect
         sig = inspect.signature(GeminiProvider.invoke)
         assert "response_schema" in sig.parameters
+
+
+class TestModuleLoggerDefined:
+    """Regression for #1495. llm_provider used logger.warning at the
+    #1431 defensive branch (non-dict JSON) but never imported logging or
+    defined logger at module scope. Every code path that touched that
+    branch raised NameError. The smoke-build empirical surface was the
+    testing N4 (implement_code) halting impl.
+    """
+
+    def test_module_defines_logger(self):
+        import assemblyzero.core.llm_provider as mod
+        assert hasattr(mod, "logger"), (
+            "llm_provider must define a module-level `logger` so the "
+            "#1431 logger.warning branch does not NameError"
+        )
+        import logging
+        assert isinstance(mod.logger, logging.Logger)
+
+    def test_logger_name_matches_module(self):
+        import assemblyzero.core.llm_provider as mod
+        assert mod.logger.name == "assemblyzero.core.llm_provider"
