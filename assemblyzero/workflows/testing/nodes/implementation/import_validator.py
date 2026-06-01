@@ -21,6 +21,74 @@ _KNOWN_THIRD_PARTY: frozenset[str] = frozenset({
 })
 
 
+# Closes #1518: PyPI package names frequently differ from import names.
+# `pip install pyyaml` installs the `yaml` module; `pip install Pillow`
+# installs `PIL`. The validator must map declared deps to the top-level
+# names they actually expose. Seed the common cases that bite real
+# projects; extend as new ones surface.
+_PYPI_TO_IMPORT_NAMES: dict[str, frozenset[str]] = {
+    "pyyaml": frozenset({"yaml"}),
+    "python_dateutil": frozenset({"dateutil"}),
+    "python_jose": frozenset({"jose"}),
+    "pillow": frozenset({"PIL"}),
+    "beautifulsoup4": frozenset({"bs4"}),
+    "opencv_python": frozenset({"cv2"}),
+    "opencv_python_headless": frozenset({"cv2"}),
+    "scikit_learn": frozenset({"sklearn"}),
+    "scikit_image": frozenset({"skimage"}),
+    "protobuf": frozenset({"google", "google.protobuf"}),
+    "msgpack_python": frozenset({"msgpack"}),
+    "attrs": frozenset({"attr", "attrs"}),
+    "snowflake_connector_python": frozenset({"snowflake"}),
+    "google_cloud_storage": frozenset({"google"}),
+    "google_cloud_bigquery": frozenset({"google"}),
+    "google_cloud_pubsub": frozenset({"google"}),
+}
+
+
+def _import_names_for_pypi(pypi_name_normalized: str) -> set[str]:
+    """Return the import-time top-level name(s) a PyPI dist exposes.
+
+    Closes #1518. The validator must recognize both the PyPI distribution
+    name and any top-level module name the dist installs as. Tries:
+
+    1. Hardcoded mapping for well-known mismatches.
+    2. importlib.metadata.top_level.txt of the locally-installed dist
+       (authoritative when the venv has the package installed; opportunistic).
+    3. Fallback: the normalized PyPI name itself (matches when import name
+       == PyPI name, the common case).
+
+    Returns a set that always contains the normalized PyPI name plus any
+    additional import names discovered.
+    """
+    names: set[str] = {pypi_name_normalized}
+
+    hardcoded = _PYPI_TO_IMPORT_NAMES.get(pypi_name_normalized)
+    if hardcoded:
+        names.update(hardcoded)
+
+    try:
+        import importlib.metadata as md
+        for dist in md.distributions():
+            dist_name = dist.metadata.get("Name", "")
+            if not dist_name:
+                continue
+            if _normalize_package_name(dist_name) != pypi_name_normalized:
+                continue
+            top_level = dist.read_text("top_level.txt") or ""
+            for line in top_level.splitlines():
+                module = line.strip()
+                if module:
+                    names.add(module)
+            break
+    except Exception:
+        # importlib.metadata may not work in every env (e.g. fresh worktree
+        # before poetry install); fall back to the hardcoded map.
+        pass
+
+    return names
+
+
 def _read_third_party_packages(repo_root: Path) -> set[str]:
     """Extract third-party package names from pyproject.toml.
 
@@ -52,26 +120,34 @@ def _read_third_party_packages(repo_root: Path) -> set[str]:
 
     packages: set[str] = set()
 
+    def _register(pypi_name: str) -> None:
+        """Register a PyPI dep + every top-level import name it exposes.
+        Closes #1518."""
+        normalized = _normalize_package_name(pypi_name)
+        if not normalized:
+            return
+        packages.update(_import_names_for_pypi(normalized))
+
     # Poetry: [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies]
     poetry = data.get("tool", {}).get("poetry", {})
     for dep_name in poetry.get("dependencies", {}):
-        packages.add(_normalize_package_name(dep_name))
+        _register(dep_name)
     for group in poetry.get("group", {}).values():
         for dep_name in group.get("dependencies", {}):
-            packages.add(_normalize_package_name(dep_name))
+            _register(dep_name)
 
     # PEP 621: [project] dependencies = ["pypdf>=5.0.0", ...]
     project = data.get("project", {})
     for spec in project.get("dependencies", []):
         name = _extract_package_name_from_pep508(spec)
         if name:
-            packages.add(_normalize_package_name(name))
+            _register(name)
     # PEP 621: [project.optional-dependencies]
     for group_specs in project.get("optional-dependencies", {}).values():
         for spec in group_specs:
             name = _extract_package_name_from_pep508(spec)
             if name:
-                packages.add(_normalize_package_name(name))
+                _register(name)
 
     # PEP 735: [dependency-groups] dev = ["pytest>=9.0.3", ...]
     for group_specs in data.get("dependency-groups", {}).values():
@@ -82,7 +158,7 @@ def _read_third_party_packages(repo_root: Path) -> set[str]:
                 continue
             name = _extract_package_name_from_pep508(spec)
             if name:
-                packages.add(_normalize_package_name(name))
+                _register(name)
 
     return packages
 

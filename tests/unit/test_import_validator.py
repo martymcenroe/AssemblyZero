@@ -241,6 +241,93 @@ def test_absolute_imports_still_validated(tmp_path):
     assert any("nonexistent" in b for b in bad)
 
 
+def test_pyyaml_dep_recognizes_yaml_import(tmp_path):
+    """Closes #1518. PyYAML installs the `yaml` top-level module; declaring
+    pyyaml in deps must register `yaml` so `import yaml` is recognized."""
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _read_third_party_packages,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "chiron"\n'
+        'dependencies = ["pyyaml>=6.0"]\n'
+    )
+    pkgs = _read_third_party_packages(tmp_path)
+    assert "yaml" in pkgs, f"Expected yaml import name from pyyaml dep, got {pkgs}"
+
+
+def test_pillow_dep_recognizes_pil_import(tmp_path):
+    """Closes #1518. Pillow → PIL (case-insensitive normalize)."""
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _read_third_party_packages,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "chiron"\n'
+        'dependencies = ["Pillow>=10"]\n'
+    )
+    pkgs = _read_third_party_packages(tmp_path)
+    assert "PIL" in pkgs, f"Expected PIL import name from Pillow dep, got {pkgs}"
+
+
+def test_beautifulsoup4_dep_recognizes_bs4_import(tmp_path):
+    """Closes #1518. beautifulsoup4 → bs4."""
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _read_third_party_packages,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "chiron"\n'
+        'dependencies = ["beautifulsoup4>=4.12"]\n'
+    )
+    pkgs = _read_third_party_packages(tmp_path)
+    assert "bs4" in pkgs
+
+
+def test_unmapped_pypi_name_still_normalizes(tmp_path):
+    """Closes #1518 regression: package names not in the mapping table
+    still go through the normal hyphen→underscore normalize path."""
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        _read_third_party_packages,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "chiron"\n'
+        'dependencies = ["pytest-cov>=7"]\n'
+    )
+    pkgs = _read_third_party_packages(tmp_path)
+    assert "pytest_cov" in pkgs
+
+
+def test_chiron_iter10_full_import_validation(tmp_path):
+    """Closes #1518. Verbatim iter10 shape: pyproject with pypdf + pyyaml,
+    code does `import yaml` — must pass validation, not flag yaml as
+    unresolvable."""
+    from assemblyzero.workflows.testing.nodes.implementation.import_validator import (
+        validate_imports,
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\n'
+        'name = "chiron"\n'
+        'dependencies = [\n'
+        '    "pypdf>=5.0.0",\n'
+        '    "pyyaml>=6.0",\n'
+        ']\n'
+    )
+    code = (
+        '"""CLI entry."""\n'
+        'import argparse\n'
+        'import logging\n'
+        'from pathlib import Path\n'
+        '\n'
+        'import yaml\n'
+        '\n'
+        'def main(): pass\n'
+    )
+    valid, bad = validate_imports(code, "src/chiron/corpus/cli.py", tmp_path)
+    assert valid is True, f"Expected valid, got bad={bad!r}"
+
+
 def test_chiron_iter06_repro(tmp_path):
     """Verbatim shape from iter06 halt: src/chiron/provenance.py exists
     on disk, test file does `from chiron.provenance import Citation`,
