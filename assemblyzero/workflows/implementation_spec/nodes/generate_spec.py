@@ -580,11 +580,22 @@ def _build_revision_prompt(
                     "Start with # title. No preamble.",
                     targeted,
                     f"## Original LLD (Issue #{issue_number})\n\n{lld_content}",
-                    "CRITICAL REVISION INSTRUCTIONS:\n"
-                    "1. Fix ALL issues from feedback\n"
-                    "2. PRESERVE sections marked [UNCHANGED] exactly as-is\n"
+                    "CRITICAL REVISION INSTRUCTIONS — READ BEFORE WRITING:\n\n"
+                    "This is a TARGETED PATCH, not a regeneration. You are "
+                    "NOT writing a new spec — you are applying specific fixes "
+                    "to the draft above.\n\n"
+                    "1. Fix ALL issues named in the feedback\n"
+                    "2. Sections marked [UNCHANGED] MUST be reproduced "
+                    "byte-identical — copy-paste them verbatim; do NOT "
+                    "rephrase, restructure, reformat, or 'improve' even if "
+                    "you think you can do better\n"
                     "3. ONLY modify sections marked [REVISE]\n"
-                    "4. Keep ALL template sections intact\n\n"
+                    "4. Keep ALL template sections intact and byte-identical\n\n"
+                    "Known failure mode (DO NOT DO THIS — AZ #1521): writer "
+                    "addresses the flagged issue but introduces a NEW error "
+                    "elsewhere by drifting on unflagged content. If you find "
+                    "yourself 'tidying up' an [UNCHANGED] section, STOP — that "
+                    "edit is a regression, not a fix.\n\n"
                     "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE.",
                 ]
                 prompt = "\n\n".join(parts)
@@ -696,18 +707,40 @@ def _build_revision_prompt(
         )
 
     # Revision instructions
+    # Closes #1521: writer was regressing on revision — fixing the flagged
+    # syntax error but introducing a new one elsewhere by drifting on
+    # unflagged content. The wording below reframes the task as a TARGETED
+    # PATCH ("not a regeneration"), explicitly forbids "tidying up" unflagged
+    # content, and calls out the known failure mode by name so the LLM sees
+    # the anti-pattern it must avoid.
     sections.append(
-        "CRITICAL REVISION INSTRUCTIONS:\n"
-        "1. Fix ALL mechanical completeness errors FIRST "
-        "(missing excerpts, missing examples)\n"
-        "2. Implement EVERY change requested by Gemini review feedback\n"
-        "3. PRESERVE sections that weren't flagged\n"
-        "4. ONLY modify sections that need changes\n"
-        "5. Keep ALL template sections intact\n"
-        "6. Ensure every Modify file has a current state excerpt\n"
-        "7. Ensure every function has concrete input/output examples\n"
-        "8. Ensure every data structure has a concrete JSON/YAML example\n\n"
-        "Revise the draft to address ALL feedback above.\n"
+        "CRITICAL REVISION INSTRUCTIONS — READ BEFORE WRITING:\n\n"
+        "This is a TARGETED PATCH, not a regeneration. You are applying "
+        "specific fixes to an existing draft. You are NOT writing a new spec.\n\n"
+        "## What to change\n"
+        "1. Fix ALL mechanical completeness errors (missing excerpts, missing "
+        "examples)\n"
+        "2. Implement EVERY change requested by the review feedback\n\n"
+        "## What NOT to change (strict — any violation is a regression)\n"
+        "3. Any text NOT named in the feedback above MUST be reproduced "
+        "VERBATIM. Copy-paste the original wording. Do NOT rephrase, "
+        "restructure, reformat, or 'improve' it — even if you think you "
+        "can do better.\n"
+        "4. Code blocks, decorators, function signatures, test fixtures, "
+        "and data-structure literals NOT flagged by feedback MUST be "
+        "byte-identical to the existing draft.\n"
+        "5. Template sections, section headings, bullet structure, and "
+        "ordering MUST match the existing draft except where feedback "
+        "says to change them.\n\n"
+        "## Completeness requirements (these MUST hold in the output)\n"
+        "6. Every Modify file has a current state excerpt\n"
+        "7. Every function has concrete input/output examples\n"
+        "8. Every data structure has a concrete JSON/YAML example\n\n"
+        "## Known failure mode (DO NOT DO THIS — AZ #1521)\n"
+        "Writer addresses the flagged issue but introduces a NEW syntax "
+        "error elsewhere by drifting on unflagged content. If you find "
+        "yourself 'tidying up' or 'fixing' something not named in the "
+        "feedback above, STOP — that edit is a regression, not a fix.\n\n"
         "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."
     )
 
