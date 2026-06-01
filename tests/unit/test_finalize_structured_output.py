@@ -213,6 +213,38 @@ class TestOpenQuestionsCheckboxIgnoresCodeBlocks:
             "Unresolved open questions remain" in i for i in issues
         ), f"got: {issues}"
 
+    def test_unchecked_inside_indented_block_does_not_trigger(self):
+        """CommonMark 4-space-indented code blocks: example checkbox syntax
+        in an indented block does NOT trip the regex. Closes #1476."""
+        content = (
+            "# LLD\n\n"
+            "## Open Questions\n\n"
+            "All resolved. The format for tracking is:\n\n"
+            "    - [ ] Example unchecked question (indented = code block)\n"
+            "    - [x] Example resolved question\n\n"
+            "## Next Section\n"
+        )
+        issues = validate_lld_final(content, open_questions_resolved=False)
+        assert not any(
+            "Unresolved open questions remain" in i for i in issues
+        ), f"got: {issues}"
+
+    def test_unchecked_in_indented_block_with_real_unchecked_outside_still_triggers(self):
+        """Mixed: indented-block example AND a real unchecked item. Closes #1476."""
+        content = (
+            "# LLD\n\n"
+            "## Open Questions\n\n"
+            "Format example:\n\n"
+            "    - [ ] example only (indented = code block)\n\n"
+            "Real questions:\n\n"
+            "- [ ] Actual question that needs answering\n\n"
+            "## Next Section\n"
+        )
+        issues = validate_lld_final(content, open_questions_resolved=False)
+        assert any(
+            "Unresolved open questions remain" in i for i in issues
+        ), f"got: {issues}"
+
 
 class TestDetectOpenQuestionsReturnType:
     """Verify FinalizeQuestionsResult TypedDict structure."""
