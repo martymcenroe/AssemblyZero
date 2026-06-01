@@ -750,7 +750,9 @@ def check_import_targets_exist(
     )
 
 
-_SOURCE_ROOT_PREFIXES: tuple[str, ...] = ("", "src", "lib")
+_SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
+    "", "src", "lib", "source", "python", "apps",
+)
 
 
 def _candidate_matches_new_file(candidate: Path, new_file_paths: set[str]) -> bool:
@@ -768,14 +770,52 @@ def _candidate_matches_new_file(candidate: Path, new_file_paths: set[str]) -> bo
     return False
 
 
+def _discover_pyproject_source_roots(repo_root: Path) -> tuple[str, ...]:
+    """Best-effort discovery of source roots from pyproject.toml.
+
+    Reads `[tool.poetry.packages]` (with `from = "X"`) and
+    `[tool.setuptools.packages.find]` (with `where = ["X"]`) entries.
+    Malformed pyproject files return (); the caller falls back to the
+    static prefix list. Closes #1477.
+    """
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.exists():
+        return ()
+    try:
+        import tomllib
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError, ImportError):
+        return ()
+    roots: list[str] = []
+    poetry_packages = (
+        data.get("tool", {}).get("poetry", {}).get("packages", [])
+    )
+    if isinstance(poetry_packages, list):
+        for pkg in poetry_packages:
+            if isinstance(pkg, dict):
+                src = pkg.get("from")
+                if isinstance(src, str) and src:
+                    roots.append(src)
+    setuptools_where = (
+        data.get("tool", {}).get("setuptools", {})
+            .get("packages", {}).get("find", {}).get("where", [])
+    )
+    if isinstance(setuptools_where, list):
+        for w in setuptools_where:
+            if isinstance(w, str) and w:
+                roots.append(w)
+    return tuple(roots)
+
+
 def _candidate_exists_under_source_roots(
     candidate: Path, repo_root: Path
 ) -> bool:
-    """Probe `repo_root / {prefix} / candidate` for common source-root prefixes.
-
-    Handles src-layout, lib-layout, and flat-layout uniformly. Closes #1461.
+    """Probe `repo_root / {prefix} / candidate` for common source-root prefixes
+    plus any prefixes discovered from `pyproject.toml`. Closes #1461, #1477.
     """
-    for prefix in _SOURCE_ROOT_PREFIXES:
+    discovered = _discover_pyproject_source_roots(repo_root)
+    all_prefixes = _SOURCE_ROOT_PREFIXES + discovered
+    for prefix in all_prefixes:
         probe = (repo_root / prefix / candidate) if prefix else (repo_root / candidate)
         if probe.exists():
             return True

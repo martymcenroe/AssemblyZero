@@ -1282,6 +1282,87 @@ class TestImportResolvesSourceLayouts:
         assert _import_resolves("chiron.provenance", tmp_path, new_files) is True
 
 
+class TestImportResolvesExtendedSourceLayouts:
+    """Extended source-root coverage beyond src/lib/flat. Closes #1477.
+
+    Adds: source/, python/, apps/ as static prefixes; pyproject.toml
+    discovery for poetry [tool.poetry.packages] from= entries and
+    setuptools [tool.setuptools.packages.find] where= entries.
+    """
+
+    def test_resolves_source_layout(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "source" / "foo").mkdir(parents=True)
+        (tmp_path / "source" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_resolves_python_layout(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "python" / "foo").mkdir(parents=True)
+        (tmp_path / "python" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_resolves_apps_layout(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "apps" / "foo").mkdir(parents=True)
+        (tmp_path / "apps" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_pyproject_poetry_packages_discovered(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        # pyproject declares packages from "custom-src/"
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.poetry]\nname = "demo"\nversion = "0.1.0"\n'
+            'packages = [{include = "foo", from = "custom-src"}]\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "custom-src" / "foo").mkdir(parents=True)
+        (tmp_path / "custom-src" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_pyproject_setuptools_where_discovered(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.setuptools.packages.find]\nwhere = ["my-pkg-root"]\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "my-pkg-root" / "foo").mkdir(parents=True)
+        (tmp_path / "my-pkg-root" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_malformed_pyproject_falls_back_silently(self, tmp_path):
+        """Malformed pyproject doesn't raise; static prefixes still work."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "pyproject.toml").write_text(
+            "this is not [valid toml",
+            encoding="utf-8",
+        )
+        # Static "src" prefix still resolves
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+    def test_missing_pyproject_doesnt_break_static_prefixes(self, tmp_path):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            _import_resolves,
+        )
+        (tmp_path / "src" / "foo").mkdir(parents=True)
+        (tmp_path / "src" / "foo" / "bar.py").write_text("")
+        assert _import_resolves("foo.bar", tmp_path, set()) is True
+
+
 # =============================================================================
 # N4: Human Gate
 # =============================================================================
