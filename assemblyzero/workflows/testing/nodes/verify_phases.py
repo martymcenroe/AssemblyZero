@@ -212,35 +212,63 @@ def _classify_import_errors(
     return expected_count, unexpected_count, unexpected_modules
 
 
+# Closes #1502: src-layout repos store importable packages under a
+# source-root prefix dir which is NOT itself a package. The earlier
+# is_package check only looked at top_level/__init__.py; for src-layout
+# that returned False and the function fell back to file-path form,
+# which pytest-cov measured as 0.0% (it expects module names or
+# discoverable directories, not file paths inside a nested layout).
+# Mirrors #1477's source-root list.
+_COV_SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
+    "src", "lib", "source", "python", "apps",
+)
+
+
 def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     """Convert a relative file path to the correct --cov target.
 
-    For Python packages (top-level dir has __init__.py), returns dotted
+    For Python packages (top-level dir has ``__init__.py``), returns dotted
     module format (e.g., ``assemblyzero.utils.file_type``).
-    For standalone scripts (no __init__.py, e.g., ``tools/``), returns
+    For src-layout packages (``src/<pkg>/...``), strips the source-root
+    prefix and returns the dotted module form (Closes #1502).
+    For standalone scripts (no ``__init__.py``, e.g., ``tools/``), returns
     the file path so pytest-cov measures the right file.
     """
     rel = Path(rel_path)
     top_level = rel.parts[0] if rel.parts else None
-    is_package = (
+
+    # Flat-layout package: repo_root/<top>/__init__.py exists.
+    is_flat_package = bool(
         top_level
         and repo_root
         and (repo_root / top_level / "__init__.py").exists()
+    )
+
+    # src-layout package: top_level is a source-root prefix and the
+    # immediately-nested dir is a package.
+    is_src_layout_package = bool(
+        top_level
+        and top_level in _COV_SOURCE_ROOT_PREFIXES
+        and len(rel.parts) > 1
+        and repo_root is not None
+        and (repo_root / top_level / rel.parts[1] / "__init__.py").exists()
     )
 
     rel_str = str(rel)
     if rel_str.endswith(".py"):
         rel_str = rel_str[:-3]
 
-    if is_package:
+    if is_flat_package or is_src_layout_package:
         module = rel_str.replace("/", ".").replace("\\", ".")
-        # Issue #387: Strip src. prefix for src-layout projects
-        if module.startswith("src."):
-            module = module[4:]
+        # Strip a known source-root prefix (Issue #387 / #1502).
+        for prefix in _COV_SOURCE_ROOT_PREFIXES:
+            if module.startswith(prefix + "."):
+                module = module[len(prefix) + 1:]
+                break
         return module
-    else:
-        # Return as a file path — pytest-cov accepts paths for non-package code
-        return str(rel).replace("\\", "/")
+
+    # Return as a file path — pytest-cov accepts paths for non-package code
+    return str(rel).replace("\\", "/")
 
 
 def run_pytest(

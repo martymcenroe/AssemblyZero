@@ -47,6 +47,40 @@ def test_src_layout_strips_prefix(tmp_path: Path) -> None:
     assert result == "mypackage.core"
 
 
+def test_real_src_layout_no_src_init(tmp_path: Path) -> None:
+    """Closes #1502. Real-world src-layout: src/ is NOT a package (no
+    src/__init__.py), but src/<pkg>/__init__.py exists. The cov target
+    must be the dotted form with the src prefix stripped, not the file
+    path (which pytest-cov misclassifies as 0% coverage).
+    """
+    (tmp_path / "src" / "chiron").mkdir(parents=True)
+    (tmp_path / "src" / "chiron" / "__init__.py").touch()
+    (tmp_path / "src" / "chiron" / "provenance.py").touch()
+    # Deliberately do NOT create src/__init__.py — real src-layout shape.
+
+    result = _path_to_cov_target("src/chiron/provenance.py", tmp_path)
+    assert result == "chiron.provenance"
+
+
+def test_lib_layout_strips_prefix(tmp_path: Path) -> None:
+    """Closes #1502. lib-layout variant."""
+    (tmp_path / "lib" / "foo").mkdir(parents=True)
+    (tmp_path / "lib" / "foo" / "__init__.py").touch()
+    (tmp_path / "lib" / "foo" / "bar.py").touch()
+
+    result = _path_to_cov_target("lib/foo/bar.py", tmp_path)
+    assert result == "foo.bar"
+
+
+def test_source_layout_strips_prefix(tmp_path: Path) -> None:
+    """Closes #1502. source-layout variant."""
+    (tmp_path / "source" / "foo").mkdir(parents=True)
+    (tmp_path / "source" / "foo" / "__init__.py").touch()
+
+    result = _path_to_cov_target("source/foo/bar.py", tmp_path)
+    assert result == "foo.bar"
+
+
 # ---------------------------------------------------------------------------
 # _path_to_cov_target — standalone scripts (no __init__.py)
 # ---------------------------------------------------------------------------
