@@ -683,15 +683,30 @@ class TestReviewNodeAdditional:
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_review_handles_blocked_status(self, mock_get_provider, tmp_path):
-        """Test review correctly sets BLOCKED status."""
+        """REVISE verdict with explicit Tier 1 BLOCKING issues -> BLOCKED."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
         import json as _json
 
+        # Closes #1511: rationale must include a non-empty Tier 1 BLOCKING
+        # section for REVISE to map to BLOCKED. REVISE with empty Tier 1
+        # now maps to APPROVED (Tier 2 stays as known-issues).
+        rationale_with_tier1 = (
+            "Missing required sections.\n\n"
+            "## Tier 1: BLOCKING Issues\n"
+            "### Safety\n"
+            "- [ ] **CRITICAL** - The draft is missing the Requirements "
+            "section entirely; downstream stages cannot proceed.\n"
+        )
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing required sections.", "feedback_items": ["Missing required sections."], "open_questions": []}),
+            content=_json.dumps({
+                "verdict": "REVISE",
+                "rationale": rationale_with_tier1,
+                "feedback_items": ["Missing required sections."],
+                "open_questions": [],
+            }),
             response="BLOCKED: Missing required sections.",
             error_message=None,
             input_tokens=0,
@@ -734,6 +749,177 @@ class TestReviewNodeAdditional:
 
         assert result.get("error_message", "") != ""
         assert "prompt" in result.get("error_message", "").lower()
+
+
+class TestTier1BlockingCounter:
+    """Closes #1511. _count_tier1_blocking_issues distinguishes real Tier 1
+    issues from the placeholder lines the reviewer emits when no blocking
+    issues exist."""
+
+    def test_count_returns_zero_when_no_tier1_section(self):
+        from assemblyzero.workflows.requirements.nodes.review import _count_tier1_blocking_issues
+        assert _count_tier1_blocking_issues("Plain prose with no tier markers") == 0
+
+    def test_count_returns_zero_when_all_placeholders(self):
+        from assemblyzero.workflows.requirements.nodes.review import _count_tier1_blocking_issues
+        rationale = (
+            "## Tier 1: BLOCKING Issues\n"
+            "No blocking issues found.\n"
+            "### Cost\n- [ ] No issues found.\n"
+            "### Safety\n- [ ] No issues found.\n"
+            "### Security\n- [ ] No issues found.\n"
+            "### Legal\n- [ ] No issues found.\n\n"
+            "## Tier 2: HIGH PRIORITY Issues\n"
+            "### Observability\n- [ ] Missing logging.\n"
+        )
+        assert _count_tier1_blocking_issues(rationale) == 0
+
+    def test_count_returns_one_for_single_real_issue(self):
+        from assemblyzero.workflows.requirements.nodes.review import _count_tier1_blocking_issues
+        rationale = (
+            "## Tier 1: BLOCKING Issues\n"
+            "### Safety\n"
+            "- [ ] **CRITICAL** - The CLI writes to arbitrary absolute paths.\n"
+            "\n## Tier 2: HIGH PRIORITY Issues\n"
+        )
+        assert _count_tier1_blocking_issues(rationale) == 1
+
+    def test_count_returns_two_for_multiple_real_issues(self):
+        from assemblyzero.workflows.requirements.nodes.review import _count_tier1_blocking_issues
+        rationale = (
+            "## Tier 1: BLOCKING Issues\n"
+            "### Safety\n"
+            "- [ ] **CRITICAL** - Worktree scope violation.\n"
+            "- [ ] **CRITICAL** - Destructive rmtree on output dir.\n"
+            "\n## Tier 2: HIGH PRIORITY Issues\n"
+        )
+        assert _count_tier1_blocking_issues(rationale) == 2
+
+    def test_count_mixed_placeholders_and_real_issues(self):
+        from assemblyzero.workflows.requirements.nodes.review import _count_tier1_blocking_issues
+        rationale = (
+            "## Tier 1: BLOCKING Issues\n"
+            "### Cost\n- [ ] No issues found.\n"
+            "### Safety\n- [ ] **CRITICAL** - Real safety issue.\n"
+            "### Security\n- [ ] No issues found.\n"
+            "### Legal\n- [ ] No issues found.\n\n"
+            "## Tier 2: HIGH PRIORITY Issues\n"
+        )
+        assert _count_tier1_blocking_issues(rationale) == 1
+
+
+class TestReviewReviseToApprovedOnEmptyTier1:
+    """Closes #1511. When the reviewer marks REVISE but lists no Tier 1
+    BLOCKING issues, the verdict means 'polish needed', not 'must fix to
+    proceed'. The pipeline should treat it as APPROVED so downstream
+    stages can run; Tier 2 feedback stays embedded as known-issues.
+
+    Note: patch target is the review module's local binding
+    (`...nodes.review.get_provider`), NOT the source module — review.py
+    binds `get_provider` at import time so patching the source has no
+    effect on review.py's reference.
+    """
+
+    @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
+    def test_revise_with_empty_tier1_maps_to_approved(self, mock_get_provider, tmp_path):
+        from assemblyzero.workflows.requirements.nodes.review import review
+        from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
+
+        rationale_no_tier1 = (
+            "Design is sound; some Tier 2 polish.\n\n"
+            "## Tier 1: BLOCKING Issues\n"
+            "No blocking issues found.\n"
+            "### Cost\n- [ ] No issues found.\n"
+            "### Safety\n- [ ] No issues found.\n\n"
+            "## Tier 2: HIGH PRIORITY Issues\n"
+            "### Observability\n- [ ] Missing logging strategy.\n"
+        )
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            content=_json.dumps({
+                "verdict": "REVISE",
+                "rationale": rationale_no_tier1,
+                "feedback_items": ["Missing logging strategy."],
+                "open_questions": [],
+            }),
+            response="",
+            error_message=None,
+            input_tokens=0,
+            output_tokens=0,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert result.get("lld_status") == "APPROVED", (
+            "REVISE with zero Tier 1 BLOCKING issues should map to APPROVED "
+            "so the pipeline proceeds; Tier 2 stays as embedded known-issues."
+        )
+
+    @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
+    def test_revise_with_real_tier1_stays_blocked(self, mock_get_provider, tmp_path):
+        from assemblyzero.workflows.requirements.nodes.review import review
+        from assemblyzero.workflows.requirements.state import create_initial_state
+        import json as _json
+
+        rationale_with_tier1 = (
+            "Critical safety issue must be resolved.\n\n"
+            "## Tier 1: BLOCKING Issues\n"
+            "### Safety\n"
+            "- [ ] **CRITICAL** - CLI writes to arbitrary absolute paths.\n\n"
+            "## Tier 2: HIGH PRIORITY Issues\n"
+        )
+        mock_provider = Mock()
+        mock_provider.invoke.return_value = Mock(
+            success=True,
+            content=_json.dumps({
+                "verdict": "REVISE",
+                "rationale": rationale_with_tier1,
+                "feedback_items": ["CLI writes to arbitrary absolute paths."],
+                "open_questions": [],
+            }),
+            response="",
+            error_message=None,
+            input_tokens=0,
+            output_tokens=0,
+        )
+        mock_get_provider.return_value = mock_provider
+
+        prompt_dir = tmp_path / "docs" / "skills"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "0702c-LLD-Review-Prompt.md").write_text("# Prompt")
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root=str(tmp_path),
+            target_repo=str(tmp_path),
+            issue_number=42,
+        )
+        state["current_draft"] = "# Draft"
+        state["audit_dir"] = str(tmp_path / "audit")
+        Path(state["audit_dir"]).mkdir(parents=True)
+
+        result = review(state)
+
+        assert result.get("lld_status") == "BLOCKED", (
+            "REVISE with real Tier 1 BLOCKING issues must remain BLOCKED."
+        )
 
 
 class TestFinalizeNode:
