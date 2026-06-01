@@ -46,6 +46,32 @@ class TestGetDefaultConfig:
         errors = validate_config(config)
         assert errors == []
 
+    def test_impl_stage_reviewer_not_empty(self):
+        """Closes #1488. The impl stage's testing sub-workflow N1 needs a
+        reviewer; empty string raises Invalid provider spec.
+        """
+        config = get_default_config()
+        assert config["stages"]["impl"]["reviewer"] != "", (
+            "impl reviewer must not be empty — testing N1 invokes "
+            "get_provider() which raises on empty spec"
+        )
+        # Top-tier-models preference (AZ #1434): every LLM-bearing reviewer
+        # uses gemini:3.1-pro-preview by default.
+        assert config["stages"]["impl"]["reviewer"] == "gemini:3.1-pro-preview"
+
+    def test_all_llm_bearing_stage_reviewers_are_top_tier(self):
+        """Closes #1488. triage/lld/spec/impl all need non-empty reviewers
+        per AZ #1434's top-tier-models rule. The pr stage is non-LLM
+        (gh pr create only), so its empty reviewer is correct.
+        """
+        config = get_default_config()
+        for stage in ("triage", "lld", "spec", "impl"):
+            assert config["stages"][stage]["reviewer"] != "", (
+                f"{stage} reviewer must not be empty"
+            )
+        # pr stage is intentionally LLM-less
+        assert config["stages"]["pr"]["reviewer"] == ""
+
 
 class TestLoadConfig:
     """Tests for load_config (T130)."""

@@ -61,8 +61,12 @@ def get_default_config() -> OrchestratorConfig:
                 timeout_seconds=600,
             ),
             "impl": StageConfig(
+                # Closes #1488: reviewer was empty, which caused the testing
+                # sub-workflow's N1 (review test plan) to halt with
+                # "Invalid provider spec ''". Top-tier Gemini matches every
+                # other LLM-bearing stage and the operator preference (#1434).
                 drafter="gemini:3.1-pro-preview",
-                reviewer="",
+                reviewer="gemini:3.1-pro-preview",
                 max_revisions=3,
                 timeout_seconds=1800,
             ),
