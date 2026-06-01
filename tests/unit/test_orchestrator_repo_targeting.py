@@ -127,8 +127,13 @@ def test_impl_carves_worktree_from_target(mock_run, mock_create_graph):
     assert expected_wt in argv, f"worktree path is not a sibling of target: {argv}"
     assert "issue-5" in argv  # branch
 
-    # testing graph receives the target as repo_root / original_repo_root
-    assert captured["repo_root"] == EXTERNAL
+    # Closes #1504. The testing sub-workflow writes files relative to
+    # repo_root, so the impl stage must thread the worktree path under that
+    # key — otherwise generated files land on target_repo's main and the
+    # issue branch stays empty (pr stage then 422s with "No commits between
+    # main and issue-N"). original_repo_root stays as the target so the
+    # load_lld.py:815 fallback (Issue #380) can still find the LLD on main.
+    assert captured["repo_root"] == expected_wt
     assert captured["original_repo_root"] == EXTERNAL
     assert captured["worktree_path"] == expected_wt
 
