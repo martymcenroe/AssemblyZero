@@ -627,6 +627,38 @@ class TestNodeFunctions:
             f"got: {result.get('error_message')!r}"
         )
 
+    def test_route_after_review_log_messages_ascii_only(self, tmp_path, capsys):
+        """Closes #1493. Windows cp1252 raises UnicodeEncodeError on
+        non-ASCII characters in print(). Assert the BLOCKED routing log
+        lines stay ASCII for both policies.
+        """
+        from assemblyzero.workflows.testing.graph import route_after_review
+
+        for policy, expected_route in (
+            ("revise", "N1_5_revise_test_plan"),
+            ("strict", "end"),
+        ):
+            ascii_state: TestingWorkflowState = {
+                "issue_number": 42,
+                "repo_root": str(tmp_path),
+                "auto_mode": False,
+                "test_plan_status": "BLOCKED",
+                "error_message": "",
+                "test_plan_policy": policy,
+                "test_plan_revision_count": 0,
+            }
+            capsys.readouterr()  # clear
+            result = route_after_review(ascii_state)
+            assert result == expected_route
+            out = capsys.readouterr().out
+            try:
+                out.encode("cp1252")
+            except UnicodeEncodeError as e:
+                raise AssertionError(
+                    f"route_after_review printed non-cp1252 chars "
+                    f"under policy={policy}: {e}; output={out!r}"
+                )
+
     def test_route_after_review_routes_to_revise_on_blocked_without_error(self, tmp_path):
         """When N1 returns BLOCKED with empty error_message and policy=revise
         (the default), route_after_review must route to N1_5_revise_test_plan.

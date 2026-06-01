@@ -112,6 +112,66 @@ class TestRedPhaseExitCodeRouting:
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.Path.exists", return_value=True)
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
+    def test_exit_2_with_expected_import_error_routes_to_implement(
+        self, mock_pytest, mock_exists,
+    ):
+        """Closes #1492. Exit code 2 with ImportError on a module the spec
+        is creating (a file in files_to_modify) is the EXPECTED red signal
+        at the start of TDD — the implementation doesn't exist yet. Route
+        to N4_implement_code instead of END.
+        """
+        # Simulated pytest output: ImportError for the module being built.
+        result_mock = _make_pytest_result(
+            EXIT_INTERRUPTED, passed=0, failed=0, errors=0,
+        )
+        result_mock["stdout"] = (
+            "collected 0 items / 1 error\n"
+            "ImportError while importing test module "
+            "'tests/test_issue_4.py'.\n"
+            "ModuleNotFoundError: No module named 'chiron.provenance'\n"
+        )
+        mock_pytest.return_value = result_mock
+        state = _make_state(
+            files_to_modify=[
+                {"path": "src/chiron/provenance.py", "change_type": "Add"},
+                {"path": "tests/test_issue_4.py", "change_type": "Add"},
+            ],
+        )
+        result = verify_red_phase(state)
+
+        assert result["next_node"] == "N4_implement_code", (
+            f"exit 2 + expected ImportError must route to N4; got {result}"
+        )
+        assert result["pytest_exit_code"] == EXIT_INTERRUPTED
+        assert result["error_message"] == ""
+
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.Path.exists", return_value=True)
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
+    def test_exit_2_without_import_error_still_stops(
+        self, mock_pytest, mock_exists,
+    ):
+        """Closes #1492. Genuine interruption (no ImportError pattern in
+        output) preserves the old END behavior. Protects against
+        false-positives that could mask a real Ctrl-C.
+        """
+        result_mock = _make_pytest_result(
+            EXIT_INTERRUPTED, passed=0, failed=0, errors=0,
+        )
+        # Output looks like a user-triggered abort; no import error pattern.
+        result_mock["stdout"] = "KeyboardInterrupt\n"
+        mock_pytest.return_value = result_mock
+        state = _make_state(
+            files_to_modify=[
+                {"path": "src/chiron/provenance.py", "change_type": "Add"},
+            ],
+        )
+        result = verify_red_phase(state)
+
+        assert result["next_node"] == "end"
+        assert result["pytest_exit_code"] == EXIT_INTERRUPTED
+
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.Path.exists", return_value=True)
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_exit_3_stops_workflow(self, mock_pytest, mock_exists):
         """Exit code 3 (internal error) stops the workflow."""
         mock_pytest.return_value = _make_pytest_result(

@@ -153,7 +153,8 @@ def detect_framework_from_project(project_root: str) -> TestFramework | None:
         if os.path.isfile(os.path.join(project_root, filename)):
             if framework not in detected:
                 detected.append(framework)
-                logger.info("Found config file %s → %s", filename, framework.value)
+                # Closes #1493: ASCII-only log (Windows cp1252).
+                logger.info("Found config file %s -> %s", filename, framework.value)
 
     # Check package.json scripts
     package_json_path = os.path.join(project_root, "package.json")
