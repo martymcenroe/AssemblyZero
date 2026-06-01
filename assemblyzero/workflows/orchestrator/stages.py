@@ -111,8 +111,40 @@ def _is_non_transient_halt(sub_result: dict) -> bool:
     """Sub-workflow halts write a recovery_plan_path. Non-transient by default
     since the resume command — not a 10-second retry — is the recovery path.
     Closes #1463.
+
+    Kept for backward compatibility; new call sites should prefer
+    _classify_halt_transience (Closes #1478) which reads the recovery plan
+    JSON for the actual is_transient classification.
     """
     return bool(sub_result.get("recovery_plan_path", ""))
+
+
+def _classify_halt_transience(sub_result: dict) -> bool | None:
+    """Read the sub-workflow's recovery plan JSON and classify transience.
+
+    Returns:
+        - True  -> halt is transient (quota exhausted, capacity, 5xx/429
+                   classes per core/recovery_plan.py:TRANSIENT_ERROR_TYPES)
+                   -> retry per existing retry loop
+        - False -> halt occurred but is non-transient (code bug, exhausted
+                   iterations, etc.) -> skip retry
+        - None  -> no halt detected (no recovery_plan_path); leave the
+                   StageResult.transient field unset -> preserve current
+                   behavior for non-halt failures (e.g. gh CLI flakes)
+
+    Closes #1478.
+    """
+    import json
+    plan_path = sub_result.get("recovery_plan_path", "")
+    if not plan_path:
+        return None
+    try:
+        plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Halt occurred but plan unreadable. Conservatively non-transient —
+        # the operator's resume hint is still the right recovery path.
+        return False
+    return bool(plan.get("is_transient", False))
 
 
 def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
@@ -177,7 +209,7 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
-                transient=False if _is_non_transient_halt(sub_result) else None,
+                transient=_classify_halt_transience(sub_result),
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -304,7 +336,7 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
-                transient=False if _is_non_transient_halt(sub_result) else None,
+                transient=_classify_halt_transience(sub_result),
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -381,7 +413,7 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
-                transient=False if _is_non_transient_halt(sub_result) else None,
+                transient=_classify_halt_transience(sub_result),
             )
     except Exception as exc:
         result = _make_stage_result(
@@ -463,7 +495,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 error_message=error_msg,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
-                transient=False if _is_non_transient_halt(sub_result) else None,
+                transient=_classify_halt_transience(sub_result),
             )
     except subprocess.CalledProcessError as exc:
         result = _make_stage_result(

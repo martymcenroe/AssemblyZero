@@ -222,6 +222,61 @@ class TestIsNonTransientHalt:
         assert _is_non_transient_halt({"error_message": "foo"}) is False
 
 
+class TestClassifyHaltTransience:
+    """Reads the recovery plan JSON to classify transience. Closes #1478."""
+
+    def test_no_recovery_plan_returns_none(self):
+        from assemblyzero.workflows.orchestrator.stages import _classify_halt_transience
+
+        assert _classify_halt_transience({}) is None
+        assert _classify_halt_transience({"recovery_plan_path": ""}) is None
+
+    def test_transient_true_in_plan_returns_true(self, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import _classify_halt_transience
+        import json
+
+        plan = tmp_path / "rp.json"
+        plan.write_text(json.dumps({
+            "error_type": "quota_exhausted",
+            "is_transient": True,
+        }), encoding="utf-8")
+        assert _classify_halt_transience({"recovery_plan_path": str(plan)}) is True
+
+    def test_transient_false_in_plan_returns_false(self, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import _classify_halt_transience
+        import json
+
+        plan = tmp_path / "rp.json"
+        plan.write_text(json.dumps({
+            "error_type": "max_iterations_reached",
+            "is_transient": False,
+        }), encoding="utf-8")
+        assert _classify_halt_transience({"recovery_plan_path": str(plan)}) is False
+
+    def test_unreadable_plan_conservatively_returns_false(self, tmp_path):
+        """If the halt happened but the plan file is missing or malformed,
+        treat as non-transient (skip retry) — the operator's resume hint
+        is still the right recovery path."""
+        from assemblyzero.workflows.orchestrator.stages import _classify_halt_transience
+
+        missing = tmp_path / "missing.json"
+        assert _classify_halt_transience({"recovery_plan_path": str(missing)}) is False
+
+        bad = tmp_path / "bad.json"
+        bad.write_text("not valid json{", encoding="utf-8")
+        assert _classify_halt_transience({"recovery_plan_path": str(bad)}) is False
+
+    def test_is_transient_missing_defaults_to_false(self, tmp_path):
+        """A recovery plan without an is_transient field is treated as
+        non-transient (conservative default)."""
+        from assemblyzero.workflows.orchestrator.stages import _classify_halt_transience
+        import json
+
+        plan = tmp_path / "rp.json"
+        plan.write_text(json.dumps({"error_type": "unknown"}), encoding="utf-8")
+        assert _classify_halt_transience({"recovery_plan_path": str(plan)}) is False
+
+
 class TestRunStageNodeRetrySkip:
     """Tests that _run_stage_node skips retry on non-transient failures.
 
