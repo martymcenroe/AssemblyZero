@@ -303,32 +303,60 @@ class TestGraphRoutingExtended:
         assert result == "HALT"
 
     def test_route_from_review_to_finalize_on_max_iterations(self):
-        """Test routing from review to finalize when max iterations reached."""
+        """Test routing from review to finalize when verdict_count >= max."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
+        # Closes #1509: gate is on verdict_count (one per N3 review),
+        # not iteration_count (bumped by N1, Ponder, N1B too).
         state = {
             "error_message": "",
             "config_gates_verdict": False,
             "lld_status": "BLOCKED",
-            "iteration_count": 20,
+            "verdict_count": 20,
             "max_iterations": 20,
         }
         result = route_after_review(state)
         assert result == "N5_finalize"
 
     def test_route_from_review_to_draft_when_under_max_iterations(self):
-        """Test routing from review to draft when under max iterations."""
+        """Test routing from review to draft when verdict_count < max."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
         state = {
             "error_message": "",
             "config_gates_verdict": False,
             "lld_status": "BLOCKED",
-            "iteration_count": 5,
+            "verdict_count": 5,
             "max_iterations": 20,
         }
         result = route_after_review(state)
         assert result == "N1_generate_draft"
+
+    def test_route_from_review_ignores_high_iteration_count_regression_1509(self):
+        """Regression for #1509. High iteration_count must NOT block the
+        revise loop — only verdict_count (number of reviewer verdicts
+        received) gates the cap. Before the fix, iteration_count was bumped
+        to ~3-4 by N1 + Ponder + N1B before the first review even
+        completed, exhausting the default cap of 3 and skipping the loop
+        entirely. The empirical surface: Chiron #37 iter02-04 each ran
+        exactly one N1+N3 and finalized BLOCKED without ever revising.
+        """
+        from assemblyzero.workflows.requirements.graph import route_after_review
+
+        state = {
+            "error_message": "",
+            "config_gates_verdict": False,
+            "lld_status": "BLOCKED",
+            "iteration_count": 999,  # pathologically high — must not gate
+            "verdict_count": 1,      # only one review done; loop must fire
+            "max_iterations": 3,
+        }
+        result = route_after_review(state)
+        assert result == "N1_generate_draft", (
+            "high iteration_count must not pre-emptively gate the revise "
+            "loop closed; only verdict_count >= max_iterations does. "
+            "See #1509 for the empirical surface."
+        )
 
     def test_route_from_human_gate_verdict_to_end(self):
         """Test routing from human gate verdict to END for unknown next_node."""
@@ -368,16 +396,17 @@ class TestGraphRoutingExtended:
         assert result == "END"
 
     def test_route_from_review_uses_default_max_iterations(self):
-        """Test routing from review uses default max_iterations of 20."""
+        """Test routing from review uses default max_iterations of 3."""
         from assemblyzero.workflows.requirements.graph import route_after_review
 
-        # No max_iterations set, should use default of 20
+        # No max_iterations set in state — function defaults to 3.
+        # verdict_count of 19 is well past the default, so finalize.
         state = {
             "error_message": "",
             "config_gates_verdict": False,
             "lld_status": "BLOCKED",
-            "iteration_count": 19,
-            # max_iterations not set - should default to 20
+            "verdict_count": 19,
+            # max_iterations not set - should default to 3
         }
         result = route_after_review(state)
         assert result == "N5_finalize"  # Over default max of 3
