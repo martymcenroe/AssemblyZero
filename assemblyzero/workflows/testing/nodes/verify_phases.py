@@ -154,16 +154,28 @@ def _classify_import_errors(
     """
     # Convert file paths to dotted module names for matching
     # e.g., "assemblyzero/utils/foo.py" -> "assemblyzero.utils.foo"
+    # Closes #1492: also strip common source-root prefixes so src-layout
+    # repos (src/chiron/provenance.py -> chiron.provenance per Python
+    # import resolution) match the names pytest actually reports.
+    # Aligned with #1477's source-root list in implementation_spec.
+    _SOURCE_ROOT_DOTTED = ("src.", "lib.", "source.", "python.", "apps.")
     expected_dotted: set[str] = set()
     for path in expected_module_paths:
         dotted = path.replace("/", ".").replace("\\", ".")
         if dotted.endswith(".py"):
             dotted = dotted[:-3]
+        # Add raw form (flat-layout repos)
         expected_dotted.add(dotted)
-        # Also add each parent package so "from assemblyzero.utils import foo" matches
-        parts = dotted.split(".")
-        for i in range(1, len(parts)):
-            expected_dotted.add(".".join(parts[:i]))
+        # Also add the source-root-stripped form (src-layout, lib-layout, etc.)
+        for prefix in _SOURCE_ROOT_DOTTED:
+            if dotted.startswith(prefix):
+                expected_dotted.add(dotted[len(prefix):])
+        # And each parent package of every form recorded so far so that
+        # "from assemblyzero.utils import foo" matches as expected.
+        for form in list(expected_dotted):
+            parts = form.split(".")
+            for i in range(1, len(parts)):
+                expected_dotted.add(".".join(parts[:i]))
 
     # Parse ModuleNotFoundError / ImportError from pytest output
     # Patterns: "ModuleNotFoundError: No module named 'X'"
@@ -389,9 +401,40 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": "",
         }
 
+    if exit_code == EXIT_INTERRUPTED:
+        # Closes #1492: exit 2 is documented as "interrupted by user", but
+        # pytest also returns 2 when collection fails because of
+        # ImportError on a module that doesn't exist yet — i.e. the
+        # expected red signal at the start of TDD. Classify the output
+        # first; route to N4_implement_code if the missing module is one
+        # the spec said it would Add. Only END on genuine interruption.
+        files_to_modify_for_red = state.get("files_to_modify", [])
+        expected_modules_for_red = [
+            f["path"] for f in files_to_modify_for_red
+            if f.get("path", "").endswith(".py")
+        ]
+        exp_count_red, unexp_count_red, _ = _classify_import_errors(
+            output, expected_modules_for_red
+        )
+        if exp_count_red > 0 and unexp_count_red == 0:
+            print(
+                f"    [EXIT CODE {exit_code}] ImportError on expected module(s) "
+                f"-> valid red signal, routing to implementation"
+            )
+            return {
+                "red_phase_output": output,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "next_node": "N4_implement_code",
+                "error_message": "",
+            }
+        # Fall through to the generic interrupted handler below.
+
     if exit_code in (EXIT_INTERRUPTED, EXIT_INTERNALERROR):
         reason = describe_exit_code(exit_code)
-        print(f"    [EXIT CODE {exit_code}] {reason} — stopping workflow")
+        # Closes #1493: ASCII-only print, no Unicode arrows. Windows cp1252
+        # otherwise raises UnicodeEncodeError mid-stream.
+        print(f"    [EXIT CODE {exit_code}] {reason} -- stopping workflow")
 
         return {
             "red_phase_output": output,

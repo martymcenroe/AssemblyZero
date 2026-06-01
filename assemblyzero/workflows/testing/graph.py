@@ -187,12 +187,14 @@ def route_after_review(
             return "N2_scaffold_tests"
         # Strict policy preserves the original END-on-BLOCKED behavior.
         if policy == "strict":
-            print("    [STRICT] BLOCKED → END (test_plan_policy=strict)")
+            # Closes #1493: ASCII-only print (Windows cp1252).
+            print("    [STRICT] BLOCKED -> END (test_plan_policy=strict)")
             return "end"
         # Default revise policy: try to fix the test plan up to N cycles.
         if revision_count < MAX_REVISION_CYCLES:
+            # Closes #1493: ASCII-only print (Windows cp1252).
             print(
-                f"    [REVISE] BLOCKED → N1.5 revise cycle "
+                f"    [REVISE] BLOCKED -> N1.5 revise cycle "
                 f"{revision_count + 1}/{MAX_REVISION_CYCLES}"
             )
             return "N1_5_revise_test_plan"
