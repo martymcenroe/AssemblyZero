@@ -303,6 +303,12 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
             section_no_blocks = re.sub(
                 r"```[\s\S]*?```", "", open_questions_section
             )
+            # Closes #1476: also strip CommonMark indented code blocks
+            # (any line beginning with 4 spaces) so example checkbox syntax
+            # shown in indented documentation does not trip the regex either.
+            section_no_blocks = re.sub(
+                r"^ {4}.*$", "", section_no_blocks, flags=re.MULTILINE
+            )
             if re.search(r"^- \[ \]", section_no_blocks, re.MULTILINE):
                 errors.append("Unresolved open questions remain")
 
