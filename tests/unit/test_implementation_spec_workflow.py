@@ -1613,6 +1613,104 @@ class TestPriorCompletenessBreakdownInPrompt:
         assert "RECURRING FAILURES" not in prompt
 
 
+class TestNormalizeFailureText:
+    """Lexical normalization for clustering recurring failures. Closes #1479."""
+
+    def test_collapses_whitespace_runs(self):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            _normalize_failure_text,
+        )
+        assert (
+            _normalize_failure_text("check_X:  thing   missing")
+            == _normalize_failure_text("check_X: thing missing")
+        )
+
+    def test_strips_trailing_punctuation(self):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            _normalize_failure_text,
+        )
+        assert (
+            _normalize_failure_text("check_X: thing missing.")
+            == _normalize_failure_text("check_X: thing missing")
+        )
+        assert (
+            _normalize_failure_text("check_X: thing missing!")
+            == _normalize_failure_text("check_X: thing missing")
+        )
+
+    def test_case_insensitive(self):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            _normalize_failure_text,
+        )
+        assert (
+            _normalize_failure_text("Check_X: Thing Missing")
+            == _normalize_failure_text("check_x: thing missing")
+        )
+
+    def test_strips_leading_trailing_whitespace(self):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            _normalize_failure_text,
+        )
+        assert (
+            _normalize_failure_text("  check_X: thing missing  ")
+            == _normalize_failure_text("check_X: thing missing")
+        )
+
+
+class TestNormalizedRecurringClustering:
+    """Lexical normalization clusters near-duplicate failures into the
+    recurring-warning section. Closes #1479."""
+
+    def _make_revision_prompt(self, prior_breakdown):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            build_drafter_prompt,
+        )
+        return build_drafter_prompt(
+            lld_content="# LLD",
+            current_state={},
+            patterns=[],
+            existing_draft="# Current draft",
+            completeness_issues=["any current failure"],
+            prior_completeness_breakdown=prior_breakdown,
+        )
+
+    def test_whitespace_variants_cluster_as_recurring(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: thing  missing"]},
+            {"iteration": 1, "failures": ["check_X: thing missing"]},
+        ])
+        assert "RECURRING FAILURES" in prompt
+        assert "Tried 2 times" in prompt
+
+    def test_trailing_punctuation_variants_cluster(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: thing missing"]},
+            {"iteration": 1, "failures": ["check_X: thing missing."]},
+            {"iteration": 2, "failures": ["check_X: thing missing!"]},
+        ])
+        assert "RECURRING FAILURES" in prompt
+        assert "Tried 3 times" in prompt
+
+    def test_case_variants_cluster(self):
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: Thing Missing"]},
+            {"iteration": 1, "failures": ["check_x: thing missing"]},
+        ])
+        assert "RECURRING FAILURES" in prompt
+        assert "Tried 2 times" in prompt
+
+    def test_latest_verbatim_text_shown(self):
+        """The recurring warning surfaces the most recent verbatim wording,
+        not the normalized form (operators see real error text)."""
+        prompt = self._make_revision_prompt(prior_breakdown=[
+            {"iteration": 0, "failures": ["check_X: thing missing"]},
+            {"iteration": 1, "failures": ["check_X: thing missing."]},
+            {"iteration": 2, "failures": ["check_X: THING MISSING!"]},
+        ])
+        # The latest entry's verbatim text appears in the warning
+        assert "check_X: THING MISSING!" in prompt
+
+
 class TestValidateCompletenessAccumulatesPriorBreakdown:
     """N3 appends each failed iteration to prior_completeness_breakdown so
     N2 sees the full history. Closes #1465."""
