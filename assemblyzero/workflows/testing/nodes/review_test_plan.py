@@ -573,11 +573,20 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         # observed on Chiron #45 (curator) iter02 N1 and N1.5 cycles. The LLD
         # reviewer at `requirements/nodes/review.py:97-98` uses the same
         # `.content`-first pattern (landed in PR #775).
-        verdict_content = (
-            result.content
-            if hasattr(result, "content") and result.content
-            else (result.response or "")
-        )
+        #
+        # The `isinstance(..., str)` guards are non-cosmetic: legacy tests mock
+        # `result` as a bare MagicMock with only `.response` set, but a
+        # MagicMock auto-creates a truthy MagicMock for any unset attribute.
+        # Without isinstance, `result.content` would read as that MagicMock,
+        # then crash `json.loads()` inside `parse_structured_verdict`.
+        content_val = getattr(result, "content", None)
+        response_val = getattr(result, "response", None)
+        if isinstance(content_val, str) and content_val:
+            verdict_content = content_val
+        elif isinstance(response_val, str):
+            verdict_content = response_val
+        else:
+            verdict_content = ""
         node_cost_usd = get_cumulative_cost() - cost_before
 
     except Exception as e:
