@@ -2981,7 +2981,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("\n" + "=" * 60)
         print("SUMMARY")
         print("=" * 60)
-        args.name = args.name.lower()
+        # Closes #1535: do NOT lowercase args.name here. The GitHub repo
+        # was created with the verbatim case (#1533); the summary must
+        # display the same value, not a mutated lowercased form.
         print("  Local scaffold:     OK")
         print(f"  GitHub repo:        {'OK' if github_created else 'FAILED'}")
         print(f"  Push:               {'OK' if push_succeeded else 'FAILED'}")
@@ -2995,7 +2997,9 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\nNext steps:")
     print(f"  cd {project_path}")
     if not args.no_github:
-        args.name = args.name.lower()
+        # Closes #1535: print the verbatim case-preserved repo name, not
+        # a mutated lowercased form. The local dir on the `cd` line above
+        # and this URL must agree, both matching the actual GitHub repo.
         print(f"  # Repository: https://github.com/{github_user}/{args.name}")
         if not push_succeeded:
             print("  # IMPORTANT: Initial push failed.")
@@ -3023,9 +3027,26 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  #   OR re-run this script with --cerberus-pem PATH (single-shot)")
         print("  #   or --cerberus-pem-gpg PATH (reusable, encrypted at rest).")
     elif cerberus_status == "OK":
+        # Closes #1536: the post-deploy advice depends on which Cerberus
+        # flow ran. The plaintext flow (--cerberus-pem) deletes the .pem
+        # after deploy, so revoking the GitHub-side key as belt-and-
+        # suspenders is correct — no on-disk credential survives this run.
+        # The encrypted-reusable flow (--cerberus-pem-gpg) intentionally
+        # keeps the encrypted blob for subsequent new-repo invocations;
+        # revoking the key would invalidate that blob — catastrophic for
+        # the documented design intent of the flag.
         print()
         print("  # Cerberus secrets deployed and verified.")
-        print("  # REMEMBER to revoke the key in the app UI (browser-only step).")
+        if args.cerberus_pem is not None:
+            print("  # The plaintext .pem was deleted by the script.")
+            print("  # REMEMBER to revoke the key in the app UI (browser-only step) —")
+            print("  # there is no on-disk credential to retire otherwise.")
+        else:  # args.cerberus_pem_gpg is not None
+            print(f"  # Encrypted PEM preserved at {args.cerberus_pem_gpg} for reuse.")
+            print("  # DO NOT revoke the key in the app UI — that would invalidate")
+            print("  # the encrypted blob you just kept. Revoke only when you want")
+            print("  # to retire this credential entirely (e.g., rotation per")
+            print("  # runbook 0930, AZ #1017).")
 
     # The internal function uses `no_pypi` (legacy parameter name); compute
     # it as "did the operator OPT IN via --pypi?" -- false = no_pypi=True =
@@ -3035,7 +3056,10 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         no_pypi=not args.pypi,
         no_github=args.no_github,
         github_user=github_user,
-        repo_name=args.name.lower(),
+        # Closes #1535: pass the case-preserved repo name. PyPI itself
+        # canonicalizes the PEP 503 form internally; the displayed URL
+        # in the reminder should match the actual GitHub repo name.
+        repo_name=args.name,
     )
 
 
