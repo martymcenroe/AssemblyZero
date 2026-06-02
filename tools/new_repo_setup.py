@@ -2668,7 +2668,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("\nWARNING: Some local checks failed. Review and fix before starting work!")
 
     if not args.no_github:
-        repo_name_lower = args.name.lower()
+        # Closes #1533: the GitHub repo name preserves the operator's input
+        # case verbatim. Prior code unconditionally lowercased here, which
+        # produced `martymcenroe/chiron` from `Chiron` input. GitHub's REST
+        # API is case-insensitive for lookup and case-preserved for display,
+        # so passing the verbatim case is correct in both directions.
+        # (The Python package name at line ~1252 stays lowercased — that is
+        # the separate PEP 503 packaging convention, not GitHub-side.)
 
         print("\n" + "=" * 60)
         print("GITHUB REMOTE (single classic-PAT session per ADR-0216)")
@@ -2693,29 +2699,29 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 # fine-grained PATs that lack Administration: write (per
                 # ADR-0216 the fine-grained PAT is intentionally lean; admin
                 # operations use the in-process classic PAT). (#1268)
-                print(f"\n13. Creating GitHub repository ({repo_name_lower})...")
+                print(f"\n13. Creating GitHub repository ({args.name})...")
                 create_resp = requests.post(
                     "https://api.github.com/user/repos",
                     headers=_api_headers,
                     json={
-                        "name": repo_name_lower,
+                        "name": args.name,
                         "private": not args.public,
                         "description": f"{args.name} project",
                     },
                     timeout=30,
                 )
                 if create_resp.status_code == 201:
-                    print(f"  Created: https://github.com/{github_user}/{repo_name_lower}")
+                    print(f"  Created: https://github.com/{github_user}/{args.name}")
                     github_created = True
                 elif create_resp.status_code == 422:
                     # 422 typically means "name already exists" -- check
                     # whether it's THIS user's repo (rerun mode) before failing.
                     check_resp = requests.get(
-                        f"https://api.github.com/repos/{github_user}/{repo_name_lower}",
+                        f"https://api.github.com/repos/{github_user}/{args.name}",
                         headers=_api_headers, timeout=30,
                     )
                     if check_resp.status_code == 200:
-                        print(f"  Already exists: https://github.com/{github_user}/{repo_name_lower}")
+                        print(f"  Already exists: https://github.com/{github_user}/{args.name}")
                         print("  Proceeding in rerun mode against existing repo.")
                         github_created = True
                     else:
@@ -2741,7 +2747,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         try:
                             run_command(
                                 ["git", "remote", "add", "origin",
-                                 f"https://github.com/{github_user}/{repo_name_lower}.git"],
+                                 f"https://github.com/{github_user}/{args.name}.git"],
                                 cwd=project_path,
                             )
                         except Exception as e:
@@ -2762,7 +2768,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 if github_created:
                     print("\n14. Starring repository...")
                     star_resp = requests.put(
-                        f"https://api.github.com/user/starred/{github_user}/{repo_name_lower}",
+                        f"https://api.github.com/user/starred/{github_user}/{args.name}",
                         headers=_api_headers, timeout=30,
                     )
                     if star_resp.status_code in (204, 304):
@@ -2774,7 +2780,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                 if github_created and push_succeeded:
                     print("\n15. Uploading workflow files via Contents API...")
                     success, count = _deploy_workflows_via_contents_api(
-                        project_path, github_user, repo_name_lower, pat,
+                        project_path, github_user, args.name, pat,
                     )
                     if success:
                         workflows_deployed = True
@@ -2803,7 +2809,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
                     # Step 17: Configure repo settings.
                     print("\n17. Configuring repo settings...")
-                    if configure_repo_settings(github_user, repo_name_lower, pat):
+                    if configure_repo_settings(github_user, args.name, pat):
                         print("  Repo settings configured:")
                         print("    - Wiki: disabled")
                         print("    - Projects: disabled")
@@ -2815,7 +2821,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
                     # Step 18: Configure branch protection.
                     print("\n18. Configuring branch protection...")
-                    if configure_branch_protection(github_user, repo_name_lower, pat):
+                    if configure_branch_protection(github_user, args.name, pat):
                         print("  Branch protection configured:")
                         print("    - Force push: blocked")
                         print("    - Deletion: blocked")
@@ -2830,7 +2836,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     # Step 19: Create canonical AZ workflow labels (#1061).
                     print("\n19. Creating canonical labels...")
                     created, total = create_canonical_labels(
-                        github_user, repo_name_lower
+                        github_user, args.name
                     )
                     print(f"  {created}/{total} labels created or updated "
                           f"({', '.join(n for n, _, _ in _CANONICAL_LABELS)})")
@@ -2843,14 +2849,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     print("\n20. Enabling Dependabot (security updates, alerts, "
                           "automated fixes)...")
                     db_result = enable_dependabot_for_repo(
-                        github_user, repo_name_lower, pat, apply=True,
+                        github_user, args.name, pat, apply=True,
                     )
                     for endpoint, status in db_result.actions.items():
                         print(f"  {endpoint}: {status}")
                     if not db_result.ok:
                         print("  WARNING: Dependabot enablement had errors. "
                               "Re-run `tools/enable_dependabot.py --repo "
-                              f"{github_user}/{repo_name_lower} --apply` "
+                              f"{github_user}/{args.name} --apply` "
                               "after diagnosing.")
 
                 # Cerberus secrets deploy. Inside the same with-block so it
@@ -2867,7 +2873,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                                 encoding="utf-8"
                             ).strip()
                             cerberus_status = _deploy_cerberus(
-                                repo_name_lower, pem_content, pat,
+                                args.name, pem_content, pat,
                                 source_path=pem_source_path,
                             )
                         except FileNotFoundError as e:
@@ -2878,7 +2884,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         try:
                             with cerberus_pem_session(pem_gpg_path) as pem_content:
                                 cerberus_status = _deploy_cerberus(
-                                    repo_name_lower, pem_content, pat,
+                                    args.name, pem_content, pat,
                                     source_path=None,
                                 )
                         except FileNotFoundError as e:
@@ -2897,7 +2903,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
                     gh_checks_total += 1
                     ok, msg = verify_branch_protection_on_origin(
-                        github_user, repo_name_lower, pat,
+                        github_user, args.name, pat,
                     )
                     if ok:
                         print(f"  [PASS] Branch protection: {msg}")
@@ -2907,7 +2913,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
                     gh_checks_total += 1
                     ok, msg = verify_repo_settings_on_origin(
-                        github_user, repo_name_lower, pat,
+                        github_user, args.name, pat,
                     )
                     if ok:
                         print(f"  [PASS] Repo settings: {msg}")
@@ -2917,7 +2923,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
                     gh_checks_total += 1
                     ok, msg = verify_workflow_content_on_origin(
-                        github_user, repo_name_lower, pat,
+                        github_user, args.name, pat,
                     )
                     if ok:
                         print(f"  [PASS] auto-reviewer.yml: {msg}")
@@ -2928,7 +2934,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     if args.cerberus_pem or args.cerberus_pem_gpg:
                         gh_checks_total += 1
                         secrets_ok, missing = verify_secrets(
-                            repo_name_lower, pat,
+                            args.name, pat,
                         )
                         if secrets_ok:
                             print("  [PASS] Cerberus secrets present "
@@ -2943,7 +2949,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     # with-block, shares pat -- no extra pinentry. (#1274)
                     gh_checks_total += 1
                     ok, msg = verify_pr_sentinel_installation(
-                        github_user, repo_name_lower, pat,
+                        github_user, args.name, pat,
                     )
                     if ok:
                         print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
@@ -2975,7 +2981,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("\n" + "=" * 60)
         print("SUMMARY")
         print("=" * 60)
-        repo_name_lower = args.name.lower()
+        args.name = args.name.lower()
         print("  Local scaffold:     OK")
         print(f"  GitHub repo:        {'OK' if github_created else 'FAILED'}")
         print(f"  Push:               {'OK' if push_succeeded else 'FAILED'}")
@@ -2989,8 +2995,8 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     print("\nNext steps:")
     print(f"  cd {project_path}")
     if not args.no_github:
-        repo_name_lower = args.name.lower()
-        print(f"  # Repository: https://github.com/{github_user}/{repo_name_lower}")
+        args.name = args.name.lower()
+        print(f"  # Repository: https://github.com/{github_user}/{args.name}")
         if not push_succeeded:
             print("  # IMPORTANT: Initial push failed.")
             print("  # Diagnose first -- the push uses git's credential helper")
