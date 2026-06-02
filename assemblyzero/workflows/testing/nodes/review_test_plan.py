@@ -565,7 +565,19 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 "test_plan_status": "BLOCKED",
             }
 
-        verdict_content = result.response
+        # Closes #1523: when a structured `response_schema` is passed to the
+        # provider (Gemini), the JSON output lands on `result.content`, not
+        # `result.response`. Reading only `.response` makes
+        # `parse_structured_verdict` always see an empty string, fall through
+        # to the regex fallback, and return a default that maps to BLOCKED —
+        # observed on Chiron #45 (curator) iter02 N1 and N1.5 cycles. The LLD
+        # reviewer at `requirements/nodes/review.py:97-98` uses the same
+        # `.content`-first pattern (landed in PR #775).
+        verdict_content = (
+            result.content
+            if hasattr(result, "content") and result.content
+            else (result.response or "")
+        )
         node_cost_usd = get_cumulative_cost() - cost_before
 
     except Exception as e:

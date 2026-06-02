@@ -201,3 +201,126 @@ class TestIntegrationWithReviewTestPlan:
         # expected behavior when coverage passes.
         result = review_test_plan(state)
         assert result["test_plan_status"] == "APPROVED"
+
+
+class TestStructuredContentReadOverResponse:
+    """#1523: Verify the LLM result is read from `.content` (where Gemini puts
+    structured-schema JSON), with `.response` as legacy fallback.
+
+    Bug shape: previously `verdict_content = result.response`. With
+    response_schema=VERDICT_SCHEMA set on a Gemini call, the structured JSON
+    lands in `result.content`; `.response` is empty. The old read got an empty
+    string every time, fell through to regex fallback, and the default-empty
+    regex result mapped to BLOCKED. Observed on Chiron #45 curator iter02 N1
+    and N1.5 cycles 1/2 and 2/2 — 25-27s LLM calls succeeding silently with
+    no parseable verdict.
+    """
+
+    def _state_forcing_llm_path(self) -> dict:
+        """State with <100% coverage so fast-path is skipped, but enough
+        scenarios to clear the mechanical gates (Gate 3 requires
+        scenario_count >= req_count). Two scenarios both map to REQ-1 →
+        clears Gate 3 but coverage_pct=50% (REQ-2 uncovered) so LLM path runs.
+        """
+        return {
+            "test_scenarios": [
+                {"name": "test_a", "type": "unit", "requirement_ref": "REQ-1"},
+                {"name": "test_b", "type": "unit", "requirement_ref": "REQ-1"},
+            ],
+            "requirements": ["REQ-1: A", "REQ-2: B"],
+            "lld_content": "This is a detailed low-level design document with sufficient words to pass the mechanical gate minimum threshold. " * 5,
+            "issue_number": 42,
+            "repo_root": "/tmp/test-repo",
+            "audit_dir": "/tmp/nonexistent",
+            "mock_mode": False,
+            "node_costs": {},
+            "node_tokens": {},
+            "file_counter": 0,
+            "config_reviewer": "gemini:3.1-pro-preview",
+        }
+
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+    @patch("assemblyzero.utils.retry.with_retry")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+    def test_structured_json_in_content_is_used(
+        self, mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+    ):
+        """When the LLM result has structured JSON in `.content` and empty
+        `.response`, the structured path runs (verdict_method='structured') and
+        the workflow reflects the JSON verdict — NOT the regex-fallback BLOCKED.
+
+        This is the exact Chiron #45 scenario inverted: with the fix, the same
+        Gemini-shape result that previously read as empty now reads as APPROVED.
+        """
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.core.llm_provider import GeminiProvider
+
+        mock_root.return_value = Path("/tmp/test-repo")
+        mock_prompt.return_value = "review prompt"
+        mock_cost.return_value = 0.0
+
+        # Mock provider: must be a GeminiProvider so response_schema is set
+        mock_provider.return_value = MagicMock(spec=GeminiProvider)
+
+        # The result Gemini would return with response_schema=VERDICT_SCHEMA:
+        # structured JSON in .content, .response empty
+        llm_result = MagicMock()
+        llm_result.success = True
+        llm_result.error_message = None
+        llm_result.content = json.dumps({
+            "verdict": "APPROVED",
+            "rationale": "Coverage is acceptable.",
+        })
+        llm_result.response = ""  # the bug: old code read THIS
+        llm_result.input_tokens = 100
+        llm_result.output_tokens = 50
+        mock_with_retry.return_value = llm_result
+
+        result = review_test_plan(self._state_forcing_llm_path())
+
+        # If the bug were present, this would be BLOCKED via regex fallback
+        # on an empty string. With the fix, it's APPROVED via structured parse.
+        assert result["test_plan_status"] == "APPROVED", (
+            f"Expected APPROVED from structured-content read; got "
+            f"{result.get('test_plan_status')!r}. This is the #1523 regression."
+        )
+
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+    @patch("assemblyzero.utils.retry.with_retry")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+    def test_legacy_response_fallback_still_works(
+        self, mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+    ):
+        """When a provider returns content via `.response` only (no `.content`
+        attribute populated), the legacy read path still works — required so
+        non-Gemini providers and older provider shapes aren't broken by the fix.
+        """
+        from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+        from assemblyzero.core.llm_provider import GeminiProvider
+
+        mock_root.return_value = Path("/tmp/test-repo")
+        mock_prompt.return_value = "review prompt"
+        mock_cost.return_value = 0.0
+        mock_provider.return_value = MagicMock(spec=GeminiProvider)
+
+        # Provider returns verdict in .response (legacy path); .content is empty
+        llm_result = MagicMock()
+        llm_result.success = True
+        llm_result.error_message = None
+        llm_result.content = ""
+        llm_result.response = json.dumps({
+            "verdict": "APPROVED",
+            "rationale": "Looks fine.",
+        })
+        llm_result.input_tokens = 100
+        llm_result.output_tokens = 50
+        mock_with_retry.return_value = llm_result
+
+        result = review_test_plan(self._state_forcing_llm_path())
+        assert result["test_plan_status"] == "APPROVED"
