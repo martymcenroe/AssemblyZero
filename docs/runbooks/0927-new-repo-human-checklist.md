@@ -190,7 +190,7 @@ Steps in **bold** require classic-PAT scopes. The PAT never enters the env block
 
 The script handles all of the following automatically:
 - Local directory structure + all config files
-- GitHub repo creation (forced lowercase) + initial push of non-workflow files
+- GitHub repo creation (case preserved from the input name; #1533) + initial push of non-workflow files
 - Workflow file upload via Contents API (one PUT per file)
 - Repo settings: wiki disabled, projects disabled, squash-only merge, delete branch on merge
 - Branch protection: require PR (1 review), block force push, block deletion, enforce_admins, pr-sentinel check

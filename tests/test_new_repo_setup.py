@@ -1187,3 +1187,55 @@ class TestProjectTypeBranchingCallSite:
         create_claude_md(tmp_path, "myrepo", "alice")
         text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
         assert "**Stack:**" not in text
+
+
+class TestGitHubRepoNameCasePreservation:
+    """#1533: GitHub repo name preserves the operator's input case verbatim.
+
+    Pre-fix: line 2671 of the script unconditionally did
+    `repo_name_lower = args.name.lower()` before sending the name to GitHub.
+    Result: `Chiron` input produced `martymcenroe/chiron` on GitHub while the
+    local directory at `Projects/Chiron/` kept its case — asymmetric and
+    against the operator's intent.
+
+    The fix is structural (remove the variable; use `args.name` directly in
+    all 14 GitHub-side call sites). This regression pin asserts the variable
+    name is gone from the script so a future edit can't quietly reintroduce
+    the lowercase normalization. The fix-anchor comment naming the issue
+    must also be present.
+    """
+
+    def test_no_lowercased_repo_name_variable_in_script(self):
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        content = script.read_text(encoding="utf-8")
+        assert "repo_name_lower" not in content, (
+            "regression: `repo_name_lower` was reintroduced. The GitHub repo "
+            "name must preserve the operator's input case verbatim — use "
+            "`args.name` in the GitHub-create / -PATCH / -GET paths instead. "
+            "See AssemblyZero #1533."
+        )
+
+    def test_fix_anchor_comment_naming_issue_present(self):
+        """The inline comment naming #1533 should remain at the GitHub-create
+        site so a future agent reading the code understands why no
+        lowercasing happens there."""
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        content = script.read_text(encoding="utf-8")
+        assert "#1533" in content
+        # The comment must sit in the GitHub-side flow. Use the `GITHUB REMOTE`
+        # banner print as the canonical anchor for that flow — it appears
+        # exactly once and only inside the post-no-github-gate block.
+        gh_banner = content.find("GITHUB REMOTE (single classic-PAT")
+        anchor = content.find("#1533")
+        assert gh_banner != -1 and anchor != -1
+        # The comment naming #1533 should appear within ~600 chars BEFORE
+        # the banner (the comment explains why no lowercase happens at this
+        # gate; banner follows immediately after).
+        delta = gh_banner - anchor
+        assert 0 < delta < 600, (
+            f"#1533 comment is at offset {anchor}; GITHUB REMOTE banner at "
+            f"{gh_banner} (delta={delta}). The fix-anchor comment is no "
+            "longer adjacent to the GitHub-side flow it explains."
+        )
