@@ -1239,3 +1239,98 @@ class TestGitHubRepoNameCasePreservation:
             f"{gh_banner} (delta={delta}). The fix-anchor comment is no "
             "longer adjacent to the GitHub-side flow it explains."
         )
+
+    def test_no_late_args_name_lowercase_mutation(self):
+        """#1535: the regression-pin above missed three direct mutations of
+        `args.name` in the final-summary block (`args.name = args.name.lower()`)
+        because it only checked for the `repo_name_lower` variable name. This
+        pin catches the direct-mutation form.
+
+        Legitimate `.lower()` uses in the script that we must NOT flag:
+        - `name.lower()` inside `create_python_project` (line ~1252-1253) —
+          generating Python package + module names per PEP 503
+        - `args.name.lower().replace(\"-\", \"_\")` for module-name substitution
+          at line ~2550 (same intent as line 1253, in the config-file flow)
+
+        What we DO flag:
+        - `args.name = args.name.lower()` anywhere — assignment that overwrites
+          the operator's input case
+        - `args.name.lower()` passed as `repo_name=...` to anything (those
+          arguments flow into displayed URLs / paths and must preserve case)
+        """
+        from pathlib import Path
+        import re
+        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        content = script.read_text(encoding="utf-8")
+
+        # Direct mutation: `args.name = args.name.lower()`
+        assert "args.name = args.name.lower()" not in content, (
+            "regression #1535: a direct mutation `args.name = args.name.lower()` "
+            "is present. That overwrites the operator's input case after the "
+            "GitHub repo was already created with the verbatim case (#1533). "
+            "Display lines downstream will then show the lowercased form, "
+            "diverging from the local dir name and the actual GitHub repo."
+        )
+
+        # Inline `args.name.lower()` passed to a `repo_name=` kwarg
+        # (the PyPI reminder path). The kwarg is supposed to receive a name
+        # that matches the actual GitHub repo.
+        matches = re.findall(r"repo_name\s*=\s*args\.name\.lower\(\)", content)
+        assert not matches, (
+            "regression #1535: `repo_name=args.name.lower()` is present. "
+            "Pass `repo_name=args.name` so the displayed PyPI URL matches "
+            "the actual GitHub repo name."
+        )
+
+
+class TestCerberusPostDeployAdvice:
+    """#1536: the post-deploy success message must distinguish between
+    the plaintext flow (`--cerberus-pem`, .pem deleted, revoke-the-key
+    correct) and the encrypted-reusable flow (`--cerberus-pem-gpg`, blob
+    preserved, revoke-the-key catastrophic — would invalidate the
+    reusable encrypted file).
+
+    Bug pre-fix: a single `print(\"REMEMBER to revoke the key...\")` line
+    fired for both flows. The operator following it under the
+    encrypted-reusable flow would lose the ability to use the encrypted
+    PEM for subsequent new-repo runs.
+    """
+
+    def test_revoke_advice_only_present_in_plaintext_branch(self):
+        """The string 'REMEMBER to revoke' should only appear inside a
+        conditional that checks args.cerberus_pem (the plaintext flow)."""
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        content = script.read_text(encoding="utf-8")
+        # The advisory text must exist (it's correct for the plaintext flow)
+        assert "REMEMBER to revoke the key in the app UI" in content
+        # And the encrypted-flow branch must have the NEGATING advice
+        assert "DO NOT revoke the key in the app UI" in content, (
+            "regression #1536: the encrypted-reusable flow "
+            "(--cerberus-pem-gpg) lost its do-not-revoke guidance. The "
+            "post-deploy success message must distinguish the two flows."
+        )
+
+    def test_anchor_comment_naming_issue_present(self):
+        """A comment naming #1536 should sit at the cerberus_status branch
+        so future agents understand why the two flows produce different
+        end-of-run advice."""
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        content = script.read_text(encoding="utf-8")
+        assert "#1536" in content
+        # The #1536 anchor must be near the `elif cerberus_status == \"OK\":`
+        # branch (within a few hundred chars BEFORE the branch text — the
+        # anchor comment introduces the conditional).
+        branch_loc = content.find('elif cerberus_status == "OK":')
+        anchor = content.find("#1536")
+        assert branch_loc != -1 and anchor != -1
+        delta = branch_loc - anchor
+        # Comment may sit ON the same logical block as the branch, so the
+        # offset is small in either direction; just check they are within
+        # 800 chars of each other.
+        assert abs(delta) < 800, (
+            f"#1536 anchor at offset {anchor}; cerberus_status branch at "
+            f"{branch_loc} (delta={delta}). The fix-anchor comment is no "
+            "longer adjacent to the cerberus advice branch."
+        )
