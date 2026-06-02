@@ -462,3 +462,117 @@ class TestRunStageNodeRetrySkip:
 
         assert call_count["n"] == 1
         assert result["stage_results"]["triage"]["status"] == "passed"
+
+
+class TestTriageBriefSynthesis:
+    """#1508: Triage stage synthesizes a brief from the GitHub issue body
+    when no operator-authored brief exists at docs/lineage/{N}/issue-brief.md.
+
+    Pre-fix: the triage sub-workflow's `_load_brief` halted with "No brief
+    file specified" in 0 seconds because `brief_file` wasn't threaded into
+    the sub-workflow state. This hit every external smoke build on a fresh
+    issue with no pre-authored brief (first observed on Chiron #37).
+    """
+
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
+    @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
+    def test_triage_fetches_issue_body_when_no_brief_exists(
+        self, mock_detect, mock_create_graph, mock_subprocess,
+    ):
+        """When no brief on disk: fetch issue body, write temp brief, pass it
+        as `brief_file` to the sub-workflow."""
+        import json as _json
+
+        # No existing artifact at docs/lineage/{N}/issue-brief.md
+        mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
+
+        # Mock `gh issue view` returning a non-empty body
+        gh_result = MagicMock()
+        gh_result.returncode = 0
+        gh_result.stdout = _json.dumps({
+            "title": "Fresh issue from GitHub",
+            "body": "Body content the operator never pre-authored a Michelle-voice brief for.",
+        })
+        gh_result.stderr = ""
+        mock_subprocess.return_value = gh_result
+
+        # Capture what the sub-workflow receives
+        captured: dict = {}
+        app = MagicMock()
+        def _invoke(payload):
+            captured.update(payload)
+            return {"issue_brief_path": "/fake/produced/brief.md"}
+        app.invoke.side_effect = _invoke
+        graph = MagicMock()
+        graph.compile.return_value = app
+        mock_create_graph.return_value = graph
+
+        state = create_initial_state(
+            37, get_default_config(),
+            target_repo="/fake/projects/Chiron",
+            assemblyzero_root="/fake/projects/AssemblyZero",
+        )
+
+        result = run_triage_stage(state)
+
+        # gh was called for the right issue against the right cwd
+        gh_call = mock_subprocess.call_args
+        assert gh_call is not None
+        args = gh_call[0][0]
+        assert args[:4] == ["gh", "issue", "view", "37"]
+        assert gh_call[1]["cwd"] == "/fake/projects/Chiron"
+
+        # brief_file was threaded into the sub-workflow state
+        assert "brief_file" in captured
+        assert captured["brief_file"]  # non-empty path
+        # The temp brief file actually contains the synthesized brief
+        with open(captured["brief_file"], encoding="utf-8") as f:
+            content = f.read()
+        assert "Fresh issue from GitHub" in content
+        assert "Body content the operator never pre-authored" in content
+
+        # Stage no longer halts at the pre-fix "No brief file specified"
+        # gate. Final status reflects the sub-workflow's return — in this
+        # test the mocked brief_path doesn't exist on disk so the stage
+        # registers as failed-after-sub-workflow rather than failed-pre-fetch.
+        # The important assertion is the brief_file threading above; status
+        # here would only be "passed" with a real produced file.
+        triage_result = result["stage_results"]["triage"]
+        if triage_result["status"] == "failed":
+            # Verify it's the post-sub-workflow failure, NOT the
+            # cannot-synthesize-brief halt from the bug or the missing-
+            # brief_file pre-fix halt.
+            err = triage_result.get("error_message", "")
+            assert "cannot synthesize brief" not in err
+            assert "No brief file specified" not in err
+
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
+    def test_triage_fails_gracefully_when_gh_issue_fetch_errors(
+        self, mock_detect, mock_subprocess,
+    ):
+        """When gh fails (issue doesn't exist, network, etc.): stage halts
+        with a clear error pointing at the workaround, NOT silently calls
+        the sub-workflow with empty brief_file."""
+        mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
+
+        gh_result = MagicMock()
+        gh_result.returncode = 1
+        gh_result.stdout = ""
+        gh_result.stderr = "GraphQL: Could not resolve to an Issue"
+        mock_subprocess.return_value = gh_result
+
+        state = create_initial_state(
+            99999, get_default_config(),
+            target_repo="/fake/projects/Chiron",
+            assemblyzero_root="/fake/projects/AssemblyZero",
+        )
+
+        result = run_triage_stage(state)
+
+        assert result["stage_results"]["triage"]["status"] == "failed"
+        err = result["stage_results"]["triage"]["error_message"]
+        assert "cannot synthesize brief" in err
+        # Points the operator at the workaround
+        assert "docs/lineage/99999/issue-brief.md" in err

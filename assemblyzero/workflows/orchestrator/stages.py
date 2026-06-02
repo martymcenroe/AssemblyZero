@@ -11,6 +11,10 @@ Each stage function:
 from __future__ import annotations
 
 from assemblyzero.utils.shell import run_command
+import json
+import os
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -147,6 +151,78 @@ def _classify_halt_transience(sub_result: dict) -> bool | None:
     return bool(plan.get("is_transient", False))
 
 
+def _fetch_issue_body_to_temp_brief(
+    issue_number: int,
+    target_repo: str,
+) -> tuple[str, str]:
+    """Closes #1508: fetch the GitHub issue body and write it to a temp file
+    so the triage workflow has a `brief_file` to feed `_load_brief`.
+
+    The triage sub-workflow (workflow_type=\"issue\") requires `brief_file`
+    in its state. When the operator pre-authored `docs/lineage/{N}/issue-brief.md`,
+    `detect_existing_artifacts` finds it and `should_skip_stage` returns
+    early — the sub-workflow is never invoked. When no such brief exists
+    (the fresh-external-issue case observed on Chiron #37), the
+    sub-workflow IS invoked but `_load_brief` short-circuits with
+    \"No brief file specified\" and the stage halts in 0 seconds.
+
+    This helper plugs the gap: synthesize a brief from the GitHub issue
+    body itself, write it to a temp file, and pass that file path as
+    `brief_file`. The operator-authored Michelle-voice brief still
+    overrides via `should_skip_stage` when present.
+
+    Returns:
+        (temp_path, error_message). Exactly one is non-empty.
+    """
+    if not target_repo:
+        return ("", "target_repo not specified — cannot resolve issue from gh")
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", str(issue_number), "--json", "title,body"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            cwd=target_repo,
+        )
+    except subprocess.SubprocessError as exc:
+        return ("", f"gh issue view failed for #{issue_number}: {exc}")
+
+    if result.returncode != 0:
+        return ("", f"gh issue view #{issue_number} non-zero: {result.stderr.strip()}")
+    if not result.stdout:
+        return ("", f"empty response from gh issue view #{issue_number}")
+
+    try:
+        issue_data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return ("", f"failed to parse gh issue view JSON: {exc}")
+
+    issue_title = issue_data.get("title", "").strip()
+    issue_body = issue_data.get("body", "")
+    if not issue_body.strip():
+        return ("", f"issue #{issue_number} body is empty — no content to synthesize a brief from")
+
+    # Minimal brief: just the title + body. The triage sub-workflow's
+    # drafter/reviewer process this further; we are NOT pre-Michelle-voice
+    # rewriting here — the operator's hand-authored brief at
+    # docs/lineage/{N}/issue-brief.md remains the override path.
+    brief_content = f"# {issue_title}\n\n{issue_body}\n"
+
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f"orchestrator-issue-{issue_number}-",
+        suffix=".md",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(brief_content)
+    except OSError as exc:
+        return ("", f"failed to write temp brief: {exc}")
+
+    return (temp_path, "")
+
+
 def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute issue triage workflow.
 
@@ -169,6 +245,27 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
         )
         return update_stage_result(state, stage, result)
 
+    # Closes #1508: when no operator-authored brief exists at
+    # docs/lineage/{N}/issue-brief.md, synthesize one from the GitHub issue
+    # body and pass it as `brief_file` so `_load_brief` doesn't halt with
+    # "No brief file specified."
+    brief_file, brief_err = _fetch_issue_body_to_temp_brief(
+        issue_number, state.get("target_repo", ""),
+    )
+    if brief_err:
+        result = _make_stage_result(
+            status="failed",
+            error_message=(
+                "Triage stage: cannot synthesize brief from GitHub issue — "
+                f"{brief_err}. Workaround: hand-author "
+                f"docs/lineage/{issue_number}/issue-brief.md in the target "
+                "repo and re-run."
+            ),
+            duration_seconds=time.monotonic() - start_time,
+            attempts=0,
+        )
+        return update_stage_result(state, stage, result)
+
     # Execute triage sub-workflow
     try:
         # Import here to avoid circular dependencies and allow mocking
@@ -186,6 +283,7 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
             "workflow_type": "issue",
             "target_repo": state.get("target_repo", ""),
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            "brief_file": brief_file,  # Closes #1508
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),

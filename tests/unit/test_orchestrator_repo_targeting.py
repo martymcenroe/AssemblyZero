@@ -59,10 +59,14 @@ def _external_state():
 # --- stage threading -------------------------------------------------------
 
 
+@patch("assemblyzero.workflows.orchestrator.stages._fetch_issue_body_to_temp_brief")
 @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
 @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
-def test_triage_threads_target_repo(mock_detect, mock_create_graph):
+def test_triage_threads_target_repo(mock_detect, mock_create_graph, mock_fetch):
     mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
+    # #1508: the fresh-issue path now fetches the issue body and writes a
+    # temp brief. Mock the helper so the test doesn't shell out to gh.
+    mock_fetch.return_value = ("/fake/tmp/orchestrator-issue-5.md", "")
     captured: dict = {}
     mock_create_graph.return_value = _capturing_graph(captured, {"issue_brief_path": ""})
 
@@ -70,6 +74,8 @@ def test_triage_threads_target_repo(mock_detect, mock_create_graph):
 
     assert captured["target_repo"] == EXTERNAL
     assert captured["assemblyzero_root"] == AZ_ROOT
+    # #1508: brief_file is now threaded into the sub-workflow state
+    assert captured["brief_file"] == "/fake/tmp/orchestrator-issue-5.md"
 
 
 @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
