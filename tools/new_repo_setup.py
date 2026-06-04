@@ -86,6 +86,13 @@ class SchemaValidationError(Exception):
 # Default schema location: co-located with standard 0009
 _DEFAULT_SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "0009-structure-schema.json"
 
+# Canonical location for the encrypted Cerberus App private key per
+# ADR-0216 / runbook 0927. When neither --cerberus-pem nor --cerberus-pem-gpg
+# is passed, main() falls back to this path so repeat invocations don't need
+# to retype the flag every time. Tests patch this constant to a non-existent
+# path to exercise the missing-PEM error branch (#1543).
+DEFAULT_CERBERUS_PEM_GPG = Path.home() / ".secrets" / "cerberus-pem.gpg"
+
 
 def load_structure_schema(schema_path: Path | None = None) -> dict:
     """Load and validate the project structure schema from JSON file.
@@ -2289,36 +2296,29 @@ Examples:
     # Catching this at the CLI gate keeps the failure loud and pre-creation,
     # not silent and only-visible-on-first-PR. Audit mode is exempt — it
     # only inspects an existing project, never creates anything.
+    #
+    # When neither flag was passed, fall back to the canonical encrypted-PEM
+    # location (#1543). Repeat invocations don't need to retype the flag.
+    # The default is only applied when neither flag was explicitly passed,
+    # so the mutual-exclusion check above still catches both-flags-passed.
+    if (not args.cerberus_pem and not args.cerberus_pem_gpg
+            and not args.no_github and not args.audit
+            and DEFAULT_CERBERUS_PEM_GPG.exists()):
+        args.cerberus_pem_gpg = str(DEFAULT_CERBERUS_PEM_GPG)
+        print(f"Using Cerberus PEM: {DEFAULT_CERBERUS_PEM_GPG} "
+              "(encrypted, in-process decryption)")
+
     if (not args.cerberus_pem and not args.cerberus_pem_gpg
             and not args.no_github and not args.audit):
-        print("ERROR: --cerberus-pem or --cerberus-pem-gpg is required.")
+        print(f"ERROR: Cerberus encrypted PEM not found at {DEFAULT_CERBERUS_PEM_GPG}")
         print()
-        print("Cerberus auto-approval is part of the new-repo contract. Without it,")
-        print("every PR on the new repo will sit blocked indefinitely waiting for")
-        print("a review (branch protection requires 1 approval; the auto-reviewer")
-        print("workflow can't approve without the Cerberus App secrets).")
+        print("The new-repo workflow needs a Cerberus App key to wire up auto-approval.")
+        print("Without it, every PR on the new repo sits blocked waiting for a review.")
         print()
-        print("Two ways to provide the .pem (per runbook 0927):")
-        print()
-        print("  RECOMMENDED -- --cerberus-pem-gpg PATH (encrypted at rest,")
-        print("  reusable across many new-repo runs, no plaintext on disk):")
-        print("    1. Open https://github.com/settings/apps/cerberus-az")
-        print("    2. Generate a private key -- in the browser's Save-As dialog,")
-        print("       target ~/.secrets/cerberus.pem (NOT ~/Downloads/, which is")
-        print("       often OneDrive-synced; mkdir -p ~/.secrets first if needed)")
-        print("    3. gpg -c -o ~/.secrets/cerberus-pem.gpg ~/.secrets/cerberus.pem")
-        print("    4. rm ~/.secrets/cerberus.pem")
-        print("    5. Re-run with --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg")
-        print("       (See runbook 0927 'Hygiene surfaces' table for the full")
-        print("       audit gate — clipboard, Recycle Bin, browser history.)")
-        print()
-        print("  LEGACY single-shot -- --cerberus-pem PATH (plaintext, deleted")
-        print("  after deploy; one-and-done, fresh .pem per repo):")
-        print("    1. Open https://github.com/settings/apps/cerberus-az")
-        print("    2. Generate a private key -- browser downloads cerberus.pem")
-        print("    3. Re-run with --cerberus-pem /path/to/the.pem")
-        print()
-        print("Full procedure: docs/runbooks/0927-new-repo-human-checklist.md#4")
+        print("Options:")
+        print("  - Encrypted key elsewhere?  --cerberus-pem-gpg /path/to/cerberus-pem.gpg")
+        print("  - One-shot plaintext?       --cerberus-pem /path/to/cerberus.pem")
+        print("  - First-time setup?         See docs/runbooks/0927-new-repo-human-checklist.md#4")
         print()
         print("Override: --no-github (skip GitHub repo entirely; local scaffold only).")
         sys.exit(1)

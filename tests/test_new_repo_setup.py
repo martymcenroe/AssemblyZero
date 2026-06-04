@@ -749,8 +749,16 @@ from new_repo_setup import (  # noqa: E402
 
 
 class TestCerberusPemRequired:
-    """T290-T292: --cerberus-pem is REQUIRED for new GitHub repos (#1206)."""
+    """T290-T292: --cerberus-pem is REQUIRED for new GitHub repos (#1206).
 
+    The DEFAULT_CERBERUS_PEM_GPG patch in T290 forces the default-PEM-fallback
+    branch (#1543) to miss, so the test continues to exercise the exit-1 path
+    even on a developer machine that has the real encrypted PEM at the
+    canonical location.
+    """
+
+    @patch("new_repo_setup.DEFAULT_CERBERUS_PEM_GPG",
+           Path("/nonexistent-for-T290/cerberus-pem.gpg"))
     @patch("new_repo_setup.config")
     def test_T290_missing_pem_without_no_github_exits_one(self, mock_config, tmp_path):
         """Without --cerberus-pem and without --no-github, exit 1 BEFORE any creation."""
@@ -782,6 +790,27 @@ class TestCerberusPemRequired:
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
+
+    @patch("new_repo_setup.config")
+    def test_T292b_default_gpg_fallback_used_when_neither_flag_passed(
+            self, mock_config, tmp_path, capsys):
+        """When neither flag passed AND DEFAULT_CERBERUS_PEM_GPG exists → fallback fires (#1543).
+
+        Uses an invalid name so the script exits AFTER the fallback prints its
+        confirmation line but BEFORE any GitHub creation logic is reached.
+        """
+        _setup_config_mock(mock_config, tmp_path)
+        fake_pem = tmp_path / "fake-cerberus-pem.gpg"
+        fake_pem.write_bytes(b"fake encrypted blob")
+        with patch("new_repo_setup.DEFAULT_CERBERUS_PEM_GPG", fake_pem):
+            # "bad/name" fails validate_name's regex, exiting 1 — but AFTER the
+            # default-fallback block, so the confirmation line still prints.
+            with patch("sys.argv", ["new_repo_setup.py", "bad/name"]):
+                with pytest.raises(SystemExit):
+                    main()
+        captured = capsys.readouterr().out
+        assert "Using Cerberus PEM:" in captured
+        assert str(fake_pem) in captured
 
 
 class TestVerifyBranchProtection:
