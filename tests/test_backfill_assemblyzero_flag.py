@@ -286,3 +286,72 @@ class TestIsSafeToBackfill:
         assert ok is False
         # Implementation short-circuits on dirty before checking branch.
         assert ".unleashed.json" in reason
+
+
+class TestProcessRepoCommitFailureRollback:
+    """T540-T550: commit-failure rollback path (#1379).
+
+    Pins the no-`--worktree` behavior so the banned destroy-uncommitted-state
+    pattern can't regress. Verifies the rollback restores the original file
+    content via explicit write-back rather than `git restore --worktree`.
+    """
+
+    @patch("backfill_assemblyzero_flag.gh_owner_of")
+    @patch("backfill_assemblyzero_flag.is_safe_to_backfill")
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T540_commit_failure_rollback_never_uses_worktree_flag(
+            self, mock_run, mock_safe, mock_owner, tmp_path):
+        """No `git restore --worktree` call when commit fails (#1379)."""
+        from backfill_assemblyzero_flag import process_repo
+
+        # Set up a tmp "repo" with .unleashed.json missing the assemblyZero key
+        # (needs_flip will return True).
+        original_text = '{\n  "profile": "default"\n}\n'
+        (tmp_path / ".unleashed.json").write_text(original_text, encoding="utf-8")
+
+        mock_safe.return_value = (True, "")
+        mock_owner.return_value = "owner/repo"
+
+        def run_side_effect(cmd, **kwargs):
+            # All git calls succeed EXCEPT `git commit`, which simulates a
+            # pre-commit hook rejection.
+            if cmd[:2] == ["git", "commit"]:
+                return MagicMock(returncode=1, stdout="", stderr="hook rejected")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_run.side_effect = run_side_effect
+
+        result = process_repo(tmp_path, dry_run=False)
+
+        all_call_args = [call.args[0] for call in mock_run.call_args_list]
+        for cmd in all_call_args:
+            assert "--worktree" not in cmd, (
+                f"Banned `--worktree` flag appeared in rollback path: {cmd}"
+            )
+        assert result.status == "ERROR_COMMIT"
+
+    @patch("backfill_assemblyzero_flag.gh_owner_of")
+    @patch("backfill_assemblyzero_flag.is_safe_to_backfill")
+    @patch("backfill_assemblyzero_flag.run")
+    def test_T550_commit_failure_restores_original_file_bytes(
+            self, mock_run, mock_safe, mock_owner, tmp_path):
+        """Rollback restores .unleashed.json to its pre-flip content (#1379)."""
+        from backfill_assemblyzero_flag import process_repo
+
+        original_text = '{\n  "profile": "default"\n}\n'
+        (tmp_path / ".unleashed.json").write_text(original_text, encoding="utf-8")
+
+        mock_safe.return_value = (True, "")
+        mock_owner.return_value = "owner/repo"
+
+        def run_side_effect(cmd, **kwargs):
+            if cmd[:2] == ["git", "commit"]:
+                return MagicMock(returncode=1, stdout="", stderr="hook rejected")
+            return MagicMock(returncode=0, stdout="", stderr="")
+        mock_run.side_effect = run_side_effect
+
+        result = process_repo(tmp_path, dry_run=False)
+
+        assert result.status == "ERROR_COMMIT"
+        # The flip happened in-memory then was reverted via write-back.
+        # File content should match the original byte-for-byte.
+        assert (tmp_path / ".unleashed.json").read_text(encoding="utf-8") == original_text

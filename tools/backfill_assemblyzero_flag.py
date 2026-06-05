@@ -258,17 +258,25 @@ def process_repo(repo_path: Path, dry_run: bool) -> RepoResult:
         return RepoResult(name, "ERROR_BRANCH",
                           f"could not create branch: {r.stderr.strip()[:200]}")
 
-    # 3. Edit + commit
+    # 3. Edit + commit. Capture original bytes BEFORE flip so the rollback
+    # path can restore the working tree via explicit write-back rather than
+    # `git restore --worktree` (banned pattern B7 — destroys uncommitted
+    # state; see Projects/CLAUDE.md banned-commands table). Write-back is
+    # correct here: we are reverting OUR OWN edit from flip_file two lines
+    # below, not destroying pre-existing operator state. (#1379)
+    original_unleashed_bytes = unleashed.read_bytes()
     flip_file(unleashed)
     run(["git", "add", ".unleashed.json"], cwd=repo_path)
     r = run(["git", "commit", "-m", COMMIT_MESSAGE], cwd=repo_path)
     if r.returncode != 0:
         # Commit failed (e.g., pre-commit hook). Branch has no new commits,
-        # so branch tip == main tip. Restore the working-tree edit, return
-        # to main, then `git branch -d` (-D is banned per memory; -d works
-        # because branch is reachable from main with no extra commits).
-        run(["git", "restore", "--staged", "--worktree", ".unleashed.json"],
-            cwd=repo_path)
+        # so branch tip == main tip. Restore the working tree by writing
+        # back the captured original bytes, unstage via `git restore --staged`
+        # only (no `--worktree`), return to main, then `git branch -d` (-D is
+        # banned per memory; -d works because branch is reachable from main
+        # with no extra commits).
+        unleashed.write_bytes(original_unleashed_bytes)
+        run(["git", "restore", "--staged", ".unleashed.json"], cwd=repo_path)
         run(["git", "checkout", "main"], cwd=repo_path)
         run(["git", "branch", "-d", BRANCH_NAME], cwd=repo_path)
         return RepoResult(name, "ERROR_COMMIT",
