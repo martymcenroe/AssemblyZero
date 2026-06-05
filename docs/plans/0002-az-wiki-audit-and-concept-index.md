@@ -1,7 +1,8 @@
-# Plan 0002 — AssemblyZero Wiki Audit + Technical Concept Index
+# Plan 0002 — AssemblyZero Wiki Audit + Concept Field Guide
 
-**Status:** Draft, awaiting operator review
+**Status:** Phase 1 in flight (5 calibration entries shipped 2026-06-04)
 **Date:** 2026-06-04 Central
+**Last updated:** 2026-06-04 Central (operator answers folded in)
 **Author:** Claude / AssemblyZero session
 **Scope:** `AssemblyZero.wiki` only (53 pages). The other fleet wikis (Aletheia.wiki, Hermes.wiki, etc.) are explicitly out of scope.
 
@@ -9,12 +10,12 @@
 
 ## 1. Why this document exists
 
-The operator (Marty) asked for two things in one session:
+Two things in one session:
 
 1. **An audit plan** for the AssemblyZero wiki against the AssemblyZero code. Suspected problems: drift (wiki describes how things used to work), wrong information (wiki claims that aren't true now), missing information (code surfaces with no wiki coverage), reorganization opportunities, and gaps where diagrams would help where prose currently strains.
-2. **A technical concept index** that supports interview prep — Marty has to explain technical concepts in interviews, and the wiki is currently organized by topic/persona rather than by concept. An index keyed by concept (with a short pitch + a pointer to the wiki page that proves it) would let him look up "explain X" in real time.
+2. **A concept field guide** that gives a reader landing on the wiki a concept-keyed lookup — concept name → concise definition → short read → deeper read → pointer to the wiki page or code that proves the concept is real. The wiki is currently organized by topic and reader role; the field guide complements that with a single page organized by *concept*, useful for readers who arrive via search or who want a clean definition before going deep.
 
-This document is the plan for both. It does not execute either; execution is the next session's job.
+This document is the plan for both. Part A (audit) is methodology only; Part B (field guide) is in active drafting — the first five entries are live.
 
 ## 2. Existing context this plan must respect
 
@@ -123,51 +124,44 @@ For each audit pass, produce:
 
 Wiki commits then happen one finding at a time, each with a commit message `docs(wiki): {fix} (refs AssemblyZero#{issue})` — matching the existing #1279/#1280 pattern.
 
-## 4. Part B — Technical Concept Index
+## 4. Part B — Concept Field Guide
 
-### 4.1 Why an index distinct from the wiki
+### 4.1 Why a concept-keyed guide exists alongside the wiki
 
-The wiki is organized by **topic and persona** (Architecture / Security & Governance / Cost & Platform / etc.). That's the right organization for someone *learning* the system. It's the wrong organization for someone in an interview who is asked *"explain X."*
+The wiki is organized by **topic and reader role** (Architecture / Security & Governance / Cost & Platform / etc.). That's the right organization for a reader *learning* the system end-to-end. It is the wrong organization for a reader who has heard one term and wants a clean explanation before deciding whether to read deeper.
 
-An interview question lands as a concept ("multi-agent orchestration", "how do you prevent agents from approving their own PRs", "what's a classic-PAT pattern"). Marty needs to navigate from CONCEPT → 30-second pitch → 3-minute deep-dive → "let me show you the actual code/PR/wiki page that proves I built this." The current wiki gives him the deep-dive but not the 30-second pitch and not the search index keyed by concept.
-
-The concept index closes that gap. It is a **lookup table from concept name to interview-ready material**, with pointers into the wiki for proof.
+The field guide closes that gap. It is a single page organized by **concept** — concept name → one-line definition → short read → deeper read → pointer to the wiki page or code that proves the concept is real. A reader can land on the field guide via search, find the concept, get oriented in 30 seconds, and click through to depth.
 
 ### 4.2 Format per entry
 
-Each concept entry is a short, fixed-shape block:
+Each entry is a short, fixed-shape block (live in `AssemblyZero.wiki/Concept-Field-Guide.md`):
 
 ```markdown
 ## {Concept Name}
 
 **One-line definition:** {15 words or less; the simplest possible answer}
 
-**30-second pitch:** {2-3 sentences. What it is, why it exists, what it
-buys you. No jargon that requires further explanation. The version you'd
-say to a CTO who is half-listening.}
+**30-second read:** {2-3 sentences. What it is, why it exists, what it
+buys you. No jargon that requires further explanation. The version a
+reader who half-understands the term can follow.}
 
 **3-minute deep-dive:**
 - {Foundational mechanism it relies on}
 - {The actual design choice that distinguishes this from the obvious version}
 - {The constraint or failure mode that made the design choice necessary}
-- {How it composes with other AZ concepts}
+- {How it composes with other AssemblyZero concepts}
 - {What the empirical evidence is — PRs landed, issues solved, scale numbers}
 
-**Show me in code:** [`path/to/file.py`](link), [PR #N](link), [wiki page](link)
+**Show me:** [`path/to/file.py`](link), [PR #N](link), [[wiki-page]]
 
-**Likely follow-ups:**
-- "How would you scale this?"
-- "What's the failure mode?"
-- "How does this compare to {industry alternative}?"
-
-**Related concepts:** [[Concept A]], [[Concept B]], [[Concept C]]
+**Related concepts:** [[Concept A]] · [[Concept B]] · [[Concept C]]
 ```
 
-The 30-second pitch is **the load-bearing field.** Most interview questions are answered there; deep-dive and code-show are for follow-ups. Each pitch should be road-tested by Marty saying it aloud cold — if it doesn't roll off, it's wrong.
+The 30-second read is **the load-bearing field.** Most readers get what they need there; deep-dive and show-me are for those who want to verify or go deeper. Each entry's pointers must be live — broken pointers make the entry *wrong* (not stale), and the guide rests on its pointers being accurate.
 
 ### 4.3 Initial concept list (candidates)
 
-Drawn from the wiki sidebar + memory + recent session work. ~30 concepts; the index can grow.
+Drawn from the wiki sidebar + memory + recent session work. ~30 concepts; the guide grows by addition.
 
 **Orchestration & workflow (foundational)**
 - Multi-agent orchestration (LangGraph-based)
@@ -192,7 +186,6 @@ Drawn from the wiki sidebar + memory + recent session work. ~30 concepts; the in
 - Branch protection at scale
 - Auto-reviewer caller workflow (reusable across the fleet)
 - Fleet-wide audits (banned commands, security posture)
-- Daily activity / contribution-graph operations
 
 **Cost & reliability**
 - Prompt economics (Haiku routing, context pruning)
@@ -207,73 +200,73 @@ Drawn from the wiki sidebar + memory + recent session work. ~30 concepts; the in
 - Session handoff + pickup (continuity across sessions)
 - Lessons-learned discipline (every cleanup files issues)
 
-**Interview-narrative concepts (not technical concepts but explainers)**
-- "What is AssemblyZero?" (the elevator pitch for the whole thing)
-- "Why build it?" (the constraint that made it necessary)
-- "What does success look like?" (the velocity / quality metric story)
-- "What did you learn that surprised you?" (vulnerability + competence in one)
+**Narrative explainers (not technical concepts; orient the reader)**
+- "What is AssemblyZero?" (the load-bearing summary)
+- "Why does it exist?" (the constraint that made it necessary)
+- "What does success look like?" (the velocity / quality story)
 
-### 4.4 Where the index lives
+A separate **private companion** (location TBD: `career` repo, or a password-protected dashboard) holds material that is useful to the operator but not appropriate for public reference. The companion is not in scope for this plan; it gets its own plan when the location is decided.
 
-Three options; pick before building:
+### 4.4 Where the guide lives
+
+Three options were considered:
 
 | Option | Pros | Cons |
 |---|---|---|
-| **A.** As a wiki page (`AssemblyZero.wiki/Concept-Index.md`) | Lives with the source material; cross-links work naturally; visible to anyone reading the wiki | Public; if Marty wants interview-private notes (likely follow-ups, weak spots) they'd need to be elsewhere |
-| **B.** As a separate private repo | Private; can hold interview-specific notes; can include "things to avoid saying" and "questions I struggled with" | Disconnected from the wiki; maintenance has to be ritualized; cross-linking is via URL not wikilink |
-| **C.** As a structured YAML the wiki renders from | Single source of truth; could generate both wiki view + private deep-dive view; data-driven | Build cost; YAML-to-Markdown rendering is a small project of its own; overkill for ~30 entries |
+| **A.** As a wiki page (`AssemblyZero.wiki/Concept-Field-Guide.md`) | Lives with the source material; cross-links work naturally; visible to anyone reading the wiki | Public; operator-only material would need to live elsewhere |
+| **B.** As a separate private repo | Private; can hold operator-only notes | Disconnected from the wiki; maintenance has to be ritualized; cross-linking is via URL not wikilink |
+| **C.** As a structured YAML the wiki renders from | Single source of truth; could generate both public and private views | Build cost; YAML-to-Markdown rendering is a small project of its own; overkill for ~30 entries |
 
-**Recommendation:** Start with **Option A** for the public-safe content (definition + pitch + deep-dive + show-me); keep "likely follow-ups" and any candor-about-weaknesses in a **separate private notes file** (Option B's content, without committing to a full private repo). Migrate to C if the index outgrows 30 entries and starts feeling stale.
+**Decision (2026-06-04):** Option A is in use — the field guide lives on the public wiki at `AssemblyZero.wiki/Concept-Field-Guide.md`. A separate private companion will hold operator-only material; companion location is TBD (existing `career` repo wiki if one exists, otherwise a new password-protected dashboard). The companion is **out of scope for this plan**; it gets its own plan when the location is decided. The public guide must not reveal anything about the companion's existence or purpose.
 
 ### 4.5 Maintenance hooks
 
-The index will rot without a maintenance ritual. Three hooks:
+The guide will rot without a maintenance ritual. Three hooks:
 
-1. **Audit cycle integration.** Every wiki audit pass (Part A) emits "concepts touched" as a side-finding. The concept-index author pulls those and updates the relevant entries' "show me in code" pointers.
-2. **Interview retro.** After each actual interview, Marty captures: which questions arose, which answers wobbled, which concepts were missing from the index. Update the index within 24h while it's fresh.
-3. **New-PR hook.** When a substantive PR merges on AZ, ask "does this PR change what 'X' means?" for any concept the PR touches. If yes, update the entry's "show me in code" + deep-dive bullets.
+1. **Audit cycle integration.** Every wiki audit pass (Part A) emits "concepts touched" as a side-finding. The field-guide maintainer pulls those and updates the relevant entries' "show me" pointers.
+2. **Operator-driven refresh.** When the operator uses the field guide and finds an entry that wobbles (definition wrong, pitch unclear, pointer broken), capture and revise within 24h while it's fresh.
+3. **New-PR hook.** When a substantive PR merges on AssemblyZero, ask "does this PR change what concept X means?" for any concept the PR touches. If yes, update the entry's "show me" pointers and deep-dive bullets.
 
 The first hook costs nothing (subsumed by audit work). The second is operator-driven. The third can be checklist-prompted from the existing handoff log.
 
 ## 5. Sequencing — what to do first
 
-Three phases, ordered by interview-value-per-unit-time:
+Three phases, ordered by reader-value-per-unit-time and operator timeline:
 
-**Phase 1 — Concept index first (~3-5 days agent time, mostly drafting)**
-- Pick Option A above (wiki-hosted public content)
-- Draft 5 highest-value concepts as a calibration batch (likely: AssemblyZero-as-a-whole, multi-agent orchestration, Cerberus/pr-sentinel separation, banned-list enforcement, LLD-driven implementation)
-- Have Marty say each pitch aloud and revise until it lands
-- Then expand to the full ~30 concepts using the calibrated template
+**Phase 1 — Concept Field Guide (in flight)**
+- 5 calibration entries live as of 2026-06-04 in `AssemblyZero.wiki/Concept-Field-Guide.md`: *AssemblyZero (the whole)*, *Multi-Agent Orchestration*, *Cerberus and pr-sentinel Separation*, *Banned-List Enforcement*, *LLD-Driven Implementation Pipeline*. Sidebar updated.
+- Next: operator reviews calibration entries; revises pitches that don't land; agent applies revisions
+- Then: expand to the full ~30 concepts from §4.3 using the calibrated template
+- Estimated wall time: ~1-2 days per operator estimate
 
-Justification: this directly serves the interview Marty is preparing for. It also creates the rubric for what "good wiki coverage of a concept" looks like, which informs the audit.
-
-**Phase 2 — Currency audit on AssemblyZero.wiki (~3-5 days)**
+**Phase 2 — Currency audit on AssemblyZero.wiki**
 - Dimension 1 only, all 53 pages
-- Build `tools/audit_wiki_currency.py` early; let it do the dead-link/dead-ref detection
+- Build `tools/audit_wiki_currency.py` early; let it do the dead-link/dead-ref detection mechanically
 - File one issue per dead reference
 - Apply fixes in batches (the existing #1279/#1280 pattern)
+- Audit-tool output, commits, and issues must not leak any private-use framing — sterile descriptions only
 
 Justification: currency is the highest-yield dimension. Most reader friction with a wiki is "this command doesn't work" / "this file doesn't exist." Fixing currency makes everything else more visible.
 
 **Phase 3 — Other dimensions, one at a time**
+- For Discworld chronicle pages: in scope for currency/correctness audits. If a character has a job that was never implemented, the page must be corrected — either move that capability to a "Future work" section (if a tracking issue is open), or move it to a new "Ideas previously considered" section (if no plan exists / tracking issue closed without action). Stylistic / metaphor content stays.
 - Pedagogy and Visual Aids paired (they share the reader-journey lens)
-- Completeness next (needs the code-surface inventory, which Phase 1's concept index work partially produces)
-- Correctness last (most subjective, most expensive per page)
+- Completeness next (needs the code-surface inventory, which Phase 1 partially produces)
 - Reorganization only if patterns emerge organically across the other dimensions
 
 Justification: avoid the trap of designing a clean information architecture before knowing what's actually in the wiki. Reorganization should be a consequence of audit, not an axiom.
 
-**Phases are sequential, not parallel.** Each phase produces enough learning that the next phase's plan should be revised before starting it. Do not pre-commit to a 3-month gantt; commit to Phase 1 and review.
+**Phases are sequential, not parallel.** Each phase produces enough learning that the next phase's plan should be revised before starting it. Do not pre-commit to a months-long gantt; commit to Phase 1 and review.
 
-## 6. Open questions for the operator
+## 6. Decisions made (2026-06-04)
 
-These are decisions only Marty can make. None block starting Phase 1.
+The five open questions in the original draft have been resolved:
 
-1. **Is Phase 1 (concept index) the right place to start, or should the currency audit go first?** Concept index is interview-urgency; currency audit is debt-reduction. If the interview is this week, Phase 1 is obvious. If the interview is in 30 days, Phase 2 might dominate.
-2. **Public or private for the "likely follow-ups" content?** The default per §4.4 is "public for the safe stuff, private file for the candid stuff." If Marty wants to keep the whole index private until interview season ends, that's a different shape.
-3. **Who owns the concept-index pitch quality — operator or agent?** Agent can draft, but the pitch only works if Marty can say it. Probably a draft-by-agent → revise-by-operator loop. The plan assumes this; explicit confirmation helps.
-4. **Are the Discworld chronicle pages in scope for audit?** They're stylistically distinctive, not technical reference. Default is to exclude them from currency/correctness audits (they're not making testable claims) but include in pedagogy/organization (they're part of the reader's experience). Confirm.
-5. **Should the audit tool (`tools/audit_wiki_currency.py`) live in AZ or be a sibling repo?** AZ is the natural home (it's the meta-system), but the tool reads `AssemblyZero.wiki.git` — sibling-repo file access from inside AZ. Probably fine, but worth flagging.
+1. **Phase 1 first.** Total estimated wall time ~1-2 days for the whole multi-phase effort, so sequencing matters less than originally framed; Phase 1 is the reader-immediate value.
+2. **Public field guide; separate private companion.** The Concept Field Guide on the public wiki holds reader-safe content. A private companion (location TBD: `career` repo wiki, or a new password-protected dashboard) holds material that should not be public. The public guide must not reveal anything about who reads the private companion or why.
+3. **Agent drafts; operator debates and revises.** Calibration entries land first; operator reviews and revises pitches that don't roll off the tongue. Pitch quality ownership is shared — agent generates, operator validates.
+4. **Discworld chronicle pages: IN scope for currency / correctness.** If a chronicle page claims a character does X and X is not implemented, the page must be corrected. Two destinations for unimplemented claims: "Future work" (open tracking issue) or "Ideas previously considered" (no plan / issue closed without action). Stylistic content unchanged.
+5. **Audit tool stays in AssemblyZero.** Sibling-repo access to `AssemblyZero.wiki.git` is fine. Tool output, commits, and filed issues must not leak any private-use framing — descriptions are sterile and reference-driven only.
 
 ---
 
