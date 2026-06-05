@@ -59,6 +59,21 @@ def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+def _try_remove_worktree(worktree: Path) -> subprocess.CompletedProcess:
+    """Remove a worktree without `--force` (banned pattern B10).
+
+    Tries plain `git worktree remove`. If that fails, runs `git worktree
+    prune` to clean up admin metadata for dead refs, then retries once.
+    Returns the final CompletedProcess; the caller decides how to react
+    to a non-zero returncode (surface failure, never force). (#1380)
+    """
+    r = _git("worktree", "remove", str(worktree), cwd=AZ_ROOT, check=False)
+    if r.returncode == 0:
+        return r
+    _git("worktree", "prune", cwd=AZ_ROOT, check=False)
+    return _git("worktree", "remove", str(worktree), cwd=AZ_ROOT, check=False)
+
+
 def fetch_canonical_from_origin() -> bytes | None:
     """Return the current canonical file bytes from origin/main, or None
     if it doesn't exist on origin yet (first-snapshot case).
@@ -100,8 +115,15 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
     worktree = Path(f"C:/Users/mcwiz/Projects/AssemblyZero-backup-{date_tag}")
 
     if worktree.exists():
-        # Leftover from a previous failed run; remove it
-        _git("worktree", "remove", "--force", str(worktree), cwd=AZ_ROOT, check=False)
+        # Leftover from a previous failed run; remove via the no-force
+        # helper. If even prune+retry can't free it, abort the run rather
+        # than escalate to --force (banned pattern B10).
+        r = _try_remove_worktree(worktree)
+        if r.returncode != 0:
+            log("error", reason="could not remove leftover worktree",
+                worktree=str(worktree),
+                stderr=r.stderr.strip()[:300])
+            return None, branch
 
     _git("fetch", "origin", "main", cwd=AZ_ROOT)
     _git("worktree", "add", str(worktree), "-b", branch, "origin/main", cwd=AZ_ROOT)
@@ -161,8 +183,15 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
                 return int(line.rstrip("/").rsplit("/", 1)[-1]), branch
         return None, branch
     finally:
-        # Always remove the worktree; the branch lives on origin
-        _git("worktree", "remove", "--force", str(worktree), cwd=AZ_ROOT, check=False)
+        # Always attempt to remove the worktree; the branch lives on origin.
+        # No --force (banned pattern B10); if the no-force helper can't
+        # free it, log loudly so the next run's pre-flight surfaces the
+        # leftover state.
+        r = _try_remove_worktree(worktree)
+        if r.returncode != 0:
+            log("warning", reason="worktree cleanup failed in finally",
+                worktree=str(worktree),
+                stderr=r.stderr.strip()[:300])
 
 
 def main() -> int:

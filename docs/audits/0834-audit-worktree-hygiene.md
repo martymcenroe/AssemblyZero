@@ -127,14 +127,24 @@ git worktree remove /path/to/worktree
 git branch -d branch-name  # -d = safe delete (fails if unmerged)
 ```
 
-### Force Removal (CAUTION)
+### When `git worktree remove` Refuses
 
-Only after confirming no valuable changes:
+`git worktree remove --force` and `git branch -D` are **banned** fleet-wide
+(see `Projects/CLAUDE.md` banned-commands table). Resolve via gentler
+means:
 
 ```bash
-git worktree remove --force /path/to/worktree
-git branch -D branch-name  # -D = force delete even if unmerged
+# 1. Cleans admin metadata for dead refs; often unblocks the next remove.
+git worktree prune
+
+# 2. Retry the plain remove.
+git worktree remove /path/to/worktree
 ```
+
+If `branch -d` refuses on a squash-merge orphan (different SHA from
+the squash commit on main), use the ADR-0217 `git replace --graft`
+recipe — never `branch -D`. If the branch still refuses to delete, it
+has unmerged work: investigate, do not force.
 
 ---
 

@@ -382,8 +382,12 @@ def fix_broken_links(findings: list[Finding], repo_root: str, dry_run: bool) -> 
 def fix_stale_worktrees(findings: list[Finding], repo_root: str, dry_run: bool) -> list[FixAction]:
     """Prune stale worktrees.
 
-    Executes `git worktree remove <path>` for each stale worktree.
-    Falls back to `git worktree remove --force <path>` if needed.
+    Executes `git worktree remove <path>` for each stale worktree. On
+    failure, runs `git worktree prune` (cleans admin metadata for dead
+    refs) and retries once. If the second attempt still fails, surfaces
+    the unremoved worktree via a Finding for operator review — never
+    escalates to `--force` (banned pattern B10; see
+    `Projects/CLAUDE.md` banned-commands table).
     """
     ...
 
