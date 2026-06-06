@@ -112,6 +112,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 
 1. **Branches vs Worktrees** - Cross-reference branch list against worktree list:
    - For each branch OTHER than main, check if it appears in the worktree list
+   - **Skip if the branch name matches `graveyard/*`** — these are operator-parked orphans per the ADR-0217 Option G refinement (namespace segregation). They persist intentionally; never flag them as orphans, never auto-delete them, do NOT include them in the orphan-deletion path. Surface only as a count in the report (see Phase 5).
    - If branch HAS a worktree: OK (active work - do NOT flag)
    - If branch has NO worktree: Flag as potential orphan
 
@@ -119,6 +120,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
 
    **Safety Criteria (ALL must be met to auto-delete):**
    - Branch is not `main`
+   - **Branch name does NOT match `graveyard/*`** (parked orphans, never auto-delete)
    - Remote tracking shows `gone` (was deleted on GitHub)
    - No worktree exists for this branch
 
@@ -256,6 +258,7 @@ Return a summary table:
 | Branches | Only main / {list} |
 | Worktrees | Only main / {list} |
 | Auto-Deleted | {count} branches / Skipped |
+| Graveyard | {count} parked branches (skipped per ADR-0217 namespace segregation) |
 | Stashes | None / {count} |
 | Permissions | Clean / Stale (Full mode only) |
 | Commit | Pushed / Failed |
