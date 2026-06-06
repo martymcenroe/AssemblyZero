@@ -203,11 +203,12 @@ Session: {SESSION_NAME}
 ## Phase 2: Conditional Fixes
 
 1. **Branches vs Worktrees** - Cross-reference:
+   - **Branch name matches `graveyard/*`: SKIP entirely.** These are operator-parked orphans per the ADR-0217 Option G refinement (namespace segregation). Never flag as orphan, never auto-delete. Surface only as a count in the Phase 5 report.
    - Branch HAS worktree: OK (active work)
    - Branch has NO worktree + remote gone: Orphan candidate
 
 2. **Auto-Delete Orphaned LOCAL Branches** (unless --no-auto-delete):
-   - Safety: Not main, remote shows `gone`, no worktree
+   - Safety: Not main, **does NOT match `graveyard/*`**, remote shows `gone`, no worktree
    - Action: `git -C ... branch -D {branch-name}`
 
 3. **CRITICAL: Delete Stale REMOTE Branches for Merged PRs:**
@@ -422,6 +423,7 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -r
 | Worktrees | Only main / {list} |
 | Local Orphans Deleted | {count} branches / 0 |
 | **Remote Stale Deleted** | {count} branches / 0 |
+| Graveyard | {count} parked branches (skipped per ADR-0217 namespace segregation) |
 | **Orphan Worktrees** | None / **ERROR: {list}** |
 | Empty Worktree Dirs Deleted | {count} / 0 |
 | Stashes | None / {count} |

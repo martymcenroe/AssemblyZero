@@ -121,6 +121,37 @@ Local branch refs cost essentially nothing. If `-D` is forbidden and `--graft` i
 - `git branch --list` accumulates dead refs over time
 - Tooling that operates on the branch list (e.g., automated cleanup, branch counters) sees noise
 
+### Option G' — Refinement: Namespace segregation for parked orphans
+
+A refinement of Option G that addresses the noise problem without crossing into bypass territory. When the graft-equivalence check fails AND the rebase-and-retry path produces a non-empty remnant (so the branch genuinely holds content that isn't on main), rename the orphan into a `graveyard/` namespace:
+
+```bash
+git branch -m <orphan-branch-name> graveyard/<orphan-branch-name>
+```
+
+Or with a date prefix for easier aging:
+
+```bash
+git branch -m <orphan-branch-name> graveyard/$(date +%Y-%m-%d)/<orphan-branch-name>
+```
+
+The rename is a **non-destructive ref operation** — the tip stays at the same commit, no content is destroyed, no force flag is involved. The branch continues to exist; it is just relocated to a namespace the operator's tooling can filter out by default.
+
+**Pros over plain Option G:**
+- Visually segregates "intentional active work" from "stuck orphans" — `git branch --list` (without `-a` and without the namespace pattern) hides parked orphans
+- Automated cleanup tooling can be taught one line — "skip `graveyard/*`" — and stop re-surfacing the same noise every run
+- Periodic re-check is trivial: `git branch -d graveyard/*` over the whole namespace tries plain delete on every parked orphan; any whose underlying commit has since become reachable from main (e.g., via subsequent merges that pull in equivalent content) will succeed and be cleaned. The namespace is a holding area with a natural-decay sweep, not a permanent grave.
+- Optional `git branch --edit-description graveyard/<name>` records why it's parked, preserving operator intent for future review.
+
+**Cons (acknowledged — same shape as Option F):**
+- The branch ref persists; the underlying commit is held alive until manual cleanup
+- Accumulates over time without the periodic re-check discipline
+- GUI git clients (GitHub Desktop, GitKraken, GitLens) render branches with slashes as collapsible folders, so the namespace surfaces there — usually desirable as visual grouping, but worth flagging
+
+This is **not** the same as Option F (rejected). Option F proposed pushing the orphan to `refs/archive/<branch>` and reconfiguring upstream — that's an actual ref-class change plus an upstream reconfiguration. Option G' is a plain rename within `refs/heads/`, no upstream changes, no new ref class. It works on the safety surface the no-force policy is concerned with.
+
+**Validated:** first applied 2026-06-07 to `1443-revise-with-context`, where the rebase-and-retry produced a 14-line duplicate-code remnant. The `git branch -m` succeeded without any flag; the cleanup skill was updated the same session to skip `graveyard/*` in orphan detection.
+
 ## 4. Rationale
 
 Option A was selected because it is the only path that:
