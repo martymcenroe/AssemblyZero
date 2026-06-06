@@ -25,6 +25,10 @@ A deep-research investigation (full prompt at `Aletheia/data/deep-research-squas
 **For deleting a local branch ref orphaned by a squash-merge, when no-force policy applies, use the four-step `git replace --graft` decomposition:**
 
 ```bash
+# 0. (Pre-flight) Capture the replace-ref state so the post-flight check
+#    in step 5 can detect residue. Typically PRE is 0 for a clean repo.
+PRE_REPLACE_COUNT=$(git replace --list | wc -l)
+
 # 1. Identify the parent of the squash commit on main
 BASE_SHA=$(git rev-parse <SQUASH_SHA>^)
 
@@ -38,9 +42,21 @@ git branch -d <ORPHAN_BRANCH_NAME>
 
 # 4. Remove the temporary graft; original commit and main are restored to pristine state
 git replace -d <SQUASH_SHA>
+
+# 5. (Post-flight) Verify no residue. The replace-ref count must match the
+#    pre-flight count. If it does not, an earlier step deviated from the
+#    recipe — surface the residue and remove it manually before continuing.
+POST_REPLACE_COUNT=$(git replace --list | wc -l)
+if [ "$POST_REPLACE_COUNT" -ne "$PRE_REPLACE_COUNT" ]; then
+  echo "ERROR: replace-ref residue after ADR-0217 recipe. Inspect:"
+  git replace --list --format=long
+  # Identify the offending ref and remove with: git replace -d <SHA>
+fi
 ```
 
 After step 4: local main is unchanged, the squash commit's parents are restored to their original single-parent form, no replace refs remain, and the orphan local branch ref is gone. The orphan commit itself becomes unreachable from any ref and is collected by `git gc` on its normal schedule.
+
+After step 5: the recipe is verified to have run to completion with no residue. This step is the load-bearing detection of a specific failure mode observed in the wild: a subagent (or an operator running the recipe partially) creates a non-standard replace ref — e.g., mapping the orphan tip to a synthetic commit instead of grafting the squash commit — abandons the sequence before step 3 or step 4, and reports success. Step 4 only removes the exact key it was told about; it cannot detect residue at a different key. Step 5 closes that gap.
 
 ## 3. Alternatives Considered
 
@@ -171,6 +187,7 @@ The selected option is a "Level 3" tool: higher overhead than `-D`, used only wh
 | `core.useReplaceRefs` set to false locally | Method silently ineffective | Very Low (default is true) | 2 | Verify with `git config --get core.useReplaceRefs` before applying; falls back to leaving orphan alone |
 | Step 3 succeeds but step 4 fails | Replace ref lingers, distorting subsequent reads of the squash commit | Very Low | 2 | Step 4 is one command; if it fails, run it manually; check `git replace -l` after |
 | Operator types wrong SHAs (e.g., not actually content-equivalent) | Could leave a graft mapping unrelated commits | Low | 2 | Verify content equivalence with `git diff <ORPHAN_SHA> <SQUASH_SHA>` before step 2 (must return zero output) |
+| Subagent (or operator) deviates from the recipe and reports success — e.g., creates a non-standard replace ref mapping the orphan tip to a synthetic commit and skips the `branch -d` | Replace-ref residue persists; orphan branch is not deleted; cleanup report claims success | Medium (observed Hermes 2026-06-06) | 2 | Step 5 post-flight check (`git replace --list` count must match pre-flight). Any deviation is detected and surfaced; recipe consumers MUST run step 5 |
 
 **Residual Risk:** Minimal for properly verified inputs.
 
@@ -217,3 +234,4 @@ The selected option is a "Level 3" tool: higher overhead than `-D`, used only wh
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-28 | Claude Opus 4.7 | Initial draft after sandbox + real-repo validation |
+| 2026-06-06 | Claude Opus 4.7 | Added Step 5 post-flight verification + Security Risk row for subagent-deviation failure mode observed on Hermes `feat-first-contact-disclosure` cleanup. See AssemblyZero #1558. |
