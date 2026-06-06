@@ -264,12 +264,25 @@ Session: {SESSION_NAME}
      - Action: `git -C ... push origin --delete {branch-name}`
    - This is NON-NEGOTIABLE. Merged PR branches MUST be deleted.
 
-4. **Verify No Orphaned Worktrees:**
+4. **Verify No Orphaned Worktrees — and auto-remove the safe ones (#1556):**
    - List worktrees: `git -C ... worktree list`
    - For each worktree (not main):
-     - Check if corresponding branch has an OPEN PR
-     - If PR is MERGED or CLOSED: worktree is orphaned → REPORT AS ERROR
-   - Worktrees for merged work MUST be removed manually (safety)
+     - Identify the worktree's branch (`git -C <worktree> branch --show-current`)
+     - Find the most recent PR for that branch: `gh pr list --repo {GITHUB_REPO} --state all --head <branch> --limit 1 --json number,state,mergedAt`
+     - **Auto-remove path** — fires when ALL three conditions are met:
+       - The PR exists AND its state is **MERGED**
+       - The worktree's `git -C <worktree> status --porcelain` returns empty (clean working tree, nothing uncommitted)
+       - The branch does NOT match `graveyard/*` → SKIP (graveyard branches are operator-parked; never auto-touch their worktrees)
+     - When auto-remove fires:
+       - Evict the worktree's cached poetry venv first (Windows file-lock mitigation, see below)
+       - Run plain `git -C {ROOT} worktree remove <worktree-path>` (no `--force` — banned per CLAUDE.md banned-commands table)
+       - On success: report `AUTO-REMOVE: <worktree> (PR #N merged, working tree was clean)`
+       - On failure (e.g., locked files, refs locked, or `worktree remove` refuses): report `AUTO-REMOVE FAILED: <worktree> — <stderr>`. Do NOT retry, do NOT escalate to `--force`, do NOT bypass.
+     - **Manual-handling path** — fires when:
+       - The PR is MERGED but the worktree has uncommitted changes (operator may have unmerged work) → REPORT as ORPHAN-WITH-UNCOMMITTED-STATE
+       - The PR is CLOSED unmerged → REPORT as ORPHAN-UNMERGED (the work may still be wanted)
+       - No PR association → REPORT as ORPHAN-NO-PR (could be carry-in or intentional state)
+     - In all manual-handling cases: report and let the operator decide; do not auto-remove
    - **Pre-removal poetry venv eviction (Windows file-lock mitigation):** Before calling `git worktree remove` on any worktree, run the following inside that worktree so its cached poetry virtualenv doesn't hold file locks:
      ```bash
      poetry env remove --all  # run from inside the worktree
