@@ -208,8 +208,53 @@ Session: {SESSION_NAME}
    - Branch has NO worktree + remote gone: Orphan candidate
 
 2. **Auto-Delete Orphaned LOCAL Branches** (unless --no-auto-delete):
-   - Safety: Not main, **does NOT match `graveyard/*`**, remote shows `gone`, no worktree
-   - Action: `git -C ... branch -D {branch-name}`
+   - Safety: Not main, **does NOT match `graveyard/*`**, remote shows `gone`, no worktree.
+   - **Do NOT use `git branch -D`** — it is on the CLAUDE.md banned-commands list. Use the literal four-step ADR-0217 graft recipe inline. For each candidate branch, execute these exact commands. Do not invent alternatives:
+
+     ```bash
+     # Identify the orphan tip and find the matching squash commit on main.
+     # Search recent main commits for one whose content matches the branch tip
+     # (typically the squash commit referencing the PR for this branch).
+     ORPHAN_TIP=$(git -C {ROOT} rev-parse {BRANCH})
+     SQUASH_SHA=$(git -C {ROOT} log origin/main --format='%H' --grep="(#${PR_N})" -1)
+     # If you cannot identify a SQUASH_SHA whose `git diff $ORPHAN_TIP $SQUASH_SHA` is empty,
+     # the branch holds unique content not on main — leave it alone and surface in the report
+     # (it is a content orphan, not a squash-merge orphan).
+
+     # Pre-flight: content equivalence REQUIRED before applying the graft.
+     if [ -n "$(git -C {ROOT} diff $ORPHAN_TIP $SQUASH_SHA --stat 2>&1)" ]; then
+       echo "WARNING: branch {BRANCH} has unique content vs squash on main. Not auto-deleting. Surface for operator review."
+       continue
+     fi
+
+     # Capture pre-flight replace-ref count so the post-flight check (Step 5 of ADR-0217)
+     # can detect any residue.
+     PRE_REPLACE_COUNT=$(git -C {ROOT} replace --list | wc -l)
+
+     # ADR-0217 Step 1: parent of the squash commit on main
+     BASE_SHA=$(git -C {ROOT} rev-parse ${SQUASH_SHA}^)
+
+     # ADR-0217 Step 2: graft (orphan tip becomes second parent of squash)
+     # Benign GPG-signature warning on signed squash commits is expected per ADR-0217 Section 5.
+     git -C {ROOT} replace --graft $SQUASH_SHA $BASE_SHA $ORPHAN_TIP
+
+     # ADR-0217 Step 3: safe delete now succeeds (orphan is reachable via graft)
+     git -C {ROOT} branch -d {BRANCH}
+
+     # ADR-0217 Step 4: remove the temporary graft
+     git -C {ROOT} replace -d $SQUASH_SHA
+
+     # ADR-0217 Step 5 (post-flight): replace-ref count must match pre-flight.
+     # If anything remains, an earlier step deviated. Surface the residue.
+     POST_REPLACE_COUNT=$(git -C {ROOT} replace --list | wc -l)
+     if [ "$POST_REPLACE_COUNT" -ne "$PRE_REPLACE_COUNT" ]; then
+       echo "ERROR: replace-ref residue remains after ADR-0217 recipe for {BRANCH}. Inspect:"
+       git -C {ROOT} replace --list --format=long
+       # Do NOT proceed silently. Report this in the final summary as a blocking condition.
+     fi
+     ```
+
+   - If the squash SHA cannot be identified (e.g., the PR number was not embedded in the commit message), fall back to namespacing the branch into `graveyard/<date>/<branch>` per ADR-0217 Option G' rather than forcing.
 
 3. **CRITICAL: Delete Stale REMOTE Branches for Merged PRs:**
    - Get merged PRs: `gh pr list --repo {GITHUB_REPO} --state merged --limit 50 --json headRefName`
@@ -374,9 +419,33 @@ Capture PR number → `PR_N`.
 ```bash
 until [ "$(gh api repos/{GITHUB_REPO}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
 gh pr merge $PR_N --squash --repo {GITHUB_REPO}
+
+# Capture the orphan-to-be and the new squash SHA before checkout.
+ORPHAN_TIP=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse $BRANCH)
+
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} fetch origin
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout main
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} pull --rebase
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -D $BRANCH
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} merge origin/main --ff-only
+
+# After squash-merge, the just-merged PR appears as the new tip of origin/main.
+SQUASH_SHA=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse origin/main)
+
+# Content equivalence is guaranteed here (we squash-merged our own commit),
+# so the pre-flight diff check is informational rather than gating.
+
+# ADR-0217 four-step recipe (do NOT use `branch -D` — it's on the banned list).
+PRE_REPLACE_COUNT=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list | wc -l)
+BASE_SHA=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse ${SQUASH_SHA}^)
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --graft $SQUASH_SHA $BASE_SHA $ORPHAN_TIP
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -d $BRANCH
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace -d $SQUASH_SHA
+
+# Step 5 post-flight: replace-ref count must match pre-flight.
+POST_REPLACE_COUNT=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list | wc -l)
+if [ "$POST_REPLACE_COUNT" -ne "$PRE_REPLACE_COUNT" ]; then
+  echo "ERROR: replace-ref residue remains after cleanup branch self-delete. Inspect:"
+  git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list --format=long
+fi
 ```
 
 ### 4.9 — Direct-push fallback (unprotected main only)
