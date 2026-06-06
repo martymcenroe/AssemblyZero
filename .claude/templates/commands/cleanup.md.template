@@ -135,11 +135,33 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
    b. If remote shows `gone` AND no worktree AND `--no-auto-delete` IS set:
       - Report: "ORPHAN: Branch {name} has no remote (--no-auto-delete set, skipping)"
 
-3. **Open PRs** - Should be 0. Flag if any exist.
+3. **Verify No Orphaned Worktrees — auto-remove safe ones (#1556):**
 
-4. **Stashes** - Document any stash entries found.
+   The workflow runners create worktrees at `~/Projects/<RepoName>-<issue>/`. When the associated PR merges and the working tree is clean, the worktree directory is filesystem residue and can be removed without losing work. This step closes that gap so worktree directories don't accumulate.
 
-5. **Permission Check** (Full mode only) - If the permission quick-check returned exit code 1:
+   - List worktrees: `git -C {{PROJECT_ROOT}} worktree list`
+   - For each worktree (not main):
+     - Identify the worktree's branch: `git -C <worktree> branch --show-current`
+     - Find the most recent PR for the branch: `gh pr list --repo {GITHUB_REPO} --state all --head <branch> --limit 1 --json number,state,mergedAt`
+     - **Auto-remove path** — fires when ALL three conditions are met:
+       - PR exists AND its state is **MERGED**
+       - `git -C <worktree> status --porcelain` returns empty (clean tree)
+       - Branch does NOT match `graveyard/*` (graveyard branches are operator-parked; never auto-touch)
+     - When auto-remove fires:
+       - Evict the worktree's cached poetry venv first (Windows file-lock mitigation; see Phase 2 note below)
+       - Run plain `git -C {{PROJECT_ROOT}} worktree remove <worktree-path>` (no `--force` — banned per CLAUDE.md banned-commands table)
+       - On success: report `AUTO-REMOVE: <worktree> (PR #N merged, working tree was clean)`
+       - On failure: report `AUTO-REMOVE FAILED: <worktree> — <stderr>`. Do NOT retry, do NOT escalate to `--force`, do NOT bypass.
+     - **Manual-handling path** — operator decides:
+       - PR is MERGED but working tree has uncommitted changes → REPORT `ORPHAN-WITH-UNCOMMITTED-STATE`
+       - PR is CLOSED unmerged → REPORT `ORPHAN-UNMERGED` (the work may still be wanted)
+       - No PR association → REPORT `ORPHAN-NO-PR` (could be carry-in)
+
+4. **Open PRs** - Should be 0. Flag if any exist.
+
+5. **Stashes** - Document any stash entries found.
+
+6. **Permission Check** (Full mode only) - If the permission quick-check returned exit code 1:
    - Report: "Stale permissions detected in settings.local.json"
    - Suggest: "Run `poetry run python tools/assemblyzero-permissions.py --clean --project {{PROJECT_NAME}}` to clean"
 
