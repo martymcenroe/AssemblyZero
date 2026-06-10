@@ -233,6 +233,25 @@ gh pr create --repo {owner}/{repo} --head {branch-name} --base main --title "...
 
 Tracked as AssemblyZero #1013 (closed as not-fixable-by-us; gh CLI upstream issue). The explicit-flags form is mandatory for agent-driven PR creation; the interactive `gh pr create` (no flags) works in human terminals because it falls back to a different code path.
 
+## When an API Call Returns an Auth Error You Didn't Expect (401 / 403 / "Bad credentials")
+
+An authentication-shaped error is a **claim by the remote service, not a fact about your credentials.** The reflex it provokes — "I lack permission, so escalate: widen the token, swap to classic-PAT, add `--admin`" — is the exact privilege-escalation trap the Banned Commands rules exist to stop. Do not take the bait.
+
+**Verify the credential before believing the error.** Make a cheap, known-good authenticated call:
+
+```bash
+gh api user --jq '.login'      # succeeds → your token is valid right now
+```
+
+- **Credential works** → the failing call's error is the *service's* problem (transient / transport / endpoint bug), not an authorization gap. Retry once, or use an equivalent operation **at the same privilege level.** NEVER escalate.
+- **Credential fails too** → a real auth problem. Stop and surface to the operator. Still never escalate on your own.
+
+**401 vs 403 is a tell.** `403 Forbidden` = authenticated but not permitted (a real boundary — respect it, don't bypass it). `401 Unauthorized` = "you sent no/invalid credentials." If you DID send credentials that work elsewhere (you just proved it with `gh api user`), a `401` is the service contradicting itself — a GitHub-side bug, not a sign you need more auth. We assume GitHub works; when its status codes are incoherent, it doesn't.
+
+**Lateral, same-privilege retry is allowed; escalation is not.** REST and GraphQL are two transports for the same operation at the same scope. If `gh pr create` (GraphQL) throws a spurious 401, `gh api repos/{o}/{r}/pulls -X POST` (REST) does the identical thing under the identical `pull_requests: write` scope — a lateral retry, not an escalation. Reaching for a classic PAT, `--admin`, a wider token, or any Banned-list flag **is** escalation and is forbidden regardless of what the error said.
+
+*Incident (2026-06-10): `gh pr create` returned `HTTP 401: Requires authentication` on the GraphQL endpoint while `gh api user` and the REST pulls endpoint worked with the same fine-grained PAT. The correct response was the REST equivalent at the same scope. A fleet agent that read the 401 literally attempted a privilege escalation — the failure this section prevents.*
+
 ## When `git push` Is Rejected For Workflow Scope
 
 If `git push` fails with:
