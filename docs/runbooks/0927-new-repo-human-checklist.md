@@ -1,7 +1,7 @@
 # 0927 - New Repo: Human Steps Checklist
 
 **Category:** Runbook / Operational Procedure
-**Version:** 6.7
+**Version:** 6.8
 **Last Updated:** 2026-05-26
 
 ---
@@ -175,7 +175,7 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
 
 | Step | Operation | Auth path |
 |------|-----------|-----------|
-| 12 | Local initial commit — non-workflow files only | (local git) |
+| 12 | Local initial commit — non-workflow files only (includes `.github/dependabot.yml` #1334 and `data-g/` #1563, which need no workflow scope) | (local git) |
 | 13 | Create GitHub repo + push initial commit | `gh auth` (fine-grained PAT is sufficient because the push contains no workflow-file changes) |
 | 14 | Star the repo | `gh auth` (fine-grained PAT) |
 | 15 | **Upload `.github/workflows/*` via Contents API** | In-process classic PAT via `classic_pat_session()` — PAT stays in Python heap |
@@ -200,7 +200,9 @@ The script handles all of the following automatically:
 - **Canonical labels**: `implementation` and `lld` on the GitHub repo (#1061)
 - **Per-repo `CLAUDE.md` (lean shape per ADR 0219)**: `## Project Identifiers` block plus a project-type-specific `## Project-Specific Context` stub. The scaffolded file is intentionally short (~15-25 lines) and ADDITIVE only — no merge-sequence / branch-protection / PR-rules content; those live in the auto-loaded universal `CLAUDE.md`. Pass `--project-type {minimal,python,chrome-extension,pypi,cf-worker,web}` to pick the stub; default `minimal` is a pure TODO block. Per-repo drift is auditable via `tools/lint_per_repo_claude_md.py` (#1290). See [ADR 0219](../adrs/0219-claude-md-division-of-responsibility.md) for the full division-of-responsibility rule. (#1258, #1291, #1266)
 - Cerberus secrets deploy (if `--cerberus-pem` supplied)
-- **Enable Dependabot at repo settings level** (#1331): PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`. Without this step the scaffolded `.github/dependabot.yml` is inert on private repos — Dependabot defaults to disabled and no PRs emit. The defect was confirmed 2026-05-26 on `dependabot-honeypot` (yml in place, 65 decorative deps pinned to ~12-18mo old versions, zero PRs after 11+ hours). The tool `tools/enable_dependabot.py` can also be run standalone to backfill existing repos.
+- **Generate `.github/dependabot.yml`** (#1334): version-update config written at creation time (script step 11c2). Ecosystems are detected by marker-file presence (`pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker) plus `github-actions` always. It rides the initial commit (non-workflow file, so no workflow scope). This is the half that makes #1331's settings-level enablement emit *version-update* PRs — without the yml, only *security* PRs fire.
+- **Create `data-g/`** (#1563): a git-tracked source-of-truth data directory with a README explaining the split. `data/` is ignored fleet-wide (ephemeral session artifacts); `data-g/` holds authoritative data the global ignore does not match, so it survives a machine wipe.
+- **Enable Dependabot at repo settings level** (#1331): PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`. Without this step the `.github/dependabot.yml` generated above is inert on private repos — Dependabot defaults to disabled and no PRs emit. The defect was confirmed 2026-05-26 on `dependabot-honeypot` (yml in place, 65 decorative deps pinned to ~12-18mo old versions, zero PRs after 11+ hours). The tool `tools/enable_dependabot.py` can also be run standalone to backfill existing repos.
 
 The script prints a summary showing what succeeded and what failed.
 
@@ -374,3 +376,4 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-05-25 | v6.5: #1295 — removed all "revoke after deploy" instructions (lines 49, 128, 264, 283, 287 of prior version). Per `unleashed#658`: revoking the key on the App page removes only the public-half registration; every per-repo `REVIEWER_APP_PRIVATE_KEY` Actions secret becomes unusable (GitHub rejects JWTs signed by the revoked key) — silently breaks every repo holding the just-revoked key. Added "Three independent copies of the key" explanation. All revoke guidance now points at runbook 0939 for the canonical deploy-new → audit → revoke-old rotation pattern. Operator question that surfaced this: "i don't understand. i don't need a pem private key on github? then how does it work?" |
 | 2026-05-26 | v6.6: #1293 — documented the per-repo `CLAUDE.md` lean shape per ADR 0219 (#1258) in the "What the script handles automatically" block. Surfaced the new `--project-type` flag (#1291) and pointed at the drift-detector lint tool (#1290). Per-repo CLAUDE.md is now explicitly framed as ADDITIVE only — no restatement of universal-CLAUDE.md content — with the lint tool as the audit-gate that catches regressions. |
 | 2026-05-26 | v6.7: #1331 — added Step 20 to the under-the-hood table: Enable Dependabot at the repo settings level (PATCH `security_and_analysis.dependabot_security_updates`, PUT `/vulnerability-alerts`, PUT `/automated-security-fixes`). Without this step the scaffolded `.github/dependabot.yml` is inert on private repos (Dependabot defaults to disabled; no PRs emit). Defect confirmed 2026-05-26 on `dependabot-honeypot`. Companion tool `tools/enable_dependabot.py` runs the same enablement against existing repos (`--repo OWNER/NAME` or `--fleet`, `--apply` per std 0017). |
+| 2026-06-10 | v6.8: #1334 + #1563 — script now generates `.github/dependabot.yml` at creation time (step 11c2; ecosystems by marker-file presence — `pyproject.toml`→pip, `package.json`→npm, `Dockerfile`→docker — plus `github-actions` always; non-workflow file, rides the initial commit). This is the version-update half that complements #1331's settings-level enablement — without the yml, only security PRs fire. Also creates `data-g/` (git-tracked source-of-truth data) with a README explaining the split vs the fleet-ignored `data/`. Updated the under-the-hood table (step 12) and the "handles automatically" list. |

@@ -1363,3 +1363,100 @@ class TestCerberusPostDeployAdvice:
             f"{branch_loc} (delta={delta}). The fix-anchor comment is no "
             "longer adjacent to the cerberus advice branch."
         )
+
+
+# ===========================================================================
+# TestDependabotConfig (#1334)
+# ===========================================================================
+
+
+class TestDependabotConfig:
+    """`.github/dependabot.yml` version-update generation at scaffold time."""
+
+    def test_github_actions_always_present(self, tmp_path):
+        from new_repo_setup import detect_dependabot_ecosystems
+        assert ("github-actions", "github-actions") in detect_dependabot_ecosystems(tmp_path)
+
+    def test_no_markers_yields_only_github_actions(self, tmp_path):
+        from new_repo_setup import detect_dependabot_ecosystems
+        assert detect_dependabot_ecosystems(tmp_path) == [("github-actions", "github-actions")]
+
+    def test_pip_detected_from_pyproject(self, tmp_path):
+        from new_repo_setup import detect_dependabot_ecosystems
+        (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
+        assert ("pip", "python") in detect_dependabot_ecosystems(tmp_path)
+
+    def test_npm_and_docker_detected(self, tmp_path):
+        from new_repo_setup import detect_dependabot_ecosystems
+        (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        keys = {eco for eco, _ in detect_dependabot_ecosystems(tmp_path)}
+        assert {"npm", "docker", "github-actions"} <= keys
+
+    def test_create_writes_file_and_returns_ecosystems(self, tmp_path):
+        from new_repo_setup import create_dependabot_config
+        (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
+        written = create_dependabot_config(tmp_path)
+        assert (tmp_path / ".github" / "dependabot.yml").exists()
+        assert "pip" in written and "github-actions" in written
+
+    def test_yml_has_fleet_standard_fields(self, tmp_path):
+        from new_repo_setup import create_dependabot_config
+        (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
+        create_dependabot_config(tmp_path)
+        text = (tmp_path / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        assert "version: 2" in text
+        assert 'package-ecosystem: "pip"' in text
+        assert 'package-ecosystem: "github-actions"' in text
+        assert 'timezone: "America/Chicago"' in text
+        assert 'prefix: "chore(deps)"' in text
+        assert "open-pull-requests-limit: 5" in text
+        # grouped minor + patch present
+        assert '"minor"' in text and '"patch"' in text
+
+    def test_yml_is_lf_only(self, tmp_path):
+        # newline="" must keep LF on Windows, matching the rest of the fleet.
+        from new_repo_setup import create_dependabot_config
+        create_dependabot_config(tmp_path)
+        raw = (tmp_path / ".github" / "dependabot.yml").read_bytes()
+        assert b"\r\n" not in raw
+
+
+# ===========================================================================
+# TestDataGConvention (#1563)
+# ===========================================================================
+
+
+class TestDataGConvention:
+    """data-g/ git-tracked source-of-truth data directory."""
+
+    def test_create_writes_readme(self, tmp_path):
+        from new_repo_setup import create_data_g_readme
+        create_data_g_readme(tmp_path)
+        assert (tmp_path / "data-g" / "README.md").exists()
+
+    def test_create_removes_schema_gitkeep(self, tmp_path):
+        from new_repo_setup import create_data_g_readme
+        data_g = tmp_path / "data-g"
+        data_g.mkdir()
+        (data_g / ".gitkeep").touch()  # simulate schema-created placeholder
+        create_data_g_readme(tmp_path)
+        assert not (data_g / ".gitkeep").exists()
+
+    def test_readme_explains_split_and_cites_issue(self, tmp_path):
+        from new_repo_setup import create_data_g_readme
+        create_data_g_readme(tmp_path)
+        text = (tmp_path / "data-g" / "README.md").read_text(encoding="utf-8")
+        assert "data/" in text and "data-g/" in text
+        assert "#1563" in text
+
+    def test_schema_includes_data_g(self):
+        from new_repo_setup import load_structure_schema
+        schema = load_structure_schema()
+        assert "data-g" in schema["directories"]
+
+    def test_claude_md_documents_convention(self, tmp_path):
+        from new_repo_setup import create_claude_md
+        create_claude_md(tmp_path, "demo", "martymcenroe", "minimal")
+        text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
+        assert "data-g/" in text
