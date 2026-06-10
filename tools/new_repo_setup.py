@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1251,6 +1252,28 @@ if __name__ == "__main__":
 '''
 
 
+_REQUIRES_PYTHON_CARET = re.compile(
+    r'(requires-python\s*=\s*")\^(\d+)\.(\d+)(?:\.\d+)?(")'
+)
+
+
+def _normalize_requires_python(pyproject_text: str) -> str:
+    """Rewrite a Poetry-style caret requires-python to valid PEP 440 (#1573).
+
+    `poetry init` writes `requires-python = "^3.10"` into the PEP 621 [project]
+    table. The caret is valid Poetry dependency syntax but INVALID PEP 440 for
+    this field, so ruff and other strict PEP 621 consumers refuse to parse
+    pyproject.toml at all. `^X.Y` means `>=X.Y,<(X+1).0`, so rewrite to that
+    faithful, valid form. An already-valid specifier is returned unchanged.
+    """
+    def _repl(m):
+        major = int(m.group(2))
+        minor = m.group(3)
+        return f'{m.group(1)}>={major}.{minor},<{major + 1}.0{m.group(4)}'
+
+    return _REQUIRES_PYTHON_CARET.sub(_repl, pyproject_text)
+
+
 def create_python_project(
     project_path: Path,
     name: str,
@@ -1351,6 +1374,20 @@ def create_python_project(
                 )
         except OSError as e:
             print(f"  WARNING: could not append pytest config: {e}")
+            return False
+
+    # Step 3b: normalize requires-python to valid PEP 440 (#1573). poetry init
+    # writes `requires-python = "^3.x"` into [project] -- valid Poetry syntax
+    # but invalid PEP 440, which breaks ruff and every strict PEP 621 consumer.
+    if pyproject.exists():
+        try:
+            current = pyproject.read_text(encoding="utf-8")
+            fixed = _normalize_requires_python(current)
+            if fixed != current:
+                pyproject.write_text(fixed, encoding="utf-8")
+                print("  Normalized requires-python to valid PEP 440")
+        except OSError as e:
+            print(f"  WARNING: could not normalize requires-python: {e}")
             return False
 
     # Step 4: tests/conftest.py
@@ -2582,6 +2619,83 @@ def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
     ])
 
 
+def validate_scaffold(project_path: Path) -> tuple[list[str], list[str]]:
+    """Structural validation of a freshly scaffolded repo (#1575).
+
+    Returns (blocking, advisory) lists of human-readable failure messages.
+
+    Blocking = structural invalidity that must not ship: a config file that
+    does not parse, or a requires-python that is not a valid PEP 440 specifier.
+    Advisory = checks that could not be run fully (an optional validator's
+    dependency is unavailable).
+
+    Operates on local files only, so the caller can run it BEFORE creating any
+    GitHub state -- a blocking failure then aborts with nothing to roll back.
+    """
+    blocking: list[str] = []
+    advisory: list[str] = []
+
+    # pyproject.toml: must parse, and [project].requires-python (if present)
+    # must be a valid PEP 440 specifier -- the #1571 / #1573 failure class.
+    pp = project_path / "pyproject.toml"
+    if pp.exists():
+        data = None
+        try:
+            data = tomllib.loads(pp.read_text(encoding="utf-8"))
+        except (tomllib.TOMLDecodeError, OSError) as e:
+            blocking.append(f"pyproject.toml does not parse: {e}")
+        if data is not None:
+            rp = data.get("project", {}).get("requires-python")
+            if rp is not None:
+                try:
+                    from packaging.specifiers import (
+                        InvalidSpecifier,
+                        SpecifierSet,
+                    )
+                    try:
+                        SpecifierSet(rp)
+                    except InvalidSpecifier as e:
+                        blocking.append(
+                            f"[project].requires-python is not valid PEP 440: "
+                            f"{rp!r} ({e})"
+                        )
+                except ImportError:
+                    # packaging unavailable: fall back to the known-bad forms.
+                    if rp.lstrip().startswith(("^", "~")):
+                        blocking.append(
+                            f"[project].requires-python uses non-PEP-440 "
+                            f"syntax: {rp!r}"
+                        )
+                    else:
+                        advisory.append(
+                            "packaging unavailable; requires-python only "
+                            "shallow-checked"
+                        )
+
+    # .github/dependabot.yml: must be valid YAML (the #1334 file).
+    db = project_path / ".github" / "dependabot.yml"
+    if db.exists():
+        try:
+            import yaml
+            try:
+                yaml.safe_load(db.read_text(encoding="utf-8"))
+            except yaml.YAMLError as e:
+                blocking.append(f".github/dependabot.yml is not valid YAML: {e}")
+        except ImportError:
+            advisory.append("PyYAML unavailable; dependabot.yml not validated")
+
+    # JSON config files must parse.
+    for rel in (".claude/project.json", ".claude/settings.json", ".unleashed.json"):
+        f = project_path / rel
+        if f.exists():
+            try:
+                json.loads(f.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as e:
+                blocking.append(f"{rel} is not valid JSON: {e}")
+
+    return blocking, advisory
+
+
 def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str) -> None:
     """Internal repo creation logic, separated for error handling."""
     # Pre-flight: refuse to proceed if anything already exists at project_path.
@@ -2847,6 +2961,25 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
 
     if checks_passed < checks_total:
         print("\nWARNING: Some local checks failed. Review and fix before starting work!")
+
+    # Scaffold validation gate (#1575). Structural validity is checked on local
+    # files BEFORE any GitHub state exists, so a malformed scaffold aborts with
+    # nothing to roll back. Blocking failures abort; advisory ones only warn.
+    print("\n" + "=" * 60)
+    print("SCAFFOLD VALIDATION GATE")
+    print("=" * 60)
+    gate_blocking, gate_advisory = validate_scaffold(project_path)
+    for msg in gate_advisory:
+        print(f"  [WARN] {msg}")
+    if gate_blocking:
+        print("\n  BLOCKING -- scaffold is structurally invalid:")
+        for msg in gate_blocking:
+            print(f"    [FAIL] {msg}")
+        print("\n  Aborting BEFORE any GitHub repo is created. Nothing was pushed.")
+        print(f"  Local scaffold left for inspection at: {project_path}")
+        print("  Fix the scaffolder defect, delete that directory, then re-run.")
+        sys.exit(1)
+    print("  [PASS] Scaffold structurally valid.")
 
     if not args.no_github:
         # Closes #1533: the GitHub repo name preserves the operator's input
