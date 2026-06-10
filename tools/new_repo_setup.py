@@ -583,6 +583,11 @@ You are a team member on the {name} project, not a tool.
 - **Worktree Pattern:** `{name}-{{IssueID}}` (e.g., `{name}-45`)
 
 {context_block}
+## Data Directories
+
+- `data/`: ephemeral session artifacts (transcripts, run logs, pickup state). Ignored by the fleet-wide global gitignore; not committed.
+- `data-g/`: source-of-truth data the runtime treats as authoritative (rosters, corpora, configs). Git-tracked for durability. See `data-g/README.md`. (AssemblyZero #1563.)
+
 {overrides_footer}"""
     claude_md_path = project_path / "CLAUDE.md"
     claude_md_path.write_text(content, encoding='utf-8')
@@ -990,6 +995,50 @@ data/unleashed/
     gitignore_path.write_text(content, encoding='utf-8')
 
 
+def create_data_g_readme(project_path: Path) -> None:
+    """Create data-g/ with a README documenting the tracked-data split (#1563).
+
+    The fleet-wide global gitignore ignores `data/` so ephemeral session
+    artifacts (transcripts, run logs, pickup state) never land in git -- the
+    right default for throwaway state. But that ignore silently drops
+    authoritative work product too. Source-of-truth data the runtime reads as
+    canonical (rosters, corpora, recipient lists, configs) goes in `data-g/`
+    (the `-g` reads as "git-tracked"), which the global ignore does NOT match.
+
+    Surfaced in IEEE-LRP-SC5 #19 when a roster JSON under data/ was silently
+    dropped from a durability commit and would have been lost on a machine wipe.
+
+    Removes the schema-created .gitkeep -- the README makes the directory
+    non-empty and committable on its own.
+    """
+    data_g = project_path / "data-g"
+    data_g.mkdir(parents=True, exist_ok=True)
+    gitkeep = data_g / ".gitkeep"
+    if gitkeep.exists():
+        gitkeep.unlink()
+    readme = '''\
+# data-g/ -- git-tracked data
+
+Source-of-truth data files that must persist in GitHub live here.
+
+The fleet-wide global gitignore ignores `data/` so ephemeral session artifacts
+(transcripts, run logs, pickup state) never land in git. That is the right
+default for throwaway state -- but it silently drops authoritative work product
+too. Anything the runtime reads as canonical input -- roster files, corpora,
+recipient lists, convergence configs -- belongs in `data-g/`, which the global
+ignore does NOT match.
+
+| Path | Tracked? | Use for |
+|------|----------|---------|
+| `data/`   | No (global gitignore) | Session transcripts, pickup state, throwaway run output |
+| `data-g/` | Yes                   | Source-of-truth: rosters, corpora, configs the runtime depends on |
+
+Rule of thumb: if losing the file on a machine wipe would hurt, it goes in
+`data-g/`. (Convention established in AssemblyZero #1563.)
+'''
+    (data_g / "README.md").write_text(readme, encoding="utf-8", newline="")
+
+
 def create_file_inventory(project_path: Path, name: str) -> None:
     """
     Create the docs/00003-file-inventory.md file.
@@ -1019,7 +1068,8 @@ This document provides a complete inventory of files in the {name} project, orga
 ```
 {name}/
 ├── .claude/                    # Claude Code configuration
-├── data/                       # App data: examples, templates, seeds
+├── data/                       # Ephemeral data (git-ignored fleet-wide)
+├── data-g/                     # Git-tracked source-of-truth data (see data-g/README.md)
 ├── docs/                       # All documentation
 │   ├── adrs/                   # Architecture Decision Records
 │   ├── standards/              # Project-specific standards
@@ -1504,6 +1554,103 @@ jobs:
         (workflows_dir / "release.yml").write_text(
             release_yml, encoding="utf-8", newline="",
         )
+
+
+# Dependabot version-update ecosystems, detected by marker-file presence.
+# (marker filename, package-ecosystem, ecosystem label). github-actions is
+# always added on top -- every scaffolded repo ships at least one workflow.
+_DEPENDABOT_ECOSYSTEMS: list[tuple[str, str, str]] = [
+    ("pyproject.toml", "pip", "python"),
+    ("package.json", "npm", "javascript"),
+    ("Dockerfile", "docker", "docker"),
+]
+
+
+def detect_dependabot_ecosystems(project_path: Path) -> list[tuple[str, str]]:
+    """Return the (package-ecosystem, label) pairs that apply to project_path.
+
+    Detection is by marker-file presence (pyproject.toml -> pip, package.json
+    -> npm, Dockerfile -> docker). github-actions is always appended last
+    because every scaffolded repo ships at least the auto-reviewer workflow.
+    Keeping detection file-based (not arg-based) lets the fleet-backfill
+    follow-up reuse this helper unchanged against existing repos.
+    """
+    ecosystems = [
+        (eco, label)
+        for marker, eco, label in _DEPENDABOT_ECOSYSTEMS
+        if (project_path / marker).exists()
+    ]
+    ecosystems.append(("github-actions", "github-actions"))
+    return ecosystems
+
+
+def _dependabot_block(package_ecosystem: str, label: str) -> str:
+    """Render one `updates:` block in the fleet-standard format.
+
+    Weekly Monday 09:00 America/Chicago, grouped minor+patch to cut PR noise,
+    chore(deps) commit prefix, open-pull-requests-limit 5, dependencies +
+    per-ecosystem label. Mirrors the working Aletheia config.
+    """
+    return f'''\
+  - package-ecosystem: "{package_ecosystem}"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "{label}"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      {label}-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+'''
+
+
+def render_dependabot_yml(ecosystems: list[tuple[str, str]]) -> str:
+    """Render a complete .github/dependabot.yml for the given ecosystems."""
+    header = (
+        "# Dependabot version-update configuration.\n"
+        "# https://docs.github.com/code-security/dependabot/dependabot-version-updates\n"
+        "# Generated by AssemblyZero new_repo_setup.py (#1334). Repo-level\n"
+        "# Dependabot alerts + security updates are enabled separately by\n"
+        "# enable_dependabot.py; this file is what makes version-update PRs fire.\n"
+        "version: 2\n"
+        "updates:\n"
+    )
+    return header + "\n".join(
+        _dependabot_block(eco, label) for eco, label in ecosystems
+    )
+
+
+def create_dependabot_config(project_path: Path) -> list[str]:
+    """Write .github/dependabot.yml with version-update config (#1334).
+
+    Without this file a repo emits only Dependabot *security* PRs (after
+    enable_dependabot.py flips the API toggles) -- never *version-update* PRs.
+    Detects ecosystems by marker-file presence; github-actions is always
+    included. Returns the package-ecosystems written.
+
+    The file lands under .github/ (NOT .github/workflows/), so it needs no
+    `workflow` PAT scope and rides the normal initial commit -- unlike the
+    workflow files, which require the Contents API (step 16).
+    """
+    ecosystems = detect_dependabot_ecosystems(project_path)
+    github_dir = project_path / ".github"
+    github_dir.mkdir(parents=True, exist_ok=True)
+    # newline="" keeps LF on Windows, matching the rest of the fleet.
+    (github_dir / "dependabot.yml").write_text(
+        render_dependabot_yml(ecosystems), encoding="utf-8", newline="",
+    )
+    return [eco for eco, _label in ecosystems]
 
 
 def create_settings_json(project_path: Path) -> None:
@@ -2523,6 +2670,13 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     create_file_inventory(project_path, args.name)
     print("  Created file inventory")
 
+    # Step 11a: Create data-g/ (git-tracked source-of-truth data) (#1563).
+    # The global gitignore ignores data/; data-g/ is the durable counterpart
+    # the ignore does not match. README explains the split.
+    print("\n11a. Creating data-g/ (git-tracked data convention)...")
+    create_data_g_readme(project_path)
+    print("  Created data-g/README.md")
+
     # Step 11b: Create .unleashed.json (wrapper configuration)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
@@ -2566,6 +2720,15 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  Created auto-reviewer.yml + release.yml (PyPI publish on tag)")
     else:
         print("  Created auto-reviewer.yml (Cerberus auto-approval caller)")
+
+    # Step 11c2: Create .github/dependabot.yml (#1334). Step 20 enables
+    # Dependabot at the API level (alerts + security updates); without this
+    # file no *version-update* PRs ever fire. Runs after the Python bootstrap
+    # so pyproject.toml is present for ecosystem detection. Lands in the
+    # initial commit (not under .github/workflows/, so no workflow scope).
+    print("\n11c2. Creating .github/dependabot.yml...")
+    db_ecos = create_dependabot_config(project_path)
+    print(f"  Created dependabot.yml (ecosystems: {', '.join(db_ecos)})")
 
     # Step 12: Initial commit — non-workflow files only.
     # Workflow files (.github/workflows/*) require the `workflow` scope on
@@ -2650,6 +2813,24 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
             checks_passed += 1
         else:
             print(f"  [FAIL] .gitignore missing agent-parked patterns: {parked_missing}")
+
+    # Verify .github/dependabot.yml present with version-update config (#1334)
+    checks_total += 1
+    dependabot_yml = project_path / ".github" / "dependabot.yml"
+    if dependabot_yml.exists() and "package-ecosystem" in dependabot_yml.read_text(encoding="utf-8"):
+        print("  [PASS] .github/dependabot.yml present (version updates)")
+        checks_passed += 1
+    else:
+        print("  [FAIL] .github/dependabot.yml missing or has no ecosystems")
+
+    # Verify data-g/ tracked-data directory present with README (#1563)
+    checks_total += 1
+    data_g_readme = project_path / "data-g" / "README.md"
+    if data_g_readme.exists():
+        print("  [PASS] data-g/ present (git-tracked data convention)")
+        checks_passed += 1
+    else:
+        print("  [FAIL] data-g/README.md missing")
 
     # Verify settings.json has hooks configured
     checks_total += 1

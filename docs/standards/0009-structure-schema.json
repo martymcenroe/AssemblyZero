@@ -150,7 +150,11 @@
     },
     "data": {
       "required": false,
-      "description": "App data: examples, templates, seeds"
+      "description": "Ephemeral data, git-ignored fleet-wide (transcripts, run logs, pickup state)"
+    },
+    "data-g": {
+      "required": false,
+      "description": "Git-tracked source-of-truth data the global ignore does not match (rosters, corpora, configs) -- AZ #1563"
     },
     ".claude": {
       "required": true,
