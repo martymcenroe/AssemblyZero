@@ -1460,3 +1460,95 @@ class TestDataGConvention:
         create_claude_md(tmp_path, "demo", "martymcenroe", "minimal")
         text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
         assert "data-g/" in text
+
+
+# ===========================================================================
+# TestRequiresPythonNormalization (#1573)
+# ===========================================================================
+
+
+class TestRequiresPythonNormalization:
+    """_normalize_requires_python: Poetry caret -> valid PEP 440."""
+
+    def test_caret_310(self):
+        from new_repo_setup import _normalize_requires_python
+        out = _normalize_requires_python('requires-python = "^3.10"\n')
+        assert 'requires-python = ">=3.10,<4.0"' in out
+
+    def test_caret_311_and_312_preserve_floor(self):
+        from new_repo_setup import _normalize_requires_python
+        assert ">=3.11,<4.0" in _normalize_requires_python('requires-python = "^3.11"')
+        assert ">=3.12,<4.0" in _normalize_requires_python('requires-python = "^3.12"')
+
+    def test_already_valid_is_unchanged(self):
+        from new_repo_setup import _normalize_requires_python
+        src = 'requires-python = ">=3.10,<4.0"\n'
+        assert _normalize_requires_python(src) == src
+
+    def test_result_parses_as_pep440(self):
+        import re
+        from packaging.specifiers import SpecifierSet
+        from new_repo_setup import _normalize_requires_python
+        out = _normalize_requires_python('requires-python = "^3.10"')
+        val = re.search(r'requires-python = "([^"]+)"', out).group(1)
+        SpecifierSet(val)  # raises InvalidSpecifier if the rewrite is wrong
+
+
+# ===========================================================================
+# TestScaffoldValidationGate (#1575)
+# ===========================================================================
+
+
+class TestScaffoldValidationGate:
+    """validate_scaffold: blocks on structural invalidity, passes valid repos."""
+
+    @staticmethod
+    def _valid_pyproject(tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "x"\nversion = "0.1.0"\n'
+            'requires-python = ">=3.10,<4.0"\n',
+            encoding="utf-8",
+        )
+
+    def test_valid_scaffold_has_no_blocking(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        self._valid_pyproject(tmp_path)
+        blocking, _ = validate_scaffold(tmp_path)
+        assert blocking == []
+
+    def test_empty_dir_has_no_blocking(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        blocking, _ = validate_scaffold(tmp_path)
+        assert blocking == []
+
+    def test_caret_requires_python_blocks(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "x"\nrequires-python = "^3.10"\n', encoding="utf-8"
+        )
+        blocking, _ = validate_scaffold(tmp_path)
+        assert any("requires-python" in m for m in blocking), blocking
+
+    def test_unparseable_pyproject_blocks(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        (tmp_path / "pyproject.toml").write_text("this = = not toml\n", encoding="utf-8")
+        blocking, _ = validate_scaffold(tmp_path)
+        assert any("does not parse" in m for m in blocking), blocking
+
+    def test_invalid_dependabot_yaml_blocks(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        self._valid_pyproject(tmp_path)
+        (tmp_path / ".github").mkdir()
+        (tmp_path / ".github" / "dependabot.yml").write_text(
+            "version: 2\nupdates: [\n", encoding="utf-8"
+        )
+        blocking, _ = validate_scaffold(tmp_path)
+        assert any("dependabot.yml" in m for m in blocking), blocking
+
+    def test_invalid_json_blocks(self, tmp_path):
+        from new_repo_setup import validate_scaffold
+        self._valid_pyproject(tmp_path)
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "project.json").write_text("{ not json", encoding="utf-8")
+        blocking, _ = validate_scaffold(tmp_path)
+        assert any("project.json" in m for m in blocking), blocking
