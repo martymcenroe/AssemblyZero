@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
 from new_repo_setup import PROJECT_TYPES, create_claude_md  # noqa: E402
 from lint_per_repo_claude_md import detect_drift  # noqa: E402

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 
 from new_repo_setup import (
     PROJECT_TYPES,
@@ -34,8 +34,8 @@ from new_repo_setup import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "0009-structure-schema.json"
-STANDARD_PATH = Path(__file__).parent.parent / "docs" / "standards" / "0009-canonical-project-structure.md"
+SCHEMA_PATH = Path(__file__).parent.parent.parent / "docs" / "standards" / "0009-structure-schema.json"
+STANDARD_PATH = Path(__file__).parent.parent.parent / "docs" / "standards" / "0009-canonical-project-structure.md"
 
 
 def _minimal_schema():
@@ -1236,7 +1236,7 @@ class TestGitHubRepoNameCasePreservation:
 
     def test_no_lowercased_repo_name_variable_in_script(self):
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
         content = script.read_text(encoding="utf-8")
         assert "repo_name_lower" not in content, (
             "regression: `repo_name_lower` was reintroduced. The GitHub repo "
@@ -1250,7 +1250,7 @@ class TestGitHubRepoNameCasePreservation:
         site so a future agent reading the code understands why no
         lowercasing happens there."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
         content = script.read_text(encoding="utf-8")
         assert "#1533" in content
         # The comment must sit in the GitHub-side flow. Use the `GITHUB REMOTE`
@@ -1289,7 +1289,7 @@ class TestGitHubRepoNameCasePreservation:
         """
         from pathlib import Path
         import re
-        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
         content = script.read_text(encoding="utf-8")
 
         # Direct mutation: `args.name = args.name.lower()`
@@ -1329,7 +1329,7 @@ class TestCerberusPostDeployAdvice:
         """The string 'REMEMBER to revoke' should only appear inside a
         conditional that checks args.cerberus_pem (the plaintext flow)."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
         content = script.read_text(encoding="utf-8")
         # The advisory text must exist (it's correct for the plaintext flow)
         assert "REMEMBER to revoke the key in the app UI" in content
@@ -1345,7 +1345,7 @@ class TestCerberusPostDeployAdvice:
         so future agents understand why the two flows produce different
         end-of-run advice."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
         content = script.read_text(encoding="utf-8")
         assert "#1536" in content
         # The #1536 anchor must be near the `elif cerberus_status == \"OK\":`
