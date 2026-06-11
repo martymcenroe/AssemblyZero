@@ -8,7 +8,7 @@ dry-run never touches the network.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
 from fix_requires_python import (  # noqa: E402
     fix_repo,

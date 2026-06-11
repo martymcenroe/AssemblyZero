@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 # Make tools/ importable. Mirrors the conftest pattern other AZ tests use.
-_TOOLS = Path(__file__).resolve().parent.parent / "tools"
+_TOOLS = Path(__file__).resolve().parent.parent.parent / "tools"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
