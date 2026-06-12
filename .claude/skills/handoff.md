@@ -262,6 +262,8 @@ After outputting the prompt to screen, persist it to the repo's handoff log so i
 
    The script is idempotent — rerunning with the same marker is a no-op. Runs BEFORE Step 6 (spawn) so the new auto-onboarding session sees the marker.
 
+   **Completion-attestation contract (#1586):** this trailing marker is written AFTER the body (Step 5) and the persist work (lessons, memories, plan archive), so its presence is the attestation that the handoff finished its persist step. The handoff log is therefore a contract consumers (`pickup_decide.py`, `/onboard`, future tooling) may rely on: `<!-- handoff-end -->` present ⇒ body complete; a trailing `<!-- handoff|park|reboot-parked <ts> -->` after it ⇒ persist step completed. Consumers must NOT infer handoff health from session-transcript close state — that is a weak proxy the normal respawn workflow (old window left open) trips routinely. This is documentation only: /handoff already writes these markers; no behavior change.
+
 ### Step 5B: Persist Lessons Learned
 
 Lessons learned are institutional knowledge — they get committed, unlike the handoff log.

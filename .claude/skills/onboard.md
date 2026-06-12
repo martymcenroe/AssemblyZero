@@ -109,7 +109,7 @@ The pickup decision is **event-ordered**, not age-based. Read `data/handoff-log.
 
 The subshell `()` keeps the `cd` local. The script reads `data/handoff-log.md`, walks `~/.claude/projects/<encoded>/*.jsonl`, classifies each session, and emits a JSON verdict. Parse the JSON. The `decision` field tells you what to do. The `summary` and `surfaces` fields are pre-rendered text for the user.
 
-**This skill is a thin shim.** All classification and decision logic lives in `pickup_decide.py` per #575. Do not interpret session categories yourself, do not second-guess the script's verdict, do not add LLM-judgment branches. Print what the script gives you and dispatch on the verdict name only.
+**This skill is a thin shim.** All classification and decision logic lives in `pickup_decide.py` per #575. Do not interpret session categories yourself, do not second-guess the script's verdict, do not add LLM-judgment branches. Print what the script gives you and dispatch on the verdict name only. (Verifying the handoff ARTIFACT with deterministic grep — and reporting those facts on a `surface_to_user` — is NOT second-guessing: the verdict and the dispatch table stay exactly as the script returns them. See the Surface protocol's verification step below and #1586.)
 
 **B) Dispatch on the `decision` field:**
 
@@ -125,6 +125,23 @@ The subshell `()` keeps the `cd` local. The script reads `data/handoff-log.md`, 
 
 **Surface protocol (`decision == "surface_to_user"`):**
 
+The verdict and dispatch stay with the script — you still surface and wait. But the script reasons about the *session transcript*; you must first verify the *handoff artifact* and lead with those facts, so the operator is not handed an unverified structural-failure hypothesis (e.g. "possible mid-handoff crash") when the refuting evidence is one grep away. Both signals can be true and describe different things (see #1586).
+
+**B0) Verify the handoff artifact first — deterministic, grep only, no LLM judgment.**
+
+If `checkpoint.has_body` is `true`, verify the **last** handoff block in `data/handoff-log.md` BEFORE printing anything. Verify ONLY the last block — the log is append-only with many prior handoffs; never match an earlier block's markers, and respect any `<!-- picked-up -->` marker. Find the last `<!-- handoff-start -->` / `<!-- handoff-end -->` pair and check for a trailing close-state marker (`<!-- handoff <ts> -->`, `<!-- park <ts> -->`, or `<!-- reboot-parked <ts> -->`) AFTER the end marker. Report the result as FACT, ahead of the script's summary:
+
+- **start + end + trailing marker all present** → "Handoff body verified complete (start/end/close-state markers intact)." Do NOT use crash/broken/failed/"incomplete" language anywhere in the surface — the artifact passed.
+- **`handoff-end` marker ABSENT** → "Handoff body INCOMPLETE — truncated at line {N} (no `handoff-end`). A mid-write crash is consistent with this evidence." Surfacing is mandatory; the operator may prefer to resume the crashed session rather than pick up a half-written handoff.
+- **end present, trailing close-state marker ABSENT** → "Handoff body complete, but the completion attestation (trailing marker) is missing — the persist step (lessons PR, memories) may not have finished; persist claims are unverified." Verify any named claim before presenting it as done (next bullet).
+- **Old-format block (pre-dating current markers)** → degrade gracefully: `handoff-end` is load-bearing, the trailing marker is corroboration. Never hard-fail verification on an old format; report what you can confirm.
+
+**Optional persist-claim check (SHOULD, not MUST):** if the handoff body names a falsifiable persist claim (e.g. "Lessons committed → PR #N", "Closes #N"), verify that ONE claim with a single `gh` read. That settles "is the handoff body itself trustworthy" — the question the operator actually has.
+
+This step is grep plus an optional `gh` read. It adds facts; it does NOT interpret session categories, reinterpret the verdict, or change which verdicts surface.
+
+**B1) Print the script's surfaces and summary, with honest close-state framing.**
+
 Print every entry in `surfaces` to the user verbatim, in order, one per line. Each entry has `kind` (`checkpoint` or `session`), `headline`, `detail`, and `danger_flags`. Render as:
 
 ```
@@ -133,13 +150,13 @@ Print every entry in `surfaces` to the user verbatim, in order, one per line. Ea
   (danger: {danger_flags joined by comma})       # only if non-empty
 ```
 
-Then print the `summary` field.
+Then print the `summary` field. **If B0 verification passed and the summary carries crash/incomplete language about close state, do not let it stand unqualified** — the script's complaint is about the writing session's *close state*, not body integrity. State plainly that the absence of a clean session-close marker is consistent with (a) the old window still being open — the normal case right after a handoff into a new window — (b) the terminal being closed without a clean exit, or (c) a genuine crash, and that which one is UNKNOWN. Never present one as THE explanation. Never assign blame or imply a prior agent lied or failed when B0 passed — the correct framing is that both signals are true and describe different things.
 
-Then offer three options. Use prose, never numbered lists or `(Y/n)` — those auto-fire under unleashed (see [CLAUDE.md](C:\Users\mcwiz\Projects\CLAUDE.md) "NEVER offer numbered options or yes/no menus in questions to the user"):
+**B2) Offer the three options and wait.** Use prose, never numbered lists or `(Y/n)` — those auto-fire under unleashed (see [CLAUDE.md](C:\Users\mcwiz\Projects\CLAUDE.md) "NEVER offer numbered options or yes/no menus in questions to the user"):
 
 > The checkpoint is at {checkpoint.ts_local} ({checkpoint.kind}). You can: pick it up anyway (run `/onboard --pickup`), investigate a specific session (its id is in the surface above; use `claude --resume <sid>` to spelunk), or onboard fresh and start a new direction. What would you like to do?
 
-WAIT for user input. Do not act on your own judgment. Do not assume.
+WAIT for user input. Do not act on your own judgment. Do not assume. **Dispatch is unchanged — verification adds evidence to the surface, it never auto-imports. Auto-pickup on "verified complete" is forbidden: that reintroduces the LLM-judgment failure mode #575 removed.**
 
 Full detail JSON is at `result.detail_path` — if the user asks for more detail on any session, read that file.
 
