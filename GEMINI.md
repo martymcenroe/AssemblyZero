@@ -1,7 +1,5 @@
 # Gemini Operational Protocols - AssemblyZero
 
-## 1. Session Initialization (The Handshake)
-
 ## 2. Core Rules
 
 **Read `CLAUDE.md` in this repository.** Those rules apply to ALL agents:
