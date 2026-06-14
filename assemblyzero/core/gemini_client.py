@@ -11,8 +11,8 @@ Ported from tools/gemini-rotate.py for programmatic use.
 
 import json
 import os
+import re
 import shutil
-import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -263,6 +263,21 @@ def get_credential_status() -> dict:
 
 
 # =============================================================================
+# Antigravity CLI (agy) output handling
+# =============================================================================
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Strip ANSI/VT control sequences from agy's pseudo-console output and
+    normalize newlines. agy renders to a TTY, so the captured stream carries
+    color codes and CR/LF that must be removed before the response is parsed."""
+    return _ANSI_RE.sub("", text).replace("\r\n", "\n").replace("\r", "")
+
+
+# =============================================================================
 # Gemini Client
 # =============================================================================
 
@@ -307,20 +322,21 @@ class GeminiClient:
         self.state_file = state_file
         self._credentials: Optional[list[Credential]] = None
         self._state: Optional[RotationState] = None
-        self._gemini_cli = self._find_gemini_cli()
+        self._agy_cli = self._find_agy_cli()
 
-    def _find_gemini_cli(self) -> Optional[str]:
-        """Find the gemini CLI executable."""
-        cli = shutil.which("gemini")
+    def _find_agy_cli(self) -> Optional[str]:
+        """Find the Antigravity CLI (agy) executable.
+
+        Replaces the retired Gemini CLI (#1335); agy is the subscription
+        (OAuth) governance transport.
+        """
+        cli = shutil.which("agy")
         if cli:
             return cli
-        # Try common locations on Windows
-        npm_gemini = Path.home() / "AppData" / "Roaming" / "npm" / "gemini.cmd"
-        if npm_gemini.exists():
-            return str(npm_gemini)
-        npm_gemini_unix = Path.home() / "AppData" / "Roaming" / "npm" / "gemini"
-        if npm_gemini_unix.exists():
-            return str(npm_gemini_unix)
+        # Default Windows install location (agy is not always on PATH).
+        candidate = Path.home() / "AppData" / "Local" / "agy" / "bin" / "agy.exe"
+        if candidate.exists():
+            return str(candidate)
         return None
 
     def _invoke_via_cli(
@@ -328,111 +344,83 @@ class GeminiClient:
         system_instruction: str,
         content: str,
     ) -> tuple[bool, str, str]:
-        """
-        Invoke Gemini via CLI (for OAuth credentials).
+        """Invoke the governance model via the Antigravity CLI (agy).
 
-        The CLI doesn't have a --system flag, so we prepend the system
-        instruction to the content with clear delineation.
+        This is the subscription/OAuth transport (#1335), replacing the retired
+        Gemini CLI. Two things differ from a normal subprocess call:
 
-        IMPORTANT: The CLI loads GEMINI.md from the working directory, which
-        contains handshake instructions that interfere with governance reviews.
-        We temporarily rename GEMINI.md during the call to avoid this.
+        1. agy renders its response ONLY to a TTY — a piped stdout receives
+           nothing (exit 0, empty stream). So we run agy under a pseudo-console
+           via pywinpty and strip ANSI control codes from the captured output.
+        2. agy is run in a clean temp working directory so no repo GEMINI.md /
+           AGENTS.md / .gemini context bleeds into the governance review. This
+           also retires the old GEMINI.md-rename workaround (and the .bak debris
+           it produced) entirely.
 
-        We also use --sandbox mode to disable agentic features.
+        The prompt rides in argv (agy `-p <prompt>`); Windows caps a command
+        line at ~32767 chars, so an oversized prompt is rejected explicitly
+        rather than truncated silently.
 
         Returns:
             Tuple of (success, response_text, error_message)
         """
-        if not self._gemini_cli:
-            return False, "", "Gemini CLI not found"
+        if not self._agy_cli:
+            return False, "", "Antigravity CLI (agy) not found"
 
-        # Combine system instruction and content
+        # Combine system instruction and content (agy has no --system flag).
         full_prompt = (
             f"You are {self.model}.\n\n"
             f"<system_instruction>\n{system_instruction}\n</system_instruction>\n\n"
             f"<user_content>\n{content}\n</user_content>"
         )
 
-        gemini_md_path = Path.cwd() / "GEMINI.md"
-        gemini_md_backup = Path.cwd() / "GEMINI.md.bak"
-        gemini_md_renamed = False
-
-        # #1436 (extended): If a prior invocation crashed before its finally
-        # block restored GEMINI.md, a stale .bak is sitting where we want to
-        # write. On Windows, Path.rename() fails when the target exists
-        # (WinError 183), making every subsequent OAuth call fail. Park any
-        # stale .bak out of the way at the start of each call. Use a
-        # timestamped suffix so the operator can still recover the parked
-        # content if needed; subsequent runs will park their own .bak with
-        # a different timestamp.
-        if gemini_md_backup.exists():
-            import datetime as _dt
-            stale_park = gemini_md_backup.with_suffix(
-                f".bak.stale-{_dt.datetime.now(_dt.timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+        # Windows CreateProcess command-line limit is 32767 chars; leave headroom.
+        if len(full_prompt) > 30000:
+            return False, "", (
+                f"prompt too large for agy argv ({len(full_prompt)} chars > 30000); "
+                f"stdin-based invocation is a follow-up"
             )
-            try:
-                gemini_md_backup.replace(stale_park)
-            except OSError:
-                pass
 
         try:
-            # Temporarily rename GEMINI.md to prevent CLI from loading it.
-            # Use Path.replace() instead of Path.rename() — replace() is the
-            # cross-platform "atomic move that overwrites if target exists"
-            # primitive. Path.rename() refuses to overwrite on Windows
-            # (WinError 183). The stale-bak cleanup above means there should
-            # be no .bak to overwrite by the time we reach here, but
-            # replace() is the safer primitive regardless.
-            if gemini_md_path.exists():
-                gemini_md_path.replace(gemini_md_backup)
-                gemini_md_renamed = True
+            from winpty import PtyProcess
+        except ImportError as e:
+            return False, "", f"pywinpty unavailable for agy invocation: {e}"
 
-            # Use stdin to pass the prompt to avoid agentic file reading.
-            # --approval-mode plan = read-only (replaces --sandbox which required
-            # Docker/Podman — broken on machines without either). --skip-trust
-            # prevents the workspace-trust prompt in headless invocations.
-            result = subprocess.run(
-                [
-                    self._gemini_cli,
-                    "--prompt",
-                    "-",  # Read from stdin
-                    "--model",
-                    self.model,
-                    "--output-format",
-                    "text",
-                    "--approval-mode",
-                    "plan",  # Read-only; no Docker requirement
-                    "--skip-trust",  # No workspace-trust prompt
-                ],
-                input=full_prompt,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=120,  # 2 minute timeout
-            )
+        import tempfile
 
-            if result.returncode == 0 and result.stdout:
-                return True, result.stdout.strip(), ""
-            else:
-                error_msg = (
-                    result.stderr.strip() or result.stdout.strip() or "Unknown error"
-                )
-                return False, "", error_msg
+        argv = [self._agy_cli, "-p", full_prompt, "--model", self.model]
+        chunks: list[str] = []
+        try:
+            with tempfile.TemporaryDirectory() as tmp_cwd:
+                proc = PtyProcess.spawn(argv, cwd=tmp_cwd, dimensions=(60, 1000))
+                deadline = time.time() + 300  # 5 minute timeout
+                timed_out = True
+                while time.time() < deadline:
+                    try:
+                        data = proc.read(4096)
+                    except EOFError:
+                        timed_out = False
+                        break
+                    if data:
+                        chunks.append(data)
+                    elif not proc.isalive():
+                        timed_out = False
+                        break
+                    else:
+                        time.sleep(0.05)
+                if timed_out:
+                    try:
+                        proc.terminate(force=True)
+                    except Exception:
+                        pass
+                    return False, "", "agy CLI timeout (300s)"
+        except Exception as e:  # pywinpty raises assorted OS/runtime errors
+            return False, "", f"agy CLI invocation failed: {e}"
 
-        except subprocess.TimeoutExpired:
-            return False, "", "CLI timeout (120s)"
-        except FileNotFoundError:
-            return False, "", f"Gemini CLI not found: {self._gemini_cli}"
-        except OSError as e:
-            return False, "", str(e)
-        finally:
-            # Restore GEMINI.md using replace() for Windows-safe atomic
-            # overwrite of the path we moved it FROM.
-            if gemini_md_renamed and gemini_md_backup.exists():
-                try:
-                    gemini_md_backup.replace(gemini_md_path)
-                except OSError:
-                    pass
+        text = _strip_ansi("".join(chunks)).strip()
+        if text:
+            return True, text, ""
+        return False, "", "agy returned no output"
 
     def invoke(
         self,

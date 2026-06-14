@@ -11,18 +11,18 @@ Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
 """
 
 import json
+import sys
 import tempfile
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from assemblyzero.core.gemini_client import (
-    Credential,
-    GeminiCallResult,
     GeminiClient,
     GeminiErrorType,
-    RotationState,
+    _strip_ansi,
 )
 
 
@@ -350,3 +350,81 @@ class TestResetTimeParsing:
 
         result = client._parse_reset_time("Some random error message")
         assert result is None
+
+
+# ── Antigravity (agy) CLI transport (#1335) ──────────────────────────
+
+
+class _FakeAgyProc:
+    """Minimal pywinpty PtyProcess stand-in: replays chunks then EOFErrors."""
+
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+        self.terminated = False
+
+    def read(self, _size):
+        if self._chunks:
+            return self._chunks.pop(0)
+        raise EOFError
+
+    def isalive(self):
+        return bool(self._chunks)
+
+    def terminate(self, force=False):
+        self.terminated = True
+
+
+def _fake_winpty(chunks):
+    """A fake `winpty` module whose PtyProcess.spawn yields the given chunks.
+
+    Lets the agy pseudo-console path be tested without real pywinpty (so the
+    tests run on Linux CI, where winpty is not installed).
+    """
+    mod = types.ModuleType("winpty")
+    mod.PtyProcess = MagicMock()
+    mod.PtyProcess.spawn.return_value = _FakeAgyProc(chunks)
+    return mod
+
+
+def test_strip_ansi_removes_codes_and_normalizes_newlines():
+    assert _strip_ansi("\x1b[32mOK\x1b[0m\r\n") == "OK\n"
+    assert _strip_ansi("a\r\nb\r\n") == "a\nb\n"
+    assert _strip_ansi("plain") == "plain"
+
+
+def test_find_agy_cli_uses_path():
+    with patch("assemblyzero.core.gemini_client.shutil.which", return_value="/usr/bin/agy"):
+        client = GeminiClient(model="gemini-3.1-pro-preview")
+    assert client._agy_cli == "/usr/bin/agy"
+
+
+def test_invoke_via_cli_agy_not_found():
+    client = GeminiClient(model="gemini-3.1-pro-preview")
+    client._agy_cli = None
+    ok, resp, err = client._invoke_via_cli("sys", "content")
+    assert ok is False and resp == "" and "not found" in err.lower()
+
+
+def test_invoke_via_cli_rejects_oversized_prompt():
+    client = GeminiClient(model="gemini-3.1-pro-preview")
+    client._agy_cli = "agy"
+    ok, resp, err = client._invoke_via_cli("sys", "x" * 31000)
+    assert ok is False and "too large" in err
+
+
+def test_invoke_via_cli_strips_ansi_and_returns_text():
+    client = GeminiClient(model="gemini-3.1-pro-preview")
+    client._agy_cli = "agy"
+    chunks = ['\x1b[32m{"verdict":"APPROVE"}\x1b[0m\r\n']
+    with patch.dict(sys.modules, {"winpty": _fake_winpty(chunks)}):
+        ok, resp, err = client._invoke_via_cli("sys", "content")
+    assert ok is True and err == ""
+    assert resp == '{"verdict":"APPROVE"}'
+
+
+def test_invoke_via_cli_empty_output_is_failure():
+    client = GeminiClient(model="gemini-3.1-pro-preview")
+    client._agy_cli = "agy"
+    with patch.dict(sys.modules, {"winpty": _fake_winpty([])}):
+        ok, resp, err = client._invoke_via_cli("sys", "content")
+    assert ok is False and "no output" in err
