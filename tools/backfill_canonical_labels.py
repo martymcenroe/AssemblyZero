@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fleet backfill: ensure canonical GitHub labels (implementation, lld) exist on every AZ-managed repo.
 
-`tools/new_repo_setup.py` creates two canonical labels on newly bootstrapped
+`tools/new_repo.py` creates two canonical labels on newly bootstrapped
 repos via `create_canonical_labels()` since #1061. Repos that predate that
 change don't have these labels, so the metrics_aggregator's
 "in-implementation" classifier (which filters on the `implementation` label)
@@ -12,7 +12,7 @@ label set using `gh label create --force` (idempotent — updates color and
 description on existing labels rather than failing).
 
 Single source of truth:
-    Imports `_CANONICAL_LABELS` from `new_repo_setup.py` directly. If that
+    Imports `_CANONICAL_LABELS` from `new_repo.py` directly. If that
     constant changes, this backfill picks it up.
 
 Auth:
@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from new_repo_setup import _CANONICAL_LABELS  # noqa: E402
+from new_repo import _CANONICAL_LABELS  # noqa: E402
 
 GITHUB_USER = "martymcenroe"
 ISSUE_NUMBER = 1213

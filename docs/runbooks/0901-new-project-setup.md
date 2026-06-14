@@ -36,25 +36,25 @@ Initialize a new project with the canonical AssemblyZero structure, enabling:
 ### Create a New Private Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
 ```
 
 ### Create a Public Repository
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --public --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --public --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.NNN.private-key.pem
 ```
 
 ### Create Local Only (No GitHub)
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --no-github
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --no-github
 ```
 
 ### Audit Existing Project
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py ExistingProject --audit
 ```
 
 ---
@@ -141,7 +141,7 @@ MyNewProject/
 ## Command Reference
 
 ```
-usage: new_repo_setup.py [-h] [--public] [--audit] [--no-github]
+usage: new_repo.py [-h] [--public] [--audit] [--no-github]
                          [--license {polyform,mit}] --cerberus-pem PATH
                          [--lang {python,none}] [--no-pypi]
                          name
@@ -213,7 +213,7 @@ gh issue create --repo your-username/MyNewProject --title "Initial setup" --body
 ### Check Structure
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py MyNewProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py MyNewProject --audit
 ```
 
 Expected output:
@@ -239,7 +239,7 @@ gh repo view your-username/MyNewProject
 The script won't overwrite existing projects. Use `--audit` to check an existing project:
 
 ```bash
-poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo_setup.py ExistingProject --audit
+poetry run --directory /c/Users/mcwiz/Projects/AssemblyZero python /c/Users/mcwiz/Projects/AssemblyZero/tools/new_repo.py ExistingProject --audit
 ```
 
 ### "Could not get GitHub username"
@@ -292,7 +292,7 @@ The script automates all of this in one command.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-01-13 | Initial version (manual process) |
-| 2.0 | 2026-01-29 | Automated with new_repo_setup.py, added 4 new dirs |
+| 2.0 | 2026-01-29 | Automated with new_repo.py, added 4 new dirs |
 | 2.1 | 2026-04-05 | Added `.unleashed.json` to file table (was in script/schema but missing from docs) |
 | 2.2 | 2026-04-05 | Added workflow files to file table. Updated post-setup: branch protection is now automated, Cerberus is the remaining human step. |
 | 2.3 | 2026-05-22 | `--cerberus-pem` is now **required** for GitHub-creating invocations (#1206). Quick Start examples updated to include the flag. Post-setup verification extended with GitHub-side checks (#1200) and `pr-sentinel-mm` Worker installation detection (#1202). |

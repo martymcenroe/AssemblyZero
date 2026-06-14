@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "tools"))
 
-from new_repo_setup import (
+from new_repo import (
     PROJECT_TYPES,
     SchemaValidationError,
     _project_specific_context,
@@ -390,7 +390,7 @@ class TestIntegrity:
 
 from unittest.mock import patch, MagicMock
 
-from new_repo_setup import (
+from new_repo import (
     main,
     validate_name,
     get_github_username,
@@ -423,7 +423,7 @@ class TestValidateName:
 class TestPythonBootstrap:
     """T280-T286: create_python_project (#1058)."""
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T280_happy_path_writes_artifacts(self, mock_run, tmp_path):
         """Successful poetry calls produce pyproject append + conftest.py."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
@@ -443,7 +443,7 @@ class TestPythonBootstrap:
             "description = \"\"\n",
             encoding="utf-8",
         )
-        from new_repo_setup import create_python_project
+        from new_repo import create_python_project
         ok = create_python_project(project, "TestProject", "polyform")
         assert ok is True
         content = (project / "pyproject.toml").read_text(encoding="utf-8")
@@ -454,78 +454,78 @@ class TestPythonBootstrap:
         body = conftest.read_text(encoding="utf-8")
         assert 'sys.path.insert(0, str(ROOT / "src"))' in body
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T281_poetry_init_failure_returns_false(self, mock_run, tmp_path):
         """If poetry init fails, function returns False without writing files."""
         mock_run.return_value = MagicMock(returncode=1, stderr="poetry: not found")
         project = tmp_path / "FailProject"
         project.mkdir()
-        from new_repo_setup import create_python_project
+        from new_repo import create_python_project
         ok = create_python_project(project, "FailProject", "polyform")
         assert ok is False
         assert not (project / "tests" / "conftest.py").exists()
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T282_license_polyform_maps_correctly(self, mock_run, tmp_path):
         """polyform license maps to PolyForm-Noncommercial-1.0.0 in poetry init."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         project = tmp_path / "PolyProject"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
-        from new_repo_setup import create_python_project
+        from new_repo import create_python_project
         create_python_project(project, "PolyProject", "polyform")
         init_cmd = mock_run.call_args_list[0][0][0]
         license_idx = init_cmd.index("--license")
         assert init_cmd[license_idx + 1] == "PolyForm-Noncommercial-1.0.0"
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T283_license_mit_maps_correctly(self, mock_run, tmp_path):
         """mit license maps to MIT in poetry init."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         project = tmp_path / "MitProject"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
-        from new_repo_setup import create_python_project
+        from new_repo import create_python_project
         create_python_project(project, "MitProject", "mit")
         init_cmd = mock_run.call_args_list[0][0][0]
         license_idx = init_cmd.index("--license")
         assert init_cmd[license_idx + 1] == "MIT"
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T284_package_name_is_lowercased(self, mock_run, tmp_path):
         """Mixed-case repo names are lowercased for the Poetry package name."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         project = tmp_path / "CamelCaseRepo"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
-        from new_repo_setup import create_python_project
+        from new_repo import create_python_project
         create_python_project(project, "CamelCaseRepo", "polyform")
         init_cmd = mock_run.call_args_list[0][0][0]
         name_idx = init_cmd.index("--name")
         assert init_cmd[name_idx + 1] == "camelcaserepo"
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T285_lang_none_skips_poetry(self, mock_run, mock_config, tmp_path):
         """--lang none short-circuits the Python bootstrap (no poetry calls)."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
         with patch("sys.argv",
-                   ["new_repo_setup.py", "NoLang", "--no-github", "--lang", "none"]):
+                   ["new_repo.py", "NoLang", "--no-github", "--lang", "none"]):
             main()
         commands = [call[0][0] for call in mock_run.call_args_list]
         assert not any(cmd[0] == "poetry" for cmd in commands), \
             f"unexpected poetry calls: {[c for c in commands if c[0] == 'poetry']}"
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T286_lang_python_default_invokes_poetry(
         self, mock_run, mock_config, tmp_path
     ):
         """--lang python (the default) calls poetry init + poetry add."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0, stderr="")
-        with patch("sys.argv", ["new_repo_setup.py", "PyDefault", "--no-github"]):
+        with patch("sys.argv", ["new_repo.py", "PyDefault", "--no-github"]):
             main()
         commands = [call[0][0] for call in mock_run.call_args_list]
         poetry_inits = [c for c in commands if c[:2] == ["poetry", "init"]]
@@ -541,11 +541,11 @@ class TestPythonBootstrap:
 class TestCanonicalLabels:
     """T215-T219: create_canonical_labels (#1061)."""
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T215_creates_all_canonical_labels(self, mock_run):
         """Both implementation and lld labels get created."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
-        from new_repo_setup import create_canonical_labels
+        from new_repo import create_canonical_labels
         created, total = create_canonical_labels("martymcenroe", "boostgauge")
         assert created == 2
         assert total == 2
@@ -555,28 +555,28 @@ class TestCanonicalLabels:
         assert "implementation" in label_names
         assert "lld" in label_names
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T216_uses_force_for_idempotency(self, mock_run):
         """gh label create is invoked with --force so reruns succeed."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
-        from new_repo_setup import create_canonical_labels
+        from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "TestRepo")
         for call in mock_run.call_args_list:
             cmd = call[0][0]
             assert "--force" in cmd, f"--force missing from: {cmd}"
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T217_targets_correct_repo(self, mock_run):
         """--repo flag is set to {github_user}/{repo_name}."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
-        from new_repo_setup import create_canonical_labels
+        from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "MyRepo")
         for call in mock_run.call_args_list:
             cmd = call[0][0]
             repo_idx = cmd.index("--repo")
             assert cmd[repo_idx + 1] == "martymcenroe/MyRepo"
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T218_partial_failure_returns_partial_count(self, mock_run, capsys):
         """If one label fails, count reflects only successes; warning printed."""
         # First call succeeds, second call fails.
@@ -584,18 +584,18 @@ class TestCanonicalLabels:
             MagicMock(returncode=0, stderr=""),
             MagicMock(returncode=1, stderr="GraphQL error: insufficient scope"),
         ]
-        from new_repo_setup import create_canonical_labels
+        from new_repo import create_canonical_labels
         created, total = create_canonical_labels("martymcenroe", "TestRepo")
         assert created == 1
         assert total == 2
         captured = capsys.readouterr()
         assert "WARNING" in captured.out
 
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.run_command")
     def test_T219_check_false_passed(self, mock_run):
         """run_command is called with check=False so non-zero exit doesn't raise."""
         mock_run.return_value = MagicMock(returncode=0, stderr="")
-        from new_repo_setup import create_canonical_labels
+        from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "TestRepo")
         for call in mock_run.call_args_list:
             kwargs = call[1] if len(call) > 1 else call.kwargs
@@ -606,23 +606,23 @@ class TestCanonicalLabels:
 class TestMainAuditMode:
     """T220: --audit flag triggers audit path."""
 
-    @patch("new_repo_setup.config")
+    @patch("new_repo.config")
     def test_T220_audit_nonexistent_directory(self, mock_config, tmp_path):
         """--audit on non-existent directory exits with error."""
         mock_config.projects_root.return_value = str(tmp_path)
-        with patch("sys.argv", ["new_repo_setup.py", "NonExistent", "--audit"]):
+        with patch("sys.argv", ["new_repo.py", "NonExistent", "--audit"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.audit_structure")
+    @patch("new_repo.config")
+    @patch("new_repo.audit_structure")
     def test_T221_audit_existing_directory(self, mock_audit, mock_config, tmp_path):
         """--audit on existing directory calls audit_structure."""
         mock_config.projects_root.return_value = str(tmp_path)
         (tmp_path / "TestProject").mkdir()
         mock_audit.return_value = 0
-        with patch("sys.argv", ["new_repo_setup.py", "TestProject", "--audit"]):
+        with patch("sys.argv", ["new_repo.py", "TestProject", "--audit"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 0
@@ -632,12 +632,12 @@ class TestMainAuditMode:
 class TestMainDirectoryExists:
     """T230: Error when target directory already exists."""
 
-    @patch("new_repo_setup.config")
+    @patch("new_repo.config")
     def test_T230_directory_already_exists(self, mock_config, tmp_path):
         """Exit with error if project directory already exists."""
         mock_config.projects_root.return_value = str(tmp_path)
         (tmp_path / "ExistingProject").mkdir()
-        with patch("sys.argv", ["new_repo_setup.py", "ExistingProject"]):
+        with patch("sys.argv", ["new_repo.py", "ExistingProject"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -646,13 +646,13 @@ class TestMainDirectoryExists:
 class TestMainGitHubAuth:
     """T240: GitHub username retrieval failure."""
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.get_github_username")
+    @patch("new_repo.config")
+    @patch("new_repo.get_github_username")
     def test_T240_gh_not_authenticated(self, mock_gh, mock_config, tmp_path):
         """Exit with error when gh CLI is not authenticated."""
         mock_config.projects_root.return_value = str(tmp_path)
         mock_gh.side_effect = subprocess.CalledProcessError(1, "gh")
-        with patch("sys.argv", ["new_repo_setup.py", "NewProject"]):
+        with patch("sys.argv", ["new_repo.py", "NewProject"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
@@ -668,26 +668,26 @@ def _setup_config_mock(mock_config, tmp_path):
 class TestMainLocalWorkflow:
     """T250-T260: Full local-only workflow (--no-github)."""
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T250_no_github_skips_remote(self, mock_run, mock_config, tmp_path):
         """--no-github skips GitHub repo creation and starring."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
-        with patch("sys.argv", ["new_repo_setup.py", "LocalProject", "--no-github"]):
+        with patch("sys.argv", ["new_repo.py", "LocalProject", "--no-github"]):
             main()
         # Should have called git init and git commit, but NOT gh repo create
         commands = [call[0][0] for call in mock_run.call_args_list]
         assert any(cmd[0] == "git" and cmd[1] == "init" for cmd in commands)
         assert not any(cmd[0] == "gh" for cmd in commands)
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T260_local_creates_all_files(self, mock_run, mock_config, tmp_path):
         """--no-github creates directory structure, config, and content files."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
-        with patch("sys.argv", ["new_repo_setup.py", "FullLocal", "--no-github"]):
+        with patch("sys.argv", ["new_repo.py", "FullLocal", "--no-github"]):
             main()
         project = tmp_path / "FullLocal"
         assert project.exists()
@@ -702,14 +702,14 @@ class TestMainLocalWorkflow:
         assert (project / "src").is_dir()
         assert (project / "tests" / "unit").is_dir()
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T265_unleashed_json_defaults(self, mock_run, mock_config, tmp_path):
         """`.unleashed.json` defaults to assemblyZero=true (#1059) and
         does NOT include the deprecated pickupThresholdMinutes (#1060)."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
-        with patch("sys.argv", ["new_repo_setup.py", "DefaultsProject", "--no-github"]):
+        with patch("sys.argv", ["new_repo.py", "DefaultsProject", "--no-github"]):
             main()
         unleashed_json = (tmp_path / "DefaultsProject" / ".unleashed.json").read_text()
         config = json.loads(unleashed_json)
@@ -722,13 +722,13 @@ class TestMainLocalWorkflow:
         assert config["claude"]["effort"] == "max"
         assert config["onboard"]["auto"] is True
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T270_force_flag_passed(self, mock_run, mock_config, tmp_path):
         """--force flag is accepted without error."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
-        with patch("sys.argv", ["new_repo_setup.py", "ForceProject", "--no-github", "--force"]):
+        with patch("sys.argv", ["new_repo.py", "ForceProject", "--no-github", "--force"]):
             main()
         assert (tmp_path / "ForceProject").exists()
 
@@ -739,7 +739,7 @@ class TestMainLocalWorkflow:
 
 import base64 as _base64  # noqa: E402
 
-from new_repo_setup import (  # noqa: E402
+from new_repo import (  # noqa: E402
     _CANONICAL_AUTO_REVIEWER_CALLER,
     verify_branch_protection_on_origin,
     verify_pr_sentinel_installation,
@@ -757,41 +757,41 @@ class TestCerberusPemRequired:
     canonical location.
     """
 
-    @patch("new_repo_setup.DEFAULT_CERBERUS_PEM_GPG",
+    @patch("new_repo.DEFAULT_CERBERUS_PEM_GPG",
            Path("/nonexistent-for-T290/cerberus-pem.gpg"))
-    @patch("new_repo_setup.config")
+    @patch("new_repo.config")
     def test_T290_missing_pem_without_no_github_exits_one(self, mock_config, tmp_path):
         """Without --cerberus-pem and without --no-github, exit 1 BEFORE any creation."""
         _setup_config_mock(mock_config, tmp_path)
-        with patch("sys.argv", ["new_repo_setup.py", "RequiredTest"]):
+        with patch("sys.argv", ["new_repo.py", "RequiredTest"]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
         # Pre-flight must exit BEFORE creating the local directory.
         assert not (tmp_path / "RequiredTest").exists()
 
-    @patch("new_repo_setup.config")
-    @patch("new_repo_setup.run_command")
+    @patch("new_repo.config")
+    @patch("new_repo.run_command")
     def test_T291_no_github_bypasses_requirement(self, mock_run, mock_config, tmp_path):
         """--no-github skips the requirement — local scaffold proceeds without --cerberus-pem."""
         _setup_config_mock(mock_config, tmp_path)
         mock_run.return_value = MagicMock(returncode=0)
-        with patch("sys.argv", ["new_repo_setup.py", "NoGitTest", "--no-github"]):
+        with patch("sys.argv", ["new_repo.py", "NoGitTest", "--no-github"]):
             main()  # should NOT raise
         assert (tmp_path / "NoGitTest").exists()
 
-    @patch("new_repo_setup.config")
+    @patch("new_repo.config")
     def test_T292_cerberus_pem_plus_no_github_still_conflict(self, mock_config, tmp_path):
         """Pre-existing conflict check still fires: --cerberus-pem + --no-github → exit 1."""
         _setup_config_mock(mock_config, tmp_path)
         with patch("sys.argv", [
-            "new_repo_setup.py", "ConflictTest", "--no-github", "--cerberus-pem", "/tmp/fake.pem",
+            "new_repo.py", "ConflictTest", "--no-github", "--cerberus-pem", "/tmp/fake.pem",
         ]):
             with pytest.raises(SystemExit) as exc_info:
                 main()
             assert exc_info.value.code == 1
 
-    @patch("new_repo_setup.config")
+    @patch("new_repo.config")
     def test_T292b_default_gpg_fallback_used_when_neither_flag_passed(
             self, mock_config, tmp_path, capsys):
         """When neither flag passed AND DEFAULT_CERBERUS_PEM_GPG exists → fallback fires (#1543).
@@ -802,10 +802,10 @@ class TestCerberusPemRequired:
         _setup_config_mock(mock_config, tmp_path)
         fake_pem = tmp_path / "fake-cerberus-pem.gpg"
         fake_pem.write_bytes(b"fake encrypted blob")
-        with patch("new_repo_setup.DEFAULT_CERBERUS_PEM_GPG", fake_pem):
+        with patch("new_repo.DEFAULT_CERBERUS_PEM_GPG", fake_pem):
             # "bad/name" fails validate_name's regex, exiting 1 — but AFTER the
             # default-fallback block, so the confirmation line still prints.
-            with patch("sys.argv", ["new_repo_setup.py", "bad/name"]):
+            with patch("sys.argv", ["new_repo.py", "bad/name"]):
                 with pytest.raises(SystemExit):
                     main()
         captured = capsys.readouterr().out
@@ -816,7 +816,7 @@ class TestCerberusPemRequired:
 class TestVerifyBranchProtection:
     """T293-T295: verify_branch_protection_on_origin (#1200)."""
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T293_pass_when_all_dimensions_match(self, mock_req):
         """enforce_admins=True, 1 review, pr-sentinel check present → (True, ...)."""
         mock_resp = MagicMock(status_code=200)
@@ -831,7 +831,7 @@ class TestVerifyBranchProtection:
         ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
         assert ok is True
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T294_fail_when_enforce_admins_off(self, mock_req):
         """enforce_admins=False → (False, msg) and msg names the dimension."""
         mock_resp = MagicMock(status_code=200)
@@ -847,7 +847,7 @@ class TestVerifyBranchProtection:
         assert ok is False
         assert "enforce_admins" in msg
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T295_fail_on_404(self, mock_req):
         """404 → (False, 'no branch protection set on origin')."""
         mock_resp = MagicMock(status_code=404, text="Not Found")
@@ -860,7 +860,7 @@ class TestVerifyBranchProtection:
 class TestVerifyRepoSettings:
     """T296-T297: verify_repo_settings_on_origin (#1200)."""
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T296_pass_when_squash_only_no_wiki(self, mock_req):
         """All settings match fleet standard → (True, ...)."""
         mock_resp = MagicMock(status_code=200)
@@ -876,7 +876,7 @@ class TestVerifyRepoSettings:
         ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
         assert ok is True
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T297_fail_when_wiki_enabled(self, mock_req):
         """has_wiki=True → (False, msg) and msg names the violation."""
         mock_resp = MagicMock(status_code=200)
@@ -897,7 +897,7 @@ class TestVerifyRepoSettings:
 class TestVerifyWorkflowContent:
     """T298-T299: verify_workflow_content_on_origin — the #1193 regression test."""
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T298_pass_when_content_matches_canonical(self, mock_req):
         """Origin content == _CANONICAL_AUTO_REVIEWER_CALLER → (True, ...)."""
         encoded = _base64.b64encode(
@@ -909,7 +909,7 @@ class TestVerifyWorkflowContent:
         ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
         assert ok is True
 
-    @patch("new_repo_setup._request_with_retry")
+    @patch("new_repo._request_with_retry")
     def test_T299_fail_when_old_format_signature(self, mock_req):
         """Origin content uses OLD caller format → (False, ...). The #1193 failure mode.
 
@@ -945,7 +945,7 @@ class TestVerifyPrSentinelInstallation:
     mock requests.get with status-code/json-shaped responses.
     """
 
-    @patch("new_repo_setup.requests.get")
+    @patch("new_repo.requests.get")
     def test_T300_pass_when_repo_in_installation(self, mock_get):
         """Worker installation found AND covers the new repo → (True, ...)."""
         installations_resp = MagicMock(status_code=200)
@@ -968,7 +968,7 @@ class TestVerifyPrSentinelInstallation:
         assert ok is True
         assert "covers" in msg
 
-    @patch("new_repo_setup.requests.get")
+    @patch("new_repo.requests.get")
     def test_T301_warn_when_installation_missing(self, mock_get):
         """No pr-sentinel-mm in /user/installations → (False, 'not found')."""
         resp = MagicMock(status_code=200)
@@ -982,7 +982,7 @@ class TestVerifyPrSentinelInstallation:
         assert ok is False
         assert "not found" in msg
 
-    @patch("new_repo_setup.requests.get")
+    @patch("new_repo.requests.get")
     def test_T302_warn_when_repo_not_in_installation_repos(self, mock_get):
         """Installation exists but doesn't cover the new repo → App scope drift warning."""
         installations_resp = MagicMock(status_code=200)
@@ -1009,7 +1009,7 @@ class TestVerifyPrSentinelInstallation:
 # #1201 — PyPI 0934 reminder
 # ===========================================================================
 
-from new_repo_setup import _maybe_print_pypi_reminder  # noqa: E402
+from new_repo import _maybe_print_pypi_reminder  # noqa: E402
 
 
 class TestPypiReminder:
@@ -1236,7 +1236,7 @@ class TestGitHubRepoNameCasePreservation:
 
     def test_no_lowercased_repo_name_variable_in_script(self):
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         assert "repo_name_lower" not in content, (
             "regression: `repo_name_lower` was reintroduced. The GitHub repo "
@@ -1250,7 +1250,7 @@ class TestGitHubRepoNameCasePreservation:
         site so a future agent reading the code understands why no
         lowercasing happens there."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         assert "#1533" in content
         # The comment must sit in the GitHub-side flow. Use the `GITHUB REMOTE`
@@ -1289,7 +1289,7 @@ class TestGitHubRepoNameCasePreservation:
         """
         from pathlib import Path
         import re
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
 
         # Direct mutation: `args.name = args.name.lower()`
@@ -1329,7 +1329,7 @@ class TestCerberusPostDeployAdvice:
         """The string 'REMEMBER to revoke' should only appear inside a
         conditional that checks args.cerberus_pem (the plaintext flow)."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         # The advisory text must exist (it's correct for the plaintext flow)
         assert "REMEMBER to revoke the key in the app UI" in content
@@ -1345,7 +1345,7 @@ class TestCerberusPostDeployAdvice:
         so future agents understand why the two flows produce different
         end-of-run advice."""
         from pathlib import Path
-        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo_setup.py"
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
         assert "#1536" in content
         # The #1536 anchor must be near the `elif cerberus_status == \"OK\":`
@@ -1374,34 +1374,34 @@ class TestDependabotConfig:
     """`.github/dependabot.yml` version-update generation at scaffold time."""
 
     def test_github_actions_always_present(self, tmp_path):
-        from new_repo_setup import detect_dependabot_ecosystems
+        from new_repo import detect_dependabot_ecosystems
         assert ("github-actions", "github-actions") in detect_dependabot_ecosystems(tmp_path)
 
     def test_no_markers_yields_only_github_actions(self, tmp_path):
-        from new_repo_setup import detect_dependabot_ecosystems
+        from new_repo import detect_dependabot_ecosystems
         assert detect_dependabot_ecosystems(tmp_path) == [("github-actions", "github-actions")]
 
     def test_pip_detected_from_pyproject(self, tmp_path):
-        from new_repo_setup import detect_dependabot_ecosystems
+        from new_repo import detect_dependabot_ecosystems
         (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
         assert ("pip", "python") in detect_dependabot_ecosystems(tmp_path)
 
     def test_npm_and_docker_detected(self, tmp_path):
-        from new_repo_setup import detect_dependabot_ecosystems
+        from new_repo import detect_dependabot_ecosystems
         (tmp_path / "package.json").write_text("{}", encoding="utf-8")
         (tmp_path / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
         keys = {eco for eco, _ in detect_dependabot_ecosystems(tmp_path)}
         assert {"npm", "docker", "github-actions"} <= keys
 
     def test_create_writes_file_and_returns_ecosystems(self, tmp_path):
-        from new_repo_setup import create_dependabot_config
+        from new_repo import create_dependabot_config
         (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
         written = create_dependabot_config(tmp_path)
         assert (tmp_path / ".github" / "dependabot.yml").exists()
         assert "pip" in written and "github-actions" in written
 
     def test_yml_has_fleet_standard_fields(self, tmp_path):
-        from new_repo_setup import create_dependabot_config
+        from new_repo import create_dependabot_config
         (tmp_path / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
         create_dependabot_config(tmp_path)
         text = (tmp_path / ".github" / "dependabot.yml").read_text(encoding="utf-8")
@@ -1416,7 +1416,7 @@ class TestDependabotConfig:
 
     def test_yml_is_lf_only(self, tmp_path):
         # newline="" must keep LF on Windows, matching the rest of the fleet.
-        from new_repo_setup import create_dependabot_config
+        from new_repo import create_dependabot_config
         create_dependabot_config(tmp_path)
         raw = (tmp_path / ".github" / "dependabot.yml").read_bytes()
         assert b"\r\n" not in raw
@@ -1431,12 +1431,12 @@ class TestDataGConvention:
     """data-g/ git-tracked source-of-truth data directory."""
 
     def test_create_writes_readme(self, tmp_path):
-        from new_repo_setup import create_data_g_readme
+        from new_repo import create_data_g_readme
         create_data_g_readme(tmp_path)
         assert (tmp_path / "data-g" / "README.md").exists()
 
     def test_create_removes_schema_gitkeep(self, tmp_path):
-        from new_repo_setup import create_data_g_readme
+        from new_repo import create_data_g_readme
         data_g = tmp_path / "data-g"
         data_g.mkdir()
         (data_g / ".gitkeep").touch()  # simulate schema-created placeholder
@@ -1444,19 +1444,19 @@ class TestDataGConvention:
         assert not (data_g / ".gitkeep").exists()
 
     def test_readme_explains_split_and_cites_issue(self, tmp_path):
-        from new_repo_setup import create_data_g_readme
+        from new_repo import create_data_g_readme
         create_data_g_readme(tmp_path)
         text = (tmp_path / "data-g" / "README.md").read_text(encoding="utf-8")
         assert "data/" in text and "data-g/" in text
         assert "#1563" in text
 
     def test_schema_includes_data_g(self):
-        from new_repo_setup import load_structure_schema
+        from new_repo import load_structure_schema
         schema = load_structure_schema()
         assert "data-g" in schema["directories"]
 
     def test_claude_md_documents_convention(self, tmp_path):
-        from new_repo_setup import create_claude_md
+        from new_repo import create_claude_md
         create_claude_md(tmp_path, "demo", "martymcenroe", "minimal")
         text = (tmp_path / "CLAUDE.md").read_text(encoding="utf-8")
         assert "data-g/" in text
@@ -1471,24 +1471,24 @@ class TestRequiresPythonNormalization:
     """_normalize_requires_python: Poetry caret -> valid PEP 440."""
 
     def test_caret_310(self):
-        from new_repo_setup import _normalize_requires_python
+        from new_repo import _normalize_requires_python
         out = _normalize_requires_python('requires-python = "^3.10"\n')
         assert 'requires-python = ">=3.10,<4.0"' in out
 
     def test_caret_311_and_312_preserve_floor(self):
-        from new_repo_setup import _normalize_requires_python
+        from new_repo import _normalize_requires_python
         assert ">=3.11,<4.0" in _normalize_requires_python('requires-python = "^3.11"')
         assert ">=3.12,<4.0" in _normalize_requires_python('requires-python = "^3.12"')
 
     def test_already_valid_is_unchanged(self):
-        from new_repo_setup import _normalize_requires_python
+        from new_repo import _normalize_requires_python
         src = 'requires-python = ">=3.10,<4.0"\n'
         assert _normalize_requires_python(src) == src
 
     def test_result_parses_as_pep440(self):
         import re
         from packaging.specifiers import SpecifierSet
-        from new_repo_setup import _normalize_requires_python
+        from new_repo import _normalize_requires_python
         out = _normalize_requires_python('requires-python = "^3.10"')
         val = re.search(r'requires-python = "([^"]+)"', out).group(1)
         SpecifierSet(val)  # raises InvalidSpecifier if the rewrite is wrong
@@ -1511,18 +1511,18 @@ class TestScaffoldValidationGate:
         )
 
     def test_valid_scaffold_has_no_blocking(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         self._valid_pyproject(tmp_path)
         blocking, _ = validate_scaffold(tmp_path)
         assert blocking == []
 
     def test_empty_dir_has_no_blocking(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         blocking, _ = validate_scaffold(tmp_path)
         assert blocking == []
 
     def test_caret_requires_python_blocks(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         (tmp_path / "pyproject.toml").write_text(
             '[project]\nname = "x"\nrequires-python = "^3.10"\n', encoding="utf-8"
         )
@@ -1530,13 +1530,13 @@ class TestScaffoldValidationGate:
         assert any("requires-python" in m for m in blocking), blocking
 
     def test_unparseable_pyproject_blocks(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         (tmp_path / "pyproject.toml").write_text("this = = not toml\n", encoding="utf-8")
         blocking, _ = validate_scaffold(tmp_path)
         assert any("does not parse" in m for m in blocking), blocking
 
     def test_invalid_dependabot_yaml_blocks(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         self._valid_pyproject(tmp_path)
         (tmp_path / ".github").mkdir()
         (tmp_path / ".github" / "dependabot.yml").write_text(
@@ -1546,7 +1546,7 @@ class TestScaffoldValidationGate:
         assert any("dependabot.yml" in m for m in blocking), blocking
 
     def test_invalid_json_blocks(self, tmp_path):
-        from new_repo_setup import validate_scaffold
+        from new_repo import validate_scaffold
         self._valid_pyproject(tmp_path)
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".claude" / "project.json").write_text("{ not json", encoding="utf-8")
