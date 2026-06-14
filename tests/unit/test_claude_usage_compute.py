@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "claude_usage_compute", TOOLS_DIR / "claude_usage_compute.py",
 )

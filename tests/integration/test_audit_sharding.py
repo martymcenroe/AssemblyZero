@@ -36,6 +36,9 @@ from assemblyzero.core.audit import (
     create_log_entry,
 )
 
+# Real subprocess (git) + threaded concurrency — gated to the integration run (#1580).
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def temp_repo(tmp_path: Path) -> Path:

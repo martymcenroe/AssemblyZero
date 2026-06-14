@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 TOOL_PATH = (
-    Path(__file__).parent.parent / "tools" / "backup_universal_claude_md.py"
+    Path(__file__).parent.parent.parent / "tools" / "backup_universal_claude_md.py"
 )
 
 

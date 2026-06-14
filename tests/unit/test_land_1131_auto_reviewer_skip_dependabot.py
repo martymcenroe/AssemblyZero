@@ -3,7 +3,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "land_1131_auto_reviewer_skip_dependabot",
     TOOLS_DIR / "land_1131_auto_reviewer_skip_dependabot.py",

@@ -5,7 +5,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "audit_tracked_log_writers", TOOLS_DIR / "audit_tracked_log_writers.py",
 )

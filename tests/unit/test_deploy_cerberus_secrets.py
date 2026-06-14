@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 # _pat_session uses gpg-decrypted PAT and triggers pinentry on import-time
 # touch in some cases; ensure the module loads in test env by faking sys.path
 # behavior the script uses.

@@ -17,6 +17,9 @@ import pytest
 
 from assemblyzero.workflows.checkpoint import get_checkpoint_db_path, get_repo_root
 
+# Real subprocess (git) + spawned Python + chdir — gated to the integration run (#1580).
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def temp_git_repo(tmp_path: Path) -> Generator[Path, None, None]:
