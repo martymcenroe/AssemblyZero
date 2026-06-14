@@ -19,7 +19,7 @@ CI invocation lives in `.github/workflows/ci.yml`. Note CI collects **only** `te
 3. **The root is for credential/network/operator-only tests, and each must self-guard** — a module-level `pytest.mark.skipif` on a missing credential/path, or an explicit skip — so it is *intentionally* excluded, never *accidentally* run. Current residents:
    - `test_designer.py` — calls real `gh` (auth/issue) in its integration-marked tests.
    - `test_universal_claude_md.py` — reads an operator-machine-only absolute path (`pytestmark = skipif(not path.exists())`).
-4. **Never move a failing test into a green gate to make it pass, and never rewrite an assertion just to match current output.** If a dormant root test fails when brought into CI, it's either stale or a real regression — file an issue and `xfail(strict=False)` it with the issue reference until resolved (e.g. #1599).
+4. **Never move a failing test into a green gate to make it pass, and never rewrite an assertion just to match current output.** A dormant root test that fails when brought into CI is either stale logic, a real regression, or environment-coupled. File an issue and gate it with the issue reference until resolved — `xfail(strict=False)` for stale/regressed assertions (e.g. #1599), or `skipif(...)` when it is genuinely platform- or credential-coupled (e.g. #1601 Windows-only path defaults; #1602 needs Gemini creds). CI runs on Linux with no credentials, so a test that only passes on Windows or with local secrets must say so explicitly, not fail silently.
 
 ## Importing tools / reaching the repo root from a test
 
