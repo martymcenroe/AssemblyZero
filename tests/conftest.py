@@ -6,10 +6,17 @@ from pathlib import Path
 
 import pytest
 
-# Ensure tools directory is importable
+# Ensure the repo root (for `import tools.x`) AND tools/ itself (for bare
+# `import enable_dependabot`) are importable. tools_dir is computed off this
+# conftest's own __file__, so it is correct regardless of which subdirectory
+# (tests/, tests/unit/, tests/integration/) a test lives in — this is what
+# lets root tests move down into tests/unit/ without per-file sys.path fixups
+# (#1580).
 tools_dir = Path(__file__).parent.parent / "tools"
 if str(tools_dir.parent) not in sys.path:
     sys.path.insert(0, str(tools_dir.parent))
+if str(tools_dir) not in sys.path:
+    sys.path.insert(0, str(tools_dir))
 
 
 def pytest_configure(config):

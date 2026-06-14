@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 # Load the tools/ script as a module without polluting sys.path with the whole tools dir.
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "repo_drift_check", TOOLS_DIR / "repo_drift_check.py"
 )

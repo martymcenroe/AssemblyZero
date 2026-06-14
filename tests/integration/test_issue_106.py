@@ -19,6 +19,9 @@ from assemblyzero.workflows.parallel import (
 )
 from assemblyzero.workflows.parallel.coordinator import WorkflowResult, ProgressStats
 
+# Timing/threading + SIGINT perf assertions — gated to the integration run (#1580).
+pytestmark = pytest.mark.integration
+
 
 # Fixtures for mocking
 @pytest.fixture

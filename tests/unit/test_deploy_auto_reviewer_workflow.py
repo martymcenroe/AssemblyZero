@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "deploy_auto_reviewer_workflow",
     TOOLS_DIR / "deploy_auto_reviewer_workflow.py",

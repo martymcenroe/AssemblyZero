@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 # Load the tools/ script as a module without polluting sys.path.
-TOOLS_DIR = Path(__file__).resolve().parents[1] / "tools"
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
 _spec = importlib.util.spec_from_file_location(
     "dependabot_review", TOOLS_DIR / "dependabot_review.py"
 )

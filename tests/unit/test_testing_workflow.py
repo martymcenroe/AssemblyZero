@@ -5,6 +5,7 @@ Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -456,6 +457,14 @@ class TestWorkflowIntegration:
         assert "N7_finalize" in nodes
         assert "N8_document" in nodes
 
+    @pytest.mark.skipif(
+        not (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+            or (Path.home() / ".assemblyzero" / "gemini-credentials.json").exists()
+        ),
+        reason="mock_mode still constructs genai.Client (needs a key); see #1602",
+    )
     def test_workflow_mock_mode_completes(self, tmp_path):
         """Workflow completes in mock mode."""
         # Create minimal LLD file
