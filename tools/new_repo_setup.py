@@ -1592,6 +1592,25 @@ _DEPENDABOT_ECOSYSTEMS: list[tuple[str, str, str]] = [
 ]
 
 
+def ecosystems_for_markers(present_markers: set[str]) -> list[tuple[str, str]]:
+    """Map a set of present marker filenames to ordered (ecosystem, label) pairs.
+
+    Pure helper shared by the filesystem-based scaffolder detector
+    (detect_dependabot_ecosystems, which checks a local checkout) and the
+    API-based fleet backfill (tools/generate_dependabot_yml.py, #1569, which
+    probes marker existence over the GitHub Contents API). Order follows
+    _DEPENDABOT_ECOSYSTEMS; github-actions is always appended last because
+    every fleet repo ships at least the auto-reviewer workflow.
+    """
+    ecosystems = [
+        (eco, label)
+        for marker, eco, label in _DEPENDABOT_ECOSYSTEMS
+        if marker in present_markers
+    ]
+    ecosystems.append(("github-actions", "github-actions"))
+    return ecosystems
+
+
 def detect_dependabot_ecosystems(project_path: Path) -> list[tuple[str, str]]:
     """Return the (package-ecosystem, label) pairs that apply to project_path.
 
@@ -1599,15 +1618,15 @@ def detect_dependabot_ecosystems(project_path: Path) -> list[tuple[str, str]]:
     -> npm, Dockerfile -> docker). github-actions is always appended last
     because every scaffolded repo ships at least the auto-reviewer workflow.
     Keeping detection file-based (not arg-based) lets the fleet-backfill
-    follow-up reuse this helper unchanged against existing repos.
+    follow-up reuse this logic against existing repos via
+    ecosystems_for_markers().
     """
-    ecosystems = [
-        (eco, label)
-        for marker, eco, label in _DEPENDABOT_ECOSYSTEMS
+    present = {
+        marker
+        for marker, _eco, _label in _DEPENDABOT_ECOSYSTEMS
         if (project_path / marker).exists()
-    ]
-    ecosystems.append(("github-actions", "github-actions"))
-    return ecosystems
+    }
+    return ecosystems_for_markers(present)
 
 
 def _dependabot_block(package_ecosystem: str, label: str) -> str:
