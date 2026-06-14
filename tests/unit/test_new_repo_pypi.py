@@ -1,9 +1,9 @@
-"""Tests for the PyPI publishing scaffold added to new_repo_setup.py (#1074).
+"""Tests for the PyPI publishing scaffold added to new_repo.py (#1074).
 
 Validates the constant templates and the post-poetry-init mutations in
 isolation — without invoking the full create_python_project() flow,
 which depends on a network-enabled `poetry init` + `poetry add` and
-takes ~30s. The integration test (does `new_repo_setup.py NewPkg`
+takes ~30s. The integration test (does `new_repo.py NewPkg`
 actually work end-to-end) is a manual smoke test by convention.
 """
 
@@ -20,7 +20,7 @@ _TOOLS = Path(__file__).resolve().parent.parent.parent / "tools"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from new_repo_setup import (  # noqa: E402
+from new_repo import (  # noqa: E402
     _PACKAGE_INIT_BODY,
     _PACKAGE_MAIN_BODY,
     _PYPROJECT_PYPI_BLOCK,

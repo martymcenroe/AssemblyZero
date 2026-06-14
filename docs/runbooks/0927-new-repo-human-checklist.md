@@ -8,7 +8,7 @@
 
 ## Purpose
 
-The human steps when creating a new repo. Most of the work is automated by `new_repo_setup.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
+The human steps when creating a new repo. Most of the work is automated by `new_repo.py` — it creates the local scaffold, GitHub repo, branch protection, workflow files, initial push, and (with `--cerberus-pem`) the Cerberus secrets deploy.
 
 Post-#1000 + #1007 (both landed 2026-04-22), the script needs **no environment-variable prefix**, even when `--cerberus-pem` is used. The classic PAT stays encrypted at rest (`~/.secrets/classic-pat.gpg`), the script decrypts it inline only when a specific API call needs admin/workflow/secrets scope, and the PAT lives only in the Python process heap — never in the env block.
 
@@ -107,7 +107,7 @@ Surfaces touched: filesystem + clipboard + editor cache + browser history. **Not
 
 #### After encryption (both patterns)
 
-The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo_setup.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
+The encrypted file lives at `~/.secrets/cerberus-pem.gpg` and is consumed via `cerberus_pem_session()` in `tools/_pat_session.py` (the parallel of `classic_pat_session()`, same ADR-0216 threat model). Decryption happens only inside the Python process's heap when `new_repo.py --cerberus-pem-gpg` runs — no plaintext PEM ever appears on disk after this one-time step (#1254).
 
 #### Three independent copies of the key (read this once)
 
@@ -133,7 +133,7 @@ You CAN safely `rm ~/.secrets/cerberus-pem.gpg` at any time (deletes only your o
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} \
+poetry run python tools/new_repo.py {name} \
     --cerberus-pem-gpg ~/.secrets/cerberus-pem.gpg [--public]
 ```
 
@@ -143,7 +143,7 @@ This requires the one-time gpg-encrypt of the Cerberus `.pem` (see "One-time set
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} --cerberus-pem PATH [--public]
+poetry run python tools/new_repo.py {name} --cerberus-pem PATH [--public]
 ```
 
 The script reads the plaintext `.pem`, deploys, then unlinks the file. Fine for occasional one-off repo creation; for any repeat use the gpg path is strictly better (security + ergonomics).
@@ -163,7 +163,7 @@ gpg-agent will prompt for your passphrase once per cache window (controlled by `
 2. Click **Generate a private key** — the browser downloads a `.pem` file (typically to `C:\Users\mcwiz\Downloads\`)
 3. Pass that path to `--cerberus-pem` in **Git Bash Unix-style**:
    ```bash
-   poetry run python tools/new_repo_setup.py MyNewRepo --private \
+   poetry run python tools/new_repo.py MyNewRepo --private \
      --cerberus-pem /c/Users/mcwiz/Downloads/cerberus-az.2026-04-22.private-key.pem
    ```
    MSYS translates `/c/Users/...` → `C:\Users\...` before `python.exe` sees argv, so pathlib handles it correctly. Windows-style `'C:\Users\mcwiz\Downloads\foo.pem'` also works if single-quoted (or with escaped backslashes), but the Unix-style form matches every other path example in this runbook.
@@ -214,7 +214,7 @@ All privileged paths now route through in-process classic PAT (#964 + #1000 + #1
 gh auth login -h github.com -p https   # paste classic PAT
 
 cd /c/Users/mcwiz/Projects/AssemblyZero
-poetry run python tools/new_repo_setup.py {name} [--public] [--cerberus-pem PATH]
+poetry run python tools/new_repo.py {name} [--public] [--cerberus-pem PATH]
 
 gh auth login -h github.com -p https   # paste fine-grained PAT back — do this immediately
 ```
@@ -264,18 +264,18 @@ The script can't auto-do steps 1 and 3 (browser-only). It needs a flag to know w
 
 **`--cerberus-pem` is REQUIRED on new GitHub repos (#1206).** The script exits 1 with the .pem-acquisition guide if you forget it. The only way to skip Cerberus deploy is `--no-github` (local scaffold only). For repos already created without the flag, the fallback path below (standalone `tools/deploy_cerberus_secrets.py`) still applies.
 
-Two procedural variants follow — **preferred** (integrated into `new_repo_setup.py`, what `--cerberus-pem` does) or **fallback** (standalone fleet-wide script when you want to deploy to many repos at once).
+Two procedural variants follow — **preferred** (integrated into `new_repo.py`, what `--cerberus-pem` does) or **fallback** (standalone fleet-wide script when you want to deploy to many repos at once).
 
-#### Preferred: pass `--cerberus-pem PATH` to `new_repo_setup.py`
+#### Preferred: pass `--cerberus-pem PATH` to `new_repo.py`
 
-When you invoke `new_repo_setup.py` with the flag, the script handles steps 3-5 below automatically after the repo is created:
+When you invoke `new_repo.py` with the flag, the script handles steps 3-5 below automatically after the repo is created:
 
 1. Go to https://github.com/settings/apps/cerberus-az > Private keys
 2. Click **Generate a private key** — browser downloads a `.pem` file
 3. Run the setup script with the flag (re-using the same invocation if this is the first time):
    ```bash
    cd /c/Users/mcwiz/Projects/AssemblyZero
-   poetry run python tools/new_repo_setup.py MyNewRepo --cerberus-pem /c/Users/mcwiz/Downloads/THE-FILE.pem
+   poetry run python tools/new_repo.py MyNewRepo --cerberus-pem /c/Users/mcwiz/Downloads/THE-FILE.pem
    ```
    The script deploys both secrets to ONLY the new repo, verifies they landed via `gh api`, then deletes the local `.pem` file.
 4. **Keep the key active on the App page** — the deployed Actions secret depends on it remaining active. Do NOT revoke. When you want to rotate the key, follow [runbook 0939](0939-cerberus-key-rotation.md).
@@ -364,14 +364,14 @@ The **per-repo human steps** are: entering the gpg passphrase (once per gpg-agen
 | 2026-04-08 | v3.0: Added PAT switch protocol (steps 1/3). Expanded repo settings (projects, merge, delete-branch). Rewrote Cerberus section as numbered checklist with .pem lifecycle notes. Added shadow wiki creation steps. (#883) |
 | 2026-04-18 | v4.0: Replaced interactive `gh auth login` swap with env-scoped `GH_TOKEN=$(gpg -d ...) poetry run ...` as preferred. Documented one-time gpg setup for at-rest PAT encryption. Legacy swap retained as fallback. Removed `pr-sentinel.yml` from automatic-component table (Worker-only after #938/#939). Documented `--cerberus-pem` flag as preferred Cerberus path (#940/#941). Added security note on env-var snooping via OS APIs. (#942) |
 | 2026-04-22 | v4.1: Fixed unsafe one-time-setup command (`echo '...' \| gpg -c` → `cat /dev/clipboard \| gpg -c`, matching the canonical form in `tools/_pat_session.py`). Updated "What GH_TOKEN does" paragraph to reflect Phase A of #964 (PR #1001): branch protection + repo settings now use in-process classic PAT via `classic_pat_session()` and do not read `GH_TOKEN`; only the initial git push and Cerberus secret-set still do. Toned down the env-snooping mitigation note — window shrank from ~90s to ~5s. Added forward-reference to #1000 (Phase B will eliminate the remaining window). (#1004) |
-| 2026-04-22 | v5.0: Phase B of #964 / #1000 landed. Invocation is now bare `poetry run python tools/new_repo_setup.py NAME [...]`; no `env GH_TOKEN` prefix required. Script splits step 13 into non-workflow initial commit (pushed via `git` with fine-grained PAT) + workflow upload via Contents API (PUT with in-process classic PAT) + `git pull` to sync. Env-block exposure of the classic PAT is eliminated for the common path. Cerberus secret-set (`--cerberus-pem`) still uses `gh auth` — bare works if your fine-grained PAT has `Actions: write`, else prepend `env GH_TOKEN=...` for that invocation. Demoted the "`gh auth login` swap" section to emergency-fallback. Replaced Section 3 (env-snooping mitigation) with a historical note. |
+| 2026-04-22 | v5.0: Phase B of #964 / #1000 landed. Invocation is now bare `poetry run python tools/new_repo.py NAME [...]`; no `env GH_TOKEN` prefix required. Script splits step 13 into non-workflow initial commit (pushed via `git` with fine-grained PAT) + workflow upload via Contents API (PUT with in-process classic PAT) + `git pull` to sync. Env-block exposure of the classic PAT is eliminated for the common path. Cerberus secret-set (`--cerberus-pem`) still uses `gh auth` — bare works if your fine-grained PAT has `Actions: write`, else prepend `env GH_TOKEN=...` for that invocation. Demoted the "`gh auth login` swap" section to emergency-fallback. Replaced Section 3 (env-snooping mitigation) with a historical note. |
 | 2026-04-22 | v5.1: #1007 — `tools/deploy_cerberus_secrets.py` migrated to in-process classic PAT (pynacl sealed-box encryption + REST API). `--cerberus-pem` invocation no longer needs `env GH_TOKEN` regardless of fine-grained PAT scope. `gh auth login` swap section updated to reflect it's now fully legacy (only relevant if `classic_pat_session` itself fails). Updated the under-the-hood table to include Cerberus secret-set on the in-process path. |
 | 2026-04-22 | v5.2: #1009 — surfaced the Cerberus `.pem` download URL (`https://github.com/settings/apps/cerberus-az > Private keys`) next to the Step 1 invocation so users don't have to scroll to Section 4 to find it when they're about to run `--cerberus-pem`. |
 | 2026-04-22 | v5.3: #1014 — made the \`--cerberus-pem\` path-format explicit. Git Bash Unix-style (\`/c/Users/mcwiz/Downloads/...\`) is preferred; noted MSYS translation and the Windows-style fallback with its quoting caveat. Concrete example given in the Step 1 block. |
 | 2026-05-07 | v6.0: #1037 — dropped \`--license mit\` from invocation examples (script default is \`polyform\`, was misleading to show MIT as if recommended). Added an explicit "Defaults the script picks unless you override" block. Rewrote Section 4 with three subsections explaining what Cerberus is (auto-approver of your own PRs after pr-sentinel passes), why the secrets must be per-repo (App's RSA private key, used by the auto-reviewer workflow to authenticate as Cerberus), and why \`--cerberus-pem\` is recommended on every new-repo creation. Updated the env-block exposure note to reflect that #1036/#1037 closes the last \`GH_TOKEN\` hold-out. |
 | 2026-05-09 | v6.1: #1058 + #1059 + #1060 + #1061 — bundle of post-boostgauge-readiness-audit fixes. Script now bootstraps a Python project by default (\`poetry init\` + \`poetry add --group dev pytest pytest-cov\` + \`[tool.pytest.ini_options]\` + \`tests/conftest.py\`); \`--lang none\` skips for non-Python repos. \`.unleashed.json\` defaults to \`assemblyZero: true\` and no longer emits the deprecated \`pickupThresholdMinutes\`. Two canonical GitHub labels (\`implementation\`, \`lld\`) created on the new repo. |
 | 2026-05-22 | v6.2: #1206 — `--cerberus-pem` is REQUIRED for new GitHub repos. Script exits 1 with the .pem-acquisition guide if omitted. Override is `--no-github` (local scaffold only). #1200 + #1202 — extended post-setup verification to GitHub-side state (branch protection, repo settings, workflow content, Cerberus secrets) and added a best-effort `pr-sentinel-mm` Worker installation check that surfaces App-scope drift at creation time instead of when the first PR opens. |
-| 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo_setup.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo_setup.py` invocations. Added one-time-setup subsection for the encryption step. |
+| 2026-05-24 | v6.3: #1254 — applied ADR-0216 gpg-at-rest pattern to the Cerberus `.pem`. New `--cerberus-pem-gpg PATH` flag on both `new_repo.py` and `deploy_cerberus_secrets.py` reads from an encrypted blob (typically `~/.secrets/cerberus-pem.gpg`) and decrypts in-process via `cerberus_pem_session()` -- never plaintext on disk during the script run. Legacy `--cerberus-pem` (plaintext, deleted after) preserved for backward compatibility. Multi-repo creation becomes trivial: one browser-trip generates the .pem, one revokes, the encrypted blob in `~/.secrets/` is reused across any number of `new_repo.py` invocations. Added one-time-setup subsection for the encryption step. |
 | 2026-05-26 | v6.4: #1265 — rewrote "Encrypt the Cerberus App private key" subsection. Save-As pattern (target `~/.secrets/cerberus.pem` directly via browser Save-As dialog, bypassing `~/Downloads/`) is now primary; clipboard pattern documented as alternative for classic-PAT recipe parity. Added inline Hygiene Surfaces audit-gate table naming every surface the recipe touches (Downloads, browser history, Recycle Bin, clipboard, editor cache, gpg-agent) and which step closes it. Eliminates the "operator forgets a step" failure mode that compounds under stress. |
 | 2026-05-25 | v6.5: #1295 — removed all "revoke after deploy" instructions (lines 49, 128, 264, 283, 287 of prior version). Per `unleashed#658`: revoking the key on the App page removes only the public-half registration; every per-repo `REVIEWER_APP_PRIVATE_KEY` Actions secret becomes unusable (GitHub rejects JWTs signed by the revoked key) — silently breaks every repo holding the just-revoked key. Added "Three independent copies of the key" explanation. All revoke guidance now points at runbook 0939 for the canonical deploy-new → audit → revoke-old rotation pattern. Operator question that surfaced this: "i don't understand. i don't need a pem private key on github? then how does it work?" |
 | 2026-05-26 | v6.6: #1293 — documented the per-repo `CLAUDE.md` lean shape per ADR 0219 (#1258) in the "What the script handles automatically" block. Surfaced the new `--project-type` flag (#1291) and pointed at the drift-detector lint tool (#1290). Per-repo CLAUDE.md is now explicitly framed as ADDITIVE only — no restatement of universal-CLAUDE.md content — with the lint tool as the audit-gate that catches regressions. |

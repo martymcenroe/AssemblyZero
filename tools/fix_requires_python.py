@@ -37,7 +37,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from new_repo_setup import _normalize_requires_python  # noqa: E402
+from new_repo import _normalize_requires_python  # noqa: E402
 
 GH_API = "https://api.github.com"
 GITHUB_USER = "martymcenroe"

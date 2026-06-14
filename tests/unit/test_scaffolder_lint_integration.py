@@ -1,6 +1,6 @@
 """Integration test — the scaffolder's CLAUDE.md emission must pass the fleet lint.
 
-#1305 — without this test, `tools/new_repo_setup.py:create_claude_md` and
+#1305 — without this test, `tools/new_repo.py:create_claude_md` and
 `tools/lint_per_repo_claude_md.py:detect_drift` can drift apart silently.
 Yesterday's incident: scaffolder shipped a TODO block whose explanatory text
 mentioned "merge sequence" and "banned commands"; the lint detector (shipped
@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
-from new_repo_setup import PROJECT_TYPES, create_claude_md  # noqa: E402
+from new_repo import PROJECT_TYPES, create_claude_md  # noqa: E402
 from lint_per_repo_claude_md import detect_drift  # noqa: E402
 
 

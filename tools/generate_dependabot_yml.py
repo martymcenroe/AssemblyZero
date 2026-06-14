@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Backfill .github/dependabot.yml across existing fleet repos (#1569).
 
-The new-repo half of #1334 shipped in new_repo_setup.py: fresh repos get a
+The new-repo half of #1334 shipped in new_repo.py: fresh repos get a
 version-update `.github/dependabot.yml` at creation time. This is the
 existing-fleet half — repos created before that change have Dependabot
 *security* updates flipped on (via enable_dependabot.py / #1331) but no
@@ -13,7 +13,7 @@ What this tool does (per target repo):
   2. Detect ecosystems by probing marker files over the Contents API
      (pyproject.toml -> pip, package.json -> npm, Dockerfile -> docker;
      github-actions always included). Reuses the fleet-standard rendering
-     from new_repo_setup.py so the backfilled file is byte-identical to what
+     from new_repo.py so the backfilled file is byte-identical to what
      the scaffolder emits for new repos.
   3. Create a tracking issue IN THE TARGET REPO (so the per-repo PR's
      `Closes #N` satisfies that repo's pr-sentinel), branch from the default
@@ -47,7 +47,7 @@ Exit codes:
 
 Related:
   - #1569 — this issue (existing-fleet backfill)
-  - #1334 — parent (new-repo half shipped via new_repo_setup.py)
+  - #1334 — parent (new-repo half shipped via new_repo.py)
   - #1331 / enable_dependabot.py — flips the API toggles (sibling tool)
   - ADR-0216 — in-process classic PAT pattern
   - fleet_delete_pr_sentinel.py — the Contents-API + branch + PR + merge template
@@ -69,7 +69,7 @@ import requests
 # tools/ on path for sibling imports (matches enable_dependabot.py pattern).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
-from new_repo_setup import (  # noqa: E402
+from new_repo import (  # noqa: E402
     _DEPENDABOT_ECOSYSTEMS,
     ecosystems_for_markers,
     render_dependabot_yml,
@@ -154,7 +154,7 @@ def detect_ecosystems_via_api(
 ) -> list[tuple[str, str]]:
     """Detect dependabot ecosystems by probing marker files over the API.
 
-    Mirrors new_repo_setup.detect_dependabot_ecosystems() but checks marker
+    Mirrors new_repo.detect_dependabot_ecosystems() but checks marker
     presence via the Contents API instead of a local checkout, so it works
     against any repo without cloning. github-actions is always included
     (appended by ecosystems_for_markers).
