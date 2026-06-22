@@ -13,6 +13,7 @@ from __future__ import annotations
 from assemblyzero.utils.shell import run_command
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -447,6 +448,86 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
+def _ride_spec_on_lld_pr(
+    spec_path: str,
+    target_repo: str,
+    issue_number: int,
+) -> bool:
+    """Closes #1625. Mirror the implementation spec into the existing ``{N}-lld``
+    worktree and commit + push it, so the spec rides the LLD PR (which merges per
+    ADR 0221) and lands on target main instead of being orphaned on the working
+    tree.
+
+    Best-effort: never raises. If the ``{N}-lld`` worktree is absent (e.g. the
+    LLD stage was skipped because a pre-existing LLD was found, so there is no LLD
+    PR to ride), the spec is left on the working tree and a note is logged — the
+    terminal cleanup only deletes the working-tree copy after the LLD PR merges,
+    so an un-ridden spec stays put rather than being lost.
+
+    Returns True iff the spec was committed to the LLD worktree.
+    """
+    if not target_repo or not spec_path:
+        return False
+    from assemblyzero.workflows.requirements.git_operations import (
+        lld_worktree_path_for,
+    )
+
+    worktree = lld_worktree_path_for(target_repo, issue_number)
+    if not worktree.is_dir():
+        print(
+            f"    [spec] no LLD worktree at {worktree} — spec stays on the working "
+            f"tree (no LLD PR to ride); terminal cleanup will not delete it"
+        )
+        return False
+
+    src = Path(spec_path)
+    try:
+        rel = src.relative_to(Path(target_repo))
+    except ValueError:
+        return False
+
+    try:
+        dst = worktree / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+        add = run_command(
+            ["git", "add", str(rel)], cwd=str(worktree),
+            capture_output=True, text=True,
+        )
+        if add.returncode != 0:
+            print(f"    [spec] git add failed (non-fatal): {add.stderr.strip()}")
+            return False
+
+        msg = (
+            f"docs: add implementation spec for issue #{issue_number}\n\n"
+            f"Ref #{issue_number}"
+        )
+        commit = run_command(
+            ["git", "commit", "-m", msg], cwd=str(worktree),
+            capture_output=True, text=True,
+        )
+        if commit.returncode != 0:
+            detail = (commit.stderr or commit.stdout).strip()
+            print(f"    [spec] git commit failed/no-op (non-fatal): {detail}")
+            return False
+
+        push = run_command(
+            ["git", "push"], cwd=str(worktree),
+            capture_output=True, text=True,
+        )
+        if push.returncode != 0:
+            # Committed locally; the open LLD PR updates on the next push.
+            print(f"    [spec] commit OK, push failed (non-fatal): {push.stderr.strip()}")
+            return True
+
+        print(f"    [spec] implementation spec committed to the LLD PR (issue #{issue_number})")
+        return True
+    except OSError as e:
+        print(f"    [spec] spec mirror failed (non-fatal): {e}")
+        return False
+
+
 def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation spec workflow.
 
@@ -498,6 +579,15 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
 
         spec_path = sub_result.get("spec_path", "")
         if spec_path and Path(spec_path).is_file():
+            # Closes #1625: the spec is a permanent artifact paired with the LLD;
+            # ride it on the LLD PR so it lands on target main (ADR 0221). The
+            # working-tree copy stays for the impl stage to read; the terminal
+            # cleanup removes it after the LLD PR merges.
+            _ride_spec_on_lld_pr(
+                spec_path=spec_path,
+                target_repo=state.get("target_repo", ""),
+                issue_number=issue_number,
+            )
             result = _make_stage_result(
                 status="passed",
                 artifact_path=spec_path,
