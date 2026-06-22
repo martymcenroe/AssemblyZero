@@ -189,7 +189,8 @@ If no session log tool exists, manually append to the current day's session log.
 - `docs/session-logs/*.md`
 - `docs/lessons-learned.md`
 - `data/session-index.jsonl`
-- `data/pickup-status.json`
+
+> `data/pickup-status.json` and `data/handoff-marker-status.json` are intentionally excluded — ephemeral session state under the global `/data/` gitignore ban (see Secret-Agent-Man#20).
 
 **DENIED patterns** (NEVER staged, even if changed):
 - Credentials: `*.env*`, `*.dev.vars*`, `*.pem`, `*.key`, anything matching `*secret*`, `*credential*`, `*token*` in filename
@@ -225,7 +226,7 @@ gh issue create --repo {{GITHUB_REPO}} \
 
 BRANCH="cleanup-[DATE]-[session-slug]"
 git -C {{PROJECT_ROOT}} checkout -b $BRANCH
-git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
 git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE] (Closes #${ISSUE_N})"
 git -C {{PROJECT_ROOT}} push -u origin $BRANCH
 
@@ -245,7 +246,7 @@ git -C {{PROJECT_ROOT}} branch -D $BRANCH
 ### 4.9 — Direct-push fallback (unprotected main)
 
 ```bash
-git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
 git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE]"
 git -C {{PROJECT_ROOT}} push
 ```
