@@ -2,7 +2,27 @@
 
 - **Status:** Accepted (operator decision 2026-06-22)
 - **Date:** 2026-06-22
-- **Related:** #1531, #1624, #1625, #1626, #1627, #1628 (the six orchestrator-pollution defects); Chiron defects report (martymcenroe/Chiron PR #108, commit `f40eb0d`); #1390 (methodology); #238 (LLDs reference, not close); #1459 (LLD worktree+PR rewire); #1504 / #1505 (testing `repo_root=worktree_path`); #1556 / PR #1560 (cleanup-skill worktree removal); #1458 (lineage gitignored)
+- **Related:** #1531, #1624, #1625, #1626, #1627, #1628 (the six orchestrator-pollution defects); #1631 (doc-step outputs left untracked); Chiron defects report (martymcenroe/Chiron PR #108, commit `f40eb0d`); #1390 (methodology); #238 (LLDs reference, not close); #1459 (LLD worktree+PR rewire); #1504 / #1505 (testing `repo_root=worktree_path`); #1556 / PR #1560 (cleanup-skill worktree removal); #1458 (lineage gitignored)
+
+## Success criterion (north star)
+
+The bar for "fixed" is not per-defect — it is a property of a whole run: **a completed orchestrator run leaves zero git debris on the target.** No untracked files, no stashes, no stale branches (local or remote), no leftover worktrees. Everything a run produces is either **committed** (lands via a merged PR) or **removed** by the terminal cleanup stage. The defect fixes below are means to this end; the acceptance test is the debris count, which must be zero (see Verification).
+
+The operator's lived experience is the motivation: a one-hour run that leaves this debris costs a full day of manual cleanup. That inversion is the failure this ADR exists to end.
+
+Every piece of git debris one run can leave, and where it is closed:
+
+| Debris | Closed by |
+|---|---|
+| Untracked **LLD** on the target working tree | terminal stage deletes it after the LLD PR merges (#1624) |
+| Untracked **spec** on the target working tree | rides the LLD PR; copy deleted in terminal stage (#1625) |
+| Untracked **test/impl reports** | committed to the impl PR (#1626) |
+| Untracked **wiki/runbook/README** from the doc step | committed via a `post-document` checkpoint (#1631); the 907/908 boilerplate is suppressed for external repos (#1627) |
+| Leftover **LLD + impl worktrees** (local) | terminal stage removes them (#1628) |
+| Stale **LLD/impl branches on origin** | auto-deleted on merge — `delete-branch-on-merge` confirmed ON for all 71 AZ-managed repos (verified 2026-06-22); the 4 OFF are external forks (`OasisLMF`, `Deep-QLearning-Agent-for-Traffic-Signal-Control`, `python-guide`, `flask`), not orchestration targets |
+| **Local squash-orphan branches** | terminal stage (LLD branch, `git branch -d` after merge); `/cleanup` via ADR-0217 (impl branch, #1556) |
+| **Leaked LLD PR** | merged (#1531) |
+| **Operator stashes** | none created by AZ — verified there is no `git stash` anywhere in orchestrator code. They were manual workarounds for the untracked files above and disappear once those are fixed (Chiron report R7) |
 
 ## Context
 
@@ -34,14 +54,14 @@ So the working-tree copies are **load-bearing through the impl stage** — they 
 
 4. **Reports already land correctly (#1626).** The testing workflow runs with `repo_root = worktree_path` (`orchestrator/stages.py:578-580`), so reports are written inside the impl worktree; committing a `post-finalize` checkpoint lands them via the impl PR. No lifecycle change needed — just the missing commit.
 
-5. **The N8 cp_docs (907/908) are the one artifact that must NOT land on an external `main` (#1627).** They are AZ-internal stage documentation. Suppress them for external-repo runs via the **existing** `skip_docs` / `doc_scope` switch (`testing/graph.py:415`, `testing/nodes/document.py:246-275`), set by the orchestrator when `target_repo != assemblyzero_root` — not a new `emit_cp_docs` config key (the snippet in #1627 references `state['config']` / `target_repo` / `assemblyzero_root`, none of which exist in `TestingWorkflowState`).
+5. **The doc step's tracked outputs are committed; only the 907/908 boilerplate is suppressed for external repos (#1627, #1631).** The N8 documentation node generates a wiki page, a runbook, and a README edit (valuable feature docs — **keep and commit** them via a `post-document` checkpoint, #1631) plus the 907/908 cp_docs (AZ-internal boilerplate that assumes an AssemblyZero context and targets `docs/skills/` — **suppress for external repos**, #1627, via the existing `skip_docs` / `doc_scope` switch at `testing/graph.py:415` and `document.py:246-275`). Today the doc node commits **none** of these, so they are left untracked in the worktree (#1631) — the original framing of "suppress all of N8" was too broad. The lessons-learned retrospective is kept either way: it writes to the git-ignored lineage dir, so it never pollutes, and it is useful for later deep investigation.
 
 ## Consequences
 
 - **#1531, #1624, #1625, #1628 become one coordinated terminal-stage change**, not three independent rounds. The Chiron report's "Round 1 standalone #1624" is superseded — #1624's deletion is unsafe except as the last step of the terminal cleanup, after the LLD PR has merged.
-- **#1626 and #1627 stay independent and land first** (no dependency on the lifecycle decision).
+- **#1626, #1627, and #1631 stay independent and land first** (no dependency on the lifecycle decision).
 - The orchestrator now performs a merge (the LLD PR) and blocks briefly at the end to do so. The LLD PR is simple (one doc, `No-Issue:` exemption), so Cerberus + pr-sentinel clear it quickly.
-- **The impl PR is still human/Cerberus-merged, not auto-merged by the orchestrator.** Its branch is already pushed to origin in the `pr` stage, so the terminal stage may remove the impl *worktree* safely while leaving the impl *branch* (PR open) intact. Final impl-branch cleanup remains `/cleanup`'s job after that PR merges (#1556 stays valid for the impl side).
+- **The impl PR is still human/Cerberus-merged, not auto-merged by the orchestrator.** Its branch is already pushed to origin in the `pr` stage, so the terminal stage may remove the impl *worktree* safely while leaving the impl *branch* (PR open) intact. The branch on origin is auto-deleted when that PR merges (delete-branch-on-merge), and the local squash-orphan is retired by `/cleanup` (#1556 stays valid for the impl side).
 - Two PRs per orchestrated issue (LLD+spec PR, impl PR).
 
 ## Implementation sequence
@@ -49,11 +69,29 @@ So the working-tree copies are **load-bearing through the impl stage** — they 
 Detailed per-issue steps live in the issues; summary order:
 
 1. **#1626** — reports `post-finalize` checkpoint (independent).
-2. **#1627** — suppress cp_docs for external repos via `skip_docs` (independent).
+2. **#1627 + #1631** — suppress the 907/908 cp_docs for external repos, and add a `post-document` checkpoint so wiki/runbook/README are committed instead of left untracked (independent).
 3. **State plumbing** — capture the LLD PR URL + `{N}-lld` worktree path into `OrchestrationState`.
 4. **#1625** — spec rides the LLD PR (needs step 3).
 5. **#1531 + #1624 + #1628** — the terminal `cleanup` stage (merge the LLD PR, delete redundant working-tree copies, remove worktrees), reusing `cleanup_helpers`.
 
+## Verification
+
+The acceptance test for the whole set is a single end-to-end smoke build on a fresh external repo asserting **zero debris**:
+
+- `git -C <target> status --porcelain` is empty (no untracked LLD / spec / report / doc files);
+- `git -C <parent> worktree list` shows no `{N}` or `{N}-lld` worktrees;
+- no open `{N}-lld` PR remains, and the LLD content is on `main`;
+- no `docs/skills/` boilerplate on an external target.
+
+One test that fails fast if any defect regresses — narrative "PR merged" is not sufficient.
+
 ## Fleet artifacts
 
-Touched by the eventual implementation (not by this ADR): `orchestrator/{graph,stages,state}.py`, `requirements/nodes/finalize.py`, `implementation_spec/nodes/finalize_spec.py`, `testing/nodes/finalize.py` (or `testing/graph.py`), `testing/nodes/document.py` / `orchestrator/stages.py`. This ADR changes no code.
+Touched by the eventual implementation (not by this ADR): `orchestrator/{graph,stages,state}.py`, `requirements/nodes/finalize.py`, `implementation_spec/nodes/finalize_spec.py`, `testing/nodes/finalize.py` / `testing/graph.py`, `testing/nodes/document.py` / `orchestrator/stages.py`. This ADR changes no code.
+
+## Revision history
+
+| Date | Change |
+|------|--------|
+| 2026-06-22 | Initial (#1629 / PR #1630). |
+| 2026-06-22 | Added the zero-debris north star + acceptance test; corrected doc-step handling (keep & commit wiki/runbook/README via #1631, suppress only the 907/908 boilerplate — the earlier "suppress all of N8" was too broad) after operator review; recorded the delete-branch-on-merge verification (71/71 AZ-managed repos) and the no-`git stash`-in-AZ verification. |
