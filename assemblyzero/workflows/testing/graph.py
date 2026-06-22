@@ -461,7 +461,11 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N4b_completeness_gate", completeness_gate)  # Issue #147
     workflow.add_node("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
     workflow.add_node("N6_e2e_validation", e2e_validation)
-    workflow.add_node("N7_finalize", finalize)
+    # Issue #1626: checkpoint after N7 so the test/implementation reports written
+    # and archived by finalize() are committed to the impl worktree (and thus
+    # land on target main when the impl PR squash-merges) instead of being left
+    # untracked. Mirrors the N2/N4/N5 checkpoint pattern.
+    workflow.add_node("N7_finalize", _wrap_with_checkpoint(finalize, "post-finalize"))
     workflow.add_node("N7_5_adversarial", run_adversarial_node)  # Issue #352
     workflow.add_node("N8_document", document)
     workflow.add_node("N9_cleanup", cleanup)  # Issue #180
