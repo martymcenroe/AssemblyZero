@@ -222,6 +222,7 @@ class TestingWorkflowState(TypedDict, total=False):
     # Documentation control
     skip_docs: bool
     doc_scope: Literal["full", "minimal", "auto", "none"]
+    skip_cp_docs: bool  # Issue #1627: suppress the 907/908 c/p docs for external-repo builds
 
     # Issue #335: Scaffold validation
     generated_tests: str  # Generated test file content

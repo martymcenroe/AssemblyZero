@@ -537,6 +537,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     import subprocess
 
     target_repo = state.get("target_repo", "")
+    assemblyzero_root = state.get("assemblyzero_root", "")
     worktree_path = worktree_path_for(issue_number, target_repo or None)
     branch_name = f"issue-{issue_number}"
 
@@ -578,6 +579,9 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "worktree_path": str(worktree_path),
             "repo_root": str(worktree_path),
             "original_repo_root": target_repo,
+            # Issue #1627: suppress the AZ-internal 907/908 c/p docs when building
+            # an external repo (target differs from the AssemblyZero root).
+            "skip_cp_docs": bool(assemblyzero_root) and target_repo != assemblyzero_root,
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),

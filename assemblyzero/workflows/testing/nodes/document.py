@@ -308,9 +308,14 @@ def document(state: TestingWorkflowState) -> dict[str, Any]:
         except Exception as e:
             print(f"    Runbook: SKIPPED ({e})")
 
-    # 5. Generate c/p docs (if new CLI tool)
+    # 5. Generate c/p docs (if new CLI tool). Issue #1627: the 907/908 c/p docs
+    # are AZ-internal boilerplate (they assume an AssemblyZero context and target
+    # docs/skills/), so skip them for external-repo builds. The orchestrator sets
+    # skip_cp_docs when target_repo != assemblyzero_root. wiki/runbook/README are
+    # kept (they are useful feature docs) and committed via the post-document
+    # checkpoint (#1631).
     cp_paths: list[str] = []
-    if is_cli_tool(state):
+    if is_cli_tool(state) and not state.get("skip_cp_docs"):
         try:
             cli_path = generate_cli_doc(
                 tool_name=feature_name,

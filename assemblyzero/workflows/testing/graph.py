@@ -467,7 +467,12 @@ def build_testing_workflow() -> StateGraph:
     # untracked. Mirrors the N2/N4/N5 checkpoint pattern.
     workflow.add_node("N7_finalize", _wrap_with_checkpoint(finalize, "post-finalize"))
     workflow.add_node("N7_5_adversarial", run_adversarial_node)  # Issue #352
-    workflow.add_node("N8_document", document)
+    # Issue #1631: checkpoint after N8 so the wiki/runbook/README the document
+    # node generates are committed to the impl worktree (and land on target main
+    # via the impl PR) instead of being left untracked. The 907/908 c/p docs are
+    # suppressed for external repos upstream (#1627), so this stages only the
+    # keeper docs there.
+    workflow.add_node("N8_document", _wrap_with_checkpoint(document, "post-document"))
     workflow.add_node("N9_cleanup", cleanup)  # Issue #180
     workflow.add_node("HALT", create_halt_node("testing"))  # Issue #486
 
