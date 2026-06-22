@@ -397,6 +397,11 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
         state = dict(state)
         if lld_path:
             state["previous_lld_draft_path"] = lld_path
+        # #1531: capture the LLD PR URL so the terminal cleanup stage can merge it
+        # (landing the LLD + spec on target main per ADR 0221).
+        lld_pr_url = sub_result.get("final_lld_pr_url", "")
+        if lld_pr_url:
+            state["lld_pr_url"] = lld_pr_url
         verdict_for_next = sub_result.get("current_verdict", "") or sub_result.get(
             "verdict_text", ""
         )
@@ -807,6 +812,165 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
+def _merge_lld_pr(pr_url: str, timeout_s: int, notes: list[str]) -> bool:
+    """Closes #1531. Poll the LLD PR until mergeable, then squash-merge it (landing
+    the LLD + spec on target main per ADR 0221). Best-effort; returns True iff the PR
+    is now merged. Bounded by ``timeout_s``; on timeout the PR is left open and
+    deferred to manual ``/cleanup``. No ``--admin``, no force.
+    """
+    deadline = time.monotonic() + max(0, timeout_s)
+    last = ""
+    while True:
+        view = run_command(
+            ["gh", "pr", "view", pr_url, "--json", "state,mergeStateStatus",
+             "--jq", "[.state, .mergeStateStatus] | @tsv"],
+            capture_output=True, text=True,
+        )
+        if view.returncode == 0:
+            cols = (view.stdout or "").strip().split("\t")
+            pr_state = cols[0] if cols and cols[0] else ""
+            last = cols[1] if len(cols) > 1 else last
+            if pr_state == "MERGED":
+                return True
+            if last == "CLEAN":
+                merge = run_command(
+                    ["gh", "pr", "merge", pr_url, "--squash"],
+                    capture_output=True, text=True,
+                )
+                if merge.returncode == 0:
+                    return True
+                notes.append(f"LLD PR merge attempt failed: {(merge.stderr or '').strip()[:160]}")
+        else:
+            notes.append(f"LLD PR view failed: {(view.stderr or '').strip()[:160]}")
+        if time.monotonic() >= deadline:
+            notes.append(
+                f"LLD PR not merged within {timeout_s}s (last merge-state="
+                f"{last or '?'}); deferred to manual /cleanup"
+            )
+            return False
+        time.sleep(15)
+
+
+def _delete_landed_working_copies(target_repo: str, issue_number: int, notes: list[str]) -> None:
+    """Closes #1624. Delete the LLD + spec working-tree copies from the target after
+    they have landed on main via the merged LLD PR. Scoped to the LLD and spec
+    artifacts only — never ``lld-status.json`` or anything else.
+    """
+    base = Path(target_repo)
+    patterns = [
+        f"docs/lld/active/LLD-{issue_number:03d}.md",
+        f"docs/lld/active/LLD-{issue_number:03d}-*.md",
+        f"docs/lld/active/LLD-{issue_number}.md",
+        f"docs/lld/active/LLD-{issue_number}-*.md",
+        f"docs/lld/drafts/spec-{issue_number:04d}.md",
+        f"docs/lld/drafts/spec-{issue_number:04d}-*.md",
+        f"docs/lld/drafts/spec-{issue_number}.md",
+        f"docs/lld/drafts/spec-{issue_number}-*.md",
+    ]
+    matched = set()
+    for pat in patterns:
+        matched.update(base.glob(pat))
+    removed = []
+    for p in sorted(matched):
+        try:
+            if p.is_file():
+                p.unlink()
+                removed.append(str(p.relative_to(base)))
+        except OSError as e:
+            notes.append(f"could not delete {p}: {e}")
+    if removed:
+        notes.append(f"removed landed working-tree copies: {', '.join(removed)}")
+
+
+def _remove_orchestrator_worktrees(
+    target_repo: str, issue_number: int, lld_merged: bool, notes: list[str],
+) -> None:
+    """Closes #1628. Remove the LLD and impl worktrees the orchestrator created,
+    reusing cleanup_helpers (plain ``git worktree remove``, no ``--force``; ``git
+    branch -d``, never ``-D``). The impl branch is left intact (its PR is merged by
+    the normal review flow); a squash-merged LLD branch that ``-d`` refuses is left
+    for ``/cleanup``'s ADR-0217 graft. Worktree-removal failures (dirty worktree)
+    are logged as residue, never force-removed.
+    """
+    from assemblyzero.workflows.requirements.git_operations import lld_worktree_path_for
+    from assemblyzero.workflows.testing.nodes.cleanup_helpers import (
+        delete_local_branch,
+        get_worktree_branch,
+        remove_worktree,
+    )
+
+    if target_repo:
+        lld_wt = lld_worktree_path_for(target_repo, issue_number)
+        if Path(lld_wt).is_dir():
+            branch = None
+            try:
+                branch = get_worktree_branch(lld_wt)
+            except Exception:
+                branch = None
+            try:
+                remove_worktree(lld_wt)
+                notes.append(f"removed LLD worktree {lld_wt}")
+                if lld_merged and branch:
+                    try:
+                        delete_local_branch(branch)
+                    except Exception as e:
+                        notes.append(f"LLD branch -d left for /cleanup (squash orphan): {e}")
+            except Exception as e:
+                notes.append(f"LLD worktree not removed (residue left, no --force): {e}")
+
+    impl_wt = worktree_path_for(issue_number, target_repo or None)
+    if Path(impl_wt).is_dir():
+        try:
+            remove_worktree(impl_wt)
+            notes.append(f"removed impl worktree {impl_wt}")
+        except Exception as e:
+            notes.append(f"impl worktree not removed (residue left, no --force): {e}")
+
+
+def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
+    """Terminal stage (#1531 + #1624 + #1628): merge the LLD PR (landing LLD + spec
+    on target main), delete the now-redundant LLD/spec working-tree copies, and
+    remove the LLD + impl worktrees.
+
+    Best-effort housekeeping: always returns ``passed`` so a cleanup hiccup never
+    fails an otherwise-successful run. Residue is logged and deferred to manual
+    ``/cleanup``.
+    """
+    stage = "cleanup"
+    issue_number = state["issue_number"]
+    start_time = time.monotonic()
+
+    target_repo = state.get("target_repo", "")
+    lld_pr_url = state.get("lld_pr_url", "")
+    config = state.get("config", {})
+    merge_timeout = config.get("cleanup_merge_timeout_s", 600)
+    notes: list[str] = []
+
+    lld_merged = False
+    if lld_pr_url:
+        lld_merged = _merge_lld_pr(lld_pr_url, merge_timeout, notes)
+    else:
+        notes.append("no LLD PR URL in state — skipping LLD merge")
+
+    # #1624: only delete the working-tree copies once the content is safely on main.
+    if lld_merged and target_repo:
+        _delete_landed_working_copies(target_repo, issue_number, notes)
+
+    # #1628: remove the worktrees (LLD branch -d attempted only if its PR merged).
+    _remove_orchestrator_worktrees(target_repo, issue_number, lld_merged, notes)
+
+    for note in notes:
+        print(f"    [cleanup] {note}")
+
+    result = _make_stage_result(
+        status="passed",
+        artifact_path=lld_pr_url if lld_merged else "",
+        duration_seconds=time.monotonic() - start_time,
+        attempts=1,
+    )
+    return update_stage_result(state, stage, result)
+
+
 # Map stage names to their runner functions
 STAGE_RUNNERS: dict[str, callable] = {
     "triage": run_triage_stage,
@@ -814,4 +978,5 @@ STAGE_RUNNERS: dict[str, callable] = {
     "spec": run_spec_stage,
     "impl": run_impl_stage,
     "pr": run_pr_stage,
+    "cleanup": run_cleanup_stage,
 }

@@ -68,8 +68,12 @@ class TestGetNextStage:
     def test_impl_to_pr(self):
         assert get_next_stage("impl") == "pr"
 
-    def test_pr_to_done(self):
-        assert get_next_stage("pr") == "done"
+    def test_pr_to_cleanup(self):
+        # Issue #1628: a terminal cleanup stage now follows pr.
+        assert get_next_stage("pr") == "cleanup"
+
+    def test_cleanup_to_done(self):
+        assert get_next_stage("cleanup") == "done"
 
     def test_done_stays_done(self):
         assert get_next_stage("done") == "done"
@@ -141,7 +145,8 @@ class TestUpdateStageResult:
         new_state = update_stage_result(OrchestrationState(**state_at_lld), "lld", result)
         assert new_state["current_stage"] == "lld"
 
-    def test_pr_passed_sets_done_and_completed(self):
+    def test_pr_passed_advances_to_cleanup(self):
+        # Issue #1628: pr is no longer terminal — the cleanup stage follows it.
         config = get_default_config()
         state = create_initial_state(305, config)
         state_at_pr = dict(state)
@@ -154,9 +159,25 @@ class TestUpdateStageResult:
             attempts=1,
         )
         new_state = update_stage_result(OrchestrationState(**state_at_pr), "pr", result)
+        assert new_state["current_stage"] == "cleanup"
+        assert new_state["completed_at"] == ""
+        assert new_state["pr_url"] == "https://github.com/martymcenroe/AssemblyZero/pull/312"
+
+    def test_cleanup_passed_sets_done_and_completed(self):
+        config = get_default_config()
+        state = create_initial_state(305, config)
+        state_at_cleanup = dict(state)
+        state_at_cleanup["current_stage"] = "cleanup"
+        result = StageResult(
+            status="passed",
+            artifact_path="",
+            error_message="",
+            duration_seconds=1.0,
+            attempts=1,
+        )
+        new_state = update_stage_result(OrchestrationState(**state_at_cleanup), "cleanup", result)
         assert new_state["current_stage"] == "done"
         assert new_state["completed_at"] != ""
-        assert new_state["pr_url"] == "https://github.com/martymcenroe/AssemblyZero/pull/312"
 
     def test_does_not_mutate_original_state(self):
         config = get_default_config()
