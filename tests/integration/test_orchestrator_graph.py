@@ -62,6 +62,9 @@ def mock_all_stages():
         "spec": make_mock_runner("spec", "impl-spec.md"),
         "impl": make_mock_runner("impl", "../AssemblyZero-305"),
         "pr": make_mock_runner("pr", "https://github.com/test/pull/1"),
+        # Issue #1628: the terminal cleanup stage is now part of STAGE_ORDER, so the
+        # "mock all stages" fixture must include it or the pipeline never reaches "done".
+        "cleanup": make_mock_runner("cleanup", "cleanup"),
     }
 
     with patch("assemblyzero.workflows.orchestrator.graph.STAGE_RUNNERS", runners), \

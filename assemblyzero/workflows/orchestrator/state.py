@@ -31,7 +31,7 @@ class OrchestrationState(TypedDict, total=False):
     """Full orchestration pipeline state."""
 
     issue_number: int
-    current_stage: str  # "triage", "lld", "spec", "impl", "pr", "done"
+    current_stage: str  # "triage", "lld", "spec", "impl", "pr", "cleanup", "done"
 
     # Repo targeting (Issue #1374)
     target_repo: str  # Where the work happens (outputs, worktree, gh CLI)
@@ -43,6 +43,7 @@ class OrchestrationState(TypedDict, total=False):
     spec_path: str
     worktree_path: str
     pr_url: str
+    lld_pr_url: str  # Issue #1531: the LLD PR, captured so the terminal cleanup stage can merge it
 
     # Progress tracking
     stage_results: dict[str, StageResult]
@@ -72,7 +73,10 @@ class OrchestrationState(TypedDict, total=False):
     previous_spec_verdict_text: str
 
 
-STAGE_ORDER: list[str] = ["triage", "lld", "spec", "impl", "pr"]
+# Issue #1628: a terminal "cleanup" stage runs after "pr" — it merges the LLD PR
+# (#1531), deletes the now-redundant working-tree LLD/spec copies (#1624), and
+# removes the LLD + impl worktrees (#1628). Best-effort housekeeping.
+STAGE_ORDER: list[str] = ["triage", "lld", "spec", "impl", "pr", "cleanup"]
 
 # Maps stage name to the state key that holds its artifact path
 _STAGE_ARTIFACT_KEY: dict[str, str] = {
@@ -124,6 +128,7 @@ def create_initial_state(
         spec_path="",
         worktree_path="",
         pr_url="",
+        lld_pr_url="",
         stage_results={},
         stage_attempts={stage: 0 for stage in STAGE_ORDER},
         started_at=now,
