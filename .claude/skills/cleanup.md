@@ -350,9 +350,10 @@ Content:
 - `docs/session-logs/*.md`
 - `docs/lessons-learned.md`
 - `data/session-index.jsonl`
-- `data/pickup-status.json`
 - `.claude/commands/*.md` (AssemblyZero only — skill sync)
 - `.claude/hooks/*.sh` (AssemblyZero only — hook sync)
+
+> Note: `data/pickup-status.json` and `data/handoff-marker-status.json` are intentionally excluded — they are ephemeral session state covered by the global `/data/` gitignore ban (see Secret-Agent-Man#20). Do not add them back to this allowlist; `git add` on them is a no-op anyway since they are globally ignored.
 
 **DENIED patterns** (NEVER staged, even if changed — report only so user handles separately):
 - Credentials: `*.env*`, `*.dev.vars*`, `*.pem`, `*.key`, anything matching `*secret*`, `*credential*`, `*token*` in filename
@@ -400,7 +401,6 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout -b $BRANCH
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ 2>/dev/null
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/lessons-learned.md 2>/dev/null
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add data/session-index.jsonl 2>/dev/null
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add data/pickup-status.json 2>/dev/null
 # AssemblyZero only (skill + hook sync):
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add .claude/commands/ 2>/dev/null
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add .claude/hooks/ 2>/dev/null
@@ -465,7 +465,7 @@ fi
 
 If 4.2 detected no protection:
 ```bash
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "chore: session cleanup {DATE} — {SESSION_NAME}"
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} push
 ```
