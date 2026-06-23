@@ -29,6 +29,11 @@ from assemblyzero.workflows.orchestrator.state import (
     StageResult,
     update_stage_result,
 )
+from assemblyzero.core.llm_provider import get_provider
+
+import logging
+
+_stages_logger = logging.getLogger(__name__)
 
 
 def should_skip_stage(
@@ -152,6 +157,47 @@ def _classify_halt_transience(sub_result: dict) -> bool | None:
     return bool(plan.get("is_transient", False))
 
 
+def _synthesize_brief_summary(title: str, body: str) -> str:
+    """Closes #1530: generate a concise 2-4 sentence summary from an issue
+    title and body using the codebase's ClaudeCLIProvider (haiku model for
+    speed; subscription/OAuth, never API key).
+
+    Returns the summary text on success, or an empty string on any failure
+    (timeout, model error, empty response). Callers must treat an empty
+    return as "fall back to raw passthrough."
+    """
+    system_prompt = (
+        "You are a technical writer summarising GitHub issues for an engineering workflow. "
+        "Write 2-4 sentences: what the issue asks for, why it matters, and the rough scope "
+        "(e.g. single function, new module, config change). "
+        "Do not repeat the title. Write in plain English, no markdown headings, no bullet points."
+    )
+    content = f"Title: {title}\n\nBody:\n{body}"
+
+    try:
+        provider = get_provider("claude:haiku")
+        result = provider.invoke(
+            system_prompt=system_prompt,
+            content=content,
+            timeout_seconds=60,
+        )
+    except Exception as exc:
+        _stages_logger.warning(
+            "brief summary synthesis failed (provider error): %s — falling back to raw passthrough",
+            exc,
+        )
+        return ""
+
+    if not result.success or not result.response or not result.response.strip():
+        _stages_logger.warning(
+            "brief summary synthesis returned empty/failure (error=%s) — falling back to raw passthrough",
+            result.error_message,
+        )
+        return ""
+
+    return result.response.strip()
+
+
 def _fetch_issue_body_to_temp_brief(
     issue_number: int,
     target_repo: str,
@@ -205,11 +251,24 @@ def _fetch_issue_body_to_temp_brief(
     if not issue_body.strip():
         return ("", f"issue #{issue_number} body is empty — no content to synthesize a brief from")
 
-    # Minimal brief: just the title + body. The triage sub-workflow's
-    # drafter/reviewer process this further; we are NOT pre-Michelle-voice
-    # rewriting here — the operator's hand-authored brief at
-    # docs/lineage/{N}/issue-brief.md remains the override path.
-    brief_content = f"# {issue_title}\n\n{issue_body}\n"
+    # Closes #1530: prepend a concise auto-generated summary so the brief
+    # starts with substance rather than raw issue text.  If synthesis fails
+    # (timeout, model error, empty response) we fall back silently to the
+    # original title+body passthrough — orchestration must never halt here.
+    summary = _synthesize_brief_summary(issue_title, issue_body)
+    if summary:
+        brief_content = (
+            f"# {issue_title}\n\n"
+            f"## Summary\n{summary}\n\n"
+            f"## Issue detail\n{issue_body}\n"
+        )
+    else:
+        # Fallback: raw passthrough (preserves pre-#1530 behaviour)
+        _stages_logger.info(
+            "issue #%s brief synthesis: using raw passthrough (summary generation failed or returned empty)",
+            issue_number,
+        )
+        brief_content = f"# {issue_title}\n\n{issue_body}\n"
 
     fd, temp_path = tempfile.mkstemp(
         prefix=f"orchestrator-issue-{issue_number}-",
