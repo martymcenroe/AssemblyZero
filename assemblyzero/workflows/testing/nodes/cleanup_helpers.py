@@ -161,7 +161,12 @@ def get_worktree_branch(worktree_path: str | Path) -> str | None:
 
 
 def delete_local_branch(branch_name: str) -> bool:
-    """Delete a local git branch using -D (force, for squash-merged branches).
+    """Delete a local git branch using the safe ``-d`` (refuses unmerged).
+
+    Uses ``git branch -d`` (NOT ``-D``): ``-D`` is on the banned-commands
+    list. ``-d`` refuses to delete a branch not reachable from HEAD, which is
+    the intended safety net. Squash-merge orphans that ``-d`` refuses are
+    retired by the caller via the ADR-0217 graft recipe, never a force delete.
 
     Args:
         branch_name: Name of the branch to delete.
@@ -170,8 +175,8 @@ def delete_local_branch(branch_name: str) -> bool:
         True if deleted, False if branch didn't exist.
 
     Raises:
-        subprocess.CalledProcessError: If git branch -D fails for reasons
-            other than branch-not-found.
+        subprocess.CalledProcessError: If git branch -d fails for reasons
+            other than branch-not-found (e.g. the branch is not merged).
         subprocess.TimeoutExpired: If git CLI exceeds SUBPROCESS_TIMEOUT.
     """
     try:
