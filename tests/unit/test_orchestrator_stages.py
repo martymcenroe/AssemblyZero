@@ -576,3 +576,161 @@ class TestTriageBriefSynthesis:
         assert "cannot synthesize brief" in err
         # Points the operator at the workaround
         assert "docs/lineage/99999/issue-brief.md" in err
+
+
+class TestSynthesizeBriefSummary:
+    """#1530: _synthesize_brief_summary prepends an AI-generated summary to
+    the auto-synthesized brief so issues start with a concise overview, not
+    raw GitHub issue text.
+
+    All tests mock the provider so no real API/CLI calls are made.
+    """
+
+    def _mock_provider(self, response: str | None = None, succeed: bool = True):
+        """Build a MagicMock LLMCallResult-returning provider."""
+        from assemblyzero.core.llm_provider import LLMCallResult
+
+        result = LLMCallResult(
+            success=succeed,
+            response=response,
+            raw_response=response,
+            error_message=None if succeed else "mock error",
+            provider="mock",
+            model_used="haiku",
+            duration_ms=10,
+            attempts=1,
+        )
+        provider = MagicMock()
+        provider.invoke.return_value = result
+        return provider
+
+    @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
+    def test_returns_summary_on_success(self, mock_get_provider):
+        """When the model returns a non-empty response, the summary is returned."""
+        from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
+
+        expected = "This issue asks for a new summary section in the auto-synthesized brief."
+        mock_get_provider.return_value = self._mock_provider(response=expected)
+
+        result = _synthesize_brief_summary("Add summary to briefs", "Detailed description here.")
+        assert result == expected
+
+    @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
+    def test_returns_empty_on_model_failure(self, mock_get_provider):
+        """When the model call fails, the function returns empty string (caller falls back)."""
+        from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
+
+        mock_get_provider.return_value = self._mock_provider(response=None, succeed=False)
+
+        result = _synthesize_brief_summary("Some issue", "Some body")
+        assert result == ""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
+    def test_returns_empty_on_empty_response(self, mock_get_provider):
+        """When the model returns an empty/whitespace string, the function returns empty."""
+        from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
+
+        mock_get_provider.return_value = self._mock_provider(response="   ")
+
+        result = _synthesize_brief_summary("Some issue", "Some body")
+        assert result == ""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
+    def test_returns_empty_on_provider_exception(self, mock_get_provider):
+        """When get_provider raises, the function returns empty (no crash)."""
+        from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
+
+        mock_get_provider.side_effect = RuntimeError("claude not found")
+
+        result = _synthesize_brief_summary("Some issue", "Some body")
+        assert result == ""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.get_provider")
+    def test_uses_haiku_model(self, mock_get_provider):
+        """Provider is requested with 'claude:haiku' (fast/cheap for summaries)."""
+        from assemblyzero.workflows.orchestrator.stages import _synthesize_brief_summary
+
+        mock_get_provider.return_value = self._mock_provider(response="A summary.")
+        _synthesize_brief_summary("Title", "Body")
+
+        mock_get_provider.assert_called_once_with("claude:haiku")
+
+
+class TestFetchIssueBriefWithSummary:
+    """#1530: _fetch_issue_body_to_temp_brief writes a ## Summary section when
+    _synthesize_brief_summary returns non-empty, and falls back to the raw
+    title+body passthrough when synthesis fails.
+    """
+
+    def _make_gh_result(self, title: str, body: str) -> MagicMock:
+        import json as _json
+        gh = MagicMock()
+        gh.returncode = 0
+        gh.stdout = _json.dumps({"title": title, "body": body})
+        gh.stderr = ""
+        return gh
+
+    @patch("assemblyzero.workflows.orchestrator.stages._synthesize_brief_summary")
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    def test_brief_contains_summary_section_when_synthesis_succeeds(
+        self, mock_subprocess, mock_synthesize,
+    ):
+        """When synthesis returns text, the temp brief contains ## Summary and ## Issue detail."""
+        from assemblyzero.workflows.orchestrator.stages import _fetch_issue_body_to_temp_brief
+
+        issue_body = "The raw issue body describing the change needed."
+        generated_summary = "This is the generated 2-sentence summary."
+        mock_subprocess.return_value = self._make_gh_result("My Issue Title", issue_body)
+        mock_synthesize.return_value = generated_summary
+
+        temp_path, err = _fetch_issue_body_to_temp_brief(42, "/fake/repo")
+        assert not err, f"unexpected error: {err}"
+        assert temp_path
+
+        content = Path(temp_path).read_text(encoding="utf-8")
+        assert "## Summary" in content, "brief must contain ## Summary section"
+        assert generated_summary in content, "generated summary text must be in brief"
+        assert "## Issue detail" in content, "brief must contain ## Issue detail section"
+        assert issue_body in content, "original issue body must be in ## Issue detail"
+
+    @patch("assemblyzero.workflows.orchestrator.stages._synthesize_brief_summary")
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    def test_brief_falls_back_to_raw_when_synthesis_returns_empty(
+        self, mock_subprocess, mock_synthesize,
+    ):
+        """When synthesis returns empty string, the brief falls back to raw title+body passthrough."""
+        from assemblyzero.workflows.orchestrator.stages import _fetch_issue_body_to_temp_brief
+
+        issue_body = "The raw issue body."
+        mock_subprocess.return_value = self._make_gh_result("My Issue Title", issue_body)
+        mock_synthesize.return_value = ""  # synthesis failed
+
+        temp_path, err = _fetch_issue_body_to_temp_brief(42, "/fake/repo")
+        assert not err, f"unexpected error: {err}"
+        assert temp_path
+
+        content = Path(temp_path).read_text(encoding="utf-8")
+        # Raw passthrough: title + body, no ## Summary section
+        assert "## Summary" not in content, "raw passthrough must NOT include ## Summary"
+        assert "My Issue Title" in content
+        assert issue_body in content
+
+    @patch("assemblyzero.workflows.orchestrator.stages._synthesize_brief_summary")
+    @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
+    def test_issue_detail_section_labels_body_when_synthesis_succeeds(
+        self, mock_subprocess, mock_synthesize,
+    ):
+        """The ## Issue detail section must immediately precede the original body text."""
+        from assemblyzero.workflows.orchestrator.stages import _fetch_issue_body_to_temp_brief
+
+        issue_body = "Specific body text to locate in ## Issue detail."
+        mock_subprocess.return_value = self._make_gh_result("Title", issue_body)
+        mock_synthesize.return_value = "A concise summary."
+
+        temp_path, err = _fetch_issue_body_to_temp_brief(1530, "/fake/repo")
+        assert not err
+        content = Path(temp_path).read_text(encoding="utf-8")
+        # ## Issue detail section must appear before the body
+        detail_idx = content.index("## Issue detail")
+        body_idx = content.index(issue_body)
+        assert detail_idx < body_idx, "## Issue detail heading must precede the body text"
