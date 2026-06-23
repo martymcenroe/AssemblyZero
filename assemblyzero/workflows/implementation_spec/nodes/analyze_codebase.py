@@ -254,6 +254,12 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # Issue #490: Compute repo structure once, cache in state
     repo_structure = get_repo_structure(str(repo_root))
 
+    # Closes #1527: Extract symbol names from all gathered Python file content.
+    # Runs over the full current_content (before excerpt trimming) so that
+    # methods defined deep in a class body are captured.
+    gathered_symbols = _extract_symbols_from_files(updated_files)
+    print(f"    Gathered {len(gathered_symbols)} target-repo symbols for API check")
+
     return {
         "current_state_snapshots": current_state_snapshots,
         "pattern_references": pattern_references,
@@ -261,6 +267,7 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
         "import_dependencies": import_dependencies,
         "files_to_modify": updated_files,
         "repo_structure": repo_structure,
+        "gathered_symbols": gathered_symbols,
         "error_message": "",
     }
 
@@ -953,6 +960,50 @@ def _extract_import_dependencies(
         lines.append(f"- **{filename}** imports: {import_list}")
 
     return "\n".join(lines)
+
+
+def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
+    """Extract class and function/method names from gathered Python files.
+
+    Closes #1527: Produces the symbol set that N3's API-hallucination check
+    uses to detect method calls on target-repo classes that don't actually
+    exist.
+
+    Uses Python ``ast`` when the content is valid Python.  Falls back to
+    two simple regexes (``^\\s*def (\\w+)`` / ``^\\s*class (\\w+)``) for
+    content that fails to parse (partial snippets, syntax errors).
+
+    Args:
+        files: Updated list of FileToModify entries with current_content set.
+
+    Returns:
+        Sorted, deduplicated list of identifier names.
+    """
+    symbols: set[str] = set()
+
+    _def_re = re.compile(r"^\s*def\s+(\w+)", re.MULTILINE)
+    _cls_re = re.compile(r"^\s*class\s+(\w+)", re.MULTILINE)
+
+    for file_spec in files:
+        content = file_spec.get("current_content")
+        path = file_spec.get("path", "")
+
+        if not content or not path.endswith(".py"):
+            continue
+
+        try:
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    symbols.add(node.name)
+        except SyntaxError:
+            # Fallback: regex-based extraction for partial/broken files
+            for m in _def_re.finditer(content):
+                symbols.add(m.group(1))
+            for m in _cls_re.finditer(content):
+                symbols.add(m.group(1))
+
+    return sorted(symbols)
 
 
 def _names_similar(name_a: str, name_b: str) -> bool:
