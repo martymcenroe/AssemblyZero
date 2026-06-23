@@ -5,7 +5,14 @@ Two modes:
   --mode local    Create real test PRs to verify happy/failure paths.
                   Works with fine-grained PAT. Targets a single repo.
   --mode audit    Fleet-wide branch protection comparison against canonical config.
-                  Requires classic PAT with repo + admin:repo_hook scopes.
+                  Uses the in-process classic-PAT pattern (ADR-0216) — decrypts
+                  the classic PAT in-process via gpg pinentry. Read-only; no
+                  --apply gate needed.
+
+OPERATOR-RUN ONLY for audit mode (ADR-0216 §6.1): run this yourself in your own
+Git Bash terminal. NEVER let an agent invoke --mode audit via its Bash tool —
+the spawned Python process would be the agent's child and its heap is
+theoretically readable while the PAT is in scope.
 
 Usage:
     # Local tests on a specific repo
@@ -14,10 +21,8 @@ Usage:
     # Local tests on AssemblyZero (default)
     poetry run python tools/test_governance_system.py --mode local
 
-    # Fleet-wide audit (requires classic PAT)
-    gh auth login -h github.com -p https   # classic PAT
+    # Fleet-wide audit (decrypts classic PAT via gpg pinentry — run yourself)
     poetry run python tools/test_governance_system.py --mode audit
-    gh auth login -h github.com -p https   # back to fine-grained
 
     # Dry run (show what would happen, don't create PRs)
     poetry run python tools/test_governance_system.py --mode local --dry-run
@@ -26,18 +31,27 @@ Issue: #887 | Related: #886
 Standard: 0016-pr-sentinel-system-architecture.md
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _pat_session import classic_pat_session  # noqa: E402
 
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
 SENTINEL_HEALTH_URL = "https://pr-sentinel.mcwizard1.workers.dev/health"
+GH_API = "https://api.github.com"
+HTTP_TIMEOUT_S = 30
 
 # Canonical branch protection settings (from standard 0016)
 CANONICAL = {
@@ -55,6 +69,14 @@ CANONICAL = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _gh_headers(pat: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {pat}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
 
 @dataclass
 class TestResult:
@@ -95,16 +117,6 @@ def run_curl(url: str, timeout: int = 10) -> tuple[int, str]:
         return 0, result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return 0, "TIMEOUT or curl not found"
-
-
-def detect_token_type() -> str:
-    """Detect whether current gh auth is classic or fine-grained."""
-    rc, output = run_gh("auth", "status")
-    if "ghp_" in (output or ""):
-        return "classic"
-    if "github_pat_" in (output or ""):
-        return "fine-grained"
-    return "unknown"
 
 
 def get_all_repos() -> list[str]:
@@ -637,7 +649,7 @@ def run_local_tests(repo: str, dry_run: bool = False) -> list[TestResult]:
     results = []
 
     print(f"\n{'=' * 60}")
-    print(f"Governance System Tests — Local Mode")
+    print("Governance System Tests — Local Mode")
     print(f"Repo: {repo}")
     print(f"{'=' * 60}")
 
@@ -696,37 +708,44 @@ def run_local_tests(repo: str, dry_run: bool = False) -> list[TestResult]:
 # Audit mode: fleet-wide branch protection comparison
 # ---------------------------------------------------------------------------
 
-def audit_repo_protection(repo: str) -> list[TestResult]:
-    """Audit a single repo's branch protection against canonical config."""
+def audit_repo_protection(repo: str, pat: str) -> list[TestResult]:
+    """Audit a single repo's branch protection against canonical config.
+
+    Uses the in-process classic PAT (ADR-0216) for the admin-protected
+    GET /repos/{owner}/{repo}/branches/main/protection endpoint.
+    The fine-grained PAT returns 403 on this endpoint.
+    """
     results = []
     prefix = repo.split("/")[-1]
 
-    # Read branch protection
-    rc, output = run_gh(
-        "api", f"repos/{repo}/branches/main/protection",
+    # Read branch protection via classic PAT (fine-grained returns 403 here)
+    resp = requests.get(
+        f"{GH_API}/repos/{repo}/branches/main/protection",
+        headers=_gh_headers(pat),
+        timeout=HTTP_TIMEOUT_S,
     )
 
-    if rc != 0:
-        if "404" in output:
-            results.append(TestResult(
-                f"{prefix}/A01", "Branch protection exists",
-                "Protection configured", "No protection on main",
-                False, detail="HTTP 404",
-            ))
-        elif "403" in output:
-            results.append(TestResult(
-                f"{prefix}/A01", "Branch protection exists",
-                "Readable", "Token lacks admin scope (HTTP 403)",
-                False, detail="Need classic PAT",
-            ))
+    if resp.status_code == 404:
+        results.append(TestResult(
+            f"{prefix}/A01", "Branch protection exists",
+            "Protection configured", "No protection on main",
+            False, detail="HTTP 404",
+        ))
+        return results
+    if resp.status_code != 200:
+        results.append(TestResult(
+            f"{prefix}/A01", "Branch protection exists",
+            "Readable", f"HTTP {resp.status_code}: {resp.text[:120]}",
+            False,
+        ))
         return results
 
     try:
-        prot = json.loads(output)
-    except json.JSONDecodeError:
+        prot = resp.json()
+    except ValueError:
         results.append(TestResult(
             f"{prefix}/A01", "Branch protection exists",
-            "Valid JSON", f"Invalid response: {output[:100]}",
+            "Valid JSON", f"Invalid response: {resp.text[:100]}",
             False,
         ))
         return results
@@ -808,27 +827,34 @@ def audit_repo_protection(repo: str) -> list[TestResult]:
 
 
 def run_audit(repos: list[str]) -> list[TestResult]:
-    """Run fleet-wide audit."""
+    """Run fleet-wide audit.
+
+    OPERATOR-RUN ONLY (ADR-0216 §6.1): decrypts the classic PAT in-process.
+    Never invoke this from an agent Bash tool.
+    """
     results = []
 
     print(f"\n{'=' * 60}")
-    print(f"Governance System Audit — Fleet Mode")
+    print("Governance System Audit — Fleet Mode")
     print(f"Repos: {len(repos)}")
     print(f"{'=' * 60}\n")
 
-    for i, repo in enumerate(repos, 1):
-        print(f"  [{i}/{len(repos)}] {repo}...", end=" ")
-        repo_results = audit_repo_protection(repo)
-        results.extend(repo_results)
+    # Branch protection reads require the classic PAT (fine-grained returns 403).
+    # One classic_pat_session spans the whole fleet scan so pinentry fires once.
+    with classic_pat_session() as pat:
+        for i, repo in enumerate(repos, 1):
+            print(f"  [{i}/{len(repos)}] {repo}...", end=" ")
+            repo_results = audit_repo_protection(repo, pat)
+            results.extend(repo_results)
 
-        fails = sum(1 for r in repo_results if not r.passed)
-        if fails:
-            print(f"{'FAIL'} ({fails} issues)")
-        else:
-            print("OK")
+            fails = sum(1 for r in repo_results if not r.passed)
+            if fails:
+                print(f"{'FAIL'} ({fails} issues)")
+            else:
+                print("OK")
 
-        if i < len(repos):
-            time.sleep(0.3)
+            if i < len(repos):
+                time.sleep(0.3)
 
     return results
 
@@ -856,13 +882,13 @@ def write_report(results: list[TestResult], mode: str, repo: str | None) -> Path
     if repo:
         lines.append(f"**Repo:** {repo}")
     lines.extend([
-        f"**Script:** `tools/test_governance_system.py`",
-        f"**Standard:** 0016-pr-sentinel-system-architecture.md",
+        "**Script:** `tools/test_governance_system.py`",
+        "**Standard:** 0016-pr-sentinel-system-architecture.md",
         "",
         "## Summary",
         "",
-        f"| Result | Count |",
-        f"|--------|-------|",
+        "| Result | Count |",
+        "|--------|-------|",
         f"| PASS | {passed} |",
         f"| FAIL | {failed} |",
         f"| Total | {len(results)} |",
@@ -947,14 +973,6 @@ Examples:
         help="Infrastructure checks only, skip PR creation",
     )
     args = parser.parse_args()
-
-    token_type = detect_token_type()
-    print(f"Token type: {token_type}")
-
-    if args.mode == "audit" and "fine-grained" in token_type:
-        print("\nERROR: Audit mode requires classic PAT with repo + admin:repo_hook scopes.")
-        print("Run: gh auth login -h github.com -p https")
-        sys.exit(1)
 
     if args.mode == "local":
         results = run_local_tests(args.repo, dry_run=args.dry_run)
