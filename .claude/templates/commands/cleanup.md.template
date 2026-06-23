@@ -129,7 +129,7 @@ Run these commands simultaneously in a single message with multiple Bash tool ca
    **Action based on `--no-auto-delete` flag:**
 
    a. If remote shows `gone` AND no worktree AND `--no-auto-delete` NOT set:
-      - Auto-delete: `git -C {{PROJECT_ROOT}} branch -D {branch-name}`
+      - Delete via the **ADR-0217 graft recipe** — never `git branch -D` (banned). Graft the orphan tip onto its squash commit on `main`, then `git -C {{PROJECT_ROOT}} branch -d {branch-name}`, then remove the graft. If the squash commit can't be identified, namespace the branch into `graveyard/<date>/{branch-name}` instead (ADR-0217 Option G').
       - Report: "AUTO-DELETE: Removed orphan branch {name} (remote gone)"
 
    b. If remote shows `gone` AND no worktree AND `--no-auto-delete` IS set:
@@ -238,9 +238,15 @@ gh pr create --repo {{GITHUB_REPO}} --head $BRANCH --base main \
 # Wait for checks, merge, cleanup
 until [ "$(gh api repos/{{GITHUB_REPO}}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
 gh pr merge $PR_N --squash --repo {{GITHUB_REPO}}
+ORPHAN_TIP=$(git -C {{PROJECT_ROOT}} rev-parse $BRANCH)
 git -C {{PROJECT_ROOT}} checkout main
 git -C {{PROJECT_ROOT}} pull --rebase
-git -C {{PROJECT_ROOT}} branch -D $BRANCH
+# Retire the squash-merged branch via the ADR-0217 graft (never `branch -D`):
+SQUASH_SHA=$(git -C {{PROJECT_ROOT}} rev-parse origin/main)
+BASE_SHA=$(git -C {{PROJECT_ROOT}} rev-parse ${SQUASH_SHA}^)
+git -C {{PROJECT_ROOT}} replace --graft $SQUASH_SHA $BASE_SHA $ORPHAN_TIP
+git -C {{PROJECT_ROOT}} branch -d $BRANCH
+git -C {{PROJECT_ROOT}} replace -d $SQUASH_SHA
 ```
 
 ### 4.9 — Direct-push fallback (unprotected main)
