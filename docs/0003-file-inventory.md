@@ -258,9 +258,6 @@ These tools use `tools/_pat_session.classic_pat_session()` so the classic PAT ne
 | File | Status | Description |
 |------|--------|-------------|
 | `tools/gemini-retry.py` | Stable | Exponential backoff for MODEL_CAPACITY_EXHAUSTED |
-| `tools/gemini-rotate.py` | Stable | Credential rotation for quota management |
-| `tools/gemini-test-credentials.py` | Stable | Credential validation tool |
-| `tools/gemini-test-credentials-v2.py` | Stable | Credential validation (v2) |
 
 ### Analysis & Reporting
 
@@ -4704,7 +4701,6 @@ These tools live outside AZ but operate fleet-wide. The user invokes them from t
 | docs/plans/53-migrate-google-genai.md | 53-migrate-google-genai.md | Plans | Active |
 | docs/prompts/implementation_spec/drafter_system.md | drafter_system.md | Prompts | Active |
 | docs/prompts/implementation_spec/drafter_user.md | drafter_user.md | Prompts | Active |
-| docs/prompts/gemini-rotation-instructions.md | gemini-rotation-instructions.md | Prompts | Active |
 | docs/prompts/implementation-276-archive-lld.md | implementation-276-archive-lld.md | Prompts | Active |
 | docs/prompts/implementation-workflow-oversight.md | implementation-workflow-oversight.md | Prompts | Active |
 | docs/prompts/implementation_spec/reviewer_system.md | reviewer_system.md | Prompts | Active |

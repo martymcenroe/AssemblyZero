@@ -68,7 +68,6 @@ CLAUDE.md (root + repo) and MEMORY.md (index) are auto-injected by Claude Code a
 1. Read project config (Step 0 above)
 2. IF `assemblyZero == true`:
    - Read `C:\Users\mcwiz\Projects\AssemblyZero\CLAUDE.md`
-   - Read `C:\Users\mcwiz\Projects\AssemblyZero\docs\prompts\gemini-rotation-instructions.md`
 
 **Report:**
 ```
@@ -216,7 +215,6 @@ Full detail JSON is at `result.detail_path` — if the user asks for more detail
 
 **IF `assemblyZero == true` (from config):**
 - Read `C:\Users\mcwiz\Projects\AssemblyZero\CLAUDE.md`
-- Read `C:\Users\mcwiz\Projects\AssemblyZero\docs\prompts\gemini-rotation-instructions.md`
 
 **IF `onboard.guide` is set:** Read `{repo_root}/{onboard.guide}`
 
