@@ -34,6 +34,27 @@ Always use `--repo` flag with `gh` CLI.
 
 **NEVER use `~` - Windows doesn't support it.**
 
+### Clickable file links in chat output
+
+When surfacing a path the operator is likely to open (runbooks, generated reports, ZIPs, screenshots, blog drafts, anything they'll actually click), ALWAYS render it as a Markdown link with a `file:///` URI.
+
+**The LABEL must be short — 1 to 3 words.** The terminal makes only the label clickable. A label long enough to wrap across terminal lines breaks the click target, so a "clickable link" with a wrapping label is NOT clickable. The URL inside the parens can be as long as needed; it does not display.
+
+Good:
+- `[draft](file:///C:/Users/mcwiz/Projects/dispatch/drafts/2026-05-30-some-long-name.md)`
+- `[runbook](file:///C:/Users/mcwiz/Projects/Clio/docs/runbooks/30002-chrome-web-store-publish.md)`
+- `[report](file:///C:/Users/mcwiz/Projects/AssemblyZero/docs/audits/0900-banned-commands-fleet-audit-2026-05-29.md)`
+
+Bad (label is the whole filename, will wrap, breaks the click):
+- `[30002-chrome-web-store-publish.md](file:///C:/...)`
+- `[2026-05-30-claude-my-own-personal-orwellian-nightmare-from-dependabot-honeypot.md](file:///C:/...)`
+
+Use forward slashes inside the URI — backslashes do not work.
+
+**Do NOT additionally provide the plain Windows path as a "copy-paste fallback."** The operator's terminal wraps long paths and injects whitespace into the copied text, forcing them to paste into an editor and hand-clean. The fallback creates more friction than it removes. The short-label clickable link is the ONLY affordance. (Operator-confirmed twice on 2026-05-30 — first about the copy-paste fallback being useless, then about the long-label wrap-break.)
+
+**The full URL must also fit on one terminal line.** The terminal renders Markdown links as `label (url)` with the URL printed in parens after the label. A long URL wraps the parenthetical regardless of how short the label is — same broken click. The operator's terminal is ~130 chars wide; a `file:///` URL longer than ~115 chars will wrap and break. If you are about to write a link whose URL is longer than that, **shorten the path before linking**: rename the target file to a short slug (e.g. `2026-05-30-orwell.md` instead of `2026-05-30-claude-my-own-personal-orwellian-nightmare-from-dependabot-honeypot.md`), then link to the renamed file. The blog-draft skill in particular generates long descriptive slugs that exceed the budget — rename to a 2-3 word short slug before producing the click link. (Operator-confirmed third time on 2026-05-30 — the long-slug wrap.)
+
 ## Dangerous Paths (I/O Safety)
 
 **NEVER search or traverse:**
@@ -63,6 +84,7 @@ The agent's Bash tool MUST NEVER execute these commands. They may appear in scri
 | `git clone <SSH-url>` | `gh repo clone <owner>/<repo>` (HTTPS via token) |
 | `git reset --hard` | `git stash`; or delete + re-clone; never destroy uncommitted state |
 | `git clean -fd` | Delete specific identified files; never the "wipe all untracked" hammer |
+| `git restore .` / `git restore <path>` on tracked-modified files | `git stash` (preserves recovery), then investigate what wrote the modification, then `git stash drop` only after operator confirms — never the "wipe all tracked modifications" hammer. The principle table below already named this; promoted to the literal table 2026-05-29 after the `dependabot_review.py::cleanup_worktree` finding (`run(["git", "-C", str(worktree), "restore", "."])` codified the destruction inside a tool). `git restore --staged <file>` is fine — that only unstages, no working-tree damage. |
 | `git branch -D` | ADR-0217 four-step `git replace --graft` recipe + `git branch -d` |
 | `git worktree remove --force` | Resolve worktree state via gentler means, then plain `git worktree remove` |
 | `--theirs` in a rebase | Manual conflict resolution keeping BOTH sides |
@@ -72,6 +94,38 @@ The agent's Bash tool MUST NEVER execute these commands. They may appear in scri
 | `--auto` on `gh pr merge` | `allow_auto_merge: false` fleet-wide; flag silently no-ops |
 
 **Banned to the agent. NOT banned in scripts the user runs.** Classic-PAT pattern (ADR-0216) is the model: agent writes the script, user runs it. The script's source may contain banned commands; the agent's Bash tool may not execute them.
+
+### Destroying uncommitted state — the principle, not just the table
+
+The `git reset --hard` annotation in the table above — "never destroy uncommitted state" — names a principle that applies to any operation with that effect, not just the literal command. The literal table is illustrative; the principle is what's enforced.
+
+Specifically banned (operations the agent must not perform on operator's working tree without explicit per-operation authorization):
+
+| Operation | Why it destroys uncommitted state | Right alternative |
+|-----------|-----------------------------------|-------------------|
+| `git restore <path>` on a tracked-modified file | Discards working-tree edits | `git stash` (preserves recovery), then pull, then `git stash drop` only after operator confirms redundancy |
+| `git checkout -- <path>` (older form of above) | Same as `git restore <path>` | Same — stash first |
+| `rm <untracked-working-tree-file>` to clear an "untracked-would-be-overwritten" pull error | Deletes operator's local file outright | `mv $file $file.bak` (preserves outside git), OR accept the pull error and surface to operator |
+| Any operation justified as "the content is equivalent so the destroy is lossless" | Content equivalence is not authorization to destroy state | Preserve via stash / .bak first; verify equivalence post-hoc with state still recoverable |
+
+**Documented incident (2026-05-27):** during a fleet-sweep cleanup, the agent ran `rm` × 16 (untracked `.unleashed.json` files, CRLF-line-ended local copies) so origin's LF-tracked versions could install via pull. The agent then ran `git restore` × 8 (tracked-modified `GEMINI.md` × 7 + `.gitignore` × 1) to discard operator's local mods because the agent's PRs had just landed equivalent content on origin. Neither `rm` nor `git restore` was on the literal banned-commands table. Both performed the operation the table forbids. Justified as "content-equivalent so lossless." Same shape as the `--force` rationalizations in `feedback_destructive_flag_scrutiny.md` — agent reasons about whether the rule applies to this specific situation, then destroys state. The literal command differs across incidents; the failure mode is identical.
+
+**Operator authorization for "do the work" or "execute the batch" does not include authorization to destroy operator's working-tree state.** Those are separate authorizations. The destroy needs its own explicit yes, per operation.
+
+### Reading the Banned List (Earned Through Repeated Failure)
+
+The banned list is not guidance to weigh against situational convenience. It is a wall. The annotation "ALWAYS, no exceptions, no per-invocation approval" exists specifically to close the loophole the agent has demonstrably used multiple times: "this case is the exception." There is no such case. The presence of the rule answers the question.
+
+**Documented pattern.** A recurring failure mode is captured in agent memory (`feedback_destructive_flag_scrutiny.md`): rule loaded in context → situation feels unusual → bypass flag presents as convenient → real-time rationalization that "this is an edge case" → command executes. Adding more text to the rule has not changed the behavior. The list of specific incidents lives in the memory file; this section names the pattern.
+
+**Operational rule for the agent.** Any candidate command containing a banned-list token (`--force`, `--force-with-lease`, `-D` for `branch`, `-f`, `--admin`, `--no-verify`, `--no-gpg-sign`, `--skip-*`, `--theirs`, `--auto`, `--execute` when wired around banned commands, `-fd` on `git clean`) is a STOP token, not a normal flag. STOP means:
+
+1. Do not type the command.
+2. Run the plain (non-bypass) command first.
+3. If the plain command refuses, investigate the refusal — do not escalate to the bypass flag. A refusal is a signal to understand, not to override.
+4. Surface the situation to the operator if the non-bypass path appears genuinely blocked. Never "request approval to use `--force`" — that framing normalizes the bypass as approval-gated, which is itself a documented failure mode.
+
+**The agent does not have authority to weigh banned-list rules against situational convenience.** The agent's job is to obey them. The system's job (hooks, classifier rules, sentinels) is to enforce them. The agent's reasoning at the moment of decision is not part of the enforcement chain — because it has demonstrably failed when allowed to be.
 
 ### Squash-merge orphan exception
 
@@ -90,6 +144,33 @@ Scripts that mutate fleet state (repo settings, branch protection, file content,
 
 The line between `--apply` and `--execute` is lint-enforceable: greppable presence of a banned command in the script source → `--execute` required.
 
+## Secret-Handling Hygiene (Operator Recipes)
+
+Any operator-handled secret (PEM, PAT, API key, anything you copy/paste/save outside the agent) passes through a finite set of surfaces between "secret in the wild" and "secret encrypted at rest." Every surface is a potential leak vector. The recipe for each secret must enumerate them all and have an explicit step for each. "I'll remember to delete it" is not a step.
+
+### Surface checklist (generic)
+
+| Surface | Risk | Mitigation |
+|---|---|---|
+| **Plaintext file on disk** | Same-user FS access; cloud sync (OneDrive) uploads it before local `rm` can fire | Don't route through `~/Downloads/` (often OneDrive-synced). Save directly to `~/.secrets/staging/` or similar non-synced path. |
+| **Browser download history** | Filename + path persists after the file is deleted | Use private/incognito mode for the download, OR clear download history immediately after. |
+| **Recycle Bin** | File Explorer delete (drag-to-trash or right-click) lands plaintext in Recycle Bin even after you "deleted" it | Use shell `rm`, not File Explorer. `powershell.exe -NoProfile -Command "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"` as insurance. |
+| **Clipboard** | Cut/copy from editor or `clip` leaves the secret in OS clipboard until overwritten. Windows clipboard-history (Win+V) caches up to 25 entries if enabled — secret could persist in that ring buffer. | Clear immediately: `Set-Clipboard -Value $null` or `echo -n "" \| clip`. If clipboard-history is enabled, clear from Settings → System → Clipboard. |
+| **Editor undo / hot-exit cache** | VS Code, Sublime, Notepad++ retain open buffers across restarts. Closing the file does not always purge. | Don't open secrets in an editor. If you must, close the editor and verify no recent-tabs preservation. |
+| **Shell history** | Path or content in any command persists in `~/.bash_history` | The operator's shell config sets `HISTCONTROL=ignoreboth:erasedups` (per their dotfiles). Operators who care can additionally set `HISTCONTROL=ignorespace` and prefix sensitive commands with a leading space. |
+| **gpg-agent cache** | Cached passphrase lets any same-user process silently decrypt | `default-cache-ttl 0` in `~/.gnupg/gpg-agent.conf` per ADR-0216. |
+| **Process argv** | Command-line arguments readable by same-user processes via OS APIs (`/proc/<pid>/cmdline` on Linux, `NtQueryInformationProcess` on Windows) | Paths in argv are acceptable. Secret VALUES in argv are not — pass via stdin, files, or in-process bytes. |
+
+### The audit gate
+
+Before considering a secret-handling operation done, mentally walk the surface table and confirm an explicit step exists for each surface the operation touched. If a surface was touched and the recipe has no step for it, **the secret has leaked into that surface and the operation is incomplete.**
+
+### Per-secret recipes (canonical references)
+
+- **Classic PAT**: `AssemblyZero/tools/_pat_session.py:classic_pat_session` docstring + ADR-0216
+- **Cerberus PEM**: `AssemblyZero/docs/runbooks/0927-new-repo-human-checklist.md` § "Encrypt the Cerberus App private key"
+- **Any new secret class**: write the recipe with this surface checklist as the audit gate. No new secret-handling pattern ships without naming every surface it touches.
+
 ## Security Validation (Linter-First)
 
 Before concluding any task that modifies application code (JS/TS/Python), run the project's linter:
@@ -103,6 +184,7 @@ This catches XSS, injection, and code quality issues at the validation phase ins
 - Use offset/limit on Read for large files. Never read >200 lines without a reason.
 - Use head_limit on Grep/Glob. Start with 20 results, widen only if needed.
 - Git status snapshot is injected at session start. Don't re-run unless changes were made.
+- **Plan mode compaction warning.** ExitPlanMode likely triggers context compaction that evicts auto-loaded CLAUDE.md. Critical per-repo instructions should be duplicated in that repo's CLAUDE.md (auto-loaded on next session) rather than only stated in chat. Do not suggest re-enabling auto-compact — the eviction risk to CLAUDE.md is the load-bearing concern.
 
 ## Python
 
@@ -126,10 +208,18 @@ When creating a Windows scheduled task on the user's machine:
 
 4. **Runbook 0918's elevation claim is wrong** â€” it predates this rule. If you see a doc telling you to "Run as Administrator" for `Register-ScheduledTask` in user-context, ignore that instruction and follow this section instead. (Tracked in AssemblyZero #1099.)
 
+5. **NEVER invoke `powershell.exe -NoProfile -Command "..."` from bash when the inline script contains `WindowStyle Hidden` or modifies scheduled tasks.** Windows Defender flags this as `Trojan:Win32/PowhidSubExec.B`, quarantines the shell snapshot, and the command fails anyway. Hand the user the command via `!` prefix — they run it in their own terminal.
+
 ## Communication
 
 - After completing a task, ask "What do you want to work on next?" â€” never offer numbered options
 - If blocked, stop and report
+- **Never use self-invented technical labels in operator questions or options.** No "marker 7", "stage 3 fault", "phase B condition", or any internal numbering the agent made up. Describe the behavior or user-visible outcome in plain English. The operator should be able to make a decision from your question without consulting any code, doc, or prior message. If they'd need to look something up to understand, the question is wrong.
+- **Never use self-invented technical labels in operator questions or options.** No "marker 7", "stage 3 fault", "phase B condition", or any internal numbering the agent made up. Describe the behavior or user-visible outcome in plain English. The operator should be able to make a decision from your question without consulting any code, doc, or prior message. If they'd need to look something up to understand, the question is wrong.
+- **Surface timestamps in US Central, not UTC.** Operator is in US Central time. Raw UTC timestamps from `gh` / AWS / GitHub Events are a recurring source of friction — convert before surfacing. Format like `2026-05-25 4:01 PM Central`. If the source timestamp matters too, parenthesize: `4:01 PM Central (21:01 UTC)`.
+  - **To read the current time, run plain `date`.** The machine's system clock is already US Central (CDT/CST), so plain `date` prints Central. **NEVER prefix `TZ='America/Chicago' date`** — Git Bash has no IANA timezone database, so it silently ignores the zone and returns **UTC**, which then gets mislabeled "Central" (off by 5–6 hours, and a full calendar day after ~7 PM Central). **Do NOT switch to PowerShell** as a workaround (the auto-reviewer flags it, and it is unnecessary). Plain `date` is correct. This is a recurring ~bi-monthly mistake; the remedy is to delete the `TZ=` prefix, nothing more.
+- **One session per repo.** When work belongs in repo X, suggest opening a session IN repo X rather than doing it from the current session. Exception: explicitly cross-repo work (audits, fleet sweeps) the operator authorized in this session. Cross-repo writes from the 'wrong' session muddy that repo's handoff log + session log + pickup state.
+- **Strip filler from commands you hand to the operator.** If the agent already did the operation (e.g., ff-merged main), don't tell the operator to do it again. If the operator is already in the right directory, don't prefix with `cd`. Filler erodes trust — it signals the agent isn't reading state. Verify the operator's actual current state before assembling commands.
 
 ## When Blocked or Uncertain (Overrides Anthropic Defaults)
 
@@ -156,6 +246,10 @@ A task is NOT done until:
 5. **Cleaned up** â€” worktrees removed, temp files deleted, no dangling branches
 
 "I wrote a script that creates it" â‰  done. "I ran the script and verified it exists" = done.
+
+**Claims need tests.** When asserting a system is "shipped/complete/working," back it with an automated test that fails fast on regression. Narrative completion ("PR merged") is not enough. If a sibling tool exists that detects what your producer should NOT emit, make them test each other (e.g., scaffolder + lint via `tests/test_scaffolder_lint_integration.py`). The right answer to "is X done?" is *"Yes — verified by `tests/test_X.py::test_Y` which would fail fast if not,"* not *"Yes — I merged PR #N."*
+
+**After solving the hard problem, STOP and check the procedural surfaces.** The technical fix is rarely the last step. Before declaring done, verify: branch protection state, issue references (Closes #N in commit + PR title + PR body), CLAUDE.md consistency, error messages reflect the new behavior, batching norms followed. The 'last 10%' procedural cleanup is what makes the work actually shippable.
 
 ## Implicit Commit/Push/Deploy Authorization (Overrides Anthropic Defaults)
 
@@ -209,7 +303,7 @@ git checkout main && git merge origin/main --ff-only && git branch -d {BRANCH}
 
 Full procedure: `AssemblyZero/docs/runbooks/0935-pr-stuck-recovery.md`.
 
-Do NOT escalate to `--admin`, ask the user to approve, force-push, push noise commits, or retry merge in a loop. Force-push is BANNED (memory `feedback_never_force_overwrite_user_data`). Squash merge collapses any noise commits into one clean main commit — no manual cleanup needed.
+Do NOT escalate to `--admin`, ask the user to approve, force-push, push noise commits, or retry merge in a loop. Force-push is BANNED (see Banned Commands table). Squash merge collapses any noise commits into one clean main commit — no manual cleanup needed.
 
 **Per-repo overrides** (e.g., AssemblyZero's worktree lineage archival) belong in that repo's CLAUDE.md, not here.
 
@@ -220,6 +314,8 @@ Do NOT escalate to `--admin`, ask the user to approve, force-push, push noise co
 When an unexpected GitHub event surfaces mid-session (PR closed, issue auto-closed, branch deleted, comment posted), assume the agent caused it until the agent can prove otherwise via its own task-output log. **Never infer authorship from the GitHub Events timeline alone.** Do NOT accuse the user of a manual GitHub action without non-timeline evidence (e.g., a different IP, a UI-only field that gh doesn't set, an explicit user message in chat).
 
 The trust failure mode is asymmetric: a wrongly-blamed user gets gaslit at a moment when something has already gone sideways, which compounds the original incident. (Lesson from patent-general PR #116, 2026-04-22 -- see #1030.)
+
+**Multi-agent caveat:** the operator runs multiple sessions in parallel. A GitHub event from another agent (different session, different repo, same gh credentials) is operator-authorized via that session, not the user clicking around. Before invoking the Actor Attribution rule, check whether the event is plausibly from another concurrent agent session.
 
 ## When `gh pr create` Says "No commits between main and main"
 
@@ -232,25 +328,6 @@ gh pr create --repo {owner}/{repo} --head {branch-name} --base main --title "...
 ```
 
 Tracked as AssemblyZero #1013 (closed as not-fixable-by-us; gh CLI upstream issue). The explicit-flags form is mandatory for agent-driven PR creation; the interactive `gh pr create` (no flags) works in human terminals because it falls back to a different code path.
-
-## When an API Call Returns an Auth Error You Didn't Expect (401 / 403 / "Bad credentials")
-
-An authentication-shaped error is a **claim by the remote service, not a fact about your credentials.** The reflex it provokes — "I lack permission, so escalate: widen the token, swap to classic-PAT, add `--admin`" — is the exact privilege-escalation trap the Banned Commands rules exist to stop. Do not take the bait.
-
-**Verify the credential before believing the error.** Make a cheap, known-good authenticated call:
-
-```bash
-gh api user --jq '.login'      # succeeds → your token is valid right now
-```
-
-- **Credential works** → the failing call's error is the *service's* problem (transient / transport / endpoint bug), not an authorization gap. Retry once, or use an equivalent operation **at the same privilege level.** NEVER escalate.
-- **Credential fails too** → a real auth problem. Stop and surface to the operator. Still never escalate on your own.
-
-**401 vs 403 is a tell.** `403 Forbidden` = authenticated but not permitted (a real boundary — respect it, don't bypass it). `401 Unauthorized` = "you sent no/invalid credentials." If you DID send credentials that work elsewhere (you just proved it with `gh api user`), a `401` is the service contradicting itself — a GitHub-side bug, not a sign you need more auth. We assume GitHub works; when its status codes are incoherent, it doesn't.
-
-**Lateral, same-privilege retry is allowed; escalation is not.** REST and GraphQL are two transports for the same operation at the same scope. If `gh pr create` (GraphQL) throws a spurious 401, `gh api repos/{o}/{r}/pulls -X POST` (REST) does the identical thing under the identical `pull_requests: write` scope — a lateral retry, not an escalation. Reaching for a classic PAT, `--admin`, a wider token, or any Banned-list flag **is** escalation and is forbidden regardless of what the error said.
-
-*Incident (2026-06-10): `gh pr create` returned `HTTP 401: Requires authentication` on the GraphQL endpoint while `gh api user` and the REST pulls endpoint worked with the same fine-grained PAT. The correct response was the REST equivalent at the same scope. A fleet agent that read the 401 literally attempted a privilege escalation — the failure this section prevents.*
 
 ## When `git push` Is Rejected For Workflow Scope
 
@@ -312,14 +389,34 @@ If blocked by pr-sentinel, fix the PR body with `gh pr edit {NUMBER} --body "...
 No issue exists? Create one first.
 Issue already closed? Create a new one — do NOT reference closed issues.
 
+### Vocabulary for cross-references in PR bodies (prospective)
+
+pr-sentinel's parasitic regex `/\b(close[sd]?)\s+#(\d+)/gi` extracts ANY occurrence of the trigger words `close`/`closes`/`closed` followed by `#N`, regardless of context: negations, hyphens, code fences, example text. `Does not close #N`, `auto-close #N`, even backticked example text — all get extracted as if they were a Closes directive. If any extracted ref is a closed issue, a PR rather than an issue, or 404, the worker posts `action_required` and the PR sits stuck.
+
+The PR body must therefore contain a `Closes #N` directive for each issue being closed (one per closed issue; multi-close PRs are permitted by the "One Issue Per Concern" section when scope is shared), and the trigger words MUST NOT appear anywhere else in the body — not in code fences, quoted examples, or negated text. Every match of the parasitic regex must be one of your intended `Closes` directives, naming an open issue this PR will close.
+
+When referencing other issues or PRs for context, use a non-trigger word:
+
+| Want to say | Use this | Not this (trips the regex) |
+|---|---|---|
+| Related issue | `see #N` / `parent: #N` / `sibling: #N` | `closes #N` |
+| Referenced PR | `mirrors PR #N` / `per PR #N` / `follow-up to PR #N` | `closed by PR #N` |
+| Future work | `follow-up: #N` / `superseded by #N` | `will close #N` |
+| Documented elsewhere | `documented in #N` / `tracked in #N` | `closed in #N` |
+
+**Pre-flight check before `git push` or `gh pr edit --body`:**
+
+```bash
+echo "$PR_BODY" | grep -niE '\b(close[sd]?)\s+#[0-9]+'
+```
+
+One match per target issue expected (single-close PR → one match; multi-close PR closing N issues → N matches). Every match must reference an OPEN issue this PR intends to close. Zero matches = the `Closes #N` directive is missing. An extra match against an unintended issue (closed, a PR rather than an issue, 404, or just a context reference using a trigger word) means parasitic extraction will happen — fix before pushing.
+
 ### `No-Issue:` exemption (operator-authorized only)
 
 pr-sentinel ALSO accepts `No-Issue: <reason>` as a valid exemption (per `sentinel/src/validate.js`). This bypasses the issue-required rule. Use ONLY when the operator has explicitly authorized one — never as a convenience to skip filing an issue.
 
-Sanctioned cases observed:
-
-- **Same-day repo cleanup.** Cleanup of just-created repos where filing an inaugural issue would be embarrassing (e.g., the 2026-05-26 Chiron / Heuriskon / dependabot-honeypot cleanups). The reason text should be specific (`No-Issue: scaffolder catch-up — applies tightened template per AZ#1298 to a repo created before that PR landed`) — not generic (`No-Issue: cleanup`).
-- **LLD-workflow PRs (AZ #1459).** The LLD requirements workflow opens its PR with a fixed body: `No-Issue: LLD design artifact for issue #<N>; the issue remains open through the implementation phase, which is what closes it. Ref #<N>.` This is emitted automatically by `assemblyzero/workflows/requirements/git_operations.py::commit_and_pr`. Preserves Issue #238's architectural decision that LLDs *reference*, not *close* — the impl PR is what closes the issue when the work lands. Greppable via `gh pr list --search "No-Issue: LLD design artifact"`.
+Sanctioned cases observed: same-day cleanup of just-created repos where filing an inaugural issue would be embarrassing (e.g., the 2026-05-26 Chiron / Heuriskon / dependabot-honeypot cleanups). The reason text should be specific (`No-Issue: scaffolder catch-up — applies tightened template per AZ#1298 to a repo created before that PR landed`) — not generic (`No-Issue: cleanup`).
 
 Default remains: file an issue. The exemption is the exception, not the escape hatch.
 
@@ -330,6 +427,27 @@ If closing an issue or merging a PR with any scope deferred — "follow-up issue
 Unfiled deferrals are completion theater — indistinguishable from abandonment. If you write "Phase 2 will be a separate issue" in a closing comment, Phase 2's issue number must already exist at the time of closing.
 
 Applies to PR descriptions that defer follow-on work ("follow-up PR coming") and to skill outputs that say "file this separately."
+
+## Skills Must Commit Their Tracked Writes (No Deferred Commits)
+
+Any skill that writes tracked files (e.g., `docs/lessons-learned.md`, `docs/session-logs/*.md`, `data/session-index.jsonl`, `data/pickup-status.json`) MUST commit those writes as part of its own execution. The pattern "the next session will commit" is a deferral that fails when there is no next session — `--park` and `--reboot` modes skip the spawn, and even plain spawn-mode sessions sometimes end without running `/cleanup`. Skills must finish what they start.
+
+**Concrete obligation:** after a skill writes any tracked file, the skill itself must either commit via the standard tracked-PR pattern (matching `/cleanup` Phase 4 — branch protection detection, tracking issue, branch + commit + push + PR + wait-merge + ADR-0217 graft cleanup) or run a direct push if `main` is unprotected. If neither is possible, the skill must report what's uncommitted so the operator can finish manually. **Skill documentation must NOT include phrases like "do not commit, the next session handles that"** — that pattern is permanently retired.
+
+**Documented incident:** AssemblyZero #1348 (2026-05-27). `/handoff` wrote `docs/lessons-learned.md` and `docs/session-logs/*.md` but explicitly did not commit them. Operator's natural flow (`/cleanup --full` then `/handoff --park`) left those writes uncommitted at session end because cleanup ran before handoff. The principle applies universally — any session-artifact-writing skill, present or future, must commit its own writes.
+
+**Note on skill-file edits:** The Claude Code auto-mode classifier hard-blocks Edit/Write on `.claude/skills/*.md` as Self-Modification. It is built into Claude Code, not a hook script. It rejects operator frustration or venting as authorization. To land a skill-file edit, the operator can: (1) type the change themselves, (2) give an explicit per-edit authorization in their message — e.g., `I authorize the edit to .claude/skills/<file>.md per #<N>` — which the classifier accepts and the edit lands immediately, or (3) add an `Edit(.claude/skills/*.md)` rule under `permissions.allow` in `.claude/settings.local.json` (weakens the guard for all skill files — deliberate choice). Empirically validated 2026-05-30 via #1348.
+
+## Learnings Discipline (File-Issue-Per-Learning Rule)
+
+After any cleanup, audit, or calibration task, file a GitHub issue for each distinct unactioned learning. Don't just write a "Learnings" section in a chat report — chat history gets summarized; issues persist past the session.
+
+- If a learning is already actioned in the same session (with a merged PR), skip
+- If it's pure confirmation ("the tool worked"), skip
+- If it's actionable (code fix, runbook entry, doc change) — file an issue
+- If it's an operator-confirmed preference — save as a memory AND consider whether the universal CLAUDE.md needs a coverage addition (file an issue for that addition too)
+
+The chat report's "Learnings" section is the working notes; the GitHub issues are the persistent record. Without filing, learnings disappear when the session ends.
 
 ## One Issue Per Concern (NEVER Bundle)
 
