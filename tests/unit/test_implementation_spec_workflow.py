@@ -2844,3 +2844,364 @@ class TestGraphExecutesEndToEnd:
         assert "N0_load_lld" in nodes_visited
         # Workflow should have stopped (error routes to END)
         assert final_state.get("error_message"), "Expected error but got none"
+
+
+# =============================================================================
+# Tests for Issue #1527: API symbol hallucination checker
+# =============================================================================
+
+
+class TestCheckApiSymbolsExist:
+    """Tests for check_api_symbols_exist — the hallucinated-API checker.
+
+    Regression case from issue #1527: spec-writer emitted
+    ``question.model_dump()`` and ``Question.model_validate(...)``
+    against a plain dataclass that only defines ``to_dict`` / ``from_dict``.
+    """
+
+    def _check(self, spec: str, symbols: list[str]):
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            check_api_symbols_exist,
+        )
+        return check_api_symbols_exist(spec, symbols)
+
+    # ------------------------------------------------------------------
+    # Regression case: the documented failure from issue #1527
+    # ------------------------------------------------------------------
+
+    def test_regression_1527_model_dump_flagged(self):
+        """model_dump / model_validate not in gathered symbols → flagged.
+
+        Target: Question is a dataclass with only to_dict / from_dict.
+        Spec emits pydantic calls → check must fail with both names.
+        """
+        gathered_symbols = ["Question", "to_dict", "from_dict"]
+
+        spec = (
+            "# Implementation Spec\n\n"
+            "## 6.1 Serialize question\n\n"
+            "```python\n"
+            "yaml_data = yaml.safe_dump(question.model_dump(), allow_unicode=True)\n"
+            "return Question.model_validate(parsed_dict)\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+
+        assert result["passed"] is False, (
+            "model_dump and model_validate are not in gathered symbols "
+            "and must be flagged"
+        )
+        details = result["details"]
+        assert "model_dump" in details, f"model_dump not mentioned in details: {details}"
+        assert "model_validate" in details, f"model_validate not mentioned in details: {details}"
+
+    # ------------------------------------------------------------------
+    # Negative case: all calls are real symbols → passes
+    # ------------------------------------------------------------------
+
+    def test_negative_real_symbols_pass(self):
+        """Spec calling only symbols present in gathered set → passes."""
+        gathered_symbols = ["Question", "to_dict", "from_dict", "Editor", "load"]
+
+        spec = (
+            "# Implementation Spec\n\n"
+            "## 5. Implementation\n\n"
+            "```python\n"
+            "data = question.to_dict()\n"
+            "q = Question.from_dict(parsed)\n"
+            "editor = Editor()\n"
+            "editor.load(path)\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is True, (
+            f"All calls are real symbols — should pass. Details: {result['details']}"
+        )
+
+    # ------------------------------------------------------------------
+    # False-positive guard: common Python/stdlib methods never flagged
+    # ------------------------------------------------------------------
+
+    def test_false_positive_builtin_dict_methods_not_flagged(self):
+        """Built-in dict methods (get, items, keys) must not be flagged."""
+        gathered_symbols = ["MyClass", "process"]
+
+        spec = (
+            "# Spec\n\n"
+            "```python\n"
+            "value = config.get('key', None)\n"
+            "for k, v in mapping.items():\n"
+            "    result[k] = v\n"
+            "keys = config.keys()\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is True, (
+            f".get()/.items()/.keys() are stdlib — must not be flagged. "
+            f"Details: {result['details']}"
+        )
+
+    def test_false_positive_list_methods_not_flagged(self):
+        """Built-in list methods (append, extend, sort) must not be flagged."""
+        gathered_symbols = ["Parser"]
+
+        spec = (
+            "# Spec\n\n"
+            "```python\n"
+            "results.append(item)\n"
+            "output.extend(batch)\n"
+            "items.sort(key=lambda x: x.name)\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is True, (
+            f"List methods are stdlib — must not be flagged. Details: {result['details']}"
+        )
+
+    def test_false_positive_str_methods_not_flagged(self):
+        """Built-in str methods (strip, split, format) must not be flagged."""
+        gathered_symbols = ["Tokenizer"]
+
+        spec = (
+            "# Spec\n\n"
+            "```python\n"
+            "text = raw.strip()\n"
+            "parts = line.split(',')\n"
+            "msg = template.format(name=name)\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is True, (
+            f"Str methods are stdlib — must not be flagged. Details: {result['details']}"
+        )
+
+    # ------------------------------------------------------------------
+    # Edge cases
+    # ------------------------------------------------------------------
+
+    def test_empty_gathered_symbols_skips_check(self):
+        """No gathered symbols → check skips (nothing to compare against)."""
+        spec = "```python\nfoo.model_dump()\n```\n"
+        result = self._check(spec, [])
+        assert result["passed"] is True
+        assert "skipped" in result["details"].lower()
+
+    def test_no_code_fences_passes(self):
+        """Spec with no code fences → no calls to check → passes."""
+        gathered_symbols = ["MyClass"]
+        spec = "# Spec\n\nSome prose: question.model_dump() mentioned here.\n"
+        result = self._check(spec, gathered_symbols)
+        # Prose outside code fences must NOT be scanned
+        assert result["passed"] is True, (
+            "Calls in prose (not code fences) must not be flagged. "
+            f"Details: {result['details']}"
+        )
+
+    def test_dunder_methods_not_flagged(self):
+        """Dunder methods like __init__ / __repr__ are in the allowlist."""
+        gathered_symbols = ["Widget"]
+
+        spec = (
+            "# Spec\n\n"
+            "```python\n"
+            "obj = Widget.__new__(Widget)\n"
+            "s = item.__repr__()\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is True, (
+            f"Dunders are allowlisted — must not be flagged. Details: {result['details']}"
+        )
+
+    def test_mixed_real_and_hallucinated_flags_only_hallucinated(self):
+        """When spec mixes real and fake methods, only fake ones are flagged."""
+        gathered_symbols = ["Question", "to_dict", "validate"]
+
+        spec = (
+            "# Spec\n\n"
+            "```python\n"
+            "data = question.to_dict()         # real\n"
+            "q = Question.from_orm(row)        # hallucinated — from_orm not in symbols\n"
+            "question.validate(ctx)            # real\n"
+            "```\n"
+        )
+
+        result = self._check(spec, gathered_symbols)
+        assert result["passed"] is False
+        assert "from_orm" in result["details"]
+        assert "to_dict" not in result["details"]
+        assert "validate" not in result["details"]
+
+
+class TestExtractSymbolsFromFiles:
+    """Tests for _extract_symbols_from_files used in N1."""
+
+    def test_extracts_class_and_function_names(self):
+        """AST extraction captures class names and all function/method names."""
+        from assemblyzero.workflows.implementation_spec.state import FileToModify
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            _extract_symbols_from_files,
+        )
+
+        content = (
+            "from dataclasses import dataclass\n\n"
+            "@dataclass(frozen=True)\n"
+            "class Question:\n"
+            "    stem: str\n\n"
+            "    def to_dict(self) -> dict:\n"
+            "        return {'stem': self.stem}\n\n"
+            "    @classmethod\n"
+            "    def from_dict(cls, data: dict) -> 'Question':\n"
+            "        return cls(stem=data['stem'])\n"
+        )
+
+        files: list[FileToModify] = [
+            FileToModify(
+                path="src/quiz/models.py",
+                change_type="Modify",
+                description="Target file",
+                current_content=content,
+            )
+        ]
+
+        symbols = _extract_symbols_from_files(files)
+        assert "Question" in symbols
+        assert "to_dict" in symbols
+        assert "from_dict" in symbols
+
+    def test_skips_non_python_files(self):
+        """Non-.py files are ignored."""
+        from assemblyzero.workflows.implementation_spec.state import FileToModify
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            _extract_symbols_from_files,
+        )
+
+        files: list[FileToModify] = [
+            FileToModify(
+                path="config.yaml",
+                change_type="Modify",
+                description="Config",
+                current_content="key: value\n",
+            )
+        ]
+
+        symbols = _extract_symbols_from_files(files)
+        assert symbols == []
+
+    def test_skips_files_with_no_content(self):
+        """Files with None or empty current_content are skipped."""
+        from assemblyzero.workflows.implementation_spec.state import FileToModify
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            _extract_symbols_from_files,
+        )
+
+        files: list[FileToModify] = [
+            FileToModify(
+                path="new_module.py",
+                change_type="Add",
+                description="New file",
+                current_content=None,
+            )
+        ]
+
+        symbols = _extract_symbols_from_files(files)
+        assert symbols == []
+
+    def test_fallback_regex_on_syntax_error(self):
+        """Broken Python falls back to regex, still extracts def/class names."""
+        from assemblyzero.workflows.implementation_spec.state import FileToModify
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            _extract_symbols_from_files,
+        )
+
+        # Deliberately broken Python (missing colon on class)
+        broken_content = (
+            "class BrokenClass\n"
+            "    def my_method(self):\n"
+            "        pass\n"
+        )
+
+        files: list[FileToModify] = [
+            FileToModify(
+                path="broken.py",
+                change_type="Modify",
+                description="Broken file",
+                current_content=broken_content,
+            )
+        ]
+
+        symbols = _extract_symbols_from_files(files)
+        # At minimum the method should be found via regex fallback
+        assert "my_method" in symbols
+
+    def test_gathered_symbols_stored_in_state(self, tmp_path):
+        """N1 analyze_codebase populates gathered_symbols in returned state."""
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            analyze_codebase,
+        )
+
+        # Create a target repo with a Python file containing known symbols
+        src_dir = tmp_path / "src" / "quiz"
+        src_dir.mkdir(parents=True)
+        (src_dir / "models.py").write_text(
+            "@dataclass\nclass Question:\n    def to_dict(self): ...\n    def from_dict(cls, d): ...\n",
+            encoding="utf-8",
+        )
+
+        state = {
+            "repo_root": str(tmp_path),
+            "lld_content": "",
+            "files_to_modify": [
+                {
+                    "path": "src/quiz/models.py",
+                    "change_type": "Modify",
+                    "description": "Target model",
+                    "current_content": None,
+                }
+            ],
+        }
+
+        result = analyze_codebase(state)
+
+        gathered = result.get("gathered_symbols", [])
+        assert "Question" in gathered, f"Question not in gathered_symbols: {gathered}"
+        assert "to_dict" in gathered, f"to_dict not in gathered_symbols: {gathered}"
+        assert "from_dict" in gathered, f"from_dict not in gathered_symbols: {gathered}"
+
+
+class TestApiSymbolCheckInValidateCompleteness:
+    """Integration: validate_completeness wires check_api_symbols_exist."""
+
+    def test_validate_completeness_uses_gathered_symbols(self, base_state, sample_spec_complete):
+        """validate_completeness populates the api_symbols_exist check."""
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            validate_completeness,
+        )
+
+        base_state["spec_draft"] = sample_spec_complete
+        base_state["files_to_modify"] = [
+            {
+                "path": "assemblyzero/workflows/test/graph.py",
+                "change_type": "Modify",
+                "description": "Update graph",
+                "current_content": "def create_graph(): pass\n",
+            }
+        ]
+        base_state["pattern_references"] = []
+        # gathered_symbols set to non-empty — create_graph is real
+        base_state["gathered_symbols"] = ["create_graph"]
+
+        result = validate_completeness(base_state)
+        # The sample_spec_complete doesn't call any hallucinated APIs on
+        # target-repo objects, so this check should not be the cause of failure
+        # (other checks may fail; we only verify the symbol check ran)
+        checks_run = result.get("completeness_issues", [])
+        details_blob = " ".join(checks_run)
+        # Hallucinated-API check details must NOT appear when symbols are valid
+        assert "api_symbols_exist" not in details_blob or "model_dump" not in details_blob

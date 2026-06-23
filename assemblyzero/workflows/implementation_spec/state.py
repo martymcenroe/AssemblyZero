@@ -186,3 +186,9 @@ class ImplementationSpecState(TypedDict, total=False):
     # messages produce identical revisions and the loop never converges.
     # Each entry: {"iteration": int, "failures": list[str]}.
     prior_completeness_breakdown: list[dict]
+
+    # Closes #1527: Symbol names (class names + function/method names) extracted
+    # from all gathered .py files by N1. Used by N3 to detect hallucinated API
+    # calls that reference methods not defined in the target project.
+    # Stored as list (not set) because TypedDict values must be serializable.
+    gathered_symbols: list[str]

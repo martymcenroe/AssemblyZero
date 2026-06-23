@@ -147,6 +147,12 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_imports)
     _log_check(check_imports)
 
+    # Check 7: Spec must not call methods absent from target repo (Issue #1527)
+    gathered_symbols: list[str] = state.get("gathered_symbols", [])  # type: ignore[assignment]
+    check_symbols = check_api_symbols_exist(spec_draft, gathered_symbols)
+    checks.append(check_symbols)
+    _log_check(check_symbols)
+
     # Collect issues from failed checks
     completeness_issues = [
         check["details"] for check in checks if not check["passed"]
@@ -748,6 +754,184 @@ def check_import_targets_exist(
         passed=True,
         details=f"All {len(checked)} import targets validated.",
     )
+
+
+def check_api_symbols_exist(
+    spec: str,
+    gathered_symbols: list[str],
+) -> CompletenessCheck:
+    """Spec must not call methods absent from the target project's gathered symbols.
+
+    Closes #1527: Catches hallucinated API calls like ``question.model_dump()``
+    and ``Question.model_validate(...)`` when the target class is a plain
+    dataclass that exposes only ``to_dict`` / ``from_dict``.
+
+    Strategy:
+    - Scan only inside code fences (``` blocks) to avoid prose false positives.
+    - Extract method/attribute calls of the form ``<ident>.<method>(`` (the
+      opening paren ensures we capture method *calls*, not attribute accesses
+      in prose or type annotations).
+    - Flag any method name that is (a) absent from ``gathered_symbols`` AND
+      (b) not in the false-positive allowlist of common Python builtins, stdlib
+      idioms, dunder methods, and well-known third-party conventions.
+
+    Conservative design:
+    - Only flags method CALLS (trailing ``(``), not bare attribute access.
+    - Only scans inside code fences.
+    - Has a broad allowlist to keep false positives low.
+    - Skips the check when ``gathered_symbols`` is empty (N1 didn't gather any
+      Python content, so we have nothing to check against).
+
+    Args:
+        spec: Implementation Spec markdown content.
+        gathered_symbols: Sorted list of identifier names extracted by N1 from
+            the target repo's gathered .py files.
+
+    Returns:
+        CompletenessCheck with pass/fail result and details.
+    """
+    if not gathered_symbols:
+        return CompletenessCheck(
+            check_name="api_symbols_exist",
+            passed=True,
+            details=(
+                "No gathered symbols from target repo — "
+                "API symbol check skipped (N1 found no Python files to analyze)."
+            ),
+        )
+
+    symbol_set: set[str] = set(gathered_symbols)
+
+    # Extract method/function call names from code fences only
+    code_block_re = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
+    # Match  <ident>.<method>(  —  the opening paren marks a call, not an annotation
+    method_call_re = re.compile(r"\b\w+\.(\w+)\s*\(")
+
+    flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
+
+    for block_match in code_block_re.finditer(spec):
+        block_content = block_match.group(1)
+        for call_match in method_call_re.finditer(block_content):
+            method_name = call_match.group(1)
+
+            if method_name in symbol_set:
+                continue
+            if method_name in _API_SYMBOL_ALLOWLIST:
+                continue
+
+            # Capture the call site for the error message (truncated)
+            call_site = block_content[
+                max(0, call_match.start() - 10) : call_match.end() + 20
+            ].strip().replace("\n", " ")
+
+            if method_name not in flagged:
+                flagged[method_name] = []
+            flagged[method_name].append(call_site[:80])
+
+    if not flagged:
+        return CompletenessCheck(
+            check_name="api_symbols_exist",
+            passed=True,
+            details=(
+                f"All method calls in spec code fences are present in the "
+                f"target repo's gathered symbols ({len(symbol_set)} symbols checked)."
+            ),
+        )
+
+    # Build a readable summary of the flagged calls
+    flag_items: list[str] = []
+    for method_name, sites in sorted(flagged.items()):
+        site_preview = sites[0] if sites else ""
+        flag_items.append(f"`{method_name}` (e.g. `{site_preview}`)")
+
+    flag_list = "; ".join(flag_items[:5])
+    suffix = f" (and {len(flagged) - 5} more)" if len(flagged) > 5 else ""
+
+    return CompletenessCheck(
+        check_name="api_symbols_exist",
+        passed=False,
+        details=(
+            f"Spec calls methods not found in the target project's gathered "
+            f"symbols: {flag_list}{suffix}. These may be hallucinated APIs "
+            f"(e.g., pydantic methods on a plain dataclass). Verify these "
+            f"symbols exist in the target repo or replace with the actual API "
+            f"the target class exposes."
+        ),
+    )
+
+
+# Allowlist of method/function names that are NEVER flagged as hallucinated.
+# Covers: Python builtins, common stdlib idioms, dunder methods, and a small
+# set of near-universal third-party conventions.
+_API_SYMBOL_ALLOWLIST: frozenset[str] = frozenset({
+    # ---- dunder / special methods ----
+    "__init__", "__repr__", "__str__", "__eq__", "__lt__", "__le__",
+    "__gt__", "__ge__", "__ne__", "__hash__", "__bool__", "__len__",
+    "__iter__", "__next__", "__contains__", "__getitem__", "__setitem__",
+    "__delitem__", "__enter__", "__exit__", "__call__", "__class__",
+    "__dict__", "__doc__", "__module__", "__slots__", "__annotations__",
+    "__new__",
+    # ---- built-in type methods — dict ----
+    "get", "items", "keys", "values", "update", "pop", "setdefault",
+    "copy", "clear", "fromkeys",
+    # ---- built-in type methods — list ----
+    "append", "extend", "insert", "remove", "reverse", "sort", "count",
+    # ---- built-in type methods — str ----
+    "strip", "lstrip", "rstrip", "split", "rsplit", "splitlines",
+    "join", "replace", "startswith", "endswith", "upper", "lower",
+    "title", "capitalize", "format", "encode", "decode", "find",
+    "rfind", "rindex", "partition", "rpartition", "zfill",
+    "center", "ljust", "rjust",
+    # ---- built-in type methods — set ----
+    "add", "discard", "difference", "intersection", "union",
+    "issubset", "issuperset",
+    # ---- built-in type methods — bytes / bytearray ----
+    "hex", "fromhex",
+    # ---- pathlib ----
+    "read_text", "write_text", "read_bytes", "write_bytes", "mkdir",
+    "exists", "is_file", "is_dir", "glob", "rglob", "unlink", "rename",
+    "stat", "open", "parent", "name", "stem", "suffix", "relative_to",
+    "resolve",
+    # ---- json / stdlib ----
+    "loads", "dumps", "load", "dump",
+    # ---- logging ----
+    "info", "debug", "warning", "error", "exception", "critical",
+    "getLogger",
+    # ---- common built-ins ----
+    "close", "flush", "read", "write", "seek", "tell", "readline",
+    "readlines", "writelines",
+    # ---- subprocess / os ----
+    "run", "check_output", "check_call", "Popen", "communicate",
+    "getenv",
+    # ---- typing / dataclasses ----
+    "field", "fields", "asdict", "astuple",
+    # ---- collections ----
+    "deque", "OrderedDict", "defaultdict", "Counter",
+    # ---- itertools / functools ----
+    "chain", "product", "combinations", "permutations", "partial",
+    "reduce", "wraps",
+    # ---- datetime ----
+    "now", "utcnow", "strftime", "strptime", "isoformat",
+    # ---- re / regex ----
+    "match", "search", "findall", "finditer", "sub", "subn", "compile",
+    "fullmatch", "group", "groups", "groupdict", "start", "end", "span",
+    # ---- enum ----
+    "value",
+    # ---- contextlib ----
+    "contextmanager",
+    # ---- uuid ----
+    "uuid4", "UUID",
+    # ---- hashlib ----
+    "sha256", "md5", "hexdigest", "digest",
+    # ---- asyncio ----
+    "gather", "sleep", "create_task", "ensure_future", "get_event_loop",
+    "run_until_complete",
+    # ---- threading ----
+    "Thread", "Lock", "Event", "set", "wait",
+    # ---- common pytest/mock patterns ----
+    "assert_called", "assert_called_once", "assert_called_with",
+    "assert_any_call", "call_count", "called",
+})
 
 
 _SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
