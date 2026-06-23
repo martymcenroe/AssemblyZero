@@ -121,6 +121,35 @@ class TestRunAdversarialNode:
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
+    def test_no_client_available_skips(self, mock_client_cls):
+        """#1602: if the Gemini client can't be constructed (no creds / mock env),
+        the non-blocking node skips gracefully instead of crashing the workflow.
+
+        Reproduces the CI failure: genai.Client() raises a ValueError at
+        construction when no api_key is present.
+        """
+        mock_client_cls.side_effect = ValueError(
+            "Missing key inputs argument! To use the Google AI API, provide "
+            "(`api_key`) arguments."
+        )
+
+        state = {
+            "implementation_files": ["/fake/module.py"],
+            "lld_content": "# LLD",
+            "test_files": [],
+            "issue_id": 352,
+        }
+
+        # Must NOT raise — the construction failure is caught and skipped.
+        result = run_adversarial_node(state)
+
+        assert result["adversarial_verdict"] == "success"
+        assert "no Gemini client available" in result["adversarial_skipped_reason"]
+        assert result["adversarial_test_count"] == 0
+
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
+    )
     def test_downgrade_skip(self, mock_client_cls):
         """T030: On GeminiModelDowngradeError, sets skipped_reason with Flash."""
         mock_client = MagicMock()

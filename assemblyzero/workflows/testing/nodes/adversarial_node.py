@@ -67,20 +67,6 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     """
     logger.info("[ADV] Starting adversarial test generation node")
 
-    # #1602: in mock_mode, skip the Gemini call entirely — mock runs must not
-    # require credentials. Return a clean "skipped" state so the workflow still
-    # proceeds to N8.
-    if state.get("mock_mode"):
-        logger.info("[ADV] mock_mode — skipping adversarial Gemini call")
-        return {
-            **state,
-            "adversarial_skipped_reason": "mock_mode",
-            "adversarial_verdict": "success",
-            "adversarial_test_count": 0,
-            "adversarial_error": None,
-            "generated_test_files": {},
-        }
-
     # Issue #547: Skip-on-resume — don't re-call Gemini if verdict already exists
     if state.get("adversarial_verdict") in ("success", "error") and state.get("adversarial_test_count", 0) > 0:
         logger.info("[ADV] Adversarial analysis already complete — skipping")
@@ -102,8 +88,25 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     # Collect and trim context
     impl_context, lld_context, test_context = _collect_context(state)
 
-    # Invoke Gemini
-    client = AdversarialGeminiClient()
+    # Invoke Gemini. This node is non-blocking by design (route_after_adversarial
+    # always proceeds to N8). If no usable Gemini client can be constructed —
+    # mock_mode runs, or a credential-less environment such as CI — skip
+    # gracefully instead of crashing the whole TDD workflow (#1602). The
+    # mock_mode flag is NOT visible here: LangGraph filters the node input to
+    # AdversarialNodeState, which omits it, so we key off client-constructability
+    # rather than the flag.
+    try:
+        client = AdversarialGeminiClient()
+    except Exception as exc:  # noqa: BLE001 — non-blocking node: any ctor failure skips
+        logger.info("[ADV] No usable Gemini client — skipping adversarial: %s", exc)
+        return {
+            **state,
+            "adversarial_skipped_reason": f"no Gemini client available: {exc}",
+            "adversarial_verdict": "success",
+            "adversarial_test_count": 0,
+            "adversarial_error": None,
+            "generated_test_files": {},
+        }
 
     try:
         raw_response = client.generate_adversarial_tests(
