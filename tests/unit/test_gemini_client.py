@@ -28,16 +28,20 @@ from assemblyzero.core.gemini_client import (
 
 @pytest.fixture
 def temp_credentials_file():
-    """Create a temporary credentials file."""
+    """Create a temporary credentials file with OAuth credentials.
+
+    #1605: api_key credentials are no longer loaded — governance is
+    subscription/OAuth-only.  All fixture credentials are now type: oauth.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         creds_file = Path(tmpdir) / "credentials.json"
         creds_file.write_text(
             json.dumps(
                 {
                     "credentials": [
-                        {"name": "key-1", "key": "test-key-1", "enabled": True, "type": "api_key"},
-                        {"name": "key-2", "key": "test-key-2", "enabled": True, "type": "api_key"},
-                        {"name": "key-3", "key": "test-key-3", "enabled": True, "type": "api_key"},
+                        {"name": "key-1", "enabled": True, "type": "oauth"},
+                        {"name": "key-2", "enabled": True, "type": "oauth"},
+                        {"name": "key-3", "enabled": True, "type": "oauth"},
                     ]
                 }
             )
@@ -109,7 +113,11 @@ class TestCredentialLoading:
     """Tests for credential loading."""
 
     def test_loads_credentials_from_file(self, temp_credentials_file, temp_state_file):
-        """Test that credentials are loaded from file."""
+        """Test that OAuth credentials are loaded from file.
+
+        #1605: _load_credentials() now only loads type: oauth credentials.
+        api_key credentials are silently skipped; key is always empty string.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=temp_credentials_file,
@@ -119,7 +127,8 @@ class TestCredentialLoading:
         creds = client._load_credentials()
         assert len(creds) == 3
         assert creds[0].name == "key-1"
-        assert creds[0].key == "test-key-1"
+        assert creds[0].cred_type == "oauth"
+        assert creds[0].key == ""  # OAuth credentials carry no API key
 
     def test_missing_credentials_file_raises(self, temp_state_file):
         """Test that missing credentials file raises FileNotFoundError."""
@@ -201,41 +210,41 @@ class TestRotationLogic:
     """Tests for credential rotation logic."""
 
     def test_090_429_triggers_rotation(self, temp_credentials_file, temp_state_file):
-        """Test that 429 error causes rotation to next credential."""
+        """Test that 429 error causes rotation to next credential.
+
+        #1605: the api_key/genai.Client path is gone.  Drive the rotation loop
+        via _invoke_via_cli returning a 429-bearing error string so that
+        classify_gemini_error → RateLimitError → QUOTA_EXHAUSTED → rotate.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=temp_credentials_file,
             state_file=temp_state_file,
         )
 
-        call_sequence = []
+        credentials_tried = []
 
-        def mock_client_init(api_key):
-            """Capture API key and return mock client."""
-            call_sequence.append(api_key)
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = Exception(
-                "TerminalQuotaError: exhausted"
-            )
-            return mock_client
+        def mock_invoke_via_cli(system_instruction, content):
+            # Count each _invoke_via_cli call — one per credential tried
+            credentials_tried.append(len(credentials_tried))
+            return (False, "", "429 TerminalQuotaError: exhausted")
 
-        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
-            mock_client_class.side_effect = mock_client_init
-
+        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli):
             result = client.invoke("system", "content")
 
-        # Should have tried all 3 credentials
-        assert len(call_sequence) == 3
-        assert call_sequence[0] == "test-key-1"
-        assert call_sequence[1] == "test-key-2"
-        assert call_sequence[2] == "test-key-3"
+        # All 3 credentials should have been tried (rotation happened)
+        assert len(credentials_tried) == 3
 
-        # Result should indicate rotation occurred
+        # Result should indicate rotation occurred and overall failure
         assert result.rotation_occurred is True
         assert result.success is False
 
     def test_100_529_triggers_backoff(self, temp_credentials_file, temp_state_file):
-        """Test that 529 error causes backoff retry on same credential."""
+        """Test that 529 error causes backoff retry on same credential.
+
+        #1605: drive the backoff path via _invoke_via_cli returning a 529/capacity
+        error string.  Succeed on the 3rd attempt so success=True, no rotation.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=temp_credentials_file,
@@ -244,51 +253,38 @@ class TestRotationLogic:
 
         attempts = [0]
 
-        def mock_generate(*args, **kwargs):
+        def mock_invoke_via_cli(system_instruction, content):
             attempts[0] += 1
             if attempts[0] < 3:
-                raise Exception("MODEL_CAPACITY_EXHAUSTED")
+                return (False, "", "529 MODEL_CAPACITY_EXHAUSTED")
             # Succeed on 3rd attempt
-            mock_response = MagicMock()
-            mock_response.text = "Success"
-            return mock_response
+            return (True, "Success", "")
 
-        def mock_client_init(api_key):
-            """Return mock client with generate_content that tracks attempts."""
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = mock_generate
-            return mock_client
+        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli), \
+             patch("time.sleep"):  # Skip actual delay
+            result = client.invoke("system", "content")
 
-        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
-            mock_client_class.side_effect = mock_client_init
-
-            with patch("time.sleep"):  # Skip actual delay
-                result = client.invoke("system", "content")
-
-        # Should have retried 3 times on same credential
+        # Should have retried 3 times on the same credential before succeeding
         assert attempts[0] == 3
         assert result.success is True
         assert result.rotation_occurred is False
 
     def test_110_all_credentials_exhausted(self, temp_credentials_file, temp_state_file):
-        """Test behavior when all credentials are exhausted."""
+        """Test behavior when all credentials are exhausted.
+
+        #1605: drive the exhaustion path via _invoke_via_cli returning a quota
+        error for every call so all three OAuth credentials get marked exhausted.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=temp_credentials_file,
             state_file=temp_state_file,
         )
 
-        def mock_client_init(api_key):
-            """Return mock client that always raises quota error."""
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = Exception(
-                "TerminalQuotaError: exhausted"
-            )
-            return mock_client
+        def mock_invoke_via_cli(system_instruction, content):
+            return (False, "", "429 TerminalQuotaError: exhausted")
 
-        with patch("assemblyzero.core.gemini_client.genai.Client") as mock_client_class:
-            mock_client_class.side_effect = mock_client_init
-
+        with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli):
             result = client.invoke("system", "content")
 
         assert result.success is False

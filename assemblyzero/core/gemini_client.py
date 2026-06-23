@@ -22,9 +22,6 @@ from pathlib import Path
 from assemblyzero.core.text_sanitizer import strip_emoji
 from typing import Optional
 
-from google import genai
-from google.genai import types
-
 from assemblyzero.core.config import (
     BACKOFF_BASE_SECONDS,
     BACKOFF_MAX_SECONDS,
@@ -550,52 +547,13 @@ class GeminiClient:
                             # Raise exception to trigger error handling
                             raise RuntimeError(error_msg)
                     else:
-                        # API key: use new google.genai SDK
-                        client = genai.Client(api_key=cred.key)
-
-                        # Issue #492: Wire response_schema into config when provided
-                        config_kwargs = {
-                            "system_instruction": system_instruction,
-                        }
-                        if response_schema is not None:
-                            config_kwargs["response_mime_type"] = "application/json"
-                            config_kwargs["response_schema"] = response_schema
-
-                        # Make the API call with system instruction in config
-                        config_kwargs["http_options"] = {"timeout": 300_000}
-                        response = client.models.generate_content(
-                            model=self.model,
-                            contents=content,
-                            config=types.GenerateContentConfig(**config_kwargs),
+                        # #1605: the paid API-key SDK path was removed — governance
+                        # is subscription/OAuth-only. _load_credentials no longer
+                        # loads api_key creds, so this is a defensive guard only.
+                        raise RuntimeError(
+                            f"Non-OAuth credential '{cred.name}' is not supported; "
+                            "governance is subscription/OAuth-only (#1605)"
                         )
-
-                        # Check for successful response
-                        if response.text:
-                            # Verify model used (if available in response metadata)
-                            model_verified = self.model  # Default to requested model
-
-                            # Update state on success
-                            state.last_success = cred.name
-                            state.last_success_time = datetime.now(
-                                timezone.utc
-                            ).isoformat()
-                            self._save_state(state)
-
-                            duration_ms = int((time.time() - start_time) * 1000)
-
-                            # Issue #527: Strip emojis (preserve raw)
-                            return GeminiCallResult(
-                                success=True,
-                                response=strip_emoji(response.text),
-                                raw_response=str(response),
-                                error_type=None,
-                                error_message=None,
-                                credential_used=cred.name,
-                                rotation_occurred=rotation_occurred,
-                                attempts=total_attempts,
-                                duration_ms=duration_ms,
-                                model_verified=model_verified,
-                            )
 
                 except Exception as e:
                     error_str = str(e)
@@ -742,7 +700,7 @@ class GeminiClient:
             response=None,
             raw_response=None,
             error_type=final_error_type,
-            error_message=f"All credentials failed:\n  - " + "\n  - ".join(errors),
+            error_message="All credentials failed:\n  - " + "\n  - ".join(errors),
             credential_used="",
             rotation_occurred=len(available) > 1,
             attempts=total_attempts,
@@ -753,13 +711,11 @@ class GeminiClient:
         )
 
     def _load_credentials(self) -> list[Credential]:
-        """Load credentials from config file.
+        """Load OAuth credentials from the config file.
 
-        OAuth credentials are loaded first (higher quota limits),
-        followed by API key credentials.
-
-        Note: OAuth through CLI loads GEMINI.md. We prepend model identity
-        to satisfy the handshake protocol defined there.
+        #1605: governance is subscription/OAuth-only; API-key credentials are
+        no longer loaded. OAuth is invoked via the Antigravity CLI (agy), which
+        runs in a clean temp dir — no GEMINI.md context bleed.
         """
         if self._credentials is not None:
             return self._credentials
@@ -767,7 +723,7 @@ class GeminiClient:
         if not self.credentials_file.exists():
             raise FileNotFoundError(
                 f"Credentials file not found: {self.credentials_file}\n"
-                f"Create it with your API keys. See AssemblyZero docs."
+                f"Create it with your OAuth credentials. See AssemblyZero docs."
             )
 
         with open(self.credentials_file, encoding="utf-8") as f:
@@ -788,18 +744,8 @@ class GeminiClient:
                     )
                 )
 
-        # Then load API key credentials
-        for c in data.get("credentials", []):
-            if c.get("type") == "api_key" and c.get("key") and c.get("enabled", True):
-                credentials.append(
-                    Credential(
-                        name=c.get("name", "unnamed"),
-                        key=c.get("key", ""),
-                        enabled=True,
-                        account_name=c.get("account-name", ""),
-                        cred_type="api_key",
-                    )
-                )
+        # #1605: API-key credentials are no longer loaded — governance is
+        # subscription/OAuth-only. Only OAuth credentials (above) are used.
 
         self._credentials = credentials
         return self._credentials

@@ -7,9 +7,7 @@ Verifies that:
 """
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
@@ -80,56 +78,14 @@ class TestParseStructuredVerdict:
 
 
 class TestGeminiPassesResponseSchema:
-    """Verify GeminiClient wires response_schema into API config."""
+    """Verify GeminiClient/GeminiProvider wire response_schema correctly.
 
-    @patch("assemblyzero.core.gemini_client.genai")
-    def test_gemini_passes_response_schema(self, mock_genai):
-        """When response_schema is provided, it should be in GenerateContentConfig."""
-        from assemblyzero.core.gemini_client import GeminiClient
-
-        # Create a mock client with minimal config
-        mock_client_instance = MagicMock()
-        mock_genai.Client.return_value = mock_client_instance
-
-        mock_response = MagicMock()
-        mock_response.text = json.dumps({"verdict": "APPROVED", "rationale": "OK"})
-        mock_client_instance.models.generate_content.return_value = mock_response
-
-        client = GeminiClient.__new__(GeminiClient)
-        client.model = "gemini-3.1-pro-preview"
-        client.credentials_file = MagicMock()
-        client.state_file = MagicMock()
-        client._credentials = None
-        client._state = None
-        client._gemini_cli = None
-
-        # Manually create a credential
-        from assemblyzero.core.gemini_client import Credential, RotationState
-
-        client._credentials = [
-            Credential(name="test-key", key="fake-key", enabled=True, cred_type="api_key")
-        ]
-        client._state = RotationState()
-
-        # Patch _save_state to avoid file IO
-        client._save_state = MagicMock()
-
-        result = client.invoke(
-            system_instruction="Review this",
-            content="Draft content",
-            response_schema=VERDICT_SCHEMA,
-        )
-
-        # Verify generate_content was called
-        assert mock_client_instance.models.generate_content.called
-        call_kwargs = mock_client_instance.models.generate_content.call_args
-
-        # The config should have response_mime_type and response_schema
-        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
-        # Check that the config was created with the right params
-        # The config is a GenerateContentConfig object created via types.GenerateContentConfig
-        # We need to verify the kwargs passed to it
-        assert result.success
+    test_gemini_passes_response_schema was deleted in #1605: the structured-output
+    path relied on genai.Client (paid API-key SDK), which was removed when
+    governance moved to subscription/OAuth-only transport.  GeminiProvider still
+    accepts and forwards response_schema to the underlying client; that forwarding
+    is tested below.
+    """
 
     def test_gemini_provider_passes_schema(self):
         """GeminiProvider.invoke() should forward response_schema to client."""
