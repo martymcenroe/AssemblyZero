@@ -289,7 +289,6 @@ def test_t040(mock_state_base):
     assert result == "N4_human_gate_verdict"
 
 
-@pytest.mark.xfail(reason="stale routing expectation N4_human_gate_verdict vs N1_generate_draft; see #1599", strict=False)
 def test_t050(mock_state_base):
     """
     test_max_iterations_respected | Terminates after limit
@@ -299,7 +298,9 @@ def test_t050(mock_state_base):
     # TDD: Arrange
     state = mock_state_base.copy()
     state["open_questions_status"] = "UNANSWERED"
-    state["iteration_count"] = 20
+    # #1599: the UNANSWERED max-iterations gate is on verdict_count (#1509),
+    # not iteration_count. Set verdict_count to the cap to exercise the halt.
+    state["verdict_count"] = 20
     state["max_iterations"] = 20
 
     # TDD: Act
@@ -463,7 +464,6 @@ def test_040(verdict_with_human_required, draft_with_open_questions, mock_state_
     assert route == "N4_human_gate_verdict", "Should escalate to human gate"
 
 
-@pytest.mark.xfail(reason="stale routing expectation N4_human_gate_verdict vs N1_generate_draft; see #1599", strict=False)
 def test_050(mock_state_base):
     """
     Max iterations respected | Auto | 20 loops without resolution |
@@ -472,7 +472,9 @@ def test_050(mock_state_base):
     # TDD: Arrange
     state = mock_state_base.copy()
     state["open_questions_status"] = "UNANSWERED"
-    state["iteration_count"] = 20
+    # #1599: the UNANSWERED max-iterations gate is on verdict_count (#1509),
+    # not iteration_count. Set verdict_count to the cap to exercise the halt.
+    state["verdict_count"] = 20
     state["max_iterations"] = 20
 
     # TDD: Act

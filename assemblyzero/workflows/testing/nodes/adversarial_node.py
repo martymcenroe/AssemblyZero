@@ -67,6 +67,20 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
     """
     logger.info("[ADV] Starting adversarial test generation node")
 
+    # #1602: in mock_mode, skip the Gemini call entirely — mock runs must not
+    # require credentials. Return a clean "skipped" state so the workflow still
+    # proceeds to N8.
+    if state.get("mock_mode"):
+        logger.info("[ADV] mock_mode — skipping adversarial Gemini call")
+        return {
+            **state,
+            "adversarial_skipped_reason": "mock_mode",
+            "adversarial_verdict": "success",
+            "adversarial_test_count": 0,
+            "adversarial_error": None,
+            "generated_test_files": {},
+        }
+
     # Issue #547: Skip-on-resume — don't re-call Gemini if verdict already exists
     if state.get("adversarial_verdict") in ("success", "error") and state.get("adversarial_test_count", 0) > 0:
         logger.info("[ADV] Adversarial analysis already complete — skipping")
