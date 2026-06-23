@@ -9,7 +9,7 @@ Tests verify that:
 - Capacity errors are not silently dropped
 """
 
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch
 from pathlib import Path
 import json
 
@@ -18,7 +18,6 @@ import pytest
 from assemblyzero.core.gemini_client import (
     GeminiClient,
     GeminiErrorType,
-    GeminiCallResult,
 )
 
 
@@ -29,13 +28,17 @@ from assemblyzero.core.gemini_client import (
 
 @pytest.fixture
 def creds_dir(tmp_path: Path) -> Path:
-    """Temporary directory with credentials and state files."""
+    """Temporary directory with credentials and state files.
+
+    #1605: api_key credentials are no longer loaded — governance is
+    subscription/OAuth-only.  Fixture updated to use type: oauth.
+    """
     creds_file = tmp_path / "gemini-credentials.json"
     state_file = tmp_path / "gemini-rotation-state.json"
 
     creds_file.write_text(json.dumps({
         "credentials": [
-            {"name": "api-key-1", "type": "api_key", "key": "test-key-1", "enabled": True},
+            {"name": "api-key-1", "type": "oauth", "enabled": True},
         ]
     }), encoding="utf-8")
 
@@ -49,14 +52,18 @@ def creds_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def multi_creds_dir(tmp_path: Path) -> Path:
-    """Temporary directory with multiple credentials (all will 503)."""
+    """Temporary directory with multiple credentials (all will 503).
+
+    #1605: api_key credentials are no longer loaded — governance is
+    subscription/OAuth-only.  Fixture updated to use type: oauth.
+    """
     creds_file = tmp_path / "gemini-credentials.json"
     state_file = tmp_path / "gemini-rotation-state.json"
 
     creds_file.write_text(json.dumps({
         "credentials": [
-            {"name": "api-key-1", "type": "api_key", "key": "test-key-1", "enabled": True},
-            {"name": "api-key-2", "type": "api_key", "key": "test-key-2", "enabled": True},
+            {"name": "api-key-1", "type": "oauth", "enabled": True},
+            {"name": "api-key-2", "type": "oauth", "enabled": True},
         ]
     }), encoding="utf-8")
 
@@ -77,21 +84,21 @@ class TestCapacity503Fix:
     """Tests for issue #483: 503 errors must not be silently dropped."""
 
     def test_503_appears_in_errors(self, creds_dir: Path) -> None:
-        """After retries exhaust on 503, the error appears in the result."""
+        """After retries exhaust on 503, the error appears in the result.
+
+        #1605: patch _invoke_via_cli (OAuth transport) to return a 503/capacity
+        error on every attempt.  The rotation loop must surface the error
+        rather than silently dropping it.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=creds_dir / "gemini-credentials.json",
             state_file=creds_dir / "gemini-rotation-state.json",
         )
 
-        # Mock genai.Client to raise 503 on every call
-        with patch("assemblyzero.core.gemini_client.genai") as mock_genai, \
+        with patch.object(client, "_invoke_via_cli",
+                          return_value=(False, "", "503 The model is overloaded. MODEL_CAPACITY_EXHAUSTED")), \
              patch("assemblyzero.core.gemini_client.time.sleep"):  # Skip actual delays
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = RuntimeError(
-                "503 The model is overloaded. MODEL_CAPACITY_EXHAUSTED"
-            )
-            mock_genai.Client.return_value = mock_client
 
             result = client.invoke(
                 system_instruction="test",
@@ -104,20 +111,19 @@ class TestCapacity503Fix:
         assert "Capacity exhausted" in result.error_message or "capacity" in result.error_message.lower()
 
     def test_all_capacity_returns_capacity_type(self, multi_creds_dir: Path) -> None:
-        """When all credentials fail with 503, error_type is CAPACITY_EXHAUSTED."""
+        """When all credentials fail with 503, error_type is CAPACITY_EXHAUSTED.
+
+        #1605: patch _invoke_via_cli for both OAuth credentials.
+        """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
             credentials_file=multi_creds_dir / "gemini-credentials.json",
             state_file=multi_creds_dir / "gemini-rotation-state.json",
         )
 
-        with patch("assemblyzero.core.gemini_client.genai") as mock_genai, \
+        with patch.object(client, "_invoke_via_cli",
+                          return_value=(False, "", "503 The model is overloaded. MODEL_CAPACITY_EXHAUSTED")), \
              patch("assemblyzero.core.gemini_client.time.sleep"):
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = RuntimeError(
-                "503 The model is overloaded. MODEL_CAPACITY_EXHAUSTED"
-            )
-            mock_genai.Client.return_value = mock_client
 
             result = client.invoke(
                 system_instruction="test",
@@ -133,6 +139,8 @@ class TestCapacity503Fix:
         Before the fix, the while loop `continue` on capacity errors
         never appended to the errors list, so after retries exhausted
         the error was silently dropped.
+
+        #1605: patch _invoke_via_cli (OAuth transport) with a 529 capacity error.
         """
         client = GeminiClient(
             model="gemini-3.1-pro-preview",
@@ -140,13 +148,9 @@ class TestCapacity503Fix:
             state_file=creds_dir / "gemini-rotation-state.json",
         )
 
-        with patch("assemblyzero.core.gemini_client.genai") as mock_genai, \
+        with patch.object(client, "_invoke_via_cli",
+                          return_value=(False, "", "529 RESOURCE_EXHAUSTED")), \
              patch("assemblyzero.core.gemini_client.time.sleep"):
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = RuntimeError(
-                "529 RESOURCE_EXHAUSTED"
-            )
-            mock_genai.Client.return_value = mock_client
 
             result = client.invoke(
                 system_instruction="test",
