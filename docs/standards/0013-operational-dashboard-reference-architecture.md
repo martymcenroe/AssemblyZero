@@ -701,4 +701,22 @@ When spinning up a new operational dashboard:
 
 ---
 
-*Derived from production experience with Hermes (2024-2026) and Aletheia (2025-2026). Updated as new patterns emerge.*
+## 11. Cross-Project Survey — Panopticon, career, Hermes (added 2026-06)
+
+Three additional operator-built dashboards were reviewed against this standard in June 2026. The findings generalize the §8 lessons; the full write-up is `Chiron/docs/design/web-app-requirements.md` (§3–§4).
+
+| App | Verdict | Keep (patterns that worked) | Avoid (patterns that hurt) |
+|-----|---------|------------------------------|-----------------------------|
+| **Panopticon** (`unleashed/dashboard`) | Elegant | Elegant *because it refuses scope* — small surface, pure logic. A ~15-line semantic `@theme` color-token file as the single source of truth; a denormalized summary row refreshed by a debounced/cron job (never per-request joins); append-only snapshot table + gauge + retention cron for "over time"; pure, unit-tested status logic behind thin components; empty states that print the exact next command; dual auth (session cookie **or** `X-API-Key`) so a CLI can push and a browser can read | Single-user allowlist auth (fine for one operator, wrong for multi-role); one oversized card file; render-time dedup that papers over messy ingest |
+| **career** (`career/dashboard`) | Unusable | The curator interaction model (Pending/Approved tabs; per-row approve / edit-inline / reject); a metrics card framed as "X / Y + % of target" with a color-coded coverage-health table | `useState` tab routing (no router → reload loses all state, no deep links); one flat nav entry per backend capability (IA mirrors the API 1:1); 800–1,200-line mega-pages with 30+ controls; two design languages in one app; `alert()` / silent `catch {}`; `any[]` + `JSON.parse` in render; `limit=5000` with no pagination; a `Docs` tab required just to operate the app |
+| **Hermes** (`Hermes/dashboard`) | Complicated | Approval queue + inline detail drawer + per-item audit history (a reusable *curator-gate* pattern — pairs with §5 observability for any review workflow); "why does this need attention" derived from data, not shown as a raw list; count badges on every queue; lightweight role *predicates* rather than an RBAC framework | Two live UIs (SSR + SPA) never reconciled; a 13-section "god page"; a 2,000-line API monolith; multi-mode endpoints (`close(mode)`) |
+
+**The through-line:** the good dashboards are **persona-first, one design language, one renderer, pure-tested logic, and small.** Panopticon is elegant because it refuses scope and keeps logic pure and testable; career is unusable because its information architecture mirrors its backend instead of its users and it has no consistent component vocabulary; Hermes is heavy because it never deleted its old UI and let one page swallow a dozen features. These reinforce §1 (inline-vs-SPA), §5 (observability), and §8 (pitfalls) with three more data points.
+
+**Sextant (`voices.sextant.ceo`) — surveyed, excluded.** Sextant is a public employee-engagement forum, not an operational dashboard: no observability pane, no admin/RBAC, no router, no metrics (all deliberately de-scoped in its build spec). Its UI is the cautionary *inverse* of patterns already prescribed here (`useState` navigation, unbounded unpaginated queries, a monolithic untested component, color tokens duplicated across JS and CSS), so it contributes nothing as a dashboard exemplar. Recorded here so it is not re-surveyed. One auth pattern from it is worth keeping (below).
+
+**Auth addendum — fail-closed allowlist at the OIDC callback (from Sextant).** A successful OAuth/OIDC login proves *identity*, not *authorization* — the IdP authenticates the entire world. After token exchange, look the subject up in a local membership table; if absent, do **not** issue a session — redirect to a request-access page. This is a membership gate at the auth boundary, *before* session issuance, and complements the RBAC guidance in §2.2 and the multi-provider OAuth guidance in §2.5. (Two further Sextant patterns — a self-service access-request + email-OTP approval queue, and sending SES email from a Worker via `aws4fetch` SigV4 without the AWS SDK — were considered but are onboarding/email concerns, not dashboard patterns; omitted here.)
+
+---
+
+*Derived from production experience with Hermes (2024-2026) and Aletheia (2025-2026), extended 2026-06 with a cross-project survey of Panopticon (`unleashed/dashboard`), career (`career/dashboard`), and Hermes (`Hermes/dashboard`) — full analysis in `Chiron/docs/design/web-app-requirements.md`; Sextant was surveyed and excluded (no operational-dashboard surface). Updated as new patterns emerge.*
