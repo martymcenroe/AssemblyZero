@@ -6,9 +6,7 @@ Issue #93: N8 Documentation Node
 """
 
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1588,7 +1586,7 @@ class TestVerifyPhasesModule:
             mock_run.return_value.stdout = "1 passed\nTOTAL 100 10 90%"
             mock_run.return_value.stderr = ""
 
-            result = run_pytest(
+            run_pytest(
                 [str(test_file)],
                 coverage_module="mymodule",
                 coverage_target=80,
@@ -2944,7 +2942,6 @@ class TestPatternsModule:
 
     def test_get_mock_guidance_with_types(self):
         """get_mock_guidance returns combined guidance."""
-        from assemblyzero.workflows.testing.knowledge.patterns import get_mock_guidance
 
         result = get_mock_guidance(["unit", "browser"])
 
@@ -2952,7 +2949,6 @@ class TestPatternsModule:
 
     def test_get_mock_guidance_no_guidance(self):
         """get_mock_guidance handles types without guidance."""
-        from assemblyzero.workflows.testing.knowledge.patterns import get_mock_guidance
 
         result = get_mock_guidance(["e2e"])
 
@@ -3018,7 +3014,6 @@ class TestAuditModuleExtras:
 
     def test_create_testing_audit_dir(self, tmp_path):
         """create_testing_audit_dir creates proper structure."""
-        from assemblyzero.workflows.testing.audit import create_testing_audit_dir
 
         result = create_testing_audit_dir(42, tmp_path)
 
@@ -3379,7 +3374,6 @@ class TestReviewTestPlanFullCoverage:
 
         # Mock the imports to fail
         import sys
-        original_modules = sys.modules.copy()
 
         # Try to trigger import error by patching at different level
         with patch.dict(sys.modules, {"assemblyzero.core.gemini_client": None}):
@@ -3737,8 +3731,7 @@ class TestFinalizeFullCoverage:
         result = finalize(state)
 
         assert result.get("error_message") == ""
-        # LLD should be archived
-        archived = result.get("archived_files", [])
+        # LLD should be archived — result.get("archived_files", []) intentionally unused
         # May or may not archive depending on path structure
 
 

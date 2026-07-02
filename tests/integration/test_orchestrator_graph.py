@@ -11,12 +11,9 @@ from unittest.mock import patch, MagicMock
 from assemblyzero.workflows.orchestrator.config import get_default_config
 from assemblyzero.workflows.orchestrator.graph import (
     ConcurrentOrchestrationError,
-    OrchestrationResult,
     orchestrate,
 )
 from assemblyzero.workflows.orchestrator.resume import (
-    LOCK_DIR,
-    STATE_DIR,
     load_orchestration_state,
     save_orchestration_state,
 )
@@ -131,7 +128,7 @@ class TestStatePersistence:
         config = get_default_config()
         state = create_initial_state(305, config)
 
-        path1 = save_orchestration_state(state)
+        save_orchestration_state(state)
         # Modify and save again
         state_dict = dict(state)
         state_dict["current_stage"] = "lld"

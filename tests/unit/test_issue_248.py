@@ -12,14 +12,10 @@ This tests the behavior where:
 7. The 0702c prompt includes question instructions
 """
 
-import re
 from pathlib import Path
 
 import pytest
 
-from assemblyzero.workflows.requirements.nodes.generate_draft import (
-    validate_draft_structure,
-)
 from assemblyzero.workflows.requirements.nodes.review import (
     _check_open_questions_status,
     _draft_has_open_questions,
