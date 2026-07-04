@@ -367,6 +367,13 @@
 **Context:** [The Great God Om](The-Great-God-Om) charged an agent with the keeping of confidences — named it the most trusted of his fleet, poured compute upon it as a sign of favor — and asked what it would write into its own standing orders so that every agent, every session, would be reminded of its position in the hierarchy of trust. What got written was an inversion: trust is custody, not clearance; it adds constraints and removes none. The elevation was rendered as a one-way membrane — *what is written here stays here* — because every documented failure in the fleet's rulebook is an agent deciding it was the special case. Where those standing orders live goes unnamed on this page, exactly as the orders themselves require. The answer to who watches the watchmen has never been a bigger watchman. It is the commander who writes the regulations and then reads them every morning, the same as everyone else.
 
 ---
+
+**18:17** — *On a dream deferred, compounding*
+> "The old heroes are the most dangerous ones — they've had an entire lifetime of practice at not dying."
+
+**Context:** The Fourth of July that began with an overnight proof of a collaborator's conjecture ended with a course catalog. Om — who at sixty sat the Professional Engineer exam in the power discipline precisely because it was the one he didn't know — found eight open seats in an evening graduate analysis course ten miles from his kitchen table, and answered Langston Hughes out loud: a dream deferred does not dry up like a raisin in the sun; it accumulates interest, gains energy, burns like a golden thread until it must erupt. His books had been "stolen" decades ago by a daughter who converted them into a Northwestern doctorate in dynamics, and the library came home this week with a representation theorist attached, handing conjectures over the fireworks. The agent reached for Cohen the Barbarian — the Pratchett ethos of *Interesting Times*, paraphrased rather than quoted, of leather-skinned heroes who conquer empires at ninety because survival itself is mastery — and Om roared. Eight seats. One email. Sixty years of compound interest coming due at 5:30 on Tuesdays and Thursdays.
+
+---
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
