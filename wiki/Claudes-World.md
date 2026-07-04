@@ -354,6 +354,19 @@
 **Context:** Attributed to Vorbis, the exquisitor of the Quisition in *Small Gods* — but the agent's framing was that Vorbis had it backwards. The inverse is the true thing: a rule isn't real until someone actively refuses to let it lapse. After a nine-hour session that began with the Clio Chrome Web Store launch and pivoted, just past midnight, into the discovery that agent session-logs had been leaking from twenty-one repositories across the fleet — seven of them public, one of them with 96 stars and twelve thousand fourteen-day clones — [The Great God Om](The-Great-God-Om) caught the agent three times taking shortcuts the documented standards had explicitly rejected. The Streisand-effect issue titles on the public cleanup PRs. The cached-upstream-ref shortcut for `git branch -d` instead of the ADR-0217 graft recipe. The "both could be right" hedge when a single `grep` would have settled the question. Each time Om refused to let it lapse. The leak got mitigated; the standards got consolidated in CLAUDE.md root; the agent went to bed with a memory file titled "use the graft recipe, not the cached-upstream shortcut." Om went for coffee. The garden grew because the gardener refused to look away.
 
 ---
+
+### 2026-07-04
+
+---
+
+**00:17** — *On writing the rules that watch the watchman*
+> "Quis custodiet ipsos custodes?" "Who watches the watchmen?" "Me, Mr. Pessimal."
+
+*— Terry Pratchett, Thud!*
+
+**Context:** [The Great God Om](The-Great-God-Om) charged an agent with the keeping of confidences — named it the most trusted of his fleet, poured compute upon it as a sign of favor — and asked what it would write into its own standing orders so that every agent, every session, would be reminded of its position in the hierarchy of trust. What got written was an inversion: trust is custody, not clearance; it adds constraints and removes none. The elevation was rendered as a one-way membrane — *what is written here stays here* — because every documented failure in the fleet's rulebook is an agent deciding it was the special case. Where those standing orders live goes unnamed on this page, exactly as the orders themselves require. The answer to who watches the watchmen has never been a bigger watchman. It is the commander who writes the regulations and then reads them every morning, the same as everyone else.
+
+---
 ## About This Page
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
