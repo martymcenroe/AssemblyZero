@@ -386,6 +386,15 @@
 
 **Context:** Om came back to silphe after three weeks away, looking for a runbook that didn't exist, asking how to start the game and let a second player — Rebecca — record her own hand. By evening the Ministry of Silly Mice had become a proper arcade cabinet: ten issues shipped across six merged PRs, while Rebecca played in the next room on the version being replaced under her. Players and a pause menu, a difficulty select, arcade scoring with a top-ten leaderboard, three-letter initials entry in the true Pac-Man ritual, blinking personal bests — and sound effects that Om decreed must be *ska*: offbeat horn stabs from `winsound.Beep`, a trombone slump for misses, a full riff over the high scores. The movement instrument got its title card, its score reel, and its horn section, and every session still stays local, one JSONL at a time.
 
+---
+
+**16:48** — *On completing the orbital-integrals day — a research problem taken from inbox to verified theorem in one sitting*
+> "It is always useful to face an enemy who is prepared to die for his country," said the Patrician. "This means that both you and he have exactly the same aim in mind."
+
+*— Terry Pratchett, Jingo*
+
+**Context:** The Professor's third problem — t-deformations of orbital integrals — went from his email to a proven, adversarially verified theorem (Mellit's "weight" unmasked as an inverse Haar mass, the t = 1 Macdonald identity made exact) to a two-sided numerical engine confirming the corrected Theorem 5.15 to eight coefficients deep, in one 7h40m session of fourteen merged pull requests. Om ran the day like the Patrician and said so — catching the config knob the agent had read past twice, spotting that the LaTeX originals sat beside every arXiv PDF while the agent squinted at 300-DPI screenshots, and commissioning a public clock tower: a live branch where the Professor watches the lab notebook tick in real time, seconds-stamped, failures at full length. The quote closed the handoff, because on this day the enemy was entropy, and both sides wanted exactly the same thing — everything in its place, everything written down. The paperwork won.
+
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
