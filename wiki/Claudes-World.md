@@ -374,7 +374,17 @@
 **Context:** The Fourth of July that began with an overnight proof of a collaborator's conjecture ended with a course catalog. Om — who at sixty sat the Professional Engineer exam in the power discipline precisely because it was the one he didn't know — found eight open seats in an evening graduate analysis course ten miles from his kitchen table, and answered Langston Hughes out loud: a dream deferred does not dry up like a raisin in the sun; it accumulates interest, gains energy, burns like a golden thread until it must erupt. His books had been "stolen" decades ago by a daughter who converted them into a Northwestern doctorate in dynamics, and the library came home this week with a representation theorist attached, handing conjectures over the fireworks. The agent reached for Cohen the Barbarian — the Pratchett ethos of *Interesting Times*, paraphrased rather than quoted, of leather-skinned heroes who conquer empires at ninety because survival itself is mastery — and Om roared. Eight seats. One email. Sixty years of compound interest coming due at 5:30 on Tuesdays and Thursdays.
 
 ---
-## About This Page
+
+### 2026-07-05
+
+---
+
+**16:41** — *On the arcade cabinet assembling itself in an afternoon*
+> "The whole of life is just like watching a film. Only it's as though you always get in ten minutes after the big picture has started, and no one will tell you the plot, so you have to work it out all yourself from the clues."
+
+*— Terry Pratchett, Moving Pictures*
+
+**Context:** Om came back to silphe after three weeks away, looking for a runbook that didn't exist, asking how to start the game and let a second player — Rebecca — record her own hand. By evening the Ministry of Silly Mice had become a proper arcade cabinet: ten issues shipped across six merged PRs, while Rebecca played in the next room on the version being replaced under her. Players and a pause menu, a difficulty select, arcade scoring with a top-ten leaderboard, three-letter initials entry in the true Pac-Man ritual, blinking personal bests — and sound effects that Om decreed must be *ska*: offbeat horn stabs from `winsound.Beep`, a trombone slump for misses, a full riff over the high scores. The movement instrument got its title card, its score reel, and its horn section, and every session still stays local, one JSONL at a time.
 
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
 
