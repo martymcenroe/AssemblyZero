@@ -1,6 +1,8 @@
 # ADR-0212: Local-Only Embeddings Policy
 
-**Status:** Accepted
+> **⚠ SUPERSEDED by [ADR-0223](0223-retire-rag-adopt-tiphys.md) (2026-07-06)** — RAG was retired (a similarity engine aimed at a ground-truth problem); the LLD is grounded by **Tiphys** (structural interface-map) instead. The original decision is preserved below for depth.
+
+**Status:** Superseded by ADR-0223
 **Date:** 2026-03-01
 **Issue:** #114
 **Related:** ADR-0211 (RAG Architecture)
