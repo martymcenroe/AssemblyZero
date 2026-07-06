@@ -299,6 +299,8 @@ These tools live outside AZ but operate fleet-wide. The user invokes them from t
 
 ## 4. RAG Subsystem (`assemblyzero/rag/`) - 14 files
 
+> **⚠ REMOVED 2026-07-06 (ADR-0223).** This subsystem no longer exists — RAG was retired and `assemblyzero/rag/` deleted. The rows below are kept as a historical inventory record. LLD grounding is now Tiphys (AZ #1688).
+
 | File | Status | Description |
 |------|--------|-------------|
 | `__init__.py` | Stable | Public API, singleton factories (`get_store`, `get_query_engine`) |

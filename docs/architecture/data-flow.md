@@ -73,6 +73,8 @@ graph LR
 
 ## RAG Data Flow
 
+> **⚠ Retired 2026-07-06 (ADR-0223).** The vector-RAG data flow below (ChromaDB + local embeddings, the `assemblyzero/rag/` subsystem) was removed. LLD codebase-grounding is now **Tiphys** (deterministic interface-map, no embeddings). Preserved for depth.
+
 The RAG subsystem has two distinct phases: **indexing** (batch, manual) and **retrieval** (per-query, automatic).
 
 ### Indexing Phase

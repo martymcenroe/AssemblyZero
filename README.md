@@ -187,9 +187,11 @@ All workflows are LangGraph `StateGraph` instances with typed state and SQLite c
 | **TDD Implementation** | 13 | Spec → code + tests + PR |
 | **Scout** | Variable | External intelligence gathering |
 
-### Codebase & Document Intelligence (RAG)
+### Codebase & Document Intelligence (⚠ RAG retired 2026-07-06 → Tiphys)
 
-AssemblyZero uses a local RAG system built on ChromaDB and `all-MiniLM-L6-v2` embeddings:
+> **Retired (ADR-0223).** The vector-RAG system below was removed — a *similarity* engine aimed at a *ground-truth* problem (grounding the design in real interface signatures). LLD codebase-grounding is now **Tiphys**: deterministic AST extraction of the real interface surface, no embeddings. The description below is historical.
+
+AssemblyZero previously used a local RAG system built on ChromaDB and `all-MiniLM-L6-v2` embeddings:
 - **Document retrieval** (The Librarian) — injects relevant ADRs, standards, and past LLDs into design prompts
 - **Codebase retrieval** (Hex) — AST-based Python indexing with vector search for implementation context
 - **Duplicate detection** (The Historian) — checks for similar past issues before drafting
