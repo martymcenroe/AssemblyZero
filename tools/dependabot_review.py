@@ -1137,7 +1137,7 @@ def process_repo(
             sub["errored"].append(f"{repo}#orphan-worktrees")
             return sub
         print(
-            f"  proceeding anyway because --ignore-orphans was set",
+            "  proceeding anyway because --ignore-orphans was set",
             file=sys.stderr,
         )
 
