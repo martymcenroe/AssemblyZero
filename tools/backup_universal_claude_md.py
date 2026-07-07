@@ -2,17 +2,24 @@
 
 The universal CLAUDE.md lives at C:\\Users\\mcwiz\\Projects\\CLAUDE.md --
 auto-loaded by Claude Code into every session's context, but not in any
-git repo. This script snapshots it nightly into AssemblyZero/docs/canonical/
-and opens a PR if drift is detected. **Never auto-merges** -- the operator
-reviews any change to the universal rules before it lands.
+git repo. This script snapshots it nightly into the PRIVATE Secret-Agent-Man
+repo (docs/canonical/) and opens a PR if drift is detected. **Never
+auto-merges** -- the operator reviews any change to the universal rules
+before it lands.
+
+PRIVATE destination is load-bearing (#1715): the universal CLAUDE.md carries
+identity/infra identifiers (cloud account IDs, login emails) and the fleet's
+security-architecture notes -- it MUST NOT be backed up to a public repo.
+This tool originally targeted the public AssemblyZero repo (#1262/#1263);
+relocated to the private Secret-Agent-Man per #1715.
 
 Scheduled task: Claude-UniversalClaudeMdBackup, daily 5:55 AM local
 (per runbook 0903 silent-task pattern).
 
-Detection / PR-open uses a worktree so the operator's main AssemblyZero
+Detection / PR-open uses a worktree so the operator's main Secret-Agent-Man
 working tree is never disturbed.
 
-Issue: martymcenroe/AssemblyZero#1262
+Issues: martymcenroe/AssemblyZero#1262 (original), #1715 (relocation to private)
 """
 
 from __future__ import annotations
@@ -25,9 +32,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 UNIVERSAL_CLAUDE_MD = Path("C:/Users/mcwiz/Projects/CLAUDE.md")
-AZ_ROOT = Path("C:/Users/mcwiz/Projects/AssemblyZero")
+# Worktree host + backup destination: the PRIVATE Secret-Agent-Man repo (#1715).
+# MUST stay private -- the universal CLAUDE.md carries identity/infra data.
+SAM_ROOT = Path("C:/Users/mcwiz/Projects/Secret-Agent-Man")
 CANONICAL_REL = "docs/canonical/universal-CLAUDE.md"
-REPO = "martymcenroe/AssemblyZero"
+REPO = "martymcenroe/Secret-Agent-Man"
 LOG_FILE = Path("C:/Users/mcwiz/Projects/.universal-claude-md-backup.jsonl")
 
 
@@ -67,11 +76,11 @@ def _try_remove_worktree(worktree: Path) -> subprocess.CompletedProcess:
     Returns the final CompletedProcess; the caller decides how to react
     to a non-zero returncode (surface failure, never force). (#1380)
     """
-    r = _git("worktree", "remove", str(worktree), cwd=AZ_ROOT, check=False)
+    r = _git("worktree", "remove", str(worktree), cwd=SAM_ROOT, check=False)
     if r.returncode == 0:
         return r
-    _git("worktree", "prune", cwd=AZ_ROOT, check=False)
-    return _git("worktree", "remove", str(worktree), cwd=AZ_ROOT, check=False)
+    _git("worktree", "prune", cwd=SAM_ROOT, check=False)
+    return _git("worktree", "remove", str(worktree), cwd=SAM_ROOT, check=False)
 
 
 def fetch_canonical_from_origin() -> bytes | None:
@@ -112,7 +121,7 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
     """Worktree-based commit + PR. Returns (pr_number, branch_name)."""
     date_tag = datetime.now(timezone.utc).strftime("%Y%m%d")
     branch = f"backup-universal-claude-md-{date_tag}"
-    worktree = Path(f"C:/Users/mcwiz/Projects/AssemblyZero-backup-{date_tag}")
+    worktree = Path(f"C:/Users/mcwiz/Projects/Secret-Agent-Man-backup-{date_tag}")
 
     if worktree.exists():
         # Leftover from a previous failed run; remove via the no-force
@@ -125,8 +134,8 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
                 stderr=r.stderr.strip()[:300])
             return None, branch
 
-    _git("fetch", "origin", "main", cwd=AZ_ROOT)
-    _git("worktree", "add", str(worktree), "-b", branch, "origin/main", cwd=AZ_ROOT)
+    _git("fetch", "origin", "main", cwd=SAM_ROOT)
+    _git("worktree", "add", str(worktree), "-b", branch, "origin/main", cwd=SAM_ROOT)
 
     try:
         target = worktree / CANONICAL_REL
@@ -137,7 +146,7 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
         commit_msg = (
             f"chore: nightly backup of universal CLAUDE.md\n"
             f"\n"
-            f"No-Issue: scheduled nightly backup (tracking #1262)\n"
+            f"No-Issue: scheduled nightly backup of the universal CLAUDE.md\n"
             f"\n"
             f"Source: {UNIVERSAL_CLAUDE_MD}\n"
             f"Canonical: {CANONICAL_REL}\n"
@@ -147,7 +156,7 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
         _git("push", "-u", "origin", branch, cwd=worktree)
 
         body = (
-            f"No-Issue: scheduled nightly backup (tracking #1262)\n\n"
+            f"No-Issue: scheduled nightly backup of the universal CLAUDE.md\n\n"
             f"## Drift detected\n\n"
             f"The universal CLAUDE.md at `{UNIVERSAL_CLAUDE_MD}` has changed since the last canonical snapshot on origin/main.\n\n"
             f"| Field | Value |\n"
@@ -163,10 +172,10 @@ def open_backup_pr(source_bytes: bytes, prior_canonical_len: int | None) -> tupl
             f"- [ ] If the change affects PR handling, dependabot review, or any fleet workflow, it lands BEFORE the next 6:00 AM dependabot sweep\n\n"
             f"After merging, this canonical snapshot becomes the new baseline; the next nightly run will diff against it.\n\n"
             f"## Related\n\n"
-            f"- Tool: `tools/backup_universal_claude_md.py`\n"
+            f"- Tool: `martymcenroe/AssemblyZero` -> `tools/backup_universal_claude_md.py`\n"
             f"- Scheduled task: `Claude-UniversalClaudeMdBackup` (daily 5:55 AM local)\n"
-            f"- Tracking: #1262\n"
-            f"- Runbook: `docs/runbooks/0903-windows-scheduled-tasks.md`\n"
+            f"- Tracking: martymcenroe/AssemblyZero#1262 (original), martymcenroe/AssemblyZero#1715 (relocated here from public AZ)\n"
+            f"- Runbook: `martymcenroe/AssemblyZero` -> `docs/runbooks/0903-windows-scheduled-tasks.md`\n"
         )
         result = _gh(
             "pr", "create", "--repo", REPO,
