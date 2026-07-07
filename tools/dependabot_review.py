@@ -1166,6 +1166,72 @@ def process_repo(
 
 
 # ---------------------------------------------------------------------------
+# Worktree guard (#1699)
+# ---------------------------------------------------------------------------
+
+def is_linked_worktree(repo: Path) -> bool:
+    """True if `repo` is a LINKED git worktree rather than a main working tree.
+
+    dependabot_review creates and tears down its own `dependabot-audit-N`
+    worktrees off the main repo. If it is itself launched from inside a linked
+    worktree, `--main-repo` (which defaults to cwd) silently points at the
+    worktree, and the tool starts adding worktrees-of-a-worktree and deleting
+    branches against the wrong git dir. The /dependabot skill's "do NOT invoke
+    from inside a worktree" rule was enforced by memory alone; this is the
+    code-level guard.
+
+    Detection is the canonical one: compare the per-worktree git dir
+    (`--absolute-git-dir`) to the shared common dir (`--git-common-dir`). In a
+    linked worktree the former is `…/.git/worktrees/<name>` and the latter is
+    `…/.git`; in the main working tree they resolve to the same path. A
+    `worktrees/` component in the git dir is a corroborating fallback.
+
+    Returns False (does NOT false-positive) when `repo` is not a git repo or
+    git is too old to answer -- the separate `.git`-exists check owns that case.
+    """
+    def _git_out(*args: str) -> tuple[int, str]:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", check=False,
+            )
+        except OSError:
+            return 1, ""
+        return r.returncode, (r.stdout or "").strip()
+
+    rc_gd, git_dir = _git_out("rev-parse", "--absolute-git-dir")
+    rc_cd, common_dir = _git_out("rev-parse", "--git-common-dir")
+    if rc_gd != 0 or rc_cd != 0 or not git_dir or not common_dir:
+        return False
+
+    git_dir_p = Path(git_dir)
+    common_p = Path(common_dir)
+    if not common_p.is_absolute():
+        # `--git-common-dir` may be relative to the worktree cwd.
+        common_p = repo / common_p
+    try:
+        if git_dir_p.resolve() != common_p.resolve():
+            return True
+    except OSError:
+        pass
+    return "worktrees" in git_dir_p.parts
+
+
+def guard_not_worktree(main_repo: Path) -> None:
+    """Refuse to run when `main_repo` is a linked worktree (#1699). Exits."""
+    if is_linked_worktree(main_repo):
+        sys.exit(
+            f"REFUSING TO RUN: {main_repo} is a linked git worktree, not a main "
+            f"working tree.\n"
+            f"dependabot_review.py creates its own audit worktrees off the main "
+            f"repo and must be launched from the main working tree.\n"
+            f"cd into the main repo (the dir whose .git is a directory) and pass "
+            f"--main-repo <main-repo-path>, then re-run. (#1699)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1213,6 +1279,12 @@ def main() -> None:
     main_repo = Path(args.main_repo).resolve()
     if not (main_repo / ".git").exists():
         sys.exit(f"Not a git repo: {main_repo}")
+
+    # #1699: a linked worktree also has a `.git` (a file, not a dir), so it
+    # passes the check above. Refuse here -- running from a worktree makes the
+    # tool add worktrees-of-a-worktree and delete branches against the wrong
+    # git dir. This replaces the memory-only "don't run from a worktree" rule.
+    guard_not_worktree(main_repo)
 
     # #1360: the orphan-worktree canary is now per-repo (inside
     # process_repo). Pre-#1360 there was a global canary here that
