@@ -126,18 +126,23 @@ The subshell `()` keeps the `cd` local. The script reads `data/handoff-log.md`, 
 
 The verdict and dispatch stay with the script — you still surface and wait. But the script reasons about the *session transcript*; you must first verify the *handoff artifact* and lead with those facts, so the operator is not handed an unverified structural-failure hypothesis (e.g. "possible mid-handoff crash") when the refuting evidence is one grep away. Both signals can be true and describe different things (see #1586).
 
-**B0) Verify the handoff artifact first — deterministic, grep only, no LLM judgment.**
+**B0) Report the checkpoint's integrity from the script's own fields — do NOT re-parse the artifact.**
 
-If `checkpoint.has_body` is `true`, verify the **last** handoff block in `data/handoff-log.md` BEFORE printing anything. Verify ONLY the last block — the log is append-only with many prior handoffs; never match an earlier block's markers, and respect any `<!-- picked-up -->` marker. Find the last `<!-- handoff-start -->` / `<!-- handoff-end -->` pair and check for a trailing close-state marker (`<!-- handoff <ts> -->`, `<!-- park <ts> -->`, or `<!-- reboot-parked <ts> -->`) AFTER the end marker. Report the result as FACT, ahead of the script's summary:
+`pickup_decide.py` has already parsed `data/handoff-log.md` and emitted its integrity verdict on `result.checkpoint`; re-grepping the same file here would be a second parser of one file, guaranteed to drift from the first (#1586/#1698). Read these fields off the JSON and report them as FACT, ahead of the script's summary — do not open the log yourself:
 
-- **start + end + trailing marker all present** → "Handoff body verified complete (start/end/close-state markers intact)." Do NOT use crash/broken/failed/"incomplete" language anywhere in the surface — the artifact passed.
-- **`handoff-end` marker ABSENT** → "Handoff body INCOMPLETE — truncated at line {N} (no `handoff-end`). A mid-write crash is consistent with this evidence." Surfacing is mandatory; the operator may prefer to resume the crashed session rather than pick up a half-written handoff.
-- **end present, trailing close-state marker ABSENT** → "Handoff body complete, but the completion attestation (trailing marker) is missing — the persist step (lessons PR, memories) may not have finished; persist claims are unverified." Verify any named claim before presenting it as done (next bullet).
-- **Old-format block (pre-dating current markers)** → degrade gracefully: `handoff-end` is load-bearing, the trailing marker is corroboration. Never hard-fail verification on an old format; report what you can confirm.
+- `has_body` (bool) — an importable body exists between the last `handoff-start` / `handoff-end` pair.
+- `has_close_marker` (bool) — a trailing close-state marker (`<!-- handoff|park|reboot-parked <ts> -->`) follows the body.
+- `body_integrity` (str) — the script's verdict, one of `complete` · `body_no_attestation` · `empty`.
+
+Map `body_integrity` to the surface:
+
+- **`complete`** → "Handoff body verified complete (script-confirmed start/end + close marker)." Do NOT use crash/broken/failed/"incomplete" language anywhere in the surface — the artifact passed.
+- **`empty`** (no importable body) → "Handoff body INCOMPLETE — the script found no importable body (missing `handoff-end`). A mid-write crash is consistent with this evidence." Surfacing is mandatory; the operator may prefer to resume the crashed session rather than pick up a half-written handoff.
+- **`body_no_attestation`** (body present, no trailing close marker) → "Handoff body complete, but the completion attestation (trailing marker) is missing — the persist step (lessons PR, memories) may not have finished; persist claims are unverified." Verify any named claim before presenting it as done (next bullet).
 
 **Optional persist-claim check (SHOULD, not MUST):** if the handoff body names a falsifiable persist claim (e.g. "Lessons committed → PR #N", "Closes #N"), verify that ONE claim with a single `gh` read. That settles "is the handoff body itself trustworthy" — the question the operator actually has.
 
-This step is grep plus an optional `gh` read. It adds facts; it does NOT interpret session categories, reinterpret the verdict, or change which verdicts surface.
+This step reads the script's already-computed fields plus an optional `gh` read. It does NOT re-parse the log, interpret session categories, reinterpret the verdict, or change which verdicts surface.
 
 **B1) Print the script's surfaces and summary, with honest close-state framing.**
 
@@ -171,7 +176,7 @@ Full detail JSON is at `result.detail_path` — if the user asks for more detail
 4. Read every file listed in the "Files to Read First" section. **As you read (or decide to skip) each one, record a one-line takeaway or skip-reason** — you'll persist these in step 4b.
 4b. **Persist a per-file read log to `data/pickup-read-log.md` (#1255).** This is the structural countermeasure to silent file-skipping: it creates an auditable record of what was actually consumed, makes silent skips visible, and lets future sessions see what prior sessions covered. Required for every file in the handoff's "Files to Read First" list — both reads AND skips.
 
-   **Gitignore check (one-time per repo):** Run `git -C {repo_root} check-ignore -q data/pickup-read-log.md`. If exit code is 1 (not ignored), append `data/pickup-read-log.md` to the repo's `.gitignore` (create if missing) and tell user: "Added `data/pickup-read-log.md` to .gitignore."
+   **Ignore check (one-time per repo):** Run `git -C {repo_root} check-ignore -q data/pickup-read-log.md`. If exit code is 1 (not ignored), add `data/pickup-read-log.md` to `{repo_root}/.git/info/exclude` (the repo-local, untracked exclude — NOT the tracked `.gitignore`) and tell user: "Ignored `data/pickup-read-log.md` via .git/info/exclude." Using `.git/info/exclude` keeps the log local without ever touching a tracked file, so onboard never leaves the working tree dirty — the pickup-read-log is inherently machine-local, so a repo-local exclude is the right home for it (#1698).
 
    **Append a session block** to `{repo_root}/data/pickup-read-log.md` (create file if missing):
 
