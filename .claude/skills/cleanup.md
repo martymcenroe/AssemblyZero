@@ -25,7 +25,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Argument | Description |
 |----------|-------------|
 | `--help` | Show this help message and exit |
-| `--quick` | Minimal cleanup (~2 min) - appends session log, does NOT commit |
+| `--quick` | Minimal cleanup (~2 min) - appends session log AND commits it same-run |
 | `--normal` | Standard cleanup (~5 min) - typical session end (default) |
 | `--full` | Comprehensive cleanup (~12 min) - after features, before breaks |
 | `--no-auto-delete` | Skip automatic deletion of orphaned branches |
@@ -37,14 +37,14 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Branch list | YES | YES | YES |
 | Open PRs | YES | YES | YES |
 | **Session log append** | YES | YES | YES |
-| **Commit & push** | | YES | YES |
+| **Commit & push** | YES | YES | YES |
 | Stash list | | YES | YES |
 | Worktree list | | YES | YES |
 | **Auto-delete orphans** | | YES | YES |
 | **Purge tmpclaude files** | YES | YES | YES |
 | Inventory audit | | | YES |
 
-**Quick mode philosophy:** Record what happened (session log), but don't commit. Changes accumulate until a normal/full cleanup commits them.
+**Quick mode philosophy:** Record what happened (session log) AND commit it same-run — a skill must commit its own tracked writes (#1348); the deferred "a later cleanup will commit it" pattern is retired. Quick simply skips the heavier branch/worktree/orphan analysis that normal/full do — not the commit.
 
 ---
 
@@ -142,7 +142,39 @@ find /c/Users/mcwiz/Projects/{PROJECT_NAME} -name "tmpclaude-*-cwd" -type f -del
 - **Next:** Per user direction
 ```
 
-### Step 4: Report
+### Step 4: Commit the Session Log Same-Run
+
+Quick mode commits its own tracked write — it does NOT defer to a later cleanup (that "a normal/full cleanup will commit it" deferral is the retired anti-pattern, #1348). Stage ONLY the session log; if nothing changed, skip to Step 5.
+
+```bash
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} diff --cached --quiet && echo "NOTHING_TO_COMMIT — skip to Step 5"
+```
+
+If something is staged, create a one-line tracking issue, branch, commit, and land it through the shared driver (the same `tracked_pr_land.py` that Phase 4 and `/handoff` use — it does a PR on protected main, a direct push on a definitively-unprotected base):
+
+```bash
+ISSUE_N=$(gh issue create --repo {GITHUB_REPO} \
+  --title "chore: quick cleanup session log {DATE} — {SESSION_NAME}" \
+  --body "Auto-created by /cleanup --quick to track the session-log commit. Session: {SESSION_NAME}" \
+  | grep -oE '[0-9]+$')
+BRANCH="cleanup-quick-{DATE}-{session-slug}"
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout -b $BRANCH
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ 2>/dev/null
+git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "chore: quick cleanup session log {DATE} (Closes #${ISSUE_N})"
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
+  --repo /c/Users/mcwiz/Projects/{PROJECT_NAME} \
+  --branch $BRANCH \
+  --title "chore: quick cleanup session log {DATE} (Closes #${ISSUE_N})" \
+  --issue ${ISSUE_N} \
+  --body "Session log from /cleanup --quick ({SESSION_NAME}).
+
+Closes #${ISSUE_N}")
+```
+
+If the driver exits non-zero: STOP and report the tracking issue, the branch, and its final `stage=…` line. Do NOT escalate to `--admin` / `--no-verify` / `branch -D`.
+
+### Step 5: Report
 
 Display a brief summary:
 
@@ -152,8 +184,7 @@ Quick cleanup: {PROJECT_NAME}
 • Branches: {list}
 • Open PRs: {count}
 • tmpclaude purged: {count}
-• Session log: appended
-(No commit — use /cleanup --normal to commit)
+• Session log: appended + committed (PR #{PR_N}) / no change this session
 ```
 
 **DONE. Do not proceed to normal/full phases.**
@@ -369,31 +400,22 @@ git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} status --porcelain
 - If no ALLOWED-scope files are modified/untracked: skip to Phase 5.
 - If NON-ALLOWED files are ALSO modified: stage only the ALLOWED ones; REPORT the non-allowed list to the user so they can handle it separately. Do NOT block cleanup.
 
-### 4.2 — Detect branch protection
+### 4.2 — Create the tracking issue
 
-```bash
-gh api repos/{GITHUB_REPO}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
-```
-
-- Output `true`: main is protected → use tracked-PR flow (4.3).
-- Output `false` / error / 404: main is unprotected → use direct-push fallback (4.9).
-
-### 4.3 — Tracked-PR flow (protected main)
-
-**a) Create tracking issue:**
 ```bash
 gh issue create --repo {GITHUB_REPO} \
   --title "chore: session cleanup {DATE} — {SESSION_NAME}" \
-  --body "Auto-created by /cleanup to track session-artifact commit.
+  --body "Auto-created by /cleanup to track the session-artifact commit.
 
 Files:
 {LIST_OF_ALLOWED_FILES}
 
 Session: {SESSION_NAME}"
 ```
-Capture issue number from the URL → `ISSUE_N`.
+Capture the issue number from the URL → `ISSUE_N`.
 
-**b) Branch + stage ALLOWED paths + commit:**
+### 4.3 — Branch + stage ALLOWED paths + commit
+
 ```bash
 BRANCH="cleanup-{DATE}-{session-slug}"
 git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout -b $BRANCH
@@ -413,69 +435,40 @@ Session: {SESSION_NAME}
 Co-Authored-By: Claude [model] <noreply@anthropic.com>"
 ```
 
-**c) Push and open PR:**
+### 4.4 — Land via the shared PR-lander (do NOT hand-roll push / poll / merge / graft)
+
+Call the shared, tested driver. It owns the whole push→PR→poll→merge→verify→graft cycle with five load-bearing invariants:
+
+- a **bounded** mergeable poll (never loops forever on `blocked`/`unstable` — the old `until [ … = "clean" ]` had NO timeout);
+- a hard **verify-gate** between merge and cleanup (the local branch is deleted only after the squash commit is confirmed on `origin/main`);
+- the ADR-0217 **graft hardcoded** (`git branch -d` only — `-D`/`--force`/`--force-with-lease` are made unrepresentable);
+- the squash SHA looked up **by PR number** — this fixes the concurrency race: the old `SQUASH_SHA=$(git rev-parse origin/main)` grabbed whatever merged LAST, so under parallel sessions a co-merged PR made it a *stranger's* commit and the graft + `branch -d` could silently drop the wrong branch;
+- a **fail-SAFE** branch-protection probe (a 404/permission error is never read as "unprotected → direct push").
+
+It handles a protected base (PR path) and a definitively-unprotected base (direct push) internally, so this one call replaces the old 4.2 protection-detect, the hand-rolled push/PR, the `until`-poll, the direct-push fallback, and the inline ADR-0217 graft:
+
 ```bash
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} push -u origin $BRANCH
-gh pr create --repo {GITHUB_REPO} --head $BRANCH --base main \
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
+  --repo /c/Users/mcwiz/Projects/{PROJECT_NAME} \
+  --branch $BRANCH \
   --title "chore: session cleanup {DATE} (Closes #${ISSUE_N})" \
+  --issue ${ISSUE_N} \
   --body "## Summary
 
 Session cleanup artifacts from \`{SESSION_NAME}\`.
 
-{git diff --cached --stat output}
-
-Closes #${ISSUE_N}"
-```
-Capture PR number → `PR_N`.
-
-**d) Wait for checks, merge, clean up branch:**
-```bash
-until [ "$(gh api repos/{GITHUB_REPO}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
-gh pr merge $PR_N --squash --repo {GITHUB_REPO}
-
-# Capture the orphan-to-be and the new squash SHA before checkout.
-ORPHAN_TIP=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse $BRANCH)
-
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} fetch origin
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} checkout main
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} merge origin/main --ff-only
-
-# After squash-merge, the just-merged PR appears as the new tip of origin/main.
-SQUASH_SHA=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse origin/main)
-
-# Content equivalence is guaranteed here (we squash-merged our own commit),
-# so the pre-flight diff check is informational rather than gating.
-
-# ADR-0217 four-step recipe (do NOT use `branch -D` — it's on the banned list).
-PRE_REPLACE_COUNT=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list | wc -l)
-BASE_SHA=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} rev-parse ${SQUASH_SHA}^)
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --graft $SQUASH_SHA $BASE_SHA $ORPHAN_TIP
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} branch -d $BRANCH
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace -d $SQUASH_SHA
-
-# Step 5 post-flight: replace-ref count must match pre-flight.
-POST_REPLACE_COUNT=$(git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list | wc -l)
-if [ "$POST_REPLACE_COUNT" -ne "$PRE_REPLACE_COUNT" ]; then
-  echo "ERROR: replace-ref residue remains after cleanup branch self-delete. Inspect:"
-  git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} replace --list --format=long
-fi
+Closes #${ISSUE_N}")
 ```
 
-### 4.9 — Direct-push fallback (unprotected main only)
+Read `PR_N` from the driver's `created PR #N` line. Exit `0` = landed (merged, verified on `origin/main`, branch grafted + deleted). Non-zero = the driver STOPPED before cleanup — go to 4.5.
 
-If 4.2 detected no protection:
-```bash
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} commit -m "chore: session cleanup {DATE} — {SESSION_NAME}"
-git -C /c/Users/mcwiz/Projects/{PROJECT_NAME} push
-```
+### 4.5 — Failure handling
 
-### 4.10 — Failure handling
-
-If ANY step in 4.3 fails: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, or bypass branch protection. Report:
-- Tracking issue number (may need manual closure)
-- Branch name (may need manual push/merge)
+If `tracked_pr_land.py` exits non-zero: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D` — the driver already refuses all of these, and a non-zero exit means the safe path is genuinely blocked, not that you should escalate. Report:
+- Tracking issue number (`ISSUE_N`)
+- Branch name (`$BRANCH`)
 - Files still uncommitted
+- The driver's final `stage=…` line
 
 Let the user decide the next step.
 
