@@ -353,7 +353,7 @@ Content:
 - `.claude/commands/*.md` (AssemblyZero only — skill sync)
 - `.claude/hooks/*.sh` (AssemblyZero only — hook sync)
 
-> Note: `data/pickup-status.json` and `data/handoff-marker-status.json` are intentionally excluded — they are ephemeral session state covered by the global `/data/` gitignore ban (see Secret-Agent-Man#20). Do not add them back to this allowlist; `git add` on them is a no-op anyway since they are globally ignored.
+> Note: `data/pickup-status.json` and `data/handoff-marker-status.json` are intentionally excluded — they are ephemeral session state covered by the global `/data/` gitignore ban. Do not add them back to this allowlist; `git add` on them is a no-op anyway since they are globally ignored.
 
 **DENIED patterns** (NEVER staged, even if changed — report only so user handles separately):
 - Credentials: `*.env*`, `*.dev.vars*`, `*.pem`, `*.key`, anything matching `*secret*`, `*credential*`, `*token*` in filename
