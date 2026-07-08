@@ -1,5 +1,5 @@
 ---
-description: Import the last handoff context from the previous session
+description: Import the last handoff context (thin alias for /onboard --pickup)
 argument-hint: "[--help]"
 scope: global
 ---
@@ -15,78 +15,49 @@ scope: global
 
 Usage: `/pickup`
 
-Reads the most recent entry from data/handoff-log.md in the current repo,
-shows a preview with age, and imports the context on confirmation.
+Thin alias for `/onboard --pickup`: skips pickup detection and imports the
+last handoff from data/handoff-log.md in the current repo.
 
-Pair with /handoff: old session runs /handoff → new session runs /pickup.
+Pair with /handoff: the old session runs /handoff, the new session runs
+/pickup (or /onboard, which adds smart pickup detection).
 ```
 
-## Why This Exists
+## This command is a thin alias for `/onboard --pickup`
 
-`/handoff` persists a structured context transfer to `data/handoff-log.md`. This command reads it back so the new session starts with full context instead of cold-starting from CLAUDE.md alone.
+All pickup logic — reading `data/handoff-log.md`, honoring the
+`<!-- picked-up -->` marker, the event-ordered pickup decision (#575), the
+per-file read log, the wrapped `pickup_marker.py` call, and the drift check —
+lives in ONE place: the `/onboard` skill's **Step 1D — Pickup import**.
+`/pickup` reimplements none of it.
 
-**Prefer `/onboard`** which includes smart pickup detection (auto-pickup for fresh handoffs, thrashing detection, crash recovery). Direct `/pickup` skips detection and goes straight to import.
+Earlier, `/pickup` carried its own fork of that logic: activity-based staleness
+counting from `session-index.jsonl` (one doctrine behind onboard's event-ordered
+model), no `<!-- picked-up -->` check (so it could re-import a handoff a prior
+session had already consumed), and an unwrapped `pickup_marker.py` call that
+failed silently on non-Python repos. Collapsing to the alias removes that whole
+drift class (#1696).
 
 ## Execution
 
-**Note:** CLAUDE.md (root + repo) and MEMORY.md are auto-injected by Claude Code at session start. Do NOT re-read them.
+Execute the `/onboard --pickup` flow: follow the **onboard** skill's
+**Step 1D — Pickup import** exactly. `--pickup` means "skip detection, import the
+last handoff now." That single routine:
 
-### Step 1: Locate the Handoff Log
+1. Extracts the body between the last `<!-- handoff-start -->` /
+   `<!-- handoff-end -->`, honoring any `<!-- picked-up -->` marker.
+2. Parses the plan-state block.
+3. Reads every "Files to Read First" entry and persists the per-file read log.
+4. Writes the pickup marker via the
+   `(cd …/unleashed && poetry run python src/pickup_marker.py --repo {repo_root})`
+   wrapper.
+5. Runs the drift check and reports.
 
-1. Run `git rev-parse --show-toplevel` to find the repo root.
-2. Check if `{repo_root}/data/handoff-log.md` exists.
-3. If not found, tell the user: "No handoff log found at `{repo_root}/data/handoff-log.md`. Run `/handoff` in the previous session first." and STOP.
-
-### Step 2: Extract the Last Entry
-
-1. Read `data/handoff-log.md`.
-2. Find the LAST occurrence of `<!-- handoff-start -->` and its matching `<!-- handoff-end -->`.
-3. Extract the content between these markers — this is the handoff prompt.
-4. Extract the timestamp from the `## Handoff — YYYY-MM-DD HH:MM:SS` header immediately above the start marker.
-
-### Step 3: Show Preview and Age
-
-1. Calculate the age of the handoff (current LOCAL time minus the timestamp). Handoff timestamps are local time -- do NOT use UTC. Use `date +"%Y-%m-%d %H:%M:%S"` (no `-u` flag).
-2. Format age as human-readable: "2 minutes ago", "3 hours ago", "2 days ago".
-3. Check `data/session-index.jsonl` for sessions that started AFTER the handoff timestamp. For each, note the start time, line count, and duration. Sum the totals.
-4. Show the user:
-
-```
-Handoff found -- {YYYY-MM-DD HH:MM:SS} ({age})
-
-Preview (first 5 lines):
-> {line 1}
-> {line 2}
-> {line 3}
-> {line 4}
-> {line 5}
-```
-
-5. If post-handoff sessions exist, show: "Note: {N} session(s) ran after this handoff ({total_lines} lines, {total_hours}h). This handoff may not reflect the latest state." (Activity-based warning only. Age alone is not a warning condition — a handoff with no intervening activity is pickup-eligible regardless of age. See martymcenroe/AssemblyZero#992 and martymcenroe/unleashed#334.)
-
-### Step 4: Import Context
-
-1. Internalize the full handoff prompt as your working context.
-2. **Parse the plan-state block (deterministic).** If the handoff contains a `<!-- plan-state-start -->` / `<!-- plan-state-end -->` block, read the YAML inside. Apply this decision logic:
-   - `plan_state: completed` → Tell user: "Previous plan `{plan_slug}` was completed (archived at `{archive_path}`). Starting fresh." Do NOT read the plan file.
-   - `plan_state: active` with `remaining_steps > 0` → Tell user: "Resuming plan `{plan_slug}`: {completed_steps}/{total_steps} steps done." Read `{plan_path}` and treat it as the active plan for this session.
-   - `plan_path` is set but the file is missing → Fall back to `{archive_path}`. Warn user: "Live plan missing, reading archived copy instead."
-   - No plan-state block, or `plan_state: none` → Continue without a plan.
-3. Read every file listed in the "Files to Read First" section of the handoff. Actually read them — don't just note the paths.
-4. Summarize what you imported:
-   - What was accomplished in the previous session
-   - What the next steps are
-   - How many files you read from the "Files to Read First" list
-   - Whether a plan was resumed, started fresh, or absent
-5. **Write the pickup marker** by running: `poetry run python C:/Users/mcwiz/Projects/unleashed/src/pickup_marker.py --repo {repo_root}`
-   If it fails, report the error to the user. Do NOT proceed silently.
-
-Tell the user: "Pickup complete. Ready to continue where the last session left off."
+Do not duplicate or paraphrase those steps here — run onboard's.
 
 ## Rules
 
-- **Append-only** -- never delete or rewrite entries in `data/handoff-log.md`. The pickup marker is written by `pickup_marker.py` (Step 4.5), not by the agent directly.
-- **Always show age** — the user needs to know how stale the context is.
-- **Execute, don't confirm** — `/pickup` is a command, not a discussion. Emit the activity-based warning (Step 3.5) if it applies, then import immediately. Do not ask "Y/n".
-- **Staleness is activity-based, not age-based** — a handoff with no intervening sessions is pickup-eligible regardless of age. Only warn if sessions ran after the handoff was written.
-- **Actually read the files** — the "Files to Read First" section exists so the agent gets grounded in current code, not just the handoff narrative.
+- `/pickup` owns no pickup logic of its own. If pickup behavior must change,
+  change it in `/onboard` (and `pickup_decide.py` / `pickup_marker.py`), never
+  here — this file must stay a thin alias.
+- `data/handoff-log.md` is append-only; the pickup marker is written by
+  `pickup_marker.py`, not by the agent directly.
