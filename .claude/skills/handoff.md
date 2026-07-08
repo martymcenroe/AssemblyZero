@@ -279,18 +279,15 @@ Lessons learned are institutional knowledge — they get committed, unlike the h
    - Append each lesson row from the handoff's Lessons Learned section.
    - If there are 0 lessons this session, skip — don't touch the file.
 
-2. **Global index:** `C:\Users\mcwiz\Projects\dispatch\lessons-learned-index.md`
-   - If missing, create with this header:
-     ```markdown
-     # Lessons Learned — Global Index
-
-     Cross-repo index for blog/newsletter mining. One line per lesson.
-
-     | Date | Repo | Lesson (one-line) |
-     |:-----|:-----|:------------------|
-     ```
-   - Append one line per lesson: `| {date} | {repo_name} | {one-line summary} |`
-   - The summary is the bold portion of the Lesson column (the "what happened" part).
+2. **Global cross-repo index — do NOT write it from here.** `/handoff` no longer
+   appends to any file outside the current repo. The prior design wrote a global
+   lessons index into a *different* repo from every session, which left that
+   repo's tree dirty each lessons session (#1348, cross-repo), violated the
+   universal **"Stay In The Session's Repo"** rule, and collided with the
+   operator's uncommitted work there. The per-repo `docs/lessons-learned.md`
+   above is the committed source of truth. If a global index is still wanted, it
+   is rebuilt pull-based (a tool that reads each repo's committed lessons file),
+   never pushed cross-repo from foreign sessions — tracked in #1721.
 
 3. **Do NOT commit inline here** — Step 5D below commits all session artifacts in ALL modes.
 
@@ -325,7 +322,7 @@ Brief backward-looking record of the session. One entry per session.
 - `data/session-index.jsonl`
 - `data/pickup-status.json`
 
-NEVER stage anything outside this list from Step 5D — no user code, no binaries, no credentials. If non-ALLOWED files are dirty, report them in the handoff output and leave them uncommitted.
+NEVER stage anything outside this list from Step 5D — no user code, no binaries, no credentials, and never a path in another repo. If non-ALLOWED files are dirty, report them in the handoff output and leave them uncommitted.
 
 #### 5D.1 — Detect ALLOWED-scope changes
 
@@ -335,31 +332,22 @@ git -C {REPO_ROOT} status --porcelain
 
 Filter for paths matching the ALLOWED list above. If none of the ALLOWED paths are modified or untracked → skip the rest of Step 5D and report "no session artifacts to commit." This is the common case when `/cleanup` already ran or when nothing changed this session.
 
-#### 5D.2 — Detect branch protection
+#### 5D.2 — Create the tracking issue
 
-```bash
-gh api repos/{OWNER}/{REPO}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
-```
-
-- Output `true`: tracked-PR flow (5D.3)
-- Output `false` / error / 404: direct-push fallback (5D.9)
-
-#### 5D.3 — Tracked-PR flow (protected main)
-
-**a) Create tracking issue:**
 ```bash
 gh issue create --repo {OWNER}/{REPO} \
   --title "chore: handoff session artifacts {DATE} — {SESSION_NAME}" \
-  --body "Auto-created by /handoff to track session-artifact commit.
+  --body "Auto-created by /handoff to track the session-artifact commit.
 
 Files:
 {LIST_OF_ALLOWED_FILES}
 
 Session: {SESSION_NAME}"
 ```
-Capture issue number → `ISSUE_N`.
+Capture the issue number → `ISSUE_N`.
 
-**b) Branch + stage ALLOWED paths + commit:**
+#### 5D.3 — Branch + stage ALLOWED paths + commit
+
 ```bash
 BRANCH="handoff-{DATE}-{session-slug}"
 git -C {REPO_ROOT} checkout -b $BRANCH
@@ -372,64 +360,40 @@ Session: {SESSION_NAME}
 Co-Authored-By: Claude [model] <noreply@anthropic.com>"
 ```
 
-**c) Push and open PR:**
+#### 5D.4 — Land via the shared PR-lander (do NOT hand-roll push / poll / merge / graft)
+
+Call the shared, tested driver. It owns the whole issue→push→PR→poll→merge→verify→graft cycle with five load-bearing invariants: a **bounded** mergeable poll (never loops forever on `blocked`/`unstable`), a hard **verify-gate** between merge and cleanup (the local branch is deleted only after the squash commit is confirmed on `origin/{base}`), the ADR-0217 **graft hardcoded** (`git branch -d` only — `-D`/`--force`/`--force-with-lease` are made unrepresentable), the squash SHA looked up **by PR number** (no `git rev-parse origin/main` race under parallel sessions), and a **fail-SAFE** branch-protection probe (a 404/permission error is never read as "unprotected → direct push"). It handles a protected base (PR path) and a definitively-unprotected base (direct push) internally, so this one call replaces the old branch-protection detection, the hand-rolled push/PR, the `until`-poll, the direct-push fallback, and the inline graft:
+
 ```bash
-git -C {REPO_ROOT} push -u origin $BRANCH
-gh pr create --repo {OWNER}/{REPO} --head $BRANCH --base main \
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
+  --repo {REPO_ROOT} \
+  --branch $BRANCH \
   --title "chore: handoff session artifacts {DATE} (Closes #${ISSUE_N})" \
+  --issue ${ISSUE_N} \
   --body "## Summary
 
 Session artifacts from /handoff ({SESSION_NAME}).
 
-Closes #${ISSUE_N}"
-```
-Capture PR number → `PR_N`.
-
-**d) Wait for checks, merge, clean up the squash-merge-orphan branch via ADR-0217:**
-```bash
-# Poll mergeable_state — handle 'behind' via update-branch (per AssemblyZero/docs/runbooks/0935-pr-stuck-recovery.md)
-until [ "$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do
-  state=$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.mergeable_state')
-  if [ "$state" = "behind" ]; then
-    head=$(gh api repos/{OWNER}/{REPO}/pulls/$PR_N --jq '.head.sha')
-    gh api -X PUT repos/{OWNER}/{REPO}/pulls/$PR_N/update-branch -f expected_head_sha=$head
-  fi
-  sleep 10
-done
-gh pr merge $PR_N --squash --repo {OWNER}/{REPO}
-git -C {REPO_ROOT} checkout main
-git -C {REPO_ROOT} pull --rebase
-# ADR-0217 graft cleanup (the only correct path to delete a squash-merge-orphan local branch):
-SQUASH=$(git -C {REPO_ROOT} log --format='%h' -1 origin/main)
-ORPHAN=$(git -C {REPO_ROOT} rev-parse $BRANCH)
-BASE=$(git -C {REPO_ROOT} rev-parse ${SQUASH}^)
-git -C {REPO_ROOT} replace --graft $SQUASH "$BASE" $ORPHAN
-git -C {REPO_ROOT} branch -d $BRANCH
-git -C {REPO_ROOT} replace -d $SQUASH
+Closes #${ISSUE_N}")
 ```
 
-#### 5D.9 — Direct-push fallback (unprotected main only)
+Read `PR_N` from the driver's `created PR #N` line. Exit `0` = landed (merged, verified on `origin/{base}`, branch grafted + deleted). Non-zero = the driver STOPPED before cleanup — go to 5D.5.
 
-```bash
-git -C {REPO_ROOT} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl data/pickup-status.json 2>/dev/null
-git -C {REPO_ROOT} commit -m "chore: handoff session artifacts {DATE} — {SESSION_NAME}"
-git -C {REPO_ROOT} push
-```
+#### 5D.5 — Failure handling
 
-#### 5D.10 — Failure handling
-
-If any step in 5D.3 fails: STOP and REPORT to user. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D`. Report:
-- Tracking issue number
-- Branch name
+If `tracked_pr_land.py` exits non-zero: STOP and REPORT to the user. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D` — the driver already refuses all of these, and a non-zero exit means the safe path is genuinely blocked, not that you should escalate. Report:
+- Tracking issue number (`ISSUE_N`)
+- Branch name (`$BRANCH`)
 - Files still uncommitted
+- The driver's final `stage=…` line
 
-Let user decide next step.
+Let the user decide the next step.
 
-#### 5D.11 — Confirm to user
+#### 5D.6 — Confirm to user
 
-After successful commit, report in the handoff output:
+After a successful land, report in the handoff output:
 
-> Session artifacts committed: PR #{PR_N} (Closes #{ISSUE_N}), {N} files. Branch cleaned up via ADR-0217.
+> Session artifacts committed: PR #{PR_N} (Closes #{ISSUE_N}), {N} files. Merged, verified on origin/main, branch cleaned via ADR-0217 graft — all by `tracked_pr_land.py`.
 
 This step closes the gap documented in AssemblyZero #1348 — without it, `/cleanup --full` followed by `/handoff --park` (or any `/handoff` whose next session never runs `/cleanup`) leaves session-artifact writes uncommitted.
 
