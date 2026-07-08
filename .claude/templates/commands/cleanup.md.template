@@ -19,7 +19,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Argument | Description |
 |----------|-------------|
 | `--help` | Show this help message and exit |
-| `--quick` | Minimal cleanup (~2 min) - appends session log, does NOT commit |
+| `--quick` | Minimal cleanup (~2 min) - appends session log AND commits it same-run |
 | `--normal` | Standard cleanup (~5 min) - typical session end (default) |
 | `--full` | Comprehensive cleanup (~12 min) - after features, before breaks |
 | `--no-auto-delete` | Skip automatic deletion of orphaned branches |
@@ -37,7 +37,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Branch list | YES | YES | YES |
 | Open PRs | YES | YES | YES |
 | **Session log append** | YES | YES | YES |
-| **Commit & push** | | YES | YES |
+| **Commit & push** | YES | YES | YES |
 | Stash list | | YES | YES |
 | Worktree list | | YES | YES |
 | **POST-MERGE cleanup** | | YES | YES |
@@ -45,7 +45,7 @@ Usage: `/cleanup [--help] [--quick|--normal|--full] [--no-auto-delete]`
 | Inventory audit | | | YES |
 | **Permission check** | | | YES |
 
-**Quick mode philosophy:** Record what happened (session log), but don't commit. Changes accumulate until a normal/full cleanup commits them. Protects contribution graph from trivial commits.
+**Quick mode philosophy:** Record what happened (session log) AND commit it same-run — a skill commits its own tracked writes (#1348); the deferred "a later cleanup will commit it" pattern is retired. Quick just skips the heavier branch/worktree analysis, not the commit.
 
 ---
 
@@ -179,9 +179,9 @@ poetry run python {{TOOLS_DIR}}/append_session_log.py \
 
 If no session log tool exists, manually append to the current day's session log.
 
-## Phase 4: Commit Session Artifacts via Tracked PR (SKIP FOR QUICK MODE)
+## Phase 4: Commit Session Artifacts via Tracked PR (ALL modes)
 
-**If mode is `quick`: SKIP this entire phase. Go directly to Phase 5.**
+**All modes commit their session artifacts same-run — including `quick`.** A skill commits its own tracked writes; the retired "a later cleanup will commit it" deferral is not used (#1348). Quick just skips the heavier branch/worktree analysis, not the commit.
 
 **Scope (critical — do NOT expand without secret-scan + size-gate mitigations):** this phase is INTENTIONALLY NARROW. Auto-staging user code risks committing secrets, binaries, and drafts (see AssemblyZero #920).
 
@@ -206,60 +206,45 @@ git -C {{PROJECT_ROOT}} status --porcelain
 - If no ALLOWED-scope files changed: skip to Phase 5.
 - If NON-ALLOWED files also changed: stage only ALLOWED; REPORT the others.
 
-### 4.2 — Detect branch protection
+### 4.2 — Create the tracking issue
 
 ```bash
-gh api repos/{{GITHUB_REPO}}/branches/main/protection --jq 'has("required_status_checks")' 2>/dev/null
+ISSUE_N=$(gh issue create --repo {{GITHUB_REPO}} \
+  --title "chore: session cleanup [DATE] — [SESSION_NAME]" \
+  --body "Auto-created by /cleanup to track the session-artifact commit. Session: [SESSION_NAME]" \
+  | grep -oE '[0-9]+$')
 ```
 
-- `true` → tracked-PR flow (4.3).
-- `false` / error → direct-push fallback (4.9).
-
-### 4.3 — Tracked-PR flow
+### 4.3 — Branch + stage ALLOWED paths + commit
 
 ```bash
-# Create tracking issue
-gh issue create --repo {{GITHUB_REPO}} \
-  --title "chore: session cleanup [DATE] — [SESSION_NAME]" \
-  --body "Auto-created by /cleanup. Session: [SESSION_NAME]"
-# Capture ISSUE_N from returned URL
-
 BRANCH="cleanup-[DATE]-[session-slug]"
 git -C {{PROJECT_ROOT}} checkout -b $BRANCH
 git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
+git -C {{PROJECT_ROOT}} diff --cached --stat
 git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE] (Closes #${ISSUE_N})"
-git -C {{PROJECT_ROOT}} push -u origin $BRANCH
-
-gh pr create --repo {{GITHUB_REPO}} --head $BRANCH --base main \
-  --title "chore: session cleanup [DATE] (Closes #${ISSUE_N})" \
-  --body "Session artifacts. Closes #${ISSUE_N}"
-# Capture PR_N
-
-# Wait for checks, merge, cleanup
-until [ "$(gh api repos/{{GITHUB_REPO}}/pulls/$PR_N --jq '.mergeable_state')" = "clean" ]; do sleep 10; done
-gh pr merge $PR_N --squash --repo {{GITHUB_REPO}}
-ORPHAN_TIP=$(git -C {{PROJECT_ROOT}} rev-parse $BRANCH)
-git -C {{PROJECT_ROOT}} checkout main
-git -C {{PROJECT_ROOT}} pull --rebase
-# Retire the squash-merged branch via the ADR-0217 graft (never `branch -D`):
-SQUASH_SHA=$(git -C {{PROJECT_ROOT}} rev-parse origin/main)
-BASE_SHA=$(git -C {{PROJECT_ROOT}} rev-parse ${SQUASH_SHA}^)
-git -C {{PROJECT_ROOT}} replace --graft $SQUASH_SHA $BASE_SHA $ORPHAN_TIP
-git -C {{PROJECT_ROOT}} branch -d $BRANCH
-git -C {{PROJECT_ROOT}} replace -d $SQUASH_SHA
 ```
 
-### 4.9 — Direct-push fallback (unprotected main)
+### 4.4 — Land via the shared PR-lander (do NOT hand-roll push / poll / merge / graft)
+
+Call the shared, tested driver instead of hand-rolling the cycle. It owns push→PR→bounded-poll→merge→verify→ADR-0217-graft with five invariants: a bounded mergeable poll (the old `until [ … = "clean" ]` had no timeout and hung on `blocked`/`unstable`), a verify-gate before any branch delete, the graft hardcoded (`branch -d` only; `-D`/`--force` unrepresentable), the squash SHA looked up **by PR number** (the old `rev-parse origin/main` grabbed whatever merged last — a *stranger's* commit under parallel sessions, deleting the wrong branch), and a fail-SAFE protection probe (404 is never "unprotected → direct push"). It does a PR on a protected base and a direct push on a definitively-unprotected one, internally:
 
 ```bash
-git -C {{PROJECT_ROOT}} add docs/session-logs/ docs/lessons-learned.md data/session-index.jsonl 2>/dev/null
-git -C {{PROJECT_ROOT}} commit -m "chore: session cleanup [DATE]"
-git -C {{PROJECT_ROOT}} push
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
+  --repo {{PROJECT_ROOT}} \
+  --branch $BRANCH \
+  --title "chore: session cleanup [DATE] (Closes #${ISSUE_N})" \
+  --issue ${ISSUE_N} \
+  --body "Session cleanup artifacts ([SESSION_NAME]).
+
+Closes #${ISSUE_N}")
 ```
 
-### 4.10 — Failure handling
+Exit `0` = landed (merged, verified on `origin/main`, branch grafted + deleted). Non-zero = STOPPED before cleanup → 4.5.
 
-If any tracked-PR step fails: STOP and REPORT. Do NOT use `--admin` or `--no-verify`.
+### 4.5 — Failure handling
+
+If `tracked_pr_land.py` exits non-zero: STOP and REPORT. Do NOT use `--admin`, `--no-verify`, force-push, or `branch -D` — the driver refuses all of these; a non-zero exit means the safe path is genuinely blocked. Report the tracking issue, the branch, files still uncommitted, and the driver's final `stage=…` line.
 
 ## Phase 5: Verification (PARALLEL)
 
