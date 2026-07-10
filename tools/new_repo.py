@@ -1096,7 +1096,7 @@ This document provides a complete inventory of files in the {name} project, orga
 ├── README.md                   # Project overview
 ├── LICENSE                     # PolyForm Noncommercial 1.0.0
 ├── .gitignore                  # Git ignore rules
-└── .unleashed.json             # Unleashed wrapper config (model, effort)
+└── .unleashed.json             # Unleashed wrapper config (effort)
 ```
 
 ---
@@ -1141,12 +1141,14 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 def create_unleashed_json(project_path: Path) -> None:
     """Create .unleashed.json with standard wrapper configuration.
 
-    Sets model="opus" (the bare family alias) and effort=max. The wrapper no
-    longer injects --model for the bare "opus" alias, so a new repo defers to
-    the operator's interactive /model default rather than being pinned to a
-    hardcoded version. (The old scaffold hardcoded "claude-opus-4-7[1M]", which
-    forced every new repo onto Opus 4.7 once 4.8 shipped and a --model flag
-    overrides the /model default.)
+    Sets effort=max. No "model" key is emitted (#1727): the Claude wrapper
+    retired --model injection entirely, so model choice belongs to Claude
+    Code's native settings hierarchy — the operator's /model default, or a
+    committed .claude/settings.json for a deliberate per-repo pin. A model
+    key here would be inert config that misleads readers. (History: the old
+    scaffold hardcoded "claude-opus-4-7[1M]", which forced every new repo
+    onto Opus 4.7 once 4.8 shipped; the interim scaffold wrote the bare
+    "opus" alias, which the wrapper deferred on.)
 
     `assemblyZero` defaults to True (#1059): repos created by this tool
     are by definition AssemblyZero-managed, so /onboard should load
@@ -1162,7 +1164,6 @@ def create_unleashed_json(project_path: Path) -> None:
     content = json.dumps({
         "profile": "default",
         "claude": {
-            "model": "opus",
             "effort": "max"
         },
         "assemblyZero": True,
@@ -2803,7 +2804,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11b: Create .unleashed.json (wrapper configuration)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
-    print("  Created .unleashed.json (model=opus, effort=max)")
+    print("  Created .unleashed.json (effort=max; no model key -- #1727)")
 
     # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
     # pytest, pytest-cov, conftest.py. Required for AZ implementation
