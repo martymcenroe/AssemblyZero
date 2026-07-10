@@ -1,6 +1,4 @@
 {
   "profile": "default",
-  "claude": {
-    "effort": "max"
-  }
+  "claude": {}
 }
