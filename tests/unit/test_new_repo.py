@@ -718,7 +718,9 @@ class TestMainLocalWorkflow:
         # #1060: deprecated and ignored by /onboard; should not be emitted.
         assert "pickupThresholdMinutes" not in config["onboard"]
         # Sanity: still has the rest of the structure.
-        assert config["claude"]["model"] == "opus"
+        # #1727: no model key — the Claude wrapper retired --model injection,
+        # so scaffolding one would be inert config that misleads readers.
+        assert "model" not in config["claude"]
         assert config["claude"]["effort"] == "max"
         assert config["onboard"]["auto"] is True
 
