@@ -30,12 +30,21 @@ input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null) || exit 0
 [ -z "$cmd" ] && exit 0
 
+# #1739: mask quoted strings BEFORE matching — a regex cannot parse shell
+# quoting, and the guard's first live block was a false positive on prose
+# inside a quoted --comment argument. Quoted substrings become the bare
+# placeholder QSTR: real invocations are unquoted at command position and
+# still match; a quoted PROMPT (claude "do x") still matches because QSTR
+# itself is a non-flag positional. Residual documented hole: heredoc bodies
+# are not masked.
+residue=$(printf '%s' "$cmd" | sed -e "s/'[^']*'/QSTR/g" -e 's/"[^"]*"/QSTR/g')
+
 # Anchor: start-of-line / ; & | ( / $( — then optional env-var assignments,
 # optional `command`/`exec`, then claude(.exe|.cmd) followed by a first arg
 # that does not start with a dash.
 BLOCK_RE='(^|[;&|(]|\$\()[[:space:]]*([A-Za-z_][A-Za-z_0-9]*=[^[:space:]]*[[:space:]]+)*(command[[:space:]]+|exec[[:space:]]+)?claude(\.exe|\.cmd)?[[:space:]]+[^-[:space:]]'
 
-if printf '%s' "$cmd" | grep -qE "$BLOCK_RE"; then
+if printf '%s' "$residue" | grep -qE "$BLOCK_RE"; then
     cat >&2 <<'MSG'
 BLOCKED by bare-claude-guard (#1734): `claude <word>` forks a live agent
 session — Claude Code parses removed subcommands as PROMPTS (a one-word

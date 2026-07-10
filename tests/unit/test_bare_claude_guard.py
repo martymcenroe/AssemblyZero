@@ -51,6 +51,11 @@ ALLOWED = [
     "grep -r claude tools/",
     "ls",
     "",
+    # #1739 regression: the guard's first live block was THIS false positive —
+    # quoted prose containing the incident command (with a paren anchor)
+    # inside a gh argument. Quoted strings are masked before matching now.
+    'gh issue close 756 --comment "text (CLAUDECODE= claude config list) more text"',
+    "git commit -m 'guard blocks claude doctor probes'",
 ]
 
 
