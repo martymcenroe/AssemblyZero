@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Fleet-wide removal of the inert `.unleashed.json` `claude.model` key.
+"""Fleet-wide removal of an inert `.unleashed.json` `claude.<key>` field.
 
-AssemblyZero #1730.
+AssemblyZero #1730 (model sweep), generalized in #1733 (`--key {model,effort}`).
 
-The Claude wrapper no longer reads `claude.model` — model choice belongs to
-Claude Code's native settings hierarchy (the operator's /model default in
-user settings; a committed `.claude/settings.json` for a deliberate per-repo
-pin). Any `claude.model` left in a repo's `.unleashed.json` is dead config
-that misleads readers into thinking it decides something. The scaffolder
-stopped minting the key in #1727; this tool sweeps the existing fleet.
+The Claude wrapper retired both `--model` and `--effort` injection: session
+shaping belongs to Claude Code's native settings hierarchy (the operator's
+`/model` and `effortLevel` user defaults; a committed `.claude/settings.json`
+for a deliberate per-repo pin). Any `claude.model` or `claude.effort` left in
+a repo's `.unleashed.json` is dead config that misleads readers into thinking
+it decides something. The scaffolder stopped minting the fields in #1727 and
+#1732; this tool sweeps the existing fleet, one key per run.
 
 For each named repo this tool:
 
   1. Skips if the repo or its `.unleashed.json` does not exist on origin.
-  2. Skips if `claude.model` is absent (idempotent re-runs).
-  3. Skips if an open PR from a prior run exists (idempotent).
+  2. Skips if `claude.<key>` is absent (idempotent re-runs).
+  3. Skips if an open PR from a prior run FOR THIS KEY exists (idempotent).
   4. Files a per-repo issue describing the change.
   5. Creates a branch from the default-branch HEAD.
-  6. Removes ONLY the `claude.model` key via the Contents API — key order,
-     sibling fields, 2-space indent, LF endings, trailing newline preserved.
+  6. Removes ONLY `claude.<key>` via the Contents API — key order, sibling
+     fields, 2-space indent, LF endings, trailing newline preserved.
   7. Opens a PR carrying `Closes #N` for that repo's issue.
   8. Polls `mergeable_state` until clean/unstable, then squash-merges.
   9. Verifies the merge actually landed before reporting success.
@@ -33,8 +34,8 @@ Generated issue/PR bodies carry no cross-repo references: each repo's
 artifacts describe the change in that repo only.
 
 Usage:
-    poetry run python tools/fleet_remove_claude_model.py --repos a,b,c
-    poetry run python tools/fleet_remove_claude_model.py --repos a,b,c --apply
+    poetry run python tools/fleet_remove_claude_key.py --key model  --repos a,b
+    poetry run python tools/fleet_remove_claude_key.py --key effort --repos a,b --apply
 
 Dry-run is the default: prints the per-repo plan and the exact resulting
 JSON, takes no action. `--apply` mutates.
@@ -51,7 +52,7 @@ from typing import Any, Callable, Optional
 
 GITHUB_USER = "martymcenroe"
 TARGET_PATH = ".unleashed.json"
-BRANCH_SUFFIX = "remove-claude-model"
+VALID_KEYS = ("model", "effort")
 HTTP_TIMEOUT_S = 60
 POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 300
@@ -63,35 +64,43 @@ TERMINAL_BAD_STATES = {"dirty", "draft"}
 # running; required ones passed (fleet merges gate on a single required check).
 MERGEABLE_OK_STATES = {"clean", "unstable"}
 
-ISSUE_TITLE = "Remove inert claude.model from .unleashed.json"
+# Per-key rationale sentence used in generated issue/PR bodies.
+KEY_CONTEXT = {
+    "model": (
+        "model choice belongs to Claude Code's native settings hierarchy "
+        "(the operator's `/model` default; a committed "
+        "`.claude/settings.json` for a deliberate per-repo pin)"
+    ),
+    "effort": (
+        "effort belongs to the operator's `effortLevel` user setting "
+        "(a committed `.claude/settings.json` covers a deliberate "
+        "per-repo pin)"
+    ),
+}
 
-ISSUE_BODY = """## Context
+ISSUE_BODY_TEMPLATE = """## Context
 
-The Claude wrapper no longer reads `claude.model` from `.unleashed.json` —
-model choice belongs to Claude Code's native settings hierarchy (the
-operator's `/model` default; a committed `.claude/settings.json` for a
-deliberate per-repo pin). This repo's `.unleashed.json` still carries the
-key, where it is dead config that misleads readers.
+The Claude wrapper no longer reads `claude.{key}` from `.unleashed.json` —
+{context}. This repo's `.unleashed.json` still carries the key, where it is
+dead config that misleads readers.
 
 ## Scope
 
-Remove ONLY `claude.model`. Sibling fields (`effort`, `permissionMode`,
-`onboard`, etc.) are preserved, as are key order, indent, and line endings.
-No behavior change: the wrapper ignores the key at every version still in
-service.
+Remove ONLY `claude.{key}`. Sibling fields are preserved, as are key order,
+indent, and line endings. No behavior change: the wrapper ignores the key at
+every version still in service.
 
-Filed and processed automatically by `tools/fleet_remove_claude_model.py`
+Filed and processed automatically by `tools/fleet_remove_claude_key.py`
 in AssemblyZero.
 """
 
 PR_BODY_TEMPLATE = """## Summary
 
-Removes the inert `claude.model` key from `.unleashed.json`. The Claude
-wrapper no longer reads it; model choice belongs to Claude Code's native
-settings hierarchy. Sibling fields, key order, indent, and line endings are
-preserved. No behavior change.
+Removes the inert `claude.{key}` key from `.unleashed.json`. The Claude
+wrapper no longer reads it; {context}. Sibling fields, key order, indent,
+and line endings are preserved. No behavior change.
 
-Filed and processed automatically by `tools/fleet_remove_claude_model.py`
+Filed and processed automatically by `tools/fleet_remove_claude_key.py`
 in AssemblyZero.
 
 Closes #{issue_number}
@@ -103,6 +112,14 @@ class GhError(RuntimeError):
 
 
 Runner = Callable[..., subprocess.CompletedProcess]
+
+
+def branch_suffix(key: str) -> str:
+    return f"remove-claude-{key}"
+
+
+def issue_title(key: str) -> str:
+    return f"Remove inert claude.{key} from .unleashed.json"
 
 
 def run(cmd: list[str], *, timeout: int = HTTP_TIMEOUT_S,
@@ -134,27 +151,27 @@ def gh_api(runner: Runner, path: str, *, method: str = "GET",
     return json.loads(out) if out else {}
 
 
-def compute_new_content(current_b64: str) -> Optional[str]:
-    """New `.unleashed.json` text with `claude.model` removed.
+def compute_new_content(current_b64: str, key: str) -> Optional[str]:
+    """New `.unleashed.json` text with `claude.<key>` removed.
 
-    Returns None when there is nothing to do (no claude block / no model
+    Returns None when there is nothing to do (no claude block / no such
     key). Preserves key order and sibling fields; emits the fleet house
     style: 2-space indent, LF-only, trailing newline, non-ASCII unescaped.
     """
     raw = base64.b64decode(current_b64).decode("utf-8")
     cfg = json.loads(raw)
     claude = cfg.get("claude")
-    if not isinstance(claude, dict) or "model" not in claude:
+    if not isinstance(claude, dict) or key not in claude:
         return None
-    del claude["model"]
+    del claude[key]
     return json.dumps(cfg, indent=2, ensure_ascii=False) + "\n"
 
 
-def find_existing_pr(runner: Runner, repo: str) -> Optional[int]:
-    """Open PR from a prior run of this tool, if any."""
+def find_existing_pr(runner: Runner, repo: str, key: str) -> Optional[int]:
+    """Open PR from a prior run of this tool FOR THIS KEY, if any."""
     prs = gh_api(runner, f"repos/{GITHUB_USER}/{repo}/pulls?state=open&per_page=50")
     for pr in prs or []:
-        if pr.get("head", {}).get("ref", "").endswith(BRANCH_SUFFIX):
+        if pr.get("head", {}).get("ref", "").endswith(branch_suffix(key)):
             return pr["number"]
     return None
 
@@ -179,7 +196,7 @@ def wait_for_mergeable(runner: Runner, repo: str, pr_number: int,
     return f"timeout:{state}"
 
 
-def process_repo(runner: Runner, repo: str, apply: bool) -> str:
+def process_repo(runner: Runner, repo: str, apply: bool, key: str) -> str:
     """Run the full cycle for one repo. Returns a one-line outcome."""
     print(f"\n=== {repo} ===")
 
@@ -196,11 +213,11 @@ def process_repo(runner: Runner, repo: str, apply: bool) -> str:
     if info is None:
         return f"skip: no {TARGET_PATH} on {default_branch}"
 
-    new_content = compute_new_content(info["content"])
+    new_content = compute_new_content(info["content"], key)
     if new_content is None:
-        return "skip: claude.model already absent"
+        return f"skip: claude.{key} already absent"
 
-    existing = find_existing_pr(runner, repo)
+    existing = find_existing_pr(runner, repo, key)
     if existing is not None:
         return f"skip: open PR #{existing} from a prior run"
 
@@ -210,21 +227,24 @@ def process_repo(runner: Runner, repo: str, apply: bool) -> str:
 
     issue = gh_api(
         runner, f"repos/{GITHUB_USER}/{repo}/issues", method="POST",
-        payload={"title": ISSUE_TITLE, "body": ISSUE_BODY},
+        payload={
+            "title": issue_title(key),
+            "body": ISSUE_BODY_TEMPLATE.format(key=key, context=KEY_CONTEXT[key]),
+        },
     )
     issue_number = issue["number"]
     print(f"  issue #{issue_number}")
 
     head = gh_api(runner, f"repos/{GITHUB_USER}/{repo}/git/ref/heads/{default_branch}")
     head_sha = head["object"]["sha"]
-    branch = f"{issue_number}-{BRANCH_SUFFIX}"
+    branch = f"{issue_number}-{branch_suffix(key)}"
     gh_api(
         runner, f"repos/{GITHUB_USER}/{repo}/git/refs", method="POST",
         payload={"ref": f"refs/heads/{branch}", "sha": head_sha},
     )
     print(f"  branch {branch} @ {head_sha[:8]}")
 
-    title = f"chore: remove inert claude.model from .unleashed.json (Closes #{issue_number})"
+    title = f"chore: remove inert claude.{key} from .unleashed.json (Closes #{issue_number})"
     gh_api(
         runner, f"repos/{GITHUB_USER}/{repo}/contents/{TARGET_PATH}", method="PUT",
         payload={
@@ -242,7 +262,9 @@ def process_repo(runner: Runner, repo: str, apply: bool) -> str:
             "title": title,
             "head": branch,
             "base": default_branch,
-            "body": PR_BODY_TEMPLATE.format(issue_number=issue_number),
+            "body": PR_BODY_TEMPLATE.format(
+                key=key, context=KEY_CONTEXT[key], issue_number=issue_number,
+            ),
         },
     )
     pr_number = pr["number"]
@@ -267,6 +289,8 @@ def process_repo(runner: Runner, repo: str, apply: bool) -> str:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--key", required=True, choices=VALID_KEYS,
+                        help="Which claude.<key> field to remove fleet-wide")
     parser.add_argument("--repos", required=True,
                         help="Comma-separated owner-less repo names to sweep")
     parser.add_argument("--apply", action="store_true",
@@ -281,12 +305,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     repos = repos[: args.limit]
 
     mode = "APPLY" if args.apply else "DRY-RUN"
-    print(f"fleet_remove_claude_model [{mode}] over {len(repos)} repo(s)")
+    print(f"fleet_remove_claude_key [{mode}] key={args.key} over {len(repos)} repo(s)")
 
     outcomes: dict[str, str] = {}
     for repo in repos:
         try:
-            outcomes[repo] = process_repo(run, repo, args.apply)
+            outcomes[repo] = process_repo(run, repo, args.apply, args.key)
         except (GhError, KeyError, json.JSONDecodeError) as exc:
             outcomes[repo] = f"ERROR: {exc}"
         print(f"  -> {outcomes[repo]}")

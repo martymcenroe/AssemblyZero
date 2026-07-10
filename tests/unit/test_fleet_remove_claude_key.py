@@ -1,8 +1,8 @@
-"""Unit tests for tools/fleet_remove_claude_model.py (#1730).
+"""Unit tests for tools/fleet_remove_claude_key.py (#1730, generalized #1733).
 
 A scripted fake runner stands in for gh — no live GitHub. The fake maps
-(method, path-prefix) to canned CompletedProcess results and records every
-call so tests can assert exactly which mutations were (not) attempted.
+(method, path-substring) to canned CompletedProcess results and records
+every call so tests can assert exactly which mutations were (not) attempted.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
-from fleet_remove_claude_model import (  # noqa: E402
+from fleet_remove_claude_key import (  # noqa: E402
     compute_new_content,
     find_existing_pr,
     process_repo,
@@ -37,39 +37,56 @@ CONFIG_WITH_MODEL = (
     '}\n'
 )
 
+# Post-model-sweep shape: effort is the only claude key left.
+CONFIG_WITH_EFFORT = (
+    '{\n'
+    '  "profile": "default",\n'
+    '  "claude": {\n'
+    '    "effort": "max"\n'
+    '  },\n'
+    '  "assemblyZero": true\n'
+    '}\n'
+)
+
 
 # ---------------------------------------------------------------------------
-# compute_new_content — the pure edit
+# compute_new_content — the pure edit, both keys
 # ---------------------------------------------------------------------------
 
 class TestComputeNewContent:
     def test_removes_only_model_preserving_siblings_and_order(self):
-        out = compute_new_content(b64(CONFIG_WITH_MODEL))
+        out = compute_new_content(b64(CONFIG_WITH_MODEL), "model")
         cfg = json.loads(out)
         assert "model" not in cfg["claude"]
         assert cfg["claude"]["effort"] == "max"
         assert list(cfg.keys()) == ["profile", "claude", "assemblyZero"]
 
+    def test_removes_only_effort_preserving_siblings_and_order(self):
+        out = compute_new_content(b64(CONFIG_WITH_MODEL), "effort")
+        cfg = json.loads(out)
+        assert "effort" not in cfg["claude"]
+        assert cfg["claude"]["model"] == "opus"
+        assert list(cfg.keys()) == ["profile", "claude", "assemblyZero"]
+
+    def test_effort_removal_on_post_model_sweep_config_leaves_empty_block(self):
+        out = compute_new_content(b64(CONFIG_WITH_EFFORT), "effort")
+        assert json.loads(out)["claude"] == {}
+
     def test_house_style_indent_lf_trailing_newline(self):
-        out = compute_new_content(b64(CONFIG_WITH_MODEL))
+        out = compute_new_content(b64(CONFIG_WITH_EFFORT), "effort")
         assert out.endswith("}\n")
         assert "\r" not in out
         assert '  "profile"' in out  # 2-space indent
 
-    def test_none_when_model_absent(self):
-        cfg = '{\n  "claude": {\n    "effort": "max"\n  }\n}\n'
-        assert compute_new_content(b64(cfg)) is None
+    def test_none_when_key_absent(self):
+        assert compute_new_content(b64(CONFIG_WITH_EFFORT), "model") is None
 
     def test_none_when_no_claude_block(self):
-        assert compute_new_content(b64('{\n  "profile": "default"\n}\n')) is None
+        cfg = '{\n  "profile": "default"\n}\n'
+        assert compute_new_content(b64(cfg), "effort") is None
 
     def test_none_when_claude_is_not_a_dict(self):
-        assert compute_new_content(b64('{\n  "claude": "opus"\n}\n')) is None
-
-    def test_claude_block_retained_when_model_was_only_key(self):
-        cfg = '{\n  "claude": {\n    "model": "opus"\n  }\n}\n'
-        out = compute_new_content(b64(cfg))
-        assert json.loads(out)["claude"] == {}
+        assert compute_new_content(b64('{\n  "claude": "max"\n}\n'), "effort") is None
 
     def test_contents_api_wrapped_base64_accepted(self):
         # The Contents API returns base64 with embedded newlines.
@@ -77,12 +94,12 @@ class TestComputeNewContent:
             b64(CONFIG_WITH_MODEL)[i:i + 20]
             for i in range(0, len(b64(CONFIG_WITH_MODEL)), 20)
         )
-        out = compute_new_content(wrapped)
+        out = compute_new_content(wrapped, "model")
         assert "model" not in json.loads(out)["claude"]
 
     def test_non_ascii_preserved_unescaped(self):
-        cfg = '{\n  "claude": {\n    "model": "opus"\n  },\n  "note": "café"\n}\n'
-        out = compute_new_content(b64(cfg))
+        cfg = '{\n  "claude": {\n    "effort": "max"\n  },\n  "note": "café"\n}\n'
+        out = compute_new_content(b64(cfg), "effort")
         assert "café" in out
         assert "\\u" not in out
 
@@ -97,9 +114,11 @@ class FakeRunner:
     def __init__(self, routes: list[tuple[str, str, int, object]]):
         self.routes = routes
         self.calls: list[list[str]] = []
+        self.inputs: list = []  # index-aligned with calls: the stdin payloads
 
     def __call__(self, cmd, *, timeout=0, input=None):
         self.calls.append(list(cmd))
+        self.inputs.append(input)
         path = cmd[2]
         method = "GET"
         if "-X" in cmd:
@@ -116,17 +135,17 @@ class FakeRunner:
 
 
 REPO_META = {"default_branch": "main"}
-CONTENTS = {"content": b64(CONFIG_WITH_MODEL), "sha": "abc123"}
+CONTENTS_EFFORT = {"content": b64(CONFIG_WITH_EFFORT), "sha": "abc123"}
 
 
 # ---------------------------------------------------------------------------
-# process_repo — skip paths and dry-run safety
+# process_repo — skip paths and dry-run safety (driven with key=effort)
 # ---------------------------------------------------------------------------
 
 class TestSkipPaths:
     def test_missing_repo_skips(self):
         r = FakeRunner([("GET", "repos/martymcenroe/ghost", 1, "")])
-        assert "not found" in process_repo(r, "ghost", apply=True)
+        assert "not found" in process_repo(r, "ghost", apply=True, key="effort")
         assert r.mutations() == []
 
     def test_missing_config_file_skips(self):
@@ -134,48 +153,59 @@ class TestSkipPaths:
             ("GET", "/contents/", 1, ""),
             ("GET", "repos/martymcenroe/bare", 0, REPO_META),
         ])
-        assert ".unleashed.json" in process_repo(r, "bare", apply=True)
+        assert ".unleashed.json" in process_repo(r, "bare", apply=True, key="effort")
         assert r.mutations() == []
 
-    def test_model_already_absent_skips(self):
-        clean = {"content": b64('{\n  "claude": {\n    "effort": "max"\n  }\n}\n'),
-                 "sha": "abc"}
+    def test_key_already_absent_skips(self):
+        clean = {"content": b64('{\n  "claude": {}\n}\n'), "sha": "abc"}
         r = FakeRunner([
             ("GET", "/contents/", 0, clean),
             ("GET", "repos/martymcenroe/done", 0, REPO_META),
         ])
-        assert "already absent" in process_repo(r, "done", apply=True)
+        out = process_repo(r, "done", apply=True, key="effort")
+        assert "claude.effort already absent" in out
         assert r.mutations() == []
 
-    def test_open_pr_from_prior_run_skips(self):
+    def test_open_pr_from_prior_run_same_key_skips(self):
         r = FakeRunner([
-            ("GET", "/contents/", 0, CONTENTS),
+            ("GET", "/contents/", 0, CONTENTS_EFFORT),
+            ("GET", "/pulls?state=open", 0,
+             [{"number": 7, "head": {"ref": "5-remove-claude-effort"}}]),
+            ("GET", "repos/martymcenroe/mid", 0, REPO_META),
+        ])
+        assert "open PR #7" in process_repo(r, "mid", apply=True, key="effort")
+        assert r.mutations() == []
+
+    def test_open_pr_for_other_key_does_not_block(self):
+        # A leftover model-sweep PR must not mask the effort sweep.
+        r = FakeRunner([
+            ("GET", "/contents/", 0, CONTENTS_EFFORT),
             ("GET", "/pulls?state=open", 0,
              [{"number": 7, "head": {"ref": "5-remove-claude-model"}}]),
             ("GET", "repos/martymcenroe/mid", 0, REPO_META),
         ])
-        assert "open PR #7" in process_repo(r, "mid", apply=True)
-        assert r.mutations() == []
+        out = process_repo(r, "mid", apply=False, key="effort")
+        assert out.startswith("dry-run")
 
     def test_dry_run_issues_no_mutating_calls(self):
         r = FakeRunner([
-            ("GET", "/contents/", 0, CONTENTS),
+            ("GET", "/contents/", 0, CONTENTS_EFFORT),
             ("GET", "/pulls?state=open", 0, []),
             ("GET", "repos/martymcenroe/live", 0, REPO_META),
         ])
-        out = process_repo(r, "live", apply=False)
+        out = process_repo(r, "live", apply=False, key="effort")
         assert out.startswith("dry-run")
         assert r.mutations() == []
 
 
 # ---------------------------------------------------------------------------
-# process_repo — happy path
+# process_repo — happy path (key=effort)
 # ---------------------------------------------------------------------------
 
 class TestHappyPath:
     def _runner(self) -> FakeRunner:
         return FakeRunner([
-            ("GET", "/contents/", 0, CONTENTS),
+            ("GET", "/contents/", 0, CONTENTS_EFFORT),
             ("GET", "/pulls?state=open", 0, []),
             ("POST", "/issues", 0, {"number": 41}),
             ("GET", "/git/ref/heads/main", 0, {"object": {"sha": "f" * 40}}),
@@ -190,18 +220,20 @@ class TestHappyPath:
         ])
 
     def test_full_cycle_reports_issue_pr_and_squash(self):
-        out = process_repo(self._runner(), "live", apply=True)
+        out = process_repo(self._runner(), "live", apply=True, key="effort")
         assert out == "merged: issue #41, PR #42, squash deadbeef"
 
-    def test_branch_named_after_issue(self):
+    def test_branch_named_after_issue_and_key(self):
         r = self._runner()
-        process_repo(r, "live", apply=True)
-        ref_calls = [c for c in r.calls if c[2].endswith("/git/refs")]
-        assert len(ref_calls) == 1  # branch created exactly once
+        process_repo(r, "live", apply=True, key="effort")
+        ref_idx = [i for i, c in enumerate(r.calls) if c[2].endswith("/git/refs")]
+        assert len(ref_idx) == 1
+        payload = json.loads(r.inputs[ref_idx[0]])
+        assert payload["ref"] == "refs/heads/41-remove-claude-effort"
 
     def test_no_force_tokens_in_any_gh_argv(self):
         r = self._runner()
-        process_repo(r, "live", apply=True)
+        process_repo(r, "live", apply=True, key="effort")
         banned = {"-D", "--force", "--force-with-lease", "--admin", "--no-verify"}
         for call in r.calls:
             assert not banned.intersection(call), call
@@ -211,7 +243,7 @@ class TestHappyPath:
         r.routes.insert(0, ("GET", "/pulls/42", 0,
                             {"mergeable_state": "unstable", "merged": True,
                              "merge_commit_sha": "deadbeefcafe"}))
-        out = process_repo(r, "live", apply=True)
+        out = process_repo(r, "live", apply=True, key="effort")
         assert out.startswith("merged:")
 
 
@@ -233,18 +265,19 @@ class TestWaitForMergeable:
 
 
 # ---------------------------------------------------------------------------
-# find_existing_pr
+# find_existing_pr — key-scoped suffix matching
 # ---------------------------------------------------------------------------
 
-def test_find_existing_pr_matches_suffix_only():
+def test_find_existing_pr_matches_requested_key_only():
     r = FakeRunner([
         ("GET", "/pulls?state=open", 0,
-         [{"number": 3, "head": {"ref": "other-branch"}},
-          {"number": 4, "head": {"ref": "12-remove-claude-model"}}]),
+         [{"number": 3, "head": {"ref": "12-remove-claude-model"}},
+          {"number": 4, "head": {"ref": "13-remove-claude-effort"}}]),
     ])
-    assert find_existing_pr(r, "x") == 4
+    assert find_existing_pr(r, "x", "effort") == 4
+    assert find_existing_pr(r, "x", "model") == 3
 
 
 def test_find_existing_pr_none_when_no_match():
     r = FakeRunner([("GET", "/pulls?state=open", 0, [])])
-    assert find_existing_pr(r, "x") is None
+    assert find_existing_pr(r, "x", "effort") is None

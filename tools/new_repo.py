@@ -1096,7 +1096,7 @@ This document provides a complete inventory of files in the {name} project, orga
 ├── README.md                   # Project overview
 ├── LICENSE                     # PolyForm Noncommercial 1.0.0
 ├── .gitignore                  # Git ignore rules
-└── .unleashed.json             # Unleashed wrapper config (effort)
+└── .unleashed.json             # Unleashed wrapper config
 ```
 
 ---
@@ -1141,14 +1141,18 @@ Use `/audit` to verify structure compliance with AssemblyZero standards.
 def create_unleashed_json(project_path: Path) -> None:
     """Create .unleashed.json with standard wrapper configuration.
 
-    Sets effort=max. No "model" key is emitted (#1727): the Claude wrapper
-    retired --model injection entirely, so model choice belongs to Claude
-    Code's native settings hierarchy — the operator's /model default, or a
-    committed .claude/settings.json for a deliberate per-repo pin. A model
-    key here would be inert config that misleads readers. (History: the old
-    scaffold hardcoded "claude-opus-4-7[1M]", which forced every new repo
-    onto Opus 4.7 once 4.8 shipped; the interim scaffold wrote the bare
-    "opus" alias, which the wrapper deferred on.)
+    No "claude" block is emitted (#1727 model, #1732 effort): the Claude
+    wrapper retired --model and --effort injection entirely, so session
+    shaping belongs to Claude Code's native settings hierarchy — the
+    operator's /model and effortLevel user defaults, or a committed
+    .claude/settings.json for a deliberate per-repo pin. Any claude.*
+    scaffold value would be inert config that misleads readers. The wrapper
+    reads config.get('claude', {}), so absence is handled; fleet
+    permission-mode tooling creates the block on demand when it sets
+    permissionMode. (History: the old scaffold hardcoded
+    "claude-opus-4-7[1M]", which forced every new repo onto Opus 4.7 once
+    4.8 shipped; the interim scaffold wrote the bare "opus" alias plus
+    effort=max, both retired since.)
 
     `assemblyZero` defaults to True (#1059): repos created by this tool
     are by definition AssemblyZero-managed, so /onboard should load
@@ -1163,9 +1167,6 @@ def create_unleashed_json(project_path: Path) -> None:
     """
     content = json.dumps({
         "profile": "default",
-        "claude": {
-            "effort": "max"
-        },
         "assemblyZero": True,
         "onboard": {
             "auto": True,
@@ -2804,7 +2805,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     # Step 11b: Create .unleashed.json (wrapper configuration)
     print("\n11b. Creating .unleashed.json...")
     create_unleashed_json(project_path)
-    print("  Created .unleashed.json (effort=max; no model key -- #1727)")
+    print("  Created .unleashed.json (no claude block -- #1727/#1732)")
 
     # Step 11b2: Bootstrap Python project (#1058) — pyproject.toml,
     # pytest, pytest-cov, conftest.py. Required for AZ implementation
