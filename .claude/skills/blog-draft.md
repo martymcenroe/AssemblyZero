@@ -8,6 +8,13 @@ scope: global
 
 Create a blog post draft in the dispatch repo, stamped with the source project.
 
+**This skill is a thin wrapper.** All deterministic work — project-anchor
+detection, date stamping, Windows-safe slug generation, model attribution from
+config, filename collision guard, template scaffolding — lives in tested Python
+(`blog_draft.py`, 36 tests). The skill runs the script and reports; it does NOT
+re-implement any of that logic in prose. If the scaffold ever looks wrong, fix
+the script, not this file.
+
 ## Usage
 
 ```
@@ -17,67 +24,28 @@ Create a blog post draft in the dispatch repo, stamped with the source project.
 
 ## Execution
 
-### Step 1: Extract Context
+### Step 1: Run the scaffolder
 
-1. Get the **source project** from the current working directory:
-   - Extract project name from path (e.g., `/c/Users/mcwiz/Projects/AssemblyZero` → `AssemblyZero`)
-
-2. Get **today's date** in YYYY-MM-DD format
-
-3. Generate **slug** from the title:
-   - Lowercase, replace spaces with hyphens, remove special characters
-   - Example: "My Amazing Discovery" → "my-amazing-discovery"
-
-### Step 2: Create Draft File
-
-**Location:** `C:\Users\mcwiz\Projects\dispatch\drafts\{date}-{slug}-from-{project}.md`
-
-**Template:**
-
-```markdown
----
-title: "{title}"
-source_project: {project}
-created: {date}
-status: draft
-tags: []
----
-
-# {title}
-
-*[Opening hook - what's the problem or insight?]*
-
----
-
-## The Context
-
-[What were you working on? What led to this?]
-
-## The Discovery/Solution
-
-[The meat of the post - what did you learn or build?]
-
-## Why It Matters
-
-[So what? Why should readers care?]
-
-## Try It Yourself
-
-[If applicable - how can readers use this?]
-
----
-
-*Built with Claude Opus 4.5. Source: {project}*
+```bash
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/blog_draft.py \
+  --title "{TITLE}" \
+  --project-path "{CURRENT_PROJECT_ROOT}")
 ```
 
-### Step 3: Report
+`{CURRENT_PROJECT_ROOT}` is the repo you are working in (the script anchors the
+draft's `source_project` to it). The script prints the created draft's full
+path; on a filename collision it refuses rather than overwriting — report that
+to the user instead of working around it.
 
-After creating the file, report:
-- Full path to the draft
-- Suggested next steps (fill in sections, run `/blog-review` when ready)
+### Step 2: Report
+
+- Full path to the created draft (clickable link + plain path per house style).
+- Suggested next steps: fill in the scaffold's sections, run `/blog-review` in
+  dispatch when ready.
 
 ## Notes
 
-- Drafts are **not committed** until explicitly requested
-- The dispatch repo has a `STYLE-GUIDE.md` - read it if tone guidance is needed
-- Use `/blog-review` in dispatch to get AI feedback on drafts
+- Drafts are **not committed** until explicitly requested.
+- The dispatch repo has a `STYLE-GUIDE.md` — read it if tone guidance is needed.
+- `--dry-run` previews without writing; `--date` overrides the stamp if the
+  user asks for a specific date.

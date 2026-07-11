@@ -79,19 +79,37 @@ Read: `C:\Users\mcwiz\Projects\AssemblyZero\wiki\Claudes-World.md`
 
 Use Edit tool to insert the new entry before `## About This Page`.
 
-## Step 7: Commit to AssemblyZero
+## Step 7: Commit to AssemblyZero via the shared PR-lander
+
+Main is branch-protected — a direct `git push` from main is rejected, and the
+hand-rolled push/poll/merge sequence is the retired anti-pattern. File a
+tracking issue, branch with the edit, commit, and hand the whole
+push→PR→poll→merge→verify→graft cycle to the shared driver (bounded poll,
+verify-gate before any branch deletion, ADR-0217 graft hardcoded, squash SHA
+looked up by PR number, fail-safe protection probe):
 
 ```bash
+ISSUE_N=$(gh issue create --repo martymcenroe/AssemblyZero \
+  --title "docs(wiki): add quote to Claude's World {DATE}" \
+  --body "Auto-created by /quote to track the wiki-page commit." \
+  | grep -oE '[0-9]+$')
+BRANCH="quote-{DATE}-{slug}"
+git -C /c/Users/mcwiz/Projects/AssemblyZero checkout -b $BRANCH
 git -C /c/Users/mcwiz/Projects/AssemblyZero add wiki/Claudes-World.md
+git -C /c/Users/mcwiz/Projects/AssemblyZero commit -m "docs(wiki): add quote to Claude's World (Closes #${ISSUE_N})"
+(cd /c/Users/mcwiz/Projects/unleashed && poetry run python src/tracked_pr_land.py \
+  --repo /c/Users/mcwiz/Projects/AssemblyZero \
+  --branch $BRANCH \
+  --title "docs(wiki): add quote to Claude's World (Closes #${ISSUE_N})" \
+  --issue ${ISSUE_N} \
+  --body "Quote memorialized by /quote.
+
+Closes #${ISSUE_N}")
 ```
 
-```bash
-git -C /c/Users/mcwiz/Projects/AssemblyZero commit -m "docs(wiki): add quote to Claude's World"
-```
-
-```bash
-git -C /c/Users/mcwiz/Projects/AssemblyZero push
-```
+Exit `0` = merged, verified on origin/main, branch grafted + deleted. Non-zero =
+STOP and report the issue number, branch, and the driver's final `stage=…` line.
+Do NOT escalate to `--admin` / `--no-verify` / force-push / `branch -D`.
 
 ## Step 8: Sync Wiki Repo
 
