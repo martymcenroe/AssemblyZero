@@ -17,29 +17,21 @@ are immutable so the bytes may persist in the heap until garbage collection;
 the primary protection is process scope (the OS reclaims the address space
 when the script exits, well before any neighbor agent could observe it).
 
-One-time setup (user):
-    mkdir -p ~/.secrets
-    # Copy the classic PAT to clipboard, then:
-    cat /dev/clipboard | gpg -c -o ~/.secrets/classic-pat.gpg
+Module contract (what this code needs to exist and hold):
+    - `~/.secrets/classic-pat.gpg` — a gpg symmetric-encrypted file whose
+      decrypted content is the token on a single line (a trailing newline
+      is tolerated and stripped).
+    - gpg-agent passphrase caching DISABLED (`default-cache-ttl 0`,
+      `max-cache-ttl 0` in ~/.gnupg/gpg-agent.conf, then
+      `gpgconf --kill gpg-agent`). While a passphrase is cached, ANY
+      same-user process can silently decrypt the file — TTL=0 forces
+      every decrypt to surface pinentry, making a sibling's attempt
+      visible. This is a hard precondition, not a tuning suggestion.
 
-(macOS: substitute `pbpaste`. Linux: `xclip -selection clipboard -o`.)
-
-The clipboard pattern keeps the secret out of shell history and out of
-the process argv table — the previous `echo '<pat>' | gpg ...` form
-exposed the secret in both places.
-
-REQUIRED gpg-agent.conf settings (~/.gnupg/gpg-agent.conf):
-    default-cache-ttl 0
-    max-cache-ttl 0
-
-The original ADR-0216 marked passphrase caching as a "small risk" and
-suggested shorter TTLs as a mitigation. That undersells it: while a
-passphrase is cached, ANY same-user process can call `gpg --decrypt
-classic-pat.gpg` and silently obtain the PAT — defeating the entire
-"in-process only" guarantee. The fleet of co-resident Claude/Codex/Gemini
-agents makes that a real, not theoretical, attack class. TTL=0 forces
-every decrypt to surface pinentry, so a sibling's silent attempt is
-visible to the user. Apply with `gpgconf --kill gpg-agent`.
+Creating and ROTATING that file is an operator procedure and is
+deliberately not documented here — it lives in the operator's private
+rotation runbook, alongside the token-scope, verification, revocation,
+and residue-destruction steps.
 
 REQUIRED operational rule:
     The user runs scripts that import this module, in their own Git Bash.
