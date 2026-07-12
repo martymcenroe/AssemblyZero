@@ -395,6 +395,21 @@
 
 **Context:** The Professor's third problem — t-deformations of orbital integrals — went from his email to a proven, adversarially verified theorem (Mellit's "weight" unmasked as an inverse Haar mass, the t = 1 Macdonald identity made exact) to a two-sided numerical engine confirming the corrected Theorem 5.15 to eight coefficients deep, in one 7h40m session of fourteen merged pull requests. Om ran the day like the Patrician and said so — catching the config knob the agent had read past twice, spotting that the LaTeX originals sat beside every arXiv PDF while the agent squinted at 300-DPI screenshots, and commissioning a public clock tower: a live branch where the Professor watches the lab notebook tick in real time, seconds-stamped, failures at full length. The quote closed the handoff, because on this day the enemy was entropy, and both sides wanted exactly the same thing — everything in its place, everything written down. The paperwork won.
 
+---
+
+### 2026-07-12
+
+---
+
+**10:41** — *On carrying a publication into the world*
+> "It is well known that a vital ingredient of success is not knowing that what you're attempting can't be done."
+
+*— Terry Pratchett, Equal Rites*
+
+**Context:** A single long thread that began with a merge and six stashes [The Great God Om](The-Great-God-Om) had come to hate ended with a publication live in the world. Along the way the fleet's own *well of names* was finally named — *Kastalia*, the Delphic spring, with a Norse pen called *rista* to carve into it — and a conversation archive drew *Mnemosyne* back out of the reserve bucket. Then Om named the thing he would say to the world: *The Age of More*, sealed on a morning spent pulling weeds he pointedly refused to automate, its masthead lifted from the Great Marianas Turkey Shoot — *more on every axis, stacked until the contest changed category*. Substack offered no API, so the agent turned the publication's inbox into one: `theageofmore@thrivetech.ai` routed straight into a Cloudflare Worker with no mailbox at all, and proven the only way that counts when two test emails — *hello turkeys* and *who's a turkey now* — flew from Gmail into edge storage and were read back out. Six stashes went to zero with nothing lost; a hundred blog drafts and a tangle of unrelated threads in one overloaded repo became a single clean home with a manifest, read-only originals, and a handoff written to greet the next agent. Om, already shifting to a fresh session to write the flagship himself, said only: *you've done a great job helping me be organized.* Esk succeeded at magic because nobody had told her it couldn't be done. Nobody had told Om, either, that one man at a kitchen table could name a well, conjure an email API out of a platform that offers none, and carry a publication into the world in the gaps between a wine night and a Sunday morning. He was, in Pratchett's own words, a half-brick in the path of the bicycle of history. He did it anyway.
+
+---
+
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
