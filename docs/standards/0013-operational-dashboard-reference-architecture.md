@@ -44,6 +44,34 @@ Hermes started with inline HTML rendered from the Worker (~1300 lines of vanilla
 
 ## 2. Authentication & Authorization
 
+### 2.0 The default gate: GitHub OAuth (prescriptive)
+
+For a fleet operational dashboard — one operator or a small trusted set — the **prescribed** gate is **GitHub OAuth**. Not Cloudflare Access / Zero Trust, not a bare bearer token in a URL, not an IP allowlist. This is the pattern in every existing fleet dashboard; a new dashboard adopts it rather than re-deriving an auth choice.
+
+**Reference implementation:** `dashboard/src/auth.ts` (Hono + `hono/jwt`). Copy it; do not reinvent it. The flow:
+
+1. `GET /api/auth/github` → redirect to GitHub authorize (`scope=read:user`), with a random `state` in a short-lived `HttpOnly` cookie (CSRF guard).
+2. `GET /api/auth/callback` → verify `state`, exchange `code` at `https://github.com/login/oauth/access_token`, fetch `https://api.github.com/user`.
+3. **Fail-closed allowlist:** if `user.login !== ALLOWED_GITHUB_USERNAME`, return `403` and issue **no** session. A successful OAuth login proves *identity*, not *authorization* (see the §11 auth addendum) — the allowlist is the authorization boundary.
+4. On success, sign an HS256 JWT (`sub`, `exp` = +24h) with `JWT_SECRET` and set it as an `HttpOnly; Secure; SameSite=Lax` `session` cookie.
+5. A gateway middleware (`app.use`) verifies the `session` cookie on every protected route; `/api/health` (and any OAuth route) stays public. Verify auth **once** at the gateway, then dispatch — never per-endpoint (see §2.1).
+
+**Optional second path — CLI/scripts:** the same middleware also accepts an `X-API-Key` header (or `?key=`) checked against `API_KEY`. This is the Panopticon dual-auth pattern (§11): a browser reads via the cookie, a CLI pushes/reads via the key. Add it only if a non-browser client needs in.
+
+**Secrets & vars:**
+
+| Name | Kind | Purpose |
+|------|------|---------|
+| `GITHUB_CLIENT_ID` | `wrangler secret` | the GitHub OAuth App's client id |
+| `GITHUB_CLIENT_SECRET` | `wrangler secret` | the OAuth App's client secret |
+| `JWT_SECRET` | `wrangler secret` | signs/verifies the session JWT (rotate per §2.8) |
+| `API_KEY` | `wrangler secret` | optional CLI path |
+| `ALLOWED_GITHUB_USERNAME` | `[vars]` in wrangler | the single allowed GitHub `login` (greppable, versioned) |
+
+**Why GitHub OAuth over Cloudflare Access for an operator dashboard:** no Zero Trust onboarding and no per-hostname Access application to stand up and maintain; the allowlist lives in the Worker where it is greppable and versioned; and it is already the fleet pattern, so operators get one familiar login. Cloudflare Access is not wrong in the abstract, but it is **not the house standard here** — do not introduce it for an operator dashboard without an explicit operator decision to switch the whole fleet.
+
+**Hostname convention (prescriptive).** Serve the dashboard from a custom domain that **names the project/repo**, on a zone we control — `telemetry.aletheia.study`, `theageofmore.thrivetech.ai`. **Never** a generic label like `inbox.`, `dashboard.`, or `app.`: many projects share one zone, and a generic label collides and reads as nothing. The OAuth callback is `https://<project>.<zone>/api/auth/callback` — register exactly that as the OAuth App's Authorization callback URL.
+
 ### 2.1 Three Auth Methods (Recommended Minimum)
 
 Production dashboards need at least two auth paths. Hermes uses three:
@@ -689,7 +717,7 @@ Before shipping any operational dashboard:
 When spinning up a new operational dashboard:
 
 1. **Define roles** — Who needs access? What can each role see/do?
-2. **Choose auth** — API key for scripts, OAuth for humans, viewer tokens for sharing
+2. **Choose auth** — default to **GitHub OAuth** (§2.0, the prescribed gate); API key as a second path for scripts, viewer tokens for temporary sharing. Do not reach for Cloudflare Access on an operator dashboard.
 3. **Choose frontend** — Inline HTML if < 10 pages, React SPA otherwise
 4. **Design the API** — RESTful resources, JSON errors with codes, cursor pagination
 5. **Build observability first** — Volume trends, success rates, failed operations
