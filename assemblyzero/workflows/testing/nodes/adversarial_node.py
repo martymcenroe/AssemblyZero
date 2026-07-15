@@ -170,9 +170,19 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
             "generated_test_files": {},
         }
 
-    # Write test files
+    # Write test files. #1757: root them in the target repo/worktree —
+    # the writer's CWD-relative default would land target-repo tests in
+    # AssemblyZero's own tests/adversarial/ when workflows run from AZ.
     issue_id = state.get("issue_id", 0)
-    generated_files = write_adversarial_tests(analysis, issue_id)
+    repo_root = state.get("repo_root", "")
+    output_dir = (
+        os.path.join(repo_root, "tests", "adversarial")
+        if repo_root
+        else "tests/adversarial"
+    )
+    generated_files = write_adversarial_tests(
+        analysis, issue_id, output_dir=output_dir
+    )
 
     # Validate (AST no-mock scan, syntax, assertions)
     validation = validate_adversarial_tests(generated_files)

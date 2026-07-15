@@ -36,6 +36,11 @@ class AdversarialNodeState(TypedDict, total=False):
     lld_content: str
     test_files: list[str]
     issue_id: int
+    # #1757: root the generated tests in the target repo/worktree. Without
+    # this key LangGraph filters repo_root out of the node input (same trap
+    # as mock_mode — see adversarial_node.py) and the writer's CWD-relative
+    # default drops target-repo tests into AssemblyZero's own tests tree.
+    repo_root: str
 
     # Outputs (populated by adversarial node)
     adversarial_analysis: AdversarialAnalysis

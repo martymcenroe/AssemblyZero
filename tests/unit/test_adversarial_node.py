@@ -97,6 +97,83 @@ class TestRunAdversarialNode:
     @patch(
         "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
     )
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.write_adversarial_tests"
+    )
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
+    )
+    def test_output_dir_rooted_in_repo_root(
+        self, mock_validate, mock_write, mock_client_cls, tmp_path
+    ):
+        """#1757: when state carries repo_root (the worktree), generated
+        tests are written under it — NOT under the process CWD, which is
+        the AssemblyZero checkout when workflows run from AZ."""
+        import os
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.generate_adversarial_tests.return_value = (
+            _make_valid_analysis_json()
+        )
+        mock_write.return_value = {}
+        mock_validate.return_value = {
+            "valid": True, "errors": [], "warnings": [], "mock_violations": [],
+        }
+
+        worktree = str(tmp_path / "boostgauge-7")
+        state = {
+            "implementation_files": ["/fake/module.py"],
+            "lld_content": "# Feature",
+            "test_files": [],
+            "issue_id": 7,
+            "repo_root": worktree,
+        }
+
+        run_adversarial_node(state)
+
+        assert mock_write.call_args.kwargs["output_dir"] == os.path.join(
+            worktree, "tests", "adversarial"
+        )
+
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
+    )
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.write_adversarial_tests"
+    )
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.validate_adversarial_tests"
+    )
+    def test_output_dir_cwd_relative_without_repo_root(
+        self, mock_validate, mock_write, mock_client_cls
+    ):
+        """Backward compatibility: states without repo_root keep the old
+        CWD-relative behavior (#1757)."""
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.generate_adversarial_tests.return_value = (
+            _make_valid_analysis_json()
+        )
+        mock_write.return_value = {}
+        mock_validate.return_value = {
+            "valid": True, "errors": [], "warnings": [], "mock_violations": [],
+        }
+
+        state = {
+            "implementation_files": ["/fake/module.py"],
+            "lld_content": "# Feature",
+            "test_files": [],
+            "issue_id": 7,
+        }
+
+        run_adversarial_node(state)
+
+        assert mock_write.call_args.kwargs["output_dir"] == "tests/adversarial"
+
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
+    )
     def test_quota_skip(self, mock_client_cls):
         """T020: On GeminiQuotaExhaustedError, sets skipped_reason and error verdict."""
         mock_client = MagicMock()
