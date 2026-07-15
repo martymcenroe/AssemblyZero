@@ -2044,16 +2044,47 @@ class TestReviewSpec:
         assert result["review_feedback"] != ""
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.review_spec.get_provider")
-    def test_max_iterations_guard(self, mock_provider, base_state):
-        """Max iterations → BLOCKED without calling provider."""
+    def test_final_iteration_still_gets_reviewed(self, mock_provider, base_state):
+        """#1775: the draft generated AT the final iteration deserves its
+        review — the old >= guard discarded a mechanically complete final
+        spec unreviewed and synthesized BLOCKED (boostgauge#96 run 4).
+        Loop safety lives in the routing functions, which require
+        review_iteration < max_iterations before any regeneration."""
+        reviewer = Mock()
+        reviewer.invoke.return_value = Mock(
+            success=True,
+            response="## Verdict\n[X] **APPROVED** - Ready\n",
+            content="## Verdict\n[X] **APPROVED** - Ready\n",
+            error_message=None,
+            input_tokens=0,
+            output_tokens=0,
+        )
+        mock_provider.return_value = reviewer
+
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
+        base_state["lld_content"] = SAMPLE_LLD_APPROVED
         base_state["review_iteration"] = 3
         base_state["max_iterations"] = 3
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 
         result = review_spec(base_state)
+        assert result["review_verdict"] == "APPROVED"
+        mock_provider.assert_called_once()
+
+    @patch("assemblyzero.workflows.implementation_spec.nodes.review_spec.get_provider")
+    def test_over_budget_iteration_guard(self, mock_provider, base_state):
+        """Iterations BEYOND the budget (routing failure) still guard
+        BLOCKED without calling the provider (#1775)."""
+        base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
+        base_state["review_iteration"] = 4
+        base_state["max_iterations"] = 3
+
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
+
+        result = review_spec(base_state)
         assert result["review_verdict"] == "BLOCKED"
+        assert "NOT reviewed" in result["review_feedback"]
         mock_provider.assert_not_called()
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.review_spec.get_provider")
