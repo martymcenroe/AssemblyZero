@@ -186,11 +186,16 @@ class TestInvokeViaCliErrorBoundary:
         )
 
     def _client(self, temp_credentials_file, temp_state_file):
-        return GeminiClient(
+        client = GeminiClient(
             model="gemini-3.1-pro-high",
             credentials_file=temp_credentials_file,
             state_file=temp_state_file,
         )
+        # The Linux CI runner has no agy binary; _find_agy_cli() returns
+        # None there and _invoke_via_cli bails before the PTY layer these
+        # tests exercise. Force a fake path — the PTY itself is stubbed.
+        client._agy_cli = "/fake/agy"
+        return client
 
     def test_nonzero_exit_is_failure(self, temp_credentials_file, temp_state_file):
         client = self._client(temp_credentials_file, temp_state_file)
