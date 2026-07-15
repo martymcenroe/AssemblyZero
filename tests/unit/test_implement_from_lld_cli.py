@@ -347,6 +347,53 @@ class TestWorktreeHandling:
 
             assert result == "main"
 
+    def test_create_worktree_carves_from_current_head_by_default(self, tmp_path):
+        """#1756: without --base-branch, `git worktree add -b {N}-implementation`
+        gets NO explicit start-point — the branch is carved from whatever
+        branch the target repo is standing on (main OR an attempt branch)."""
+        from tools.run_implement_from_lld import create_worktree
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+            create_worktree(tmp_path / "boostgauge", 7)
+
+            add_call = mock_run.call_args_list[0]
+            argv = add_call.args[0]
+            assert argv[:3] == ["git", "worktree", "add"]
+            assert argv[-2:] == ["-b", "7-implementation"], (
+                f"no start-point expected after -b branch; got {argv!r}"
+            )
+
+    def test_create_worktree_uses_explicit_start_point(self, tmp_path):
+        """#1756: an explicit --base-branch becomes the worktree-add
+        start-point, so the work branch is carved from that ref."""
+        from tools.run_implement_from_lld import create_worktree
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+            create_worktree(
+                tmp_path / "boostgauge", 7, start_point="speedrun-attempt-1"
+            )
+
+            add_call = mock_run.call_args_list[0]
+            argv = add_call.args[0]
+            assert argv[-3:] == [
+                "-b", "7-implementation", "speedrun-attempt-1",
+            ], f"start-point must follow the -b branch; got {argv!r}"
+
+    def test_parse_base_branch_flag(self):
+        """--base-branch is accepted and lands in args.base_branch (#1756)."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--base-branch", type=str, default="", dest="base_branch"
+        )
+        args = parser.parse_args(["--base-branch", "speedrun-attempt-1"])
+        assert args.base_branch == "speedrun-attempt-1"
+
 
 class TestCheckpointDbPath:
     """Tests for get_checkpoint_db_path() — Issue #379.

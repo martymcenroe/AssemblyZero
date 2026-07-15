@@ -58,6 +58,7 @@ configure_langsmith()
 # Issue #424: Telemetry instrumentation
 from assemblyzero.telemetry import emit, flush, track_tool
 from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.utils.git import is_generated_work_branch, is_issue_work_branch
 atexit.register(flush)
 
 
@@ -102,12 +103,17 @@ def find_existing_worktree(repo_path: Path, issue_number: int) -> Path | None:
     return worktree_path
 
 
-def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
+def create_worktree(
+    repo_path: Path, issue_number: int, start_point: str = ""
+) -> tuple[Path, str]:
     """Create a git worktree for the issue.
 
     Args:
         repo_path: Path to the main repository.
         issue_number: Issue number.
+        start_point: Optional ref to carve the work branch from (#1756
+            attempt-branch model — e.g. an explicit --base-branch).
+            Empty → current HEAD, i.e. the checked-out branch.
 
     Returns:
         Tuple of (worktree_path, error_message).
@@ -133,9 +139,12 @@ def create_worktree(repo_path: Path, issue_number: int) -> tuple[Path, str]:
             shutil.rmtree(worktree_path)
             # Continue to create proper worktree below
 
-    # Create worktree
+    # Create worktree (from start_point if given, else current HEAD)
+    add_cmd = ["git", "worktree", "add", str(worktree_path), "-b", branch_name]
+    if start_point:
+        add_cmd.append(start_point)
     result = subprocess.run(
-        ["git", "worktree", "add", str(worktree_path), "-b", branch_name],
+        add_cmd,
         cwd=str(repo_path),
         capture_output=True,
         text=True,
@@ -418,6 +427,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help="Skip worktree creation (use current directory)",
     )
     parser.add_argument(
+        "--base-branch",
+        type=str,
+        default="",
+        dest="base_branch",
+        help=(
+            "Integration branch the implementation targets (#1756 "
+            "attempt-branch model). Default: the branch the target repo "
+            "is checked out on. The worktree branch is carved from it "
+            "and the PR advice targets it."
+        ),
+    )
+    parser.add_argument(
         "--db-path",
         type=str,
         help="Path to checkpoint database (overrides default per-issue partitioning)",
@@ -684,13 +705,40 @@ def main():
     original_repo_root = repo_root
     worktree_path = None
 
-    # Handle worktree creation/detection
+    # Handle worktree creation/detection (#1756 attempt-branch model:
+    # ANY named integration branch — main or e.g. speedrun-attempt-N —
+    # is a valid base; the worktree branch is carved from it and PRs
+    # target it. Never assume main.)
+    base_branch = args.base_branch
     if not args.no_worktree:
         current_branch = get_current_branch(repo_root)
 
-        # Check if we're on main/master (need worktree)
-        if current_branch in ("main", "master"):
-            # Check for existing worktree first
+        if is_issue_work_branch(current_branch, args.issue):
+            # Already on THIS issue's work branch - likely in its worktree.
+            # Exact match only: the old substring test let issue #1
+            # false-match `speedrun-attempt-1` and run in-place with
+            # checkpoints as no-ops (#1756).
+            print(f"Already on issue branch: {current_branch}")
+        elif is_generated_work_branch(current_branch):
+            print(
+                f"ERROR: On '{current_branch}' — a generated work branch "
+                "for a different issue."
+            )
+            print(
+                "       Check out your integration branch (e.g. main or "
+                "speedrun-attempt-N) and re-run."
+            )
+            sys.exit(1)
+        elif not current_branch or current_branch == "HEAD":
+            print("ERROR: Detached HEAD (or unreadable branch) in the target repo.")
+            print(
+                "       Check out your integration branch (e.g. main or "
+                "speedrun-attempt-N) and re-run."
+            )
+            sys.exit(1)
+        else:
+            # Named integration branch: carve the issue worktree from it.
+            base_branch = args.base_branch or current_branch
             existing = find_existing_worktree(repo_root, args.issue)
 
             if existing and existing.exists():
@@ -698,22 +746,18 @@ def main():
                 repo_root = existing
                 worktree_path = existing
             else:
-                print(f"Creating worktree for issue #{args.issue}...")
-                worktree_path, error = create_worktree(repo_root, args.issue)
+                print(
+                    f"Creating worktree for issue #{args.issue} "
+                    f"(base: {base_branch})..."
+                )
+                worktree_path, error = create_worktree(
+                    repo_root, args.issue, start_point=args.base_branch
+                )
                 if error:
                     print(f"Error: {error}")
                     sys.exit(1)
                 print(f"Created worktree: {worktree_path}")
                 repo_root = worktree_path
-        elif f"-{args.issue}" in current_branch or f"{args.issue}-" in current_branch:
-            # Already on issue branch - likely in a worktree
-            print(f"Already on issue branch: {current_branch}")
-        else:
-            # On some other branch - warn user
-            print(f"WARNING: On branch '{current_branch}', not main.")
-            print("         Use --no-worktree to skip worktree creation.")
-            print("         Or switch to main first: git checkout main")
-            sys.exit(1)
 
     # Set up checkpoint database (Issue #379: per-issue partitioning)
     if args.db_path:
@@ -962,12 +1006,19 @@ def main():
 
                     # Show next steps for worktree workflow
                     if worktree_path:
+                        # #1756: the PR must target the integration branch
+                        # the worktree was carved from, never default to main.
+                        pr_cmd = (
+                            f"gh pr create --base {base_branch}"
+                            if base_branch
+                            else "gh pr create"
+                        )
                         print()
                         print("Next steps:")
                         print(f"  1. cd {worktree_path}")
                         print("  2. Review changes: git diff")
                         print("  3. Commit: git add . && git commit -m 'feat: implement issue #{}'".format(args.issue))
-                        print("  4. Create PR: gh pr create")
+                        print(f"  4. Create PR: {pr_cmd}")
 
                     return 0
 
