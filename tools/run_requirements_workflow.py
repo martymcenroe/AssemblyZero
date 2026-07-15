@@ -60,6 +60,7 @@ from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     shift_lineage_versions,
 )
+from assemblyzero.utils.git import current_branch, validate_integration_branch
 from assemblyzero.workflows.requirements.config import GateConfig
 from assemblyzero.workflows.requirements.graph import create_requirements_graph
 from assemblyzero.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
@@ -470,6 +471,16 @@ Examples:
         help="Target repository path (default: auto-detect from git)",
     )
     parser.add_argument(
+        "--base-branch",
+        default="",
+        dest="base_branch",
+        help=(
+            "Integration branch for the LLD PR (#1754 attempt-branch "
+            "model). Default: the branch the target repo is checked "
+            "out on."
+        ),
+    )
+    parser.add_argument(
         "--context",
         action="append",
         help="Additional context files (LLD workflow only, can be repeated)",
@@ -651,10 +662,19 @@ def build_initial_state(
             source_idea=source_idea,
         )
     else:  # lld
+        # #1754 attempt-branch model: capture the integration branch the
+        # target repo is standing on BEFORE any LLM work burns quota.
+        # A generated work branch or detached HEAD aborts here, loudly.
+        base_branch = getattr(args, "base_branch", "") or current_branch(
+            target_repo
+        )
+        validate_integration_branch(base_branch)
+
         state = create_initial_state(
             workflow_type="lld",
             assemblyzero_root=str(assemblyzero_root),
             target_repo=str(target_repo),
+            base_branch=base_branch,
             drafter=args.drafter,
             reviewer=args.reviewer,
             gates_draft=gate_config.draft_gate,

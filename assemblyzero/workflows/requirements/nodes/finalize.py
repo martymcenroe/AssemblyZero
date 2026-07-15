@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from assemblyzero.utils.git import GitBranchError, current_branch
 from assemblyzero.workflows.requirements.audit import (
     embed_review_evidence,
     move_lineage_to_done,
@@ -174,6 +175,16 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
             # Closes #1459: LLD outputs flow through a per-issue worktree + PR
             # instead of a direct push to the operator's checkout. Mirrors the
             # impl stage's pattern at orchestrator/stages.py:493-532.
+            #
+            # #1754 attempt-branch model: the PR targets the integration
+            # branch captured at invocation (base_branch state key). If a
+            # caller predates that key (e.g. the orchestrator's partial
+            # invoke dict), detect it from the target repo now — the
+            # operator's checkout is still on the integration branch at
+            # this point. Never silently fall back to main.
+            base_branch = state.get("base_branch", "") or current_branch(
+                target_repo
+            )
             worktree_path, branch_name = setup_lld_worktree(
                 target_repo=target_repo, issue_number=issue_number,
             )
@@ -191,6 +202,7 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
                 target_repo=target_repo,
                 issue_number=issue_number,
                 branch_name=branch_name,
+                base_branch=base_branch,
             )
             if commit_sha:
                 state["commit_sha"] = commit_sha
@@ -209,8 +221,10 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
             if commit_sha:
                 state["commit_sha"] = commit_sha
 
-    except GitOperationError as e:
-        # Log error but don't fail the workflow - files are already saved
+    except (GitOperationError, GitBranchError) as e:
+        # Log error but don't fail the workflow - files are already saved.
+        # GitBranchError (#1754): base-branch detection failed (e.g.
+        # detached HEAD) — refusing beats silently PRing against main.
         state["commit_error"] = str(e)
 
     return state

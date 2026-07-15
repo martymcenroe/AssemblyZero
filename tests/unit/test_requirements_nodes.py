@@ -1217,12 +1217,14 @@ class TestFinalizeNodeAdditional:
             "workflow_type": "lld",
             "target_repo": str(tmp_path),
             "issue_number": 42,
+            "base_branch": "main",
         }
 
         result = _commit_and_push_files(state)
 
         mock_setup.assert_called_once()
         mock_commit_and_pr.assert_called_once()
+        assert mock_commit_and_pr.call_args.kwargs["base_branch"] == "main"
         assert result.get("commit_sha") == "abc123"
         assert result.get("final_lld_pr_url") == "https://example.com/pr/1"
 
@@ -1265,11 +1267,95 @@ class TestFinalizeNodeAdditional:
             "workflow_type": "lld",
             "target_repo": str(tmp_path),
             "issue_number": 42,
+            "base_branch": "main",
         }
 
         result = _commit_and_push_files(state)
 
         assert "pr failed" in result.get("commit_error", "")
+
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.setup_lld_worktree")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_pr")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._mirror_to_worktree")
+    def test_commit_lld_threads_attempt_branch_as_pr_base(
+        self, mock_mirror, mock_commit_and_pr, mock_setup, tmp_path
+    ):
+        """#1754 attempt-branch model: state's base_branch reaches
+        commit_and_pr so the LLD PR targets the attempt branch."""
+        from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
+
+        mock_setup.return_value = (tmp_path / "wt", "42-lld")
+        mock_mirror.return_value = ["mirrored/file1.md"]
+        mock_commit_and_pr.return_value = ("abc123", "https://example.com/pr/1")
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "lld",
+            "target_repo": str(tmp_path),
+            "issue_number": 42,
+            "base_branch": "speedrun-attempt-1",
+        }
+
+        _commit_and_push_files(state)
+
+        assert (
+            mock_commit_and_pr.call_args.kwargs["base_branch"]
+            == "speedrun-attempt-1"
+        )
+
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.current_branch")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.setup_lld_worktree")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.commit_and_pr")
+    @patch("assemblyzero.workflows.requirements.nodes.finalize._mirror_to_worktree")
+    def test_commit_lld_detects_base_when_state_lacks_it(
+        self, mock_mirror, mock_commit_and_pr, mock_setup, mock_branch, tmp_path
+    ):
+        """Callers that predate the base_branch state key (e.g. the
+        orchestrator's partial invoke dict) get detect-at-use from the
+        target repo — never a silent main fallback. #1754."""
+        from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
+
+        mock_branch.return_value = "speedrun-attempt-2"
+        mock_setup.return_value = (tmp_path / "wt", "42-lld")
+        mock_mirror.return_value = ["mirrored/file1.md"]
+        mock_commit_and_pr.return_value = ("abc123", "https://example.com/pr/1")
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "lld",
+            "target_repo": str(tmp_path),
+            "issue_number": 42,
+        }
+
+        _commit_and_push_files(state)
+
+        mock_branch.assert_called_once_with(str(tmp_path))
+        assert (
+            mock_commit_and_pr.call_args.kwargs["base_branch"]
+            == "speedrun-attempt-2"
+        )
+
+    @patch("assemblyzero.workflows.requirements.nodes.finalize.current_branch")
+    def test_commit_lld_base_detection_failure_logged_not_raised(
+        self, mock_branch, tmp_path
+    ):
+        """Detached HEAD (or git failure) during detect-at-use is logged
+        as commit_error — refusing beats silently PRing against main."""
+        from assemblyzero.utils.git import GitBranchError
+        from assemblyzero.workflows.requirements.nodes.finalize import _commit_and_push_files
+
+        mock_branch.side_effect = GitBranchError("detached HEAD")
+
+        state = {
+            "created_files": ["file1.md"],
+            "workflow_type": "lld",
+            "target_repo": str(tmp_path),
+            "issue_number": 42,
+        }
+
+        result = _commit_and_push_files(state)
+
+        assert "detached HEAD" in result.get("commit_error", "")
 
 
 class TestFinalizeLineageFiles:

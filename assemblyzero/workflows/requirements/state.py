@@ -159,6 +159,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
     workflow_type: Literal["issue", "lld"]
     assemblyzero_root: str  # ALWAYS set, NEVER empty
     target_repo: str  # ALWAYS set, NEVER empty
+    # Attempt-branch model (#1754): the integration branch the target repo
+    # was standing on at invocation. LLD PRs target this branch, never a
+    # hardcoded main. Empty string → consumer detects from target_repo.
+    base_branch: str
     config_drafter: str
     config_reviewer: str
     config_effort: str  # Issue #773: Effort level for Claude reviewer
@@ -268,6 +272,7 @@ def create_initial_state(
     workflow_type: Literal["issue", "lld"],
     assemblyzero_root: str,
     target_repo: str,
+    base_branch: str = "",
     drafter: str = "gemini:3.1-pro-preview",
     reviewer: str = "gemini:3.1-pro-preview",
     gates_draft: bool = True,
@@ -293,6 +298,8 @@ def create_initial_state(
         workflow_type: Either "issue" or "lld".
         assemblyzero_root: Path to AssemblyZero installation.
         target_repo: Path to target repository.
+        base_branch: Integration branch the target repo is standing on
+            (#1754 attempt-branch model). Empty → consumer detects at use.
         drafter: LLM provider spec for drafter.
         reviewer: LLM provider spec for reviewer.
         gates_draft: Whether draft gate is enabled.
@@ -323,6 +330,7 @@ def create_initial_state(
         "workflow_type": workflow_type,
         "assemblyzero_root": assemblyzero_root,
         "target_repo": target_repo,
+        "base_branch": base_branch,
         "config_drafter": drafter,
         "config_reviewer": reviewer,
         "config_effort": effort,
