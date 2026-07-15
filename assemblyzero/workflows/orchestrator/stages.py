@@ -327,57 +327,38 @@ def run_triage_stage(state: OrchestrationState) -> OrchestrationState:
         )
         return update_stage_result(state, stage, result)
 
-    # Execute triage sub-workflow
+    # Closes #1770: `orchestrate --issue N` means the issue ALREADY EXISTS,
+    # so triage's product — a brief distilled from the issue — is exactly
+    # what the synthesizer above just produced (#1508 fetch + #1530
+    # summary). The previous code invoked the issue-AUTHORING workflow
+    # here, which (a) filed a duplicate GitHub issue per attempt via its
+    # finalize (`gh issue create`, no existing-issue guard) and (b) then
+    # failed on `sub_result['issue_brief_path']`, a key no code path sets —
+    # triage could never pass without a pre-existing skip artifact.
+    # Persist the synthesized brief to the canonical skip-artifact location
+    # so resume/re-runs skip via detect_existing_artifacts, and pass.
+    canonical_brief = (
+        Path(state.get("target_repo", "."))
+        / "docs" / "lineage" / str(issue_number) / "issue-brief.md"
+    )
+    artifact_path = brief_file
     try:
-        # Import here to avoid circular dependencies and allow mocking
-        from assemblyzero.workflows.requirements.graph import create_requirements_graph
-
-        # #1440: Plumb orchestrator config into the sub-workflow state.
-        config = state.get("config", {})
-        stage_cfg = config.get("stages", {}).get("triage", {})
-        gate_enabled = bool(config.get("gates", {}).get("triage", False))
-
-        graph = create_requirements_graph()
-        app = graph.compile()
-        sub_result = app.invoke({
-            "issue_number": issue_number,
-            "workflow_type": "issue",
-            "target_repo": state.get("target_repo", ""),
-            "assemblyzero_root": state.get("assemblyzero_root", ""),
-            "brief_file": brief_file,  # Closes #1508
-            "config_drafter": stage_cfg.get("drafter", ""),
-            "config_reviewer": stage_cfg.get("reviewer", ""),
-            "config_effort": stage_cfg.get("effort", ""),
-            "config_gates_draft": gate_enabled,
-            "config_gates_verdict": gate_enabled,
-        })
-
-        # Check for artifact
-        brief_path = sub_result.get("issue_brief_path", "")
-        if brief_path and Path(brief_path).is_file():
-            result = _make_stage_result(
-                status="passed",
-                artifact_path=brief_path,
-                duration_seconds=time.monotonic() - start_time,
-                attempts=1,
-            )
-        else:
-            error_msg = sub_result.get("error_message", "Triage workflow completed but no artifact produced")
-            result = _make_stage_result(
-                status="failed",
-                error_message=error_msg,
-                duration_seconds=time.monotonic() - start_time,
-                attempts=1,
-                transient=_classify_halt_transience(sub_result),
-            )
-    except Exception as exc:
-        result = _make_stage_result(
-            status="failed",
-            error_message=f"Triage stage error: {exc}",
-            duration_seconds=time.monotonic() - start_time,
-            attempts=1,
+        canonical_brief.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(brief_file, canonical_brief)
+        artifact_path = str(canonical_brief)
+    except OSError as exc:
+        # Non-fatal: the temp brief still serves this run; only the
+        # skip-on-rerun convenience is lost.
+        _stages_logger.warning(
+            "Triage: could not persist brief to %s: %s", canonical_brief, exc
         )
 
+    result = _make_stage_result(
+        status="passed",
+        artifact_path=artifact_path,
+        duration_seconds=time.monotonic() - start_time,
+        attempts=1,
+    )
     return update_stage_result(state, stage, result)
 
 

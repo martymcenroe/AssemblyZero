@@ -116,6 +116,61 @@ class TestRunTriageStage:
         assert new_state["stage_results"]["triage"]["status"] == "skipped"
         assert new_state["current_stage"] == "lld"
 
+    @patch("assemblyzero.workflows.orchestrator.stages._fetch_issue_body_to_temp_brief")
+    @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
+    def test_existing_issue_passes_without_authoring_workflow(
+        self, mock_detect, mock_fetch, tmp_path
+    ):
+        """#1770: `--issue N` means the issue exists — triage persists the
+        synthesized brief to the canonical location and passes. It must NOT
+        invoke the issue-authoring workflow (which filed a duplicate GitHub
+        issue per attempt) and must not depend on `issue_brief_path` (a key
+        nothing sets)."""
+        mock_detect.return_value = {
+            "triage": None, "lld": None, "spec": None, "impl": None, "pr": None,
+        }
+        temp_brief = tmp_path / "temp-brief.md"
+        temp_brief.write_text(
+            "# feat: config file\n\n## Summary\nA config file.\n\n"
+            "## Issue detail\nBody.\n",
+            encoding="utf-8",
+        )
+        mock_fetch.return_value = (str(temp_brief), "")
+
+        target = tmp_path / "boostgauge"
+        target.mkdir()
+
+        config = get_default_config()
+        state = create_initial_state(7, config, target_repo=str(target))
+
+        new_state = run_triage_stage(state)
+
+        assert new_state["stage_results"]["triage"]["status"] == "passed"
+        canonical = target / "docs" / "lineage" / "7" / "issue-brief.md"
+        assert canonical.is_file(), "brief must persist to the skip-artifact path"
+        assert "## Summary" in canonical.read_text(encoding="utf-8")
+        assert new_state["stage_results"]["triage"]["artifact_path"] == str(canonical)
+
+    @patch("assemblyzero.workflows.orchestrator.stages._fetch_issue_body_to_temp_brief")
+    @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
+    def test_brief_synthesis_failure_still_fails_stage(
+        self, mock_detect, mock_fetch, tmp_path
+    ):
+        """An unreachable/empty issue still fails triage loudly (#1770
+        preserves the #1508 error path)."""
+        mock_detect.return_value = {
+            "triage": None, "lld": None, "spec": None, "impl": None, "pr": None,
+        }
+        mock_fetch.return_value = ("", "issue #7 body is empty")
+
+        config = get_default_config()
+        state = create_initial_state(7, config, target_repo=str(tmp_path))
+
+        new_state = run_triage_stage(state)
+
+        assert new_state["stage_results"]["triage"]["status"] == "failed"
+        assert "empty" in new_state["stage_results"]["triage"]["error_message"]
+
 
 class TestStageRunners:
     """Tests for STAGE_RUNNERS mapping."""
@@ -597,13 +652,17 @@ class TestTriageBriefSynthesis:
     """
 
     @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
-    @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
     @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
     def test_triage_fetches_issue_body_when_no_brief_exists(
-        self, mock_detect, mock_create_graph, mock_subprocess,
+        self, mock_detect, mock_subprocess, tmp_path
     ):
-        """When no brief on disk: fetch issue body, write temp brief, pass it
-        as `brief_file` to the sub-workflow."""
+        """When no brief on disk: fetch the issue body, synthesize a brief,
+        persist it to the canonical skip-artifact path, and PASS.
+
+        #1770 rewrote the tail of this flow: the issue-authoring
+        sub-workflow is no longer invoked from triage (it filed duplicate
+        GitHub issues and its result was checked against a key nothing
+        sets), so this test now pins the persist-and-pass contract."""
         import json as _json
 
         # No existing artifact at docs/lineage/{N}/issue-brief.md
@@ -619,55 +678,35 @@ class TestTriageBriefSynthesis:
         gh_result.stderr = ""
         mock_subprocess.return_value = gh_result
 
-        # Capture what the sub-workflow receives
-        captured: dict = {}
-        app = MagicMock()
-        def _invoke(payload):
-            captured.update(payload)
-            return {"issue_brief_path": "/fake/produced/brief.md"}
-        app.invoke.side_effect = _invoke
-        graph = MagicMock()
-        graph.compile.return_value = app
-        mock_create_graph.return_value = graph
-
+        target = tmp_path / "target-repo"
+        target.mkdir()
         state = create_initial_state(
             37, get_default_config(),
-            target_repo="/fake/projects/Chiron",
+            target_repo=str(target),
             assemblyzero_root="/fake/projects/AssemblyZero",
         )
 
         result = run_triage_stage(state)
 
         # gh was called for the right issue against the right cwd
-        gh_call = mock_subprocess.call_args
-        assert gh_call is not None
-        args = gh_call[0][0]
+        gh_calls = [
+            c for c in mock_subprocess.call_args_list
+            if c[0][0][:3] == ["gh", "issue", "view"]
+        ]
+        assert gh_calls, "gh issue view must be called"
+        args = gh_calls[0][0][0]
         assert args[:4] == ["gh", "issue", "view", "37"]
-        assert gh_call[1]["cwd"] == "/fake/projects/Chiron"
+        assert gh_calls[0][1]["cwd"] == str(target)
 
-        # brief_file was threaded into the sub-workflow state
-        assert "brief_file" in captured
-        assert captured["brief_file"]  # non-empty path
-        # The temp brief file actually contains the synthesized brief
-        with open(captured["brief_file"], encoding="utf-8") as f:
-            content = f.read()
+        # #1770: stage passes; brief persisted to the canonical location
+        triage_result = result["stage_results"]["triage"]
+        assert triage_result["status"] == "passed"
+        canonical = target / "docs" / "lineage" / "37" / "issue-brief.md"
+        assert canonical.is_file()
+        content = canonical.read_text(encoding="utf-8")
         assert "Fresh issue from GitHub" in content
         assert "Body content the operator never pre-authored" in content
-
-        # Stage no longer halts at the pre-fix "No brief file specified"
-        # gate. Final status reflects the sub-workflow's return — in this
-        # test the mocked brief_path doesn't exist on disk so the stage
-        # registers as failed-after-sub-workflow rather than failed-pre-fetch.
-        # The important assertion is the brief_file threading above; status
-        # here would only be "passed" with a real produced file.
-        triage_result = result["stage_results"]["triage"]
-        if triage_result["status"] == "failed":
-            # Verify it's the post-sub-workflow failure, NOT the
-            # cannot-synthesize-brief halt from the bug or the missing-
-            # brief_file pre-fix halt.
-            err = triage_result.get("error_message", "")
-            assert "cannot synthesize brief" not in err
-            assert "No brief file specified" not in err
+        assert triage_result["artifact_path"] == str(canonical)
 
     @patch("assemblyzero.workflows.orchestrator.stages.subprocess.run")
     @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
