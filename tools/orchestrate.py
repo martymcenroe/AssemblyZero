@@ -120,6 +120,17 @@ Examples:
     parser.add_argument("--no-skip-spec", action="store_true", help="Force spec regeneration")
     parser.add_argument("--gate-pr", action="store_true", default=None, help="Enable human gate before PR")
     parser.add_argument("--no-gate-pr", action="store_true", help="Disable human gate before PR")
+    parser.add_argument(
+        "--base-branch",
+        type=str,
+        default=None,
+        dest="base_branch",
+        help=(
+            "Integration branch every pipeline PR targets (#1755 "
+            "attempt-branch model). Default: the branch the target repo "
+            "is checked out on."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -161,6 +172,7 @@ Examples:
             dry_run=args.dry_run,
             target_repo=target_repo,
             assemblyzero_root=assemblyzero_root,
+            base_branch=args.base_branch,
         )
 
         if result["success"]:
