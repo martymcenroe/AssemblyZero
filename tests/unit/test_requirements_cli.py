@@ -232,6 +232,7 @@ class TestBuildInitialState:
         args.mock = True
         args.max_iterations = 10
         args.context = ["src/auth.py"]
+        args.base_branch = "main"
 
         state = build_initial_state(
             args,
@@ -666,6 +667,7 @@ class TestAllArgumentsUsed:
             "--type", "lld",
             "--issue", "42",
             "--mock",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
@@ -680,6 +682,7 @@ class TestAllArgumentsUsed:
             "--type", "lld",
             "--issue", "42",
             "--gates", "none",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
@@ -695,6 +698,7 @@ class TestAllArgumentsUsed:
             "--issue", "42",
             "--context", "src/auth.py",
             "--context", "src/utils.py",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
@@ -709,6 +713,7 @@ class TestAllArgumentsUsed:
             "--type", "lld",
             "--issue", "42",
             "--max-iterations", "5",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
@@ -723,6 +728,7 @@ class TestAllArgumentsUsed:
             "--type", "lld",
             "--issue", "42",
             "--drafter", "gemini:2.5-flash",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
@@ -737,11 +743,65 @@ class TestAllArgumentsUsed:
             "--type", "lld",
             "--issue", "42",
             "--reviewer", "claude:sonnet",
+            "--base-branch", "main",
         ])
 
         state = build_initial_state(args, tmp_path, tmp_path)
 
         assert state["config_reviewer"] == "claude:sonnet"
+
+    def test_base_branch_flag_passed_to_state(self, tmp_path):
+        """#1754 attempt-branch model: --base-branch lands in state so the
+        LLD PR targets it instead of a hardcoded main."""
+        from tools.run_requirements_workflow import parse_args, build_initial_state
+
+        args = parse_args([
+            "--type", "lld",
+            "--issue", "42",
+            "--base-branch", "speedrun-attempt-1",
+        ])
+
+        state = build_initial_state(args, tmp_path, tmp_path)
+
+        assert state["base_branch"] == "speedrun-attempt-1"
+
+    @patch("tools.run_requirements_workflow.current_branch")
+    def test_base_branch_detected_from_target_repo_checkout(
+        self, mock_branch, tmp_path
+    ):
+        """Without --base-branch, the integration branch is detected from
+        the target repo's checkout — never assumed to be main (#1754)."""
+        from tools.run_requirements_workflow import parse_args, build_initial_state
+
+        mock_branch.return_value = "speedrun-attempt-2"
+
+        args = parse_args([
+            "--type", "lld",
+            "--issue", "42",
+        ])
+
+        state = build_initial_state(args, tmp_path, tmp_path)
+
+        mock_branch.assert_called_once_with(tmp_path)
+        assert state["base_branch"] == "speedrun-attempt-2"
+
+    @patch("tools.run_requirements_workflow.current_branch")
+    def test_generated_work_branch_rejected_as_base(self, mock_branch, tmp_path):
+        """Running the LLD workflow while the target repo sits on a
+        generated work branch (e.g. 42-lld) aborts loudly BEFORE any LLM
+        quota is burned (#1754)."""
+        from assemblyzero.utils.git import GitBranchError
+        from tools.run_requirements_workflow import parse_args, build_initial_state
+
+        mock_branch.return_value = "42-lld"
+
+        args = parse_args([
+            "--type", "lld",
+            "--issue", "42",
+        ])
+
+        with pytest.raises(GitBranchError, match="generated work branch"):
+            build_initial_state(args, tmp_path, tmp_path)
 
 
 class TestRepoAutoDetection:
