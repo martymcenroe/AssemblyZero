@@ -778,6 +778,22 @@ class TestGeminiProvider:
         provider = GeminiProvider(model="3.1-pro-preview")
         assert provider.model == "3.1-pro-preview"
 
+    def test_pro_aliases_resolve_to_living_catalog_ids(self):
+        """#1764: agy retired the -preview IDs. Every Pro-line alias must
+        resolve to a model the CLI actually serves (verified against
+        `agy models` 2026-07-14) — a dead ID turns every pipeline LLM call
+        into an error banner."""
+        assert GeminiProvider.MODEL_MAP["3.1-pro-preview"] == "gemini-3.1-pro-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro"] == "gemini-3.1-pro-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro-high"] == "gemini-3.1-pro-high"
+        assert GeminiProvider.MODEL_MAP["3.1-pro-low"] == "gemini-3.1-pro-low"
+
+    def test_pro_preview_alias_maps_to_high_model_id(self):
+        """The workflow default spec gemini:3.1-pro-preview must construct a
+        provider whose resolved model ID is servable (#1764)."""
+        provider = GeminiProvider(model="3.1-pro-preview")
+        assert provider._model_id == "gemini-3.1-pro-high"
+
     def test_valid_model_3_flash_preview(self):
         """Test creating provider with 3.1-flash-preview model."""
         provider = GeminiProvider(model="3.1-flash-preview")

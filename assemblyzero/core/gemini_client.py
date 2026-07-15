@@ -306,7 +306,7 @@ class GeminiClient:
         if model in FORBIDDEN_MODELS:
             raise ValueError(
                 f"Model '{model}' is explicitly forbidden for governance. "
-                f"Allowed: gemini-3.1-pro-preview, gemini-3-flash-preview"
+                f"Allowed: Pro-tier models (e.g. gemini-3.1-pro-high; #1764)"
             )
         if not model.startswith("gemini-"):
             raise ValueError(
@@ -387,6 +387,7 @@ class GeminiClient:
 
         argv = [self._agy_cli, "-p", full_prompt, "--model", self.model]
         chunks: list[str] = []
+        exit_status = None
         try:
             with tempfile.TemporaryDirectory() as tmp_cwd:
                 proc = PtyProcess.spawn(argv, cwd=tmp_cwd, dimensions=(60, 1000))
@@ -411,10 +412,26 @@ class GeminiClient:
                     except Exception:
                         pass
                     return False, "", "agy CLI timeout (300s)"
+                try:
+                    exit_status = proc.exitstatus
+                except Exception:
+                    exit_status = None
         except Exception as e:  # pywinpty raises assorted OS/runtime errors
             return False, "", f"agy CLI invocation failed: {e}"
 
         text = _strip_ansi("".join(chunks)).strip()
+
+        # #1765: never hand a CLI error banner to callers as model output.
+        # An invalid --model (etc.) printed 'Error: ...' to the PTY and was
+        # laundered through draft -> review -> verdict as content. Nonzero
+        # exit is the primary signal; a first-line 'Error:' catches banners
+        # printed under a PTY with ambiguous status.
+        if exit_status not in (0, None):
+            return False, "", f"agy exited {exit_status}: {text[:400]}"
+        first_line = text.splitlines()[0].strip() if text else ""
+        if first_line.startswith("Error:"):
+            return False, "", f"agy error output: {text[:400]}"
+
         if text:
             return True, text, ""
         return False, "", "agy returned no output"
