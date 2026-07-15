@@ -742,6 +742,23 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
         })
 
         error_msg = sub_result.get("error_message", "")
+        # #1779: the completeness gate's verdict must survive to the stage
+        # result. The gate's stagnation halt routes the sub-workflow to END
+        # without setting error_message — run 6 shipped a PR of BLOCKED,
+        # untested code under a 'completed successfully' banner. A BLOCK
+        # verdict IS a failure: no PR is opened from unverified code; the
+        # work-in-progress stays on the pushed branch and in the
+        # implementation report for a resume.
+        if not error_msg and sub_result.get("completeness_verdict") == "BLOCK":
+            issues = sub_result.get("completeness_issues", [])
+            issue_lines = "; ".join(
+                str(i.get("message", i)) if isinstance(i, dict) else str(i)
+                for i in issues[:5]
+            )
+            error_msg = (
+                "Completeness gate BLOCK — implementation halted with "
+                f"unresolved issues: {issue_lines or 'see implementation report'}"
+            )
         if not error_msg:
             result = _make_stage_result(
                 status="passed",

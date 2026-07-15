@@ -175,8 +175,14 @@ Examples:
             base_branch=args.base_branch,
         )
 
+        # #1785: the summary IS the per-stage evidence — printed on every
+        # exit, success or failure. No more blanket success banner (#1779).
+        from assemblyzero.workflows.orchestrator.graph import format_stage_table
+        print()
+        print(format_stage_table(result["stage_results"]))
+
         if result["success"]:
-            print(f"\n[ORCHESTRATOR] Pipeline completed successfully!")
+            print(f"\n[ORCHESTRATOR] All stages passed.")
             if result["pr_url"]:
                 print(f"[ORCHESTRATOR] PR: {result['pr_url']}")
             print(f"[ORCHESTRATOR] Duration: {result['total_duration_seconds']:.1f}s")

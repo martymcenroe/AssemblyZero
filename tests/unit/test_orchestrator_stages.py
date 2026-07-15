@@ -172,6 +172,85 @@ class TestRunTriageStage:
         assert "empty" in new_state["stage_results"]["triage"]["error_message"]
 
 
+class TestImplCompletenessGateHonesty:
+    """#1779: a BLOCK verdict from the completeness gate must fail the
+    stage — run 6 shipped a PR of untested code under a success banner."""
+
+    def _run_impl(self, sub_result: dict, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import run_impl_stage
+
+        config = get_default_config()
+        state = create_initial_state(
+            4, config,
+            target_repo=str(tmp_path / "target"),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+        state["spec_path"] = str(tmp_path / "spec.md")
+        (tmp_path / "spec.md").write_text("# spec")
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                return sub_result
+
+        class _StubGraph:
+            def compile(self) -> _StubApp:
+                return _StubApp()
+
+        with patch(
+            "assemblyzero.workflows.orchestrator.stages.run_command",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        ), patch(
+            "assemblyzero.workflows.testing.graph.build_testing_workflow",
+            return_value=_StubGraph(),
+        ):
+            return run_impl_stage(state)
+
+    def test_block_verdict_fails_stage(self, tmp_path):
+        result_state = self._run_impl(
+            {
+                "error_message": "",
+                "completeness_verdict": "BLOCK",
+                "completeness_issues": [
+                    {"message": "stub function detected"},
+                    "trivial assertion",
+                ],
+            },
+            tmp_path,
+        )
+        impl = result_state["stage_results"]["impl"]
+        assert impl["status"] == "failed"
+        assert "Completeness gate BLOCK" in impl["error_message"]
+        assert "stub function detected" in impl["error_message"]
+
+    def test_pass_verdict_still_passes(self, tmp_path):
+        result_state = self._run_impl(
+            {"error_message": "", "completeness_verdict": "PASS"},
+            tmp_path,
+        )
+        assert result_state["stage_results"]["impl"]["status"] == "passed"
+
+
+class TestFormatStageTable:
+    """#1785: the run summary is a per-stage table, not a banner."""
+
+    def test_table_shows_verdicts_and_errors(self):
+        from assemblyzero.workflows.orchestrator.graph import format_stage_table
+
+        table = format_stage_table({
+            "triage": {"status": "passed", "duration_seconds": 1.2,
+                       "artifact_path": "docs/lineage/7/issue-brief.md",
+                       "error_message": ""},
+            "impl": {"status": "failed", "duration_seconds": 150.0,
+                     "artifact_path": "",
+                     "error_message": "Completeness gate BLOCK — stub"},
+        })
+        assert "triage" in table and "passed" in table
+        assert "impl" in table and "failed" in table
+        assert "Completeness gate BLOCK" in table
+        # Stages that never ran still appear (honest blanks)
+        assert "cleanup" in table
+
+
 class TestImplWorktreeUpstreamPush:
     """#1780: the impl worktree branch is pushed -u at creation so
     checkpoint pushes work (crash-resilience)."""
