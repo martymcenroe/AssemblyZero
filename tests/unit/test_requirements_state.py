@@ -126,8 +126,8 @@ class TestCreateInitialState:
             issue_number=1,
         )
 
-        assert state["config_drafter"] == "gemini:3.1-pro-preview"
-        assert state["config_reviewer"] == "gemini:3.1-pro-preview"
+        assert state["config_drafter"] == "gemini:3.1-pro"
+        assert state["config_reviewer"] == "gemini:3.1-pro"
         assert state["config_effort"] == "max"
         assert state["config_gates_draft"] is True
         assert state["config_gates_verdict"] is True
