@@ -172,6 +172,107 @@ class TestRunTriageStage:
         assert "empty" in new_state["stage_results"]["triage"]["error_message"]
 
 
+class TestImplWorktreeUpstreamPush:
+    """#1780: the impl worktree branch is pushed -u at creation so
+    checkpoint pushes work (crash-resilience)."""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_worktree_creation_pushes_upstream(self, mock_run, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import run_impl_stage
+
+        out = MagicMock()
+        out.stdout = ""
+        out.stderr = ""
+        out.returncode = 0
+        mock_run.return_value = out
+
+        config = get_default_config()
+        state = create_initial_state(
+            4,
+            config,
+            target_repo=str(tmp_path / "target"),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+        state["spec_path"] = str(tmp_path / "spec.md")
+        (tmp_path / "spec.md").write_text("# spec")
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                return {"error_message": ""}
+
+        class _StubGraph:
+            def compile(self) -> _StubApp:
+                return _StubApp()
+
+        with patch(
+            "assemblyzero.workflows.testing.graph.build_testing_workflow",
+            return_value=_StubGraph(),
+        ):
+            run_impl_stage(state)
+
+        push_calls = [
+            c for c in mock_run.call_args_list
+            if len(c.args[0]) >= 4 and c.args[0][3:4] == ["push"]
+            or ("push" in c.args[0] and "-u" in c.args[0])
+        ]
+        assert any(
+            "-u" in c.args[0] and "issue-4" in c.args[0] for c in push_calls
+        ), f"expected a push -u origin issue-4 at worktree creation; calls: {[c.args[0] for c in mock_run.call_args_list]}"
+
+
+class TestWorktreeRemovalRetry:
+    """#1781: transient Windows file locks — retry before declaring residue."""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.time.sleep")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.remove_worktree")
+    def test_lock_then_success_is_removed(self, mock_remove, mock_sleep, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import (
+            _remove_orchestrator_worktrees,
+        )
+
+        target = tmp_path / "boostgauge"
+        target.mkdir()
+        (tmp_path / "boostgauge-7-lld").mkdir()
+        (tmp_path / "boostgauge-7").mkdir()
+
+        # Each worktree: first attempt locked, second succeeds
+        mock_remove.side_effect = [
+            OSError("exit 128: file in use"), None,
+            OSError("exit 128: file in use"), None,
+        ]
+
+        notes: list[str] = []
+        _remove_orchestrator_worktrees(str(target), 7, lld_merged=False, notes=notes)
+
+        joined = "\n".join(notes)
+        assert "removed LLD worktree" in joined
+        assert "removed impl worktree" in joined
+        assert "residue" not in joined
+        assert mock_remove.call_count == 4
+
+    @patch("assemblyzero.workflows.orchestrator.stages.time.sleep")
+    @patch("assemblyzero.workflows.testing.nodes.cleanup_helpers.remove_worktree")
+    def test_persistent_lock_reports_residue_without_force(
+        self, mock_remove, mock_sleep, tmp_path
+    ):
+        from assemblyzero.workflows.orchestrator.stages import (
+            _remove_orchestrator_worktrees,
+        )
+
+        target = tmp_path / "boostgauge"
+        target.mkdir()
+        (tmp_path / "boostgauge-7").mkdir()
+
+        mock_remove.side_effect = OSError("exit 128: file in use")
+
+        notes: list[str] = []
+        _remove_orchestrator_worktrees(str(target), 7, lld_merged=False, notes=notes)
+
+        joined = "\n".join(notes)
+        assert "residue left, no --force" in joined
+        assert mock_remove.call_count == 3  # 3 attempts, then honest residue
+
+
 class TestStageRunners:
     """Tests for STAGE_RUNNERS mapping."""
 

@@ -1358,6 +1358,29 @@ class TestFinalizeNodeAdditional:
         assert "detached HEAD" in result.get("commit_error", "")
 
 
+class TestFinalLldPrUrlDeclared:
+    """#1778: the PR URL key must be DECLARED in the state schema or
+    LangGraph strips it and the orchestrator's cleanup never merges the
+    LLD PR (fourth member of the undeclared-key family: #1757, #1770)."""
+
+    def test_declared_in_state_schema(self):
+        from assemblyzero.workflows.requirements.state import (
+            RequirementsWorkflowState,
+        )
+        assert "final_lld_pr_url" in RequirementsWorkflowState.__annotations__
+
+    def test_initialized_empty_for_lld_workflow(self):
+        from assemblyzero.workflows.requirements.state import create_initial_state
+
+        state = create_initial_state(
+            workflow_type="lld",
+            assemblyzero_root="/az",
+            target_repo="/target",
+            issue_number=7,
+        )
+        assert state["final_lld_pr_url"] == ""
+
+
 class TestFinalizeLineageFiles:
     """Tests for lineage files being excluded from created_files.
 

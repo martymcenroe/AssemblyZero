@@ -224,6 +224,10 @@ class RequirementsWorkflowState(TypedDict, total=False):
 
     # Output - LLD workflow
     final_lld_path: str
+    # #1778: MUST be declared or LangGraph strips it from the graph result
+    # and the orchestrator's cleanup stage never learns the LLD PR exists
+    # (silently skipping the merge). Set by finalize's worktree+PR path.
+    final_lld_pr_url: str
     lld_status: Literal["PENDING", "APPROVED", "BLOCKED"]
 
     # Error handling
@@ -406,6 +410,7 @@ def create_initial_state(
                 "context_files": context_files or [],
                 "context_content": "",
                 "final_lld_path": "",
+                "final_lld_pr_url": "",
                 "lld_status": "PENDING",
             }
         )
