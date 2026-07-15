@@ -11,6 +11,7 @@ Issue #605: Systemic Model Refresh — Gemini 3.1, Claude 4.6
 """
 
 import json
+import subprocess
 import sys
 import tempfile
 import types
@@ -243,6 +244,82 @@ class TestInvokeViaCliErrorBoundary:
             ok, text, err = client._invoke_via_cli("sys", "content")
         assert ok is False
         assert "no output" in err
+
+
+class TestInvokeViaStdin:
+    """#1772: prompts beyond the Windows argv ceiling ride stdin.
+
+    `agy --model X` with no -p reads the prompt from stdin and prints to a
+    plain pipe (verified live with a 39,954-char prompt). Same #1765 error
+    boundaries as the PTY path.
+    """
+
+    def _client(self, temp_credentials_file, temp_state_file):
+        client = GeminiClient(
+            model="gemini-3.1-pro-high",
+            credentials_file=temp_credentials_file,
+            state_file=temp_state_file,
+        )
+        client._agy_cli = "/fake/agy"
+        return client
+
+    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    def test_oversize_prompt_routes_to_stdin_path(
+        self, mock_run, temp_credentials_file, temp_state_file
+    ):
+        """_invoke_via_cli must route >30K prompts to stdin — never reject
+        them, never put them in argv."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="A fine review.\n", stderr=""
+        )
+        client = self._client(temp_credentials_file, temp_state_file)
+
+        big_content = "x" * 31000
+        ok, text, err = client._invoke_via_cli("sys", big_content)
+
+        assert ok is True
+        assert "fine review" in text
+        argv = mock_run.call_args[0][0]
+        assert "-p" not in argv, "oversize prompt must NOT ride argv"
+        assert argv[0] == "/fake/agy"
+        assert argv[1:3] == ["--model", "gemini-3.1-pro-high"]
+        kwargs = mock_run.call_args[1]
+        assert len(kwargs["input"]) > 31000  # full composed prompt on stdin
+        assert kwargs["cwd"], "stdin path must keep temp-cwd isolation"
+
+    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    def test_stdin_nonzero_exit_is_failure(
+        self, mock_run, temp_credentials_file, temp_state_file
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="Error: invalid --model"
+        )
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_stdin("p" * 31000)
+        assert ok is False
+        assert "agy exited 1" in err
+
+    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    def test_stdin_error_banner_is_failure(
+        self, mock_run, temp_credentials_file, temp_state_file
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="Error: something odd\n", stderr=""
+        )
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_stdin("p" * 31000)
+        assert ok is False
+        assert "agy error output" in err
+
+    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    def test_stdin_timeout_is_failure(
+        self, mock_run, temp_credentials_file, temp_state_file
+    ):
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="agy", timeout=300)
+        client = self._client(temp_credentials_file, temp_state_file)
+        ok, text, err = client._invoke_via_stdin("p" * 31000)
+        assert ok is False
+        assert "timeout" in err.lower()
 
 
 class TestErrorClassification:
@@ -504,11 +581,18 @@ def test_invoke_via_cli_agy_not_found():
     assert ok is False and resp == "" and "not found" in err.lower()
 
 
-def test_invoke_via_cli_rejects_oversized_prompt():
+def test_invoke_via_cli_routes_oversized_prompt_to_stdin():
+    """#1772: oversize prompts are no longer rejected — they ride stdin.
+    (Supersedes the pre-#1772 'too large' rejection this test used to pin.)"""
     client = GeminiClient(model="gemini-3.1-pro-preview")
     client._agy_cli = "agy"
-    ok, resp, err = client._invoke_via_cli("sys", "x" * 31000)
-    assert ok is False and "too large" in err
+    with patch.object(
+        client, "_invoke_via_stdin", return_value=(True, "ok", "")
+    ) as mock_stdin:
+        ok, resp, err = client._invoke_via_cli("sys", "x" * 31000)
+    assert ok is True and resp == "ok"
+    mock_stdin.assert_called_once()
+    assert len(mock_stdin.call_args[0][0]) > 31000  # full composed prompt
 
 
 def test_invoke_via_cli_strips_ansi_and_returns_text():

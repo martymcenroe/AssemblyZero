@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -371,12 +372,13 @@ class GeminiClient:
             f"<user_content>\n{content}\n</user_content>"
         )
 
-        # Windows CreateProcess command-line limit is 32767 chars; leave headroom.
+        # Windows CreateProcess command-line limit is 32767 chars; leave
+        # headroom. #1772: oversize prompts ride stdin instead of argv —
+        # `agy --model X` with no -p reads the prompt from stdin and prints
+        # the response to a plain pipe (verified with a 39,954-char prompt).
+        # Small prompts keep the proven PTY path below.
         if len(full_prompt) > 30000:
-            return False, "", (
-                f"prompt too large for agy argv ({len(full_prompt)} chars > 30000); "
-                f"stdin-based invocation is a follow-up"
-            )
+            return self._invoke_via_stdin(full_prompt)
 
         try:
             from winpty import PtyProcess
@@ -422,6 +424,7 @@ class GeminiClient:
         text = _strip_ansi("".join(chunks)).strip()
 
         # #1765: never hand a CLI error banner to callers as model output.
+        # (Boundary checks below are mirrored in _invoke_via_stdin.)
         # An invalid --model (etc.) printed 'Error: ...' to the PTY and was
         # laundered through draft -> review -> verdict as content. Nonzero
         # exit is the primary signal; a first-line 'Error:' catches banners
@@ -435,6 +438,54 @@ class GeminiClient:
         if text:
             return True, text, ""
         return False, "", "agy returned no output"
+
+    def _invoke_via_stdin(self, full_prompt: str) -> tuple[bool, str, str]:
+        """Invoke agy with the prompt on stdin (#1772).
+
+        For prompts beyond the Windows argv ceiling. `agy --model X` with
+        no ``-p`` reads the prompt from stdin and prints the response to a
+        plain pipe — no PTY required on this path (verified 2026-07-14
+        with a 39,954-char prompt). Same temp-cwd isolation (no repo
+        GEMINI.md / CLAUDE.md context bleed) and the same #1765 error
+        boundaries as the PTY path.
+
+        Returns:
+            Tuple of (success, response_text, error_message)
+        """
+        import tempfile
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp_cwd:
+                result = subprocess.run(
+                    [self._agy_cli, "--model", self.model],
+                    input=full_prompt,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=300,
+                    cwd=tmp_cwd,
+                )
+        except subprocess.TimeoutExpired:
+            return False, "", "agy CLI timeout (300s, stdin path)"
+        except OSError as e:
+            return False, "", f"agy stdin invocation failed: {e}"
+
+        text = _strip_ansi(result.stdout or "").strip()
+
+        # #1765 boundaries, mirrored from the PTY path.
+        if result.returncode != 0:
+            detail = (result.stderr or "").strip() or text
+            return False, "", (
+                f"agy exited {result.returncode} (stdin path): {detail[:400]}"
+            )
+        first_line = text.splitlines()[0].strip() if text else ""
+        if first_line.startswith("Error:"):
+            return False, "", f"agy error output (stdin path): {text[:400]}"
+
+        if text:
+            return True, text, ""
+        return False, "", "agy returned no output (stdin path)"
 
     def invoke(
         self,
