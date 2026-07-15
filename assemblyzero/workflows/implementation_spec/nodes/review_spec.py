@@ -153,14 +153,26 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     # -------------------------------------------------------------------------
     # GUARD: Iteration bounds
+    #
+    # #1775: strictly GREATER than — the draft generated AT the final
+    # iteration still deserves its review. The iteration budget bounds
+    # REGENERATION, which the routing functions already enforce
+    # (route_after_validation and route_after_review both require
+    # review_iteration < max_iterations before re-entering N2), so
+    # reviewing here cannot loop: REVISE at max routes to HALT honestly,
+    # APPROVED finalizes. The old >= guard discarded a mechanically
+    # complete final spec unreviewed and synthesized a BLOCKED verdict
+    # no reviewer issued (boostgauge#96 hardening run 4).
     # -------------------------------------------------------------------------
-    if review_iteration >= max_iterations:
-        print(f"    [GUARD] Max iterations ({max_iterations}) reached")
+    if review_iteration > max_iterations:
+        print(f"    [GUARD] Iteration {review_iteration} exceeds budget ({max_iterations})")
         return {
             "review_verdict": "BLOCKED",
             "review_feedback": (
-                f"Maximum review iterations ({max_iterations}) exceeded. "
-                "Spec could not pass readiness review within allowed attempts."
+                f"Review iteration {review_iteration} exceeds the maximum "
+                f"({max_iterations}); the regeneration routing should have "
+                "halted earlier — treating as BLOCKED. The last generated "
+                "spec was NOT reviewed."
             ),
             "error_message": "",
         }
