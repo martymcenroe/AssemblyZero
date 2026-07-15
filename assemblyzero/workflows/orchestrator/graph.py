@@ -202,6 +202,47 @@ def create_orchestration_graph() -> StateGraph:
     return workflow
 
 
+def format_stage_table(stage_results: dict) -> str:
+    """#1785: per-stage run record — the summary IS the evidence.
+
+    Replaces the blanket 'completed successfully' banner that run 6 of the
+    boostgauge#96 campaign proved could assert success over a halted,
+    untested implementation (#1779). Pure function; unit-tested.
+    """
+    from assemblyzero.workflows.orchestrator.state import STAGE_ORDER
+
+    lines = [
+        f"{'STAGE':<9} {'VERDICT':<9} {'TIME':>7}  ARTIFACT / ERROR",
+        "-" * 70,
+    ]
+    for stage in STAGE_ORDER:
+        r = stage_results.get(stage)
+        if not r:
+            lines.append(f"{stage:<9} {'-':<9} {'-':>7}")
+            continue
+        status = r.get("status", "?")
+        secs = r.get("duration_seconds", 0.0)
+        detail = r.get("error_message") or r.get("artifact_path") or ""
+        lines.append(f"{stage:<9} {status:<9} {secs:>6.1f}s  {detail[:60]}")
+    return "\n".join(lines)
+
+
+def _write_run_record(issue_number: int, table: str, success: bool) -> None:
+    """Persist the per-run record next to the resume state (#1785)."""
+    from assemblyzero.workflows.orchestrator.resume import STATE_DIR
+
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        outcome = "SUCCESS" if success else "FAILED"
+        (STATE_DIR / f"{issue_number}-record.md").write_text(
+            f"# Run record — issue #{issue_number} — {outcome}\n\n"
+            f"```\n{table}\n```\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass  # the console table already showed it; never fail a run on this
+
+
 def orchestrate(
     issue_number: int,
     config: OrchestratorConfig | None = None,
@@ -374,6 +415,11 @@ def orchestrate(
             )
         else:
             error_summary = ""
+
+        # #1785: every run leaves a readable record beside its resume state.
+        _write_run_record(
+            issue_number, format_stage_table(stage_results), success
+        )
 
         return OrchestrationResult(
             success=success,
