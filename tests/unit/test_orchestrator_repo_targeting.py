@@ -60,22 +60,29 @@ def _external_state():
 
 
 @patch("assemblyzero.workflows.orchestrator.stages._fetch_issue_body_to_temp_brief")
-@patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
 @patch("assemblyzero.workflows.orchestrator.stages.detect_existing_artifacts")
-def test_triage_threads_target_repo(mock_detect, mock_create_graph, mock_fetch):
+def test_triage_threads_target_repo(mock_detect, mock_fetch, tmp_path):
+    """#1770: triage no longer invokes the issue-authoring sub-workflow.
+    target_repo threading now shows up as (a) the repo handed to the gh
+    fetch helper and (b) the canonical brief persisted under the TARGET
+    repo — never the orchestrator's own cwd."""
     mock_detect.return_value = {k: None for k in ("triage", "lld", "spec", "impl", "pr")}
-    # #1508: the fresh-issue path now fetches the issue body and writes a
-    # temp brief. Mock the helper so the test doesn't shell out to gh.
-    mock_fetch.return_value = ("/fake/tmp/orchestrator-issue-5.md", "")
-    captured: dict = {}
-    mock_create_graph.return_value = _capturing_graph(captured, {"issue_brief_path": ""})
+    temp_brief = tmp_path / "orchestrator-issue-5.md"
+    temp_brief.write_text("## Summary\nsynthesized\n", encoding="utf-8")
+    mock_fetch.return_value = (str(temp_brief), "")
 
-    run_triage_stage(_external_state())
+    target = tmp_path / "external-target"
+    target.mkdir()
+    state = create_initial_state(
+        5, get_default_config(), target_repo=str(target), assemblyzero_root=AZ_ROOT
+    )
 
-    assert captured["target_repo"] == EXTERNAL
-    assert captured["assemblyzero_root"] == AZ_ROOT
-    # #1508: brief_file is now threaded into the sub-workflow state
-    assert captured["brief_file"] == "/fake/tmp/orchestrator-issue-5.md"
+    result = run_triage_stage(state)
+
+    assert mock_fetch.call_args[0] == (5, str(target))
+    assert result["stage_results"]["triage"]["status"] == "passed"
+    canonical = target / "docs" / "lineage" / "5" / "issue-brief.md"
+    assert canonical.is_file(), "brief must persist under the target repo"
 
 
 @patch("assemblyzero.workflows.requirements.graph.create_requirements_graph")
