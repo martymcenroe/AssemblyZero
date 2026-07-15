@@ -273,6 +273,7 @@ def test_commit_and_pr_returns_empty_for_empty_created_files():
         target_repo="/tmp/target",
         issue_number=4,
         branch_name="4-lld",
+        base_branch="main",
     )
     assert sha == ""
     assert url == ""
@@ -321,6 +322,7 @@ def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
             target_repo=target,
             issue_number=4,
             branch_name="4-lld",
+            base_branch="main",
         )
 
     assert sha == "abc123"
@@ -334,6 +336,58 @@ def test_commit_and_pr_emits_no_issue_for_pr_body(tmp_path):
     assert "Ref #4" in title, f"PR title should reference — got {title!r}"
     # The branch is pushed by its real name with --set-upstream
     # (mirrors orchestrator/stages.py:493-509 pattern for impl stage).
+
+
+def test_commit_and_pr_targets_given_base_branch(tmp_path):
+    """#1754 attempt-branch model: the PR base is the integration branch
+    captured at invocation, never a hardcoded main. On a speedrun the
+    target repo stands on `speedrun-attempt-N` and the LLD PR must
+    target it."""
+    from unittest.mock import MagicMock, patch
+    from assemblyzero.workflows.requirements.git_operations import commit_and_pr
+
+    captured = {}
+
+    def fake_run(cmd, *args, **kwargs):
+        out = MagicMock()
+        out.returncode = 0
+        if cmd[:3] == ["gh", "pr", "create"]:
+            captured["pr_argv"] = list(cmd)
+            out.stdout = "https://github.com/owner/repo/pull/1\n"
+        elif cmd[:2] == ["git", "commit"]:
+            out.stdout = "[4-lld abc123] commit message\n"
+        elif cmd[:1] == ["git"] and "remote" in cmd:
+            out.stdout = "https://github.com/owner/repo.git\n"
+        else:
+            out.stdout = ""
+        return out
+
+    wt = tmp_path / "repo-4-lld"
+    wt.mkdir()
+    lld = wt / "LLD-004.md"
+    lld.write_text("# LLD")
+
+    with patch("assemblyzero.workflows.requirements.git_operations.run_command",
+               side_effect=fake_run):
+        commit_and_pr(
+            created_files=[str(lld)],
+            worktree_path=wt,
+            target_repo=tmp_path / "repo",
+            issue_number=4,
+            branch_name="4-lld",
+            base_branch="speedrun-attempt-1",
+        )
+
+    pr_argv = captured["pr_argv"]
+    base = pr_argv[pr_argv.index("--base") + 1]
+    assert base == "speedrun-attempt-1", (
+        f"PR must target the captured integration branch — got {base!r}"
+    )
+    body = pr_argv[pr_argv.index("--body") + 1]
+    assert "speedrun-attempt-1" in body, (
+        "PR body should name the branch the LLD lands on"
+    )
+    assert "land it on main" not in body
 
 
 # Issue #238 - Ref instead of Closes

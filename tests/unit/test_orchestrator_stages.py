@@ -191,6 +191,59 @@ class TestRunImplStageRepoRoot:
         )
 
 
+class TestLldStageBaseBranchThreading:
+    """#1755: the lld stage must thread base_branch into the requirements
+    graph's invoke payload so the LLD PR targets the attempt branch."""
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_lld_invoke_payload_carries_base_branch(self, mock_run, tmp_path):
+        from assemblyzero.workflows.orchestrator.stages import run_lld_stage
+
+        out = MagicMock()
+        out.stdout = ""
+        out.stderr = ""
+        out.returncode = 0
+        mock_run.return_value = out
+
+        config = get_default_config()
+        state = create_initial_state(
+            7,
+            config,
+            target_repo=str(tmp_path / "target"),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+        state["base_branch"] = "speedrun-attempt-1"
+
+        captured: dict[str, dict] = {}
+        final_lld = tmp_path / "LLD-007.md"
+        final_lld.write_text("# LLD")
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                captured["payload"] = payload
+                return {
+                    "error_message": "",
+                    "final_lld_path": str(final_lld),
+                    "final_verdict": "APPROVED",
+                }
+
+        class _StubGraph:
+            def compile(self) -> _StubApp:
+                return _StubApp()
+
+        with patch(
+            "assemblyzero.workflows.requirements.graph.create_requirements_graph",
+            return_value=_StubGraph(),
+        ):
+            run_lld_stage(state)
+
+        payload = captured.get("payload", {})
+        assert payload.get("base_branch") == "speedrun-attempt-1", (
+            "lld stage must thread the pipeline's base_branch into the "
+            f"requirements graph payload; got {payload.get('base_branch')!r}"
+        )
+
+
 class TestRunPrStage:
     """run_pr_stage must emit a pr-sentinel-compliant PR (Closes #1366).
 
@@ -219,6 +272,7 @@ class TestRunPrStage:
         config = get_default_config()
         state = create_initial_state(issue, config)
         state["worktree_path"] = "/tmp/AssemblyZero-1366"
+        state["base_branch"] = "main"
 
         new_state = run_pr_stage(state)
 
@@ -232,10 +286,12 @@ class TestRunPrStage:
         body = argv[argv.index("--body") + 1]
         title = argv[argv.index("--title") + 1]
         head = argv[argv.index("--head") + 1]
+        base = argv[argv.index("--base") + 1]
 
         assert f"Closes #{issue}" in body, f"PR body missing Closes #{issue}: {body!r}"
         assert f"Closes #{issue}" in title, f"PR title missing Closes #{issue}: {title!r}"
         assert head == worktree_branch, f"--head {head!r} != worktree branch {worktree_branch!r}"
+        assert base == "main", f"--base {base!r} != state base_branch 'main'"
 
         # The branch is pushed by its real name, never the hardcoded issue-{N}.
         push_calls = [c for c in mock_run.call_args_list if c.args[0][:2] == ["git", "push"]]
@@ -243,6 +299,72 @@ class TestRunPrStage:
         pushed_argv = push_calls[0].args[0]
         assert worktree_branch in pushed_argv
         assert f"issue-{issue}" not in pushed_argv
+
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_pr_base_is_attempt_branch_from_state(self, mock_run):
+        """#1755 attempt-branch model: the impl PR targets the integration
+        branch captured at pipeline start, never a hardcoded main."""
+        issue = 7
+
+        def fake_run(cmd, *args, **kwargs):
+            out = MagicMock()
+            if cmd[:2] == ["git", "rev-parse"]:
+                out.stdout = "issue-7\n"
+            elif cmd[:3] == ["gh", "pr", "create"]:
+                out.stdout = "https://github.com/owner/boostgauge/pull/99\n"
+            else:
+                out.stdout = ""
+            return out
+
+        mock_run.side_effect = fake_run
+
+        config = get_default_config()
+        state = create_initial_state(issue, config)
+        state["worktree_path"] = "/tmp/boostgauge-7"
+        state["base_branch"] = "speedrun-attempt-1"
+
+        new_state = run_pr_stage(state)
+
+        assert new_state["stage_results"]["pr"]["status"] == "passed"
+        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
+        argv = pr_calls[0].args[0]
+        base = argv[argv.index("--base") + 1]
+        assert base == "speedrun-attempt-1", (
+            f"impl PR must target the attempt branch — got {base!r}"
+        )
+
+    @patch("assemblyzero.workflows.orchestrator.stages.current_branch")
+    @patch("assemblyzero.workflows.orchestrator.stages.run_command")
+    def test_pr_base_detected_when_state_predates_key(self, mock_run, mock_branch):
+        """Persisted states from before #1755 lack base_branch — the pr
+        stage detects it from the target repo instead of assuming main."""
+        issue = 7
+
+        def fake_run(cmd, *args, **kwargs):
+            out = MagicMock()
+            if cmd[:2] == ["git", "rev-parse"]:
+                out.stdout = "issue-7\n"
+            elif cmd[:3] == ["gh", "pr", "create"]:
+                out.stdout = "https://github.com/owner/boostgauge/pull/99\n"
+            else:
+                out.stdout = ""
+            return out
+
+        mock_run.side_effect = fake_run
+        mock_branch.return_value = "speedrun-attempt-3"
+
+        config = get_default_config()
+        state = create_initial_state(issue, config)
+        state["worktree_path"] = "/tmp/boostgauge-7"
+        state["target_repo"] = "/tmp/boostgauge"
+        state.pop("base_branch", None)
+
+        run_pr_stage(state)
+
+        mock_branch.assert_called_once_with("/tmp/boostgauge")
+        pr_calls = [c for c in mock_run.call_args_list if c.args[0][:3] == ["gh", "pr", "create"]]
+        argv = pr_calls[0].args[0]
+        assert argv[argv.index("--base") + 1] == "speedrun-attempt-3"
 
 
 class TestMakeStageResultTransient:

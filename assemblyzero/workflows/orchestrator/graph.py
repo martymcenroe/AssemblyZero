@@ -11,6 +11,11 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from assemblyzero.utils.git import (
+    GitBranchError,
+    current_branch,
+    validate_integration_branch,
+)
 from assemblyzero.workflows.orchestrator.artifacts import detect_existing_artifacts
 from assemblyzero.workflows.orchestrator.config import (
     OrchestratorConfig,
@@ -204,6 +209,7 @@ def orchestrate(
     dry_run: bool = False,
     target_repo: str | None = None,
     assemblyzero_root: str | None = None,
+    base_branch: str | None = None,
 ) -> OrchestrationResult:
     """Run full pipeline from issue to PR.
 
@@ -217,6 +223,9 @@ def orchestrate(
             AssemblyZero (Issue #1374).
         assemblyzero_root: Where AssemblyZero lives (templates). Defaults to
             the resolved AssemblyZero root.
+        base_branch: Integration branch every pipeline PR targets (#1755
+            attempt-branch model). Defaults to the branch target_repo is
+            checked out on — never a hardcoded main.
 
     Returns:
         OrchestrationResult with final status and artifacts
@@ -227,6 +236,25 @@ def orchestrate(
     # AssemblyZero root, so omitting --repo builds AssemblyZero.
     resolved_root = assemblyzero_root or default_assemblyzero_root()
     resolved_target = target_repo or resolved_root
+
+    # #1755 attempt-branch model: capture the integration branch ONCE at
+    # pipeline start, before any stage runs or the lock is taken. Every PR
+    # the pipeline opens targets this branch — never a hardcoded main. A
+    # generated work branch or detached HEAD fails loudly here, before any
+    # LLM quota is burned.
+    try:
+        resolved_base = base_branch or current_branch(resolved_target)
+        validate_integration_branch(resolved_base)
+    except GitBranchError as e:
+        return OrchestrationResult(
+            success=False,
+            issue_number=issue_number,
+            pr_url="",
+            final_stage="",
+            total_duration_seconds=0.0,
+            stage_results={},
+            error_summary=f"Base-branch resolution failed: {e}",
+        )
 
     # Load configuration
     effective_config = load_config(config)
@@ -270,11 +298,17 @@ def orchestrate(
             state_dict["target_repo"] = (
                 target_repo or state_dict.get("target_repo") or state_dict["assemblyzero_root"]
             )
+            # Base branch on resume (#1755): explicit arg wins, else keep
+            # what was persisted, else the freshly-detected branch.
+            state_dict["base_branch"] = (
+                base_branch or state_dict.get("base_branch") or resolved_base
+            )
             state = OrchestrationState(**state_dict)
         else:
             state = create_initial_state(
                 issue_number, effective_config, resolved_target, resolved_root
             )
+            state["base_branch"] = resolved_base
             # Detect existing artifacts and skip completed stages
             existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
             for stage in STAGE_ORDER:

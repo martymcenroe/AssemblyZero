@@ -36,6 +36,10 @@ class OrchestrationState(TypedDict, total=False):
     # Repo targeting (Issue #1374)
     target_repo: str  # Where the work happens (outputs, worktree, gh CLI)
     assemblyzero_root: str  # Where AssemblyZero lives (templates/prompts)
+    # Attempt-branch model (#1755): the integration branch target_repo was
+    # standing on at pipeline start. Every PR the pipeline opens targets
+    # this branch — never a hardcoded main. Captured once in orchestrate().
+    base_branch: str
 
     # Artifacts produced at each stage
     issue_brief_path: str
