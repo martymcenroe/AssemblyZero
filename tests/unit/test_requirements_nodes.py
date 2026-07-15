@@ -1870,8 +1870,8 @@ class TestReviewNodeCoverage:
         assert "invalid" in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
-    def test_handles_reviewer_failure(self, mock_get_provider, tmp_path):
-        """Test handling of reviewer invocation failure gracefully degrades to BLOCKED.
+    def test_reviewer_failure_is_llm_format_error(self, mock_get_provider, tmp_path):
+        """Reviewer failure surfaces as an LLM-format error (#1766).
 
         Issue #775: review node no longer checks result.success. Empty content
         from a failed provider falls through to regex fallback -> UNKNOWN -> BLOCKED.
@@ -1904,8 +1904,11 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        # With #775, empty content degrades to BLOCKED via UNKNOWN -> REVISE -> BLOCKED
-        assert result.get("lld_status") == "BLOCKED"
+        # #1766: empty/failed reviewer content is an LLM-format error, not a
+        # synthesized review outcome (was: UNKNOWN -> REVISE -> BLOCKED with
+        # an empty rationale). The stage retry machinery re-runs the review.
+        assert "unparseable" in result.get("error_message", "")
+        assert "lld_status" not in result
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
     def test_verdict_path_none_when_audit_dir_missing(self, mock_get_provider, tmp_path):
@@ -2015,8 +2018,8 @@ class TestReviewNodeCoverage:
         assert result.get("lld_status") == "BLOCKED"
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
-    def test_unknown_verdict_defaults_to_blocked(self, mock_get_provider, tmp_path):
-        """Test unknown verdict format defaults to BLOCKED."""
+    def test_unknown_verdict_is_llm_format_error(self, mock_get_provider, tmp_path):
+        """No extractable verdict -> honest error, not synthesized BLOCKED (#1766)."""
         from assemblyzero.workflows.requirements.nodes.review import review
         from assemblyzero.workflows.requirements.state import create_initial_state
 
@@ -2047,7 +2050,10 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        assert result.get("lld_status") == "BLOCKED"
+        # #1766: no extractable verdict -> honest LLM-format error, no
+        # synthesized BLOCKED.
+        assert "unparseable" in result.get("error_message", "")
+        assert "lld_status" not in result
 
 
 class TestGenerateDraftNodeCoverage:

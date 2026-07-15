@@ -11,7 +11,7 @@ Provides a unified interface for calling different LLM providers:
 - OpenAI (future)
 - Ollama (future)
 
-Spec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:3.1-pro-preview")
+Spec format: provider:model (e.g. "claude:opus", "anthropic:haiku", "gemini:3.1-pro")
 
 The "claude:" prefix uses CLI first (free via Max subscription), and automatically
 falls back to the Anthropic API if an API key is configured in .env.
@@ -645,18 +645,25 @@ class ClaudeCLIProvider(LLMProvider):
                     # Treat any non-dict shape as "use raw stdout" so the call
                     # still completes with a useful response and the raw bytes
                     # are preserved for debugging.
-                    if not isinstance(response_data, dict):
-                        # Closes #1498: Claude CLI v2.1.x returns a streaming-
-                        # events JSON array even on `--output-format json`.
-                        # Extract the actual response from the `result` event,
-                        # or fall back to assistant message content, before
-                        # last-resort raw stdout. The earlier behavior (just
-                        # stringify stdout) discarded a perfectly parseable
-                        # response and the downstream consumer couldn't find a
-                        # code block.
+                    if isinstance(response_data, list):
+                        # #1767: the streaming-events array IS the current
+                        # CLI's normal `--output-format json` shape (#1498) —
+                        # it is the primary path, not a surprise. No warning;
+                        # every call was paying a scary log line for normal
+                        # operation.
+                        logger.debug(
+                            "claude -p streaming-events array (%d events)",
+                            len(response_data),
+                        )
+                        response_text = _extract_text_from_stream_events(
+                            response_data, stdout
+                        )
+                    elif not isinstance(response_data, dict):
+                        # Genuinely unexpected shape (neither dict nor list) —
+                        # this one deserves the warning. #1431.
                         logger.warning(
-                            "claude -p returned non-dict JSON (type=%s); "
-                            "attempting streaming-events extraction. "
+                            "claude -p returned unexpected JSON shape "
+                            "(type=%s); attempting stream extraction. "
                             "stdout[:500]=%r",
                             type(response_data).__name__, stdout[:500]
                         )
@@ -1188,7 +1195,7 @@ class GeminiProvider(LLMProvider):
         "3.1-flash-preview": "gemini-3.1-flash-preview",
     }
 
-    def __init__(self, model: str = "3.1-pro-preview"):
+    def __init__(self, model: str = "3.1-pro"):
         """Initialize Gemini provider.
 
         Args:
@@ -1404,7 +1411,7 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
     """Parse provider:model specification.
 
     Args:
-        spec: Provider spec like "claude:opus" or "gemini:3.1-pro-preview".
+        spec: Provider spec like "claude:opus" or "gemini:3.1-pro".
 
     Returns:
         Tuple of (provider_name, model_name).
@@ -1415,7 +1422,7 @@ def parse_provider_spec(spec: str) -> tuple[str, str]:
     if ":" not in spec:
         raise ValueError(
             f"Invalid provider spec '{spec}'. Expected format: provider:model "
-            f"(e.g., 'claude:opus', 'gemini:3.1-pro-preview')"
+            f"(e.g., 'claude:opus', 'gemini:3.1-pro')"
         )
 
     parts = spec.split(":", 1)
@@ -1434,7 +1441,7 @@ def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
 
     Args:
         spec: Provider specification like "claude:opus", "anthropic:haiku",
-              or "gemini:3.1-pro-preview".
+              or "gemini:3.1-pro".
         effort: Effort level for Claude CLI (low/medium/high/max). None omits flag.
 
     Returns:
@@ -1447,7 +1454,7 @@ def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
     Examples:
         >>> drafter = get_provider("claude:opus")
         >>> direct = get_provider("anthropic:haiku")  # requires --allow-api
-        >>> reviewer = get_provider("gemini:3.1-pro-preview")
+        >>> reviewer = get_provider("gemini:3.1-pro")
         >>> mock = get_provider("mock:test")
     """
     provider, model = parse_provider_spec(spec)

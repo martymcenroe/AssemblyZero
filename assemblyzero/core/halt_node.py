@@ -65,7 +65,13 @@ def classify_error(error_message: str) -> str:
         return "capacity_exhausted"
     if any(p in msg_lower for p in ("quota exhausted", "429", "all credentials exhausted")):
         return "quota_exhausted"
-    if any(p in msg_lower for p in ("auth", "api_key_invalid", "permission_denied", "unauthenticated")):
+    # #1773: the bare substring "auth" false-matched credential NAMES like
+    # "oauth-primary" — a prompt-size rejection was halted as 'Check your
+    # Gemini credentials'. Match specific auth-failure phrases only.
+    if any(p in msg_lower for p in (
+        "authentication failed", "authentication error", "invalid api key",
+        "api_key_invalid", "permission_denied", "unauthenticated", "unauthorized",
+    )):
         return "auth"
 
     return "unknown"

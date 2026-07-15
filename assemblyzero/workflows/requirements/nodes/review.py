@@ -133,7 +133,7 @@ def review(state: RequirementsWorkflowState) -> dict[str, Any]:
     if mock_mode:
         reviewer_spec = "mock:review"
     else:
-        reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro-preview")
+        reviewer_spec = state.get("config_reviewer", "gemini:3.1-pro")
 
     # Determine review prompt path based on workflow type
     if workflow_type == "issue":
@@ -211,7 +211,19 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     response = ""
     verdict_status = feedback_result["verdict"]
     if verdict_status == "UNKNOWN":
-        verdict_status = "REVISE"
+        # #1766: an unparseable reviewer response is an LLM-format error,
+        # not a review outcome. Silently mapping UNKNOWN -> REVISE produced
+        # contradictory logs ('could not extract verdict' followed by
+        # 'Parsed structured verdict: REVISE' -> BLOCKED with an empty
+        # rationale) and burned two-strike halts on garbage. Fail loudly;
+        # the stage retry machinery re-runs the review.
+        msg = (
+            "Reviewer response unparseable — no verdict found (structured "
+            "parse and regex fallback both failed). Treating as LLM "
+            "format error."
+        )
+        print(f"    ERROR: {msg}")
+        return {"error_message": msg}
     # Backward compat: derive `structured` dict for any remaining callers
     structured = {"verdict": verdict_status, "rationale": feedback_result["rationale"]}
 

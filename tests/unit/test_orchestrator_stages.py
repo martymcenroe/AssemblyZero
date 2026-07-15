@@ -270,7 +270,7 @@ class TestWorktreeRemovalRetry:
 
         joined = "\n".join(notes)
         assert "residue left, no --force" in joined
-        assert mock_remove.call_count == 3  # 3 attempts, then honest residue
+        assert mock_remove.call_count == 5  # #1783: 5 backoff attempts, then honest residue
 
 
 class TestStageRunners:

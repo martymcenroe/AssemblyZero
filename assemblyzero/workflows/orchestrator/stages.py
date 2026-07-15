@@ -965,11 +965,13 @@ def _remove_orchestrator_worktrees(
         remove_worktree,
     )
 
-    def _remove_with_retry(path, attempts: int = 3, delay_s: float = 2.0) -> None:
-        # #1781: Windows file locks from just-finished child processes make
-        # the first removal attempt fail transiently — the identical command
-        # succeeds seconds later. Retry before declaring residue; never
-        # escalate to --force.
+    def _remove_with_retry(path, attempts: int = 5, base_delay_s: float = 2.0) -> None:
+        # #1781/#1783: Windows file locks from just-finished child processes
+        # (Claude CLI implementer sessions, pytest) outlive a flat 3x2s retry
+        # — run 7 proved the identical command succeeds minutes later.
+        # Exponential backoff: 2s, 4s, 8s, 16s between 5 attempts (~30s
+        # total). Never escalate to --force; persistent locks still report
+        # honest residue.
         last_exc: Exception | None = None
         for i in range(attempts):
             try:
@@ -978,7 +980,7 @@ def _remove_orchestrator_worktrees(
             except Exception as e:  # noqa: BLE001 — re-raised after retries
                 last_exc = e
                 if i < attempts - 1:
-                    time.sleep(delay_s)
+                    time.sleep(base_delay_s * (2 ** i))
         assert last_exc is not None
         raise last_exc
 

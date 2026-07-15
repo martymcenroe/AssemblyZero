@@ -215,7 +215,7 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     from assemblyzero.core.llm_provider import get_provider
     from assemblyzero.utils.retry import get_policy, with_retry
 
-    revisor_spec = state.get("config_drafter", "gemini:3.1-pro-preview")
+    revisor_spec = state.get("config_drafter", "gemini:3.1-pro")
     effort = state.get("config_effort")
     try:
         revisor = get_provider(revisor_spec, effort=effort)

@@ -43,20 +43,20 @@ def get_default_config() -> OrchestratorConfig:
             # crash (#1431) remains the reason this defaults to Gemini rather
             # than Claude — but with the right tier this time.
             "triage": StageConfig(
-                drafter="gemini:3.1-pro-preview",
-                reviewer="gemini:3.1-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=3,
                 timeout_seconds=300,
             ),
             "lld": StageConfig(
-                drafter="gemini:3.1-pro-preview",
-                reviewer="gemini:3.1-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=5,
                 timeout_seconds=600,
             ),
             "spec": StageConfig(
-                drafter="gemini:3.1-pro-preview",
-                reviewer="gemini:3.1-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=3,
                 timeout_seconds=600,
             ),
@@ -65,8 +65,8 @@ def get_default_config() -> OrchestratorConfig:
                 # sub-workflow's N1 (review test plan) to halt with
                 # "Invalid provider spec ''". Top-tier Gemini matches every
                 # other LLM-bearing stage and the operator preference (#1434).
-                drafter="gemini:3.1-pro-preview",
-                reviewer="gemini:3.1-pro-preview",
+                drafter="gemini:3.1-pro",
+                reviewer="gemini:3.1-pro",
                 max_revisions=3,
                 timeout_seconds=1800,
             ),

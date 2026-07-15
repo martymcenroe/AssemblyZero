@@ -56,8 +56,8 @@ class TestGetDefaultConfig:
             "get_provider() which raises on empty spec"
         )
         # Top-tier-models preference (AZ #1434): every LLM-bearing reviewer
-        # uses gemini:3.1-pro-preview by default.
-        assert config["stages"]["impl"]["reviewer"] == "gemini:3.1-pro-preview"
+        # uses gemini:3.1-pro by default.
+        assert config["stages"]["impl"]["reviewer"] == "gemini:3.1-pro"
 
     def test_all_llm_bearing_stage_reviewers_are_top_tier(self):
         """Closes #1488. triage/lld/spec/impl all need non-empty reviewers
