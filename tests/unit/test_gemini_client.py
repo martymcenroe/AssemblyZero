@@ -173,7 +173,17 @@ class TestInvokeViaCliErrorBoundary:
 
     Hardening-run evidence: an 'Error: invalid --model' banner was saved as
     a draft and flowed through review and verdict as content.
+
+    winpty is Windows-only and absent on the Linux CI runner, so these
+    tests stub the whole module in sys.modules rather than patching into
+    a real import.
     """
+
+    @staticmethod
+    def _patch_winpty(spawner):
+        return patch.dict(
+            sys.modules, {"winpty": types.SimpleNamespace(PtyProcess=spawner)}
+        )
 
     def _client(self, temp_credentials_file, temp_state_file):
         return GeminiClient(
@@ -189,7 +199,7 @@ class TestInvokeViaCliErrorBoundary:
             "gemini-3.1-pro-preview is not recognized\nAvailable models:\n"
         )
         spawner, _ = _FakePty.make_spawn([banner], exitstatus=1)
-        with patch("winpty.PtyProcess", spawner):
+        with self._patch_winpty(spawner):
             ok, text, err = client._invoke_via_cli("sys", "content")
         assert ok is False
         assert text == ""
@@ -204,7 +214,7 @@ class TestInvokeViaCliErrorBoundary:
         client = self._client(temp_credentials_file, temp_state_file)
         banner = "Error: something went sideways\ndetails...\n"
         spawner, _ = _FakePty.make_spawn([banner], exitstatus=0)
-        with patch("winpty.PtyProcess", spawner):
+        with self._patch_winpty(spawner):
             ok, text, err = client._invoke_via_cli("sys", "content")
         assert ok is False
         assert text == ""
@@ -215,7 +225,7 @@ class TestInvokeViaCliErrorBoundary:
     ):
         client = self._client(temp_credentials_file, temp_state_file)
         spawner, _ = _FakePty.make_spawn(["## Draft\n\nA legitimate response.\n"])
-        with patch("winpty.PtyProcess", spawner):
+        with self._patch_winpty(spawner):
             ok, text, err = client._invoke_via_cli("sys", "content")
         assert ok is True
         assert "legitimate response" in text
@@ -224,7 +234,7 @@ class TestInvokeViaCliErrorBoundary:
     def test_empty_output_is_failure(self, temp_credentials_file, temp_state_file):
         client = self._client(temp_credentials_file, temp_state_file)
         spawner, _ = _FakePty.make_spawn([""])
-        with patch("winpty.PtyProcess", spawner):
+        with self._patch_winpty(spawner):
             ok, text, err = client._invoke_via_cli("sys", "content")
         assert ok is False
         assert "no output" in err
