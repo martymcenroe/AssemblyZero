@@ -39,6 +39,13 @@ from assemblyzero.workflows.implementation_spec.state import (
     ImplementationSpecState,
     PatternRef,
 )
+from assemblyzero.workflows.implementation_spec.nodes.edit_script import (
+    EDIT_SCRIPT_SYSTEM_PROMPT,
+    apply_edit_blocks,
+    build_edit_script_prompt,
+    parse_edit_blocks,
+    unchanged_ratio,
+)
 from assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder import (
     RetryContext,
     build_retry_prompt,
@@ -284,15 +291,73 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     print(f"    Drafter: {drafter_spec}")
 
     # -------------------------------------------------------------------------
-    # Call drafter LLM
+    # #1528: Edit-script revision — the model emits SEARCH/REPLACE blocks
+    # which are applied mechanically, so unflagged content cannot drift
+    # (measured regenerations oscillated 1,149→341→1,407 lines; see #1529).
+    # Any failure falls through to the classic full-revision call below.
     # -------------------------------------------------------------------------
-    cost_before = get_cumulative_cost()
-    result = drafter.invoke(
-        system_prompt=DRAFTER_SYSTEM_PROMPT,
-        content=prompt,
-        timeout_seconds=600,  # 10 min — impl specs are large
-    )
-    node_cost_usd = get_cumulative_cost() - cost_before
+    edit_script_content: str | None = None
+    result = None
+    if is_revision and retry_count < 1 and not drafter_spec.startswith("mock:"):
+        cost_before = get_cumulative_cost()
+        edit_result = drafter.invoke(
+            system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT,
+            content=build_edit_script_prompt(
+                existing_draft=existing_draft,
+                review_feedback=review_feedback,
+                completeness_issues=completeness_issues,
+                prior_completeness_breakdown=state.get(
+                    "prior_completeness_breakdown", []
+                ),
+            ),
+            timeout_seconds=600,
+        )
+        node_cost_usd = get_cumulative_cost() - cost_before
+        if edit_result.success:
+            blocks = parse_edit_blocks(edit_result.response or "")
+            if blocks:
+                patched, failures = apply_edit_blocks(existing_draft, blocks)
+                if not failures and patched != existing_draft:
+                    ratio = unchanged_ratio(existing_draft, patched)
+                    print(
+                        f"    [EDIT-SCRIPT] Applied {len(blocks)} edit(s); "
+                        f"{ratio:.0%} of prior spec preserved byte-identical "
+                        f"(#1528)"
+                    )
+                    edit_script_content = patched
+                    result = edit_result
+                else:
+                    reason = (
+                        "; ".join(failures)
+                        if failures
+                        else "edits produced no change"
+                    )
+                    print(
+                        f"    [EDIT-SCRIPT] Falling back to full revision: "
+                        f"{reason}"
+                    )
+            else:
+                print(
+                    "    [EDIT-SCRIPT] Falling back to full revision: "
+                    "no well-formed edit blocks in response"
+                )
+        else:
+            print(
+                f"    [EDIT-SCRIPT] Falling back to full revision: "
+                f"{edit_result.error_message}"
+            )
+
+    # -------------------------------------------------------------------------
+    # Call drafter LLM (classic full draft/revision path)
+    # -------------------------------------------------------------------------
+    if edit_script_content is None:
+        cost_before = get_cumulative_cost()
+        result = drafter.invoke(
+            system_prompt=DRAFTER_SYSTEM_PROMPT,
+            content=prompt,
+            timeout_seconds=600,  # 10 min — impl specs are large
+        )
+        node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
         print(f"    ERROR: {result.error_message}")
@@ -306,12 +371,15 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         print(f"    {msg}")
         return {"error_message": msg}
 
-    spec_content = result.response or ""
-
-    # -------------------------------------------------------------------------
-    # Strip preamble (safety: Claude sometimes adds text before the # heading)
-    # -------------------------------------------------------------------------
-    spec_content = _strip_preamble(spec_content)
+    if edit_script_content is not None:
+        # #1528: the patched draft IS the spec — no preamble to strip.
+        spec_content = edit_script_content
+    else:
+        spec_content = result.response or ""
+        # ---------------------------------------------------------------------
+        # Strip preamble (safety: Claude sometimes adds text before the # heading)
+        # ---------------------------------------------------------------------
+        spec_content = _strip_preamble(spec_content)
 
     # -------------------------------------------------------------------------
     # Save to audit trail
