@@ -696,6 +696,21 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 capture_output=True,
                 text=True,
             )
+            # #1780: set upstream at creation so checkpoint pushes work.
+            # Without it every [CP:*] push fails until the pr stage's
+            # --set-upstream, losing the crash-resilience checkpoints
+            # exist for. Non-fatal (offline runs stay possible).
+            push_result = run_command(
+                ["git", "-C", str(worktree_path), "push", "-u", "origin", branch_name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if push_result.returncode != 0:
+                print(
+                    f"    [WARN] could not push {branch_name} upstream: "
+                    f"{(push_result.stderr or '').strip()[:200]}"
+                )
 
         # Run implementation workflow
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
@@ -950,6 +965,23 @@ def _remove_orchestrator_worktrees(
         remove_worktree,
     )
 
+    def _remove_with_retry(path, attempts: int = 3, delay_s: float = 2.0) -> None:
+        # #1781: Windows file locks from just-finished child processes make
+        # the first removal attempt fail transiently — the identical command
+        # succeeds seconds later. Retry before declaring residue; never
+        # escalate to --force.
+        last_exc: Exception | None = None
+        for i in range(attempts):
+            try:
+                remove_worktree(path)
+                return
+            except Exception as e:  # noqa: BLE001 — re-raised after retries
+                last_exc = e
+                if i < attempts - 1:
+                    time.sleep(delay_s)
+        assert last_exc is not None
+        raise last_exc
+
     if target_repo:
         lld_wt = lld_worktree_path_for(target_repo, issue_number)
         if Path(lld_wt).is_dir():
@@ -959,7 +991,7 @@ def _remove_orchestrator_worktrees(
             except Exception:
                 branch = None
             try:
-                remove_worktree(lld_wt)
+                _remove_with_retry(lld_wt)
                 notes.append(f"removed LLD worktree {lld_wt}")
                 if lld_merged and branch:
                     try:
@@ -972,7 +1004,7 @@ def _remove_orchestrator_worktrees(
     impl_wt = worktree_path_for(issue_number, target_repo or None)
     if Path(impl_wt).is_dir():
         try:
-            remove_worktree(impl_wt)
+            _remove_with_retry(impl_wt)
             notes.append(f"removed impl worktree {impl_wt}")
         except Exception as e:
             notes.append(f"impl worktree not removed (residue left, no --force): {e}")
