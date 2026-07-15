@@ -1171,13 +1171,20 @@ class GeminiProvider(LLMProvider):
 
     # Model mapping from friendly names to actual model IDs
     # Issue #605: Gemini 3.1 (REQ-1) â€” removed deprecated 3.0 entries
+    # Issue #1764: agy retired the -preview IDs (catalog verified 2026-07-14
+    # via `agy models` + live probe). Pro-line aliases remap to the living
+    # gemini-3.1-pro-{low,high} so persisted states and older configs keep
+    # working instead of erroring at the CLI. Legacy flash/2.5 entries are
+    # untouched (already dead at the CLI; flash is forbidden for governance).
     MODEL_MAP = {
         "2.5-pro": "gemini-2.5-pro",
         "pro": "gemini-2.5-pro",
         "2.5-flash": "gemini-2.5-flash",
         "flash": "gemini-2.5-flash",
-        "3.1-pro-preview": "gemini-3.1-pro-preview",
-        "3.1-pro": "gemini-3.1-pro",
+        "3.1-pro-preview": "gemini-3.1-pro-high",  # superseded preview (#1764)
+        "3.1-pro": "gemini-3.1-pro-high",
+        "3.1-pro-high": "gemini-3.1-pro-high",
+        "3.1-pro-low": "gemini-3.1-pro-low",
         "3.1-flash-preview": "gemini-3.1-flash-preview",
     }
 

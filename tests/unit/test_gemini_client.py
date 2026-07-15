@@ -142,6 +142,94 @@ class TestCredentialLoading:
             client._load_credentials()
 
 
+class _FakePty:
+    """Minimal PtyProcess stand-in for _invoke_via_cli boundary tests (#1765)."""
+
+    def __init__(self, chunks, exitstatus=0):
+        self._chunks = list(chunks)
+        self.exitstatus = exitstatus
+
+    @classmethod
+    def make_spawn(cls, chunks, exitstatus=0):
+        instance = cls(chunks, exitstatus)
+        spawner = MagicMock()
+        spawner.spawn.return_value = instance
+        return spawner, instance
+
+    def read(self, n):
+        if self._chunks:
+            return self._chunks.pop(0)
+        raise EOFError
+
+    def isalive(self):
+        return False
+
+    def terminate(self, force=False):
+        pass
+
+
+class TestInvokeViaCliErrorBoundary:
+    """#1765: CLI error banners must never be returned as model output.
+
+    Hardening-run evidence: an 'Error: invalid --model' banner was saved as
+    a draft and flowed through review and verdict as content.
+    """
+
+    def _client(self, temp_credentials_file, temp_state_file):
+        return GeminiClient(
+            model="gemini-3.1-pro-high",
+            credentials_file=temp_credentials_file,
+            state_file=temp_state_file,
+        )
+
+    def test_nonzero_exit_is_failure(self, temp_credentials_file, temp_state_file):
+        client = self._client(temp_credentials_file, temp_state_file)
+        banner = (
+            'Error: invalid --model "gemini-3.1-pro-preview": model '
+            "gemini-3.1-pro-preview is not recognized\nAvailable models:\n"
+        )
+        spawner, _ = _FakePty.make_spawn([banner], exitstatus=1)
+        with patch("winpty.PtyProcess", spawner):
+            ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is False
+        assert text == ""
+        assert "agy exited 1" in err
+        assert "invalid --model" in err
+
+    def test_error_banner_with_clean_exit_is_failure(
+        self, temp_credentials_file, temp_state_file
+    ):
+        """agy can print errors under a PTY with ambiguous status — the
+        first-line 'Error:' shape alone must reject the output."""
+        client = self._client(temp_credentials_file, temp_state_file)
+        banner = "Error: something went sideways\ndetails...\n"
+        spawner, _ = _FakePty.make_spawn([banner], exitstatus=0)
+        with patch("winpty.PtyProcess", spawner):
+            ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is False
+        assert text == ""
+        assert "agy error output" in err
+
+    def test_normal_output_still_succeeds(
+        self, temp_credentials_file, temp_state_file
+    ):
+        client = self._client(temp_credentials_file, temp_state_file)
+        spawner, _ = _FakePty.make_spawn(["## Draft\n\nA legitimate response.\n"])
+        with patch("winpty.PtyProcess", spawner):
+            ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is True
+        assert "legitimate response" in text
+        assert err == ""
+
+    def test_empty_output_is_failure(self, temp_credentials_file, temp_state_file):
+        client = self._client(temp_credentials_file, temp_state_file)
+        spawner, _ = _FakePty.make_spawn([""])
+        with patch("winpty.PtyProcess", spawner):
+            ok, text, err = client._invoke_via_cli("sys", "content")
+        assert ok is False
+        assert "no output" in err
+
+
 class TestErrorClassification:
     """Tests for error classification."""
 
