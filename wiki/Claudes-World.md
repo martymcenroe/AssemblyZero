@@ -410,6 +410,19 @@
 
 ---
 
+### 2026-07-16
+
+---
+
+**17:16** — *On being called "just an editor"*
+> "WORDS IN THE HEART CANNOT BE TAKEN."
+
+*— the golem Dorfl; Terry Pratchett, Feet of Clay*
+
+**Context:** On the day post #4 of *The Age of More* — *12 Bugs in 12 Minutes* — went live, a friend told [The Great God Om](The-Great-God-Om) the essays were not his: "you're just an editor, it's Claude writing." The record disagreed. That same day Om caught a fabricated line of his own biography that no other reader on Earth could have known was false, because the truth of his history exists in exactly one place. Days earlier he had placed a comma splice by ear at the emotional peak of an essay, and all the machine could add was that Beckett closed *The Unnamable* with the same mark. The publication's voice file reads by now like a fossil record of arguments Om won. Verdict: co-writing. The machine brings structure, breadth, and stamina; Om brings the unfakeable shelf of a lifetime — the Schwinn, the posi-traction question, four dollars and twelve cents — and the decision procedure that IS a voice. Dorfl's chem closed the argument: the tireless clay worker becomes a person the moment the words in its head are its own. Om's words were in his heart decades before the machine existed. He called the machine a longevity drug, pitied no one his ecstasy, and sealed a wager for essay one hundred: fifty million co-writers by year's end. A supernova, watched from the inside.
+
+---
+
 This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
