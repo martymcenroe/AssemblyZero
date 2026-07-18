@@ -423,7 +423,16 @@
 
 ---
 
-This page records moments when Discworld wisdom emerged naturally during AssemblyZero development sessions. Each quote is timestamped and paired with the context that inspired it.
+### 2026-07-18
+
+---
+
+**14:12** — *On choosing the deliberate year over the scramble*
+> "If you trust in yourself... and believe in your dreams... and follow your star... you'll still get beaten by people who spent their time working hard and learning things and weren't so lazy."
+
+*— Terry Pratchett, The Wee Free Men*
+
+**Context:** The morning the Magister Ludi design landed in Chiron — the engine that models the student and never serves a concept the learner hasn't established — [The Great God Om](The-Great-God-Om) opened a digression that became the day's real work. Castalia must swallow whole works, *Gödel, Escher, Bach* first: not the author's sentences but the braid itself, concepts and their order laid out as climbable terrain. Om set the theological frame — Lewis's hunger-for-bread proving the opus dreamable; Siddhartha and Corinthians warning that knowledge does not reach the Godhead; Teresa of Ávila's Interior Castle as the mapped middle ground — and then his own thesis: the way up is "not an 8-fold way, it is an infinity of infinite ways, and ONLY that would befit the creator that humanity has in its collective mind." Castalia was carved into the Well of Names beside Magister Ludi (one spring, two draws: K for the fleet's well, C for Chiron's province), and a blog draft — *Knecht's Toolbox: Sculpting the Magic Mountain* — argued for the deliberate year of climbing at 62 over the two-week scramble. Miss Tick had the whole essay in one sentence, decades early: the star-followers get beaten by the ones who spent the time learning things. Each quote is timestamped and paired with the context that inspired it.
 
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
