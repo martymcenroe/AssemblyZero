@@ -92,31 +92,91 @@ def close_open_prs(repo: str, issue: int) -> int:
     return closed
 
 
+def worktree_is_dirty(worktree_path: Path) -> bool:
+    """
+    True if the worktree holds uncommitted work (tracked or untracked).
+
+    Returns True when the state cannot be read, so an unreadable worktree
+    is treated as "might hold work" rather than "safe to delete".
+    """
+    result = _run(["git", "status", "--porcelain"], cwd=worktree_path)
+    if result.returncode != 0:
+        return True
+    return bool(result.stdout.strip())
+
+
 def remove_worktree(repo_root: Path, issue: int) -> bool:
-    """Remove worktree at `{repo}-{issue}` if it exists."""
+    """
+    Remove the worktree at `{repo}-{issue}` if it exists.
+
+    A CUT take leaves a half-finished worktree behind, and that worktree
+    may hold uncommitted work. `git worktree remove` refuses in that case,
+    and that refusal is a signal to respect, not to route around: this
+    function never force-removes and never deletes a dirty directory. A
+    worktree holding work is reported and left for the operator (#1762).
+    """
     parent = repo_root.parent
     worktree_path = parent / f"{repo_root.name}-{issue}"
     if not worktree_path.exists():
         return False
+
     result = _run(
         ["git", "worktree", "remove", str(worktree_path)],
         cwd=repo_root,
     )
     if result.returncode == 0:
         print(f"  Removed worktree: {worktree_path}")
+        _prune_worktrees(repo_root)
         return True
-    # Worktree might exist but be unregistered in git's view. Try direct rmdir.
+
+    if worktree_is_dirty(worktree_path):
+        print(f"  SKIPPED worktree {worktree_path} — it holds uncommitted work.")
+        print("    Left in place. Inspect it, then remove it yourself once")
+        print("    you have salvaged anything worth keeping.")
+        return False
+
+    # Clean, but git would not remove it — typically a directory that is no
+    # longer registered as a worktree. Nothing uncommitted is at stake.
     try:
         shutil.rmtree(worktree_path)
-        print(f"  Removed worktree directory: {worktree_path}")
+        print(f"  Removed unregistered worktree directory: {worktree_path}")
+        _prune_worktrees(repo_root)
         return True
     except OSError as e:
         print(f"  WARNING: could not remove worktree {worktree_path}: {e}")
         return False
 
 
+def _prune_worktrees(repo_root: Path) -> None:
+    """
+    Drop stale worktree registrations.
+
+    Without this, git keeps the removed path registered and the next
+    `git worktree add` at that path fails as already-registered — the
+    exact state a reset is supposed to clear.
+    """
+    _run(["git", "worktree", "prune"], cwd=repo_root)
+
+
+def current_branch(repo_root: Path) -> str:
+    """Name of the branch the repo is checked out on, or '' if undetermined."""
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
 def delete_local_branches(repo_root: Path, issue: int) -> int:
-    """Delete local branches matching `{issue}-*` pattern. Returns count deleted."""
+    """
+    Safe-delete the pipeline branches for one issue. Returns count deleted.
+
+    Only `{issue}-*` branches are candidates — the per-stage work branches
+    the pipeline creates. The attempt branch itself (the integration branch
+    every pipeline PR targets under the #1755 model) is named for the
+    attempt, not the issue, so it never matches. The checked-out branch is
+    additionally excluded by name, so a reset can never delete the very
+    branch the attempt is standing on (#1762).
+    """
     result = _run(
         ["git", "branch", "--list", f"{issue}-*"],
         cwd=repo_root,
@@ -128,22 +188,26 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
         for line in result.stdout.splitlines()
         if line.strip()
     ]
+    active = current_branch(repo_root)
     deleted = 0
     for branch in branches:
         if not branch:
             continue
-        # Try safe-delete first; never use -D
+        if branch == active:
+            print(f"  Skipped branch {branch} (currently checked out).")
+            continue
         r = _run(["git", "branch", "-d", branch], cwd=repo_root)
         if r.returncode == 0:
             print(f"  Deleted local branch: {branch}")
             deleted += 1
         else:
-            # Branch wasn't merged. For speed-run reset, that's expected
-            # (we're discarding work). Use -d still — the user can decide
-            # if they want -D themselves. We don't auto-escalate.
+            # Safe-delete refused: the branch holds commits not reachable
+            # from HEAD. That refusal is the safety net working. Report it
+            # and move on -- never escalate to a force-delete, and never
+            # suggest one, per the banned-commands rule and ADR-0217.
             print(
-                f"  Skipped branch {branch} (not merged; "
-                f"reset with `git branch -D {branch}` if intentional)"
+                f"  Skipped branch {branch} (holds unmerged commits; "
+                f"left in place for review)."
             )
     return deleted
 
