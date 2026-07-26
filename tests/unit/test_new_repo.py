@@ -11,6 +11,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,6 +27,8 @@ from new_repo import (
     flatten_directories,
     flatten_files,
     load_structure_schema,
+    main,
+    validate_name,
     validate_paths_no_traversal,
     validate_template_files_exist,
 )
@@ -371,7 +374,7 @@ class TestIntegrity:
         """Raise error for missing template files."""
         schema = _minimal_schema()
         schema["files"]["README.md"]["template"] = "readme-template.md"
-        path = _write_schema(tmp_path, schema)
+        _write_schema(tmp_path, schema)
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
         # Template file does NOT exist
@@ -387,15 +390,6 @@ class TestIntegrity:
 # ===========================================================================
 # TestMain — Issue #451: main() workflow coverage
 # ===========================================================================
-
-from unittest.mock import patch, MagicMock
-
-from new_repo import (
-    main,
-    validate_name,
-    get_github_username,
-    audit_structure,
-)
 
 
 class TestValidateName:
