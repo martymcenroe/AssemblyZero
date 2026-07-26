@@ -503,9 +503,6 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
                 )
             )
             has_code_block = "```" in search_region
-            has_arrow = bool(
-                re.search(r"(?:->|=>|→|returns?\s*:)", search_region)
-            )
             has_concrete_values = bool(
                 re.search(
                     r'(?:\d+|"[^"]+"|True|False|None|\[.*\]|\{.*\})',
