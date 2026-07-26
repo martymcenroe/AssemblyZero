@@ -346,6 +346,41 @@ def validate_name(name: str) -> tuple[bool, str]:
     return True, ""
 
 
+def detach_stdin() -> bool:
+    """
+    Replace this process's stdin with the null device (#1806).
+
+    During a run, gpg's pinentry may fail to steal window focus. If the
+    operator types or pastes the passphrase while focus is wrong, those
+    keystrokes land on whatever holds the terminal -- which must never be
+    this process. After this call, anything typed at the controlling
+    terminal is discarded: it cannot be read, echoed, or logged here.
+
+    The passphrase belongs to pinentry's own dialog, which reads from its
+    own handle, not from the inherited terminal. If gpg is ever configured
+    with a tty-based pinentry, it will now fail loudly rather than quietly
+    accept a secret through the wrong channel -- that is the intended
+    trade, not a regression.
+
+    Returns:
+        True if stdin was detached, False if there was no real stdin to
+        detach (already closed, or no file descriptor -- e.g. under a test
+        harness that captures output).
+    """
+    try:
+        fd = sys.stdin.fileno()
+    except (AttributeError, ValueError, OSError):
+        # No real stdin -- nothing can be typed into it, so nothing to do.
+        return False
+
+    try:
+        with open(os.devnull, "rb") as devnull:
+            os.dup2(devnull.fileno(), fd)
+    except OSError:
+        return False
+    return True
+
+
 def get_github_username() -> str:
     """Get the authenticated GitHub username."""
     result = subprocess.run(
@@ -354,8 +389,56 @@ def get_github_username() -> str:
         text=True,
         check=True,
         timeout=60,
+        stdin=subprocess.DEVNULL,
     )
     return result.stdout.strip()
+
+
+def check_remote_repo_exists(github_user: str, name: str) -> dict[str, Any] | None:
+    """
+    Look up <github_user>/<name> on GitHub before anything local is written.
+
+    Runs through the `gh` CLI, which uses the already-configured
+    fine-grained PAT. That matters: this is a pre-flight check, and it must
+    not trigger a pinentry prompt for the classic PAT before the operator
+    even knows whether the run can proceed.
+
+    Args:
+        github_user: The authenticated GitHub account name.
+        name: The repository name being requested.
+
+    Returns:
+        The repo's JSON metadata if it exists, or None if GitHub reports it
+        does not.
+
+    Raises:
+        RuntimeError: If existence could not be determined -- an auth
+            failure, a network error, or a missing `gh`. The caller must
+            treat this as "unknown", never as "does not exist"; proceeding
+            on an unverified name is what #1805 is about.
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{github_user}/{name}"],
+            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError("`gh` CLI not found on PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("timed out querying GitHub") from e
+
+    if result.returncode == 0:
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"unparseable response from GitHub: {e}") from e
+
+    # A 404 is the answer we want: the name is free.
+    stderr = (result.stderr or "").lower()
+    if "404" in stderr or "not found" in stderr:
+        return None
+
+    raise RuntimeError(result.stderr.strip() or f"gh exited {result.returncode}")
 
 
 def run_command(cmd: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -370,7 +453,10 @@ def run_command(cmd: list[str], cwd: Path | None = None, check: bool = True) -> 
     Returns:
         CompletedProcess result
     """
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=check, timeout=60)
+    return subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True, check=check, timeout=60,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def create_directory_structure(project_path: Path) -> list[str]:
@@ -1809,7 +1895,7 @@ def configure_branch_protection(github_user: str, repo_name: str, pat: str) -> b
     try:
         check = subprocess.run(
             ["gh", "api", f"/repos/{github_user}/{repo_name}/branches/main"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
         )
         if check.returncode != 0:
             print("    Remote branch 'main' not found — skipping branch protection.")
@@ -2315,7 +2401,7 @@ def _deploy_cerberus(
     if not ok:
         print(f"  FAILED to deploy: {', '.join(failed)}")
         if source_path is not None:
-            print(f"  .pem file NOT deleted -- retry manually:")
+            print("  .pem file NOT deleted -- retry manually:")
             print(f"    poetry run python tools/deploy_cerberus_secrets.py {source_path}")
         return f"FAILED: {', '.join(failed)}"
     print("  Secrets set.")
@@ -2324,7 +2410,7 @@ def _deploy_cerberus(
     if not ok:
         print(f"  WARNING: verification failed; missing {missing}")
         if source_path is not None:
-            print(f"  .pem file NOT deleted -- investigate before deleting.")
+            print("  .pem file NOT deleted -- investigate before deleting.")
         return f"UNVERIFIED: {', '.join(missing)}"
     print("  Secrets verified on GitHub (both REVIEWER_APP_ID and REVIEWER_APP_PRIVATE_KEY present).")
 
@@ -2348,6 +2434,11 @@ def _deploy_cerberus(
 
 
 def main():
+    # Detach stdin before anything else (#1806). A run prompts for a GPG
+    # passphrase via pinentry; if pinentry loses the focus race, keystrokes
+    # meant for it land on this terminal. From here on they go nowhere.
+    detach_stdin()
+
     parser = argparse.ArgumentParser(
         description="Scaffold a new repository with AssemblyZero structure",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2566,7 +2657,7 @@ Examples:
         print(f"[ERROR] Repository creation failed: {e}")
         print(f"{'=' * 60}")
         print(f"\nPartial state may exist at: {project_path}")
-        print(f"Review and clean up manually if needed.")
+        print("Review and clean up manually if needed.")
         sys.exit(1)
 
 
@@ -2588,9 +2679,9 @@ def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
     """
     if project_path.is_file():
         return ("file", [
-            f"Path is a regular file, not a directory.",
+            "Path is a regular file, not a directory.",
             f"Remove it: rm '{project_path}'",
-            f"Then re-run.",
+            "Then re-run.",
         ])
 
     git_path = project_path / ".git"
@@ -2602,21 +2693,21 @@ def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
         except OSError:
             pass
         return ("stale_worktree", [
-            f"Directory contains a `.git` FILE — looks like a stale git-worktree leftover (#935).",
+            "Directory contains a `.git` FILE — looks like a stale git-worktree leftover (#935).",
             f"  .git contents: {registration or '(unreadable)'}",
             "Recovery options (try in this order):",
             f"  1. cd '{project_path}' && poetry env remove --all  # release venv file locks",
             f"  2. rm -rf '{project_path}'                          # may still fail if other locks remain",
             f"  3. powershell -c \"Get-Process | Where-Object {{ \\$_.Path -like '*{project_path.name}*' }}\"  # find lock-holder",
-            f"  4. If a stale Python process holds the lock: powershell -c \"Get-Process python | Stop-Process\" (carefully)",
-            f"  5. Reboot is the nuclear option.",
+            "  4. If a stale Python process holds the lock: powershell -c \"Get-Process python | Stop-Process\" (carefully)",
+            "  5. Reboot is the nuclear option.",
         ])
 
     if git_path.is_dir():
         return ("live_repo", [
-            f"Directory is an existing git repo (has a `.git` directory).",
-            f"This is NOT a leftover. Refusing to overwrite.",
-            f"Pick a different name for your new repo, or move/rename the existing repo first.",
+            "Directory is an existing git repo (has a `.git` directory).",
+            "This is NOT a leftover. Refusing to overwrite.",
+            "Pick a different name for your new repo, or move/rename the existing repo first.",
         ])
 
     try:
@@ -2625,7 +2716,7 @@ def _diagnose_existing_path(project_path: Path) -> tuple[str, list[str]]:
         entry_count = -1
     return ("unknown_dir", [
         f"Directory exists with {entry_count} entries but no `.git` of any kind.",
-        f"Either remove it (if not yours) or pick a different name:",
+        "Either remove it (if not yours) or pick a different name:",
         f"  rm -rf '{project_path}'  # if you confirm you don't need it",
     ])
 
@@ -2716,7 +2807,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     if project_path.exists():
         kind, recovery_lines = _diagnose_existing_path(project_path)
         print("\n" + "=" * 60)
-        print(f"[PRE-FLIGHT] Refusing to proceed: target path already exists")
+        print("[PRE-FLIGHT] Refusing to proceed: target path already exists")
         print("=" * 60)
         print(f"Path: {project_path}")
         print(f"Kind: {kind}")
@@ -2725,6 +2816,51 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print()
         print("No local files written, no GitHub repo created. Resolve the collision and re-run.")
         sys.exit(1)
+
+    # Pre-flight: refuse to proceed if the GitHub repo already exists (#1805).
+    # This must run BEFORE the scaffold. Detecting the collision later (at the
+    # create call, which 422s) is too late: by then a fresh initial commit
+    # exists locally, its history is unrelated to the live remote, the push is
+    # rejected, and every downstream step gated on that push -- workflow
+    # upload, repo settings, the Cerberus secret deploy -- silently skips. The
+    # visible symptom is a missing second pinentry prompt, which reads as a
+    # broken security flow when the real fault is scaffolding over a live repo.
+    if not args.no_github:
+        try:
+            existing = check_remote_repo_exists(github_user, args.name)
+        except RuntimeError as e:
+            print("\n" + "=" * 60)
+            print("[PRE-FLIGHT] Cannot determine whether the GitHub repo exists")
+            print("=" * 60)
+            print(f"Repo:   {github_user}/{args.name}")
+            print(f"Reason: {e}")
+            print()
+            print("Refusing to scaffold on an unverified name. Fix the cause")
+            print("(`gh auth status`, network) and re-run, or pass --no-github")
+            print("to scaffold locally only.")
+            print()
+            print("No local files written, no GitHub state changed.")
+            sys.exit(1)
+
+        if existing is not None:
+            created = str(existing.get("created_at", "unknown"))[:10]
+            print("\n" + "=" * 60)
+            print("[PRE-FLIGHT] Refusing to proceed: GitHub repo already exists")
+            print("=" * 60)
+            print(f"Repo:    {existing.get('html_url', f'{github_user}/{args.name}')}")
+            print(f"Created: {created}")
+            print(f"Private: {existing.get('private', 'unknown')}")
+            print()
+            print("Scaffolding now would build a fresh initial commit whose history")
+            print("is unrelated to that repo. The push would be rejected, and the")
+            print("Cerberus secret deploy would be skipped because it is gated on a")
+            print("successful push -- leaving a local directory that can never push.")
+            print()
+            print("Clone the existing repo instead:")
+            print(f"  gh repo clone {github_user}/{args.name}")
+            print()
+            print("No local files written, no GitHub state changed.")
+            sys.exit(1)
 
     # Step 1: Create directory
     print("\n1. Creating directory...")
@@ -3050,7 +3186,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         print("  Proceeding in rerun mode against existing repo.")
                         github_created = True
                     else:
-                        print(f"  ERROR: 422 from POST /user/repos but repo not found")
+                        print("  ERROR: 422 from POST /user/repos but repo not found")
                         print(f"  Response: {create_resp.text[:300]}")
                 else:
                     print(f"  ERROR: POST /user/repos returned {create_resp.status_code}")
@@ -3066,7 +3202,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     remote_check = subprocess.run(
                         ["git", "remote", "get-url", "origin"],
                         cwd=str(project_path),
-                        capture_output=True, text=True,
+                        capture_output=True, text=True, stdin=subprocess.DEVNULL,
                     )
                     if remote_check.returncode != 0:
                         try:
@@ -3126,6 +3262,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         pull = subprocess.run(
                             ["git", "pull", "--rebase", "origin", "main"],
                             cwd=str(project_path), capture_output=True, text=True, timeout=60,
+                            stdin=subprocess.DEVNULL,
                         )
                         if pull.returncode == 0:
                             print("  Synced -- local is now at remote HEAD with workflows tracked.")

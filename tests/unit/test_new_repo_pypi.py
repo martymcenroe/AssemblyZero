@@ -13,7 +13,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
 
 # Make tools/ importable. Mirrors the conftest pattern other AZ tests use.
 _TOOLS = Path(__file__).resolve().parent.parent.parent / "tools"
