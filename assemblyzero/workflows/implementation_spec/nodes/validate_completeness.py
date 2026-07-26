@@ -28,6 +28,10 @@ from assemblyzero.workflows.implementation_spec.state import (
     ImplementationSpecState,
     PatternRef,
 )
+from assemblyzero.workflows.telemetry import (
+    build_hallucination_event,
+    record_hallucination_event,
+)
 
 
 # =============================================================================
@@ -153,6 +157,14 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_symbols)
     _log_check(check_symbols)
 
+    # Telemetry (#1812): record detector outcomes for the spec draft (every
+    # pass) and the LLD (first pass only). Record-only — the try/except
+    # guarantees telemetry can never alter validation_passed.
+    try:
+        _record_hallucination_telemetry(state, spec_draft, gathered_symbols)
+    except Exception as e:  # noqa: BLE001 — record-only contract
+        print(f"    [telemetry] WARNING: hallucination telemetry failed: {e}")
+
     # Collect issues from failed checks
     completeness_issues = [
         check["details"] for check in checks if not check["passed"]
@@ -192,6 +204,66 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
         "prior_completeness_breakdown": prior_breakdown,
         "error_message": "",
     }
+
+
+def _record_hallucination_telemetry(
+    state: ImplementationSpecState,
+    spec_draft: str,
+    gathered_symbols: list[str],
+) -> None:
+    """Emit hallucination-detector events for this validation pass (#1812).
+
+    Runs the shared detector against the spec draft on every pass, and
+    against the LLD once per run — on the first pass, before any revision
+    has bumped ``review_iteration`` past 0. The LLD does not change across
+    revision cycles, so one measurement per run is the honest count.
+
+    When no symbols were gathered, the detector cannot run; a ``skipped``
+    event is recorded instead of silence, so "not checked" is never
+    mistaken for "checked, clean".
+
+    Record-only: this function writes events and returns nothing. It is
+    called inside a try/except in the node; sink failures degrade to
+    warnings inside the telemetry module itself.
+    """
+    iteration: int = state.get("review_iteration", 0)  # type: ignore[assignment]
+    repo: str = state.get("repo_root", "")  # type: ignore[assignment]
+    issue: int = state.get("issue_number", 0)  # type: ignore[assignment]
+
+    audit_dir_str: str = state.get("audit_dir", "")  # type: ignore[assignment]
+    audit_dir = Path(audit_dir_str) if audit_dir_str else None
+    az_root_str: str = state.get("assemblyzero_root", "")  # type: ignore[assignment]
+    az_root = Path(az_root_str) if az_root_str else None
+
+    symbol_set = set(gathered_symbols)
+
+    artifacts: list[tuple[str, str]] = [("spec_draft", spec_draft)]
+    if iteration == 0:
+        lld_content: str = state.get("lld_content", "")  # type: ignore[assignment]
+        artifacts.insert(0, ("lld", lld_content))
+
+    for artifact_name, text in artifacts:
+        if not symbol_set:
+            event = build_hallucination_event(
+                repo=repo,
+                issue=issue,
+                artifact=artifact_name,
+                iteration=iteration,
+                symbols_checked=0,
+                flagged={},
+                skipped=True,
+            )
+        else:
+            flagged = detect_unknown_method_calls(text, symbol_set)
+            event = build_hallucination_event(
+                repo=repo,
+                issue=issue,
+                artifact=artifact_name,
+                iteration=iteration,
+                symbols_checked=len(symbol_set),
+                flagged=flagged,
+            )
+        record_hallucination_event(event, audit_dir, az_root)
 
 
 # =============================================================================
@@ -756,6 +828,54 @@ def check_import_targets_exist(
     )
 
 
+def detect_unknown_method_calls(
+    text: str,
+    symbol_set: set[str],
+) -> dict[str, list[str]]:
+    """Scan code fences in ``text`` for method calls absent from ``symbol_set``.
+
+    The detection core shared by :func:`check_api_symbols_exist` (which
+    gates the spec) and the hallucination telemetry (#1812, which records
+    the same signal for both the spec draft and the LLD, record-only).
+    Extracted so both consumers measure with the identical yardstick.
+
+    Args:
+        text: Markdown to scan. Only content inside ``` fences is examined.
+        symbol_set: Real symbol names extracted from the target repo.
+
+    Returns:
+        Mapping of unknown method name -> truncated example call sites.
+        Empty when every call resolves to a known or allowlisted symbol.
+    """
+    # Extract method/function call names from code fences only
+    code_block_re = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
+    # Match  <ident>.<method>(  —  the opening paren marks a call, not an annotation
+    method_call_re = re.compile(r"\b\w+\.(\w+)\s*\(")
+
+    flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
+
+    for block_match in code_block_re.finditer(text):
+        block_content = block_match.group(1)
+        for call_match in method_call_re.finditer(block_content):
+            method_name = call_match.group(1)
+
+            if method_name in symbol_set:
+                continue
+            if method_name in _API_SYMBOL_ALLOWLIST:
+                continue
+
+            # Capture the call site for the error message (truncated)
+            call_site = block_content[
+                max(0, call_match.start() - 10) : call_match.end() + 20
+            ].strip().replace("\n", " ")
+
+            if method_name not in flagged:
+                flagged[method_name] = []
+            flagged[method_name].append(call_site[:80])
+
+    return flagged
+
+
 def check_api_symbols_exist(
     spec: str,
     gathered_symbols: list[str],
@@ -801,32 +921,7 @@ def check_api_symbols_exist(
         )
 
     symbol_set: set[str] = set(gathered_symbols)
-
-    # Extract method/function call names from code fences only
-    code_block_re = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
-    # Match  <ident>.<method>(  —  the opening paren marks a call, not an annotation
-    method_call_re = re.compile(r"\b\w+\.(\w+)\s*\(")
-
-    flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
-
-    for block_match in code_block_re.finditer(spec):
-        block_content = block_match.group(1)
-        for call_match in method_call_re.finditer(block_content):
-            method_name = call_match.group(1)
-
-            if method_name in symbol_set:
-                continue
-            if method_name in _API_SYMBOL_ALLOWLIST:
-                continue
-
-            # Capture the call site for the error message (truncated)
-            call_site = block_content[
-                max(0, call_match.start() - 10) : call_match.end() + 20
-            ].strip().replace("\n", " ")
-
-            if method_name not in flagged:
-                flagged[method_name] = []
-            flagged[method_name].append(call_site[:80])
+    flagged = detect_unknown_method_calls(spec, symbol_set)
 
     if not flagged:
         return CompletenessCheck(
