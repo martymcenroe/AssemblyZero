@@ -253,6 +253,9 @@ class RequirementsWorkflowState(TypedDict, total=False):
     # Codebase context (Issue #401)
     codebase_context: dict
 
+    # Tiphys: real interface surface for the drafter (Issue #1688)
+    interface_map: dict
+
     # Issue #476: API cost budget
     cost_budget_usd: float
 
@@ -378,6 +381,8 @@ def create_initial_state(
         "draft_number": 1,
         # Codebase context (Issue #401)
         "codebase_context": {},
+        # Tiphys: real interface surface (Issue #1688)
+        "interface_map": {},
         # Issue #476: API cost budget
         "cost_budget_usd": 0.0,
         # Issue #486: Halt-and-Plan
