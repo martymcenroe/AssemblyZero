@@ -24,6 +24,10 @@ MAX_TOTAL_PROMPT_CHARS = 120_000
 # Warn at 80% of the cap
 PROMPT_SIZE_WARNING_THRESHOLD = 0.8
 
+from assemblyzero.core.interface_surface import (
+    build_interface_map_for_paths,
+    format_interface_map_section,
+)
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.section_utils import (
@@ -41,6 +45,9 @@ from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 from assemblyzero.workflows.requirements.feedback_window import (
     build_feedback_block,
     render_feedback_markdown,
+)
+from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
+    parse_files_changed_table,
 )
 from assemblyzero.core.verdict_schema import (
     DRAFT_QUESTIONS_SCHEMA,
@@ -331,6 +338,12 @@ def _build_prompt(
     user_feedback = state.get("user_feedback", "")
     validation_errors = state.get("validation_errors", [])  # Issue #294
 
+    # Revision detection, computed early: Tiphys injection placement depends
+    # on it (Issue #294 originally defined this after input assembly).
+    is_revision = bool(
+        current_draft and (verdict_history or validation_errors or user_feedback)
+    )
+
     if workflow_type == "issue":
         input_content = state.get("brief_content", "")
         input_label = "Brief (user's ideation notes)"
@@ -345,6 +358,19 @@ def _build_prompt(
         if context_content:
             input_content += f"\n\n## Context\n\n{context_content}"
 
+        # Tiphys (#1688): real interface surface, placed BEFORE the
+        # codebase-context sections — _truncate_prompt sacrifices those
+        # first under token pressure, and ground truth that exists to
+        # prevent hallucination must not be the first thing dropped. On
+        # revision passes the refreshed surface rides in revision_context
+        # instead — never both.
+        if not is_revision:
+            interface_section = format_interface_map_section(
+                state.get("interface_map") or {}
+            )
+            if interface_section:
+                input_content += f"\n\n{interface_section}"
+
         # Issue #401: Inject codebase context from N0b analyze_codebase node
         codebase_ctx = state.get("codebase_context")
         if codebase_ctx and isinstance(codebase_ctx, dict):
@@ -355,10 +381,8 @@ def _build_prompt(
         input_content += f"\n\n**CRITICAL: This LLD is for GitHub Issue #{issue_number}. Use this exact issue number in all references.**"
         input_label = f"GitHub Issue #{issue_number}"
 
-    # Check if this is a revision (Gemini feedback, user feedback, OR validation errors)
-    # Issue #294: Include validation_errors to break infinite loop
-    is_revision = current_draft and (verdict_history or validation_errors or user_feedback)
-
+    # is_revision computed above, before input assembly (Issue #294 origin;
+    # moved for Tiphys injection placement).
     if is_revision:
         # Revision mode
         revision_context = ""
@@ -389,6 +413,32 @@ def _build_prompt(
                 revision_context += "- 'Modify' files MUST exist in the repository\n"
                 revision_context += "- 'Add' files must have existing parent directories\n"
                 revision_context += "- Use actual file names from the codebase, not generic names\n\n"
+
+        # Tiphys (#1688): revision feedback loop — the draft's own Files
+        # Changed table declares the change's actual blast radius; refresh
+        # signatures for exactly those files (plus one-hop imports). Any
+        # draft-one selection miss becomes a one-iteration transient. Falls
+        # back to the N0b-computed map when the table yields nothing.
+        refreshed_map: dict = {}
+        revision_target_repo = state.get("target_repo", "")
+        if revision_target_repo and current_draft:
+            try:
+                entries, _parse_errors = parse_files_changed_table(current_draft)
+                draft_paths = [
+                    e.get("path", "") for e in entries
+                    if e.get("path", "").endswith(".py")
+                ]
+                if draft_paths:
+                    refreshed_map = build_interface_map_for_paths(
+                        draft_paths, Path(revision_target_repo)
+                    )
+            except Exception:  # noqa: BLE001 — Tiphys must never block revision
+                logger.warning("Tiphys revision refresh failed", exc_info=True)
+        interface_section = format_interface_map_section(
+            refreshed_map or state.get("interface_map") or {}
+        )
+        if interface_section:
+            revision_context += interface_section + "\n\n"
 
         # Issue #497: Bounded feedback window replaces cumulative verdict history
         if verdict_history:

@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.interface_surface import build_interface_map
 from assemblyzero.utils.codebase_reader import (
     is_sensitive_file,
     parse_project_metadata,
@@ -104,7 +105,7 @@ def analyze_codebase(state: dict) -> dict:
 
     if not repo_path_str or not str(repo_path_str).strip():
         logger.warning("No repo path provided, skipping codebase analysis")
-        return {"codebase_context": _empty_codebase_context()}
+        return {"codebase_context": _empty_codebase_context(), "interface_map": {}}
 
     repo_path = Path(repo_path_str)
     if not repo_path.exists():
@@ -112,7 +113,7 @@ def analyze_codebase(state: dict) -> dict:
             "Repo path does not exist: %s, skipping codebase analysis",
             repo_path,
         )
-        return {"codebase_context": _empty_codebase_context()}
+        return {"codebase_context": _empty_codebase_context(), "interface_map": {}}
 
     # Resolve to absolute to ensure consistent path handling
     repo_path = repo_path.resolve()
@@ -191,9 +192,14 @@ def analyze_codebase(state: dict) -> dict:
     # ------------------------------------------------------------------
     remaining_budget = max(0, _TOTAL_TOKEN_BUDGET - tokens_used)
     related_code: dict[str, str] = {}
+    # Full related list, pre-exclusion, kept for Tiphys interface extraction
+    # (Step 8b) — the name-based exclusion below exists only to avoid
+    # double-reading contents, which doesn't apply to signature extraction.
+    related_paths_all: list[Path] = []
 
     if issue_text and directory_tree:
         related_paths = _find_related_files(repo_path, issue_text, directory_tree)
+        related_paths_all = list(related_paths)
         # Exclude files already read as key files
         already_read = {Path(p).name for p in key_file_excerpts}
         related_paths = [
@@ -211,6 +217,23 @@ def analyze_codebase(state: dict) -> dict:
                     related_code[result["path"]] = result["content"]
 
     # ------------------------------------------------------------------
+    # Step 8b: Tiphys (#1688) — ground-truth interface surface.
+    # Size-adaptive: small repos ship their whole public surface (no
+    # selection, no selection miss); large repos use explicit-path +
+    # keyword selection with one-hop import expansion. Never blocks:
+    # any failure yields an empty map and the LLD proceeds as before.
+    # ------------------------------------------------------------------
+    interface_map: dict[str, str] = {}
+    try:
+        interface_map = build_interface_map(
+            repo_path,
+            issue_text=issue_text,
+            related_paths=related_paths_all,
+        )
+    except Exception:  # noqa: BLE001 — Tiphys must never block the LLD
+        logger.warning("Tiphys interface extraction failed", exc_info=True)
+
+    # ------------------------------------------------------------------
     # Step 9: Assemble CodebaseContext
     # ------------------------------------------------------------------
     context: dict[str, Any] = {
@@ -226,14 +249,15 @@ def analyze_codebase(state: dict) -> dict:
 
     logger.info(
         "Codebase analysis complete: %d key files, %d related files, "
-        "%d conventions, %d frameworks detected",
+        "%d conventions, %d frameworks detected, %d interface surfaces",
         len(key_file_excerpts),
         len(related_code),
         len(conventions),
         len(frameworks),
+        len(interface_map),
     )
 
-    return {"codebase_context": context}
+    return {"codebase_context": context, "interface_map": interface_map}
 
 
 def _select_key_files(repo_path: Path) -> list[Path]:

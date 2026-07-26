@@ -320,137 +320,15 @@ def extract_relevant_excerpt(
     return excerpt
 
 
-def _summarize_python_file(content: str) -> str:
-    """Extract imports and signatures from a Python file for compact context.
-
-    Issue #373 pattern: Instead of embedding full file bodies (~20KB+),
-    extract only what's needed: imports, class/function signatures, and
-    their docstrings. Reduces context from ~20KB to ~2-3KB.
-
-    Args:
-        content: Full Python file content.
-
-    Returns:
-        Compact summary with imports, signatures, and constants.
-    """
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
-        # If we can't parse it, return first 50 lines as fallback
-        lines = content.split("\n")
-        return "\n".join(lines[:50]) + "\n# ... (truncated, syntax error in original)\n"
-
-    parts: list[str] = []
-
-    # Extract module docstring
-    if (
-        tree.body
-        and isinstance(tree.body[0], ast.Expr)
-        and isinstance(tree.body[0].value, ast.Constant)
-        and isinstance(tree.body[0].value.value, str)
-    ):
-        docstring = tree.body[0].value.value
-        parts.append(f'"""{docstring}"""')
-
-    # Extract all imports
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            start = node.lineno - 1
-            end = node.end_lineno if node.end_lineno else start + 1
-            source_lines = content.split("\n")[start:end]
-            parts.append("\n".join(source_lines))
-
-    # Extract class and function signatures
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.ClassDef):
-            parts.append(_summarize_class(node, content))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            parts.append(_summarize_function(node, content))
-
-    # Extract module-level constants/type aliases (simple assignments)
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.Assign):
-            start = node.lineno - 1
-            end = node.end_lineno if node.end_lineno else start + 1
-            source_lines = content.split("\n")[start:end]
-            line_text = "\n".join(source_lines)
-            # Only include short assignments (constants, not large data structures)
-            if len(line_text) < 200:
-                parts.append(line_text)
-
-    return "\n\n".join(parts)
-
-
-def _summarize_function(
-    node: ast.FunctionDef | ast.AsyncFunctionDef, source: str
-) -> str:
-    """Extract function signature and docstring.
-
-    Args:
-        node: AST function definition node.
-        source: Full source code of the file.
-
-    Returns:
-        Function signature with docstring summary.
-    """
-    start = node.lineno - 1
-    source_lines = source.split("\n")
-
-    # Find the end of the signature (the line with the colon)
-    sig_lines = []
-    for i in range(start, min(start + 10, len(source_lines))):
-        sig_lines.append(source_lines[i])
-        if source_lines[i].rstrip().endswith(":"):
-            break
-
-    sig = "\n".join(sig_lines)
-
-    # Get docstring if present
-    docstring = ast.get_docstring(node)
-    if docstring:
-        # Use only first 3 lines of docstring
-        doc_lines = docstring.split("\n")[:3]
-        indent = "    "
-        sig += f'\n{indent}"""{chr(10).join(doc_lines)}"""'
-
-    sig += "\n    ..."
-    return sig
-
-
-def _summarize_class(node: ast.ClassDef, source: str) -> str:
-    """Extract class signature, docstring, and method signatures.
-
-    Args:
-        node: AST class definition node.
-        source: Full source code of the file.
-
-    Returns:
-        Class signature with docstring and method signatures.
-    """
-    source_lines = source.split("\n")
-    start = node.lineno - 1
-
-    # Get class def line
-    class_lines = []
-    for i in range(start, min(start + 5, len(source_lines))):
-        class_lines.append(source_lines[i])
-        if source_lines[i].rstrip().endswith(":"):
-            break
-
-    parts_inner = ["\n".join(class_lines)]
-
-    # Get class docstring
-    docstring = ast.get_docstring(node)
-    if docstring:
-        doc_lines = docstring.split("\n")[:3]
-        parts_inner.append(f'    """{chr(10).join(doc_lines)}"""')
-
-    # Get method signatures
-    for item in node.body:
-        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            parts_inner.append(_summarize_function(item, source))
-
-    return "\n\n".join(parts_inner)
+# The three signature summarizers moved to core (Tiphys, #1688) so the LLD
+# stage and this spec stage extract with one yardstick. The `_`-prefixed
+# aliases preserve this module's historical import surface — internal
+# callers and existing tests are untouched.
+from assemblyzero.core.interface_surface import (  # noqa: E402
+    summarize_class as _summarize_class,
+    summarize_function as _summarize_function,
+    summarize_python_file as _summarize_python_file,
+)
 
 
 def _truncate_content(content: str, max_chars: int) -> str:
