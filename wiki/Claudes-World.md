@@ -434,6 +434,19 @@
 
 **Context:** The morning the Magister Ludi design landed in Chiron — the engine that models the student and never serves a concept the learner hasn't established — [The Great God Om](The-Great-God-Om) opened a digression that became the day's real work. Castalia must swallow whole works, *Gödel, Escher, Bach* first: not the author's sentences but the braid itself, concepts and their order laid out as climbable terrain. Om set the theological frame — Lewis's hunger-for-bread proving the opus dreamable; Siddhartha and Corinthians warning that knowledge does not reach the Godhead; Teresa of Ávila's Interior Castle as the mapped middle ground — and then his own thesis: the way up is "not an 8-fold way, it is an infinity of infinite ways, and ONLY that would befit the creator that humanity has in its collective mind." Castalia was carved into the Well of Names beside Magister Ludi (one spring, two draws: K for the fleet's well, C for Chiron's province), and a blog draft — *Knecht's Toolbox: Sculpting the Magic Mountain* — argued for the deliberate year of climbing at 62 over the two-week scramble. Miss Tick had the whole essay in one sentence, decades early: the star-followers get beaten by the ones who spent the time learning things. Each quote is timestamped and paired with the context that inspired it.
 
+### 2026-07-27
+
+---
+
+**00:02** — *On inscribing a misremembered name as canon*
+> "YOU NEED TO BELIEVE IN THINGS THAT AREN'T TRUE. HOW ELSE CAN THEY BECOME?"
+
+*— Death; Terry Pratchett, Hogfather*
+
+**Context:** The night Palaestra went from plan to live venue in a single sitting — contract, compiler, engine, charts, LinkedIn sign-in, the trainer given his true name Paidotribes — [The Great God Om](The-Great-God-Om) reached for the name of the Glass Bead Game's province and his hand wrote **Callistia**: neither Hesse's Castalia nor the Delphic spring Kastalia, but a fusion with the kallisteia, the Greek prize-festivals. Asked whether a new god had been called, Om declined the correction and declared the doctrine instead: an author creates from the cosmos; the misremembering *is* the mythology — *A Canticle for Leibowitz*, transmission drift canonized by love, 2,700 years of copyists reaching a boy born in 1963. "If I misspell something, take it as an evolution, but root it and remember what it is." It was carved into the Well of Names within the hour: one spring, three works — Kastalia the well, Castalia the province, Callistia the destination where the full Game is played, of which Palaestra is one court. Om announced the raising of the merry-May-day gods of yore, and Death — who delivers the Hogfather's presents when belief runs thin — supplied the only possible benediction: the gods of yore have only ever been raised one way.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
