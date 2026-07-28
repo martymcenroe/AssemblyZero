@@ -38,20 +38,12 @@ class WorkspaceContext:
             if not path.exists():
                 raise ValueError(f"{field_name} does not exist: {path}")
 
-    @property
-    def docs_dir(self) -> Path:
-        """Return assemblyzero_root / 'docs'."""
-        return self.assemblyzero_root / "docs"
-
-    @property
-    def lld_active_dir(self) -> Path:
-        """Return docs / 'lld' / 'active'."""
-        return self.docs_dir / "lld" / "active"
-
-    @property
-    def reports_dir(self) -> Path:
-        """Return docs / 'reports'."""
-        return self.docs_dir / "reports"
+    # docs_dir / lld_active_dir / reports_dir properties removed (#1420):
+    # they returned AssemblyZero-rooted paths with zero external callers,
+    # and any future consumer wiring a WRITE to them would land the write
+    # in the AssemblyZero repo instead of the target repo. Per-target
+    # artifact paths belong to the target repo, never derived from
+    # assemblyzero_root.
 
     @property
     def target_name(self) -> str:

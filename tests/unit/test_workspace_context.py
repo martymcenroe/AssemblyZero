@@ -101,17 +101,12 @@ class TestWorkspaceContextProperties:
         repo.mkdir()
         return WorkspaceContext(assemblyzero_root=root, target_repo=repo)
 
-    def test_docs_dir(self, ctx) -> None:
-        """T060."""
-        assert ctx.docs_dir == ctx.assemblyzero_root / "docs"
-
-    def test_lld_active_dir(self, ctx) -> None:
-        """T070."""
-        assert ctx.lld_active_dir == ctx.assemblyzero_root / "docs" / "lld" / "active"
-
-    def test_reports_dir(self, ctx) -> None:
-        """T080."""
-        assert ctx.reports_dir == ctx.assemblyzero_root / "docs" / "reports"
+    def test_az_rooted_artifact_properties_removed(self, ctx) -> None:
+        """#1420: the AZ-rooted docs_dir/lld_active_dir/reports_dir
+        properties must stay gone — a future consumer writing through them
+        would write into AssemblyZero instead of the target repo."""
+        for name in ("docs_dir", "lld_active_dir", "reports_dir"):
+            assert not hasattr(ctx, name), f"{name} must not be reintroduced"
 
     def test_target_name(self, ctx) -> None:
         """T090."""
