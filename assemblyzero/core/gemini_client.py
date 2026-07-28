@@ -14,6 +14,8 @@ import os
 import re
 import shutil
 import subprocess
+
+from assemblyzero.utils.process import kill_process_tree
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -68,6 +70,27 @@ QUOTA_EXHAUSTED_PATTERNS = [
     "429",
     "Resource has been exhausted",
 ]
+
+# #1874: a per-attempt timeout is not a bound on a call. A timeout classifies
+# as capacity, which backs off and retries the SAME credential, so the real
+# worst case was MAX_RETRIES_PER_CREDENTIAL x credentials x per-attempt
+# timeout. A 15-second-nominal test-plan review sat 17.5 minutes that way
+# (hardening run 11, 2026-07-28) and had to be killed by hand. The budget
+# below bounds ONE invoke() end to end, retries and rotation included.
+AGY_CALL_TIMEOUT_SECONDS = 300.0
+MAX_TOTAL_INVOKE_SECONDS = 600.0
+MIN_ATTEMPT_SECONDS = 20.0
+
+# #1872: Windows process-creation failures. A child that dies with one of
+# these never got to run — desktop-heap / DLL-init pressure on a busy
+# machine, not a credential problem. Twice in 30 minutes on 2026-07-28 these
+# were reported as "All credentials failed" while preflight showed 4/4
+# healthy seconds later.
+SPAWN_FAILURE_EXIT_CODES = (
+    3221225794,  # 0xC0000142 STATUS_DLL_INIT_FAILED
+    3221225781,  # 0xC0000135 STATUS_DLL_NOT_FOUND
+    3221225477,  # 0xC0000005 access violation during process init
+)
 
 CAPACITY_PATTERNS = [
     "MODEL_CAPACITY_EXHAUSTED",
@@ -268,6 +291,15 @@ def get_credential_status() -> dict:
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>]")
 
 
+def _is_spawn_failure(error_text: str) -> bool:
+    """True when an error string carries a Windows process-creation code.
+
+    Issue #1872: these mean the child never started. That is transient
+    machine pressure and deserves a backoff, not a credential write-off.
+    """
+    return any(str(code) in error_text for code in SPAWN_FAILURE_EXIT_CODES)
+
+
 def _strip_ansi(text: str) -> str:
     """Strip ANSI/VT control sequences from agy's pseudo-console output and
     normalize newlines. agy renders to a TTY, so the captured stream carries
@@ -341,6 +373,7 @@ class GeminiClient:
         self,
         system_instruction: str,
         content: str,
+        timeout_seconds: float = AGY_CALL_TIMEOUT_SECONDS,
     ) -> tuple[bool, str, str]:
         """Invoke the governance model via the Antigravity CLI (agy).
 
@@ -378,7 +411,7 @@ class GeminiClient:
         # the response to a plain pipe (verified with a 39,954-char prompt).
         # Small prompts keep the proven PTY path below.
         if len(full_prompt) > 30000:
-            return self._invoke_via_stdin(full_prompt)
+            return self._invoke_via_stdin(full_prompt, timeout_seconds)
 
         try:
             from winpty import PtyProcess
@@ -393,7 +426,7 @@ class GeminiClient:
         try:
             with tempfile.TemporaryDirectory() as tmp_cwd:
                 proc = PtyProcess.spawn(argv, cwd=tmp_cwd, dimensions=(60, 1000))
-                deadline = time.time() + 300  # 5 minute timeout
+                deadline = time.time() + timeout_seconds
                 timed_out = True
                 while time.time() < deadline:
                     try:
@@ -413,7 +446,13 @@ class GeminiClient:
                         proc.terminate(force=True)
                     except Exception:
                         pass
-                    return False, "", "agy CLI timeout (300s)"
+                    # #1874: terminate() ends the console host, not the
+                    # grandchildren agy spawned under it.
+                    try:
+                        kill_process_tree(proc.pid)
+                    except Exception:
+                        pass
+                    return False, "", f"agy CLI timeout ({timeout_seconds:.0f}s)"
                 try:
                     exit_status = proc.exitstatus
                 except Exception:
@@ -439,7 +478,11 @@ class GeminiClient:
             return True, text, ""
         return False, "", "agy returned no output"
 
-    def _invoke_via_stdin(self, full_prompt: str) -> tuple[bool, str, str]:
+    def _invoke_via_stdin(
+        self,
+        full_prompt: str,
+        timeout_seconds: float = AGY_CALL_TIMEOUT_SECONDS,
+    ) -> tuple[bool, str, str]:
         """Invoke agy with the prompt on stdin (#1772).
 
         For prompts beyond the Windows argv ceiling. `agy --model X` with
@@ -455,29 +498,47 @@ class GeminiClient:
         import tempfile
 
         try:
-            with tempfile.TemporaryDirectory() as tmp_cwd:
-                result = subprocess.run(
+            # #1874: Popen, not subprocess.run. run()'s own timeout kills only
+            # the root process on Windows and then drains the pipes with an
+            # unbounded communicate() — agy's grandchildren hold those handles,
+            # so the call hangs indefinitely instead of raising at the timeout.
+            # ignore_cleanup_errors: a just-killed child can still hold the
+            # temp cwd for a moment; that must not fail the call.
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_cwd:
+                proc = subprocess.Popen(
                     [self._agy_cli, "--model", self.model],
-                    input=full_prompt,
-                    capture_output=True,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=300,
                     cwd=tmp_cwd,
                 )
-        except subprocess.TimeoutExpired:
-            return False, "", "agy CLI timeout (300s, stdin path)"
+                try:
+                    stdout, stderr = proc.communicate(
+                        input=full_prompt, timeout=timeout_seconds
+                    )
+                except subprocess.TimeoutExpired:
+                    kill_process_tree(proc.pid)
+                    try:
+                        proc.communicate(timeout=10)
+                    except (subprocess.TimeoutExpired, OSError, ValueError):
+                        pass
+                    return False, "", (
+                        f"agy CLI timeout ({timeout_seconds:.0f}s, stdin path)"
+                    )
+                returncode = proc.returncode
         except OSError as e:
             return False, "", f"agy stdin invocation failed: {e}"
 
-        text = _strip_ansi(result.stdout or "").strip()
+        text = _strip_ansi(stdout or "").strip()
 
         # #1765 boundaries, mirrored from the PTY path.
-        if result.returncode != 0:
-            detail = (result.stderr or "").strip() or text
+        if returncode != 0:
+            detail = (stderr or "").strip() or text
             return False, "", (
-                f"agy exited {result.returncode} (stdin path): {detail[:400]}"
+                f"agy exited {returncode} (stdin path): {detail[:400]}"
             )
         first_line = text.splitlines()[0].strip() if text else ""
         if first_line.startswith("Error:"):
@@ -561,6 +622,7 @@ class GeminiClient:
 
         initial_credential = available[0]
         errors: list[str] = []
+        budget_exhausted = False
 
         for cred in available:
             rotation_occurred = cred.name != initial_credential.name
@@ -578,6 +640,23 @@ class GeminiClient:
             attempt = 0
 
             while attempt < MAX_RETRIES_PER_CREDENTIAL:
+                # #1874: the ceiling covers the whole call. Without it, each
+                # attempt is bounded but the sequence is not — retries and
+                # rotations multiply into tens of minutes.
+                remaining = self._remaining_budget(start_time)
+                if remaining < MIN_ATTEMPT_SECONDS:
+                    budget_exhausted = True
+                    errors.append(
+                        f"{cred.name}: call budget of "
+                        f"{MAX_TOTAL_INVOKE_SECONDS:.0f}s exhausted"
+                    )
+                    print(
+                        f"    [LLM] provider=gemini model={self.model}: "
+                        f"call budget of {MAX_TOTAL_INVOKE_SECONDS:.0f}s "
+                        f"exhausted — halting instead of retrying"
+                    )
+                    break
+
                 attempt += 1
                 total_attempts += 1
 
@@ -586,7 +665,9 @@ class GeminiClient:
                     if cred.cred_type == "oauth":
                         # OAuth: use CLI subprocess
                         success, response_text, error_msg = self._invoke_via_cli(
-                            system_instruction, content
+                            system_instruction,
+                            content,
+                            timeout_seconds=min(AGY_CALL_TIMEOUT_SECONDS, remaining),
                         )
                         if success:
                             # Update state on success
@@ -630,6 +711,16 @@ class GeminiClient:
                     status_code = classified.status_code
                     error_type = self._error_type_from_classified(classified)
 
+                    # #1872: a child that never started is machine pressure,
+                    # not a bad credential. Route it into the backoff-and-
+                    # retry-same-credential path instead of writing the
+                    # credential off and reporting "all credentials failed".
+                    if (
+                        error_type == GeminiErrorType.UNKNOWN
+                        and _is_spawn_failure(error_str)
+                    ):
+                        error_type = GeminiErrorType.CAPACITY_EXHAUSTED
+
                     if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
                         # 529/503: Backoff and retry same credential
                         delay = self._backoff_delay(attempt)
@@ -646,7 +737,8 @@ class GeminiClient:
                             f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
                             f"{status_code or 503} capacity exhausted (retrying in {delay:.0f}s)"
                         )
-                        time.sleep(delay)
+                        # #1874: a backoff must not sleep past the budget.
+                        time.sleep(min(delay, max(0.0, self._remaining_budget(start_time))))
                         continue
 
                     elif error_type == GeminiErrorType.QUOTA_EXHAUSTED:
@@ -703,7 +795,10 @@ class GeminiClient:
                                 f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
                                 f"transient error (status={status_code}), retrying in {delay:.0f}s"
                             )
-                            time.sleep(delay)
+                            # #1874: a backoff must not sleep past the budget.
+                            time.sleep(
+                                min(delay, max(0.0, self._remaining_budget(start_time)))
+                            )
                             continue
 
                         # Non-retryable or last attempt: Log and try next credential
@@ -728,6 +823,10 @@ class GeminiClient:
                     f"{cred.name}: Capacity exhausted after "
                     f"{MAX_RETRIES_PER_CREDENTIAL} retries (503/529)"
                 )
+
+            # #1874: budget is per call, so stop rotating too.
+            if budget_exhausted:
+                break
 
         # All credentials failed
         duration_ms = int((time.time() - start_time) * 1000)
@@ -926,6 +1025,11 @@ class GeminiClient:
     def _backoff_delay(self, attempt: int) -> float:
         """Calculate exponential backoff delay."""
         return min(BACKOFF_BASE_SECONDS * (2**attempt), BACKOFF_MAX_SECONDS)
+
+    @staticmethod
+    def _remaining_budget(start_time: float) -> float:
+        """Seconds left in this invoke()'s wall-clock budget (#1874)."""
+        return MAX_TOTAL_INVOKE_SECONDS - (time.time() - start_time)
 
     def _parse_reset_time(self, error_output: str) -> Optional[float]:
         """Parse quota reset time from error message (returns hours)."""

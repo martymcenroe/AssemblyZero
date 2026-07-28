@@ -776,9 +776,18 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 transient=_classify_halt_transience(sub_result),
             )
     except subprocess.CalledProcessError as exc:
+        # #1873: stderr alone is empty when the git child dies before it can
+        # write (the machine-pressure spawn failures of #1872), which left
+        # the run record saying only "Git worktree error: ". Carry the
+        # command, the exit code, and both streams so a blank-stderr death
+        # is still diagnosable from the log.
+        detail = (exc.stderr or "").strip() or (exc.stdout or "").strip() or "no output"
         result = _make_stage_result(
             status="failed",
-            error_message=f"Git worktree error: {exc.stderr}",
+            error_message=(
+                f"Git worktree error (exit {exc.returncode}): {detail[:400]} "
+                f"[cmd: {' '.join(str(a) for a in exc.cmd) if isinstance(exc.cmd, (list, tuple)) else exc.cmd}]"
+            ),
             duration_seconds=time.monotonic() - start_time,
             attempts=1,
         )
