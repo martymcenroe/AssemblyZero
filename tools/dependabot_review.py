@@ -67,6 +67,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -190,6 +191,50 @@ class PRInfo:
     author_login: str
     body: str
     head_ref: str
+
+
+class PRBudget:
+    """Thread-safe cap on PRs processed per run (#1339).
+
+    The honeypot produces 30-50+ open PRs at once; an uncapped sweep is a
+    ~60-contribution single-day spike that rescales the operator's entire
+    contribution graph. ``--limit N`` turns the drain into a calibrated
+    daily harvest.
+
+    A PR consumes budget when processing STARTS, regardless of outcome —
+    merged and deferred PRs each generate a review event (the unit the
+    operator is budgeting), and an errored attempt already spent the
+    attempt. Thread-safe by construction even though the limit path runs
+    sequentially today, so a future parallel+limit combination cannot
+    silently overshoot.
+    """
+
+    def __init__(self, limit: int):
+        self._limit = limit
+        self._lock = threading.Lock()
+        self._used = 0
+
+    def try_acquire(self) -> bool:
+        """Reserve one PR slot; False when the budget is spent."""
+        with self._lock:
+            if self._used < self._limit:
+                self._used += 1
+                return True
+            return False
+
+    @property
+    def exhausted(self) -> bool:
+        with self._lock:
+            return self._used >= self._limit
+
+    @property
+    def used(self) -> int:
+        with self._lock:
+            return self._used
+
+    @property
+    def limit(self) -> int:
+        return self._limit
 
 
 # ---------------------------------------------------------------------------
@@ -1139,6 +1184,7 @@ def process_repo(
     main_repo: Path,
     dry_run: bool = False,
     ignore_orphans: bool = False,
+    budget: PRBudget | None = None,
 ) -> dict[str, list[str]]:
     """Process all dependabot PRs in one repo, sequentially.
 
@@ -1152,10 +1198,16 @@ def process_repo(
     Cross-repo parallelism is the caller's responsibility.
 
     Returns a per-repo result dict with the same shape as the
-    aggregate (merged / deferred / errored lists of `repo#N` strings).
-    Empty lists when no PRs are open.
+    aggregate (merged / deferred / errored / limit_skipped lists of
+    `repo#N` strings). Empty lists when no PRs are open.
+
+    #1339: PRs process oldest-first (ascending PR number) — FIFO drains
+    the queue tail, and under ``--limit`` it makes selection deterministic
+    instead of inheriting gh's newest-first listing order.
     """
-    sub: dict[str, list[str]] = {"merged": [], "deferred": [], "errored": []}
+    sub: dict[str, list[str]] = {
+        "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
+    }
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
     print(f"{'=' * 60}")
@@ -1218,7 +1270,12 @@ def process_repo(
               f"({count_packages(pr.body)} packages)")
     if dry_run:
         return sub
-    for pr in prs:
+    for pr in sorted(prs, key=lambda p: p.number):
+        if budget is not None and not budget.try_acquire():
+            # #1339: budget spent — remaining PRs are untouched, recorded
+            # visibly (no silent caps), and left for the next harvest.
+            sub["limit_skipped"].append(f"{repo}#{pr.number}")
+            continue
         status = process_pr(pr, repo, target_repo)
         sub[status].append(f"{repo}#{pr.number}")
     return sub
@@ -1334,6 +1391,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--limit", type=int, default=0,
+        help=(
+            "#1339: process at most N PRs this run (0 = unlimited, the "
+            "default). Merged, deferred, and errored attempts all consume "
+            "budget; remaining PRs are reported as limit-skipped and left "
+            "for the next harvest. Selection is deterministic: repos in "
+            "name order, PRs oldest-first — so consecutive limited runs "
+            "drain the queue FIFO. Implies sequential processing "
+            "(--workers is ignored)."
+        ),
+    )
+    parser.add_argument(
         "--no-run-log", action="store_true",
         help=(
             "#1403: by default every run tees its full output to a "
@@ -1374,9 +1443,20 @@ def main() -> None:
     else:
         repos = [args.repo]
 
+    # #1339: calibrated harvest. gh's repo listing orders by recent push
+    # (non-deterministic run to run), so a limited run sorts repos by name
+    # — with oldest-first PRs inside process_repo, consecutive limited
+    # runs drain the fleet queue FIFO, deterministically.
+    if args.limit < 0:
+        sys.exit(f"--limit must be >= 0, got {args.limit}")
+    budget = PRBudget(args.limit) if args.limit > 0 else None
+    if budget:
+        repos = sorted(repos)
+        print(f"Harvest limit: {budget.limit} PR(s) this run (sequential).")
+
     # Aggregate results across repos.
     results: dict[str, list[str]] = {
-        "merged": [], "deferred": [], "errored": [],
+        "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
     }
 
     # Wrap the worker dispatch + summary print in try/finally so the
@@ -1393,7 +1473,7 @@ def main() -> None:
         # Issue #1093: parallelize across repos in --fleet mode. Single-
         # repo mode (or --workers=1) keeps the sequential path. Within a
         # repo, processing is always sequential.
-        if args.fleet and args.workers > 1 and not args.dry_run:
+        if args.fleet and args.workers > 1 and not args.dry_run and not budget:
             print(f"\nProcessing {len(repos)} repo(s) with {args.workers} "
                   f"worker(s)...")
             with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -1425,15 +1505,24 @@ def main() -> None:
                         # truthful regardless of the exception class.
                         print(f"\n  [ERROR] worker for {repo} raised: "
                               f"{type(e).__name__}: {e}")
-                        sub = {"merged": [], "deferred": [], "errored": [repo]}
-                    for k in ("merged", "deferred", "errored"):
+                        sub = {"merged": [], "deferred": [],
+                               "errored": [repo], "limit_skipped": []}
+                    for k in ("merged", "deferred", "errored", "limit_skipped"):
                         results[k].extend(sub[k])
         else:
             for repo in repos:
+                # #1339: once the budget is spent, later repos are not even
+                # enumerated — their queues are untouched, next harvest's
+                # name-ordered pass reaches them deterministically.
+                if budget is not None and budget.exhausted:
+                    print(f"\n  Harvest limit reached — skipping {repo} "
+                          f"(queue untouched).")
+                    continue
                 sub = process_repo(
                     repo, main_repo, args.dry_run, args.ignore_orphans,
+                    budget=budget,
                 )
-                for k in ("merged", "deferred", "errored"):
+                for k in ("merged", "deferred", "errored", "limit_skipped"):
                     results[k].extend(sub[k])
     finally:
         # Dry-run skips the result-aggregation summary -- it only
@@ -1461,6 +1550,11 @@ def main() -> None:
             print(f"  Deferred (test failures / install errors, worktree retained): "
                   f"{results['deferred']}")
             print(f"  Errored:  {results['errored']}")
+            if results["limit_skipped"]:
+                # #1339: no silent caps — every PR the limit left behind
+                # is named, so "covered everything" can never be misread.
+                print(f"  Limit-skipped (left for next harvest): "
+                      f"{results['limit_skipped']}")
             print(
                 f"  Review events created: {approved_events} APPROVED "
                 f"+ {commented_events} COMMENTED = {total_events} total"

@@ -842,3 +842,99 @@ class TestRunLog:
         log.close()
         tee.write("still works\n")  # must not raise
         tee.flush()
+
+
+# ---- #1339: --limit N calibrated harvest ----
+
+class TestPRBudget:
+
+    def test_caps_at_limit(self):
+        budget = dependabot_review.PRBudget(3)
+        grants = [budget.try_acquire() for _ in range(5)]
+        assert grants == [True, True, True, False, False]
+        assert budget.exhausted is True
+        assert budget.used == 3
+
+    def test_thread_safety_never_overshoots(self):
+        import threading as _threading
+        budget = dependabot_review.PRBudget(50)
+        granted = []
+        lock = _threading.Lock()
+
+        def worker():
+            for _ in range(20):
+                if budget.try_acquire():
+                    with lock:
+                        granted.append(1)
+
+        threads = [_threading.Thread(target=worker) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(granted) == 50, "budget must never overshoot under races"
+
+
+class TestProcessRepoWithBudget:
+
+    def _prs(self, numbers):
+        return [
+            dependabot_review.PRInfo(
+                number=n, title=f"bump {n}", author_login="app/dependabot",
+                body="", head_ref=f"dependabot/{n}",
+            )
+            for n in numbers
+        ]
+
+    def _wire(self, monkeypatch, tmp_path, numbers):
+        processed = []
+        monkeypatch.setattr(
+            dependabot_review, "resolve_target_repo_dir",
+            lambda repo, main: tmp_path,
+        )
+        monkeypatch.setattr(
+            dependabot_review, "check_for_orphan_worktrees", lambda t: [],
+        )
+        monkeypatch.setattr(
+            dependabot_review, "list_dependabot_prs",
+            lambda repo: self._prs(numbers),
+        )
+        monkeypatch.setattr(
+            dependabot_review, "process_pr",
+            lambda pr, repo, target: processed.append(pr.number) or "merged",
+        )
+        return processed
+
+    def test_oldest_first_and_budget_cutoff(self, monkeypatch, tmp_path):
+        """gh lists newest-first; the drain must be FIFO — and the limit
+        must cut deterministically at the oldest N."""
+        processed = self._wire(monkeypatch, tmp_path, [12, 5, 9])
+        budget = dependabot_review.PRBudget(2)
+        sub = dependabot_review.process_repo(
+            "o/r", tmp_path, budget=budget,
+        )
+        assert processed == [5, 9], "oldest two, in FIFO order"
+        assert sub["merged"] == ["o/r#5", "o/r#9"]
+        assert sub["limit_skipped"] == ["o/r#12"], "the skip is named, never silent"
+
+    def test_no_budget_processes_all_oldest_first(self, monkeypatch, tmp_path):
+        processed = self._wire(monkeypatch, tmp_path, [12, 5, 9])
+        sub = dependabot_review.process_repo("o/r", tmp_path)
+        assert processed == [5, 9, 12]
+        assert sub["limit_skipped"] == []
+
+    def test_result_dict_always_carries_limit_skipped_key(self, monkeypatch, tmp_path):
+        """Aggregators iterate a fixed key tuple — the key must exist on
+        every return path, including the no-PRs early return."""
+        monkeypatch.setattr(
+            dependabot_review, "resolve_target_repo_dir",
+            lambda repo, main: tmp_path,
+        )
+        monkeypatch.setattr(
+            dependabot_review, "check_for_orphan_worktrees", lambda t: [],
+        )
+        monkeypatch.setattr(
+            dependabot_review, "list_dependabot_prs", lambda repo: [],
+        )
+        sub = dependabot_review.process_repo("o/r", tmp_path)
+        assert set(sub) == {"merged", "deferred", "errored", "limit_skipped"}
