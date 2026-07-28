@@ -9,7 +9,7 @@
 
 ## Context
 
-The scaffolded per-repo `CLAUDE.md` (emitted by `tools/new_repo_setup.py:create_claude_md`) duplicated content already in the universal `CLAUDE.md` (`C:\Users\mcwiz\Projects\CLAUDE.md`, auto-loaded for every project). When the universal `CLAUDE.md` changes (example: 2026-05-24's merge-sequence discussion about `unstable` vs `clean` polling), all per-repo copies become subtly stale. The drift compounds with every universal-CLAUDE.md edit.
+The scaffolded per-repo `CLAUDE.md` (emitted by `tools/new_repo.py:create_claude_md`) duplicated content already in the universal `CLAUDE.md` (`C:\Users\mcwiz\Projects\CLAUDE.md`, auto-loaded for every project). When the universal `CLAUDE.md` changes (example: 2026-05-24's merge-sequence discussion about `unstable` vs `clean` polling), all per-repo copies become subtly stale. The drift compounds with every universal-CLAUDE.md edit.
 
 Drift evidence: per-repo audit in the private fleet tracker (unleashed#656) showed multiple repos with stale boilerplate inherited from old scaffolder versions, false claims about what universal `CLAUDE.md` contains, and broken references to nonexistent infrastructure (orchestrator gate, wrong report-filename format).
 

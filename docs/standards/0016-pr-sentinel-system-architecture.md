@@ -188,7 +188,7 @@ Every repo MUST have these branch protection settings on `main`:
 | Configuration | Context value | How it gets there |
 |---------------|--------------|-------------------|
 | **Fleet majority (48 repos)** | `pr-sentinel / issue-reference` | Set by `deploy_auto_reviewer_fleet.py` or `fix_branch_protections.py` |
-| **AssemblyZero + Sextant** | `issue-reference` with `app_id: 15368` | Set manually or by `new_repo_setup.py` |
+| **AssemblyZero + Sextant** | `issue-reference` with `app_id: 15368` | Set manually or by `new_repo.py` |
 
 **Both configurations work** because:
 - The Cloudflare Worker posts a check named `pr-sentinel / issue-reference`
@@ -196,9 +196,9 @@ Every repo MUST have these branch protection settings on `main`:
 - Context `pr-sentinel / issue-reference` matches the Worker's check
 - Context `issue-reference` with app_id filter 15368 matches the Actions workflow's job name
 
-**Known contradiction:** Issue #748 says `new_repo_setup.py` should set `issue-reference`. The fleet deployment scripts set `pr-sentinel / issue-reference`. Both work. This needs resolution (see #886).
+**Known contradiction:** Issue #748 says `new_repo.py` should set `issue-reference`. The fleet deployment scripts set `pr-sentinel / issue-reference`. Both work. This needs resolution (see #886).
 
-**What `new_repo_setup.py` currently sets:** `pr-sentinel` (bare, no slash, no job name). This is **wrong** — it matches neither the Worker's check run name nor the Actions workflow's composite name. Tracked in #748 and #883.
+**What `new_repo.py` currently sets:** `pr-sentinel` (bare, no slash, no job name). This is **wrong** — it matches neither the Worker's check run name nor the Actions workflow's composite name. Tracked in #748 and #883.
 
 ### 3.2 The app_id Filter
 
@@ -243,7 +243,7 @@ Used for fleet-wide operations that require elevated access. Always scripted, al
 | `merge_sentinel_permissions_prs.py` | Merge workflow permission fix PRs | `repo` |
 | `push_workflow_fixes.py` | Push workflow file changes | `workflow` |
 | `github_protection_audit.py` | Audit branch protection fleet-wide | `repo` + `admin:repo_hook` + `read:org` (audit mode) |
-| `new_repo_setup.py` | Create new repos with protection | Optional classic PAT for admin scope |
+| `new_repo.py` | Create new repos with protection | Optional classic PAT for admin scope |
 
 **Protocol:** Switch to classic PAT, run the script, switch back to fine-grained PAT immediately. The classic PAT is never stored in environment variables or configuration files accessible to agents.
 
@@ -282,7 +282,7 @@ Full audit data: `data/branch-protection-audit.csv`
 | Auto-reviewer timeout | PR not approved after 10 min | Required check not found by substring match | Verify check run name contains `issue-reference` |
 | Missing Cerberus secrets | Auto-reviewer workflow fails | `REVIEWER_APP_ID` or `REVIEWER_APP_PRIVATE_KEY` not set | Run `deploy_cerberus_secrets.py` |
 | Wrong context in branch protection | Check passes but protection not satisfied | Context name doesn't match any posted check | Fix via classic PAT (see scripts in section 4) |
-| `new_repo_setup.py` sets wrong context | New repos have mismatched protection | Script sets `pr-sentinel` instead of `pr-sentinel / issue-reference` | Known bug, tracked in #748/#883 |
+| `new_repo.py` sets wrong context | New repos have mismatched protection | Script sets `pr-sentinel` instead of `pr-sentinel / issue-reference` | Known bug, tracked in #748/#883 |
 | Squash merge drops PR body | Issue not auto-closed after merge | Commit message lacks `Closes #N` | Tracked in #851 — commit messages must also contain the reference |
 | Agent death spiral | Agent polls merge in tight loop | `mergeable_state` stays `blocked`, agent doesn't diagnose | CLAUDE.md instructs: check PR body, issue state, then stop |
 
@@ -296,7 +296,7 @@ Full audit data: `data/branch-protection-audit.csv`
 | 2026-03-10 | Agent merged 4 PRs in 6-7 seconds; pr-sentinel passed but didn't register due to missing permissions block | Documented in dispatch paper | Led to adding `permissions:` to pr-sentinel.yml (#853) |
 | 2026-03-10 | Auto-reviewer timeout — exact match on `pr-sentinel` failed against `pr-sentinel / issue-reference` | #742 | Fix: substring `contains()` match |
 | 2026-03-10 | Dependabot PRs permanently queued — Worker skipped without creating check run | #749 | Fix: create passing check run for dependabot |
-| 2026-03-18 | `new_repo_setup.py` sets `required_approving_review_count=0` instead of 1 | #758, #748 | Runbook updated; script still needs fix (#883) |
+| 2026-03-18 | `new_repo.py` sets `required_approving_review_count=0` instead of 1 | #758, #748 | Runbook updated; script still needs fix (#883) |
 | 2026-03-20 | Agent referenced closed issues, causing pr-sentinel failure and merge loop | Documented in lessons-learned | Led to commit message enforcement (#851) |
 | 2026-04-06 | Agent deleted Sextant branch protection and merged PR without permission | Lessons learned 2026-04-06 | Led to #883, reinforced standard 0003 |
 | 2026-04-06 | 3-hour misdiagnosis: Sextant protection flagged as broken when it was working | #886 | Led to this document and #887 (test suite) |

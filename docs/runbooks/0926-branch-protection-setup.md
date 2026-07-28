@@ -15,7 +15,7 @@ Configure **classic Branch Protection** for a repo when the script flow cannot d
 
 **When to use the manual fallback:** after creating a new repo and pushing at least one commit, AND the script's branch-protection step has failed AND re-running it with the classic PAT is not viable.
 
-**Why classic, not Rulesets:** every script in the fleet (`tools/new_repo_setup.py`, `tools/fix_branch_protections.py`, `tools/deploy_auto_reviewer_fleet.py`, `tools/github_protection_audit.py`, `tools/remediate_patent_general_protection.py`, `tools/remediate_fleet_branch_protection.py`) uses the classic Branch Protection API (`PUT /repos/{O}/{R}/branches/main/protection`). All 48+ protected repos in the fleet use classic protection. Per #1203 Option A (2026-05-22), the lone Rulesets outlier (patent-general) was migrated to classic on 2026-05-23 for fleet uniformity. Manual steps should match the fleet, not create a new outlier.
+**Why classic, not Rulesets:** every script in the fleet (`tools/new_repo.py`, `tools/fix_branch_protections.py`, `tools/deploy_auto_reviewer_fleet.py`, `tools/github_protection_audit.py`, `tools/remediate_patent_general_protection.py`, `tools/remediate_fleet_branch_protection.py`) uses the classic Branch Protection API (`PUT /repos/{O}/{R}/branches/main/protection`). All 48+ protected repos in the fleet use classic protection. Per #1203 Option A (2026-05-22), the lone Rulesets outlier (patent-general) was migrated to classic on 2026-05-23 for fleet uniformity. Manual steps should match the fleet, not create a new outlier.
 
 ---
 
@@ -136,7 +136,7 @@ git checkout -- README.md
 - [0925 - Agent Token Setup](0925-agent-token-setup.md) — Why the fine-grained PAT can't do this directly
 - `docs/standards/0017-classic-pat-fleet-tooling-reference-architecture.md` — Patterns for the in-process classic PAT (preferred over manual fallback)
 - `tools/remediate_patent_general_protection.py` — Reference one-shot tool: shows the canonical `CLASSIC_PROTECTION_BODY` shape this manual procedure must match
-- `tools/new_repo_setup.py:configure_branch_protection()` — The canonical body the manual steps mirror
+- `tools/new_repo.py:configure_branch_protection()` — The canonical body the manual steps mirror
 
 ---
 

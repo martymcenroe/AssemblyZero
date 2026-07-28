@@ -139,7 +139,7 @@ After these PRs are merged, the `permissions` block exists on `main` in every re
 - Human must perform 9 manual steps — documented in the script header and session instructions
 
 ### Neutral
-- The `permissions` block is now part of the pr-sentinel workflow template; new repos created via `new_repo_setup.py` already include it
+- The `permissions` block is now part of the pr-sentinel workflow template; new repos created via `new_repo.py` already include it
 - No code changes to any application — only workflow YAML and the merge operation itself
 
 ## 7. Implementation

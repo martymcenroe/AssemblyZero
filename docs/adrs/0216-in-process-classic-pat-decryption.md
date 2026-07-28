@@ -80,7 +80,7 @@ Five existing tools still use v2 (env-scoped) at time of writing — see issues 
 - `tools/merge_sentinel_permissions_prs.py`
 - `tools/fix_branch_protections.py`
 - `tools/deploy_auto_reviewer_fleet.py`
-- `tools/new_repo_setup.py` (privileged paths only)
+- `tools/new_repo.py` (privileged paths only)
 - `tools/test_governance_system.py` (audit mode only)
 
 Until those land, mixed v2/v3 usage is tolerated. New tools MUST start at v3.
