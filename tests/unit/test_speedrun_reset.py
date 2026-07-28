@@ -23,6 +23,7 @@ from speedrun_reset import (
     close_open_prs,
     current_branch,
     delete_local_branches,
+    relocate_lld_artifacts,
     remove_worktree,
     worktree_is_dirty,
 )
@@ -173,6 +174,109 @@ class TestWorktreeSweepPreservesWork:
         repo = tmp_path / "repo"
         repo.mkdir()
         assert remove_worktree(repo, 1234) is False
+
+    def test_lld_worktree_is_swept_too(self, tmp_path, capsys):
+        """#1848: the requirements workflow's -lld worktree is also debris."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        lld_worktree = tmp_path / "repo-1234-lld"
+        lld_worktree.mkdir()
+        calls = []
+
+        def fake_run(cmd, cwd=None, check=False):
+            calls.append(cmd)
+            return _completed()
+
+        with patch("speedrun_reset._run", side_effect=fake_run):
+            assert remove_worktree(repo, 1234) is True
+
+        removed_paths = [
+            cmd[3] for cmd in calls if cmd[:3] == ["git", "worktree", "remove"]
+        ]
+        assert str(lld_worktree) in removed_paths
+
+    def test_both_worktrees_swept_in_one_call(self, tmp_path):
+        """#1848: base and -lld worktrees both targeted."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (tmp_path / "repo-1234").mkdir()
+        (tmp_path / "repo-1234-lld").mkdir()
+        calls = []
+
+        def fake_run(cmd, cwd=None, check=False):
+            calls.append(cmd)
+            return _completed()
+
+        with patch("speedrun_reset._run", side_effect=fake_run):
+            assert remove_worktree(repo, 1234) is True
+
+        removed_paths = [
+            cmd[3] for cmd in calls if cmd[:3] == ["git", "worktree", "remove"]
+        ]
+        assert str(tmp_path / "repo-1234") in removed_paths
+        assert str(tmp_path / "repo-1234-lld") in removed_paths
+
+
+class TestArtifactRelocation:
+    """#1849: untracked LLD/spec artifacts must leave the docs/lld tree."""
+
+    def _make_repo(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / "docs" / "lld" / "active").mkdir(parents=True)
+        (repo / "docs" / "lld" / "drafts").mkdir(parents=True)
+        return repo
+
+    def test_untracked_artifacts_relocated(self, tmp_path, capsys):
+        repo = self._make_repo(tmp_path)
+        lld = repo / "docs" / "lld" / "active" / "LLD-007.md"
+        lld.write_text("# LLD", encoding="utf-8")
+        spec = repo / "docs" / "lld" / "drafts" / "spec-0007-implementation-readiness.md"
+        spec.write_text("# spec", encoding="utf-8")
+
+        # git ls-files --error-unmatch: nonzero == untracked
+        with patch("speedrun_reset._run", return_value=_completed(returncode=1)):
+            moved = relocate_lld_artifacts(repo, 7)
+
+        assert moved == 2
+        dest = repo / "data" / "speedrun" / "reset-artifacts" / "issue-7"
+        assert (dest / "LLD-007.md").exists()
+        assert (dest / "spec-0007-implementation-readiness.md").exists()
+        assert not lld.exists()
+        assert not spec.exists()
+        # emptied drafts dir is itself debris
+        assert not (repo / "docs" / "lld" / "drafts").exists()
+
+    def test_tracked_artifact_left_alone(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        lld = repo / "docs" / "lld" / "active" / "LLD-007.md"
+        lld.write_text("# LLD", encoding="utf-8")
+
+        # git ls-files --error-unmatch: zero == tracked, deliberate content
+        with patch("speedrun_reset._run", return_value=_completed(returncode=0)):
+            moved = relocate_lld_artifacts(repo, 7)
+
+        assert moved == 0
+        assert lld.exists()
+
+    def test_no_artifacts_is_not_an_error(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        with patch("speedrun_reset._run", return_value=_completed(returncode=1)):
+            assert relocate_lld_artifacts(repo, 7) == 0
+
+    def test_collision_gets_numeric_suffix(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        lld = repo / "docs" / "lld" / "active" / "LLD-007.md"
+        lld.write_text("# second run", encoding="utf-8")
+        dest_dir = repo / "data" / "speedrun" / "reset-artifacts" / "issue-7"
+        dest_dir.mkdir(parents=True)
+        (dest_dir / "LLD-007.md").write_text("# first run", encoding="utf-8")
+
+        with patch("speedrun_reset._run", return_value=_completed(returncode=1)):
+            moved = relocate_lld_artifacts(repo, 7)
+
+        assert moved == 1
+        assert (dest_dir / "LLD-007.1.md").read_text(encoding="utf-8") == "# second run"
+        assert (dest_dir / "LLD-007.md").read_text(encoding="utf-8") == "# first run"
 
 
 class TestPrEnumerationIsBaseAgnostic:
