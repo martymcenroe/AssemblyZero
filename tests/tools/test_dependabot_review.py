@@ -9,6 +9,7 @@ notes). The fix routes large bodies through `--body-file <tempfile>`.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -1063,3 +1064,167 @@ class TestRunTestsStripsVirtualEnv:
         dependabot_review.run_tests(tmp_path)
 
         assert captured["env"].get("PYTHONDONTWRITEBYTECODE") == "1"
+
+
+class TestAlreadyDeferredAtHead:
+    """#1838: skip re-audit when a tool-authored deferral review exists at
+    the PR's current head SHA. Standing deferrals were re-audited (and
+    re-commented) every scheduled run; under --limit 15 they consumed the
+    entire daily budget before fresh PRs were reached."""
+
+    HEAD = "abc123def4567890abc123def4567890abc123de"
+
+    def _pr(self, head_oid=None):
+        return dependabot_review.PRInfo(
+            number=42, title="bump x", author_login="app/dependabot",
+            body="", head_ref="dependabot/pip/x-1.0",
+            head_oid=self.HEAD if head_oid is None else head_oid,
+        )
+
+    def _review(self, *, user="martymcenroe", state="COMMENTED",
+                commit_id=None, body=None):
+        return {
+            "user": user,
+            "state": state,
+            "commit_id": self.HEAD if commit_id is None else commit_id,
+            "body": (
+                dependabot_review.REVIEW_BODY_PREFIX
+                + " -- test suite FAILED (exit 1). Not approving, not merging."
+            ) if body is None else body,
+        }
+
+    def _stub(self, monkeypatch, reviews, returncode=0, raw=None):
+        def _fake(cmd, *args, **kwargs):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=returncode,
+                stdout=raw if raw is not None else json.dumps(reviews),
+                stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+
+    def test_matching_deferral_review_skips(self, monkeypatch):
+        self._stub(monkeypatch, [self._review()])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is True
+
+    def test_commit_mismatch_reaudits(self, monkeypatch):
+        """A rebase/new push moves the head SHA -- must re-audit (#994)."""
+        self._stub(monkeypatch, [self._review(commit_id="0" * 40)])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_approved_review_does_not_skip(self, monkeypatch):
+        """An APPROVED review at head is the green path, not a deferral --
+        the #1399 timeout-deferral case must keep retrying the merge."""
+        self._stub(monkeypatch, [self._review(state="APPROVED")])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_foreign_reviewer_does_not_skip(self, monkeypatch):
+        self._stub(monkeypatch, [self._review(user="cerberus-az[bot]")])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_non_tool_body_does_not_skip(self, monkeypatch):
+        self._stub(monkeypatch, [self._review(body="LGTM, nice bump")])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_gh_failure_is_conservative(self, monkeypatch):
+        self._stub(monkeypatch, [], returncode=1)
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_bad_json_is_conservative(self, monkeypatch):
+        self._stub(monkeypatch, [], raw="not-json{")
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_missing_head_oid_reaudits_without_api_call(self, monkeypatch):
+        """PRInfo from an older listing (no headRefOid) must not skip and
+        must not spend an API call."""
+        called = []
+
+        def _fake(*args, **kwargs):
+            called.append(args)
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="[]", stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(head_oid=""), "o/r") is False
+        assert called == []
+
+
+class TestListPRsCarriesHeadOid:
+    """#1838: the PR listing must request headRefOid and map it onto
+    PRInfo.head_oid so the skip check has a SHA to compare against."""
+
+    def test_head_oid_requested_and_mapped(self, monkeypatch):
+        captured: dict = {}
+        payload = [{
+            "number": 7, "title": "t", "author": {"login": "app/dependabot"},
+            "body": None, "headRefName": "dependabot/npm_and_yarn/x-2",
+            "headRefOid": "feedbeef" * 5,
+        }]
+
+        def _fake(cmd, *args, **kwargs):
+            captured["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps(payload), stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        prs = dependabot_review.list_dependabot_prs("o/r")
+        assert "headRefOid" in " ".join(captured["cmd"])
+        assert prs[0].head_oid == "feedbeef" * 5
+
+    def test_missing_oid_field_maps_to_empty(self, monkeypatch):
+        payload = [{
+            "number": 7, "title": "t", "author": {"login": "app/dependabot"},
+            "body": "", "headRefName": "h",
+        }]
+
+        def _fake(cmd, *args, **kwargs):
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps(payload), stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        assert dependabot_review.list_dependabot_prs("o/r")[0].head_oid == ""
+
+
+class TestProcessRepoSkipsUnchanged:
+    """#1838: the skip happens BEFORE budget accounting and before any
+    worktree work; skipped PRs land in skipped_unchanged, visibly."""
+
+    def _wire(self, monkeypatch, tmp_path, deferred_at_head):
+        pr = dependabot_review.PRInfo(
+            number=9, title="bump y", author_login="app/dependabot",
+            body="", head_ref="h", head_oid="cafe1234" * 5)
+        monkeypatch.setattr(dependabot_review, "resolve_target_repo_dir",
+                            lambda repo, parent: tmp_path)
+        monkeypatch.setattr(dependabot_review, "check_for_orphan_worktrees",
+                            lambda t: [])
+        monkeypatch.setattr(dependabot_review, "list_dependabot_prs",
+                            lambda repo: [pr])
+        monkeypatch.setattr(dependabot_review, "already_deferred_at_head",
+                            lambda p, repo: deferred_at_head)
+        processed: list[int] = []
+        monkeypatch.setattr(
+            dependabot_review, "process_pr",
+            lambda p, repo, target: processed.append(p.number) or "merged")
+        return processed
+
+    def test_unchanged_pr_is_skipped_and_budget_untouched(
+            self, monkeypatch, tmp_path):
+        processed = self._wire(monkeypatch, tmp_path, deferred_at_head=True)
+        budget = dependabot_review.PRBudget(5)
+        sub = dependabot_review.process_repo("o/r", tmp_path, budget=budget)
+        assert sub["skipped_unchanged"] == ["o/r#9"]
+        assert processed == []
+        assert budget.used == 0, (
+            "skip must happen BEFORE budget.try_acquire -- a skipped PR "
+            "consuming budget recreates the starvation #1838 fixes"
+        )
+
+    def test_changed_pr_still_processes(self, monkeypatch, tmp_path):
+        processed = self._wire(monkeypatch, tmp_path, deferred_at_head=False)
+        sub = dependabot_review.process_repo("o/r", tmp_path)
+        assert processed == [9]
+        assert sub["merged"] == ["o/r#9"]
+        assert sub["skipped_unchanged"] == []

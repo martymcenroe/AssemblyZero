@@ -182,6 +182,11 @@ POETRY_INSTALL_TIMEOUT_S = 600
 # "pytest returns 0 when no tests collected" -- that was true on
 # pytest <5.0; doc fix tracked separately.
 PYTEST_EXIT_NO_TESTS_COLLECTED = 5
+# #1838: shared prefix for every review body this tool posts. Both the
+# posting sites (approve + deferral reviews) and the skip-detection in
+# already_deferred_at_head key on this string -- if it drifts, the skip
+# silently disarms and standing deferrals go back to daily re-audits.
+REVIEW_BODY_PREFIX = "Automated review via tools/dependabot_review.py"
 
 
 @dataclass
@@ -191,6 +196,9 @@ class PRInfo:
     author_login: str
     body: str
     head_ref: str
+    # #1838: current head SHA (headRefOid). "" when the listing did not
+    # provide one; every consumer must treat "" as "unknown, re-audit".
+    head_oid: str = ""
 
 
 class PRBudget:
@@ -350,7 +358,7 @@ def list_dependabot_prs(repo: str) -> list[PRInfo]:
         "gh", "pr", "list", "--repo", repo,
         "--author", "app/dependabot",
         "--state", "open",
-        "--json", "number,title,author,body,headRefName",
+        "--json", "number,title,author,body,headRefName,headRefOid",
     ])
     if result.returncode != 0:
         raise PRListError(
@@ -364,6 +372,7 @@ def list_dependabot_prs(repo: str) -> list[PRInfo]:
             author_login=r["author"]["login"],
             body=r["body"] or "",
             head_ref=r["headRefName"],
+            head_oid=r.get("headRefOid") or "",
         )
         for r in raw
     ]
@@ -551,7 +560,7 @@ def approve_pr(pr_number: int, repo: str) -> bool:
     result = run([
         "gh", "pr", "review", str(pr_number), "--repo", repo, "--approve",
         "--body",
-        "Automated review via tools/dependabot_review.py — test suite passed "
+        f"{REVIEW_BODY_PREFIX} — test suite passed "
         "(exit 0). Deterministic gate; no LLM in loop. "
         "Author and exit-code gates enforced.",
     ])
@@ -711,6 +720,57 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
     if not pr_base or not main_head:
         return False  # Conservative: don't trigger rebase on uncertain state
     return pr_base != main_head
+
+
+def already_deferred_at_head(pr: PRInfo, repo: str) -> bool:
+    """#1838: True iff this tool already posted a deferral review at the
+    PR's CURRENT head SHA.
+
+    The scheduled harvest re-audited every standing deferral daily -- full
+    worktree + install + test cycle, a duplicate COMMENTED review, and a
+    budget slot (#1339). On 2026-07-28, 30 of 37 processed PRs were
+    re-deferrals; under --limit 15 (#1836) the sorted repo order spends
+    the entire daily budget on them before reaching fresh PRs.
+
+    A deferral review whose commit_id equals the current head means
+    nothing changed since the last audit -- re-running the gate is
+    guaranteed to reproduce the same result. Dependabot rebases and
+    pushes move the head SHA, so real changes still re-audit (#994
+    semantics preserved). #1399 mergeable-timeout deferrals post no
+    review, so they correctly keep retrying; errored PRs post no review
+    either and also retry.
+
+    per_page=100 covers the worst observed backlog (~60 daily deferral
+    reviews on Talos#169); once this skip is active, deferral reviews
+    stop accumulating, so the count is self-limiting.
+
+    Conservative on ANY failure: return False (re-audit). A wasted audit
+    is recoverable; a wrongly-skipped PR never merges.
+    """
+    if not pr.head_oid:
+        return False
+    result = run(
+        ["gh", "api", f"repos/{repo}/pulls/{pr.number}/reviews?per_page=100",
+         "--jq",
+         "[.[] | {user: .user.login, state: .state, "
+         "commit_id: .commit_id, body: .body}]"],
+        quiet_on_failure=True,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        reviews = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return False
+    for rv in reviews:
+        if (
+            rv.get("user") == GITHUB_USER
+            and rv.get("state") == "COMMENTED"
+            and (rv.get("body") or "").startswith(REVIEW_BODY_PREFIX)
+            and rv.get("commit_id") == pr.head_oid
+        ):
+            return True
+    return False
 
 
 # #1400: file patterns that mean "this PR could affect the Python test
@@ -947,7 +1007,7 @@ def _process_pr_inside_worktree(
             # path also accrues to the user's Code Review profile stat.
             review_comment_on_pr(
                 pr.number, repo,
-                "Automated review via tools/dependabot_review.py -- "
+                f"{REVIEW_BODY_PREFIX} -- "
                 "`poetry install` failed. See the PR's Actions output for the "
                 "captured stderr; re-run locally via `gh pr checkout` if needed.",
             )
@@ -985,7 +1045,7 @@ def _process_pr_inside_worktree(
         # user has audited the PR; the credit should reflect that.
         review_comment_on_pr(
             pr.number, repo,
-            f"Automated review via tools/dependabot_review.py -- test suite "
+            f"{REVIEW_BODY_PREFIX} -- test suite "
             f"FAILED (exit {exit_code}). Not approving, not merging. "
             f"Re-run locally via `gh pr checkout` if needed; the PR's Actions "
             f"output is the forensic record.",
@@ -1198,8 +1258,9 @@ def process_repo(
     Cross-repo parallelism is the caller's responsibility.
 
     Returns a per-repo result dict with the same shape as the
-    aggregate (merged / deferred / errored / limit_skipped lists of
-    `repo#N` strings). Empty lists when no PRs are open.
+    aggregate (merged / deferred / errored / limit_skipped /
+    skipped_unchanged lists of `repo#N` strings). Empty lists when no
+    PRs are open.
 
     #1339: PRs process oldest-first (ascending PR number) — FIFO drains
     the queue tail, and under ``--limit`` it makes selection deterministic
@@ -1207,6 +1268,7 @@ def process_repo(
     """
     sub: dict[str, list[str]] = {
         "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
+        "skipped_unchanged": [],
     }
     print(f"\n{'=' * 60}")
     print(f"REPO: {repo}")
@@ -1271,6 +1333,14 @@ def process_repo(
     if dry_run:
         return sub
     for pr in sorted(prs, key=lambda p: p.number):
+        # #1838: a PR already deferred at this exact head SHA cannot
+        # produce a different result -- skip before spending a budget
+        # slot, building a worktree, or posting a duplicate review.
+        if already_deferred_at_head(pr, repo):
+            print(f"  SKIP #{pr.number}: already deferred at current head "
+                  f"{pr.head_oid[:9]} -- unchanged since last audit (#1838)")
+            sub["skipped_unchanged"].append(f"{repo}#{pr.number}")
+            continue
         if budget is not None and not budget.try_acquire():
             # #1339: budget spent — remaining PRs are untouched, recorded
             # visibly (no silent caps), and left for the next harvest.
@@ -1457,6 +1527,7 @@ def main() -> None:
     # Aggregate results across repos.
     results: dict[str, list[str]] = {
         "merged": [], "deferred": [], "errored": [], "limit_skipped": [],
+        "skipped_unchanged": [],
     }
 
     # Wrap the worker dispatch + summary print in try/finally so the
@@ -1506,8 +1577,10 @@ def main() -> None:
                         print(f"\n  [ERROR] worker for {repo} raised: "
                               f"{type(e).__name__}: {e}")
                         sub = {"merged": [], "deferred": [],
-                               "errored": [repo], "limit_skipped": []}
-                    for k in ("merged", "deferred", "errored", "limit_skipped"):
+                               "errored": [repo], "limit_skipped": [],
+                               "skipped_unchanged": []}
+                    for k in ("merged", "deferred", "errored", "limit_skipped",
+                              "skipped_unchanged"):
                         results[k].extend(sub[k])
         else:
             for repo in repos:
@@ -1522,7 +1595,8 @@ def main() -> None:
                     repo, main_repo, args.dry_run, args.ignore_orphans,
                     budget=budget,
                 )
-                for k in ("merged", "deferred", "errored", "limit_skipped"):
+                for k in ("merged", "deferred", "errored", "limit_skipped",
+                          "skipped_unchanged"):
                     results[k].extend(sub[k])
     finally:
         # Dry-run skips the result-aggregation summary -- it only
@@ -1555,6 +1629,12 @@ def main() -> None:
                 # is named, so "covered everything" can never be misread.
                 print(f"  Limit-skipped (left for next harvest): "
                       f"{results['limit_skipped']}")
+            if results["skipped_unchanged"]:
+                # #1838: standing deferrals with an unchanged head are not
+                # re-audited; they create no review events and burn no
+                # budget. A rebase or new push re-audits them.
+                print(f"  Skipped (already deferred at unchanged head): "
+                      f"{results['skipped_unchanged']}")
             print(
                 f"  Review events created: {approved_events} APPROVED "
                 f"+ {commented_events} COMMENTED = {total_events} total"
@@ -1572,7 +1652,8 @@ def main() -> None:
                 f"\n=== {end_stamp} | FLEET-COMPLETE | "
                 f"merged={len(results['merged'])} "
                 f"deferred={len(results['deferred'])} "
-                f"errored={len(results['errored'])} ==="
+                f"errored={len(results['errored'])} "
+                f"skipped_unchanged={len(results['skipped_unchanged'])} ==="
             )
             # #1403: repeat the log path at the very end — after a long
             # drain the opening line is thousands of lines up-scroll.
