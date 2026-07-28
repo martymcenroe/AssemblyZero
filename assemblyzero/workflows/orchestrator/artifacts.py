@@ -139,7 +139,12 @@ def validate_artifact(path: Path, artifact_type: str) -> bool:
       - File is non-empty
       - For lld: contains '## 1. Context' heading
       - For spec: contains '## 1. Overview' heading
-      - For triage: contains '##' heading (any h2)
+      - For triage: any non-empty file (#1430) — briefs are narrative by
+        nature, they exist as provenance + skip-marker, and no downstream
+        stage parses their structure (the lld stage reads the issue body
+        from GitHub directly). The old any-h2 requirement forced voice
+        compromises on operator-authored briefs while validating nothing
+        a consumer relied on.
     """
     if artifact_type == "impl":
         # For implementation, just check directory exists
@@ -158,6 +163,8 @@ def validate_artifact(path: Path, artifact_type: str) -> bool:
     if artifact_type == "spec":
         return "## 1. Overview" in content
     if artifact_type == "triage":
-        return "## " in content
+        # Non-empty is sufficient (#1430); the size check above already ran.
+        # Guard only against whitespace-only files.
+        return bool(content.strip())
 
     return True

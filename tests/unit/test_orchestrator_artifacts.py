@@ -5,7 +5,6 @@ Issue #305: End-to-End Orchestration Workflow (Issue → Code)
 
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 from assemblyzero.workflows.orchestrator.artifacts import (
     detect_existing_artifacts,
@@ -134,6 +133,21 @@ class TestValidateArtifact:
         empty_file = tmp_path / "empty.md"
         empty_file.write_text("")
         assert validate_artifact(empty_file, "triage") is False
+
+    def test_narrative_brief_without_headings_is_valid_triage(self, tmp_path):
+        """#1430: briefs are narrative provenance, not structured input —
+        an operator-voice brief with no markdown headings must pass."""
+        brief = tmp_path / "issue-brief.md"
+        brief.write_text(
+            "The user wants the gauge to feel like a real tachometer.\n"
+            "No h2 anywhere in this file, and that is fine.\n"
+        )
+        assert validate_artifact(brief, "triage") is True
+
+    def test_whitespace_only_triage_is_invalid(self, tmp_path):
+        brief = tmp_path / "issue-brief.md"
+        brief.write_text("   \n\n\t\n")
+        assert validate_artifact(brief, "triage") is False
 
     def test_impl_checks_directory(self, tmp_path):
         impl_dir = tmp_path / "worktree"
