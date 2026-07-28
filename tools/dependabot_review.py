@@ -75,6 +75,65 @@ from pathlib import Path
 
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
+
+# #1403: per-run log directory, anchored to the AssemblyZero repo the tool
+# lives in — NOT the cwd, and NOT a hidden home directory. The issue's
+# original sketch said ~/.assemblyzero/, but the 2026-07-26 hidden-spaces
+# rule bans agent artifacts in invisible locations; data/ is the house
+# convention (speedrun run-log, hallucination telemetry) — operator-visible
+# in the Projects tree, machine-local, gitignored.
+RUN_LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "dependabot-runs"
+
+
+class _Tee:
+    """Mirror a stream to a log file. Terminal output stays unchanged.
+
+    #1403: manual drains had no record — the operator's terminal
+    scrollback was the only log, and days were spent reconstructing runs
+    from partial pastes. Every failure here degrades silently to
+    terminal-only; logging must never break the drain.
+    """
+
+    def __init__(self, stream, logfile):
+        self._stream = stream
+        self._logfile = logfile
+
+    def write(self, text: str) -> int:
+        try:
+            self._logfile.write(text)
+        except (OSError, ValueError):
+            pass  # log file gone/closed — terminal keeps working
+        return self._stream.write(text)
+
+    def flush(self) -> None:
+        try:
+            self._logfile.flush()
+        except (OSError, ValueError):
+            pass
+        self._stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def setup_run_log(log_dir: Path = RUN_LOG_DIR):
+    """Open a timestamped per-run log and tee stdout/stderr into it.
+
+    Returns the log path, or None when the log could not be created (the
+    run proceeds terminal-only — a warning says so).
+    """
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        log_path = log_dir / f"{stamp}.log"
+        logfile = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 — lives for the process
+    except OSError as e:
+        print(f"WARNING: run log unavailable ({e}); continuing terminal-only",
+              file=sys.stderr)
+        return None
+    sys.stdout = _Tee(sys.stdout, logfile)
+    sys.stderr = _Tee(sys.stderr, logfile)
+    return log_path
 # Windows-only creationflag that isolates each child subprocess in its
 # own process group. Without this, parent + child share a console
 # group, so a child-side console event (e.g. pytest dying during
@@ -1274,7 +1333,20 @@ def main() -> None:
             "the orphans first or they accumulate."
         ),
     )
+    parser.add_argument(
+        "--no-run-log", action="store_true",
+        help=(
+            "#1403: by default every run tees its full output to a "
+            "timestamped file under data/dependabot-runs/ in AssemblyZero "
+            "(manual drains previously left no record). Pass this to skip."
+        ),
+    )
     args = parser.parse_args()
+
+    # #1403: open the run log FIRST so every subsequent line is recorded.
+    run_log_path = None if args.no_run_log else setup_run_log()
+    if run_log_path:
+        print(f"Run log: {run_log_path}")
 
     main_repo = Path(args.main_repo).resolve()
     if not (main_repo / ".git").exists():
@@ -1408,6 +1480,10 @@ def main() -> None:
                 f"deferred={len(results['deferred'])} "
                 f"errored={len(results['errored'])} ==="
             )
+            # #1403: repeat the log path at the very end — after a long
+            # drain the opening line is thousands of lines up-scroll.
+            if run_log_path:
+                print(f"Full run log: {run_log_path}")
 
 
 if __name__ == "__main__":

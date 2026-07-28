@@ -800,3 +800,45 @@ class TestWorkerAggregationSurvivesBaseException:
             raised = True
 
         assert raised, "KeyboardInterrupt must propagate, not be swallowed"
+
+
+# ---- #1403: per-run log file ----
+
+class TestRunLog:
+    """Manual drains previously left no record beyond terminal scrollback."""
+
+    def test_creates_timestamped_log_and_tees_stdout(self, tmp_path, capsys, monkeypatch):
+        import sys as _sys
+        orig_out, orig_err = _sys.stdout, _sys.stderr
+        try:
+            log_path = dependabot_review.setup_run_log(tmp_path / "runs")
+            assert log_path is not None
+            print("hello drain")
+            _sys.stdout.flush()
+            content = log_path.read_text(encoding="utf-8")
+        finally:
+            _sys.stdout, _sys.stderr = orig_out, orig_err
+        assert "hello drain" in content
+        assert log_path.parent.name == "runs"
+        # Terminal output unchanged: capsys still saw the line.
+        assert "hello drain" in capsys.readouterr().out
+
+    def test_unwritable_log_dir_degrades_to_terminal_only(self, tmp_path, capsys):
+        import sys as _sys
+        blocker = tmp_path / "blocked"
+        blocker.write_text("a file where the dir should be", encoding="utf-8")
+        orig_out, orig_err = _sys.stdout, _sys.stderr
+        try:
+            log_path = dependabot_review.setup_run_log(blocker / "runs")
+        finally:
+            _sys.stdout, _sys.stderr = orig_out, orig_err
+        assert log_path is None
+        assert "terminal-only" in capsys.readouterr().err
+
+    def test_tee_survives_closed_logfile(self, tmp_path):
+        import io
+        log = io.StringIO()
+        tee = dependabot_review._Tee(io.StringIO(), log)
+        log.close()
+        tee.write("still works\n")  # must not raise
+        tee.flush()
