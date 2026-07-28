@@ -104,6 +104,13 @@ separators. Compare pathlib.Path objects (path == Path.home() / ".app" / \
 "cfg.json"), never separator-laden strings — monkeypatching sys.platform \
 does NOT change pathlib's flavour, so on Windows str(path) renders with \
 backslashes and endswith("dir/file.json") can never pass (Issue #1841)
+- Every assertion in test code MUST trace to behavior this spec's own \
+requirements/behavior sections specify. NEVER assert side effects the \
+behavior sections do not name — e.g., if CLI flags are specified as \
+runtime precedence over the config file, do NOT assert that a CLI \
+override is persisted back to disk. An assertion without a specified \
+behavior behind it makes the spec self-contradictory and unwinnable \
+(Issue #1860)
 
 STRUCTURE:
 Follow the provided template exactly. Include ALL sections. \
