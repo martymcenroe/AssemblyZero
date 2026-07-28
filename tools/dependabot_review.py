@@ -5,8 +5,13 @@ Hard gates (no LLM in the loop):
 
 1. Author gate: every PR must be authored by `dependabot[bot]`. Any other
    author is a hard refusal — the script will not approve or merge it.
-2. Test gate: `poetry run pytest` must exit 0. Non-zero exit means the PR
-   is commented on and left for human review; no approval, no merge.
+2. Test gate, per ecosystem the PR touches (#1839): Python-relevant
+   changes run `poetry install` + `poetry run pytest` (exit 0, or 5 for
+   test-less repos per #1397); npm-relevant changes run `npm ci` /
+   `npm install` + `npm test` (exit 0) in each touched manifest
+   directory. Non-zero exit means the PR is commented on and left for
+   human review; no approval, no merge. PRs touching neither ecosystem
+   (docker, github-actions) skip the gate (#1400).
 
 For each open dependabot-authored PR:
 
@@ -64,6 +69,8 @@ import datetime
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -165,6 +172,10 @@ POLL_INTERVAL_S = 10
 MERGEABLE_TIMEOUT_S = 900
 PYTEST_TIMEOUT_S = 1800
 POETRY_INSTALL_TIMEOUT_S = 600
+# #1839: npm install can be slow on first run (puppeteer-class postinstall
+# downloads); test budget mirrors pytest's.
+NPM_INSTALL_TIMEOUT_S = 900
+NPM_TEST_TIMEOUT_S = 1800
 # Pytest exit codes since pytest 5.0 (2019):
 #   0 = all tests passed
 #   1 = a test failed
@@ -537,6 +548,113 @@ def run_tests(worktree: Path) -> int:
     return result.returncode
 
 
+def _npm_cmd() -> str:
+    """npm on Windows is npm.cmd; CreateProcess does not apply PATHEXT,
+    so a bare "npm" argv entry is unresolvable. shutil.which does apply
+    it and returns the full shim path."""
+    return shutil.which("npm") or "npm"
+
+
+def _npm_test_script(pkg_dir: Path) -> str | None:
+    """The package.json "test" script, or None when nothing is runnable.
+
+    npm init's placeholder ("Error: no test specified" && exit 1) counts
+    as no script -- running it can only exit 1 with a message that would
+    then be misreported as a test failure instead of the real condition,
+    which is "this package declares no tests".
+    """
+    pkg = pkg_dir / "package.json"
+    if not pkg.exists():
+        return None
+    try:
+        with pkg.open("rb") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    script = (data.get("scripts") or {}).get("test")
+    if not isinstance(script, str) or not script.strip():
+        return None
+    if "no test specified" in script:
+        return None
+    return script
+
+
+def _remove_node_modules(pkg_dir: Path) -> None:
+    """#1839: the audit must delete what it created. `git worktree
+    remove` (no --force; the force flag is banned) refuses on untracked
+    files, and node_modules always lands in-tree. Windows needs the
+    chmod-and-retry handler for readonly files (esbuild/sharp binaries,
+    nested .git objects)."""
+    nm = pkg_dir / "node_modules"
+    if not nm.exists():
+        return
+
+    def _onexc(func, path, exc):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    try:
+        shutil.rmtree(nm, onexc=_onexc)
+    except OSError as e:
+        print(f"  WARNING: could not fully remove {nm}: {e} -- worktree "
+              f"cleanup will likely refuse; manual cleanup needed.",
+              file=sys.stderr)
+
+
+def run_js_gate(worktree: Path, js_dirs: list[str]) -> tuple[bool, str]:
+    """#1839: install + test gate for npm ecosystems, one pass per
+    touched manifest directory.
+
+    Per directory: `npm ci` when an npm lockfile exists (ci never writes
+    the lockfile; it errors when manifest and lock are out of sync),
+    else `npm install --no-package-lock` (yarn/pnpm repos still gate
+    installability from package.json, and no untracked lockfile is
+    generated). Then `npm test`, gated on exit code. A directory with no
+    runnable test script fails the gate -- do not auto-merge unverified
+    (martymcenroe/dependabot-honeypot#171 point 4). node_modules is
+    removed on every exit path so worktree cleanup stays force-free.
+
+    Returns (ok, desc); desc goes verbatim into the review body.
+    """
+    npm = _npm_cmd()
+    parts: list[str] = []
+    for d in js_dirs:
+        pkg_dir = worktree if d == "." else worktree / d
+        try:
+            if not (pkg_dir / "package.json").exists():
+                parts.append(f"'{d}': package.json absent on PR branch; "
+                             f"nothing to gate")
+                continue
+            if _npm_test_script(pkg_dir) is None:
+                return False, (
+                    f"no runnable npm test script in '{d}' -- not "
+                    f"auto-merging unverified (#1839)"
+                )
+            has_npm_lock = any(
+                (pkg_dir / lf).exists()
+                for lf in ("package-lock.json", "npm-shrinkwrap.json")
+            )
+            install_cmd = ([npm, "ci"] if has_npm_lock
+                           else [npm, "install", "--no-package-lock"])
+            result = run(install_cmd, cwd=str(pkg_dir),
+                         timeout=NPM_INSTALL_TIMEOUT_S,
+                         env=_clean_subprocess_env())
+            if result.returncode != 0:
+                return False, (f"npm install failed "
+                               f"(exit {result.returncode}) in '{d}'")
+            result = run([npm, "test"], cwd=str(pkg_dir),
+                         timeout=NPM_TEST_TIMEOUT_S,
+                         env=_clean_subprocess_env())
+            print(f"  npm test exit code ('{d}'): {result.returncode}")
+            if result.returncode != 0:
+                return False, (f"npm test FAILED "
+                               f"(exit {result.returncode}) in '{d}'")
+            parts.append(f"npm test passed (exit 0) in '{d}'")
+        finally:
+            _remove_node_modules(pkg_dir)
+    return True, "; ".join(parts) if parts else "npm gate: nothing to run"
+
+
 # ---------------------------------------------------------------------------
 # PR mutation (only after both gates pass)
 # ---------------------------------------------------------------------------
@@ -556,12 +674,16 @@ def inject_no_issue(pr: PRInfo, repo: str) -> bool:
     return result.returncode == 0
 
 
-def approve_pr(pr_number: int, repo: str) -> bool:
+def approve_pr(pr_number: int, repo: str, gate_desc: str) -> bool:
+    """#1839: the review body states WHICH gate actually ran. The prior
+    fixed text claimed "test suite passed (exit 0)" even on the #1400
+    skip path where no test ran -- a false audit record for npm/docker/
+    actions PRs."""
     result = run([
         "gh", "pr", "review", str(pr_number), "--repo", repo, "--approve",
         "--body",
-        f"{REVIEW_BODY_PREFIX} — test suite passed "
-        "(exit 0). Deterministic gate; no LLM in loop. "
+        f"{REVIEW_BODY_PREFIX} — gate: {gate_desc}. "
+        "Deterministic gate; no LLM in loop. "
         "Author and exit-code gates enforced.",
     ])
     return result.returncode == 0
@@ -786,33 +908,34 @@ _PYTHON_RELEVANT_FILES = frozenset({
 })
 
 
-def pr_touches_python(pr_number: int, repo: str) -> bool:
-    """#1400: True iff the PR's diff includes any Python-relevant file.
+# #1839: npm lockfiles + manifest. A dependabot npm bump always touches
+# package.json and/or one of these lockfiles; their parent directory is
+# where the JS gate runs (fleet npm manifests are mostly subdirectories --
+# /dashboard, /das, /web -- not repo roots).
+_JS_LOCKFILES = frozenset({
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+})
+_JS_MANIFEST_FILES = _JS_LOCKFILES | frozenset({"package.json"})
 
-    Used by _process_pr_inside_worktree to decide whether to run the
-    `poetry install` + `pytest` gate. A PR that does not touch any Python
-    file or manifest cannot break the Python venv by construction --
-    running the Python gate on it is wasted work AND creates false
-    negatives when the worktree's lockfile has any pre-existing issue
-    unrelated to the PR (the bug that bit honeypot's docker PRs #52, #53,
-    #55 on 2026-05-29/30 -- their branches predate the LLM-cleanup
-    martymcenroe/dependabot-honeypot#67/#71/#72/#76 and still carry the
-    jiter manifest, but the docker bump itself cannot have caused that).
 
-    Conservative on failure: if `gh pr diff` cannot list the changed
-    files, return True so the Python gate still runs (no false-pass).
+def _pr_changed_files(pr_number: int, repo: str) -> list[str] | None:
+    """Changed-file paths for the PR, or None when gh cannot list them.
+
+    Single source for both ecosystem predicates -- one `gh pr diff`
+    call per PR feeds _touches_python and _js_manifest_dirs.
     """
     result = run(
         ["gh", "pr", "diff", str(pr_number), "--repo", repo, "--name-only"],
         quiet_on_failure=True,
     )
     if result.returncode != 0:
-        print(f"  WARNING: could not list PR #{pr_number} changed files "
-              f"(gh pr diff --name-only failed); running Python gate as "
-              f"the safe default (#1400).",
-              file=sys.stderr)
-        return True
-    files = [f.strip() for f in (result.stdout or "").splitlines() if f.strip()]
+        return None
+    return [f.strip() for f in (result.stdout or "").splitlines() if f.strip()]
+
+
+def _touches_python(files: list[str]) -> bool:
+    """#1400 predicate, pure part: any Python source, manifest, or
+    lockfile anywhere in the changed-file list."""
     for f in files:
         # Any *.py file anywhere in the repo.
         if f.endswith(".py"):
@@ -825,6 +948,43 @@ def pr_touches_python(pr_number: int, repo: str) -> bool:
         if basename.startswith("requirements") and basename.endswith(".txt"):
             return True
     return False
+
+
+def _js_manifest_dirs(files: list[str]) -> list[str]:
+    """#1839: repo-relative directories ('.' for root) holding a touched
+    npm manifest or lockfile. Sorted and deduped. Vendored trees under
+    node_modules are ignored -- dependabot never edits them, and a stray
+    checked-in vendor dir must not trigger an install there."""
+    dirs: set[str] = set()
+    for f in files:
+        parts = f.split("/")
+        if "node_modules" in parts[:-1]:
+            continue
+        if parts[-1] in _JS_MANIFEST_FILES:
+            dirs.add("/".join(parts[:-1]) or ".")
+    return sorted(dirs)
+
+
+def pr_touches_python(pr_number: int, repo: str) -> bool:
+    """#1400: True iff the PR's diff includes any Python-relevant file.
+
+    A PR that does not touch any Python file or manifest cannot break
+    the Python venv by construction -- running the Python gate on it is
+    wasted work AND creates false negatives when the worktree's lockfile
+    has any pre-existing issue unrelated to the PR (the bug that bit
+    honeypot's docker PRs #52, #53, #55 on 2026-05-29/30).
+
+    Conservative on failure: if `gh pr diff` cannot list the changed
+    files, return True so the Python gate still runs (no false-pass).
+    """
+    files = _pr_changed_files(pr_number, repo)
+    if files is None:
+        print(f"  WARNING: could not list PR #{pr_number} changed files "
+              f"(gh pr diff --name-only failed); running Python gate as "
+              f"the safe default (#1400).",
+              file=sys.stderr)
+        return True
+    return _touches_python(files)
 
 
 # ---------------------------------------------------------------------------
@@ -991,6 +1151,18 @@ def _process_pr_inside_worktree(
         print("  ERROR: gh pr checkout failed")
         return "errored"
 
+    files = _pr_changed_files(pr.number, repo)
+    if files is None:
+        print(f"  WARNING: could not list PR #{pr.number} changed files "
+              f"(gh pr diff --name-only failed); running Python gate as "
+              f"the safe default (#1400).", file=sys.stderr)
+    touches_py = True if files is None else _touches_python(files)
+    js_dirs = [] if files is None else _js_manifest_dirs(files)
+
+    gate_descs: list[str] = []
+    exit_code = 0
+    defer_reason = ""
+
     # #1400: only run the Python gate (poetry install + pytest) when the
     # PR actually touches a Python file or manifest. A Dockerfile-only
     # bump, an npm bump, or a github-actions workflow pin cannot break
@@ -998,7 +1170,7 @@ def _process_pr_inside_worktree(
     # PRs is wasted work and creates false-negative deferrals when the
     # PR's branch has any pre-existing lockfile issue (e.g. honeypot's
     # docker PRs #52/#53/#55 carried the pre-cleanup jiter manifest).
-    if pr_touches_python(pr.number, repo):
+    if touches_py:
         evict_poetry_venv(worktree)
 
         if not install_deps(worktree):
@@ -1023,19 +1195,32 @@ def _process_pr_inside_worktree(
         if exit_code == PYTEST_EXIT_NO_TESTS_COLLECTED:
             print("  pytest: no tests collected (exit 5) -- treating as PASS "
                   "(decorative-deps repo with no test suite)")
+            gate_descs.append("pytest: no tests collected (exit 5, treated "
+                              "as pass per #1397)")
             exit_code = 0
-    else:
-        # #1400: PR did not touch any Python-relevant file. Skip the Python
-        # gate entirely and treat as pass for the dep-bump gate. The PR
-        # can only have changed Docker / npm / workflow / docs content;
-        # those cannot break a Python venv. Eventual follow-up: add
-        # ecosystem-specific gates here (npm test, docker build, etc.)
-        # if/when needed -- the honeypot's decorative-deps purpose means
-        # "skip gate, pass through" is currently the right semantic.
-        print(f"  PR #{pr.number} touches no Python-relevant files -- "
-              f"skipping poetry install + pytest gate (#1400). "
+        elif exit_code == 0:
+            gate_descs.append("pytest passed (exit 0)")
+        else:
+            defer_reason = f"test suite FAILED (exit {exit_code})"
+
+    # #1839: npm gate for every touched manifest directory, after the
+    # Python gate -- a grouped PR touching both ecosystems must pass both.
+    if exit_code == 0 and js_dirs:
+        js_ok, js_desc = run_js_gate(worktree, js_dirs)
+        gate_descs.append(js_desc)
+        if not js_ok:
+            exit_code = 1
+            defer_reason = js_desc
+
+    if not touches_py and not js_dirs:
+        # #1400: PR touches neither ecosystem -- docker / workflow / docs
+        # content cannot break a venv or an npm tree. Skip the gates and
+        # pass through; the review body says so truthfully (#1839).
+        print(f"  PR #{pr.number} touches no Python- or npm-relevant files "
+              f"-- skipping install/test gates (#1400). "
               f"Treating as PASS for the dep-bump gate.")
-        exit_code = 0
+        gate_descs.append("no Python- or npm-relevant files changed; "
+                          "install/test gates skipped (#1400)")
 
     if exit_code != 0:
         package_count = count_packages(pr.body)
@@ -1045,8 +1230,8 @@ def _process_pr_inside_worktree(
         # user has audited the PR; the credit should reflect that.
         review_comment_on_pr(
             pr.number, repo,
-            f"{REVIEW_BODY_PREFIX} -- test suite "
-            f"FAILED (exit {exit_code}). Not approving, not merging. "
+            f"{REVIEW_BODY_PREFIX} -- {defer_reason}. "
+            f"Not approving, not merging. "
             f"Re-run locally via `gh pr checkout` if needed; the PR's Actions "
             f"output is the forensic record.",
         )
@@ -1072,7 +1257,7 @@ def _process_pr_inside_worktree(
     # Small wait for pr-sentinel to re-evaluate the edited body
     time.sleep(5)
 
-    if not approve_pr(pr.number, repo):
+    if not approve_pr(pr.number, repo, "; ".join(gate_descs)):
         print("  ERROR: approve failed")
         return "errored"
 
@@ -1192,11 +1377,16 @@ def resolve_target_repo_dir(repo_full: str, default_parent: Path) -> Path | None
 def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     """List user-owned repos that we should attempt to process.
 
-    Returns repos as 'owner/name' strings. Filters to repos where this
-    tool can actually run the test gate — i.e., repos with a
-    `pyproject.toml` on `main`. Non-Poetry repos (npm, Cargo, etc.)
-    are omitted because the existing test gate can't validate them.
-    Future per-language test runners can lift this filter.
+    #1839: the fleet is the WORK QUEUE -- repos with at least one open
+    dependabot PR -- intersected with the user's non-archived, non-fork
+    repos. Pre-#1839 this probed each repo for a root `pyproject.toml`
+    (the gate was Poetry-only), which excluded exactly the JS repos the
+    gate can now handle (~47 of the fleet's 84 open dependabot PRs on
+    2026-07-28) and burned one API probe per repo. With per-ecosystem
+    gate selection in _process_pr_inside_worktree, any repo with open
+    PRs is processable; repos with nothing open have nothing to do.
+
+    Returned sorted for deterministic ordering run to run.
     """
     result = run([
         "gh", "repo", "list", user,
@@ -1206,33 +1396,25 @@ def list_fleet_repos(user: str = GITHUB_USER) -> list[str]:
     if result.returncode != 0:
         sys.exit(f"Failed to list fleet repos: {result.stderr}")
     repos = json.loads(result.stdout or "[]")
+    allowed = {
+        r["nameWithOwner"] for r in repos
+        if not r.get("isArchived") and not r.get("isFork")
+    }
 
-    candidates: list[str] = []
-    for r in repos:
-        if r.get("isArchived") or r.get("isFork"):
-            continue
-        candidates.append(r["nameWithOwner"])
+    search = run([
+        "gh", "search", "prs",
+        "--author", "app/dependabot",
+        "--state", "open",
+        "--owner", user,
+        "--limit", str(FLEET_REPO_LIMIT),
+        "--json", "repository",
+    ])
+    if search.returncode != 0:
+        sys.exit(f"Failed to search open dependabot PRs: {search.stderr}")
+    rows = json.loads(search.stdout or "[]")
+    with_open_prs = {row["repository"]["nameWithOwner"] for row in rows}
 
-    # Filter to repos that have a pyproject.toml on main. Non-Python
-    # repos would defer every PR (poetry run pytest fails) which is a
-    # waste — and would file failure-path review-comments on PRs the
-    # user can't actually approve. Skip silently instead.
-    processable: list[str] = []
-    for repo in candidates:
-        # 404 = "no pyproject.toml in this repo" = "not a Python repo we
-        # can run pytest in". That's the FILTER signal, not an error;
-        # suppress the stderr noise for these calls.
-        check = run(
-            [
-                "gh", "api", f"repos/{repo}/contents/pyproject.toml",
-                "--jq", ".name",
-            ],
-            quiet_on_failure=True,
-        )
-        if check.returncode == 0 and check.stdout.strip():
-            processable.append(repo)
-
-    return processable
+    return sorted(with_open_prs & allowed)
 
 
 # ---------------------------------------------------------------------------
@@ -1431,10 +1613,10 @@ def main() -> None:
     parser.add_argument(
         "--fleet", action="store_true",
         help=(
-            "Process dependabot PRs across ALL user-owned repos with a "
-            "pyproject.toml on main, not just --repo. Multiplies review-"
-            "event volume across the fleet. Mutually exclusive with "
-            "--repo (--fleet wins). (#1091)"
+            "Process dependabot PRs across ALL user-owned repos with open "
+            "dependabot PRs — every ecosystem, not just Poetry (#1839). "
+            "Multiplies review-event volume across the fleet. Mutually "
+            "exclusive with --repo (--fleet wins). (#1091)"
         ),
     )
     parser.add_argument(
@@ -1507,9 +1689,10 @@ def main() -> None:
 
     # Issue #1091: fleet mode enumerates user-owned Poetry repos.
     if args.fleet:
-        print(f"Fleet mode — enumerating {GITHUB_USER}'s Python repos...")
+        print(f"Fleet mode — enumerating {GITHUB_USER}'s repos with open "
+              f"dependabot PRs (#1839)...")
         repos = list_fleet_repos()
-        print(f"  Found {len(repos)} Poetry-based repo(s) to scan.")
+        print(f"  Found {len(repos)} repo(s) with open dependabot PRs.")
     else:
         repos = [args.repo]
 
