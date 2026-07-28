@@ -95,7 +95,9 @@ def _invoke_reviewer_with_feedback_schema(
         schema_kwargs["json_schema"] = FEEDBACK_SCHEMA
 
     result = provider.invoke(system, prompt, **schema_kwargs)
-    raw = result.content if hasattr(result, "content") else str(result)
+    # Issue #1843: the payload lives on .response — `.content` never existed,
+    # so parses ran against the stringified dataclass and always fell back.
+    raw = getattr(result, "response", None) or ""
     return parse_structured_feedback(raw)
 
 

@@ -91,11 +91,20 @@ def _invoke_reviewer_with_spec_schema(
     provider,
     prompt: str,
     system: str,
-) -> ReviewSpecResult:
+) -> tuple[ReviewSpecResult | None, str]:
     """Call spec reviewer with REVIEW_SPEC_SCHEMA and parse structured response.
 
     Issue #775: Uses response_schema for Gemini, json_schema for all other
     providers (including FallbackProvider which wraps ClaudeCLIProvider).
+
+    Issue #1868 / #1843: the payload lives on LLMCallResult.response — the
+    old `result.content` read a field that never existed, so every parse ran
+    against the stringified dataclass and fell back to regex. A failed call
+    or empty response returns (None, error): an infrastructure failure must
+    never be parsed into a verdict.
+
+    Returns:
+        (parsed result, "") on success; (None, error description) on failure.
     """
     from assemblyzero.core.llm_provider import GeminiProvider
 
@@ -106,8 +115,13 @@ def _invoke_reviewer_with_spec_schema(
         schema_kwargs["json_schema"] = REVIEW_SPEC_SCHEMA
 
     result = provider.invoke(system, prompt, **schema_kwargs)
-    raw = result.content if hasattr(result, "content") else str(result)
-    return parse_structured_review_spec(raw)
+    if not getattr(result, "success", False):
+        detail = getattr(result, "error_message", None) or "LLM call failed with no error detail"
+        return None, str(detail)
+    raw = getattr(result, "response", None) or ""
+    if not raw.strip():
+        return None, "LLM call returned an empty response"
+    return parse_structured_review_spec(raw), ""
 
 
 # =============================================================================
@@ -234,7 +248,7 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # provider, then parses via parse_structured_review_spec.
     # -------------------------------------------------------------------------
     cost_before = get_cumulative_cost()
-    spec_result = _invoke_reviewer_with_spec_schema(
+    spec_result, invoke_error = _invoke_reviewer_with_spec_schema(
         reviewer, review_content, REVIEWER_SYSTEM_PROMPT
     )
     node_cost_usd = get_cumulative_cost() - cost_before
@@ -247,10 +261,20 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         print(f"    {msg}")
         return {"error_message": msg}
 
-    response = ""  # Raw text no longer primary; structured result is authoritative
+    # Issue #1868: a failed call is an error, not a verdict — the old path
+    # laundered it into REVISE and the graph looped to the recursion limit.
+    if invoke_error or spec_result is None:
+        msg = f"Spec review LLM call failed: {invoke_error or 'no result'}"
+        print(f"    ERROR: {msg}")
+        return {"error_message": msg}
+
     verdict_status = spec_result["verdict"]
     if verdict_status == "UNKNOWN":
-        verdict_status = "REVISE"
+        # Issue #1868: unparseable review = review infrastructure failure.
+        # Synthesizing a REVISE from noise steered revise cycles blind.
+        msg = "Spec review response yielded no extractable verdict"
+        print(f"    ERROR: {msg}")
+        return {"error_message": msg}
     feedback = spec_result["rationale"]
     if not feedback and spec_result["feedback_items"]:
         feedback = "\n".join(f"- {item}" for item in spec_result["feedback_items"])

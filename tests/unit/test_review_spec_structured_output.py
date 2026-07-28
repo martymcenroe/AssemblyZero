@@ -17,10 +17,18 @@ from assemblyzero.core.verdict_schema import (
 )
 
 
-def _make_mock_provider(response_content: str):
-    """Create a mock provider that returns the given content."""
-    mock_result = MagicMock()
-    mock_result.content = response_content
+def _make_mock_provider(response_content: str, success: bool = True, error_message: str = ""):
+    """Create a mock provider whose invoke returns an LLMCallResult-shaped result.
+
+    Issue #1868/#1843: the payload field is `.response` — the old mock set
+    `.content`, which a MagicMock happily grew, so tests passed while
+    production read a nonexistent field and stringified the dataclass.
+    Explicit spec'd fields keep the mock honest.
+    """
+    mock_result = MagicMock(spec=["success", "response", "error_message"])
+    mock_result.success = success
+    mock_result.response = response_content
+    mock_result.error_message = error_message
     mock_provider = MagicMock()
     mock_provider.invoke.return_value = mock_result
     return mock_provider
@@ -56,10 +64,49 @@ class TestInvokeReviewerWithSpecSchema:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["verdict"] == "APPROVED"
         assert result["rationale"] == "Spec is complete"
+        assert result["source"] == "structured"
+
+    def test_failed_call_returns_error_not_verdict(self):
+        """Issue #1868: LLM failure surfaces as (None, error) — never a verdict."""
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
+            _invoke_reviewer_with_spec_schema,
+        )
+
+        provider = _make_mock_provider(
+            "", success=False, error_message="agy exited 3221225794"
+        )
+        result, err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        assert result is None
+        assert "3221225794" in err
+
+    def test_empty_response_returns_error_not_verdict(self):
+        """Issue #1868: an empty response is a failure, not a parseable verdict."""
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
+            _invoke_reviewer_with_spec_schema,
+        )
+
+        provider = _make_mock_provider("   ", success=True)
+        result, err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        assert result is None
+        assert "empty" in err.lower()
+
+    def test_payload_read_from_response_field(self):
+        """Issue #1843: the payload is LLMCallResult.response — a result object
+        without a `content` attribute must still parse structured."""
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
+            _invoke_reviewer_with_spec_schema,
+        )
+
+        raw = json.dumps({"verdict": "APPROVED", "rationale": "ok", "feedback_items": []})
+        provider = _make_mock_provider(raw)
+        # spec'd mock has no .content — the old code would stringify it
+        assert not hasattr(provider.invoke.return_value, "content")
+        result, err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        assert err == ""
         assert result["source"] == "structured"
 
     def test_passes_json_schema_to_non_gemini_provider(self):
@@ -95,8 +142,10 @@ class TestInvokeReviewerWithSpecSchema:
             "rationale": "ok",
             "feedback_items": [],
         })
-        mock_result = MagicMock()
-        mock_result.content = raw
+        mock_result = MagicMock(spec=["success", "response", "error_message"])
+        mock_result.success = True
+        mock_result.response = raw
+        mock_result.error_message = ""
         gemini_provider = MagicMock(spec=GeminiProvider)
         gemini_provider.invoke.return_value = mock_result
 
@@ -117,7 +166,7 @@ class TestInvokeReviewerWithSpecSchema:
         raw = "[X] **APPROVED**\n\nRationale: Looks good"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["verdict"] == "APPROVED"
         assert result["source"] == "regex_fallback"
@@ -135,7 +184,7 @@ class TestInvokeReviewerWithSpecSchema:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["verdict"] == "REVISE"
         assert result["feedback_items"] == ["Add diff for section 6"]
@@ -153,7 +202,7 @@ class TestInvokeReviewerWithSpecSchema:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["verdict"] == "BLOCKED"
         assert result["source"] == "structured"
@@ -324,7 +373,7 @@ class TestReviewSpecResultPropagation:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["feedback_items"] == items
 
@@ -341,7 +390,7 @@ class TestReviewSpecResultPropagation:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "structured"
 
@@ -354,7 +403,7 @@ class TestReviewSpecResultPropagation:
         raw = "[X] **REVISE**\n\nRationale: missing tests"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "regex_fallback"
 
@@ -371,7 +420,7 @@ class TestReviewSpecResultPropagation:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["feedback_items"] == []
 
@@ -389,7 +438,7 @@ class TestFallbackBehavior:
         raw = "[X] **REVISE**\n\n## Required Changes\n- Fix error handling"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "regex_fallback"
         mock_logger.debug.assert_any_call("verdict_schema.regex_fallback parser=review_spec")
@@ -407,22 +456,23 @@ class TestFallbackBehavior:
         })
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "structured"
 
-    def test_empty_response_returns_unknown_or_revise(self):
-        """Empty provider response returns fallback result."""
+    def test_empty_response_is_an_error_not_a_verdict(self):
+        """Issue #1868: an empty response no longer synthesizes a fallback
+        verdict — it surfaces as an invoke error so routing halts honestly."""
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
             _invoke_reviewer_with_spec_schema,
         )
 
         provider = _make_mock_provider("")
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
-        assert result["source"] == "regex_fallback"
-        assert result["verdict"] in {"UNKNOWN", "REVISE"}
+        assert result is None
+        assert err != ""
 
     def test_feedback_items_extracted_via_fallback(self):
         """Feedback items extracted from markdown via regex fallback."""
@@ -438,7 +488,7 @@ class TestFallbackBehavior:
         )
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "regex_fallback"
         assert "Fix error handling" in result["feedback_items"]
@@ -458,7 +508,7 @@ class TestFallbackBehavior:
         )
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
+        result, _err = _invoke_reviewer_with_spec_schema(provider, "prompt", "system")
 
         assert result["source"] == "regex_fallback"
         assert "Update section 6" in result["feedback_items"]

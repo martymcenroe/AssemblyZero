@@ -3257,3 +3257,23 @@ class TestDrafterSystemPrompt:
 
         assert "MUST trace" in DRAFTER_SYSTEM_PROMPT
         assert "side effects" in DRAFTER_SYSTEM_PROMPT
+
+
+class TestRouteAfterGenerateSpec:
+    """Issue #1869: a drafter failure halts — it must not ride through N3's
+    vacuous pass into N5, which resets error_message and severs the chain."""
+
+    def test_error_routes_to_halt(self):
+        from assemblyzero.workflows.implementation_spec.graph import (
+            route_after_generate_spec,
+        )
+
+        state = {"error_message": "Drafter failed: All credentials failed"}
+        assert route_after_generate_spec(state) == "HALT"
+
+    def test_clean_state_routes_to_validation(self):
+        from assemblyzero.workflows.implementation_spec.graph import (
+            route_after_generate_spec,
+        )
+
+        assert route_after_generate_spec({}) == "N3_validate_completeness"
