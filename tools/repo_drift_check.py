@@ -212,11 +212,17 @@ def check_repo_drift(name: str) -> dict:
 
 
 def format_text_report(report: dict, quiet: bool) -> str:
+    """Render the ANSWER (drift / in-sync) for stdout.
+
+    #1566: error repos are deliberately NOT part of this report — "couldn't
+    do my job" belongs on stderr (see format_error_report), so a caller
+    capturing stdout under --quiet can never mistake a failed check for a
+    clean one.
+    """
     lines = []
     drift_repos = [r for r in report["repos"] if r["status"] == "drift"]
-    error_repos = [r for r in report["repos"] if r["status"] not in ("in_sync", "drift")]
 
-    if quiet and not drift_repos and not error_repos:
+    if quiet and not drift_repos:
         return ""
 
     if not report["repos"]:
@@ -232,13 +238,6 @@ def format_text_report(report: dict, quiet: bool) -> str:
                 parts.append(f"{r['ahead']} ahead of origin/{r['branch']}")
             lines.append(f"  {r['name']}: {' / '.join(parts)} -- pull before any local work")
 
-    if error_repos:
-        if lines:
-            lines.append("")
-        lines.append("Repos that could not be checked:")
-        for r in error_repos:
-            lines.append(f"  {r['name']}: {r['status']} ({r.get('error', 'no detail')})")
-
     if not quiet:
         in_sync = [r for r in report["repos"] if r["status"] == "in_sync"]
         if in_sync:
@@ -246,6 +245,25 @@ def format_text_report(report: dict, quiet: bool) -> str:
                 lines.append("")
             lines.append(f"In sync ({len(in_sync)}): {', '.join(r['name'] for r in in_sync)}")
 
+    return "\n".join(lines)
+
+
+def format_error_report(report: dict) -> str:
+    """Render repos that could NOT be checked, for stderr.
+
+    #1566: emitted unconditionally — --quiet must never silence "the check
+    itself failed". The 2026-06-09 incident: an invalidated gh token made
+    every fetch fail, --quiet produced empty stdout, and the caller
+    reported "no drift" when the true state was "unknown for every repo".
+    """
+    error_repos = [
+        r for r in report["repos"] if r["status"] not in ("in_sync", "drift")
+    ]
+    if not error_repos:
+        return ""
+    lines = ["Repos that could not be checked:"]
+    for r in error_repos:
+        lines.append(f"  {r['name']}: {r['status']} ({r.get('error', 'no detail')})")
     return "\n".join(lines)
 
 
@@ -278,8 +296,23 @@ def main(argv: list[str] | None = None) -> int:
         if text:
             print(text)
 
-    has_errors = any(r["status"] not in ("in_sync", "drift") for r in report["repos"])
-    return 2 if has_errors else 0
+    # #1566: failures to CHECK always reach stderr, in every mode — --quiet
+    # only quiets the answer, never the "I couldn't do my job" signal.
+    error_text = format_error_report(report)
+    if error_text:
+        print(error_text, file=sys.stderr)
+
+    # #1566: distinct exit codes so callers can dispatch on failure class:
+    #   0 = checked, clean or drift (the report is the answer)
+    #   1 = usage error (bad handoff path)
+    #   2 = fetch failed for at least one repo (network/auth — state UNKNOWN)
+    #   3 = other check failures only (missing dir, not a git repo, rev-list)
+    statuses = {r["status"] for r in report["repos"]}
+    if "fetch_error" in statuses:
+        return 2
+    if statuses - {"in_sync", "drift"}:
+        return 3
+    return 0
 
 
 if __name__ == "__main__":
