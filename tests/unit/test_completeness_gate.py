@@ -213,6 +213,106 @@ class TestDeadCLIFlags:
         issues = analyze_dead_cli_flags(source, "broken.py")
         assert issues == []
 
+    def test_cross_file_consumption_suppresses_issue(self) -> None:
+        """Issue #1857: flag defined in cli.py, read in app.py — alive."""
+        cli_source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--reset-config', action='store_true')
+                return parser
+        """)
+        issues = analyze_dead_cli_flags(
+            cli_source,
+            "cli.py",
+            corpus_references={"reset_config"},
+            corpus_text=cli_source.lower(),
+        )
+        assert issues == []
+
+    def test_corpus_text_string_reference_suppresses_issue(self) -> None:
+        """Issue #1857: getattr-style consumption in another file counts."""
+        cli_source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--verbose', action='store_true')
+                return parser
+        """)
+        other_file = "value = getattr(args, 'verbose')\n"
+        issues = analyze_dead_cli_flags(
+            cli_source,
+            "cli.py",
+            corpus_references=set(),
+            corpus_text=(cli_source + other_file).lower(),
+        )
+        assert issues == []
+
+    def test_flag_dead_across_whole_corpus_still_flagged(self) -> None:
+        """Issue #1857: corpus provided but nothing consumes the flag."""
+        cli_source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--orphan', action='store_true')
+                return parser
+        """)
+        issues = analyze_dead_cli_flags(
+            cli_source,
+            "cli.py",
+            corpus_references={"unrelated_name"},
+            corpus_text=cli_source.lower(),
+        )
+        assert len(issues) == 1
+        assert issues[0]["category"] == CompletenessCategory.DEAD_CLI_FLAG
+
+    def test_run_ast_analysis_cross_file_flag(self, tmp_path) -> None:
+        """Issue #1857 end-to-end: cli.py + app.py pass; cli.py alone blocks."""
+        from assemblyzero.workflows.testing.completeness import run_ast_analysis
+
+        cli = tmp_path / "cli.py"
+        cli.write_text(
+            textwrap.dedent("""\
+                import argparse
+
+                def build_parser():
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument('--reset-config', action='store_true')
+                    return parser
+            """),
+            encoding="utf-8",
+        )
+        app = tmp_path / "app.py"
+        app.write_text(
+            textwrap.dedent("""\
+                from cli import build_parser
+
+                def main(argv=None):
+                    parsed_args = build_parser().parse_args(argv)
+                    if parsed_args.reset_config:
+                        return 'reset'
+                    return 'run'
+            """),
+            encoding="utf-8",
+        )
+
+        result = run_ast_analysis([cli, app])
+        dead = [
+            i for i in result["issues"]
+            if i["category"] == CompletenessCategory.DEAD_CLI_FLAG
+        ]
+        assert dead == []
+
+        result_solo = run_ast_analysis([cli])
+        dead_solo = [
+            i for i in result_solo["issues"]
+            if i["category"] == CompletenessCategory.DEAD_CLI_FLAG
+        ]
+        assert len(dead_solo) == 1
+
 
 # =============================================================================
 # T020: Empty Branch (pass) Detection

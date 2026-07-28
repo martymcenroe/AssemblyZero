@@ -181,17 +181,47 @@ def _extract_argparse_flag_names(call_node: ast.Call) -> list[str]:
 # =============================================================================
 
 
+def _collect_reference_names(tree: ast.AST) -> set[str]:
+    """Collect name/attribute references relevant to flag-usage detection.
+
+    Shared by the single-file scan and the cross-file corpus build
+    (Issue #1857).
+    """
+    refs: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            refs.update(_collect_name_references(node))
+        # Also check module-level attribute access (e.g., args.foo)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            refs.add(node.attr)
+    return refs
+
+
 def analyze_dead_cli_flags(
-    source_code: str, file_path: str
+    source_code: str,
+    file_path: str,
+    corpus_references: set[str] | None = None,
+    corpus_text: str = "",
 ) -> list[CompletenessIssue]:
     """Detect argparse add_argument calls with no corresponding usage.
 
     Issue #147, Requirement 2: Detects dead CLI flags where argparse
     arguments are defined but never referenced in the rest of the code.
 
+    Issue #1857: a flag defined in one file and consumed in another
+    (cli.py defines, app.py reads args.flag) is alive. Callers that
+    analyze a file SET pass corpus_references / corpus_text spanning all
+    implementation files so cross-file consumption suppresses the issue.
+    Test files must be excluded from the corpus — a test invoking the
+    flag does not make an unconsumed flag alive.
+
     Args:
         source_code: Python source code to analyze.
         file_path: Path to the source file (for issue reporting).
+        corpus_references: Reference names collected across the whole
+            implementation file set (optional).
+        corpus_text: Lowercased raw source of the whole implementation
+            file set, for string-reference matching (optional).
 
     Returns:
         List of CompletenessIssue for each unused argparse argument.
@@ -220,16 +250,7 @@ def analyze_dead_cli_flags(
 
     # Phase 2: Collect all name/attribute references in function bodies
     # (excluding the add_argument calls themselves)
-    all_references: set[str] = set()
-
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            body_refs = _collect_name_references(node)
-            all_references.update(body_refs)
-        # Also check module-level attribute access (e.g., args.foo)
-        if isinstance(node, ast.Attribute):
-            if isinstance(node.value, ast.Name):
-                all_references.add(node.attr)
+    all_references: set[str] = _collect_reference_names(tree)
 
     # Also scan raw source for string references to flag names
     # (handles cases like getattr(args, 'flag_name'))
@@ -244,10 +265,20 @@ def analyze_dead_cli_flags(
         if flag_name in all_references:
             flag_referenced = True
 
+        # Issue #1857: cross-file consumption (defined here, read elsewhere)
+        if (
+            not flag_referenced
+            and corpus_references
+            and flag_name in corpus_references
+        ):
+            flag_referenced = True
+
         # Check string references (getattr(args, 'flag_name'))
         if not flag_referenced:
             # Count occurrences - if more than just the declaration, it's used
             occurrences = source_lower.count(flag_name.lower())
+            if corpus_text:
+                occurrences = max(occurrences, corpus_text.count(flag_name.lower()))
             if occurrences > 1:
                 flag_referenced = True
 
@@ -658,6 +689,10 @@ def run_ast_analysis(
     start_ms = time.monotonic_ns() // 1_000_000
     all_issues: list[CompletenessIssue] = []
 
+    # Pass 1: load every analyzable file (guards unchanged), caching the
+    # parsed tree so the corpus build below reuses it (Issue #1857).
+    loaded: list[tuple[Path, str, ast.AST]] = []
+
     for file_path in files:
         # Skip non-Python files
         if file_path.suffix != ".py":
@@ -692,11 +727,27 @@ def run_ast_analysis(
 
         # Verify it parses before running checks
         try:
-            ast.parse(source_code)
+            tree = ast.parse(source_code)
         except SyntaxError as e:
             logger.warning("Syntax error in %s: %s — skipping AST analysis", file_path, e)
             continue
 
+        loaded.append((file_path, source_code, tree))
+
+    # Issue #1857: cross-file flag-consumption corpus. Implementation files
+    # only — a test invoking a flag must not rescue a flag no implementation
+    # code consumes (that failure belongs to the test run).
+    corpus_references: set[str] = set()
+    corpus_parts: list[str] = []
+    for file_path, source_code, tree in loaded:
+        if file_path.name.startswith("test_"):
+            continue
+        corpus_parts.append(source_code)
+        corpus_references.update(_collect_reference_names(tree))
+    corpus_text = "\n".join(corpus_parts).lower()
+
+    # Pass 2: per-file checks
+    for file_path, source_code, tree in loaded:
         file_str = str(file_path)
         is_test_file = file_path.name.startswith("test_")
 
@@ -705,7 +756,14 @@ def run_ast_analysis(
             all_issues.extend(analyze_trivial_assertions(source_code, file_str))
         else:
             # Implementation files: check for all other patterns
-            all_issues.extend(analyze_dead_cli_flags(source_code, file_str))
+            all_issues.extend(
+                analyze_dead_cli_flags(
+                    source_code,
+                    file_str,
+                    corpus_references=corpus_references,
+                    corpus_text=corpus_text,
+                )
+            )
             all_issues.extend(analyze_empty_branches(source_code, file_str))
             all_issues.extend(analyze_docstring_only_functions(source_code, file_str))
             all_issues.extend(analyze_unused_imports(source_code, file_str))
