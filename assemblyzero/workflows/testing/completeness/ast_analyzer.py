@@ -233,8 +233,11 @@ def analyze_dead_cli_flags(
     except SyntaxError:
         return issues
 
-    # Phase 1: Find all add_argument calls and their flag names
+    # Phase 1: Find all add_argument calls, their flag names, and each
+    # call's own source segment. Occurrences of a flag name inside any
+    # declaration segment are declaration context, not consumption (#1864).
     declared_flags: list[tuple[str, int]] = []  # (flag_name, line_number)
+    decl_segments: list[str] = []  # lowercased add_argument call sources
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -242,6 +245,9 @@ def analyze_dead_cli_flags(
         # Match pattern: *.add_argument(...)
         if isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument":
             flag_names = _extract_argparse_flag_names(node)
+            if flag_names:
+                segment = ast.get_source_segment(source_code, node) or ""
+                decl_segments.append(segment.lower())
             for flag_name in flag_names:
                 declared_flags.append((flag_name, node.lineno))
 
@@ -273,13 +279,19 @@ def analyze_dead_cli_flags(
         ):
             flag_referenced = True
 
-        # Check string references (getattr(args, 'flag_name'))
+        # Check string references (getattr(args, 'flag_name')). Baseline
+        # subtraction, not a fixed threshold (#1864): a hyphen-declared flag
+        # ('--no-topmost' -> dest no_topmost) never spells its normalized
+        # name in the declaration, so ANY occurrence outside declaration
+        # segments is consumption evidence — while an underscore-declared
+        # unconsumed flag's own declaration occurrence subtracts to zero.
         if not flag_referenced:
-            # Count occurrences - if more than just the declaration, it's used
-            occurrences = source_lower.count(flag_name.lower())
+            flag_lower = flag_name.lower()
+            decl_occ = sum(seg.count(flag_lower) for seg in decl_segments)
+            outside = source_lower.count(flag_lower) - decl_occ
             if corpus_text:
-                occurrences = max(occurrences, corpus_text.count(flag_name.lower()))
-            if occurrences > 1:
+                outside = max(outside, corpus_text.count(flag_lower) - decl_occ)
+            if outside > 0:
                 flag_referenced = True
 
         if not flag_referenced:
