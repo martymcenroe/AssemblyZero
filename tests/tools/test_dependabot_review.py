@@ -502,18 +502,19 @@ class TestExitCodeFiveIsPass:
         return success, so a non-deferred run reaches the green path."""
         monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
                             lambda worktree, pr_number, repo: True)
-        # #1400: force the Python gate ON so these exit-code tests actually
-        # exercise the install/test path they are testing. (#1400 added a
-        # pr_touches_python check that would otherwise skip the gate when
-        # the stubbed `run` returns empty diff output.)
-        monkeypatch.setattr(dependabot_review, "pr_touches_python",
-                            lambda pr, repo: True)
+        # #1400/#1839: force the Python gate ON (and the npm gate OFF) so
+        # these exit-code tests exercise the install/test path they are
+        # testing, regardless of what the stubbed `run` returns for the
+        # changed-files listing.
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr, repo: ["pyproject.toml"])
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: exit_code)
         # Green-path stubs (only used when the gate doesn't defer).
         monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
-        monkeypatch.setattr(dependabot_review, "approve_pr", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "approve_pr",
+                            lambda pr, repo, gate_desc: True)
         monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
                             lambda pr, repo, timeout=900: True)
         monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
@@ -621,7 +622,8 @@ class TestWaitForMergeableTimeoutDeferred:
         monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 0)
         monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
-        monkeypatch.setattr(dependabot_review, "approve_pr", lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "approve_pr",
+                            lambda pr, repo, gate_desc: True)
         monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
 
     def _pr(self):
@@ -787,7 +789,7 @@ class TestPipelineSkippedForNonPythonPR:
         monkeypatch.setattr(dependabot_review, "inject_no_issue",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "approve_pr",
-                            lambda pr, repo: True)
+                            lambda pr, repo, gate_desc: True)
         monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "squash_merge",
@@ -804,8 +806,8 @@ class TestPipelineSkippedForNonPythonPR:
         """The headline #1400 contract: docker-only PR never invokes
         install_deps or run_tests."""
         self._stub_green_path(monkeypatch)
-        monkeypatch.setattr(dependabot_review, "pr_touches_python",
-                            lambda pr, repo: False)
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr, repo: ["Dockerfile"])
         install_called = []
         tests_called = []
         monkeypatch.setattr(dependabot_review, "install_deps",
@@ -825,14 +827,14 @@ class TestPipelineSkippedForNonPythonPR:
         )
         assert result == "merged"
         out = capsys.readouterr().out
-        assert "skipping poetry install + pytest gate" in out
+        assert "skipping install/test gates" in out
         assert "#1400" in out
 
     def test_python_pr_still_runs_install_and_test(self, monkeypatch):
         """Existing behavior preserved for Python PRs."""
         self._stub_green_path(monkeypatch)
-        monkeypatch.setattr(dependabot_review, "pr_touches_python",
-                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr, repo: ["poetry.lock"])
         install_called = []
         tests_called = []
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
@@ -1228,3 +1230,344 @@ class TestProcessRepoSkipsUnchanged:
         assert processed == [9]
         assert sub["merged"] == ["o/r#9"]
         assert sub["skipped_unchanged"] == []
+
+
+class TestJsManifestDirs:
+    """#1839: pure predicate mapping changed files to npm gate dirs."""
+
+    def test_root_package_json(self):
+        assert dependabot_review._js_manifest_dirs(["package.json"]) == ["."]
+
+    def test_subdir_lockfile(self):
+        assert dependabot_review._js_manifest_dirs(
+            ["dashboard/package-lock.json"]) == ["dashboard"]
+
+    def test_dedup_and_sort(self):
+        files = ["web/package.json", "web/package-lock.json",
+                 "api/package.json", "README.md"]
+        assert dependabot_review._js_manifest_dirs(files) == ["api", "web"]
+
+    def test_node_modules_excluded(self):
+        assert dependabot_review._js_manifest_dirs(
+            ["web/node_modules/foo/package.json"]) == []
+
+    def test_yarn_and_pnpm_locks_recognized(self):
+        assert dependabot_review._js_manifest_dirs(
+            ["a/yarn.lock", "b/pnpm-lock.yaml"]) == ["a", "b"]
+
+    def test_unrelated_files_empty(self):
+        assert dependabot_review._js_manifest_dirs(
+            ["Dockerfile", ".github/workflows/ci.yml", "src/x.py"]) == []
+
+
+class TestNpmTestScript:
+    """#1839: what counts as a runnable npm test script."""
+
+    def _write(self, tmp_path, obj):
+        (tmp_path / "package.json").write_text(
+            json.dumps(obj), encoding="utf-8")
+
+    def test_missing_package_json(self, tmp_path):
+        assert dependabot_review._npm_test_script(tmp_path) is None
+
+    def test_no_scripts_section(self, tmp_path):
+        self._write(tmp_path, {"name": "x"})
+        assert dependabot_review._npm_test_script(tmp_path) is None
+
+    def test_npm_init_placeholder_counts_as_none(self, tmp_path):
+        self._write(tmp_path, {"scripts": {
+            "test": 'echo "Error: no test specified" && exit 1'}})
+        assert dependabot_review._npm_test_script(tmp_path) is None
+
+    def test_blank_script_counts_as_none(self, tmp_path):
+        self._write(tmp_path, {"scripts": {"test": "   "}})
+        assert dependabot_review._npm_test_script(tmp_path) is None
+
+    def test_real_script_returned(self, tmp_path):
+        self._write(tmp_path, {"scripts": {"test": "vitest run"}})
+        assert dependabot_review._npm_test_script(tmp_path) == "vitest run"
+
+    def test_malformed_json_counts_as_none(self, tmp_path):
+        (tmp_path / "package.json").write_text("{not json", encoding="utf-8")
+        assert dependabot_review._npm_test_script(tmp_path) is None
+
+
+class TestRunJsGate:
+    """#1839: npm install + test per touched dir, node_modules cleanup."""
+
+    def _pkg(self, d, script="run-my-tests", lock=True):
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "package.json").write_text(
+            json.dumps({"scripts": {"test": script}}), encoding="utf-8")
+        if lock:
+            (d / "package-lock.json").write_text("{}", encoding="utf-8")
+
+    def _stub_run(self, monkeypatch, calls, test_exit=0, install_exit=0):
+        def _fake(cmd, *args, **kwargs):
+            calls.append({"cmd": list(cmd), "cwd": kwargs.get("cwd"),
+                          "env": kwargs.get("env")})
+            rc = test_exit if cmd[-1] == "test" else install_exit
+            return subprocess.CompletedProcess(args=cmd, returncode=rc,
+                                               stdout="", stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+
+    def test_no_test_script_fails_gate(self, monkeypatch, tmp_path):
+        (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        ok, desc = dependabot_review.run_js_gate(tmp_path, ["."])
+        assert ok is False
+        assert "no runnable npm test script" in desc
+        assert calls == [], "no npm subprocess may run without a test script"
+
+    def test_lockfile_uses_npm_ci_then_test(self, monkeypatch, tmp_path):
+        self._pkg(tmp_path)
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        ok, desc = dependabot_review.run_js_gate(tmp_path, ["."])
+        assert ok is True
+        assert "npm test passed" in desc
+        assert calls[0]["cmd"][1:] == ["ci"]
+        assert calls[1]["cmd"][1:] == ["test"]
+
+    def test_no_lockfile_falls_back_to_install_no_package_lock(
+            self, monkeypatch, tmp_path):
+        self._pkg(tmp_path, lock=False)
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        ok, _ = dependabot_review.run_js_gate(tmp_path, ["."])
+        assert ok is True
+        assert calls[0]["cmd"][1:] == ["install", "--no-package-lock"]
+
+    def test_test_failure_fails_gate(self, monkeypatch, tmp_path):
+        self._pkg(tmp_path)
+        calls: list = []
+        self._stub_run(monkeypatch, calls, test_exit=1)
+        ok, desc = dependabot_review.run_js_gate(tmp_path, ["."])
+        assert ok is False
+        assert "npm test FAILED (exit 1)" in desc
+
+    def test_install_failure_fails_gate_without_running_tests(
+            self, monkeypatch, tmp_path):
+        self._pkg(tmp_path)
+        calls: list = []
+        self._stub_run(monkeypatch, calls, install_exit=1)
+        ok, desc = dependabot_review.run_js_gate(tmp_path, ["."])
+        assert ok is False
+        assert "npm install failed" in desc
+        assert len(calls) == 1
+
+    def test_subdir_runs_in_subdir(self, monkeypatch, tmp_path):
+        self._pkg(tmp_path / "dashboard")
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        ok, desc = dependabot_review.run_js_gate(tmp_path, ["dashboard"])
+        assert ok is True
+        assert calls[0]["cwd"] == str(tmp_path / "dashboard")
+        assert "'dashboard'" in desc
+
+    def test_node_modules_removed_after_gate(self, monkeypatch, tmp_path):
+        self._pkg(tmp_path)
+        nm = tmp_path / "node_modules" / "leftover"
+        nm.mkdir(parents=True)
+        (nm / "file.js").write_text("x", encoding="utf-8")
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        dependabot_review.run_js_gate(tmp_path, ["."])
+        assert not (tmp_path / "node_modules").exists(), (
+            "node_modules must be removed -- git worktree remove (no "
+            "--force) refuses on untracked files"
+        )
+
+    def test_node_modules_removed_even_on_failure(self, monkeypatch, tmp_path):
+        self._pkg(tmp_path)
+        (tmp_path / "node_modules").mkdir()
+        calls: list = []
+        self._stub_run(monkeypatch, calls, test_exit=1)
+        dependabot_review.run_js_gate(tmp_path, ["."])
+        assert not (tmp_path / "node_modules").exists()
+
+    def test_env_strips_virtual_env(self, monkeypatch, tmp_path):
+        """Compose with #1415: npm subprocesses get the cleaned env too."""
+        monkeypatch.setenv("VIRTUAL_ENV", "C:/AZ/venv/should/not/leak")
+        self._pkg(tmp_path)
+        calls: list = []
+        self._stub_run(monkeypatch, calls)
+        dependabot_review.run_js_gate(tmp_path, ["."])
+        assert calls, "gate must have invoked npm"
+        assert all("VIRTUAL_ENV" not in c["env"] for c in calls)
+
+
+class TestProcessPrJsFlow:
+    """#1839: gate selection inside _process_pr_inside_worktree."""
+
+    def _stub_green_path(self, monkeypatch):
+        monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
+                            lambda worktree, pr_number, repo: True)
+        monkeypatch.setattr(dependabot_review, "inject_no_issue",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "squash_merge",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=99, title="bump chalk", author_login="app/dependabot",
+            body="", head_ref="dependabot/npm_and_yarn/chalk-6")
+
+    def test_npm_only_pr_runs_js_gate_not_python(self, monkeypatch):
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(
+            dependabot_review, "_pr_changed_files",
+            lambda pr, repo: ["dashboard/package.json",
+                              "dashboard/package-lock.json"])
+        approvals: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "approve_pr",
+            lambda pr, repo, gate_desc: approvals.append(gate_desc) or True)
+        installs, tests, js = [], [], []
+        monkeypatch.setattr(dependabot_review, "install_deps",
+                            lambda wt: installs.append(wt) or True)
+        monkeypatch.setattr(dependabot_review, "run_tests",
+                            lambda wt: tests.append(wt) or 0)
+        monkeypatch.setattr(
+            dependabot_review, "run_js_gate",
+            lambda wt, dirs: js.append(dirs) or
+            (True, "npm test passed (exit 0) in 'dashboard'"))
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"))
+
+        assert result == "merged"
+        assert installs == [] and tests == []
+        assert js == [["dashboard"]]
+        assert approvals and "npm test passed" in approvals[0]
+
+    def test_js_gate_failure_defers_with_reason(self, monkeypatch):
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr, repo: ["package.json"])
+        monkeypatch.setattr(
+            dependabot_review, "run_js_gate",
+            lambda wt, dirs: (False, "no runnable npm test script in '.' -- "
+                              "not auto-merging unverified (#1839)"))
+        reviews: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "review_comment_on_pr",
+            lambda pr, repo, body: reviews.append(body) or True)
+        monkeypatch.setattr(dependabot_review, "is_pr_branch_stale",
+                            lambda pr, repo: False)
+        approvals: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "approve_pr",
+            lambda pr, repo, gate_desc: approvals.append(gate_desc) or True)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"))
+
+        assert result == "deferred"
+        assert approvals == []
+        assert reviews and "no runnable npm test script" in reviews[0]
+
+    def test_grouped_pr_runs_both_gates(self, monkeypatch):
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(
+            dependabot_review, "_pr_changed_files",
+            lambda pr, repo: ["poetry.lock", "web/package.json"])
+        approvals: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "approve_pr",
+            lambda pr, repo, gate_desc: approvals.append(gate_desc) or True)
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv",
+                            lambda wt: None)
+        monkeypatch.setattr(dependabot_review, "install_deps",
+                            lambda wt: True)
+        monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 0)
+        js: list = []
+        monkeypatch.setattr(
+            dependabot_review, "run_js_gate",
+            lambda wt, dirs: js.append(dirs) or
+            (True, "npm test passed (exit 0) in 'web'"))
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"))
+
+        assert result == "merged"
+        assert js == [["web"]]
+        assert "pytest passed (exit 0)" in approvals[0]
+        assert "npm test passed" in approvals[0]
+
+    def test_python_failure_short_circuits_js_gate(self, monkeypatch):
+        self._stub_green_path(monkeypatch)
+        monkeypatch.setattr(
+            dependabot_review, "_pr_changed_files",
+            lambda pr, repo: ["poetry.lock", "web/package.json"])
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv",
+                            lambda wt: None)
+        monkeypatch.setattr(dependabot_review, "install_deps",
+                            lambda wt: True)
+        monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 1)
+        js: list = []
+        monkeypatch.setattr(dependabot_review, "run_js_gate",
+                            lambda wt, dirs: js.append(dirs) or (True, "x"))
+        monkeypatch.setattr(dependabot_review, "review_comment_on_pr",
+                            lambda pr, repo, body: True)
+        monkeypatch.setattr(dependabot_review, "is_pr_branch_stale",
+                            lambda pr, repo: False)
+
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "owner/repo", Path("/tmp/wt"))
+
+        assert result == "deferred"
+        assert js == [], "js gate must not run when the Python gate failed"
+
+
+class TestListFleetReposByOpenPrs:
+    """#1839: fleet = repos with open dependabot PRs, intersected with the
+    user's non-archived non-fork repos, sorted."""
+
+    def test_intersection_sorted_archived_excluded(self, monkeypatch):
+        def _fake(cmd, *args, **kwargs):
+            if cmd[1] == "repo" and cmd[2] == "list":
+                payload = [
+                    {"name": "beta", "nameWithOwner": "o/beta",
+                     "isArchived": False, "isFork": False},
+                    {"name": "alpha", "nameWithOwner": "o/alpha",
+                     "isArchived": False, "isFork": False},
+                    {"name": "old", "nameWithOwner": "o/old",
+                     "isArchived": True, "isFork": False},
+                    {"name": "fork", "nameWithOwner": "o/fork",
+                     "isArchived": False, "isFork": True},
+                ]
+            else:
+                payload = [
+                    {"repository": {"nameWithOwner": "o/beta"}},
+                    {"repository": {"nameWithOwner": "o/alpha"}},
+                    {"repository": {"nameWithOwner": "o/alpha"}},
+                    {"repository": {"nameWithOwner": "o/old"}},
+                    {"repository": {"nameWithOwner": "o/fork"}},
+                ]
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout=json.dumps(payload), stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        assert dependabot_review.list_fleet_repos("o") == ["o/alpha", "o/beta"]
+
+
+class TestApprovePrGateDesc:
+    """#1839: the approval body names the gate that actually ran."""
+
+    def test_gate_desc_lands_in_review_body(self, monkeypatch):
+        captured: dict = {}
+
+        def _fake(cmd, *args, **kwargs):
+            captured["cmd"] = list(cmd)
+            return subprocess.CompletedProcess(args=cmd, returncode=0,
+                                               stdout="", stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        assert dependabot_review.approve_pr(
+            5, "o/r", "npm test passed (exit 0) in '.'") is True
+        body = captured["cmd"][captured["cmd"].index("--body") + 1]
+        assert "gate: npm test passed (exit 0) in '.'" in body
+        assert body.startswith(dependabot_review.REVIEW_BODY_PREFIX)
