@@ -18,6 +18,17 @@ If you did NOT pass `--pypi` when creating the repo, this runbook does not apply
 
 ---
 
+## Credentials & login (read before Section 1)
+
+- **PyPI has no social or GitHub login.** There is no "Sign in with GitHub" button and there never was — account login is username/email + password + **mandatory 2FA** (authenticator app or passkey) + recovery codes. The GitHub connection in this runbook is only the OIDC *publish* trust; it plays no part in logging in.
+- Credentials belong in your password manager. If you set up a Trusted Publisher for any prior repo, you already have an account — **reuse it; do not create a second**.
+- **The OIDC path (this runbook) needs zero API tokens.** No `pypi-...` token to generate, store, or rotate. If you find yourself creating one for this flow, you have left the runbook.
+- Only the manual `twine upload` fallback needs a `pypi-...` API token. That token is a secret: the operator runs twine, never an agent, and the secret-handling surface checklist in the universal rules applies to every surface it touches.
+
+(Added per a real incident: an operator assumed "Sign in with GitHub" would work, and it does not exist.)
+
+---
+
 ## Section 1 — Register the pending publisher on PyPI
 
 1. Open https://pypi.org/manage/account/publishing/ in a browser. Log in if prompted.
@@ -36,7 +47,9 @@ If you did NOT pass `--pypi` when creating the repo, this runbook does not apply
 
 4. Click **"Add"**.
 
-5. Confirmation: PyPI shows the new pending publisher in the list. The package name is reserved against this publisher — nobody else can register it now.
+5. Confirmation: PyPI shows the new pending publisher in the list.
+
+   **A pending publisher does NOT reserve the package name.** PyPI's own docs: *"A 'pending' publisher does not create a project or reserve a project's name until it is actually used to publish. If another user registers the project name before you actually publish, your 'pending' publisher will be invalidated."* The name is claimed only when Section 2's first publish succeeds — so don't linger between Section 1 and Section 2 for a name you care about. (This runbook previously asserted the opposite; corrected per PyPI's yellow callout on the pending-publisher page, which an operator had to screenshot to settle a real 2026-05-22 dispute.)
 
 **Common mistakes:**
 - Mismatched project name (e.g., `Boostgauge` vs. `boostgauge`). PyPI is case-insensitive on lookup but stores what you type. Always use lowercase.
