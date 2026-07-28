@@ -29,18 +29,8 @@ from assemblyzero.workflows.requirements.nodes.analyze_codebase import (
     _search_for_file,
 )
 from assemblyzero.utils.codebase_reader import (
-    FileReadResult,
     is_sensitive_file,
     read_file_with_budget,
-    read_files_within_budget,
-    parse_project_metadata,
-    SENSITIVE_PATTERNS,
-)
-from assemblyzero.utils.pattern_scanner import (
-    PatternAnalysis,
-    scan_patterns,
-    detect_frameworks,
-    extract_conventions_from_claude_md,
 )
 
 
@@ -57,6 +47,7 @@ _CODEBASE_CONTEXT_KEYS = {
     "related_code",
     "dependency_summary",
     "directory_tree",
+    "code_patterns",  # #1816: scan_patterns output, wired in per #401
 }
 
 
@@ -1338,3 +1329,39 @@ class TestExtractModuleDocstringLong:
         result = _extract_module_docstring(content)
         assert len(result) <= 120
         assert result.endswith("...")
+
+class TestCodePatternsWiredIn:
+    """#1816: scan_patterns output must reach the drafter, per #401's
+    original acceptance ("existing code patterns are injected")."""
+
+    def test_context_carries_detected_patterns(self, mock_repo, directory_tree):
+        state = {
+            "repo_path": str(mock_repo),
+            "issue_text": "Improve the reader module",
+            "directory_tree": directory_tree,
+        }
+        ctx = analyze_codebase(state)["codebase_context"]
+        assert "code_patterns" in ctx
+        # Only detected values ride along -- never the "unknown" filler.
+        assert "unknown" not in ctx["code_patterns"].values()
+
+    def test_formatter_renders_detected_patterns(self):
+        from assemblyzero.workflows.requirements.nodes.generate_draft import (
+            _format_codebase_context,
+        )
+
+        section = _format_codebase_context(
+            {"code_patterns": {"state_pattern": "TypedDict", "test_pattern": "pytest"}}
+        )
+        assert "### Detected Code Patterns" in section
+        assert "State management: TypedDict" in section
+        assert "Test framework: pytest" in section
+
+    def test_formatter_omits_section_when_nothing_detected(self):
+        from assemblyzero.workflows.requirements.nodes.generate_draft import (
+            _format_codebase_context,
+        )
+
+        assert "Detected Code Patterns" not in _format_codebase_context(
+            {"code_patterns": {}}
+        )
