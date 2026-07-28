@@ -79,7 +79,26 @@ You ARE reviewing:
 - Concreteness: Are there real code excerpts, not just descriptions?
 - Specificity: Could someone write exact diffs from the instructions?
 - Consistency: Do patterns, naming, and structure match the codebase?
-- Feasibility: Are the instructions technically achievable?"""
+- Feasibility: Are the instructions technically achievable?
+- Internal consistency of the tests: does every assertion in the spec's test \
+code follow from behaviour the spec itself specifies?
+
+ASSERTION TRACEABILITY (Issue #1866) — check this explicitly and BLOCK on any \
+violation. Three real specs shipped an unwinnable test this way:
+
+1. An assertion that contradicts the spec's own behaviour text. One spec said \
+peaks never decay below the latest value, then asserted a decayed peak BELOW \
+the latest value. No implementation can satisfy both.
+2. An assertion about a side effect the spec never specifies. One spec \
+described CLI flags as runtime precedence over the config file, then asserted \
+a CLI override was written back to disk.
+3. An assertion that cannot hold on the platform the tests run on. One spec \
+monkeypatched sys.platform and asserted a POSIX path separator; pathlib's \
+flavour does not change with sys.platform, so on Windows it can never pass.
+
+For each assertion in the spec's test code, name the requirement or behaviour \
+section it traces to. If you cannot, that assertion is the finding — quote it \
+and say which behaviour it contradicts or invents."""
 
 
 # =============================================================================
