@@ -200,8 +200,7 @@ No blocking issues found.
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "LLD looks good overall.", "feedback_items": [], "open_questions": []}),
-            response=full_verdict,
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "LLD looks good overall.", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=100,
             output_tokens=200,
@@ -247,8 +246,7 @@ No blocking issues found.
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "Looks good", "feedback_items": ["Consider caching"], "open_questions": []}),
-            response="raw prose",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "Looks good", "feedback_items": ["Consider caching"], "open_questions": []}),
             error_message=None,
             input_tokens=100,
             output_tokens=200,
