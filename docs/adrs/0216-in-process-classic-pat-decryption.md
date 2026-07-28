@@ -39,7 +39,14 @@ The remaining attack surface is essentially: an attacker with `ptrace` privilege
 
 Concretely, the rule:
 
-- The PAT is decrypted by `subprocess.run(["gpg", "--quiet", "--decrypt", str(pat_path)], ...)` inside the calling Python process. `gpg-agent` prompts for the passphrase on first call (then caches per its TTL).
+- The PAT is decrypted by `subprocess.run(["gpg", "--quiet", "--decrypt", str(pat_path)], ...)` inside the calling Python process. `gpg-agent` prompts for the passphrase on **every** call — caching is a hard precondition to have DISABLED (`default-cache-ttl 0`, `max-cache-ttl 0`; see section 5 and the module docstring). While a passphrase is cached, any same-user sibling process can silently decrypt the file, which dissolves this ADR's central guarantee. An earlier revision of this line read "then caches per its TTL", which contradicted that requirement and is corrected here (#1853).
+- **Every decrypt announces its purpose on the console before pinentry appears** (#1853). The operator holds several distinct passphrases, and gpg's pinentry dialog names neither the secret nor the operation — so an unannounced prompt is ambiguous, and a wrong guess burns a retry. `_announce_decrypt()` prints the secret's human name, its path, the caller's stated reason, and the attempt counter to stderr immediately before each `gpg` invocation. Callers SHOULD pass `reason=` describing what the elevated scope is for on that run:
+
+  ```python
+  with classic_pat_session(reason="land Seshat CI workflow") as pat:
+  ```
+
+  The console is the load-bearing surface here, not the dialog: gpg symmetric decryption offers no dependable lever on pinentry's own text. The banner carries the secret's NAME only and must never carry secret material — `tests/tools/test_pat_session.py` asserts this.
 - The decrypted PAT is yielded as a local variable inside a context-manager scope (`with ... as pat:`).
 - The caller passes `pat` into `requests`/`pygithub` calls directly. **Never set `os.environ["GH_TOKEN"] = pat`. Never pass the PAT via subprocess argv. Never log it.**
 - When the `with` block exits, the local binding is `del`'d. (Python strings are immutable, so this is symbolic — the bytes may persist in the heap until garbage collection. The primary protection is process scope: the OS reclaims the address space when the script exits.)
