@@ -213,6 +213,60 @@ class TestDeadCLIFlags:
         issues = analyze_dead_cli_flags(source, "broken.py")
         assert issues == []
 
+    def test_hyphen_flag_consumed_via_getattr_same_file(self) -> None:
+        """Issue #1864: --no-topmost + getattr(args, 'no_topmost') is alive.
+
+        The declaration spells the hyphen form, so the single normalized
+        occurrence in getattr must count as consumption on its own.
+        """
+        source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--no-topmost', action='store_true')
+                return parser
+
+            def apply(parsed_args, config):
+                if getattr(parsed_args, 'no_topmost', False):
+                    config.always_on_top = False
+                return config
+        """)
+        issues = analyze_dead_cli_flags(source, "config.py")
+        assert issues == []
+
+    def test_hyphen_flag_never_consumed_still_flagged(self) -> None:
+        """Issue #1864: hyphen-declared flag with zero consumption stays dead."""
+        source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--no-topmost', action='store_true')
+                return parser
+        """)
+        issues = analyze_dead_cli_flags(source, "config.py")
+        assert len(issues) == 1
+        assert issues[0]["category"] == CompletenessCategory.DEAD_CLI_FLAG
+
+    def test_help_text_mention_does_not_rescue_dead_flag(self) -> None:
+        """Issue #1864: a mention inside another declaration's help string
+        is declaration context, not consumption."""
+        source = textwrap.dedent("""\
+            import argparse
+
+            def build_parser():
+                parser = argparse.ArgumentParser()
+                parser.add_argument('--orphan', action='store_true')
+                parser.add_argument('--other', help='overrides orphan behavior')
+                args = parser.parse_args()
+                print(args.other)
+                return parser
+        """)
+        issues = analyze_dead_cli_flags(source, "cli.py")
+        orphan = [i for i in issues if "orphan" in i["description"]]
+        assert len(orphan) == 1
+
     def test_cross_file_consumption_suppresses_issue(self) -> None:
         """Issue #1857: flag defined in cli.py, read in app.py — alive."""
         cli_source = textwrap.dedent("""\
