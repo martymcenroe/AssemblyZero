@@ -4,11 +4,16 @@
 Performs the cleanup needed between attempts:
 
   1. Closes any open PR for the issue (without merging).
-  2. Removes the worktree at `{repo}-{issue}` if it exists.
+  2. Removes the worktrees at `{repo}-{issue}` and `{repo}-{issue}-lld`
+     if they exist (#1848).
   3. Deletes the local feature branch (safe-delete).
   4. Deletes `docs/lineage/active/{issue}-*/` directories.
-  5. Reopens the issue if it was closed.
-  6. Prints "spawn state restored" on success.
+  5. Relocates untracked LLD/spec artifacts out of the target repo's
+     docs/lld tree into `data/speedrun/reset-artifacts/` (#1849) — left
+     in place they make the next run resolve existing artifacts and
+     silently skip design generation.
+  6. Reopens the issue if it was closed.
+  7. Prints "spawn state restored" on success.
 
 Idempotent: safe to run multiple times. Each step is independently
 guarded — a missing PR / worktree / branch is not an error.
@@ -107,7 +112,24 @@ def worktree_is_dirty(worktree_path: Path) -> bool:
 
 def remove_worktree(repo_root: Path, issue: int) -> bool:
     """
-    Remove the worktree at `{repo}-{issue}` if it exists.
+    Remove the worktrees at `{repo}-{issue}` and `{repo}-{issue}-lld`.
+
+    The requirements workflow creates an `-lld` worktree alongside the
+    implementation worktree; both are pipeline debris after a cut take
+    (#1848). Returns True if at least one was removed.
+    """
+    parent = repo_root.parent
+    removed_any = False
+    for suffix in (f"{issue}", f"{issue}-lld"):
+        worktree_path = parent / f"{repo_root.name}-{suffix}"
+        if _remove_worktree_at(repo_root, worktree_path):
+            removed_any = True
+    return removed_any
+
+
+def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
+    """
+    Remove one worktree directory if it exists.
 
     A CUT take leaves a half-finished worktree behind, and that worktree
     may hold uncommitted work. `git worktree remove` refuses in that case,
@@ -115,8 +137,6 @@ def remove_worktree(repo_root: Path, issue: int) -> bool:
     function never force-removes and never deletes a dirty directory. A
     worktree holding work is reported and left for the operator (#1762).
     """
-    parent = repo_root.parent
-    worktree_path = parent / f"{repo_root.name}-{issue}"
     if not worktree_path.exists():
         return False
 
@@ -230,6 +250,73 @@ def delete_lineage_dirs(repo_root: Path, issue: int) -> int:
     return deleted
 
 
+def _is_git_tracked(repo_root: Path, file_path: Path) -> bool:
+    """True when git tracks the file (deliberate repo content)."""
+    try:
+        rel = file_path.relative_to(repo_root)
+    except ValueError:
+        return False
+    result = _run(
+        ["git", "ls-files", "--error-unmatch", str(rel)], cwd=repo_root
+    )
+    return result.returncode == 0
+
+
+def relocate_lld_artifacts(repo_root: Path, issue: int) -> int:
+    """
+    Move untracked LLD/spec artifacts out of the target repo's docs tree.
+
+    The requirements/spec stages save `LLD-{NNN}.md` and `spec-{NNNN}-*.md`
+    into the target repo's primary checkout. Left in place, the next run
+    resolves them as existing artifacts and can silently skip design
+    generation — a wiped repo must not behave differently from a cold
+    start (#1849). The bytes are already preserved in the design PR's
+    commits, so working copies are relocated (never deleted) to
+    `data/speedrun/reset-artifacts/issue-{N}/` for inspection. Tracked
+    files are deliberate repo content and are left alone.
+    """
+    active = repo_root / "docs" / "lld" / "active"
+    drafts = repo_root / "docs" / "lld" / "drafts"
+    candidates: list[Path] = []
+    candidates.extend(active.glob(f"LLD-{issue:03d}.md"))
+    candidates.extend(active.glob(f"LLD-{issue}.md"))
+    candidates.extend(drafts.glob(f"spec-{issue:04d}-*.md"))
+    candidates.extend(drafts.glob(f"spec-{issue}-*.md"))
+
+    dest_dir = repo_root / "data" / "speedrun" / "reset-artifacts" / f"issue-{issue}"
+    seen: set[Path] = set()
+    moved = 0
+    for artifact in candidates:
+        if artifact in seen or not artifact.is_file():
+            continue
+        seen.add(artifact)
+        if _is_git_tracked(repo_root, artifact):
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / artifact.name
+        counter = 1
+        while dest.exists():
+            dest = dest_dir / f"{artifact.stem}.{counter}{artifact.suffix}"
+            counter += 1
+        try:
+            shutil.move(str(artifact), str(dest))
+            print(
+                f"  Relocated artifact: {artifact.relative_to(repo_root)}"
+                f" -> {dest.relative_to(repo_root)}"
+            )
+            moved += 1
+        except OSError as e:
+            print(f"  WARNING: could not relocate {artifact}: {e}")
+
+    # An emptied drafts/ dir is itself pipeline debris; active/ keeps .gitkeep
+    try:
+        if drafts.exists() and not any(drafts.iterdir()):
+            drafts.rmdir()
+    except OSError:
+        pass
+    return moved
+
+
 def reopen_issue(repo: str, issue: int) -> bool:
     """Reopen the GitHub issue if it's currently closed."""
     result = _run([
@@ -257,12 +344,13 @@ def reopen_issue(repo: str, issue: int) -> bool:
 
 
 def reset_one_issue(repo_root: Path, repo: str, issue: int) -> None:
-    """Run all six reset steps for one issue."""
+    """Run all reset steps for one issue."""
     print(f"\nResetting issue #{issue}:")
     close_open_prs(repo, issue)
     remove_worktree(repo_root, issue)
     delete_local_branches(repo_root, issue)
     delete_lineage_dirs(repo_root, issue)
+    relocate_lld_artifacts(repo_root, issue)
     reopen_issue(repo, issue)
 
 
