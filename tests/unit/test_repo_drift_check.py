@@ -289,12 +289,14 @@ def test_main_emits_json_when_flag_passed(tmp_path, monkeypatch, capsys):
     handoff.write_text("Worked in /c/Users/mcwiz/Projects/real-repo today.", encoding="utf-8")
 
     rc = repo_drift_check.main(["--handoff", str(handoff), "--json"])
-    captured = capsys.readouterr().out
-    parsed = json.loads(captured)
+    captured = capsys.readouterr()
+    parsed = json.loads(captured.out)
     assert parsed["names_extracted"] == ["real-repo"]
     assert parsed["repos"][0]["status"] == "not_git"
-    # not_git is treated as an error status in main()'s exit-code logic
-    assert rc == 2
+    # #1566: non-fetch check failures exit 3 (fetch_error is 2); the
+    # failure detail reaches stderr even in --json mode.
+    assert rc == 3
+    assert "could not be checked" in captured.err
 
 
 def test_main_filters_filename_false_positives_via_dir_check(tmp_path, monkeypatch, capsys):
@@ -325,3 +327,53 @@ def test_main_returns_1_when_handoff_path_missing(tmp_path, capsys):
     assert rc == 1
     err = capsys.readouterr().err
     assert "not found" in err
+
+
+# ---- #1566: --quiet must never silence check failures ----
+
+def _error_report():
+    return {
+        "repos": [
+            {"name": "alpha", "status": "fetch_error", "behind": 0, "ahead": 0,
+             "branch": "main", "error": "authentication failed"},
+            {"name": "beta", "status": "in_sync", "behind": 0, "ahead": 0,
+             "branch": "main"},
+        ]
+    }
+
+
+def test_stdout_report_omits_error_repos():
+    """Errors are stderr's job; a stdout consumer must never see a failed
+    check rendered as part of the answer."""
+    out = repo_drift_check.format_text_report(_error_report(), quiet=True)
+    assert "alpha" not in out
+    assert "fetch_error" not in out
+
+
+def test_error_report_names_repo_status_and_detail():
+    err = repo_drift_check.format_error_report(_error_report())
+    assert "could not be checked" in err
+    assert "alpha: fetch_error (authentication failed)" in err
+    assert "beta" not in err
+
+
+def test_main_quiet_fetch_error_exits_2_with_stderr_detail(tmp_path, monkeypatch, capsys):
+    """The 2026-06-09 incident shape: quiet mode, every fetch failing.
+    Exit must be 2 and stderr must say why — never empty-and-ambiguous."""
+    fake_root = tmp_path / "Projects"
+    (fake_root / "real-repo").mkdir(parents=True)
+    monkeypatch.setattr(repo_drift_check, "PROJECTS_ROOT", fake_root)
+    monkeypatch.setattr(
+        repo_drift_check, "check_repo_drift",
+        lambda name: {"name": name, "status": "fetch_error", "behind": 0,
+                      "ahead": 0, "branch": "main", "error": "auth token invalid"},
+    )
+
+    handoff = tmp_path / "h.md"
+    handoff.write_text("Worked in /c/Users/mcwiz/Projects/real-repo today.", encoding="utf-8")
+
+    rc = repo_drift_check.main(["--handoff", str(handoff), "--quiet"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert "auth token invalid" in captured.err
