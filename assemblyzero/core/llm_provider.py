@@ -50,6 +50,7 @@ from assemblyzero.core.errors import (
     classify_anthropic_error,
 )
 from assemblyzero.core.text_sanitizer import strip_emoji
+from assemblyzero.utils.process import kill_process_tree
 
 
 _PYDANTIC_WARNING_RE = re.compile(
@@ -342,26 +343,12 @@ class LLMProvider(ABC):
 def _kill_process_tree(pid: int) -> None:
     """Kill a process and all its children.
 
-    On Windows, uses taskkill /T (tree-kill) to terminate the entire
-    process group.  On Unix, kills the process group via os.killpg.
     Issue #526: subprocess.run timeout on Windows only kills the root
     process â€” grandchildren keep pipes open for hundreds of seconds.
+    Issue #1874: the primitive now lives in assemblyzero.utils.process so
+    the Gemini/agy transport kills tree-wise the same way this one does.
     """
-    try:
-        if sys.platform == "win32":
-            env = os.environ.copy()
-            env["PYTHONWARNINGS"] = "ignore"
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True,
-                timeout=10,
-                env=env,
-            )
-        else:
-            os.killpg(os.getpgid(pid), 9)
-    except (ProcessLookupError, OSError, subprocess.TimeoutExpired):
-        # Process already dead â€” that's fine
-        pass
+    kill_process_tree(pid)
 
 
 class ClaudeCLIProvider(LLMProvider):

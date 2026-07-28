@@ -263,15 +263,24 @@ class TestInvokeViaStdin:
         client._agy_cli = "/fake/agy"
         return client
 
-    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    @staticmethod
+    def _proc(stdout="", stderr="", returncode=0):
+        """A Popen double. #1874 moved this path off subprocess.run, whose
+        Windows timeout kills the root and then drains pipes unbounded."""
+        proc = MagicMock()
+        proc.pid = 4242
+        proc.communicate.return_value = (stdout, stderr)
+        proc.returncode = returncode
+        return proc
+
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
     def test_oversize_prompt_routes_to_stdin_path(
-        self, mock_run, temp_credentials_file, temp_state_file
+        self, mock_popen, temp_credentials_file, temp_state_file
     ):
         """_invoke_via_cli must route >30K prompts to stdin — never reject
         them, never put them in argv."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="A fine review.\n", stderr=""
-        )
+        proc = self._proc(stdout="A fine review.\n")
+        mock_popen.return_value = proc
         client = self._client(temp_credentials_file, temp_state_file)
 
         big_content = "x" * 31000
@@ -279,47 +288,52 @@ class TestInvokeViaStdin:
 
         assert ok is True
         assert "fine review" in text
-        argv = mock_run.call_args[0][0]
+        argv = mock_popen.call_args[0][0]
         assert "-p" not in argv, "oversize prompt must NOT ride argv"
         assert argv[0] == "/fake/agy"
         assert argv[1:3] == ["--model", "gemini-3.1-pro-high"]
-        kwargs = mock_run.call_args[1]
-        assert len(kwargs["input"]) > 31000  # full composed prompt on stdin
-        assert kwargs["cwd"], "stdin path must keep temp-cwd isolation"
+        assert mock_popen.call_args[1]["cwd"], "stdin path keeps temp-cwd isolation"
+        sent = proc.communicate.call_args[1]["input"]
+        assert len(sent) > 31000  # full composed prompt on stdin
 
-    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
     def test_stdin_nonzero_exit_is_failure(
-        self, mock_run, temp_credentials_file, temp_state_file
+        self, mock_popen, temp_credentials_file, temp_state_file
     ):
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="Error: invalid --model"
+        mock_popen.return_value = self._proc(
+            stderr="Error: invalid --model", returncode=1
         )
         client = self._client(temp_credentials_file, temp_state_file)
         ok, text, err = client._invoke_via_stdin("p" * 31000)
         assert ok is False
         assert "agy exited 1" in err
 
-    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
     def test_stdin_error_banner_is_failure(
-        self, mock_run, temp_credentials_file, temp_state_file
+        self, mock_popen, temp_credentials_file, temp_state_file
     ):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="Error: something odd\n", stderr=""
-        )
+        mock_popen.return_value = self._proc(stdout="Error: something odd\n")
         client = self._client(temp_credentials_file, temp_state_file)
         ok, text, err = client._invoke_via_stdin("p" * 31000)
         assert ok is False
         assert "agy error output" in err
 
-    @patch("assemblyzero.core.gemini_client.subprocess.run")
+    @patch("assemblyzero.core.gemini_client.kill_process_tree")
+    @patch("assemblyzero.core.gemini_client.subprocess.Popen")
     def test_stdin_timeout_is_failure(
-        self, mock_run, temp_credentials_file, temp_state_file
+        self, mock_popen, mock_kill, temp_credentials_file, temp_state_file
     ):
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="agy", timeout=300)
+        proc = self._proc()
+        proc.communicate.side_effect = subprocess.TimeoutExpired(
+            cmd="agy", timeout=300
+        )
+        mock_popen.return_value = proc
         client = self._client(temp_credentials_file, temp_state_file)
         ok, text, err = client._invoke_via_stdin("p" * 31000)
         assert ok is False
         assert "timeout" in err.lower()
+        # #1874: the whole tree dies, not just the root holding the pipes
+        mock_kill.assert_called_once_with(4242)
 
 
 class TestErrorClassification:
@@ -404,7 +418,7 @@ class TestRotationLogic:
 
         credentials_tried = []
 
-        def mock_invoke_via_cli(system_instruction, content):
+        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
             # Count each _invoke_via_cli call — one per credential tried
             credentials_tried.append(len(credentials_tried))
             return (False, "", "429 TerminalQuotaError: exhausted")
@@ -433,7 +447,7 @@ class TestRotationLogic:
 
         attempts = [0]
 
-        def mock_invoke_via_cli(system_instruction, content):
+        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
             attempts[0] += 1
             if attempts[0] < 3:
                 return (False, "", "529 MODEL_CAPACITY_EXHAUSTED")
@@ -461,7 +475,7 @@ class TestRotationLogic:
             state_file=temp_state_file,
         )
 
-        def mock_invoke_via_cli(system_instruction, content):
+        def mock_invoke_via_cli(system_instruction, content, timeout_seconds=None):
             return (False, "", "429 TerminalQuotaError: exhausted")
 
         with patch.object(client, "_invoke_via_cli", side_effect=mock_invoke_via_cli):
