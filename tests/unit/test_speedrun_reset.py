@@ -64,12 +64,35 @@ class TestBranchSweepIsAttemptBranchAware:
         deletions = [c for c in calls if c[:3] == ["git", "branch", "-d"]]
         assert deletions == [["git", "branch", "-d", "1234-lld"]]
 
+    def test_impl_branch_issue_n_is_swept(self, tmp_path):
+        """#1862: the pipeline's issue-{N} impl branch is a candidate too."""
+        calls = []
+
+        def fake_run(cmd, cwd=None, check=False):
+            calls.append(cmd)
+            if cmd[:3] == ["git", "branch", "--list"]:
+                return _completed(stdout="  issue-7\n  7-lld\n")
+            if cmd[:2] == ["git", "rev-parse"]:
+                return _completed(stdout="hardening-run-11\n")
+            return _completed()
+
+        with patch("speedrun_reset._run", side_effect=fake_run):
+            deleted = delete_local_branches(tmp_path, 7)
+
+        assert deleted == 2
+        list_call = next(c for c in calls if c[:3] == ["git", "branch", "--list"])
+        assert "issue-7" in list_call
+        deleted_branches = [c[3] for c in calls if c[:3] == ["git", "branch", "-d"]]
+        assert "issue-7" in deleted_branches
+        assert "7-lld" in deleted_branches
+
     def test_attempt_branch_does_not_match_the_issue_glob(self, tmp_path):
-        """Enumeration is scoped to `{issue}-*`; `attempt-test-1` is not swept."""
+        """Enumeration is scoped to `{issue}-*` and `issue-{N}` (#1862);
+        `attempt-test-1` is not swept."""
         with patch("speedrun_reset._run", return_value=_completed(stdout="")) as run:
             delete_local_branches(tmp_path, 1234)
         listing = run.call_args_list[0].args[0]
-        assert listing == ["git", "branch", "--list", "1234-*"]
+        assert listing == ["git", "branch", "--list", "1234-*", "issue-1234"]
 
     def test_unmerged_branch_is_left_alone_without_suggesting_force_delete(
         self, tmp_path, capsys
