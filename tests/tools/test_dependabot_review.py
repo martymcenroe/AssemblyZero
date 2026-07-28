@@ -1571,3 +1571,108 @@ class TestApprovePrGateDesc:
         body = captured["cmd"][captured["cmd"].index("--body") + 1]
         assert "gate: npm test passed (exit 0) in '.'" in body
         assert body.startswith(dependabot_review.REVIEW_BODY_PREFIX)
+
+
+# vitest/jest and pytest benchmark tables emit these routinely; cp1252
+# cannot encode any of them.
+NON_ASCII_LINE = "  | ✓ src/x.test.ts (3 tests) │ ── 456ms"
+
+
+class _Cp1252Stream:
+    """stdout double whose encoding cannot represent non-ASCII -- the
+    exact 2026-07-28 career-run condition (#1876)."""
+
+    encoding = "cp1252"
+
+    def __init__(self):
+        self.written: list[str] = []
+
+    def write(self, text: str) -> int:
+        text.encode("cp1252")  # raises UnicodeEncodeError like the real one
+        self.written.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+
+class TestForceUtf8Streams:
+    """#1876: the tool must not depend on its launcher's env for
+    encoding correctness."""
+
+    def test_reconfigures_each_stream_to_utf8_replace(self):
+        calls: list[dict] = []
+
+        class _Stream:
+            def reconfigure(self, **kw):
+                calls.append(kw)
+
+        dependabot_review._force_utf8_streams([_Stream(), _Stream()])
+        assert len(calls) == 2
+        assert all(c == {"encoding": "utf-8", "errors": "replace"}
+                   for c in calls)
+
+    def test_stream_without_reconfigure_does_not_raise(self):
+        """A test double or already-wrapped stream must be tolerated --
+        _Tee.write's fallback covers that case."""
+        dependabot_review._force_utf8_streams([object()])
+
+    def test_reconfigure_failure_is_swallowed(self):
+        class _Stream:
+            def reconfigure(self, **kw):
+                raise ValueError("detached buffer")
+
+        dependabot_review._force_utf8_streams([_Stream()])
+
+    def test_reconfigured_stream_accepts_non_ascii(self):
+        """End-to-end intent: after reconfigure, the write that crashed
+        the career run succeeds."""
+        import io
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        with pytest.raises(UnicodeEncodeError):
+            stream.write(NON_ASCII_LINE)
+            stream.flush()
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        dependabot_review._force_utf8_streams([stream])
+        stream.write(NON_ASCII_LINE)
+        stream.flush()
+
+
+class TestTeeSurvivesUndecodableTerminal:
+    """#1876: a failed *print* must never abort the drain."""
+
+    def test_write_does_not_raise_on_unicode_error(self, tmp_path):
+        logfile = (tmp_path / "run.log").open("w", encoding="utf-8")
+        tee = dependabot_review._Tee(_Cp1252Stream(), logfile)
+        tee.write(NON_ASCII_LINE)  # must not raise
+        logfile.close()
+
+    def test_faithful_text_still_reaches_the_log(self, tmp_path):
+        log_path = tmp_path / "run.log"
+        logfile = log_path.open("w", encoding="utf-8")
+        tee = dependabot_review._Tee(_Cp1252Stream(), logfile)
+        tee.write(NON_ASCII_LINE)
+        logfile.close()
+        assert NON_ASCII_LINE in log_path.read_text(encoding="utf-8"), (
+            "the run log is UTF-8 and must keep the exact text even when "
+            "the terminal can only render a lossy version"
+        )
+
+    def test_terminal_gets_lossy_render_not_nothing(self, tmp_path):
+        logfile = (tmp_path / "run.log").open("w", encoding="utf-8")
+        stream = _Cp1252Stream()
+        tee = dependabot_review._Tee(stream, logfile)
+        tee.write(NON_ASCII_LINE)
+        logfile.close()
+        assert stream.written, "output must degrade, not disappear"
+        assert "src/x.test.ts (3 tests)" in stream.written[0], (
+            "the ASCII substance of the line must survive the fallback"
+        )
+
+    def test_ascii_write_is_unaffected(self, tmp_path):
+        logfile = (tmp_path / "run.log").open("w", encoding="utf-8")
+        stream = _Cp1252Stream()
+        tee = dependabot_review._Tee(stream, logfile)
+        assert tee.write("plain ascii line") == len("plain ascii line")
+        logfile.close()
+        assert stream.written == ["plain ascii line"]
