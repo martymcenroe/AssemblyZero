@@ -111,7 +111,19 @@ class _Tee:
             self._logfile.write(text)
         except (OSError, ValueError):
             pass  # log file gone/closed — terminal keeps working
-        return self._stream.write(text)
+        try:
+            return self._stream.write(text)
+        except UnicodeEncodeError:
+            # #1876: the terminal's encoding cannot represent this text
+            # (cp1252 console + vitest/jest box-drawing or check marks).
+            # Degrade to a lossy render rather than let a *print* abort
+            # the drain -- the log copy written above is UTF-8 and keeps
+            # the faithful text. Belt-and-suspenders behind
+            # _force_utf8_streams(), which normally prevents this.
+            enc = getattr(self._stream, "encoding", None) or "ascii"
+            return self._stream.write(
+                text.encode(enc, "replace").decode(enc, "replace")
+            )
 
     def flush(self) -> None:
         try:
@@ -122,6 +134,34 @@ class _Tee:
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
+
+
+def _force_utf8_streams(streams=None) -> None:
+    """#1876: make stdout/stderr UTF-8 regardless of how the tool was
+    launched.
+
+    `run()` captures subprocess output with errors="replace", so the
+    captured str is always valid -- but ECHOING it crashed with
+    UnicodeEncodeError when the console encoding was the Windows locale
+    default (cp1252) and the subprocess emitted non-ASCII (vitest/jest
+    box-drawing, pytest benchmark tables). The exception escaped
+    process_repo's sequential path and killed the whole drain, printing
+    an all-zero Summary that hid the PR's real outcome.
+
+    tools/run_dependabot_fleet.ps1 sets PYTHONIOENCODING/PYTHONUTF8, so
+    the scheduled task never hit this -- correctness depended on the
+    launcher, leaving every manual run (including the /dependabot skill)
+    unprotected. #1839 widened the exposure: before it the tool never
+    ran npm, so JS output never reached the echo path.
+    """
+    for stream in (streams if streams is not None
+                   else (sys.stdout, sys.stderr)):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Not a reconfigurable TextIOWrapper (already wrapped, or a
+            # test double). _Tee.write's fallback covers this case.
+            pass
 
 
 def setup_run_log(log_dir: Path = RUN_LOG_DIR):
@@ -1663,6 +1703,10 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    # #1876: UTF-8 the streams BEFORE _Tee wraps them, so both the
+    # terminal and the run log can carry subprocess output verbatim.
+    _force_utf8_streams()
 
     # #1403: open the run log FIRST so every subsequent line is recorded.
     run_log_path = None if args.no_run_log else setup_run_log()
