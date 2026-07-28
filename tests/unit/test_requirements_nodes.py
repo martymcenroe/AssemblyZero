@@ -329,8 +329,7 @@ class TestReviewNode:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "All requirements met.", "feedback_items": [], "open_questions": []}),
-            response="## Verdict: APPROVED\n\nAll requirements met.",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "All requirements met.", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -370,8 +369,7 @@ class TestReviewNode:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
-            response="APPROVED",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -407,8 +405,7 @@ class TestReviewNode:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing tests", "feedback_items": ["Missing tests"], "open_questions": []}),
-            response="BLOCKED: Missing tests",
+            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing tests", "feedback_items": ["Missing tests"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -654,8 +651,7 @@ class TestReviewNodeAdditional:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "Issue looks good.", "feedback_items": [], "open_questions": []}),
-            response="[x] **APPROVED** - Issue looks good.",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "Issue looks good.", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -701,13 +697,12 @@ class TestReviewNodeAdditional:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({
+            response=_json.dumps({
                 "verdict": "REVISE",
                 "rationale": rationale_with_tier1,
                 "feedback_items": ["Missing required sections."],
                 "open_questions": [],
             }),
-            response="BLOCKED: Missing required sections.",
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -838,13 +833,12 @@ class TestReviewReviseToApprovedOnEmptyTier1:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({
+            response=_json.dumps({
                 "verdict": "REVISE",
                 "rationale": rationale_no_tier1,
                 "feedback_items": ["Missing logging strategy."],
                 "open_questions": [],
             }),
-            response="",
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -888,13 +882,12 @@ class TestReviewReviseToApprovedOnEmptyTier1:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({
+            response=_json.dumps({
                 "verdict": "REVISE",
                 "rationale": rationale_with_tier1,
                 "feedback_items": ["CLI writes to arbitrary absolute paths."],
                 "open_questions": [],
             }),
-            response="",
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -1817,8 +1810,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
-            response="APPROVED",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -1882,8 +1874,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=False,
-            content="",
-            response=None,
+            response="",
             error_message="API error",
         )
         mock_get_provider.return_value = mock_provider
@@ -1920,8 +1911,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
-            response="APPROVED",
+            response=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -1955,8 +1945,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "DISCUSS", "rationale": "Need clarification on requirements", "feedback_items": ["Need clarification on requirements"], "open_questions": []}),
-            response="[x] **DISCUSS** - Need clarification on requirements",
+            response=_json.dumps({"verdict": "DISCUSS", "rationale": "Need clarification on requirements", "feedback_items": ["Need clarification on requirements"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -1991,8 +1980,7 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content=_json.dumps({"verdict": "REVISE", "rationale": "Missing error handling section", "feedback_items": ["Missing error handling section"], "open_questions": []}),
-            response="[X] **REVISE** - Missing error handling section",
+            response=_json.dumps({"verdict": "REVISE", "rationale": "Missing error handling section", "feedback_items": ["Missing error handling section"], "open_questions": []}),
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -2026,7 +2014,6 @@ class TestReviewNodeCoverage:
         mock_provider = Mock()
         mock_provider.invoke.return_value = Mock(
             success=True,
-            content="Some random response without clear verdict markers",
             response="Some random response without clear verdict markers",
             error_message=None,
             input_tokens=0,

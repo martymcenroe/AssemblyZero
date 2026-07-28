@@ -16,9 +16,12 @@ from assemblyzero.core.verdict_schema import (
 
 
 def _make_mock_provider(response_content: str):
-    """Create a mock provider that returns the given content."""
-    mock_result = MagicMock()
-    mock_result.content = response_content
+    """Create a mock provider whose result carries the payload on .response
+    (the real LLMCallResult field — Issue #1843 mock-drift repair)."""
+    mock_result = MagicMock(spec=["success", "response", "error_message"])
+    mock_result.success = True
+    mock_result.response = response_content
+    mock_result.error_message = ""
     mock_provider = MagicMock()
     mock_provider.invoke.return_value = mock_result
     return mock_provider
@@ -103,8 +106,10 @@ class TestInvokeReviewerWithFeedbackSchema:
             "open_questions": [],
             "resolved_issues": [],
         })
-        mock_result = MagicMock()
-        mock_result.content = raw
+        mock_result = MagicMock(spec=["success", "response", "error_message"])
+        mock_result.success = True
+        mock_result.response = raw
+        mock_result.error_message = ""
         gemini_provider = MagicMock(spec=GeminiProvider)
         gemini_provider.invoke.return_value = mock_result
 

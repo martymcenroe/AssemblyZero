@@ -106,6 +106,29 @@ def route_after_analyze(
     return "N2_generate_spec"
 
 
+def route_after_generate_spec(
+    state: ImplementationSpecState,
+) -> Literal["N3_validate_completeness", "HALT"]:
+    """Route after N2: generate_spec.
+
+    Routes to:
+    - N3_validate_completeness: Draft generated
+    - HALT: Drafter LLM failed (Issue #1869 — the previous unconditional
+      edge let error_message ride through N3's vacuous pass into N5, which
+      reset it to "", severing the error chain and fueling the run-11
+      recursion loop)
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Next node name.
+    """
+    if state.get("error_message"):
+        return "HALT"
+    return "N3_validate_completeness"
+
+
 def route_after_validation(
     state: ImplementationSpecState,
 ) -> Literal["N4_human_gate", "N5_review_spec", "N2_generate_spec", "HALT"]:
@@ -326,8 +349,15 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
         },
     )
 
-    # N2 -> N3 (always proceeds to validation after generation)
-    graph.add_edge(N2_GENERATE_SPEC, N3_VALIDATE_COMPLETENESS)
+    # N2 -> N3 or HALT (Issue #1869: drafter failure must not reach review)
+    graph.add_conditional_edges(
+        N2_GENERATE_SPEC,
+        route_after_generate_spec,
+        {
+            "N3_validate_completeness": N3_VALIDATE_COMPLETENESS,
+            "HALT": HALT,
+        },
+    )
 
     # N3 -> N4 or N5 or N2 or HALT (based on validation result and config)
     graph.add_conditional_edges(
