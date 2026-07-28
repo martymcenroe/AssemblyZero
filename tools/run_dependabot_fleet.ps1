@@ -2,18 +2,21 @@
 #
 # Designed to be called by Windows Task Scheduler. Logs to
 # C:\Users\mcwiz\Projects\dependabot-fleet.log so the operator can
-# see what happened across runs without opening a console.
+# see what happened across runs without opening a console. The tool
+# additionally writes its own per-run log under data/dependabot-runs/
+# in AssemblyZero (#1403).
 #
-# Setup (run once):
-#
-#     $action = New-ScheduledTaskAction `
-#       -Execute 'powershell.exe' `
-#       -Argument '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File C:\Users\mcwiz\Projects\AssemblyZero\tools\run_dependabot_fleet.ps1'
-#     $trigger = New-ScheduledTaskTrigger -Daily -At 06:00
-#     Register-ScheduledTask `
-#       -TaskName 'Claude-DependabotFleet' `
-#       -Action $action -Trigger $trigger `
-#       -Description 'Daily fleet-wide dependabot PR review + merge (#1091, #1092)'
+# Registration (#1836): the Claude-DependabotFleet task does NOT launch
+# this script with powershell.exe directly. Launching powershell from a
+# scheduled task -- even with -WindowStyle Hidden -- flashes a console
+# on the interactive desktop, because Windows allocates the console for
+# a console-subsystem app BEFORE SW_HIDE takes effect (measured; see
+# AZ #1819). The task instead runs a silent wscript launcher (WshShell
+# .Run with window style 0 = SW_HIDE at CreateProcess) that invokes
+# this script; the launcher is generated and managed by the private
+# environment-tooling repo's converter. Do NOT re-register this task
+# with a direct powershell action -- that silently reintroduces the
+# console flash the launcher exists to prevent.
 #
 # Manual run:
 #
@@ -58,7 +61,12 @@ try {
     # PowerShell's pipeline mechanics. The OK/EXIT marker is then
     # written by PowerShell with explicit -Encoding utf8 so the same
     # encoding wire doesn't trip later writes. See #1176.
-    & cmd.exe /c "poetry run python tools\dependabot_review.py --fleet >> `"$LogFile`" 2>&1"
+    # #1836/#1339: --limit 15 caps the scheduled harvest at ~30
+    # contributions/day (15 review events + up to 15 merges) against the
+    # operator's ~260/day calibration. The uncapped 2026-07-28 run
+    # produced 35 review events in one morning; consecutive limited runs
+    # drain the queue FIFO instead.
+    & cmd.exe /c "poetry run python tools\dependabot_review.py --fleet --limit 15 >> `"$LogFile`" 2>&1"
     $exitCode = $LASTEXITCODE
 
     $endStamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
