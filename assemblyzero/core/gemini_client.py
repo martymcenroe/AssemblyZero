@@ -291,6 +291,25 @@ def get_credential_status() -> dict:
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>]")
 
 
+def _append_json_schema_directive(system_instruction: str, schema: dict) -> str:
+    """Ask, in words, for the JSON the caller's schema describes (#1843).
+
+    The agy CLI transport has no structured-output flag, so ``response_schema``
+    was accepted by invoke() and then dropped on the floor. Callers that asked
+    for JSON got whatever their prompt's markdown template produced; the
+    structured parse failed at char 0 every single time and silently fell back
+    to regex. Since the transport cannot carry a schema, the prompt does.
+    """
+    return (
+        f"{system_instruction}\n\n"
+        "## Response Format (MANDATORY)\n\n"
+        "Respond with a SINGLE JSON object and nothing else. No prose before "
+        "or after it, no markdown headings, no code fences. It must validate "
+        "against this schema:\n\n"
+        f"{json.dumps(schema, indent=2)}\n"
+    )
+
+
 def _is_spawn_failure(error_text: str) -> bool:
     """True when an error string carries a Windows process-creation code.
 
@@ -577,6 +596,14 @@ class GeminiClient:
         """
         start_time = time.time()
         total_attempts = 0
+
+        # #1843: the CLI transport cannot carry a schema, so put the request
+        # in the prompt. Without this the parameter was inert and every
+        # "structured" call parsed markdown as JSON and fell back to regex.
+        if response_schema:
+            system_instruction = _append_json_schema_directive(
+                system_instruction, response_schema
+            )
 
         credentials = self._load_credentials()
         state = self._load_state()

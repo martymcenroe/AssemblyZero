@@ -214,6 +214,35 @@ def parse_structured_verdict(response_text: str) -> dict | None:
     return None
 
 
+def _loads_lenient(raw: str) -> dict:
+    """json.loads that tolerates a fenced or prose-wrapped JSON object.
+
+    Issue #1843: a model told to emit JSON very often wraps it in ```json
+    fences or adds a sentence around it. A bare json.loads then fails at
+    char 0, the caller silently drops to its regex fallback, and a
+    "structured" contract degrades to 100% fallback with nobody the wiser.
+
+    Raises:
+        json.JSONDecodeError: when no JSON object can be recovered, so
+            callers' existing except clauses behave exactly as before.
+    """
+    text = (raw or "").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if fenced:
+        return json.loads(fenced.group(1))
+
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        return json.loads(text[start : end + 1])
+
+    raise json.JSONDecodeError("no JSON object found in response", text or "", 0)
+
+
 def _validate_required_keys(data: dict, required: list[str]) -> bool:
     """Check that all required keys are present in parsed data.
 
@@ -235,7 +264,7 @@ def parse_structured_feedback(raw: str) -> FeedbackResult:
     Emits counter metric on fallback (REQ-3, T150).
     """
     try:
-        data = json.loads(raw)
+        data = _loads_lenient(raw)
         if not _validate_required_keys(data, ["verdict", "rationale", "feedback_items", "open_questions"]):
             raise ValueError("Missing required keys")
         if not _validate_enum(data["verdict"], _FEEDBACK_VERDICTS):
@@ -266,7 +295,7 @@ def parse_structured_review_spec(raw: str) -> ReviewSpecResult:
     Emits counter metric on fallback (REQ-3, T150).
     """
     try:
-        data = json.loads(raw)
+        data = _loads_lenient(raw)
         if not _validate_required_keys(data, ["verdict", "rationale", "feedback_items"]):
             raise ValueError("Missing required keys")
         if not _validate_enum(data["verdict"], _REVIEW_SPEC_VERDICTS):
@@ -309,7 +338,7 @@ def parse_structured_draft_questions(raw: str) -> DraftQuestionsResult:
     Emits counter metric on fallback (REQ-3, T150).
     """
     try:
-        data = json.loads(raw)
+        data = _loads_lenient(raw)
         if not _validate_required_keys(data, ["open_questions"]):
             raise ValueError("Missing required key: open_questions")
         return DraftQuestionsResult(
@@ -329,7 +358,7 @@ def parse_structured_finalize_questions(raw: str) -> FinalizeQuestionsResult:
     Emits counter metric on fallback (REQ-3, T150).
     """
     try:
-        data = json.loads(raw)
+        data = _loads_lenient(raw)
         if not _validate_required_keys(data, ["has_open_questions", "question_count", "questions"]):
             raise ValueError("Missing required keys")
         return FinalizeQuestionsResult(
