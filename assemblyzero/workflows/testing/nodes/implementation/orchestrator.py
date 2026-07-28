@@ -272,6 +272,27 @@ def validate_files_to_modify(
     return errors
 
 
+def _should_skip_existing_file(
+    change_type: str, target_path: Path, iteration_count: int
+) -> bool:
+    """Issue #547 skip-on-resume, scoped by Issue #1842 to the first pass only.
+
+    Retry iterations (iteration_count > 0) exist to REWRITE files with the
+    test-failure feedback that build_single_file_prompt carries as
+    previous_error. The unscoped guard skipped every already-on-disk Add file,
+    so no retry ever called the model — N5 re-ran byte-identical files until
+    the stagnation detector halted the run (hardening runs 8/10/11, boostgauge
+    campaign 2026-07-28).
+    """
+    if iteration_count > 0:
+        return False
+    return (
+        change_type.lower() == "add"
+        and target_path.exists()
+        and target_path.stat().st_size > 0
+    )
+
+
 def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     """N4: Generate implementation code file-by-file.
 
@@ -527,7 +548,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Issue #547: Skip-on-resume — don't re-call Claude for files already on disk
         target_path = repo_root / filepath
-        if change_type.lower() == "add" and target_path.exists() and target_path.stat().st_size > 0:
+        if _should_skip_existing_file(change_type, target_path, iteration_count):
             existing_content = target_path.read_text(encoding="utf-8")
             print(f"        Skipped (already exists): {target_path}")
             completed_files.append((filepath, existing_content))
