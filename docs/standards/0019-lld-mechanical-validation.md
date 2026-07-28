@@ -178,9 +178,9 @@ The validator runs eleven structural checks. Nine are ERROR-severity (blocking);
 - `Parent directory does not exist for Add file: {path}`
 - `Parent directory does not exist for Add directory: {path}`
 
-**Suggestions (Issue #300):** When a `Modify` or `Delete` references a non-existent file, the validator searches `tools/`, `assemblyzero/`, `scripts/`, `src/`, `lib/`, `tests/` for files matching the basename — including underscore↔hyphen normalization (`new_repo_setup.py` ↔ `new-repo-setup.py`). Up to 3 suggestions surface in the error message.
+**Suggestions (Issue #300):** When a `Modify` or `Delete` references a non-existent file, the validator searches `tools/`, `assemblyzero/`, `scripts/`, `src/`, `lib/`, `tests/` for files matching the basename — including underscore↔hyphen normalization (`new_repo.py` ↔ `new-repo-setup.py`). Up to 3 suggestions surface in the error message.
 
-**Why it exists:** Hallucinated file paths are the #1 LLD failure mode. The drafter confidently writes `tools/new_repo_setup.py` when the actual file is `tools/new-repo-setup.py`, or invents an entirely fictional file. Filesystem-level validation catches this deterministically; the suggestion engine reduces revision-cycle iterations by pointing the drafter at the real path.
+**Why it exists:** Hallucinated file paths are the #1 LLD failure mode. The drafter confidently writes `tools/new_repo.py` when the actual file is `tools/new-repo-setup.py`, or invents an entirely fictional file. Filesystem-level validation catches this deterministically; the suggestion engine reduces revision-cycle iterations by pointing the drafter at the real path.
 
 ### 2.8 Check 8 — Placeholder Prefixes Match Reality (ERROR)
 

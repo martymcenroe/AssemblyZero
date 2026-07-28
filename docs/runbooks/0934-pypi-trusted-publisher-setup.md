@@ -1,8 +1,8 @@
 # PyPI Trusted Publisher Setup
 
-**Runbook 0934 — one-time per-repo browser steps to enable tag-push PyPI publishes from a repo bootstrapped by `tools/new_repo_setup.py` (#1074).**
+**Runbook 0934 — one-time per-repo browser steps to enable tag-push PyPI publishes from a repo bootstrapped by `tools/new_repo.py` (#1074).**
 
-`new_repo_setup.py` deploys `release.yml` to new Python repos **only when `--pypi` is passed** (as of #1269 — was default-on, now opt-in). The workflow is wired to publish to PyPI via OIDC Trusted Publisher — no API token is stored in GitHub secrets. But OIDC trust requires a one-time registration on PyPI's side, and **PyPI's publisher-registration UI is browser-only**. There is no API. This runbook covers the human steps; the script handles everything else.
+`new_repo.py` deploys `release.yml` to new Python repos **only when `--pypi` is passed** (as of #1269 — was default-on, now opt-in). The workflow is wired to publish to PyPI via OIDC Trusted Publisher — no API token is stored in GitHub secrets. But OIDC trust requires a one-time registration on PyPI's side, and **PyPI's publisher-registration UI is browser-only**. There is no API. This runbook covers the human steps; the script handles everything else.
 
 If you did NOT pass `--pypi` when creating the repo, this runbook does not apply — the repo has no `release.yml` and won't try to publish. To add PyPI publishing to an existing repo, re-run scaffolding or add `release.yml` manually.
 
@@ -10,7 +10,7 @@ If you did NOT pass `--pypi` when creating the repo, this runbook does not apply
 
 ## Prerequisites
 
-- Repo created via `tools/new_repo_setup.py <name> --pypi`.
+- Repo created via `tools/new_repo.py <name> --pypi`.
 - The script's output should include `Created auto-reviewer.yml + release.yml (PyPI publish on tag)`.
 - `pyproject.toml` in the repo has `[tool.poetry.scripts]` and `[tool.poetry.urls]` blocks populated. Verify with `grep -A3 "tool.poetry.scripts" pyproject.toml`.
 - `.github/workflows/release.yml` exists and uses `environment: pypi` (this is the default; don't edit unless you know what you're doing).
@@ -123,7 +123,7 @@ If you want to test the publish path without polluting the real PyPI index:
 3. Register a separate pending publisher on https://test.pypi.org/manage/account/publishing/ with the same fields.
 4. Trigger via a different tag pattern (e.g., `pre-v*.*.*`).
 
-This is out of scope for the default `new_repo_setup.py` flow. If demand for it grows, file a follow-up issue to add a `--testpypi` flag.
+This is out of scope for the default `new_repo.py` flow. If demand for it grows, file a follow-up issue to add a `--testpypi` flag.
 
 ---
 
@@ -142,10 +142,10 @@ PyPI **does not allow re-uploading** the same version (filename collision). If a
 
 ## Maintenance
 
-When `release.yml` template in `tools/new_repo_setup.py` changes:
+When `release.yml` template in `tools/new_repo.py` changes:
 
 1. Update the template string in `create_github_workflows()`.
-2. Re-run `new_repo_setup.py` on a throwaway test repo to verify the new workflow lands correctly.
+2. Re-run `new_repo.py` on a throwaway test repo to verify the new workflow lands correctly.
 3. For repos already created with the old workflow, decide: leave them on the old version, or land a follow-up PR per repo to update `release.yml` (Contents API path per ADR-0216).
 4. Update this runbook if the publisher fields change (e.g., environment name, workflow filename).
 
@@ -157,6 +157,6 @@ When `release.yml` template in `tools/new_repo_setup.py` changes:
 - **OIDC + GitHub Actions:** https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect
 - **PyPI publishing GitHub Action:** https://github.com/pypa/gh-action-pypi-publish
 - **AZ #1074** — issue that surfaced the need for this runbook.
-- **`tools/new_repo_setup.py`** — script that deploys `release.yml`.
+- **`tools/new_repo.py`** — script that deploys `release.yml`.
 - **Standard 0009** — canonical project structure (defines `src/<module>/` layout).
 - **Speed-run plan** — `boostgauge/docs/speedrun/0003-az-implementation-plan.md` §6.4 calls out the browser-only nature of this step.

@@ -46,7 +46,7 @@ For the target repo at `{target}`:
 
 | Surface | What to check | Source |
 |---|---|---|
-| Repo bootstrap | `git log --oneline | grep "initialize project with AssemblyZero"` | Indicates `new_repo_setup.py` ran |
+| Repo bootstrap | `git log --oneline | grep "initialize project with AssemblyZero"` | Indicates `new_repo.py` ran |
 | `CLAUDE.md` + `GEMINI.md` | Both present, ≥50 lines each | Files |
 | `.unleashed.json` | Present; `assemblyZero: true`; no deprecated `pickupThresholdMinutes` | File |
 | Security hooks | `.claude/hooks/secret-file-guard.sh` present | File |

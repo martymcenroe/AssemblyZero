@@ -708,7 +708,7 @@ def find_similar_files(filename: str, repo_root: Path, max_results: int = 3) -> 
     Issue #300: Help drafter fix invalid paths by suggesting alternatives.
 
     Args:
-        filename: The filename to search for (e.g., "new_repo_setup.py").
+        filename: The filename to search for (e.g., "new_repo.py").
         repo_root: Path to repository root.
         max_results: Maximum number of suggestions to return.
 
@@ -718,14 +718,14 @@ def find_similar_files(filename: str, repo_root: Path, max_results: int = 3) -> 
     suggestions = []
 
     # Normalize filename: convert underscores to hyphens and vice versa
-    base_name = Path(filename).stem  # e.g., "new_repo_setup"
+    base_name = Path(filename).stem  # e.g., "new_repo"
     extension = Path(filename).suffix  # e.g., ".py"
 
     # Generate variants to search for
     variants = {
         base_name,
-        base_name.replace("_", "-"),  # new_repo_setup -> new-repo-setup
-        base_name.replace("-", "_"),  # new-repo-setup -> new_repo_setup
+        base_name.replace("_", "-"),  # new_repo -> new-repo-setup
+        base_name.replace("-", "_"),  # new-repo-setup -> new_repo
     }
 
     # Search common code directories (limit depth to avoid slowness)

@@ -1,6 +1,6 @@
 # Classic-PAT Fleet Tooling Reference Architecture
 
-A cross-fleet playbook for writing Python tools that perform privileged GitHub operations using the in-process classic PAT pattern (ADR-0216). Derived from production experience with `sentinel_migrate.py`, `fleet_delete_pr_sentinel.py`, `merge_aletheia_603_audit_gate.py`, `fleet_set_delete_branch_on_merge.py`, and `new_repo_setup.py`.
+A cross-fleet playbook for writing Python tools that perform privileged GitHub operations using the in-process classic PAT pattern (ADR-0216). Derived from production experience with `sentinel_migrate.py`, `fleet_delete_pr_sentinel.py`, `merge_aletheia_603_audit_gate.py`, `fleet_set_delete_branch_on_merge.py`, and `new_repo.py`.
 
 This is not prescriptive about specific algorithms. It captures **patterns that worked**, **patterns that didn't**, and **decisions you'll face early** that are expensive to change later.
 
@@ -199,7 +199,7 @@ Three options, none clearly best:
 - **`tools/_gh_http.py`** (proposed, not yet built) — dedicated HTTP helper module
 - **`tools/_pat_session.py`** — co-locate with `classic_pat_session()`, since both deal with elevated GitHub calls
 
-For now, inline is acceptable. As more tools land that use the same helper, extracting becomes worthwhile. Tracked at #1022 for `new_repo_setup.py`'s migration.
+For now, inline is acceptable. As more tools land that use the same helper, extracting becomes worthwhile. Tracked at #1022 for `new_repo.py`'s migration.
 
 ---
 
@@ -358,7 +358,7 @@ NEVER. Even to /tmp, even with `chmod 600`, even briefly. The Sentinel hook will
 | **`merge_aletheia_603_audit_gate.py`** (2026-04-30) | One-shot land single PR via API | Idempotent, accepts unstable for self-ref, CRLF normalize, `--skip-N-nudge` | YES — best model for one-shot tools |
 | **`fleet_delete_pr_sentinel.py`** (older) | Fleet-wide file deletion + PR + merge | Per-repo try/except, no retry/backoff | Partial — copy structure, add retry from `fleet_set_delete_branch_on_merge.py` |
 | **`sentinel_migrate.py`** (older) | Branch protection updates | Simplest v3 example, no retry | Partial — read for structure only |
-| **`new_repo_setup.py`** (complex) | Full new-repo orchestration | Wrapping try/except, no retry on privileged calls | NO — read for context, but #1022 tracks robustness debt |
+| **`new_repo.py`** (complex) | Full new-repo orchestration | Wrapping try/except, no retry on privileged calls | NO — read for context, but #1022 tracks robustness debt |
 | **`merge_sentinel_permissions_prs.py`** | DEPRECATED v1 (gh auth swap) | — | NO — anti-example. Documented for context only. |
 
 ---
@@ -410,7 +410,7 @@ When spinning up a new tool that needs classic PAT:
 - `docs/runbooks/0930-gpg-and-classic-pat-rotation.md` — periodic rotation procedure
 - Issue #1016 — Phase 1 of post-ADR-0216 hardening: move gpg key to YubiKey
 - Issue #1017 — TODO: execute gpg+pat rotation per runbook 0930
-- Issue #1022 — port `_request_with_retry` into `new_repo_setup.py`
+- Issue #1022 — port `_request_with_retry` into `new_repo.py`
 - Root `CLAUDE.md` — "When `git push` Is Rejected For Workflow Scope" + "Gotchas (learned the hard way 2026-04-30)" sections
 - Blog draft `dispatch/drafts/2026-04-21-in-process-pat-decryption-from-AssemblyZero.md` — companion narrative
 

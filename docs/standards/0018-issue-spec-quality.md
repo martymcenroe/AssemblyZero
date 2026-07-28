@@ -94,7 +94,7 @@ An issue must satisfy all six to be considered ready for the LLD workflow. Each 
 |---|---|
 | `New module: assemblyzero/utils/retry.py` | `Add some retry logic` |
 | `Modify: docs/standards/0009-canonical-project-structure.md §3.2` | `Update the standards doc` |
-| `Touches: tools/new_repo_setup.py + a new release.yml template` | `Set up packaging` |
+| `Touches: tools/new_repo.py + a new release.yml template` | `Set up packaging` |
 
 **Count needed:** ≥ 1 named path/module/function. Generic references ("the workflow," "the codebase") do not count.
 
