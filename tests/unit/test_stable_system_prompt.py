@@ -68,6 +68,13 @@ class TestBuildStableSystemPrompt:
         assert "Additional Context" not in result
         assert "Tests That Must Pass" not in result
 
+    def test_contains_platform_correctness_guidance(self):
+        """Issue #1841: platform guidance must ride in every stable prompt."""
+        result = build_stable_system_prompt(lld_content="lld")
+        assert "Platform Correctness" in result
+        assert "sys.platform" in result
+        assert "path separators" in result
+
     def test_identical_across_files(self):
         """Two different files must produce the same stable system prompt."""
         kwargs = dict(

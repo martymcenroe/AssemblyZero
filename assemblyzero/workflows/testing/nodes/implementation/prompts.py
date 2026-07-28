@@ -43,6 +43,21 @@ def build_stable_system_prompt(
 
 {lld_content}
 
+## Platform Correctness
+
+Generated code and tests run on Windows, macOS, and Linux. Both must be
+platform-independent (Issue #1841):
+
+- Never assert on hardcoded path separators. Compare `pathlib.Path` objects
+  (`assert path == Path.home() / ".app" / "cfg.json"`), never separator-laden
+  strings.
+- Monkeypatching `sys.platform` does NOT change `pathlib`'s flavour: on
+  Windows, `Path` still renders with backslashes, so
+  `str(path).endswith("dir/file.json")` can NEVER pass there.
+- If the specification's test code contains a platform-dependent assertion,
+  implement the platform-independent equivalent that preserves the same
+  behavioral claim — do not transcribe the broken assertion verbatim.
+
 """
 
     if path_enforcement_section:
