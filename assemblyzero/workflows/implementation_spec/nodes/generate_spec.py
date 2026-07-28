@@ -99,6 +99,11 @@ with realistic values (not just TypedDict definitions)
 - Change instructions MUST be specific enough to generate diffs \
 (line-level guidance, before/after snippets)
 - Pattern references MUST include file:line locations pointing to real code
+- Test code MUST be platform-independent: never assert on hardcoded path \
+separators. Compare pathlib.Path objects (path == Path.home() / ".app" / \
+"cfg.json"), never separator-laden strings — monkeypatching sys.platform \
+does NOT change pathlib's flavour, so on Windows str(path) renders with \
+backslashes and endswith("dir/file.json") can never pass (Issue #1841)
 
 STRUCTURE:
 Follow the provided template exactly. Include ALL sections. \

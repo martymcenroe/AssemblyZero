@@ -3236,3 +3236,15 @@ class TestApiSymbolCheckInValidateCompleteness:
         details_blob = " ".join(checks_run)
         # Hallucinated-API check details must NOT appear when symbols are valid
         assert "api_symbols_exist" not in details_blob or "model_dump" not in details_blob
+
+
+class TestDrafterSystemPrompt:
+    """Issue #1841: spec drafter must demand platform-independent test code."""
+
+    def test_platform_independence_requirement_present(self):
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            DRAFTER_SYSTEM_PROMPT,
+        )
+
+        assert "platform-independent" in DRAFTER_SYSTEM_PROMPT
+        assert "sys.platform" in DRAFTER_SYSTEM_PROMPT
