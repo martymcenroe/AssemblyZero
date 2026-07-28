@@ -65,10 +65,18 @@ except ImportError:
 # GH_TOKEN for the workflow-scoped initial push — tracked in #1000.
 import requests  # noqa: E402
 try:
-    from _pat_session import classic_pat_session, cerberus_pem_session
+    from _pat_session import (
+        classic_pat_session,
+        cerberus_pem_session,
+        pr_sentinel_app_session,
+    )
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from _pat_session import classic_pat_session, cerberus_pem_session
+    from _pat_session import (
+        classic_pat_session,
+        cerberus_pem_session,
+        pr_sentinel_app_session,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +101,13 @@ _DEFAULT_SCHEMA_PATH = Path(__file__).parent.parent / "docs" / "standards" / "00
 # to retype the flag every time. Tests patch this constant to a non-existent
 # path to exercise the missing-PEM error branch (#1543).
 DEFAULT_CERBERUS_PEM_GPG = Path.home() / ".secrets" / "cerberus-pem.gpg"
+
+# Canonical location for the encrypted pr-sentinel App credential bundle
+# (App ID on line 1, private-key PEM after), used by the installation
+# check (#1822). Absent file => the check reports "unverifiable" and is
+# excluded from the GitHub-side pass/fail denominator entirely — an
+# unperformable check must not produce a warning banner.
+DEFAULT_PR_SENTINEL_APP_GPG = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
 
 
 def load_structure_schema(schema_path: Path | None = None) -> dict:
@@ -2262,94 +2277,144 @@ def verify_workflow_content_on_origin(
     return False, "content differs from canonical (#1193 failure mode)"
 
 
+def _parse_sentinel_app_bundle(bundle: str) -> tuple[str, str]:
+    """Split the decrypted sentinel App bundle into (app_id, pem).
+
+    Bundle format (see pr_sentinel_app_session): App ID on line 1, the
+    App's private-key PEM from line 2 onward.
+
+    Raises:
+        ValueError: Line 1 is not a numeric App ID, or no PEM follows.
+    """
+    lines = bundle.strip().splitlines()
+    if len(lines) < 2:
+        raise ValueError("bundle has fewer than 2 lines (App ID + PEM expected)")
+    app_id = lines[0].strip()
+    if not app_id.isdigit():
+        raise ValueError("bundle line 1 is not a numeric App ID")
+    pem = "\n".join(lines[1:]).strip() + "\n"
+    if "PRIVATE KEY" not in pem:
+        raise ValueError("bundle lines 2+ do not look like a private-key PEM")
+    return app_id, pem
+
+
+def _mint_github_app_jwt(app_id: str, pem: str) -> str:
+    """Mint a short-lived RS256 JWT authenticating AS the GitHub App.
+
+    Standard GitHub App JWT shape: iat backdated 60s for clock drift,
+    9-minute expiry (GitHub caps at 10), iss = the App ID. Signed with
+    the App's private key via `cryptography` (already a project
+    dependency) — no JWT library needed for the one fixed header shape
+    GitHub accepts. (#1822)
+    """
+    import base64 as _b64
+    import json as _json
+    import time as _time
+
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as _padding
+
+    def _b64url(data: bytes) -> bytes:
+        return _b64.urlsafe_b64encode(data).rstrip(b"=")
+
+    now = int(_time.time())
+    header = _b64url(_json.dumps({"alg": "RS256", "typ": "JWT"}).encode())
+    payload = _b64url(_json.dumps(
+        {"iat": now - 60, "exp": now + 540, "iss": app_id}
+    ).encode())
+    signing_input = header + b"." + payload
+    key = serialization.load_pem_private_key(pem.encode(), password=None)
+    signature = key.sign(signing_input, _padding.PKCS1v15(), hashes.SHA256())
+    return (signing_input + b"." + _b64url(signature)).decode()
+
+
 def verify_pr_sentinel_installation(
-    github_user: str, repo_name: str, pat: str,
+    github_user: str, repo_name: str, app_jwt: str,
 ) -> tuple[bool, str]:
-    """Best-effort check that pr-sentinel-mm Cloudflare Worker covers this repo.
+    """Check that the pr-sentinel App is installed on this repo.
 
-    The Worker delivers the `pr-sentinel / issue-reference` check that branch
-    protection requires. If the Worker's GitHub App installation scope has
-    drifted from 'All repositories', the check never fires and every PR sits
-    blocked. Catches that at creation time instead of when the first PR opens.
+    The Worker delivers the `pr-sentinel / issue-reference` check that
+    branch protection requires. If the App's installation scope has
+    drifted from 'All repositories', the check never fires and every PR
+    sits blocked. Catches that at creation time instead of when the
+    first PR opens.
 
-    Uses the in-process classic PAT per ADR-0216 (#1274). The
-    /user/installations endpoint requires elevated scope that the
-    fine-grained PAT deliberately lacks; prior versions of this function
-    shelled out via gh and reliably 403'd on every run.
+    Asks the question the honest way (#1822): authenticated AS the App
+    (JWT), `GET /repos/{owner}/{repo}/installation` returns 200 iff this
+    App is installed on the repo, 404 if it is not. The previous
+    /user/installations approach was rejected 403 for ANY personal
+    access token (auth-shape rejection — that endpoint requires a GitHub
+    App user access token), so the check structurally could not pass on
+    any run.
 
     Args:
-        github_user: GitHub username (org or user account that owns the repo).
+        github_user: GitHub username (org or user account owning the repo).
         repo_name: Repository name (no owner prefix).
-        pat: Classic PAT from classic_pat_session(). Passed in the
-            Authorization header; never reaches env or argv.
+        app_jwt: RS256 App JWT from _mint_github_app_jwt(). Bearer
+            header only; never reaches env or argv.
     """
     headers = {
-        "Authorization": f"token {pat}",
+        "Authorization": f"Bearer {app_jwt}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-
-    # Step 1: find the pr-sentinel-mm installation id on the user account.
+    full_name = f"{github_user}/{repo_name}"
     try:
         r = requests.get(
-            "https://api.github.com/user/installations",
+            f"https://api.github.com/repos/{full_name}/installation",
             headers=headers, timeout=30,
         )
     except requests.RequestException as e:
-        return False, f"could not query /user/installations: {e}"
-    if r.status_code != 200:
+        return False, f"could not query repo installation: {e}"
+    if r.status_code == 200:
+        try:
+            inst_id = r.json().get("id")
+        except ValueError:
+            inst_id = None
+        return True, f"App installation covers this repo (id {inst_id})"
+    if r.status_code == 404:
         return False, (
-            f"GET /user/installations failed: {r.status_code} "
-            f"{r.text[:200]}"
+            f"App is NOT installed on {full_name} -- installation scope "
+            "may have drifted from 'All repositories'"
         )
-    try:
-        installations = r.json().get("installations", [])
-    except ValueError as e:
-        return False, f"could not parse /user/installations: {e}"
-    sentinel = next(
-        (inst for inst in installations if inst.get("app_slug") == "pr-sentinel-mm"),
-        None,
-    )
-    if sentinel is None:
-        return False, "pr-sentinel-mm not found in /user/installations"
-    installation_id = sentinel.get("id")
-    if installation_id is None:
-        return False, "pr-sentinel-mm installation has no id field"
-
-    # Step 2: list repositories covered by this installation; confirm the
-    # new repo is in the list. GitHub paginates installation repositories
-    # at 100 per page; loop until exhausted.
-    full_name = f"{github_user}/{repo_name}"
-    page = 1
-    while True:
-        try:
-            r = requests.get(
-                f"https://api.github.com/user/installations/{installation_id}/repositories",
-                headers=headers,
-                params={"per_page": 100, "page": page},
-                timeout=30,
-            )
-        except requests.RequestException as e:
-            return False, f"could not query installation repos: {e}"
-        if r.status_code != 200:
-            return False, (
-                f"GET /user/installations/{installation_id}/repositories "
-                f"failed: {r.status_code} {r.text[:200]}"
-            )
-        try:
-            repos = r.json().get("repositories", [])
-        except ValueError as e:
-            return False, f"could not parse installation repos: {e}"
-        for repo in repos:
-            if repo.get("full_name") == full_name:
-                return True, f"installation {installation_id} covers this repo"
-        if len(repos) < 100:
-            break  # last page
-        page += 1
     return False, (
-        f"installation {installation_id} does NOT cover {full_name} -- "
-        "App scope may have drifted from 'All repositories'"
+        f"GET /repos/{full_name}/installation failed: "
+        f"{r.status_code} {r.text[:200]}"
     )
+
+
+def run_pr_sentinel_check(
+    github_user: str, repo_name: str, bundle_path: Path,
+) -> tuple[str, str]:
+    """Three-state pr-sentinel installation check (#1822).
+
+    Returns (outcome, message) with outcome one of:
+        "pass" -- App verified installed on the repo.
+        "fail" -- App verifiably NOT installed, or the authenticated
+                  probe errored: counts against the GitHub-side
+                  denominator (genuine investigate signal).
+        "skip" -- unverifiable, not attempted: credential bundle not
+                  provisioned, operator declined the pinentry boost, or
+                  bundle malformed. Excluded from the denominator so an
+                  unperformable check cannot cry wolf — an always-firing
+                  warning banner trains operators to ignore it, which
+                  then cannot alert on a genuine failure.
+    """
+    try:
+        with pr_sentinel_app_session(bundle_path) as bundle:
+            app_id, pem = _parse_sentinel_app_bundle(bundle)
+            app_jwt = _mint_github_app_jwt(app_id, pem)
+    except FileNotFoundError:
+        return "skip", (
+            f"encrypted App credential not provisioned ({bundle_path}); "
+            "check not attempted"
+        )
+    except RuntimeError as e:
+        return "skip", f"credential unavailable: {e}; check not attempted"
+    except ValueError as e:
+        return "skip", f"credential bundle malformed: {e}; check not attempted"
+    ok, msg = verify_pr_sentinel_installation(github_user, repo_name, app_jwt)
+    return ("pass" if ok else "fail"), msg
 
 
 def _deploy_cerberus(
@@ -2508,6 +2573,17 @@ Examples:
              "encrypted blob is NOT deleted -- reuse it across as many "
              "new-repo invocations as you need, then revoke the key in the "
              "browser when done (#1254)."
+    )
+    parser.add_argument(
+        "--sentinel-app-gpg",
+        metavar="PATH",
+        default=None,
+        help="Path to the GPG-ENCRYPTED pr-sentinel App credential bundle "
+             "(App ID on line 1, private-key PEM after; default "
+             "~/.secrets/pr-sentinel-app.gpg). Used by the installation "
+             "check; decrypted in-process, pinentry per run is the consent "
+             "event. If the file is absent or the decrypt is declined, the "
+             "check reports unverifiable and is NOT counted (#1822)."
     )
     parser.add_argument(
         "--lang",
@@ -3405,22 +3481,38 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                         else:
                             print(f"  [FAIL] Cerberus secrets missing: {missing}")
 
-                    # pr-sentinel installation check -- elevated; needs the
-                    # classic PAT (the /user/installations endpoint is NOT
-                    # accessible to the fine-grained PAT). Inside the
-                    # with-block, shares pat -- no extra pinentry. (#1274)
-                    gh_checks_total += 1
-                    ok, msg = verify_pr_sentinel_installation(
-                        github_user, args.name, pat,
+                    # pr-sentinel installation check -- requires the App's
+                    # OWN credential (JWT); GitHub refuses /user/installations
+                    # to personal access tokens of any shape, so no PAT can
+                    # perform this check. Three-state per #1822: "skip" means
+                    # unverifiable/not attempted and is EXCLUDED from the
+                    # denominator -- no false warning banner. The decrypt
+                    # pinentry (TTL 0) is the operator's per-run consent to
+                    # this extra permission boost; cancelling it declines.
+                    sentinel_bundle = Path(
+                        args.sentinel_app_gpg or DEFAULT_PR_SENTINEL_APP_GPG
                     )
-                    if ok:
-                        print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
+                    if sentinel_bundle.exists():
+                        print("  pr-sentinel check: pinentry will prompt to "
+                              "decrypt the App credential (cancel to skip "
+                              "this check).")
+                    outcome, msg = run_pr_sentinel_check(
+                        github_user, args.name, sentinel_bundle,
+                    )
+                    if outcome == "pass":
+                        gh_checks_total += 1
                         gh_checks_passed += 1
-                    else:
-                        print(f"  [WARN] pr-sentinel-mm Worker: {msg}")
+                        print(f"  [PASS] pr-sentinel-mm Worker: {msg}")
+                    elif outcome == "fail":
+                        gh_checks_total += 1
+                        print(f"  [FAIL] pr-sentinel-mm Worker: {msg}")
                         print("         If pr-sentinel checks don't appear on the first PR,")
                         print("         the App's installation scope likely drifted from "
                               "'All repositories'.")
+                    else:
+                        print(f"  [SKIP] pr-sentinel-mm Worker: {msg}")
+                        print("         (not counted; the first PR doubles as the live "
+                              "sentinel verification)")
 
         except FileNotFoundError as e:
             print(f"\n  ERROR: classic PAT not configured: {e}")
