@@ -737,6 +737,9 @@ import base64 as _base64  # noqa: E402
 
 from new_repo import (  # noqa: E402
     _CANONICAL_AUTO_REVIEWER_CALLER,
+    _mint_github_app_jwt,
+    _parse_sentinel_app_bundle,
+    run_pr_sentinel_check,
     verify_branch_protection_on_origin,
     verify_pr_sentinel_installation,
     verify_repo_settings_on_origin,
@@ -935,70 +938,182 @@ class TestVerifyWorkflowContent:
 
 
 class TestVerifyPrSentinelInstallation:
-    """T300-T302: verify_pr_sentinel_installation (#1202, refactored #1274).
+    """T300-T302: verify_pr_sentinel_installation (#1202, #1274, #1822).
 
-    Post-#1274: function uses requests + classic PAT (not gh CLI). Tests
-    mock requests.get with status-code/json-shaped responses.
+    Post-#1822: the function authenticates AS the App (JWT) and probes
+    GET /repos/{owner}/{repo}/installation — 200 = installed, 404 = not.
+    The old /user/installations flow was rejected 403 for any PAT, so the
+    check could never pass; these tests mock the new endpoint only.
     """
 
     @patch("new_repo.requests.get")
-    def test_T300_pass_when_repo_in_installation(self, mock_get):
-        """Worker installation found AND covers the new repo → (True, ...)."""
-        installations_resp = MagicMock(status_code=200)
-        installations_resp.json.return_value = {
-            "installations": [
-                {"app_slug": "pr-sentinel-mm", "id": 12345},
-            ],
-        }
-        repos_resp = MagicMock(status_code=200)
-        repos_resp.json.return_value = {
-            "repositories": [
-                {"full_name": "martymcenroe/some-other"},
-                {"full_name": "martymcenroe/repo-name"},
-            ],
-        }
-        mock_get.side_effect = [installations_resp, repos_resp]
+    def test_T300_pass_when_app_installed_on_repo(self, mock_get):
+        """200 from /repos/{o}/{r}/installation → (True, covers)."""
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"id": 12345}
+        mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
-            "martymcenroe", "repo-name", "fake-pat",
+            "martymcenroe", "repo-name", "fake-jwt",
         )
         assert ok is True
         assert "covers" in msg
+        # Bearer auth with the App JWT, not a PAT token header.
+        headers = mock_get.call_args.kwargs["headers"]
+        assert headers["Authorization"] == "Bearer fake-jwt"
 
     @patch("new_repo.requests.get")
-    def test_T301_warn_when_installation_missing(self, mock_get):
-        """No pr-sentinel-mm in /user/installations → (False, 'not found')."""
-        resp = MagicMock(status_code=200)
-        resp.json.return_value = {"installations": [
-            {"app_slug": "some-other-app", "id": 99},
-        ]}
+    def test_T301_fail_when_app_not_installed(self, mock_get):
+        """404 → (False, NOT installed / scope drift)."""
+        resp = MagicMock(status_code=404, text="Not Found")
         mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
-            "martymcenroe", "repo-name", "fake-pat",
+            "martymcenroe", "repo-name", "fake-jwt",
         )
         assert ok is False
-        assert "not found" in msg
+        assert "NOT installed" in msg
+        assert "drift" in msg.lower()
 
     @patch("new_repo.requests.get")
-    def test_T302_warn_when_repo_not_in_installation_repos(self, mock_get):
-        """Installation exists but doesn't cover the new repo → App scope drift warning."""
-        installations_resp = MagicMock(status_code=200)
-        installations_resp.json.return_value = {
-            "installations": [
-                {"app_slug": "pr-sentinel-mm", "id": 12345},
-            ],
-        }
-        repos_resp = MagicMock(status_code=200)
-        repos_resp.json.return_value = {
-            "repositories": [
-                {"full_name": "martymcenroe/some-other-only"},
-            ],
-        }
-        mock_get.side_effect = [installations_resp, repos_resp]
+    def test_T302_fail_on_unexpected_http_status(self, mock_get):
+        """Non-200/404 (e.g. 401 bad JWT) → (False, HTTP detail)."""
+        resp = MagicMock(status_code=401, text="Bad credentials")
+        mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
-            "martymcenroe", "repo-name", "fake-pat",
+            "martymcenroe", "repo-name", "fake-jwt",
         )
         assert ok is False
-        assert "does NOT cover" in msg or "drift" in msg.lower()
+        assert "401" in msg
+
+
+class TestSentinelAppBundleAndJwt:
+    """T310-T313: _parse_sentinel_app_bundle + _mint_github_app_jwt (#1822)."""
+
+    @staticmethod
+    def _test_pem() -> str:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        return key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+
+    def test_T310_parse_valid_bundle(self):
+        """App ID line + PEM body parses into the pair."""
+        pem = self._test_pem()
+        app_id, parsed_pem = _parse_sentinel_app_bundle(f"123456\n{pem}")
+        assert app_id == "123456"
+        assert "PRIVATE KEY" in parsed_pem
+
+    def test_T311_parse_rejects_non_numeric_app_id(self):
+        """Line 1 must be the numeric App ID."""
+        with pytest.raises(ValueError, match="numeric App ID"):
+            _parse_sentinel_app_bundle("not-a-number\n-----BEGIN PRIVATE KEY-----\nx\n")
+
+    def test_T312_parse_rejects_missing_pem(self):
+        """A bare App ID with no PEM body is malformed."""
+        with pytest.raises(ValueError):
+            _parse_sentinel_app_bundle("123456")
+
+    def test_T313_minted_jwt_has_app_claims_and_valid_signature(self):
+        """JWT: three segments, iss = App ID, iat backdated, RS256-verifiable."""
+        import base64
+        import json
+
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+
+        pem = self._test_pem()
+        token = _mint_github_app_jwt("123456", pem)
+        header_b64, payload_b64, sig_b64 = token.split(".")
+
+        def unb64(seg: str) -> bytes:
+            return base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
+
+        header = json.loads(unb64(header_b64))
+        payload = json.loads(unb64(payload_b64))
+        assert header == {"alg": "RS256", "typ": "JWT"}
+        assert payload["iss"] == "123456"
+        assert payload["exp"] - payload["iat"] == 600  # -60s iat, +540s exp
+        # Signature must verify against the key's public half.
+        pub = serialization.load_pem_private_key(
+            pem.encode(), password=None,
+        ).public_key()
+        pub.verify(  # raises InvalidSignature on mismatch
+            unb64(sig_b64),
+            f"{header_b64}.{payload_b64}".encode(),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+
+
+class TestRunPrSentinelCheck:
+    """T314-T317: run_pr_sentinel_check three-state dispatch (#1822).
+
+    "skip" outcomes must NOT count toward the GitHub-side denominator —
+    that is the whole point of the fix: an unperformable check must not
+    produce the WARNING banner.
+    """
+
+    def test_T314_skip_when_bundle_not_provisioned(self, tmp_path):
+        """Missing encrypted bundle → ('skip', not attempted)."""
+        outcome, msg = run_pr_sentinel_check(
+            "martymcenroe", "repo-name", tmp_path / "absent.gpg",
+        )
+        assert outcome == "skip"
+        assert "not provisioned" in msg
+        assert "not attempted" in msg
+
+    @patch("new_repo.pr_sentinel_app_session")
+    def test_T315_skip_when_decrypt_declined(self, mock_session, tmp_path):
+        """Operator cancels pinentry (RuntimeError) → ('skip', ...)."""
+        mock_session.side_effect = RuntimeError(
+            "decrypt declined by operator (pinentry cancelled)"
+        )
+        outcome, msg = run_pr_sentinel_check(
+            "martymcenroe", "repo-name", tmp_path / "any.gpg",
+        )
+        assert outcome == "skip"
+        assert "declined" in msg
+
+    @patch("new_repo.verify_pr_sentinel_installation")
+    @patch("new_repo._mint_github_app_jwt")
+    @patch("new_repo._parse_sentinel_app_bundle")
+    @patch("new_repo.pr_sentinel_app_session")
+    def test_T316_pass_when_verified(
+        self, mock_session, mock_parse, mock_mint, mock_verify,
+    ):
+        """Decrypt + mint + 200 probe → ('pass', ...)."""
+        mock_session.return_value.__enter__ = MagicMock(return_value="bundle")
+        mock_session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_parse.return_value = ("123456", "PEM")
+        mock_mint.return_value = "jwt"
+        mock_verify.return_value = (True, "App installation covers this repo (id 1)")
+        outcome, msg = run_pr_sentinel_check(
+            "martymcenroe", "repo-name", Path("ignored.gpg"),
+        )
+        assert outcome == "pass"
+        assert "covers" in msg
+
+    @patch("new_repo.verify_pr_sentinel_installation")
+    @patch("new_repo._mint_github_app_jwt")
+    @patch("new_repo._parse_sentinel_app_bundle")
+    @patch("new_repo.pr_sentinel_app_session")
+    def test_T317_fail_when_app_absent(
+        self, mock_session, mock_parse, mock_mint, mock_verify,
+    ):
+        """Credential fine but App genuinely not installed → ('fail', ...)."""
+        mock_session.return_value.__enter__ = MagicMock(return_value="bundle")
+        mock_session.return_value.__exit__ = MagicMock(return_value=False)
+        mock_parse.return_value = ("123456", "PEM")
+        mock_mint.return_value = "jwt"
+        mock_verify.return_value = (False, "App is NOT installed on o/r")
+        outcome, msg = run_pr_sentinel_check(
+            "martymcenroe", "repo-name", Path("ignored.gpg"),
+        )
+        assert outcome == "fail"
+        assert "NOT installed" in msg
 
 
 # ===========================================================================

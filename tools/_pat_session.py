@@ -51,6 +51,7 @@ from typing import Iterator
 
 DEFAULT_PAT_PATH: Path = Path.home() / ".secrets" / "classic-pat.gpg"
 DEFAULT_CERBERUS_PEM_PATH: Path = Path.home() / ".secrets" / "cerberus-pem.gpg"
+DEFAULT_PR_SENTINEL_APP_PATH: Path = Path.home() / ".secrets" / "pr-sentinel-app.gpg"
 GPG_TIMEOUT_S: int = 180
 MAX_GPG_ATTEMPTS: int = 5
 
@@ -215,4 +216,95 @@ def cerberus_pem_session(
     raise RuntimeError(
         f"gpg decrypt of Cerberus PEM failed after {MAX_GPG_ATTEMPTS} attempts. "
         f"Last error: {last_stderr}"
+    )
+
+
+@contextmanager
+def pr_sentinel_app_session(
+    bundle_path: Path = DEFAULT_PR_SENTINEL_APP_PATH,
+) -> Iterator[str]:
+    """Yield the gpg-decrypted pr-sentinel App credential bundle.
+
+    The bundle is one gpg-symmetric-encrypted file: the App ID on line 1,
+    the App's private-key PEM from line 2 onward. Same threat model as
+    classic_pat_session / cerberus_pem_session: encrypted at rest,
+    decrypted only into this process's heap inside the context-manager
+    scope, never on disk in plaintext during a run.
+
+    With gpg-agent at TTL 0 every decrypt surfaces pinentry, so each
+    decrypt IS the operator's per-run consent to this permission boost
+    (#1822). Deliberate deviation from the sibling sessions: a
+    user-CANCELLED pinentry aborts immediately with RuntimeError instead
+    of retrying — cancel means "I decline the boost", and callers report
+    the dependent check as unverifiable rather than failed. Genuine
+    decrypt failures (mistyped passphrase) still retry as usual.
+
+    One-time setup (operator, in their own shell; App ID from the App's
+    settings page, PEM freshly downloaded):
+        mkdir -p ~/.secrets
+        { echo <APP_ID>; cat <app>.private-key.pem; } \\
+            | gpg -c -o ~/.secrets/pr-sentinel-app.gpg
+        rm <app>.private-key.pem
+        # then walk the hygiene-surfaces audit gate (runbook 0927)
+
+    Args:
+        bundle_path: Path to the gpg-encrypted credential bundle.
+
+    Yields:
+        Decrypted bundle text (App ID line + PEM). Deleted on exit.
+
+    Raises:
+        FileNotFoundError: Bundle file absent — treat the dependent
+            check as unverifiable, not failed.
+        RuntimeError: Decrypt declined (pinentry cancel) or failed
+            after MAX_GPG_ATTEMPTS — same unverifiable treatment.
+
+    Implementation note: mirrors cerberus_pem_session's structure rather
+    than sharing a helper, per that function's stated convention — the
+    load-bearing PAT/PEM paths stay untouched.
+    """
+    if not bundle_path.exists():
+        raise FileNotFoundError(
+            f"pr-sentinel App credential not found at {bundle_path}.\n"
+            f"One-time setup (operator shell; App ID + downloaded PEM):\n"
+            f"  mkdir -p {bundle_path.parent}\n"
+            f"  {{ echo <APP_ID>; cat <app>.private-key.pem; }} "
+            f"| gpg -c -o {bundle_path}\n"
+            f"  rm <app>.private-key.pem"
+        )
+
+    last_stderr = ""
+    for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        result = subprocess.run(
+            ["gpg", "--quiet", "--decrypt", str(bundle_path)],
+            capture_output=True,
+            text=True,
+            timeout=GPG_TIMEOUT_S,
+        )
+        if result.returncode == 0:
+            bundle = result.stdout.strip()
+            try:
+                yield bundle
+            finally:
+                del bundle
+            return
+        last_stderr = result.stderr.strip()
+        if "cancel" in last_stderr.lower():
+            # Pinentry cancel = operator declined the boost. No retry.
+            raise RuntimeError(
+                "decrypt declined by operator (pinentry cancelled)"
+            )
+        if attempt < MAX_GPG_ATTEMPTS:
+            print(
+                f"gpg decrypt failed (attempt {attempt}/{MAX_GPG_ATTEMPTS}): {last_stderr}",
+                file=sys.stderr,
+            )
+            print(
+                "Retrying -- pinentry will prompt again. (Ctrl-C to abort.)",
+                file=sys.stderr,
+            )
+
+    raise RuntimeError(
+        f"gpg decrypt of pr-sentinel App bundle failed after "
+        f"{MAX_GPG_ATTEMPTS} attempts. Last error: {last_stderr}"
     )
