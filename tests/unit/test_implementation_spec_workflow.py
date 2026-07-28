@@ -3248,3 +3248,12 @@ class TestDrafterSystemPrompt:
 
         assert "platform-independent" in DRAFTER_SYSTEM_PROMPT
         assert "sys.platform" in DRAFTER_SYSTEM_PROMPT
+
+    def test_assertion_traceability_requirement_present(self):
+        """Issue #1860: spec test assertions must trace to specified behavior."""
+        from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
+            DRAFTER_SYSTEM_PROMPT,
+        )
+
+        assert "MUST trace" in DRAFTER_SYSTEM_PROMPT
+        assert "side effects" in DRAFTER_SYSTEM_PROMPT
