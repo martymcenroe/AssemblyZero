@@ -79,6 +79,7 @@ def _empty_codebase_context() -> dict[str, Any]:
         "related_code": {},
         "dependency_summary": "",
         "directory_tree": "",
+        "code_patterns": {},
     }
 
 
@@ -161,7 +162,14 @@ def analyze_codebase(state: dict) -> dict:
     # ------------------------------------------------------------------
     # Step 3: Scan code patterns
     # ------------------------------------------------------------------
+    # #1816: this result was computed and discarded since the original #401
+    # build, despite #401's acceptance explicitly listing "existing code
+    # patterns are injected into the drafter prompt". Wired in: detected
+    # fields only ("unknown" values carry no signal and are dropped).
     pattern_analysis = scan_patterns(file_contents)
+    code_patterns: dict[str, str] = {
+        k: v for k, v in pattern_analysis.items() if v and v != "unknown"
+    }
 
     # ------------------------------------------------------------------
     # Step 4: Detect frameworks
@@ -245,6 +253,7 @@ def analyze_codebase(state: dict) -> dict:
         "related_code": related_code,
         "dependency_summary": dependency_summary,
         "directory_tree": directory_tree,
+        "code_patterns": code_patterns,
     }
 
     logger.info(

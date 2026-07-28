@@ -592,6 +592,22 @@ def _format_codebase_context(ctx: dict) -> str:
         conv_lines = "\n".join(f"- {c}" for c in conventions)
         parts.append(f"### Coding Conventions\n\n{conv_lines}")
 
+    # #1816: detected code patterns (scan_patterns output, wired in per
+    # #401's original acceptance — "existing code patterns are injected").
+    code_patterns = ctx.get("code_patterns", {})
+    if code_patterns:
+        labels = {
+            "naming_convention": "Naming convention",
+            "state_pattern": "State management",
+            "node_pattern": "Node/function style",
+            "test_pattern": "Test framework",
+            "import_style": "Import style",
+        }
+        pattern_lines = "\n".join(
+            f"- {labels.get(k, k)}: {v}" for k, v in code_patterns.items()
+        )
+        parts.append(f"### Detected Code Patterns\n\n{pattern_lines}")
+
     frameworks = ctx.get("frameworks", [])
     if frameworks:
         fw_lines = "\n".join(f"- {f}" for f in frameworks)
