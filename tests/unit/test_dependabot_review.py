@@ -937,4 +937,6 @@ class TestProcessRepoWithBudget:
             dependabot_review, "list_dependabot_prs", lambda repo: [],
         )
         sub = dependabot_review.process_repo("o/r", tmp_path)
-        assert set(sub) == {"merged", "deferred", "errored", "limit_skipped"}
+        assert set(sub) == {
+            "merged", "deferred", "errored", "limit_skipped", "skipped_unchanged",
+        }
