@@ -55,10 +55,59 @@ DEFAULT_PR_SENTINEL_APP_PATH: Path = Path.home() / ".secrets" / "pr-sentinel-app
 GPG_TIMEOUT_S: int = 180
 MAX_GPG_ATTEMPTS: int = 5
 
+# Human names for each secret this module decrypts (#1853). The operator holds
+# several DISTINCT passphrases; gpg's pinentry dialog names neither the secret
+# nor the operation, so without an announcement the prompt is ambiguous and a
+# wrong guess burns a retry. These are display strings only -- never secret
+# material.
+SECRET_CLASSIC_PAT: str = "GitHub classic PAT (admin scope)"
+SECRET_CERBERUS_PEM: str = "Cerberus App private key (PEM)"
+SECRET_PR_SENTINEL_APP: str = "pr-sentinel App credential (App ID + PEM)"
+
+
+def _announce_decrypt(
+    secret_name: str,
+    path: Path,
+    reason: str | None,
+    attempt: int,
+    max_attempts: int,
+) -> None:
+    """Print to stderr WHICH secret pinentry is about to ask for (#1853).
+
+    The console is the reliable surface for this: gpg symmetric decryption
+    offers no dependable lever on the pinentry dialog's own text, so the
+    operator's cue has to arrive before the dialog appears.
+
+    Deliberately ASCII-only -- this prints into Git Bash, cmd, and Windows
+    Terminal, and box-drawing characters do not survive all three.
+
+    Receives and prints only the secret's NAME, its path, and the caller's
+    stated reason. Never secret material.
+
+    Args:
+        secret_name: One of the SECRET_* display constants above.
+        path: The encrypted file about to be decrypted.
+        reason: Caller's description of what the elevated scope is for on
+            this run, e.g. "land Seshat CI workflow". None if unstated.
+        attempt: 1-based attempt counter.
+        max_attempts: Total attempts before giving up.
+    """
+    bar = "=" * 64
+    print(bar, file=sys.stderr)
+    print("PASSPHRASE NEEDED -- pinentry is about to prompt", file=sys.stderr)
+    print(f"  secret   : {secret_name}", file=sys.stderr)
+    print(f"  file     : {path}", file=sys.stderr)
+    if reason:
+        print(f"  used for : {reason}", file=sys.stderr)
+    if max_attempts > 1:
+        print(f"  attempt  : {attempt} of {max_attempts}", file=sys.stderr)
+    print(bar, file=sys.stderr)
+
 
 @contextmanager
 def classic_pat_session(
     pat_path: Path = DEFAULT_PAT_PATH,
+    reason: str | None = None,
 ) -> Iterator[str]:
     """Yield the gpg-decrypted classic PAT.
 
@@ -69,6 +118,10 @@ def classic_pat_session(
 
     Args:
         pat_path: Path to the gpg-encrypted PAT file.
+        reason: What the elevated scope is for on this run, e.g.
+            "land Seshat CI workflow". Printed on the pre-prompt banner so
+            the operator can tell which of several passphrases pinentry is
+            asking for (#1853).
 
     Yields:
         The decrypted PAT as a string. Lives only in this generator's scope.
@@ -93,6 +146,7 @@ def classic_pat_session(
 
     last_stderr = ""
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        _announce_decrypt(SECRET_CLASSIC_PAT, pat_path, reason, attempt, MAX_GPG_ATTEMPTS)
         result = subprocess.run(
             ["gpg", "--quiet", "--decrypt", str(pat_path)],
             capture_output=True,
@@ -126,6 +180,7 @@ def classic_pat_session(
 @contextmanager
 def cerberus_pem_session(
     pem_path: Path = DEFAULT_CERBERUS_PEM_PATH,
+    reason: str | None = None,
 ) -> Iterator[str]:
     """Yield the gpg-decrypted Cerberus App private-key PEM.
 
@@ -161,6 +216,9 @@ def cerberus_pem_session(
 
     Args:
         pem_path: Path to the gpg-encrypted Cerberus PEM file.
+        reason: What this decrypt is for on this run. Printed on the
+            pre-prompt banner so the operator can tell which of several
+            passphrases pinentry is asking for (#1853).
 
     Yields:
         The decrypted PEM as a string. Lives only in this generator's
@@ -189,6 +247,7 @@ def cerberus_pem_session(
 
     last_stderr = ""
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        _announce_decrypt(SECRET_CERBERUS_PEM, pem_path, reason, attempt, MAX_GPG_ATTEMPTS)
         result = subprocess.run(
             ["gpg", "--quiet", "--decrypt", str(pem_path)],
             capture_output=True,
@@ -222,6 +281,7 @@ def cerberus_pem_session(
 @contextmanager
 def pr_sentinel_app_session(
     bundle_path: Path = DEFAULT_PR_SENTINEL_APP_PATH,
+    reason: str | None = None,
 ) -> Iterator[str]:
     """Yield the gpg-decrypted pr-sentinel App credential bundle.
 
@@ -249,6 +309,9 @@ def pr_sentinel_app_session(
 
     Args:
         bundle_path: Path to the gpg-encrypted credential bundle.
+        reason: What this permission boost is for on this run. Printed on
+            the pre-prompt banner so the operator can tell which of several
+            passphrases pinentry is asking for (#1853).
 
     Yields:
         Decrypted bundle text (App ID line + PEM). Deleted on exit.
@@ -275,6 +338,7 @@ def pr_sentinel_app_session(
 
     last_stderr = ""
     for attempt in range(1, MAX_GPG_ATTEMPTS + 1):
+        _announce_decrypt(SECRET_PR_SENTINEL_APP, bundle_path, reason, attempt, MAX_GPG_ATTEMPTS)
         result = subprocess.run(
             ["gpg", "--quiet", "--decrypt", str(bundle_path)],
             capture_output=True,
