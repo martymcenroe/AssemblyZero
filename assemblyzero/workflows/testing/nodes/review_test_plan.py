@@ -565,20 +565,18 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
                 "test_plan_status": "BLOCKED",
             }
 
-        # Closes #1523: when a structured `response_schema` is passed to the
-        # provider (Gemini), the JSON output lands on `result.content`, not
-        # `result.response`. Reading only `.response` makes
-        # `parse_structured_verdict` always see an empty string, fall through
-        # to the regex fallback, and return a default that maps to BLOCKED —
-        # observed on Chiron #45 (curator) iter02 N1 and N1.5 cycles. The LLD
-        # reviewer at `requirements/nodes/review.py:97-98` uses the same
-        # `.content`-first pattern (landed in PR #775).
+        # #1843 corrects what #1523 asserted here: LLMCallResult has no
+        # `content` field, so the payload is always `.response`. The `.content`
+        # probe is kept only for providers that return their own result object,
+        # and it must stay ordered this way — a provider that DOES carry
+        # `.content` puts the structured payload there.
         #
         # The `isinstance(..., str)` guards are non-cosmetic: legacy tests mock
         # `result` as a bare MagicMock with only `.response` set, but a
         # MagicMock auto-creates a truthy MagicMock for any unset attribute.
         # Without isinstance, `result.content` would read as that MagicMock,
-        # then crash `json.loads()` inside `parse_structured_verdict`.
+        # then crash `json.loads()` inside `parse_structured_verdict`. That is
+        # exactly the mock-drift that hid the phantom-field bug for months.
         content_val = getattr(result, "content", None)
         response_val = getattr(result, "response", None)
         if isinstance(content_val, str) and content_val:

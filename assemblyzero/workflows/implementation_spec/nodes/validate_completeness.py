@@ -172,15 +172,29 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
 
     validation_passed = len(completeness_issues) == 0
 
-    # Report summary
-    passed_count = sum(1 for c in checks if c["passed"])
-    total_count = len(checks)
-    print(
-        f"\n    Results: {passed_count}/{total_count} checks passed"
+    # Report summary. #1870: a check with nothing to check reports passed=True
+    # with "not applicable" in its details, so a spec that verified almost
+    # nothing still printed "7/7 checks passed" — which read as thorough
+    # validation in the run-11 logs. Count and name those separately; they are
+    # still not failures, they are just not evidence.
+    n_a_count = sum(
+        1 for c in checks if c["passed"] and "not applicable" in c["details"].lower()
     )
+    passed_count = sum(1 for c in checks if c["passed"]) - n_a_count
+    total_count = len(checks)
+    summary = f"\n    Results: {passed_count}/{total_count} checks passed"
+    if n_a_count:
+        summary += f", {n_a_count} not applicable (nothing to check)"
+    print(summary)
 
     if validation_passed:
-        print("    PASSED: All completeness checks passed")
+        if n_a_count:
+            print(
+                f"    PASSED: {passed_count} check(s) verified, "
+                f"{n_a_count} had nothing to verify"
+            )
+        else:
+            print("    PASSED: All completeness checks passed")
     else:
         print(f"    BLOCKED: {len(completeness_issues)} check(s) failed")
         for issue in completeness_issues:
@@ -1160,6 +1174,13 @@ def _log_check(check: CompletenessCheck) -> None:
     Args:
         check: CompletenessCheck to log.
     """
-    status = "PASS" if check["passed"] else "FAIL"
+    # #1870: a check with nothing to check is not a pass. Saying so keeps the
+    # console honest about how much of the spec was actually verified.
+    if not check["passed"]:
+        status = "FAIL"
+    elif "not applicable" in check["details"].lower():
+        status = "N/A "
+    else:
+        status = "PASS"
     name = check["check_name"]
     print(f"    [{status}] {name}")
