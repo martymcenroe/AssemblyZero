@@ -190,15 +190,17 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
     """
     Safe-delete the pipeline branches for one issue. Returns count deleted.
 
-    Only `{issue}-*` branches are candidates — the per-stage work branches
-    the pipeline creates. The attempt branch itself (the integration branch
-    every pipeline PR targets under the #1755 model) is named for the
-    attempt, not the issue, so it never matches. The checked-out branch is
-    additionally excluded by name, so a reset can never delete the very
-    branch the attempt is standing on (#1762).
+    Candidates are the per-stage work branches the pipeline creates:
+    `{issue}-*` (e.g. `7-lld`) and the implementation branch `issue-{N}`
+    (e.g. `issue-7`, missed by the glob alone — #1862). The attempt branch
+    itself (the integration branch every pipeline PR targets under the
+    #1755 model) is named for the attempt, not the issue, so it never
+    matches. The checked-out branch is additionally excluded by name, so a
+    reset can never delete the very branch the attempt is standing on
+    (#1762).
     """
     result = _run(
-        ["git", "branch", "--list", f"{issue}-*"],
+        ["git", "branch", "--list", f"{issue}-*", f"issue-{issue}"],
         cwd=repo_root,
     )
     if result.returncode != 0:
