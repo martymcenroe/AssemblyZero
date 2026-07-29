@@ -32,7 +32,12 @@ class PytestRunner(BaseTestRunner):
 
         Uses --json-report if available, falls back to stdout parsing.
         """
-        command = ["pytest", "--tb=short", "-q"]
+        # #1904: bare "pytest" resolved from the ORCHESTRATOR's PATH — AZ's
+        # venv, not the target repo's. Phase 3 of the boostgauge campaign
+        # passed only because AZ happens to carry Pillow; phase 4 died on
+        # psutil, which only the target declares. poetry run + cwd at the
+        # (provisioned — see stages.py) worktree resolves the real env.
+        command = ["poetry", "run", "pytest", "--tb=short", "-q"]
 
         if extra_args:
             command.extend(extra_args)

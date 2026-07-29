@@ -712,6 +712,40 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     f"{(push_result.stderr or '').strip()[:200]}"
                 )
 
+            # #1904: provision the worktree's environment. Without this,
+            # `poetry run` silently falls through to PATH for missing
+            # commands and every test executes in AssemblyZero's venv —
+            # phase 3 of the boostgauge campaign passed on AZ's Pillow,
+            # phase 4 died on the target's psutil. A failed install is a
+            # failed stage, not a warning: tests in the wrong environment
+            # are worse than no tests.
+            if (worktree_path / "pyproject.toml").is_file():
+                print("    [ENV] poetry install (target worktree)...")
+                install_result = run_command(
+                    ["poetry", "install"],
+                    cwd=str(worktree_path),
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                if install_result.returncode != 0:
+                    detail = (
+                        (install_result.stderr or "").strip()
+                        or (install_result.stdout or "").strip()
+                        or "no output"
+                    )
+                    return _make_stage_result(
+                        status="failed",
+                        error_message=(
+                            f"Worktree environment provisioning failed "
+                            f"(poetry install exit {install_result.returncode}): "
+                            f"{detail[:400]}"
+                        ),
+                        duration_seconds=time.monotonic() - start_time,
+                        attempts=1,
+                    )
+                print("    [ENV] worktree environment ready")
+
         # Run implementation workflow
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
 

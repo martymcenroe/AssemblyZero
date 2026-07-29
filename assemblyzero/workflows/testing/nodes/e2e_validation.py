@@ -131,8 +131,10 @@ def run_e2e_tests(
         # Run all tests if no specific E2E files
         e2e_files = test_files
 
+    # #1904: through the target repo's env, matching verify_phases — bare
+    # pytest ran in AssemblyZero's venv.
     cmd = [
-        "pytest",
+        "poetry", "run", "pytest",
         "-v",
         "-m", "e2e or integration",  # Run only e2e/integration marked tests
         "--tb=short",
