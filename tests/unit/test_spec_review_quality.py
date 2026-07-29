@@ -5,6 +5,8 @@ pass (#1866), and the console called a spec "7/7 checks passed" when most of
 those checks had nothing to check (#1870).
 """
 
+from unittest.mock import MagicMock
+
 from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
     REVIEWER_SYSTEM_PROMPT,
 )
@@ -67,3 +69,74 @@ class TestNotApplicableChecksAreNotPasses:
         })
         out = capsys.readouterr().out
         assert "[FAIL]" in out
+
+
+class TestBlockedVerdictSaysWhy:
+    """#1889: the gate's finding must survive into the run record."""
+
+    def _state(self, tmp_path):
+        return {
+            "spec_draft": "# Spec\n" + ("x" * 200),
+            "lld_content": "# LLD",
+            "audit_dir": str(tmp_path / "audit"),
+            "issue_number": 41,
+            "cost_budget_usd": 0.0,
+        }
+
+    def _spec_result(self, verdict, rationale="", items=None):
+        return {
+            "verdict": verdict,
+            "rationale": rationale,
+            "feedback_items": items or [],
+            "source": "structured",
+        }
+
+    def _run(self, tmp_path, spec_result):
+        from unittest.mock import patch
+
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
+            review_spec,
+        )
+
+        base = "assemblyzero.workflows.implementation_spec.nodes.review_spec"
+        with patch(f"{base}.get_provider", return_value=MagicMock()), patch(
+            f"{base}._invoke_reviewer_with_spec_schema",
+            return_value=(spec_result, ""),
+        ):
+            return review_spec(self._state(tmp_path))
+
+    def test_blocked_carries_its_reason_into_error_message(self, tmp_path):
+        result = self._run(
+            tmp_path,
+            self._spec_result(
+                "BLOCKED", rationale="Assertion T080 contradicts section 5.2."
+            ),
+        )
+        assert result["review_verdict"] == "BLOCKED"
+        assert "BLOCKED" in result["error_message"]
+        assert "T080" in result["error_message"]
+
+    def test_approved_leaves_error_message_empty(self, tmp_path):
+        result = self._run(tmp_path, self._spec_result("APPROVED", rationale="fine"))
+        assert result["error_message"] == ""
+
+    def test_revise_leaves_error_message_empty(self, tmp_path):
+        """REVISE must keep routing to another revision, not halt."""
+        result = self._run(tmp_path, self._spec_result("REVISE", rationale="tighten"))
+        assert result["error_message"] == ""
+
+    def test_blocked_prints_the_feedback(self, tmp_path, capsys):
+        self._run(
+            tmp_path,
+            self._spec_result("BLOCKED", rationale="Unwinnable assertion in T080."),
+        )
+        assert "Unwinnable assertion" in capsys.readouterr().out
+
+    def test_verdict_persists_even_when_audit_dir_is_absent(self, tmp_path):
+        """The run that exposed this wrote no verdict file at all."""
+        audit = tmp_path / "audit"
+        assert not audit.exists()
+        self._run(tmp_path, self._spec_result("BLOCKED", rationale="because"))
+        written = list(audit.glob("*readiness-verdict.md"))
+        assert written, "a blocked verdict must leave a record"
+        assert "because" in written[0].read_text(encoding="utf-8")
