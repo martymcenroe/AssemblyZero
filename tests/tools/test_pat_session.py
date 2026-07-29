@@ -163,14 +163,14 @@ class TestDecryptAnnouncement:
         _pat_session._announce_decrypt(
             _pat_session.SECRET_CLASSIC_PAT,
             Path("/x/classic-pat.gpg"),
-            "land Seshat CI workflow",
+            "land the CI workflow",
             1,
             5,
         )
         err = capsys.readouterr().err
         assert _pat_session.SECRET_CLASSIC_PAT in err
         assert "classic-pat.gpg" in err
-        assert "land Seshat CI workflow" in err
+        assert "land the CI workflow" in err
         assert "1 of 5" in err
 
     def test_announce_omits_reason_line_when_unstated(self, capsys):
