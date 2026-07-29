@@ -43,6 +43,11 @@ CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
 ROTATION_STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
 GEMINI_API_LOG_FILE = Path.home() / ".assemblyzero" / "gemini-api.jsonl"
 
+# Issue #1883: cross-provider capacity state. Gemini's exhaustion already
+# lives in ROTATION_STATE_FILE; Claude's was detected and then forgotten, so
+# a run could start with Claude dry and burn Gemini quota finding out.
+CAPACITY_STATE_FILE = Path.home() / ".assemblyzero" / "provider-capacity.json"
+
 # =============================================================================
 # Retry Configuration
 # =============================================================================
