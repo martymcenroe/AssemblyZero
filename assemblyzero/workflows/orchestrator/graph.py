@@ -44,6 +44,7 @@ from assemblyzero.workflows.orchestrator.state import (
     update_stage_result,
 )
 from assemblyzero.core.halt_node import create_halt_node
+from assemblyzero.core.stage_watchdog import StageWatchdog
 
 
 class OrchestrationResult(TypedDict):
@@ -101,8 +102,11 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
         last_state = dict(last_state)
         last_state["stage_started_at"] = datetime.now(tz=timezone.utc).isoformat()
 
-        # Run stage
-        new_state = runner(OrchestrationState(**last_state))
+        # Run stage. #1886: a stall must be visible while it is stalling —
+        # the 17.5-minute hang of 2026-07-28 looked identical to normal
+        # progress in the log until a human compared it against nominal.
+        with StageWatchdog(current_stage):
+            new_state = runner(OrchestrationState(**last_state))
 
         # Persist state after each attempt
         save_orchestration_state(new_state)

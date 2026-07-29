@@ -733,6 +733,41 @@ class GeminiClient:
 
                 except Exception as e:
                     error_str = str(e)
+
+                    # #1875: a TypeError/AttributeError/NameError/ImportError
+                    # is a defect in this code, not a condition the provider
+                    # can recover from. Retrying one burns the call budget and
+                    # then reports "All credentials failed" for what is a bug —
+                    # observed as 9 attempts and 84 seconds of backoff for a
+                    # single bad call signature. Fail immediately, name it.
+                    if isinstance(
+                        e, (TypeError, AttributeError, NameError, ImportError)
+                    ):
+                        msg = f"{type(e).__name__}: {error_str}"
+                        print(
+                            f"    [LLM] provider=gemini: programming error, "
+                            f"not retryable — {msg[:160]}"
+                        )
+                        log_gemini_event(
+                            event_type="api_error",
+                            credential_name=cred.name,
+                            model=self.model,
+                            error_message=msg[:200],
+                            details={"programming_error": True, "retryable": False},
+                        )
+                        return GeminiCallResult(
+                            success=False,
+                            response=None,
+                            raw_response=None,
+                            error_type=GeminiErrorType.UNKNOWN,
+                            error_message=f"Programming error (not retried): {msg}",
+                            credential_used=cred.name,
+                            rotation_occurred=rotation_occurred,
+                            attempts=total_attempts,
+                            duration_ms=int((time.time() - start_time) * 1000),
+                            model_verified="",
+                        )
+
                     # Issue #546: Classify through the typed error hierarchy
                     classified = classify_gemini_error(e)
                     status_code = classified.status_code
