@@ -88,7 +88,9 @@ def _announce_decrypt(
         secret_name: One of the SECRET_* display constants above.
         path: The encrypted file about to be decrypted.
         reason: Caller's description of what the elevated scope is for on
-            this run, e.g. "land Seshat CI workflow". None if unstated.
+            this run, e.g. "land the CI workflow in <owner>/<repo>". Build it
+            from run-time arguments -- this repo is public, so a hardcoded
+            target name can be a membrane leak. None if unstated.
         attempt: 1-based attempt counter.
         max_attempts: Total attempts before giving up.
     """
@@ -119,9 +121,11 @@ def classic_pat_session(
     Args:
         pat_path: Path to the gpg-encrypted PAT file.
         reason: What the elevated scope is for on this run, e.g.
-            "land Seshat CI workflow". Printed on the pre-prompt banner so
-            the operator can tell which of several passphrases pinentry is
-            asking for (#1853).
+            "land the CI workflow in <owner>/<repo>". Printed on the
+            pre-prompt banner so the operator can tell which of several
+            passphrases pinentry is asking for (#1853). Callers should build
+            this from run-time arguments rather than hardcoding a target
+            repository name -- this repo is public, and some targets are not.
 
     Yields:
         The decrypted PAT as a string. Lives only in this generator's scope.

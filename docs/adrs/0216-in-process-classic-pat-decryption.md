@@ -43,8 +43,10 @@ Concretely, the rule:
 - **Every decrypt announces its purpose on the console before pinentry appears** (#1853). The operator holds several distinct passphrases, and gpg's pinentry dialog names neither the secret nor the operation — so an unannounced prompt is ambiguous, and a wrong guess burns a retry. `_announce_decrypt()` prints the secret's human name, its path, the caller's stated reason, and the attempt counter to stderr immediately before each `gpg` invocation. Callers SHOULD pass `reason=` describing what the elevated scope is for on that run:
 
   ```python
-  with classic_pat_session(reason="land Seshat CI workflow") as pat:
+  with classic_pat_session(reason=f"land {workflow} in {owner}/{repo}") as pat:
   ```
+
+  Build the reason from run-time arguments rather than hardcoding a target repository name. This repo is public and some targets are private, so a hardcoded name in a tool, docstring, or commit message is a membrane leak (universal CLAUDE.md, "Private-Repo Names Stay Off Public Surfaces"). `tools/land_staged_workflow.py` is the reference: every target detail arrives via argv.
 
   The console is the load-bearing surface here, not the dialog: gpg symmetric decryption offers no dependable lever on pinentry's own text. The banner carries the secret's NAME only and must never carry secret material — `tests/tools/test_pat_session.py` asserts this.
 - The decrypted PAT is yielded as a local variable inside a context-manager scope (`with ... as pat:`).
