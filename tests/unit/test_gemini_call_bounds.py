@@ -229,3 +229,54 @@ class TestSpawnIsBounded:
         assert gc._is_spawn_failure(
             "agy spawn timed out (30s) — machine-pressure hang; treated like a spawn failure"
         ) is True
+
+
+class TestReadIsBounded:
+    """#1910: the drain must not depend on the child ever producing output."""
+
+    def test_silent_child_is_killed_at_the_bound(self):
+        import threading
+
+        release = threading.Event()
+        proc = MagicMock()
+        proc.pid = 777
+        proc.read.side_effect = lambda n: release.wait(10) or ""
+        proc.isalive.return_value = True
+
+        with patch.object(gc, "kill_process_tree") as killer:
+            ok, payload, status = gc._read_pty_bounded(proc, timeout_seconds=0.3)
+
+        release.set()
+        assert ok is False
+        assert "timeout" in payload.lower()
+        assert status is None
+        killer.assert_called_once_with(777)
+
+    def test_completing_child_returns_its_output(self):
+        proc = MagicMock()
+        proc.pid = 778
+        proc.read.side_effect = ["hello ", "world", EOFError()]
+        proc.exitstatus = 0
+
+        ok, payload, status = gc._read_pty_bounded(proc, timeout_seconds=5)
+
+        assert ok is True
+        assert payload == "hello world"
+        assert status == 0
+
+    def test_dead_child_with_no_output_completes(self):
+        proc = MagicMock()
+        proc.pid = 779
+        proc.read.return_value = ""
+        proc.isalive.return_value = False
+        proc.exitstatus = 3221225794
+
+        ok, payload, status = gc._read_pty_bounded(proc, timeout_seconds=5)
+
+        assert ok is True
+        assert payload == ""
+        assert status == 3221225794
+
+    def test_timeout_message_is_a_recognized_timeout(self):
+        """The failure routes like other timeouts, not like a verdict."""
+        assert "timeout" in "agy CLI timeout (300s, silent child killed)"
