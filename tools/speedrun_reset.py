@@ -6,7 +6,8 @@ Performs the cleanup needed between attempts:
   1. Closes any open PR for the issue (without merging).
   2. Removes the worktrees at `{repo}-{issue}` and `{repo}-{issue}-lld`
      if they exist (#1848).
-  3. Deletes the local feature branch (safe-delete).
+  3. Deletes the local feature branch (safe-delete) and the same branches
+     on origin (#1885) — the attempt branch is never a candidate.
   4. Deletes `docs/lineage/active/{issue}-*/` directories.
   5. Relocates untracked LLD/spec artifacts out of the target repo's
      docs/lld tree into `data/speedrun/reset-artifacts/` (#1849) — left
@@ -234,6 +235,59 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
     return deleted
 
 
+def delete_remote_branches(repo_root: Path, issue: int) -> int:
+    """Delete the pipeline's pushed branches on origin. Returns count deleted.
+
+    The local sweep alone left `issue-{N}` and `{N}-lld` on origin after every
+    roll of the 2026-07-28 campaign, so the wipe was one forgotten command away
+    from leaving debris that collides with the next roll's push (#1885).
+
+    Deletes each ref independently: a single `git push --delete a b` aborts the
+    whole push when either ref is already gone, which is the common case on a
+    partially-cleaned repo. The attempt branch is never a candidate — the same
+    exclusion the local sweep honours (#1762).
+    """
+    candidates = [f"issue-{issue}"]
+    result = _run(["git", "branch", "--list", f"{issue}-*"], cwd=repo_root)
+    if result.returncode == 0:
+        candidates.extend(
+            line.strip().lstrip("* ").strip()
+            for line in result.stdout.splitlines()
+            if line.strip()
+        )
+    # Whatever the local sweep already deleted still needs removing on origin,
+    # so ask origin what it actually has rather than trusting local state.
+    ls_remote = _run(["git", "ls-remote", "--heads", "origin"], cwd=repo_root)
+    if ls_remote.returncode != 0:
+        print("  WARNING: could not list remote branches; skipping remote sweep")
+        return 0
+    remote_names = {
+        line.split("refs/heads/", 1)[1].strip()
+        for line in ls_remote.stdout.splitlines()
+        if "refs/heads/" in line
+    }
+    for suffix in (f"{issue}-lld",):
+        candidates.append(suffix)
+
+    active = current_branch(repo_root)
+    deleted = 0
+    for branch in dict.fromkeys(candidates):  # de-dupe, keep order
+        if not branch or branch == active or branch not in remote_names:
+            continue
+        r = _run(
+            ["git", "push", "origin", "--delete", branch], cwd=repo_root
+        )
+        if r.returncode == 0:
+            print(f"  Deleted remote branch: {branch}")
+            deleted += 1
+        else:
+            print(
+                f"  WARNING: could not delete remote branch {branch}: "
+                f"{(r.stderr or '').strip()[:120]}"
+            )
+    return deleted
+
+
 def delete_lineage_dirs(repo_root: Path, issue: int) -> int:
     """Delete docs/lineage/active/{issue}-* directories. Returns count deleted."""
     lineage_active = repo_root / "docs" / "lineage" / "active"
@@ -351,6 +405,7 @@ def reset_one_issue(repo_root: Path, repo: str, issue: int) -> None:
     close_open_prs(repo, issue)
     remove_worktree(repo_root, issue)
     delete_local_branches(repo_root, issue)
+    delete_remote_branches(repo_root, issue)
     delete_lineage_dirs(repo_root, issue)
     relocate_lld_artifacts(repo_root, issue)
     reopen_issue(repo, issue)
