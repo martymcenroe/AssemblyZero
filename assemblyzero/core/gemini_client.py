@@ -310,12 +310,79 @@ def _append_json_schema_directive(system_instruction: str, schema: dict) -> str:
     )
 
 
+# #1906: spawn nominal is sub-second; a spawn still pending after this long
+# is the hang-shaped sibling of the #1872 instant spawn failures.
+SPAWN_TIMEOUT_SECONDS = 30.0
+
+
+def _spawn_pty_bounded(argv, cwd, dimensions, timeout_seconds=SPAWN_TIMEOUT_SECONDS):
+    """PtyProcess.spawn with a wall-clock bound (#1906).
+
+    The #1874 budget bounds the PTY READ loop, whose deadline is set after
+    spawn returns — so a spawn that hangs under machine pressure sits before
+    any deadline exists and escapes the budget entirely (observed live:
+    13:45:22 entry, killed by hand at 13:58). Spawn runs in a worker thread;
+    on expiry the caller gets the standard failure path and the abandoned
+    thread terminates its own late-arriving process so nothing leaks.
+
+    Returns:
+        The spawned PtyProcess.
+
+    Raises:
+        TimeoutError: spawn did not complete within the bound.
+        Exception: whatever spawn itself raised, re-raised in the caller.
+    """
+    import threading
+
+    from winpty import PtyProcess
+
+    holder: dict = {}
+    lock = threading.Lock()
+
+    def _target() -> None:
+        try:
+            proc = PtyProcess.spawn(argv, cwd=cwd, dimensions=dimensions)
+        except Exception as exc:  # noqa: BLE001 — re-raised by the caller
+            with lock:
+                holder["error"] = exc
+            return
+        with lock:
+            if holder.get("abandoned"):
+                # The caller gave up; a process arriving now would be an
+                # orphan burning quota with nobody reading its output.
+                try:
+                    proc.terminate(force=True)
+                except Exception:  # noqa: BLE001
+                    pass
+                return
+            holder["proc"] = proc
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_seconds)
+
+    with lock:
+        if "proc" in holder:
+            return holder["proc"]
+        if "error" in holder:
+            raise holder["error"]
+        holder["abandoned"] = True
+    raise TimeoutError(
+        f"agy spawn timed out ({timeout_seconds:.0f}s) — machine-pressure "
+        f"hang; treated like a spawn failure"
+    )
+
+
 def _is_spawn_failure(error_text: str) -> bool:
     """True when an error string carries a Windows process-creation code.
 
     Issue #1872: these mean the child never started. That is transient
     machine pressure and deserves a backoff, not a credential write-off.
+    Issue #1906: a hung spawn (timed out) is the same condition in slow
+    motion and takes the same retry path.
     """
+    if "spawn timed out" in error_text:
+        return True
     return any(str(code) in error_text for code in SPAWN_FAILURE_EXIT_CODES)
 
 
@@ -433,7 +500,7 @@ class GeminiClient:
             return self._invoke_via_stdin(full_prompt, timeout_seconds)
 
         try:
-            from winpty import PtyProcess
+            import winpty  # noqa: F401 — availability probe only
         except ImportError as e:
             return False, "", f"pywinpty unavailable for agy invocation: {e}"
 
@@ -444,7 +511,14 @@ class GeminiClient:
         exit_status = None
         try:
             with tempfile.TemporaryDirectory() as tmp_cwd:
-                proc = PtyProcess.spawn(argv, cwd=tmp_cwd, dimensions=(60, 1000))
+                # #1906: spawn itself must be bounded — the read deadline
+                # below does not exist yet while spawn hangs.
+                try:
+                    proc = _spawn_pty_bounded(
+                        argv, cwd=tmp_cwd, dimensions=(60, 1000)
+                    )
+                except TimeoutError as e:
+                    return False, "", str(e)
                 deadline = time.time() + timeout_seconds
                 timed_out = True
                 while time.time() < deadline:

@@ -136,3 +136,96 @@ class TestStdinTransportTimeout:
         assert "3221225794" in err
         # and that message is what #1872's detector keys on
         assert gc._is_spawn_failure(err) is True
+
+
+class TestSpawnIsBounded:
+    """#1906: a hung spawn escaped the #1874 budget — the read deadline does
+    not exist while spawn hangs. Observed live: 13:45:22 entry, hand-killed
+    at 13:58."""
+
+    def test_hung_spawn_raises_timeout(self):
+        import threading
+
+        release = threading.Event()
+
+        class HangingPty:
+            @staticmethod
+            def spawn(argv, cwd=None, dimensions=None):
+                release.wait(5)  # far past the test's bound
+                raise AssertionError("spawn should have been abandoned")
+
+        import sys
+
+        with patch.dict(sys.modules, {"winpty": MagicMock(PtyProcess=HangingPty)}):
+            try:
+                gc._spawn_pty_bounded(["agy"], cwd=".", dimensions=(60, 100),
+                                      timeout_seconds=0.2)
+            except TimeoutError as e:
+                assert "spawn timed out" in str(e)
+            else:  # pragma: no cover
+                raise AssertionError("expected TimeoutError")
+        release.set()
+
+    def test_fast_spawn_returns_the_process(self):
+        import sys
+
+        proc = MagicMock()
+
+        class FastPty:
+            @staticmethod
+            def spawn(argv, cwd=None, dimensions=None):
+                return proc
+
+        with patch.dict(sys.modules, {"winpty": MagicMock(PtyProcess=FastPty)}):
+            got = gc._spawn_pty_bounded(["agy"], cwd=".", dimensions=(60, 100),
+                                        timeout_seconds=5)
+        assert got is proc
+
+    def test_spawn_error_is_reraised(self):
+        import sys
+
+        class BrokenPty:
+            @staticmethod
+            def spawn(argv, cwd=None, dimensions=None):
+                raise OSError("conpty allocation failed")
+
+        with patch.dict(sys.modules, {"winpty": MagicMock(PtyProcess=BrokenPty)}):
+            try:
+                gc._spawn_pty_bounded(["agy"], cwd=".", dimensions=(60, 100),
+                                      timeout_seconds=5)
+            except OSError as e:
+                assert "conpty" in str(e)
+            else:  # pragma: no cover
+                raise AssertionError("expected OSError")
+
+    def test_late_spawn_is_terminated_not_leaked(self):
+        import sys
+        import threading
+
+        gate = threading.Event()
+        proc = MagicMock()
+
+        class SlowPty:
+            @staticmethod
+            def spawn(argv, cwd=None, dimensions=None):
+                gate.wait(5)
+                return proc
+
+        with patch.dict(sys.modules, {"winpty": MagicMock(PtyProcess=SlowPty)}):
+            try:
+                gc._spawn_pty_bounded(["agy"], cwd=".", dimensions=(60, 100),
+                                      timeout_seconds=0.2)
+            except TimeoutError:
+                pass
+            gate.set()  # let the abandoned thread finish spawning
+            import time as _time
+
+            deadline = _time.time() + 3
+            while _time.time() < deadline and not proc.terminate.called:
+                _time.sleep(0.05)
+        proc.terminate.assert_called_once_with(force=True)
+
+    def test_spawn_timeout_message_takes_the_retry_path(self):
+        assert gc._is_spawn_failure(
+            "agy spawn timed out (30s) — machine-pressure hang; treated like a spawn failure"
+        ) is True
