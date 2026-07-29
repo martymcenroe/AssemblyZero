@@ -597,6 +597,16 @@ class ClaudeCLIProvider(LLMProvider):
                     # Check for non-retryable errors (like usage limits)
                     retryable = not is_non_retryable_error(error_msg)
 
+                    # #1883: remember the exhaustion instead of discarding it.
+                    # The claude CLI has no usage subcommand, so a failure is
+                    # the only signal there is — dropping it meant the next
+                    # run started blind and burned Gemini quota finding out.
+                    if _is_capacity_message(error_msg):
+                        from assemblyzero.core.capacity import record_exhaustion
+
+                        recorded = record_exhaustion("claude", error_msg)
+                        print(f"    [CAPACITY] {recorded.wait_summary()}")
+
                     call_result = LLMCallResult(
                         success=False,
                         response=None,
@@ -682,6 +692,13 @@ class ClaudeCLIProvider(LLMProvider):
 
                 # Issue #527: Strip emojis from response (preserve raw_response)
                 response_text = strip_emoji(response_text)
+
+                # #1883: a provider that just answered is not exhausted. This
+                # is what makes the gate self-healing when a reset time was
+                # unparseable or the window ended early.
+                from assemblyzero.core.capacity import clear_exhaustion
+
+                clear_exhaustion("claude")
 
                 call_result = LLMCallResult(
                     success=True,
@@ -977,6 +994,22 @@ class AnthropicProvider(LLMProvider):
             )
             log_llm_call(call_result)
             return call_result
+
+
+def _is_capacity_message(error_msg: str | None) -> bool:
+    """True when an error says the subscription is out of capacity (#1883).
+
+    Narrower than is_non_retryable_error, which also covers billing and auth
+    failures — recording those as "exhausted until" would block runs for a
+    condition that no amount of waiting fixes.
+    """
+    if not error_msg:
+        return False
+    lower = error_msg.lower()
+    return any(
+        pattern in lower
+        for pattern in ("usage limit", "usage has been exhausted", "wait until")
+    )
 
 
 def is_non_retryable_error(error_msg: str | None) -> bool:

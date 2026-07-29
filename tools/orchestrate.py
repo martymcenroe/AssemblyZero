@@ -121,6 +121,14 @@ Examples:
     parser.add_argument("--gate-pr", action="store_true", default=None, help="Enable human gate before PR")
     parser.add_argument("--no-gate-pr", action="store_true", help="Disable human gate before PR")
     parser.add_argument(
+        "--ignore-capacity",
+        action="store_true",
+        help=(
+            "Start even when a provider is recorded as exhausted (#1883). "
+            "The record may be stale if the quota window ended early."
+        ),
+    )
+    parser.add_argument(
         "--base-branch",
         type=str,
         default=None,
@@ -159,6 +167,31 @@ Examples:
 
     print(f"[ORCHESTRATOR] Starting pipeline for issue #{args.issue}")
     print(f"[ORCHESTRATOR] Target repo: {target_repo}")
+
+    # #1883: a run needs BOTH providers — Gemini designs and reviews, Claude
+    # implements. Starting one while either is exhausted spends the healthy
+    # provider's quota just to discover the dry one, and on a recorded take
+    # that is a dead run. Read-only, zero API calls.
+    if not args.dry_run and not args.ignore_capacity:
+        from assemblyzero.core.capacity import blocked_providers
+
+        blocked = blocked_providers()
+        if blocked:
+            print("\n" + "=" * 58)
+            # ASCII only: the Windows console renders an em-dash as a
+            # replacement char, and this banner is read under pressure.
+            print("  RUN NOT STARTED - provider capacity exhausted")
+            print("=" * 58)
+            for status in blocked:
+                print(f"  {status.wait_summary()}")
+                if status.detail:
+                    print(f"    detail: {status.detail[:160]}")
+            print(
+                "\n  Nothing was spent. Re-run after the reset above, or pass\n"
+                "  --ignore-capacity to start anyway."
+            )
+            print("=" * 58 + "\n")
+            sys.exit(2)
     if args.dry_run:
         print("[ORCHESTRATOR] DRY RUN -- no stages will execute")
     if args.resume_from:
