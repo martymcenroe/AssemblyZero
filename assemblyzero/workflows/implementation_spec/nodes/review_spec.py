@@ -311,11 +311,18 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         for item in spec_result["feedback_items"]:
             verdict_content += f"- {item}\n"
 
-    if audit_dir and audit_dir.exists():
-        file_num = next_file_number(audit_dir)
-        verdict_path = save_audit_file(
-            audit_dir, file_num, "readiness-verdict.md", verdict_content
-        )
+    # #1889: create the audit dir if it is absent rather than silently
+    # dropping the verdict. A run that blocked and left no record of why is
+    # the failure this whole gate exists to prevent.
+    if audit_dir:
+        try:
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            file_num = next_file_number(audit_dir)
+            verdict_path = save_audit_file(
+                audit_dir, file_num, "readiness-verdict.md", verdict_content
+            )
+        except OSError as exc:
+            print(f"    WARNING: could not persist verdict: {exc}")
 
     # -------------------------------------------------------------------------
     # Report results
@@ -325,8 +332,10 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     if verdict_path:
         print(f"    Saved: {verdict_path.name}")
 
-    if verdict_status == "REVISE" and feedback:
-        # Show a preview of feedback
+    # #1889: BLOCKED is the more severe outcome and used to print nothing but
+    # a line count, so the reviewer's finding — the whole point of the gate —
+    # was invisible in the run record.
+    if verdict_status in ("REVISE", "BLOCKED") and feedback:
         feedback_preview = feedback[:200].replace("\n", " ")
         if len(feedback) > 200:
             feedback_preview += "..."
@@ -343,10 +352,20 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         0,
     )
 
+    # #1889: a BLOCKED verdict routes to HALT either way, but the halt used
+    # to report nothing because error_message stayed empty — the rationale
+    # and feedback sat unused in state while the operator saw a blank. Carry
+    # the reason so the stage that stopped says why it stopped.
+    blocked_reason = ""
+    if verdict_status == "BLOCKED":
+        blocked_reason = (
+            f"Spec review BLOCKED: {feedback or spec_result['rationale'] or 'no reason given'}"
+        )
+
     return {
         "review_verdict": verdict_status,
         "review_feedback": feedback,
-        "error_message": "",
+        "error_message": blocked_reason,
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
     }
