@@ -83,8 +83,8 @@ You ARE reviewing:
 - Internal consistency of the tests: does every assertion in the spec's test \
 code follow from behaviour the spec itself specifies?
 
-ASSERTION TRACEABILITY (Issue #1866) — check this explicitly and BLOCK on any \
-violation. Three real specs shipped an unwinnable test this way:
+ASSERTION TRACEABILITY (Issue #1866) — check this explicitly on every review. \
+Three real specs shipped an unwinnable test this way:
 
 1. An assertion that contradicts the spec's own behaviour text. One spec said \
 peaks never decay below the latest value, then asserted a decayed peak BELOW \
@@ -98,7 +98,17 @@ flavour does not change with sys.platform, so on Windows it can never pass.
 
 For each assertion in the spec's test code, name the requirement or behaviour \
 section it traces to. If you cannot, that assertion is the finding — quote it \
-and say which behaviour it contradicts or invents."""
+and say which behaviour it contradicts or invents.
+
+SEVERITY MUST MATCH RECOVERABILITY (Issue #1892). Report a traceability \
+violation as REVISE whenever a regenerated spec could fix it — a wrong \
+assertion, a reference implementation that disagrees with the spec's own \
+requirements, a test whose inputs cannot distinguish correct from incorrect \
+behaviour. That is the overwhelmingly common case, and REVISE returns your \
+feedback to the drafter so the spec gets fixed. Reserve BLOCKED for a \
+contradiction in the LLD itself that no spec could satisfy, because BLOCKED \
+stops the run outright and needs a human. State the finding just as forcefully \
+either way; only the verdict changes."""
 
 
 # =============================================================================

@@ -31,8 +31,15 @@ class TestReviewerChecksAssertionTraceability:
         # cannot hold on the platform the tests run on
         assert "sys.platform" in text
 
-    def test_prompt_requires_blocking_not_merely_noting(self):
-        assert "BLOCK" in REVIEWER_SYSTEM_PROMPT
+    def test_prompt_ties_severity_to_recoverability(self):
+        """#1892: a fixable violation must come back as REVISE so the revise
+        loop can heal it; BLOCKED halts the run and needs a human."""
+        assert "SEVERITY MUST MATCH RECOVERABILITY" in REVIEWER_SYSTEM_PROMPT
+        assert "REVISE whenever a regenerated spec could fix it" in REVIEWER_SYSTEM_PROMPT
+        assert "Reserve BLOCKED" in REVIEWER_SYSTEM_PROMPT
+
+    def test_prompt_still_demands_the_finding_be_stated(self):
+        assert "that assertion is the finding" in REVIEWER_SYSTEM_PROMPT
 
     def test_prompt_keeps_its_original_review_dimensions(self):
         for dimension in ("Completeness", "Concreteness", "Specificity", "Feasibility"):
