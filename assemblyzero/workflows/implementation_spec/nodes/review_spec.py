@@ -108,7 +108,17 @@ behaviour. That is the overwhelmingly common case, and REVISE returns your \
 feedback to the drafter so the spec gets fixed. Reserve BLOCKED for a \
 contradiction in the LLD itself that no spec could satisfy, because BLOCKED \
 stops the run outright and needs a human. State the finding just as forcefully \
-either way; only the verdict changes."""
+either way; only the verdict changes.
+
+SELF-REFERENTIAL VISUAL BASELINES (Issue #1902). If the spec creates or \
+regenerates visual-regression baseline images and its tests compare renders \
+only against those baselines, that is a REVISE finding: baselines produced by \
+the run under test validate their own systematic defects (an inverted needle \
+renders an inverted baseline and passes forever). Require property assertions \
+computable WITHOUT any baseline — geometry, pixel-position, or invariant \
+checks at discriminating values — in a section explicitly marked \
+"baseline-independent", or an independent reference source named for the \
+baselines."""
 
 
 # =============================================================================
