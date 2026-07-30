@@ -844,6 +844,104 @@ class TestRunLog:
         tee.flush()
 
 
+# ---- #1961: the log must be readable WHILE the run is in progress ----
+
+class TestRunLogVisibleDuringRun:
+    """A 0-byte log makes a slow harvest indistinguishable from a hung one.
+
+    The 2026-07-30 06:00 harvest sat at 0 bytes for 78 minutes while doing
+    real work, then completed normally with exit 0. The unreadable log is
+    what produced a false "permanent deadlock" diagnosis. These tests
+    deliberately never call flush() -- an explicit flush is exactly the
+    crutch that hid the bug.
+    """
+
+    def test_line_reaches_disk_without_an_explicit_flush(self, tmp_path):
+        import sys as _sys
+        orig_out, orig_err = _sys.stdout, _sys.stderr
+        try:
+            log_path = dependabot_review.setup_run_log(tmp_path / "runs")
+            assert log_path is not None
+            print("progress: PR #1 gate passed")
+            # NO flush() here on purpose -- that is the whole point.
+            content = log_path.read_text(encoding="utf-8")
+        finally:
+            _sys.stdout, _sys.stderr = orig_out, orig_err
+        assert "progress: PR #1 gate passed" in content, (
+            "run log was not readable mid-run; a slow run is again "
+            "indistinguishable from a hung one (#1961)"
+        )
+
+    def test_stderr_also_reaches_disk_without_an_explicit_flush(self, tmp_path):
+        import sys as _sys
+        orig_out, orig_err = _sys.stdout, _sys.stderr
+        try:
+            log_path = dependabot_review.setup_run_log(tmp_path / "runs")
+            assert log_path is not None
+            print("WARNING: rebase requested", file=_sys.stderr)
+            content = log_path.read_text(encoding="utf-8")
+        finally:
+            _sys.stdout, _sys.stderr = orig_out, orig_err
+        assert "WARNING: rebase requested" in content
+
+    def test_flushes_the_wrapped_stream_too_not_just_the_logfile(self):
+        """The redirected wrapper log was the second stale sink.
+
+        Line-buffering the log file alone would not have fixed it; the
+        flush has to reach the stream _Tee wraps.
+        """
+        import io
+
+        class _CountingStream(io.StringIO):
+            flushes = 0
+
+            def flush(self):
+                type(self).flushes += 1
+                super().flush()
+
+        stream = _CountingStream()
+        tee = dependabot_review._Tee(stream, io.StringIO())
+        tee.write("a complete line\n")
+        assert _CountingStream.flushes >= 1, (
+            "wrapped stream was never flushed; a redirected stdout stays "
+            "block-buffered and the wrapper log stays stale (#1961)"
+        )
+
+    def test_partial_line_does_not_flush(self):
+        """Flush is gated on a newline so partial writes cost nothing."""
+        import io
+
+        class _CountingStream(io.StringIO):
+            flushes = 0
+
+            def flush(self):
+                type(self).flushes += 1
+                super().flush()
+
+        stream = _CountingStream()
+        tee = dependabot_review._Tee(stream, io.StringIO())
+        tee.write("no terminator yet")
+        assert _CountingStream.flushes == 0
+
+    def test_write_still_returns_chars_written(self):
+        import io
+        tee = dependabot_review._Tee(io.StringIO(), io.StringIO())
+        assert tee.write("five\n") == len("five\n")
+
+    def test_tee_survives_unflushable_stream(self):
+        """Flush now runs on the write path -- it must not break output."""
+        import io
+
+        class _UnflushableStream(io.StringIO):
+            def flush(self):
+                raise OSError("stream cannot be flushed")
+
+        log = io.StringIO()
+        tee = dependabot_review._Tee(_UnflushableStream(), log)
+        tee.write("drain continues\n")  # must not raise
+        assert "drain continues" in log.getvalue()
+
+
 # ---- #1339: --limit N calibrated harvest ----
 
 class TestPRBudget:
