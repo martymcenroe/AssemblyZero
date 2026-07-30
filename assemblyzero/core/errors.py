@@ -201,6 +201,15 @@ def classify_anthropic_error(exc: Exception) -> APIError:
     if isinstance(exc, anthropic.APITimeoutError):
         return TimeoutError_(msg, provider="anthropic")
 
+    if isinstance(exc, anthropic.APIConnectionError):
+        # #1917: the 2026-07-29 outage surfaced at the SDK edge as plain
+        # connection failures, which the unknown-error fallback below
+        # marked non-retryable and killed on the spot. Provider-unreachable
+        # is retryable weather (server storm or local blip), never a
+        # caller bug. Must stay AFTER the APITimeoutError branch —
+        # APITimeoutError subclasses APIConnectionError.
+        return APIError(msg, retryable=True, provider="anthropic")
+
     if isinstance(exc, anthropic.InternalServerError):
         status = getattr(exc, "status_code", 500)
         if status in (503, 529):
