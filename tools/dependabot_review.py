@@ -112,7 +112,7 @@ class _Tee:
         except (OSError, ValueError):
             pass  # log file gone/closed — terminal keeps working
         try:
-            return self._stream.write(text)
+            written = self._stream.write(text)
         except UnicodeEncodeError:
             # #1876: the terminal's encoding cannot represent this text
             # (cp1252 console + vitest/jest box-drawing or check marks).
@@ -121,16 +121,43 @@ class _Tee:
             # the faithful text. Belt-and-suspenders behind
             # _force_utf8_streams(), which normally prevents this.
             enc = getattr(self._stream, "encoding", None) or "ascii"
-            return self._stream.write(
+            written = self._stream.write(
                 text.encode(enc, "replace").decode(enc, "replace")
             )
+        # #1961: flush once a line is complete, so the log is readable
+        # WHILE the run is in progress. Both sinks were block-buffered:
+        # the 2026-07-30 06:00 harvest sat at 0 bytes for 78 minutes
+        # while doing real work, and the redirected wrapper log likewise
+        # never grew. With no observable progress a slow run and a dead
+        # run are indistinguishable from outside, and that ambiguity
+        # produced a false "permanent deadlock" diagnosis for a run that
+        # in fact completed normally with exit 0.
+        #
+        # Flushing HERE rather than only line-buffering the log file is
+        # what covers the second sink: self.flush() also flushes the
+        # wrapped stream, which is block-buffered whenever stdout is
+        # redirected to a file (every scheduled run).
+        #
+        # Gated on a newline so partial-line writes (print emits text and
+        # its terminator separately) don't each pay a syscall; a drain's
+        # output is line-oriented, so per-line cost is negligible.
+        if "\n" in text:
+            self.flush()
+        return written
 
     def flush(self) -> None:
         try:
             self._logfile.flush()
         except (OSError, ValueError):
             pass
-        self._stream.flush()
+        try:
+            self._stream.flush()
+        except (OSError, ValueError):
+            # #1961: flush now runs on the write path, so a stream that
+            # fails to flush would break output that previously worked.
+            # Same contract as the log file above: logging never breaks
+            # the drain.
+            pass
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
@@ -169,12 +196,17 @@ def setup_run_log(log_dir: Path = RUN_LOG_DIR):
 
     Returns the log path, or None when the log could not be created (the
     run proceeds terminal-only — a warning says so).
+
+    #1961: the handle is line-buffered so the file is readable during the
+    run even if the `_Tee.write` flush is ever lost to a later edit. The
+    flush in `_Tee.write` is the load-bearing half (it reaches the
+    redirected stdout too); this is the cheap second layer.
     """
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
         log_path = log_dir / f"{stamp}.log"
-        logfile = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 — lives for the process
+        logfile = open(log_path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115 — lives for the process
     except OSError as e:
         print(f"WARNING: run log unavailable ({e}); continuing terminal-only",
               file=sys.stderr)
