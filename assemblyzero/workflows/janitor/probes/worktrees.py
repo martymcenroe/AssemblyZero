@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from assemblyzero.utils.git import parse_branch_names
 from assemblyzero.utils.shell import run_command
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from assemblyzero.workflows.janitor.state import Finding, ProbeResult
 

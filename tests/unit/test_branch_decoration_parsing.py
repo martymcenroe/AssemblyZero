@@ -16,7 +16,6 @@ it is observable, that the pre-fix `lstrip('* ')` would have failed it.
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 from assemblyzero.utils.git import parse_branch_names
 from assemblyzero.workflows.janitor.probes.worktrees import is_branch_merged
