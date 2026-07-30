@@ -159,6 +159,14 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_symbols)
     _log_check(check_symbols)
 
+    # Check 8: Visual baselines the run itself makes need a baseline-free
+    # oracle (Issue #1902)
+    check_baselines = check_visual_baselines_not_self_referential(
+        spec_draft, files_to_modify
+    )
+    checks.append(check_baselines)
+    _log_check(check_baselines)
+
     # Telemetry (#1812): record detector outcomes for the spec draft (every
     # pass) and the LLD (first pass only). Record-only — the try/except
     # guarantees telemetry can never alter validation_passed.
@@ -867,6 +875,81 @@ def check_import_targets_exist(
         check_name="import_targets_exist",
         passed=True,
         details=f"All {len(checked)} import targets validated.{env_note}",
+    )
+
+
+# Literal marker a spec must carry when it touches visual baselines (#1902).
+# The drafter prompt teaches it; this check enforces it mechanically.
+_BASELINE_INDEPENDENT_MARKER = "baseline-independent"
+
+_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
+
+
+def check_visual_baselines_not_self_referential(
+    spec: str,
+    files: list[FileToModify],
+) -> CompletenessCheck:
+    """Baselines made by the run under test must not be the only oracle.
+
+    Issue #1902: the pipeline generated tests/visual/baselines/*.png in
+    the same run that generated the renderer, then compared the renderer
+    against them — a systematically wrong first render (inverted needle,
+    mirrored dial) becomes its own reference and passes forever. Any spec
+    that adds or regenerates baseline images must declare property
+    assertions computable WITHOUT a baseline, in a section carrying the
+    literal marker "baseline-independent". The revise loop can heal this
+    (#1892), so it fails the completeness gate rather than halting.
+    """
+    baseline_touches: list[str] = []
+    for f in files:
+        change_type = f.get("change_type", "").lower()
+        if change_type not in ("add", "modify"):
+            continue
+        raw_path = f.get("path", "")
+        if not raw_path:
+            continue
+        path = raw_path.lower().replace("\\", "/")
+        in_baseline_dir = "/baselines/" in f"/{path}"
+        is_test_image = path.endswith(_IMAGE_SUFFIXES) and "/tests/" in f"/{path}"
+        if in_baseline_dir or is_test_image:
+            baseline_touches.append(raw_path)
+
+    if not baseline_touches:
+        return CompletenessCheck(
+            check_name="visual_baselines_not_self_referential",
+            passed=True,
+            details="Spec touches no visual baseline images.",
+        )
+
+    if _BASELINE_INDEPENDENT_MARKER in spec.lower():
+        return CompletenessCheck(
+            check_name="visual_baselines_not_self_referential",
+            passed=True,
+            details=(
+                f"{len(baseline_touches)} baseline image(s) touched with a "
+                f"declared {_BASELINE_INDEPENDENT_MARKER} section."
+            ),
+        )
+
+    path_list = ", ".join(f"`{p}`" for p in baseline_touches[:5])
+    suffix = (
+        f" (and {len(baseline_touches) - 5} more)"
+        if len(baseline_touches) > 5
+        else ""
+    )
+    return CompletenessCheck(
+        check_name="visual_baselines_not_self_referential",
+        passed=False,
+        details=(
+            f"Spec creates/regenerates visual baseline images that the run "
+            f"itself produces: {path_list}{suffix}. A systematically wrong "
+            f"first render would become its own reference and pass forever. "
+            f"Add property assertions computable WITHOUT a baseline (e.g. "
+            f"needle tip at the expected angle for a discriminating value) "
+            f"in a section explicitly marked '{_BASELINE_INDEPENDENT_MARKER}', "
+            f"or name an independent reference source for the baselines in "
+            f"such a section."
+        ),
     )
 
 
