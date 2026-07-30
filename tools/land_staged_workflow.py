@@ -31,7 +31,7 @@ variable inside the `with classic_pat_session()` block, is consumed by
   4. PUT the workflow file at its destination on that branch.
   5. DELETE the staged copy on the same branch, so the repo does not carry two
      versions that can drift (--keep-staged opts out).
-  6. Open a PR ("Closes #<issue>"), WAIT for the named check to CONCLUDE, and
+  6. Open a PR ("Closes #<issue>"), WAIT for the workflow run to CONCLUDE, and
      report it.
   7. Squash-merge, then delete the remote branch. Local git is never touched.
 
@@ -40,6 +40,11 @@ Step 6 deliberately waits rather than merging as soon as GitHub reports
 check -- for `pull_request` events GitHub evaluates the workflow from the merge
 ref -- so merging without reading the result installs an instrument and never
 looks at it. Refuses to merge on red unless --merge-on-red is given.
+
+The run is identified by the WORKFLOW name, parsed from the file's own
+top-level `name:`, and polled via /actions/runs. Not by check-run name: those
+are keyed by JOB, so waiting for a workflow name against them never matches and
+silently reports "never registered" while the run is failing (#1913).
 
 ## Usage
 
@@ -75,7 +80,6 @@ from _pat_session import classic_pat_session  # noqa: E402
 
 GH_API = "https://api.github.com"
 DEFAULT_OWNER = "martymcenroe"
-DEFAULT_CHECK = "tests"
 HTTP_TIMEOUT_S = 30
 MERGE_POLL_ATTEMPTS = 30
 MERGE_POLL_SLEEP_S = 10
@@ -221,7 +225,7 @@ def open_pr(pat: str, cfg: argparse.Namespace) -> int:
         "fine-grained PAT every agent session uses cannot push under "
         "`.github/workflows/` -- it lacks the `workflow` scope, and that "
         "exclusion is load-bearing.\n\n"
-        f"This PR is itself the first exercise of the `{cfg.check}` check it "
+        "This PR is itself the first exercise of the check it "
         "installs: for `pull_request` events the workflow is evaluated from the "
         "merge ref, so it runs here before the merge.\n"
     )
@@ -248,30 +252,61 @@ def head_sha(pat: str, cfg: argparse.Namespace, num: int) -> str:
     return r.json()["head"]["sha"]
 
 
-def wait_for_check(pat: str, cfg: argparse.Namespace, sha: str) -> str:
-    """Wait for the named check and return its conclusion.
+def workflow_name(content: str, override: str | None) -> str:
+    """The workflow's own top-level `name:` -- derived, not guessed (#1913).
 
-    Returns the conclusion string, or "absent" if it never registered within the
-    poll budget. Never raises on a red check -- a failing result is information
-    the caller acts on, not an error in this script.
+    The first version of this tool asked the caller for a check name and matched
+    it against check-RUN names. Those are different namespaces: a check run is
+    named after the JOB, while `name:` at the top of the file names the
+    WORKFLOW. Polling a workflow name against check-run names never matched, and
+    the tool then printed "never registered" while the run was actually failing.
+
+    Since this tool already reads the YAML, the name is right there. Parsed by
+    prefix match rather than adding a YAML dependency: only the top-level,
+    column-zero `name:` is wanted, which is exactly what this finds.
+    """
+    if override:
+        return override
+    for line in content.splitlines():
+        if line.startswith("name:"):
+            return line.split(":", 1)[1].strip().strip("'\"")
+    raise SystemExit(
+        "no top-level `name:` found in the workflow -- pass --check to name it explicitly"
+    )
+
+
+def wait_for_workflow(pat: str, cfg: argparse.Namespace, sha: str, name: str) -> str:
+    """Wait for the named WORKFLOW run on `sha` and return its conclusion.
+
+    Uses /actions/runs rather than /commits/{sha}/check-runs for two reasons
+    (#1913): check runs are keyed by job name, not workflow name; and the
+    check-runs endpoint returns 403 for fine-grained PATs on some repos while
+    this one does not, which is what forced the original diagnosis onto this
+    endpoint anyway.
+
+    Returns the conclusion string, or "no_run" if no run for this workflow and
+    commit appeared within the poll budget. Never raises on a red result -- a
+    failing check is information the caller acts on, not an error here.
     """
     for i in range(1, CHECK_POLL_ATTEMPTS + 1):
         r = requests.get(
-            _repo_url(cfg, f"commits/{sha}/check-runs"),
+            _repo_url(cfg, "actions/runs"),
+            params={"head_sha": sha, "per_page": 50},
             headers=_headers(pat),
             timeout=HTTP_TIMEOUT_S,
         )
         r.raise_for_status()
-        run = {c["name"]: c for c in r.json().get("check_runs", [])}.get(cfg.check)
-        if run is None:
-            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {cfg.check}: not registered yet")
-        elif run["status"] == "completed":
-            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {cfg.check}: {run['conclusion']}")
-            return run["conclusion"] or "unknown"
+        runs = [w for w in r.json().get("workflow_runs", []) if w.get("name") == name]
+        if not runs:
+            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: no run for this commit yet")
         else:
-            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {cfg.check}: {run['status']}")
+            latest = max(runs, key=lambda w: w["created_at"])
+            if latest["status"] == "completed":
+                print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: {latest['conclusion']}")
+                return latest["conclusion"] or "unknown"
+            print(f"  [{i}/{CHECK_POLL_ATTEMPTS}] {name}: {latest['status']}")
         time.sleep(CHECK_POLL_SLEEP_S)
-    return "absent"
+    return "no_run"
 
 
 def wait_mergeable(pat: str, cfg: argparse.Namespace, num: int) -> bool:
@@ -326,7 +361,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--workflow", required=True, help="Destination under .github/workflows/")
     ap.add_argument("--owner", default=DEFAULT_OWNER)
     ap.add_argument("--branch", default=None, help="Default: ci/staged-workflow-<issue>")
-    ap.add_argument("--check", default=DEFAULT_CHECK, help="Check to wait for.")
+    ap.add_argument(
+        "--check",
+        default=None,
+        help="Override the workflow name to wait for. Default: parsed from the "
+             "workflow file's own top-level `name:` (#1913).",
+    )
     ap.add_argument(
         "--strip-header-comment",
         action="store_true",
@@ -356,7 +396,7 @@ def main() -> int:
         print(f"  write    : {cfg.workflow} on branch {cfg.branch}")
         print(f"  staged   : {'kept' if cfg.keep_staged else 'removed in the same PR'}")
         print(f"  header   : {'stripped' if cfg.strip_header_comment else 'preserved'}")
-        print(f"  PR       : Closes #{cfg.issue}, waits for check `{cfg.check}`")
+        print(f"  PR       : Closes #{cfg.issue}, waits for workflow `{cfg.check or '<parsed from the file>'}`")
         print(f"  on red   : {'merge anyway' if cfg.merge_on_red else 'stop and report'}")
         return 0
 
@@ -374,24 +414,28 @@ def main() -> int:
             delete_staged(pat, cfg)
         num = open_pr(pat, cfg)
 
-        print(f"Waiting for `{cfg.check}` on PR #{num} ...")
-        conclusion = wait_for_check(pat, cfg, head_sha(pat, cfg, num))
+        name = workflow_name(content, cfg.check)
+        print(f"Waiting for workflow `{name}` on PR #{num} ...")
+        conclusion = wait_for_workflow(pat, cfg, head_sha(pat, cfg, num), name)
 
         if conclusion == "success":
             print("  green on its first run.")
-        elif conclusion == "absent":
+        elif conclusion == "no_run":
             print(
-                f"  `{cfg.check}` never registered within the poll budget. The branch "
-                f"and PR exist; inspect PR #{num} on GitHub.",
+                f"  No `{name}` run appeared for this commit within the poll budget.\n"
+                f"  This means the run did not START -- it does NOT mean the workflow\n"
+                f"  passed or failed. Check that Actions is enabled and the trigger\n"
+                f"  matches. The branch and PR #{num} exist and are untouched.",
                 file=sys.stderr,
             )
             return 1
         elif not cfg.merge_on_red:
             print(
-                f"  `{cfg.check}` concluded `{conclusion}`. NOT merging.\n"
-                f"  The workflow landed on the branch and PR #{num} is open, so the "
-                f"failure is visible and fixable there. Re-run with --merge-on-red "
-                f"to override.",
+                f"  Workflow `{name}` concluded `{conclusion}`. NOT merging.\n"
+                f"  The workflow landed on the branch and PR #{num} is open, so the\n"
+                f"  failure is visible and fixable there. Inspect the failing job with:\n"
+                f"    gh run list --repo {target} --branch {cfg.branch}\n"
+                f"  Re-run with --merge-on-red to override.",
                 file=sys.stderr,
             )
             return 1

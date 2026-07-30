@@ -15,7 +15,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "tools"))
 
-from land_staged_workflow import parse_args, strip_header_comment  # noqa: E402
+from land_staged_workflow import (  # noqa: E402
+    parse_args,
+    strip_header_comment,
+    workflow_name,
+)
 
 WORKFLOW = "name: tests\non:\n  pull_request:\n"
 
@@ -50,6 +54,39 @@ class TestStripHeaderComment:
         assert strip_header_comment(staged) == staged
 
 
+class TestWorkflowName:
+    """#1913. The tool used to poll for a check-run name supplied by the caller.
+    Check runs are named after the JOB; `name:` at the top of the file names the
+    WORKFLOW. Matching one against the other never succeeded, and the tool then
+    reported 'never registered' for ten minutes while the run was failing."""
+
+    def test_parses_the_top_level_name(self):
+        assert workflow_name(WORKFLOW, None) == "tests"
+
+    def test_does_not_pick_up_a_job_name(self):
+        """The exact confusion that caused the bug: `python` is the job, and the
+        check run is named after it -- but the workflow is `tests`."""
+        content = "name: tests\non:\n  pull_request:\njobs:\n  python:\n    runs-on: x\n"
+        assert workflow_name(content, None) == "tests"
+
+    def test_ignores_indented_name_keys(self):
+        """Steps carry their own `name:`; only column zero is the workflow."""
+        content = "name: tests\njobs:\n  build:\n    steps:\n      - name: not this\n"
+        assert workflow_name(content, None) == "tests"
+
+    def test_strips_quotes(self):
+        assert workflow_name('name: "tests"\non:\n', None) == "tests"
+        assert workflow_name("name: 'tests'\non:\n", None) == "tests"
+
+    def test_override_wins(self):
+        assert workflow_name(WORKFLOW, "something-else") == "something-else"
+
+    def test_missing_name_is_a_clear_error_not_a_silent_guess(self):
+        with pytest.raises(SystemExit) as e:
+            workflow_name("on:\n  pull_request:\n", None)
+        assert "--check" in str(e.value)
+
+
 class TestParseArgs:
     BASE = [
         "--repo", "EXAMPLE",
@@ -74,7 +111,12 @@ class TestParseArgs:
         assert cfg.keep_staged is False
         assert cfg.merge_on_red is False, "must not merge a red check by default"
         assert cfg.strip_header_comment is False
-        assert cfg.check == "tests"
+        assert cfg.check is None
+
+    def test_check_defaults_to_none_so_the_name_is_derived(self):
+        """#1913: a guessed default check name is what let a failing run be
+        reported as 'never registered'. The default must be derive-from-file."""
+        assert parse_args(self.BASE).check is None
 
     def test_no_target_repository_is_baked_in(self):
         """#1882: this repo is public and some targets are not, so the target
