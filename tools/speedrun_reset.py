@@ -459,6 +459,7 @@ def main() -> int:
         return 1
 
     if args.issue:
+        reset_issues = [args.issue]
         reset_one_issue(repo_root, repo, args.issue)
     else:
         issues = all_logged_issues(repo_root)
@@ -468,8 +469,30 @@ def main() -> int:
         print(f"Resetting {len(issues)} issue(s) from run-log: {issues}")
         for issue in issues:
             reset_one_issue(repo_root, repo, issue)
+        reset_issues = issues
 
-    print("\nspawn state restored")
+    # #1918: a reset that cannot prove it finished did not finish. The
+    # clean-check enumerates every debris class this tool is supposed to
+    # clear; a nonzero remainder (e.g. a dirty worktree deliberately left
+    # for the operator per #1762) is reported honestly instead of the
+    # unconditional success banner this tool used to print.
+    from speedrun_clean_check import check_repo
+
+    findings = check_repo(repo_root, reset_issues)
+    errors = [f for f in findings if f.startswith("ERROR:")]
+    debris = [f for f in findings if not f.startswith("ERROR:")]
+    if errors:
+        print("\nVERIFY: clean-check could not fully answer:")
+        for e in errors:
+            print(f"  {e}")
+        return 2
+    if debris:
+        print(f"\nVERIFY: reset INCOMPLETE — {len(debris)} finding(s) remain:")
+        for d in debris:
+            print(f"  {d}")
+        return 1
+
+    print("\nspawn state restored — verified clean (speedrun_clean_check)")
     return 0
 
 
