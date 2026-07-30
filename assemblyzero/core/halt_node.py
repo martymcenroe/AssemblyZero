@@ -50,7 +50,13 @@ def classify_error(error_message: str) -> str:
     # 'stagnation'-only pattern never matched a real halt message.
     if any(p in msg_lower for p in ("stagnation", "stagnant", "same issues", "same blocking", "two consecutive")):
         return "stagnation"
-    if any(p in msg_lower for p in ("budget", "cost budget exceeded")):
+    # #1944: the bare token 'budget' false-matched the CLIENT's wall-clock
+    # wall ('call budget of 600s exhausted') — a pure capacity storm halted
+    # as a non-transient cost problem telling the operator to raise
+    # --budget. Cost halts all carry '[BUDGET]' or 'cost budget'; match
+    # those, and let capacity-flavored budget-wall messages fall through to
+    # the capacity classifier below.
+    if any(p in msg_lower for p in ("[budget]", "cost budget")):
         return "budget"
     if "preflight" in msg_lower:
         if "unavailable" in msg_lower or "exhausted" in msg_lower:

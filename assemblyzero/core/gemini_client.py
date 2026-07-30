@@ -766,6 +766,12 @@ class GeminiClient:
         initial_credential = available[0]
         errors: list[str] = []
         budget_exhausted = False
+        # #1944: what the budget wall was riding when it fired. Without
+        # this, 'call budget exhausted' erases the capacity signature —
+        # downstream, the stage retried a 10-minute 503 storm with a flat
+        # 10s delay (no escalation) and the halt classifier false-matched
+        # the COST-budget pattern (non-transient).
+        last_error_type: GeminiErrorType | None = None
 
         for cred in available:
             rotation_occurred = cred.name != initial_credential.name
@@ -789,9 +795,15 @@ class GeminiClient:
                 remaining = self._remaining_budget(start_time)
                 if remaining < MIN_ATTEMPT_SECONDS:
                     budget_exhausted = True
+                    if last_error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
+                        flavor = " riding 503/529 capacity storms"
+                    elif last_error_type is not None:
+                        flavor = f" (last error class: {last_error_type.name.lower()})"
+                    else:
+                        flavor = ""
                     errors.append(
                         f"{cred.name}: call budget of "
-                        f"{MAX_TOTAL_INVOKE_SECONDS:.0f}s exhausted"
+                        f"{MAX_TOTAL_INVOKE_SECONDS:.0f}s exhausted{flavor}"
                     )
                     print(
                         f"    [LLM] provider=gemini model={self.model}: "
@@ -898,6 +910,7 @@ class GeminiClient:
                         and _is_spawn_failure(error_str)
                     ):
                         error_type = GeminiErrorType.CAPACITY_EXHAUSTED
+                    last_error_type = error_type  # #1944: budget wall carries this
 
                     if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
                         # 529/503: Backoff and retry same credential
