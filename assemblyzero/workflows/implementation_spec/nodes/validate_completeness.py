@@ -983,8 +983,19 @@ def detect_unknown_method_calls(
         re.MULTILINE,
     )
     def_re = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
+    # #1950: `self._on_quit_cb = on_quit` then `self._on_quit_cb()` —
+    # constructor-assigned callables are spec-defined too. The def-only
+    # collector drove the drafter into rename-oscillation (_on_quit ->
+    # _on_quit_cb) because the checker could never see the definitions.
+    self_assign_re = re.compile(r"^\s*self\.(\w+)\s*=", re.MULTILINE)
+    # #1950: docstrings inside fences quote code ('No tkinter.Tk()
+    # instantiated' — the test-strategy rule itself) — prose, not calls.
+    docstring_re = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
 
-    blocks = [m.group(1) for m in code_block_re.finditer(text)]
+    blocks = [
+        docstring_re.sub("", m.group(1))
+        for m in code_block_re.finditer(text)
+    ]
 
     # #1948: three universes the target repo's symbol table has no authority
     # over — the phase-5 kill was this check rejecting Pillow's documented
@@ -1005,6 +1016,8 @@ def detect_unknown_method_calls(
                 )
         for d in def_re.finditer(block_content):
             spec_defined.add(d.group(1))
+        for a in self_assign_re.finditer(block_content):
+            spec_defined.add(a.group(1))
 
     # One propagation pass: `draw = ImageDraw.Draw(...)` makes `draw` an
     # exempt receiver too. Single level, matching how spec snippets read.
