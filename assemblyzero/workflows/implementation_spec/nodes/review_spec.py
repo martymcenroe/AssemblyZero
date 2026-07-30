@@ -100,6 +100,19 @@ For each assertion in the spec's test code, name the requirement or behaviour \
 section it traces to. If you cannot, that assertion is the finding — quote it \
 and say which behaviour it contradicts or invents.
 
+REQUIREMENTS CONFLICT ESCALATION (Issue #1900). When the violation you found \
+traces to a CONTRADICTION OR AMBIGUITY IN THE SOURCE REQUIREMENTS themselves \
+— two criteria in the LLD or the issue specifying different outcomes for the \
+same situation, so ANY spec must violate one of them — do not report it as a \
+spec-authoring error. An ambiguous requirement has no correct spec; revise \
+cycles just oscillate between the readings (a real run burned all three \
+cycles exactly this way: drafter picks reading A, you reject citing B, \
+drafter picks B, you reject citing A). Instead: verdict BLOCKED, and begin \
+your rationale with the exact marker 'REQUIREMENTS CONFLICT:' followed by \
+the two conflicting sentences QUOTED VERBATIM and the concrete situation \
+where they diverge. This is the one case #1892 reserves BLOCKED for — no \
+regenerated spec can fix it; the ISSUE needs an operator ruling.
+
 SEVERITY MUST MATCH RECOVERABILITY (Issue #1892). Report a traceability \
 violation as REVISE whenever a regenerated spec could fix it — a wrong \
 assertion, a reference implementation that disagrees with the spec's own \

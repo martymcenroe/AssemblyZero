@@ -51,6 +51,7 @@ from assemblyzero.telemetry import emit
 
 from assemblyzero.workflows.requirements.nodes import (
     analyze_codebase,
+    analyze_requirements,
     finalize,
     generate_draft,
     human_gate_draft,
@@ -74,6 +75,7 @@ from assemblyzero.core.halt_node import create_halt_node
 
 N0_LOAD_INPUT = "N0_load_input"
 N0B_ANALYZE_CODEBASE = "N0b_analyze_codebase"  # Issue #401
+N0C_ANALYZE_REQUIREMENTS = "N0c_analyze_requirements"  # Issue #1899
 N1_GENERATE_DRAFT = "N1_generate_draft"
 N1_5_VALIDATE_MECHANICAL = "N1_5_validate_mechanical"  # Issue #277
 N1B_VALIDATE_TEST_PLAN = "N1b_validate_test_plan"  # Issue #166
@@ -88,6 +90,20 @@ HALT = "HALT"
 # =============================================================================
 # Routing Functions
 # =============================================================================
+
+
+def route_after_analyze_requirements(
+    state: RequirementsWorkflowState,
+) -> Literal["N1_generate_draft", "HALT"]:
+    """Route after the requirements-ambiguity gate (Issue #1899).
+
+    A REQUIREMENTS CONFLICT halts before any generation spends tokens —
+    no spec can satisfy contradictory criteria, so the ISSUE needs an
+    operator ruling, not a roll. Anything else proceeds to drafting.
+    """
+    if state.get("error_message"):
+        return "HALT"
+    return "N1_generate_draft"
 
 
 def route_after_load_input(
@@ -461,6 +477,7 @@ def create_requirements_graph() -> StateGraph:
     # Add nodes
     graph.add_node(N0_LOAD_INPUT, load_input)
     graph.add_node(N0B_ANALYZE_CODEBASE, analyze_codebase)  # Issue #401
+    graph.add_node(N0C_ANALYZE_REQUIREMENTS, analyze_requirements)  # Issue #1899
     graph.add_node(N1_GENERATE_DRAFT, generate_draft)
     graph.add_node(N1_5_VALIDATE_MECHANICAL, validate_lld_mechanical)  # Issue #277
     graph.add_node(N1B_VALIDATE_TEST_PLAN, validate_test_plan_node)  # Issue #166
@@ -490,8 +507,17 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N0b -> N1 (always proceeds to draft generation)
-    graph.add_edge(N0B_ANALYZE_CODEBASE, N1_GENERATE_DRAFT)
+    # N0b -> N0c (Issue #1899: requirements-ambiguity gate before any
+    # generation spends tokens) -> N1 or HALT
+    graph.add_edge(N0B_ANALYZE_CODEBASE, N0C_ANALYZE_REQUIREMENTS)
+    graph.add_conditional_edges(
+        N0C_ANALYZE_REQUIREMENTS,
+        route_after_analyze_requirements,
+        {
+            "N1_generate_draft": N1_GENERATE_DRAFT,
+            "HALT": HALT,
+        },
+    )
 
     # N1 -> Ponder (LLD) or N2 or N3 or HALT (based on workflow type, gates, error)
     # Issue #565: LLD workflows go through Ponder auto-fix first

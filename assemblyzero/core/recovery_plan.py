@@ -175,5 +175,13 @@ def _build_recommendation(error_type: str, error_message: str, workflow: str) ->
             "Non-transient: Authentication failed. "
             "Check your Gemini credentials in ~/.assemblyzero/gemini-credentials.json."
         )
+    elif error_type == "requirements_conflict":
+        return (
+            "Non-transient: the ISSUE's requirements contradict each other — "
+            "no spec can satisfy both readings, so re-rolling burns tokens on "
+            "an unwinnable draft (#1899/#1900). Read the named conflict in the "
+            "error message, rule on the correct reading, edit the issue's "
+            "acceptance criteria to say it, then re-run."
+        )
     else:
         return f"Workflow {workflow} halted: {error_message[:200]}"

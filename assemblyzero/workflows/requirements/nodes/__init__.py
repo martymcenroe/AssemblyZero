@@ -22,6 +22,9 @@ Nodes:
 from assemblyzero.workflows.requirements.nodes.analyze_codebase import (
     analyze_codebase,
 )
+from assemblyzero.workflows.requirements.nodes.analyze_requirements import (
+    analyze_requirements,
+)
 from assemblyzero.workflows.requirements.nodes.finalize import finalize
 from assemblyzero.workflows.requirements.nodes.generate_draft import generate_draft
 from assemblyzero.workflows.requirements.nodes.human_gate import (
@@ -40,6 +43,7 @@ from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
 
 __all__ = [
     "analyze_codebase",
+    "analyze_requirements",
     "load_input",
     "generate_draft",
     "validate_lld_mechanical",
