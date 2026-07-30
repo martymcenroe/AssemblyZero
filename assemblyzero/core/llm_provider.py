@@ -1300,6 +1300,14 @@ class GeminiProvider(LLMProvider):
                 credential_used=result.credential_used,
                 rotation_occurred=result.rotation_occurred,
                 rate_limited=was_rate_limited,
+                # #1907: a failure GeminiClient.invoke() REPORTS is
+                # post-exhaustion — it already retried per credential,
+                # rotated across all of them, and enforced its own wall
+                # clock (#1874). The dataclass default (retryable=True)
+                # invited with_retry(5) to stack five more full gauntlets
+                # (~50 min worst case) on top. Riding out longer storms
+                # is the stage retry's job (#1909), not another lap here.
+                retryable=result.success,
             )
             log_llm_call(call_result)
             return call_result
