@@ -3731,8 +3731,13 @@ class TestFinalizeFullCoverage:
         result = finalize(state)
 
         assert result.get("error_message") == ""
-        # LLD should be archived — result.get("archived_files", []) intentionally unused
-        # May or may not archive depending on path structure
+        # #1686: assert the behavior the name promises. This test once checked
+        # only error_message — with archival fully broken it still passed.
+        done_lld = tmp_path / "docs" / "lld" / "done" / "LLD-042.md"
+        assert done_lld.exists(), "LLD was not archived to done/"
+        assert not lld_file.exists(), "LLD still present in active/"
+        archived_names = [Path(p).name for p in result.get("archived_files", [])]
+        assert "LLD-042.md" in archived_names
 
 
 class TestImplementCodeCLIPaths:
@@ -4453,135 +4458,153 @@ class TestReviewTestPlanCoverageGaps:
         assert result.get("test_plan_status") == "BLOCKED"
         assert "GUARD" in result.get("error_message", "")
 
-    def test_review_test_plan_gemini_api_success_approved(self, tmp_path):
-        """review_test_plan with mocked Gemini returning APPROVED."""
-        import sys
+    def _fake_reviewer(self, response_text):
+        """Typed fake per #948: explicit attributes only, real LLMCallResult.
 
-        # Create a mock GeminiClient
-        class MockResult:
-            success = True
-            response = """## Verdict
-[x] **APPROVED** - Test plan is ready for implementation
-"""
-            error_message = ""
-            input_tokens = 0
-            output_tokens = 0
+        The predecessors of these tests mocked assemblyzero.core.gemini_client
+        at sys.modules level — dead code after #773 routed through
+        get_provider — so the 'mocked' call fell through to a REAL provider
+        (~$0.05 per run, network-flaky, asserting nothing about our code).
+        The invocation counter is the proof-of-life the old tests lacked:
+        each test asserts the fake actually served the review. Closes #956.
+        """
+        from assemblyzero.core.llm_provider import LLMCallResult
 
-        class MockGeminiClient:
-            def __init__(self, model=None):
-                pass
-            def invoke(self, system_instruction=None, content=None):
-                return MockResult()
+        class FakeReviewerProvider:
+            provider_name = "fake"
+            model = "fake-reviewer"
 
-        # Create mock modules
-        mock_config = type(sys)("mock_config")
-        mock_config.REVIEWER_MODEL = "gemini-test"
+            def __init__(self):
+                self.invocations = 0
 
-        mock_gemini = type(sys)("mock_gemini")
-        mock_gemini.GeminiClient = MockGeminiClient
+            def invoke(
+                self,
+                system_prompt="",
+                content="",
+                json_schema=None,
+                response_schema=None,
+            ):
+                self.invocations += 1
+                return LLMCallResult(
+                    success=True,
+                    response=response_text,
+                    raw_response=response_text,
+                    error_message=None,
+                    provider="fake",
+                    model_used="fake-reviewer",
+                    duration_ms=1,
+                    attempts=1,
+                )
 
-        # Patch the modules
-        with patch.dict(sys.modules, {
-            "assemblyzero.core.config": mock_config,
-            "assemblyzero.core.gemini_client": mock_gemini,
-        }):
-            # Reload to pick up mocked modules
-            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
+        return FakeReviewerProvider()
 
-            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+    def test_review_test_plan_llm_path_approved(self, tmp_path):
+        """The LLM review path returns APPROVED from the provider verdict.
 
-            audit_dir = tmp_path / "audit"
-            audit_dir.mkdir()
+        Coverage is deliberately incomplete — two scenarios both cover REQ-1
+        and none covers REQ-2 — so the #509 mechanical fast-path CANNOT
+        approve (the predecessor test had 100% coverage and 'passed' without
+        any LLM involvement at all), while the scenario count still clears
+        the #496 ratio gate that requires scenarios >= requirements.
+        """
+        from assemblyzero.workflows.testing.nodes.review_test_plan import (
+            review_test_plan,
+        )
 
-            state: TestingWorkflowState = {
-                "issue_number": 42,
-                "repo_root": str(tmp_path),
-                "mock_mode": False,  # Non-mock to hit real path
-                "audit_dir": str(audit_dir),
-                "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n\n## 10. Test Plan\nTest all requirements thoroughly.",
-                "test_scenarios": [
-                    {
-                        "name": "test_something",
-                        "requirement_ref": "REQ-1",
-                        "test_type": "unit",
-                        "description": "Test something",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    }
-                ],
-                "requirements": ["REQ-1: Do something"],
-            }
+        fake = self._fake_reviewer(
+            "## Verdict\n[x] **APPROVED** - Test plan is ready\n"
+        )
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
 
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "mock_mode": False,  # Non-mock to hit the provider path
+            "audit_dir": str(audit_dir),
+            "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
+            "test_scenarios": [
+                {
+                    "name": "test_something",
+                    "requirement_ref": "REQ-1",
+                    "test_type": "unit",
+                    "description": "Test something",
+                    "mock_needed": False,
+                    "assertions": ["passes"],
+                },
+                {
+                    "name": "test_something_else",
+                    "requirement_ref": "REQ-1",
+                    "test_type": "unit",
+                    "description": "Test something else",
+                    "mock_needed": False,
+                    "assertions": ["passes"],
+                },
+            ],
+            "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
+        }
+
+        with patch(
+            "assemblyzero.workflows.testing.nodes.review_test_plan.get_provider",
+            return_value=fake,
+        ):
             result = review_test_plan(state)
 
-            assert result.get("test_plan_status") == "APPROVED"
+        assert result.get("test_plan_status") == "APPROVED"
+        assert fake.invocations == 1, "the fake provider never served the review"
 
-    def test_review_test_plan_gemini_api_blocked_response(self, tmp_path):
-        """review_test_plan with mocked Gemini returning BLOCKED."""
-        import sys
+    def test_review_test_plan_llm_path_blocked(self, tmp_path):
+        """The LLM review path surfaces BLOCKED plus the reviewer's feedback."""
+        from assemblyzero.workflows.testing.nodes.review_test_plan import (
+            review_test_plan,
+        )
 
-        # Create a mock GeminiClient returning BLOCKED
-        class MockResult:
-            success = True
-            response = """## Verdict
-[x] **BLOCKED** - Test plan needs revision
+        fake = self._fake_reviewer(
+            "## Verdict\n[x] **BLOCKED** - Test plan needs revision\n\n"
+            "## Required Changes\n"
+            "1. Add more test coverage\n"
+            "2. Fix assertion issues\n"
+        )
+        audit_dir = tmp_path / "audit"
+        audit_dir.mkdir()
 
-## Required Changes
-1. Add more test coverage
-2. Fix assertion issues
-"""
-            error_message = ""
-            input_tokens = 0
-            output_tokens = 0
+        state: TestingWorkflowState = {
+            "issue_number": 42,
+            "repo_root": str(tmp_path),
+            "mock_mode": False,
+            "audit_dir": str(audit_dir),
+            "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
+            "test_scenarios": [
+                {
+                    "name": "test_something",
+                    "requirement_ref": "REQ-1",
+                    "test_type": "unit",
+                    "description": "Test",
+                    "mock_needed": False,
+                    "assertions": ["passes"],
+                },
+                {
+                    "name": "test_something_more",
+                    "requirement_ref": "REQ-1",
+                    "test_type": "unit",
+                    "description": "Test more",
+                    "mock_needed": False,
+                    "assertions": ["passes"],
+                },
+            ],
+            "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
+        }
 
-        class MockGeminiClient:
-            def __init__(self, model=None):
-                pass
-            def invoke(self, system_instruction=None, content=None):
-                return MockResult()
-
-        mock_config = type(sys)("mock_config")
-        mock_config.REVIEWER_MODEL = "gemini-test"
-
-        mock_gemini = type(sys)("mock_gemini")
-        mock_gemini.GeminiClient = MockGeminiClient
-
-        with patch.dict(sys.modules, {
-            "assemblyzero.core.config": mock_config,
-            "assemblyzero.core.gemini_client": mock_gemini,
-        }):
-            if "assemblyzero.workflows.testing.nodes.review_test_plan" in sys.modules:
-                del sys.modules["assemblyzero.workflows.testing.nodes.review_test_plan"]
-
-            from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
-
-            audit_dir = tmp_path / "audit"
-            audit_dir.mkdir()
-
-            state: TestingWorkflowState = {
-                "issue_number": 42,
-                "repo_root": str(tmp_path),
-                "mock_mode": False,
-                "audit_dir": str(audit_dir),
-                "lld_content": "# LLD-042: Test Feature\n\n## 1. Context\nThis document describes the low level design for issue forty two which involves implementing a critical feature for the system that requires careful testing and thorough validation across multiple scenarios to ensure correctness reliability and robustness of the implementation in production environments under various load conditions and edge cases.\n\n## 3. Requirements\n1. REQ-1: Do something important\n2. REQ-2: Another requirement\n\n## 10. Test Plan\nTest all requirements thoroughly.",
-                "test_scenarios": [
-                    {
-                        "name": "test_something",
-                        "requirement_ref": "REQ-1",
-                        "test_type": "unit",
-                        "description": "Test",
-                        "mock_needed": False,
-                        "assertions": ["passes"],
-                    }
-                ],
-                "requirements": ["REQ-1: Do something", "REQ-2: Another requirement"],
-            }
-
+        with patch(
+            "assemblyzero.workflows.testing.nodes.review_test_plan.get_provider",
+            return_value=fake,
+        ):
             result = review_test_plan(state)
 
-            assert result.get("test_plan_status") == "BLOCKED"
-            assert "gemini_feedback" in result
+        assert result.get("test_plan_status") == "BLOCKED"
+        assert fake.invocations == 1, "the fake provider never served the review"
+        feedback = result.get("gemini_feedback", "")
+        assert "test coverage" in feedback or "Required Changes" in feedback
 
 
 
