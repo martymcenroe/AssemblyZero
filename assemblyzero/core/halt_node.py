@@ -45,7 +45,10 @@ def classify_error(error_message: str) -> str:
     # situation. The fix is an operator ruling on the issue text.
     if "requirements conflict" in msg_lower:
         return "requirements_conflict"
-    if any(p in msg_lower for p in ("stagnation", "same issues", "same blocking", "two consecutive")):
+    # #1939: 'stagnant' is what the live guards actually print
+    # ("[STAGNANT] Coverage stagnant: 87.0% -> 86.0%") — the old
+    # 'stagnation'-only pattern never matched a real halt message.
+    if any(p in msg_lower for p in ("stagnation", "stagnant", "same issues", "same blocking", "two consecutive")):
         return "stagnation"
     if any(p in msg_lower for p in ("budget", "cost budget exceeded")):
         return "budget"

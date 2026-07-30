@@ -71,6 +71,20 @@ def route_by_exit_code(
     return "end"
 
 
+def describe_run_outcome(exit_code: int, failed_count: int | None = None) -> str:
+    """describe_exit_code, but never blames tests for the coverage gate.
+
+    #1938: pytest-cov's fail-under forces exit 1 even when every test
+    passes. A live run printed '50 passed, 0 failed | Exit: 1 (some tests
+    failed)' — the mislabel cost a full log-forensics pass during the
+    kill-diagnosis. When the caller knows the failure count is zero, exit 1
+    means the coverage gate, and the label says so.
+    """
+    if exit_code == EXIT_TESTSFAILED and failed_count == 0:
+        return "coverage below fail-under; all tests passed"
+    return describe_exit_code(exit_code)
+
+
 def describe_exit_code(exit_code: int) -> str:
     """Return a human-readable description of a pytest exit code.
 
