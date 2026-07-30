@@ -1,4 +1,4 @@
-﻿// PR body validation rules:
+// PR body validation rules:
 // Pass: Closes #N (case-insensitive, also cross-repo owner/repo#N)
 // Pass: No-Issue: <reason> (requires non-empty reason)
 // Fail: empty body, no matching pattern
