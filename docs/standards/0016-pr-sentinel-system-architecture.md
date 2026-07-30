@@ -94,8 +94,19 @@ PR created/edited on any repo
 | Deployed at | `https://pr-sentinel.mcwizard1.workers.dev` |
 | Routes | `/health` (GET, returns 200), `/webhook` (POST, handles events) |
 | Cloudflare account | `4fe1c5e241425c85d0f2c35c69fb45b8` |
-| Source code | `sentinel/src/` in AssemblyZero |
+| Source code | `sentinel/src/` in AssemblyZero — **proven deployed**, see below |
 | Check run name | Configurable via `CHECK_NAME` env var, default `pr-sentinel / issue-reference` |
+
+#### Deployed-source provenance (#1972)
+
+This standard used to state *where the source lives* but never *what is running*, and those are different claims. A dead standalone fork, `martymcenroe/sentinel`, declares the same `name = "pr-sentinel"` in its own `wrangler.toml`, so whichever tree was deployed last owns the same Worker URL. That fork has no `verify-issues.js` and skips dependabot PRs without posting a check — materially weaker behavior. For months, which one was live rested on inference, not evidence.
+
+Proven 2026-07-30 by direct inspection of the running Worker: the deployed bundle contains a `// src/verify-issues.js` section, calls `verifyIssueRefs` after body validation, auto-passes dependabot PRs *with* a posted check run (#749), and its `refPattern` matches this repo's `validate.js` character-for-character. All four exist only in the AssemblyZero copy. Live behavior on a real dependabot PR agrees.
+
+Two things follow that matter more than the answer:
+
+- **There is no CI deploy.** The running version was uploaded by hand on 2026-03-20 at 11:03:36 AM Central — 18 seconds *before* its source was committed, and ~21 hours before that source reached `main`. For that window the deployed artifact existed in no commit anywhere. Tracked in #1974.
+- **Ask the Worker, not the tree.** Because deployment is manual, the repo cannot tell you what is running. To re-verify, read the deployed code directly (Cloudflare dashboard, `wrangler deployments list`, or the observability API) rather than reasoning from which tree looks maintained.
 
 **How it works:**
 
