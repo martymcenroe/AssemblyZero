@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { validatePRBody, extractIssueRefs } from "../src/validate.js";
 
 describe("extractIssueRefs", () => {
