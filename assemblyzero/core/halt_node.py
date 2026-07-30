@@ -39,6 +39,12 @@ def classify_error(error_message: str) -> str:
     msg_lower = error_message.lower()
 
     # Domain-specific classifications first (no HTTP equivalent)
+    # #1899/#1900: a contradiction in the ISSUE's own requirements. Nothing
+    # transient about it — no retry, revise cycle, or regenerated spec can
+    # satisfy two criteria that specify different outcomes for the same
+    # situation. The fix is an operator ruling on the issue text.
+    if "requirements conflict" in msg_lower:
+        return "requirements_conflict"
     if any(p in msg_lower for p in ("stagnation", "same issues", "same blocking", "two consecutive")):
         return "stagnation"
     if any(p in msg_lower for p in ("budget", "cost budget exceeded")):
