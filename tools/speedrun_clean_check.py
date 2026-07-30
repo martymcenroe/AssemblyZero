@@ -179,23 +179,36 @@ def find_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     return findings
 
 
-def find_committed_artifact_debris(repo_root: Path, issue: int) -> list[str]:
-    """Pipeline artifacts for this issue already COMMITTED on the current branch.
+def find_committed_artifact_debris(
+    repo_root: Path, issue: int, base_ref: str
+) -> list[str]:
+    """Pipeline artifacts for this issue already COMMITTED on ``base_ref``.
 
     The untracked scan above reads `git status`, so it sees only what a killed
-    roll left lying around. It cannot see the quieter case: a branch that
-    already CONTAINS this issue's finished work. A roll started there finds the
-    LLD present and the implementation's tests already green, so it runs fast,
+    roll left lying around. It cannot see the quieter case: a base that already
+    CONTAINS this issue's finished work. A roll started there finds the LLD
+    present and the implementation's tests already green, so it runs fast,
     exits successfully, and produces nothing — while the preflight that exists
     to guarantee a run starts from verified zero signs off on it (#1959).
 
     That is the state boostgauge's `hardening-run-11` was in when this was
     found: six phases of committed LLDs, specs, and implementations, and a
     CLEAN verdict for every one of the six issues.
+
+    Reads the REF with `git ls-tree`, not the index with `git ls-files`: the
+    pipeline carves its worktree from the base branch (#1960), which need not
+    be what the repo is checked out on. Measuring the checkout would answer a
+    question nobody asked, and would refuse a perfectly clean
+    `--base-branch main` roll launched from a dirty checkout (#1963).
     """
-    result = _run(["git", "ls-files", "--", "docs/lld"], cwd=repo_root)
+    result = _run(
+        ["git", "ls-tree", "-r", "--name-only", base_ref, "--", "docs/lld"],
+        cwd=repo_root,
+    )
     if result.returncode != 0:
-        return [f"ERROR: git ls-files failed: {result.stderr.strip()}"]
+        return [
+            f"ERROR: git ls-tree failed for {base_ref}: {result.stderr.strip()}"
+        ]
     needles = _artifact_needles(issue)
     findings: list[str] = []
     for line in result.stdout.splitlines():
@@ -208,30 +221,50 @@ def find_committed_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     return findings
 
 
-def describe_base(repo_root: Path) -> str:
-    """Current branch and its divergence from origin's default, for context.
+def current_branch(repo_root: Path) -> str:
+    """Branch the target repo is checked out on, or "" if git cannot say."""
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root)
+    if result.returncode != 0:
+        return ""
+    name = result.stdout.strip()
+    return "" if name == "HEAD" else name
 
-    A CLEAN verdict is only meaningful relative to the branch it was measured
-    on, so the verdict line carries that branch (#1959).
+
+def commits_ahead_of_default(repo_root: Path, ref: str) -> int | None:
+    """How far ``ref`` is ahead of origin's default branch.
+
+    None when that cannot be determined — typically a repo with no
+    `origin/HEAD` symbolic ref, or no origin at all. Callers must treat None
+    as "unknown", never as zero: refusing a roll on an unproven divergence
+    would block every throwaway and offline repo.
     """
-    branch = _run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root
-    )
-    if branch.returncode != 0:
-        return "unknown branch"
-    name = branch.stdout.strip() or "unknown branch"
     count = _run(
-        ["git", "rev-list", "--count", f"origin/HEAD..{name}"], cwd=repo_root
+        ["git", "rev-list", "--count", f"origin/HEAD..{ref}"], cwd=repo_root
     )
     if count.returncode != 0 or not count.stdout.strip().isdigit():
-        return f"branch {name}"
-    ahead = int(count.stdout.strip())
+        return None
+    return int(count.stdout.strip())
+
+
+def describe_base(repo_root: Path, base_ref: str, declared: bool) -> str:
+    """The base a verdict was measured against, for the verdict line.
+
+    A CLEAN verdict is only meaningful relative to the base it was measured on,
+    so the verdict line carries it (#1959) and says whether it was declared or
+    taken from the checkout (#1968).
+    """
+    if not base_ref:
+        return "an undetermined base"
+    source = "declared base" if declared else "checked-out branch"
+    ahead = commits_ahead_of_default(repo_root, base_ref)
+    if ahead is None:
+        return f"{source} {base_ref}"
     if ahead == 0:
-        return f"branch {name}, level with origin's default"
-    return f"branch {name}, {ahead} commit(s) ahead of origin's default"
+        return f"{source} {base_ref}, level with origin's default"
+    return f"{source} {base_ref}, {ahead} commit(s) ahead of origin's default"
 
 
-def check_repo(repo_root: Path, issues: list[int]) -> list[str]:
+def check_repo(repo_root: Path, issues: list[int], base_ref: str) -> list[str]:
     """All findings for the given issues. Empty list == verified clean."""
     findings: list[str] = []
     for issue in issues:
@@ -240,7 +273,7 @@ def check_repo(repo_root: Path, issues: list[int]) -> list[str]:
         findings.extend(find_remote_branch_debris(repo_root, issue))
         findings.extend(find_open_pr_debris(repo_root, issue))
         findings.extend(find_artifact_debris(repo_root, issue))
-        findings.extend(find_committed_artifact_debris(repo_root, issue))
+        findings.extend(find_committed_artifact_debris(repo_root, issue, base_ref))
     return findings
 
 
@@ -253,6 +286,14 @@ def main(argv: list[str] | None = None) -> int:
         "--issue", type=int, action="append", required=True,
         help="Issue number to check (repeatable)",
     )
+    parser.add_argument(
+        "--base-branch", dest="base_branch", default=None,
+        help=(
+            "Ref the roll will be carved from. Must match what orchestrate.py "
+            "is given. Required when the checkout has diverged from origin's "
+            "default (#1968)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo).resolve()
@@ -260,12 +301,40 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {repo_root} is not a git repository root")
         return 2
 
-    findings = check_repo(repo_root, args.issue)
+    # #1968: the base must be declared, or be unambiguous. A roll that inherits
+    # whatever the checkout happens to be on is how a finished arc becomes the
+    # next run's starting point -- the pipeline itself leaves the repo on the
+    # integration branch holding all of it, so inheritance is not a rare
+    # accident, it is the default outcome of a successful campaign.
+    declared = bool(args.base_branch)
+    base_ref = args.base_branch or current_branch(repo_root)
+    if not base_ref:
+        print(
+            "ERROR: cannot determine a base ref (detached HEAD?). "
+            "Pass --base-branch to declare the ref this roll will be carved from."
+        )
+        return 2
+    if not declared:
+        ahead = commits_ahead_of_default(repo_root, base_ref)
+        if ahead:
+            print(
+                f"ERROR: no --base-branch given, so the roll would inherit the "
+                f"checked-out branch\n  '{base_ref}', which is {ahead} commit(s) "
+                f"ahead of origin's default. That is exactly the\n  state a "
+                f"finished run leaves behind, and inheriting it is how a roll "
+                f"ends up\n  rebuilding work that already exists.\n\n"
+                f"  Pass --base-branch explicitly (the same value given to "
+                f"orchestrate.py), or\n  check out the default branch if that "
+                f"is really the intended base."
+            )
+            return 2
+
+    findings = check_repo(repo_root, args.issue, base_ref)
     errors = [f for f in findings if f.startswith("ERROR:")]
     debris = [f for f in findings if not f.startswith("ERROR:")]
 
     issue_list = ", ".join(f"#{i}" for i in args.issue)
-    base = describe_base(repo_root)
+    base = describe_base(repo_root, base_ref, declared)
     if errors:
         for e in errors:
             print(e)
@@ -281,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
         # separately rather than leaving the operator to infer (#1959).
         if any(d.startswith("committed artifact:") for d in debris):
             print(
-                "\n  The committed artifacts above mean this branch ALREADY "
+                "\n  The committed artifacts above mean this BASE ALREADY "
                 "CONTAINS the issue's work,\n  so it is the wrong base for a "
                 "roll. A run started here would resolve the existing\n  "
                 "artifacts, find the tests already green, and report success "

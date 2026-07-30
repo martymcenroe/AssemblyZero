@@ -64,7 +64,7 @@ class TestCommittedArtifactDebris:
         repo = _make_repo(tmp_path)
         self._commit_artifacts(repo, "docs/lld/active/LLD-004.md")
 
-        findings = scc.find_committed_artifact_debris(repo, 4)
+        findings = scc.find_committed_artifact_debris(repo, 4, "HEAD")
         assert findings == ["committed artifact: docs/lld/active/LLD-004.md"]
 
     def test_committed_spec_is_found(self, tmp_path):
@@ -73,7 +73,7 @@ class TestCommittedArtifactDebris:
             repo, "docs/lld/drafts/spec-0004-implementation-readiness.md"
         )
 
-        assert scc.find_committed_artifact_debris(repo, 4) == [
+        assert scc.find_committed_artifact_debris(repo, 4, "HEAD") == [
             "committed artifact: "
             "docs/lld/drafts/spec-0004-implementation-readiness.md"
         ]
@@ -84,14 +84,14 @@ class TestCommittedArtifactDebris:
             repo, "docs/lld/active/LLD-041.md", "docs/lld/active/LLD-002.md"
         )
 
-        assert scc.find_committed_artifact_debris(repo, 4) == []
-        assert scc.find_committed_artifact_debris(repo, 41) == [
+        assert scc.find_committed_artifact_debris(repo, 4, "HEAD") == []
+        assert scc.find_committed_artifact_debris(repo, 41, "HEAD") == [
             "committed artifact: docs/lld/active/LLD-041.md"
         ]
 
     def test_clean_branch_has_no_committed_findings(self, tmp_path):
         repo = _make_repo(tmp_path)
-        assert scc.find_committed_artifact_debris(repo, 4) == []
+        assert scc.find_committed_artifact_debris(repo, 4, "HEAD") == []
 
     def test_untracked_artifact_is_not_double_reported(self, tmp_path):
         """An uncommitted artifact belongs to the untracked class only."""
@@ -99,7 +99,7 @@ class TestCommittedArtifactDebris:
         (repo / "docs" / "lld" / "active").mkdir(parents=True)
         (repo / "docs/lld/active/LLD-004.md").write_text("x", encoding="utf-8")
 
-        assert scc.find_committed_artifact_debris(repo, 4) == []
+        assert scc.find_committed_artifact_debris(repo, 4, "HEAD") == []
         assert scc.find_artifact_debris(repo, 4) == [
             "untracked artifact: docs/lld/active/LLD-004.md"
         ]
@@ -108,7 +108,7 @@ class TestCommittedArtifactDebris:
         repo = _make_repo(tmp_path)
         self._commit_artifacts(repo, "docs/lld/active/LLD-004.md")
 
-        findings = scc.check_repo(repo, [4])
+        findings = scc.check_repo(repo, [4], "HEAD")
         assert any(f.startswith("committed artifact:") for f in findings), findings
 
     def test_main_exits_nonzero_and_names_the_remedy(self, tmp_path, capsys):
@@ -142,4 +142,4 @@ class TestCommittedArtifactDebris:
     def test_describe_base_survives_a_repo_without_origin(self, tmp_path):
         """Throwaway repos have no origin/HEAD; the gate must not error out."""
         repo = _make_repo(tmp_path)
-        assert "branch main" in scc.describe_base(repo)
+        assert "main" in scc.describe_base(repo, "main", False)
