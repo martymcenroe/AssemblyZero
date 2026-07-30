@@ -18,7 +18,9 @@ This node populates:
 - error_message: "" on success, error text on failure
 """
 
+import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -793,6 +795,13 @@ def check_import_targets_exist(
 
     unresolvable: list[str] = []
     checked: set[str] = set()
+    # #1901: dotted imports that are neither stdlib nor first-party are
+    # third-party (PIL.Image, psutil.*, google.genai). Walking the repo
+    # tree for those flagged Pillow as "nonexistent" and cost a revision
+    # cycle per affected spec. They validate against the TARGET repo's
+    # own environment instead — grouped by top-level for one batched probe.
+    first_party_tops = _first_party_tops(repo_root)
+    third_party: dict[str, list[str]] = {}
 
     for block_match in code_block_pattern.finditer(spec):
         block_content = block_match.group(1)
@@ -817,7 +826,27 @@ def check_import_targets_exist(
             if _import_resolves(module_path, repo_root, new_file_paths):
                 continue
 
-            unresolvable.append(module_path)
+            if top_level in first_party_tops:
+                unresolvable.append(module_path)
+            else:
+                third_party.setdefault(top_level, []).append(module_path)
+
+    env_note = ""
+    if third_party:
+        probe = _probe_target_env(repo_root, sorted(third_party))
+        if probe is None:
+            # Cannot validate ≠ missing. The target env is the only honest
+            # authority for third-party imports (#1904: wrong-environment
+            # answers are worse than none); without it, give the benefit
+            # of the doubt and say so.
+            env_note = (
+                f" Target environment unavailable — {len(third_party)} "
+                f"third-party top-level import(s) not validated."
+            )
+        else:
+            for top, modules in sorted(third_party.items()):
+                if not probe.get(top, False):
+                    unresolvable.extend(modules)
 
     if unresolvable:
         mod_list = ", ".join(f"`{m}`" for m in unresolvable[:5])
@@ -826,16 +855,18 @@ def check_import_targets_exist(
             check_name="import_targets_exist",
             passed=False,
             details=(
-                f"Imports in spec reference nonexistent modules: "
-                f"{mod_list}{suffix}. Verify these modules exist or "
-                f"are being created by this spec."
+                f"Imports in spec reference modules that neither exist, nor "
+                f"are created by this spec, nor import in the target repo's "
+                f"environment: {mod_list}{suffix}. For first-party modules, "
+                f"verify the path; for third-party, add the dependency to "
+                f"the target repo or fix the import."
             ),
         )
 
     return CompletenessCheck(
         check_name="import_targets_exist",
         passed=True,
-        details=f"All {len(checked)} import targets validated.",
+        details=f"All {len(checked)} import targets validated.{env_note}",
     )
 
 
@@ -1149,6 +1180,89 @@ def _import_resolves(
 
 
 # Common stdlib top-level module names (subset for fast rejection)
+def _first_party_tops(repo_root: Path) -> set[str]:
+    """Top-level package names that belong to the target repo itself (#1901).
+
+    A dotted import whose top level is one of these gets the strict
+    exists-or-created-by-this-spec rule (#842); anything else is
+    third-party and validates against the target environment instead.
+    Covers flat layout (pkg at repo root) and src layout.
+    """
+    tops: set[str] = set()
+    for base in (repo_root, repo_root / "src"):
+        try:
+            if not base.is_dir():
+                continue
+            for child in base.iterdir():
+                if child.is_dir() and (child / "__init__.py").is_file():
+                    tops.add(child.name)
+        except OSError:
+            continue
+    return tops
+
+
+def _target_env_python(repo_root: Path) -> str | None:
+    """Absolute python path of the TARGET repo's poetry venv, or None.
+
+    Asks poetry for the env path explicitly instead of `poetry run python`
+    — poetry silently falls through to PATH when no venv exists (#1904),
+    which would answer the probe from the WRONG environment.
+    """
+    try:
+        proc = subprocess.run(
+            ["poetry", "env", "info", "--path"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    env_path = Path(proc.stdout.strip())
+    for candidate in (env_path / "Scripts" / "python.exe", env_path / "bin" / "python"):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _probe_target_env(repo_root: Path, tops: list[str]) -> dict[str, bool] | None:
+    """One batched find_spec probe inside the target repo's venv (#1901).
+
+    Returns {top_level: importable} — or None when the environment cannot
+    answer (no venv, timeout, bad output). Callers MUST treat None as
+    "cannot validate", never as "missing": a wrong-environment verdict is
+    worse than no verdict (#1904).
+    """
+    if not tops:
+        return {}
+    python = _target_env_python(repo_root)
+    if python is None:
+        return None
+    script = (
+        "import importlib.util, json, sys; "
+        "print(json.dumps({n: importlib.util.find_spec(n) is not None "
+        "for n in sys.argv[1:]}))"
+    )
+    try:
+        proc = subprocess.run(
+            [python, "-c", script, *tops],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        if not isinstance(result, dict):
+            return None
+        return {str(k): bool(v) for k, v in result.items()}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
 _KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({
     "abc", "argparse", "ast", "asyncio", "base64", "builtins", "collections",
     "contextlib", "copy", "csv", "dataclasses", "datetime", "decimal",
