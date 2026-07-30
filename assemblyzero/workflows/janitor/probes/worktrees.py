@@ -5,6 +5,7 @@ Issue #94: Lu-Tze: The Janitor
 
 from __future__ import annotations
 
+from assemblyzero.utils.git import parse_branch_names
 from assemblyzero.utils.shell import run_command
 from datetime import datetime, timedelta, timezone
 
@@ -169,8 +170,13 @@ def is_branch_merged(
     repo_root: str, branch: str, target: str = "main"
 ) -> bool:
     """Check if branch has been merged into target branch."""
+    # `--format` emits bare refnames (#1937). This function's `branch in
+    # merged_branches` is an EXACT-name comparison, so the old
+    # `lstrip("* ")` — which strips `*` and spaces but not the `+` git puts
+    # on a worktree-checked-out branch — made any such branch read as
+    # unmerged. That is a silent wrong answer, not a cosmetic one.
     result = run_command(
-        ["git", "branch", "--merged", target],
+        ["git", "branch", "--merged", target, "--format=%(refname:short)"],
         cwd=repo_root,
         capture_output=True,
         text=True,
@@ -178,5 +184,4 @@ def is_branch_merged(
     if result.returncode != 0:
         return False
 
-    merged_branches = [b.strip().lstrip("* ") for b in result.stdout.splitlines()]
-    return branch in merged_branches
+    return branch in parse_branch_names(result.stdout)

@@ -21,6 +21,11 @@ from pathlib import Path
 # {N}-implementation (implement tool), issue-{N} (orchestrator impl stage).
 _WORK_BRANCH_RE = re.compile(r"^(?:\d+-lld|\d+-implementation|issue-\d+)$")
 
+# git's `branch --list` decoration: `* ` (current) or `+ ` (checked out in
+# another worktree). Matched only as marker-then-whitespace so a branch named
+# `+foo` is not mangled. See parse_branch_names (#1937).
+_BRANCH_DECORATION_RE = re.compile(r"^[*+]\s+")
+
 
 class GitBranchError(RuntimeError):
     """Raised when a repo's checked-out branch cannot serve as a base."""
@@ -54,6 +59,39 @@ def current_branch(repo: Path | str) -> str:
             "branch (e.g. main or speedrun-attempt-N) before running."
         )
     return branch
+
+
+def parse_branch_names(stdout: str) -> list[str]:
+    """Bare branch names from any ``git branch`` listing, decorated or not.
+
+    ``git branch`` decorates its output: ``* `` for the current branch and
+    ``+ `` for a branch checked out in another worktree. Callers should pass
+    ``--format=%(refname:short)``, which suppresses both — this parser is the
+    backstop for listings that arrive decorated anyway.
+
+    It strips the markers only in the exact form git emits them (marker then
+    whitespace), so a branch legitimately named ``+foo`` survives intact.
+    ``lstrip("*+ ")`` would eat that leading ``+``; the pre-#1937 code used
+    ``lstrip("* ")``, which stripped the star but left the plus, so a
+    worktree-held branch parsed as ``+ issue-4``. That mattered because the
+    sites reading these listings include safety comparisons — #1762's "never
+    delete the branch the run stands on" — where a name that fails to match
+    opens the guard instead of closing it.
+
+    Args:
+        stdout: Raw stdout from a ``git branch`` listing.
+
+    Returns:
+        Non-empty branch names in the order git listed them. Git's detached-HEAD
+        pseudo-entry (``* (HEAD detached at abc1234)``) is not a branch and is
+        omitted.
+    """
+    names: list[str] = []
+    for line in stdout.splitlines():
+        name = _BRANCH_DECORATION_RE.sub("", line.strip()).strip()
+        if name and not name.startswith("(HEAD "):
+            names.append(name)
+    return names
 
 
 def is_generated_work_branch(branch: str) -> bool:

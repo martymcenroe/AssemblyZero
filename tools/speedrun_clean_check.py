@@ -75,16 +75,24 @@ def find_worktree_debris(repo_root: Path, issue: int) -> list[str]:
 
 def find_local_branch_debris(repo_root: Path, issue: int) -> list[str]:
     """Local branches issue-{N} and {N}-* (graveyard/* exempt by pattern)."""
+    # `--format` emits the bare refname. Plain `git branch --list` decorates the
+    # current branch with `* ` and a worktree-checked-out branch with `+ `, and
+    # the previous `lstrip('* ')` left that `+` in place (#1937) — mangling the
+    # report text and, worse, any exact-name comparison downstream. Not parsing
+    # decoration at all is the fix; widening the strip set only moves the bug.
     result = _run(
-        ["git", "branch", "--list", f"issue-{issue}", f"{issue}-*"],
+        [
+            "git", "branch", "--list", "--format=%(refname:short)",
+            f"issue-{issue}", f"{issue}-*",
+        ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         return [f"ERROR: git branch --list failed: {result.stderr.strip()}"]
     return [
-        f"local branch: {line.strip().lstrip('* ').strip()}"
-        for line in result.stdout.splitlines()
-        if line.strip()
+        f"local branch: {name}"
+        for name in (line.strip() for line in result.stdout.splitlines())
+        if name
     ]
 
 
