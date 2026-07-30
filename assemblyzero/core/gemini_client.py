@@ -373,6 +373,68 @@ def _spawn_pty_bounded(argv, cwd, dimensions, timeout_seconds=SPAWN_TIMEOUT_SECO
     )
 
 
+def _read_pty_bounded(proc, timeout_seconds: float):
+    """Drain a PTY child under a bound the child cannot defeat (#1910).
+
+    pywinpty's read() blocks until data arrives, so a deadline checked
+    between reads never fires against a silent child — observed live as 12
+    minutes inside read() while agy produced nothing. The drain runs in a
+    worker thread; on expiry the process TREE dies, which forces the
+    blocked read to EOF so the thread exits too.
+
+    Returns:
+        (True, text, exit_status) on completion;
+        (False, error_message, None) on timeout.
+    """
+    import threading
+
+    chunks: list[str] = []
+    done = threading.Event()
+    holder: dict = {}
+
+    def _drain() -> None:
+        try:
+            while True:
+                try:
+                    data = proc.read(4096)
+                except EOFError:
+                    break
+                except Exception:  # noqa: BLE001 — killed mid-read
+                    break
+                if data:
+                    chunks.append(data)
+                elif not proc.isalive():
+                    break
+                else:
+                    time.sleep(0.05)
+            try:
+                holder["exit_status"] = proc.exitstatus
+            except Exception:  # noqa: BLE001
+                holder["exit_status"] = None
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_drain, daemon=True)
+    thread.start()
+    if not done.wait(timeout=timeout_seconds):
+        try:
+            proc.terminate(force=True)
+        except Exception:  # noqa: BLE001
+            pass
+        # #1874: terminate() ends the console host, not the grandchildren.
+        try:
+            kill_process_tree(proc.pid)
+        except Exception:  # noqa: BLE001
+            pass
+        done.wait(timeout=10)  # the blocked read returns once the tree dies
+        return (
+            False,
+            f"agy CLI timeout ({timeout_seconds:.0f}s, silent child killed)",
+            None,
+        )
+    return True, "".join(chunks), holder.get("exit_status")
+
+
 def _is_spawn_failure(error_text: str) -> bool:
     """True when an error string carries a Windows process-creation code.
 
@@ -519,37 +581,17 @@ class GeminiClient:
                     )
                 except TimeoutError as e:
                     return False, "", str(e)
-                deadline = time.time() + timeout_seconds
-                timed_out = True
-                while time.time() < deadline:
-                    try:
-                        data = proc.read(4096)
-                    except EOFError:
-                        timed_out = False
-                        break
-                    if data:
-                        chunks.append(data)
-                    elif not proc.isalive():
-                        timed_out = False
-                        break
-                    else:
-                        time.sleep(0.05)
-                if timed_out:
-                    try:
-                        proc.terminate(force=True)
-                    except Exception:
-                        pass
-                    # #1874: terminate() ends the console host, not the
-                    # grandchildren agy spawned under it.
-                    try:
-                        kill_process_tree(proc.pid)
-                    except Exception:
-                        pass
-                    return False, "", f"agy CLI timeout ({timeout_seconds:.0f}s)"
-                try:
-                    exit_status = proc.exitstatus
-                except Exception:
-                    exit_status = None
+                # #1910: the old between-reads deadline was no bound at all —
+                # pywinpty's read() blocks, so a silent child parked the loop
+                # inside read() for 12+ minutes with the deadline never
+                # consulted. The drain runs in a worker thread the child
+                # cannot hold hostage.
+                ok, payload, exit_status = _read_pty_bounded(
+                    proc, timeout_seconds
+                )
+                if not ok:
+                    return False, "", payload
+                chunks.append(payload)
         except Exception as e:  # pywinpty raises assorted OS/runtime errors
             return False, "", f"agy CLI invocation failed: {e}"
 
