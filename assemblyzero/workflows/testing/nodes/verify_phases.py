@@ -30,6 +30,7 @@ from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_USAGEERROR,
     EXIT_NOTESTSCOLLECTED,
     describe_exit_code,
+    describe_run_outcome,
     route_by_exit_code,
 )
 from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
@@ -734,7 +735,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     parsed = result["parsed"]
 
     print(f"    [N5] Results: {parsed.get('passed', 0)} passed, {parsed.get('failed', 0)} failed | "
-          f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} ({describe_exit_code(exit_code)})")
+          f"Coverage: {parsed.get('coverage', 0):.1f}% | Exit: {exit_code} "
+          f"({describe_run_outcome(exit_code, parsed.get('failed'))})")
 
     # Save output to audit trail
     audit_dir_str = state.get("audit_dir", "")

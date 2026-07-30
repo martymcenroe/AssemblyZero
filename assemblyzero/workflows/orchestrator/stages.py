@@ -148,6 +148,14 @@ def _classify_halt_transience(sub_result: dict) -> bool | None:
     import json
     plan_path = sub_result.get("recovery_plan_path", "")
     if not plan_path:
+        # #1939: no recovery plan, but some sub-workflow guards halt with a
+        # bare error_message. A stagnation halt is deterministic given the
+        # worktree the retry will resume ("Skipped (already exists)" replayed
+        # attempt 1 verbatim on 2026-07-30) — retrying it burns full stage
+        # attempts to re-measure the number the guard already reported.
+        message = str(sub_result.get("error_message", "")).lower()
+        if any(m in message for m in ("stagnant", "stagnation")):
+            return False
         return None
     try:
         plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
