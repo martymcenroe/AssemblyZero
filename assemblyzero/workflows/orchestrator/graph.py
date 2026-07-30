@@ -43,6 +43,7 @@ from assemblyzero.workflows.orchestrator.state import (
     get_next_stage,
     update_stage_result,
 )
+from assemblyzero.core.errors import is_capacity_message
 from assemblyzero.core.halt_node import create_halt_node
 from assemblyzero.core.stage_watchdog import StageWatchdog
 
@@ -122,13 +123,24 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
         # (preserve current behavior for non-halt failures). Closes #1463.
         transient = stage_result.get("transient", True)
         if attempt < max_retries and transient:
+            # #1909: capacity storms outlast a flat delay — the 2026-07-29
+            # phase-4 run burned attempts 1-3 inside ~2 minutes while the
+            # provider's 503 storm ran for several. Escalate delays for
+            # capacity-class failures; everything else keeps retry_delay.
+            if is_capacity_message(stage_result.get("error_message", "")):
+                delays = config.get("capacity_retry_delays", [10, 60, 300])
+                delay = delays[min(attempt - 1, len(delays) - 1)]
+                flavor = " [capacity storm — escalated backoff]"
+            else:
+                delay = retry_delay
+                flavor = ""
             print(
                 f"[ORCHESTRATOR] Stage '{current_stage}' failed (attempt {attempt}/{max_retries}). "
-                f"Retrying in {retry_delay}s..."
+                f"Retrying in {delay}s...{flavor}"
             )
             # Update attempt count in result
             stage_result["attempts"] = attempt
-            time.sleep(retry_delay)
+            time.sleep(delay)
             last_state = new_state
         else:
             if not transient:

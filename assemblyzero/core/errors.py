@@ -394,3 +394,24 @@ def _extract_retry_after(exc: Exception) -> Optional[float]:
             except (ValueError, TypeError):
                 pass
     return None
+
+
+# ---------------------------------------------------------------------------
+# Capacity-signature detection (#1909)
+# ---------------------------------------------------------------------------
+
+# Substrings that mark a provider-capacity failure in flattened error text.
+# Single source of truth shared by halt classification (halt_node.py) and the
+# orchestrator's capacity-aware stage retry escalation (graph.py).
+CAPACITY_MESSAGE_MARKERS = ("capacity exhausted", "503", "529", "overloaded")
+
+
+def is_capacity_message(message: str) -> bool:
+    """True when flattened error text carries a provider-capacity signature.
+
+    Capacity storms (503/529/overloaded) are the transient class that
+    outlasts a flat retry delay — callers use this to pick the escalating
+    backoff schedule instead of retry_delay_seconds.
+    """
+    lower = message.lower()
+    return any(marker in lower for marker in CAPACITY_MESSAGE_MARKERS)
