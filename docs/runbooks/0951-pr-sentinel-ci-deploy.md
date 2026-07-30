@@ -1,8 +1,10 @@
 # 0951 — pr-sentinel: CI deploy via Cloudflare Workers Builds
 
-- **Date:** 2026-07-30
+- **Date:** 2026-07-30 (UI section corrected same day against the live dashboard)
 - **Issue:** #1974
 - **Status:** Setup pending — the dashboard connection is a one-time operator action; everything else is already in place.
+
+> **Writing rule for this runbook.** Every UI step here is either linked to its current Cloudflare docs page or verified against a screenshot of the live dashboard. Do **not** update it from recalled navigation. #1818 records two incidents of stale Cloudflare paths being handed to the operator, and the first draft of this file repeated the mistake — it listed Root directory as a top-level field (it is under Advanced settings) and Build watch paths as available at connect time (it only appears after connecting). If Cloudflare moves something, re-query the docs and correct this file.
 - **Related:** #1972 (deployed-source proof), #1973 (the manual deploy that motivated this), standard `0016-pr-sentinel-system-architecture.md`
 
 ## Why this exists
@@ -43,15 +45,44 @@ Per the [current Workers Builds docs](https://developers.cloudflare.com/workers/
 2. Select the **`pr-sentinel`** Worker.
 3. **Settings** → **Builds** → **Connect**, and follow the prompts to connect `martymcenroe/AssemblyZero`.
 
-Then set these build settings:
+### What the "Connect to a repository" panel actually contains
+
+Verified against the live dashboard 2026-07-30. **Not all settings are on this panel** — an earlier version of this runbook listed them as if they were, which sent the operator hunting for a field that does not exist there.
+
+The panel has, top to bottom:
+
+- **Git account** — a selector, **empty until you choose an account**. If nothing is listed, use the add-account option, which installs and authorizes the [Cloudflare Workers and Pages GitHub App](https://github.com/apps/cloudflare-workers-and-pages). This is the first required field; leave it unset and the rest of the form may not behave.
+- **Repository** — pick `AssemblyZero`.
+- **Production branch** — `main`.
+- **Builds for non-production branches** — checkbox, **checked by default. Uncheck it.** With it on, every push to any non-production branch triggers a build running `npx wrangler versions upload`. AssemblyZero has constant agent branch activity, and because watch paths cannot be scoped until *after* connecting, this would burn account build limits on pushes that never touch `sentinel/`. There is also no upside: preview versions exist to exercise a change before promoting it, and this Worker is a webhook receiver with no UI — its real test is the vitest suite, which already runs in AssemblyZero's CI. Re-enable later only if per-branch preview versions become useful, and only once watch paths are scoped.
+- **Build command** *(marked Optional)* — see table below.
+- **Deploy command** — pre-filled `npx wrangler deploy`.
+- **Advanced settings** — a set of collapsed accordions. **Root directory is in here**, not at top level. Expand the chevron. Also holds Non-production branch deploy command, API Token, Build variables, and Build caching.
+
+| Setting | Value | Where | Why |
+|---|---|---|---|
+| **Root directory** | `sentinel` | Advanced settings (collapsed) | The Wrangler config lives in a subdirectory of a large repo. Documented [monorepo](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos) mechanism. Required — without it the build finds no `wrangler.toml`. |
+| **Deploy command** | `npx wrangler deploy` | Main panel | The default. Stated explicitly so it is not silently changed. |
+| **Build command** | `npm test` | Main panel, Optional | Gates the deploy on the vitest suite, answering the "should deploys be test-gated?" question #1974 raised. Optional — if the form misbehaves, leave it blank and add it after connecting. |
+| **API token** | leave blank | Advanced settings | Cloudflare auto-generates and reuses one. Do not create a token. |
+
+### Settings that only exist AFTER connecting
+
+**Build watch paths is not on the connect panel.** Per the [Workers Builds changelog](https://developers.cloudflare.com/changelog/post/2024-12-29-faster-builds/): "Once connected, you'll see options to configure Build Caching and Build Watch Paths."
+
+So after the connection succeeds, return to **Settings → Builds** and set:
 
 | Setting | Value | Why |
 |---|---|---|
-| **Root directory** | `sentinel` | The Wrangler config lives in a subdirectory of a large repo. This is the documented [monorepo](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos) mechanism. |
-| **Build command** | `npm test` | Gates the deploy on the vitest suite. A failing test means no deploy — this answers the "should deploys be test-gated?" question #1974 raised. |
-| **Deploy command** | `npx wrangler deploy` | The default. Listed explicitly so it is not silently changed. |
-| **Build watch paths** | `sentinel/*` | AssemblyZero receives many pushes that do not touch the Worker. Without this, every push to `main` triggers a build. See [Build Watch Paths](https://developers.cloudflare.com/workers/ci-cd/builds/build-watch-paths/). |
-| **API token** | leave blank | Cloudflare auto-generates and reuses one. Do not create a token. |
+| **Build watch paths** | `sentinel/*` | AssemblyZero receives many pushes that never touch the Worker. Without this, every push to `main` triggers a build. See [Build Watch Paths](https://developers.cloudflare.com/workers/ci-cd/builds/build-watch-paths/). |
+
+### If the panel misbehaves
+
+Reported symptoms on first setup: the panel flashing, and Build command / Root directory not persisting.
+
+Check the **Git account** selector first — it is the first required field and was empty when this was observed.
+
+Fallback: connect with defaults and nothing else set, then configure Root directory in the ordinary **Settings → Builds** page rather than the connect panel. A first build that fails costs nothing — **a failed build deploys nothing** — so an initial failure is a safe way to get past a stuck form.
 
 ### The one trap
 
