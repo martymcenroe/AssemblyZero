@@ -530,24 +530,31 @@ def _extract_assertions(content: str) -> list[str]:  # pragma: no cover
     return assertions[:5]  # Limit to 5 assertions
 
 
-def extract_coverage_target(lld_content: str) -> int:  # pragma: no cover
+def extract_coverage_target(lld_content: str) -> int:
     """Extract coverage target from LLD.
 
     Looks for patterns like:
     - Coverage: 90%
     - Target coverage: 85%
     - Code coverage >= 80%
+    - Coverage Target: ≥89%   (#1943: comparators before the number)
+
+    #1943: every live LLD writes its target as '≥N%', which the old
+    digit-first patterns could not parse — extraction silently fell to
+    the default, nullifying the #1940 repo-gate pin at the consumer end
+    (a declared 89 ran as 95).
 
     Args:
         lld_content: Full LLD content.
 
     Returns:
-        Coverage target percentage (default 90).
+        Coverage target percentage (default 95, per ADR 0207).
     """
+    comparator = r"(?:[≥≤>=<≧≦]|>=|<=)?\s*"
     patterns = [
-        r"coverage[:\s]+(\d+)%",
-        r"target coverage[:\s]+(\d+)%",
-        r"code coverage[:\s]*>=?\s*(\d+)%",
+        rf"coverage(?: target)?[:\*\s]+{comparator}(\d+)%",
+        rf"target coverage[:\*\s]+{comparator}(\d+)%",
+        rf"code coverage[:\*\s]*{comparator}(\d+)%",
         r"(\d+)%\s*coverage",
     ]
 
