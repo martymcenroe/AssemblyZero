@@ -142,6 +142,20 @@ def find_open_pr_debris(repo_root: Path, issue: int) -> list[str]:
     return findings
 
 
+def _artifact_needles(issue: int) -> tuple[str, ...]:
+    """Filename fragments identifying one issue's pipeline artifacts.
+
+    Shared by the untracked and committed scans so the two cannot drift apart
+    on what counts as this issue's artifact (#1959).
+    """
+    return (
+        f"lld-{issue:03d}",
+        f"lld-{issue}",
+        f"spec-{issue:04d}",
+        f"spec-{issue}",
+    )
+
+
 def find_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     """Untracked pipeline artifacts under docs/lld for this issue.
 
@@ -153,12 +167,7 @@ def find_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     result = _run(["git", "status", "--porcelain", "-uall"], cwd=repo_root)
     if result.returncode != 0:
         return [f"ERROR: git status failed: {result.stderr.strip()}"]
-    needles = (
-        f"lld-{issue:03d}",
-        f"lld-{issue}",
-        f"spec-{issue:04d}",
-        f"spec-{issue}",
-    )
+    needles = _artifact_needles(issue)
     findings: list[str] = []
     for line in result.stdout.splitlines():
         if not line.startswith("??"):
@@ -170,6 +179,58 @@ def find_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     return findings
 
 
+def find_committed_artifact_debris(repo_root: Path, issue: int) -> list[str]:
+    """Pipeline artifacts for this issue already COMMITTED on the current branch.
+
+    The untracked scan above reads `git status`, so it sees only what a killed
+    roll left lying around. It cannot see the quieter case: a branch that
+    already CONTAINS this issue's finished work. A roll started there finds the
+    LLD present and the implementation's tests already green, so it runs fast,
+    exits successfully, and produces nothing — while the preflight that exists
+    to guarantee a run starts from verified zero signs off on it (#1959).
+
+    That is the state boostgauge's `hardening-run-11` was in when this was
+    found: six phases of committed LLDs, specs, and implementations, and a
+    CLEAN verdict for every one of the six issues.
+    """
+    result = _run(["git", "ls-files", "--", "docs/lld"], cwd=repo_root)
+    if result.returncode != 0:
+        return [f"ERROR: git ls-files failed: {result.stderr.strip()}"]
+    needles = _artifact_needles(issue)
+    findings: list[str] = []
+    for line in result.stdout.splitlines():
+        path = line.strip()
+        if not path:
+            continue
+        lower = path.lower().replace("\\", "/")
+        if any(n in lower for n in needles):
+            findings.append(f"committed artifact: {path}")
+    return findings
+
+
+def describe_base(repo_root: Path) -> str:
+    """Current branch and its divergence from origin's default, for context.
+
+    A CLEAN verdict is only meaningful relative to the branch it was measured
+    on, so the verdict line carries that branch (#1959).
+    """
+    branch = _run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo_root
+    )
+    if branch.returncode != 0:
+        return "unknown branch"
+    name = branch.stdout.strip() or "unknown branch"
+    count = _run(
+        ["git", "rev-list", "--count", f"origin/HEAD..{name}"], cwd=repo_root
+    )
+    if count.returncode != 0 or not count.stdout.strip().isdigit():
+        return f"branch {name}"
+    ahead = int(count.stdout.strip())
+    if ahead == 0:
+        return f"branch {name}, level with origin's default"
+    return f"branch {name}, {ahead} commit(s) ahead of origin's default"
+
+
 def check_repo(repo_root: Path, issues: list[int]) -> list[str]:
     """All findings for the given issues. Empty list == verified clean."""
     findings: list[str] = []
@@ -179,6 +240,7 @@ def check_repo(repo_root: Path, issues: list[int]) -> list[str]:
         findings.extend(find_remote_branch_debris(repo_root, issue))
         findings.extend(find_open_pr_debris(repo_root, issue))
         findings.extend(find_artifact_debris(repo_root, issue))
+        findings.extend(find_committed_artifact_debris(repo_root, issue))
     return findings
 
 
@@ -203,19 +265,36 @@ def main(argv: list[str] | None = None) -> int:
     debris = [f for f in findings if not f.startswith("ERROR:")]
 
     issue_list = ", ".join(f"#{i}" for i in args.issue)
+    base = describe_base(repo_root)
     if errors:
         for e in errors:
             print(e)
         return 2
     if debris:
         print(
-            f"DEBRIS: {repo_root.name} is NOT clean for {issue_list} — "
-            f"{len(debris)} finding(s):"
+            f"DEBRIS: {repo_root.name} is NOT clean for {issue_list} on "
+            f"{base} -- {len(debris)} finding(s):"
         )
         for d in debris:
             print(f"  {d}")
+        # The two artifact classes need opposite remedies, so name them
+        # separately rather than leaving the operator to infer (#1959).
+        if any(d.startswith("committed artifact:") for d in debris):
+            print(
+                "\n  The committed artifacts above mean this branch ALREADY "
+                "CONTAINS the issue's work,\n  so it is the wrong base for a "
+                "roll. A run started here would resolve the existing\n  "
+                "artifacts, find the tests already green, and report success "
+                "having built nothing.\n  Roll from a base that predates the "
+                "work (or reset the issue) rather than deleting\n  these "
+                "files: unlike untracked debris, they are somebody's merged "
+                "commit."
+            )
         return 1
-    print(f"CLEAN: {repo_root.name} carries zero speedrun debris for {issue_list}.")
+    print(
+        f"CLEAN: {repo_root.name} carries zero speedrun debris for "
+        f"{issue_list} on {base}."
+    )
     return 0
 
 
