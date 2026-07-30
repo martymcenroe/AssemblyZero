@@ -10,7 +10,7 @@ Each stage function:
 
 from __future__ import annotations
 
-from assemblyzero.utils.git import current_branch
+from assemblyzero.utils.git import GitBranchError, current_branch
 from assemblyzero.utils.shell import run_command
 import json
 import os
@@ -698,6 +698,35 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             if target_repo:
                 add_cmd += ["-C", target_repo]
             add_cmd += ["worktree", "add", str(worktree_path), "-b", branch_name]
+            # #1960: name the base explicitly. `worktree add -b X <path>` with
+            # no commit-ish branches from whatever the target repo happens to
+            # be checked out on, so the content a roll starts from was decided
+            # by ambient state — the same trap #1852/#1903 closed for
+            # hand-driven branching. base_branch is already resolved upstream
+            # (graph.py: the flag, else the target's current branch), so the
+            # default behaviour is unchanged; what changes is that passing
+            # --base-branch now controls the roll's CONTENT as well as the PR
+            # target, and the resolved base is printed rather than implied.
+            base_branch = state.get("base_branch", "")
+            if not base_branch:
+                # current_branch raises GitBranchError on detached HEAD by
+                # design (it must not silently fall back to main), and OSError
+                # when the path is not a directory git can run in. Resolving the
+                # base is an improvement here, not a new failure mode, so a repo
+                # it cannot answer for keeps the previous ambient-HEAD behaviour
+                # rather than failing the stage.
+                try:
+                    base_branch = current_branch(target_repo or ".")
+                except (GitBranchError, OSError) as err:
+                    print(f"    [WARN] base branch unresolved: {err}")
+            if base_branch:
+                add_cmd.append(base_branch)
+                print(f"    Worktree base: {base_branch}")
+            else:
+                print(
+                    "    [WARN] could not resolve a base branch; worktree "
+                    "will be carved from the target repo's current HEAD"
+                )
             run_command(
                 add_cmd,
                 check=True,

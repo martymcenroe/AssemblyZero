@@ -53,7 +53,10 @@ class TestBranchSweepIsAttemptBranchAware:
         def fake_run(cmd, cwd=None, check=False):
             calls.append(cmd)
             if cmd[:3] == ["git", "branch", "--list"]:
-                return _completed(stdout="  1234-lld\n* 1234-attempt\n")
+                # Bare refnames: the sweep now passes
+                # --format=%(refname:short), so git emits no `* ` / `+ `
+                # decoration to parse (#1937).
+                return _completed(stdout="1234-lld\n1234-attempt\n")
             if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
                 return _completed(stdout="1234-attempt\n")
             return _completed()
@@ -93,7 +96,10 @@ class TestBranchSweepIsAttemptBranchAware:
         with patch("speedrun_reset._run", return_value=_completed(stdout="")) as run:
             delete_local_branches(tmp_path, 1234)
         listing = run.call_args_list[0].args[0]
-        assert listing == ["git", "branch", "--list", "1234-*", "issue-1234"]
+        assert listing == [
+            "git", "branch", "--list", "--format=%(refname:short)",
+            "1234-*", "issue-1234",
+        ]
 
     def test_unmerged_branch_is_left_alone_without_suggesting_force_delete(
         self, tmp_path, capsys

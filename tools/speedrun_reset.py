@@ -200,16 +200,23 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
     reset can never delete the very branch the attempt is standing on
     (#1762).
     """
+    # `--format` emits the bare refname — see #1937. Plain output decorates a
+    # worktree-checked-out branch with `+ `, which the old `lstrip('* ')` left
+    # intact, so the name compared against `active` below (and printed in the
+    # skip message) was `+ issue-4` rather than `issue-4`.
     result = _run(
-        ["git", "branch", "--list", f"{issue}-*", f"issue-{issue}"],
+        [
+            "git", "branch", "--list", "--format=%(refname:short)",
+            f"{issue}-*", f"issue-{issue}",
+        ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         return 0
     branches = [
-        line.strip().lstrip("* ").strip()
-        for line in result.stdout.splitlines()
-        if line.strip()
+        name
+        for name in (line.strip() for line in result.stdout.splitlines())
+        if name
     ]
     active = current_branch(repo_root)
     deleted = 0
@@ -248,12 +255,17 @@ def delete_remote_branches(repo_root: Path, issue: int) -> int:
     exclusion the local sweep honours (#1762).
     """
     candidates = [f"issue-{issue}"]
-    result = _run(["git", "branch", "--list", f"{issue}-*"], cwd=repo_root)
+    result = _run(
+        ["git", "branch", "--list", "--format=%(refname:short)", f"{issue}-*"],
+        cwd=repo_root,
+    )
     if result.returncode == 0:
+        # Bare refnames only (#1937): a `+ `-decorated name here would be
+        # pushed to origin as a nonexistent ref and silently skipped.
         candidates.extend(
-            line.strip().lstrip("* ").strip()
-            for line in result.stdout.splitlines()
-            if line.strip()
+            name
+            for name in (line.strip() for line in result.stdout.splitlines())
+            if name
         )
     # Whatever the local sweep already deleted still needs removing on origin,
     # so ask origin what it actually has rather than trusting local state.
