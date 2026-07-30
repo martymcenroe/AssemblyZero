@@ -1019,9 +1019,20 @@ def detect_unknown_method_calls(
         for a in self_assign_re.finditer(block_content):
             spec_defined.add(a.group(1))
 
+    # #1952: stdlib module names are exempt receivers even without a
+    # visible import — spec snippets legitimately omit import headers
+    # (`copy.deepcopy(config)` flagged with no `import copy` in any fence).
+    import sys as _sys
+
+    exempt_receivers |= set(_sys.stdlib_module_names)
+
     # One propagation pass: `draw = ImageDraw.Draw(...)` makes `draw` an
     # exempt receiver too. Single level, matching how spec snippets read.
-    assign_re = re.compile(r"^\s*(\w+)\s*=\s*(\w+)\.", re.MULTILINE)
+    # #1952: same for self-attributes — `self.root = tk.Tk()` then
+    # `self.root.attributes(...)`: the call regex sees receiver `root`,
+    # so the ATTRIBUTE name joins the exempt receivers when its value
+    # came from one (the whole tkinter widget surface arrives this way).
+    assign_re = re.compile(r"^\s*(?:self\.)?(\w+)\s*=\s*(\w+)[.(]", re.MULTILINE)
     for block_content in blocks:
         for a in assign_re.finditer(block_content):
             if a.group(2) in exempt_receivers:
