@@ -974,17 +974,56 @@ def detect_unknown_method_calls(
     """
     # Extract method/function call names from code fences only
     code_block_re = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
-    # Match  <ident>.<method>(  —  the opening paren marks a call, not an annotation
-    method_call_re = re.compile(r"\b\w+\.(\w+)\s*\(")
+    # Match  <receiver>.<method>(  —  the opening paren marks a call, not an
+    # annotation. #1948: capture the receiver too — WHOSE method it is decides
+    # whether the target repo's symbol table has any authority over it.
+    method_call_re = re.compile(r"\b(\w+)\.(\w+)\s*\(")
+    import_re = re.compile(
+        r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
+        re.MULTILINE,
+    )
+    def_re = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
+
+    blocks = [m.group(1) for m in code_block_re.finditer(text)]
+
+    # #1948: three universes the target repo's symbol table has no authority
+    # over — the phase-5 kill was this check rejecting Pillow's documented
+    # API (ImageDraw.Draw, alpha_composite), pathlib, and a method the spec
+    # itself defined. Same wrong-universe disease #1901 fixed for imports.
+    exempt_receivers: set[str] = set()
+    spec_defined: set[str] = set()
+    for block_content in blocks:
+        for imp in import_re.finditer(block_content):
+            if imp.group(1):  # from X import a, b — names land in scope
+                exempt_receivers.add(imp.group(1).split(".")[0])
+                for name in imp.group(2).split(","):
+                    name = name.strip().split(" as ")
+                    exempt_receivers.add(name[-1].strip())
+            elif imp.group(3):  # import X [as y]
+                exempt_receivers.add(
+                    imp.group(4) or imp.group(3).split(".")[0]
+                )
+        for d in def_re.finditer(block_content):
+            spec_defined.add(d.group(1))
+
+    # One propagation pass: `draw = ImageDraw.Draw(...)` makes `draw` an
+    # exempt receiver too. Single level, matching how spec snippets read.
+    assign_re = re.compile(r"^\s*(\w+)\s*=\s*(\w+)\.", re.MULTILINE)
+    for block_content in blocks:
+        for a in assign_re.finditer(block_content):
+            if a.group(2) in exempt_receivers:
+                exempt_receivers.add(a.group(1))
 
     flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
 
-    for block_match in code_block_re.finditer(text):
-        block_content = block_match.group(1)
+    for block_content in blocks:
         for call_match in method_call_re.finditer(block_content):
-            method_name = call_match.group(1)
+            receiver = call_match.group(1)
+            method_name = call_match.group(2)
 
-            if method_name in symbol_set:
+            if receiver in exempt_receivers:
+                continue
+            if method_name in symbol_set or method_name in spec_defined:
                 continue
             if method_name in _API_SYMBOL_ALLOWLIST:
                 continue
