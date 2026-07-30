@@ -135,7 +135,7 @@ class TestVerdict:
         with patch.object(
             scc, "find_remote_branch_debris", return_value=[]
         ), patch.object(scc, "find_open_pr_debris", return_value=[]):
-            findings = scc.check_repo(repo, [9])
+            findings = scc.check_repo(repo, [9], "HEAD")
         assert findings == ["local branch: issue-9"]
 
     def test_main_exit_codes(self, tmp_path):

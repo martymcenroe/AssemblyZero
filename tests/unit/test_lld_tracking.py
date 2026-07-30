@@ -267,17 +267,24 @@ class TestLoadLLDTracking:
         # Set up lld-status.json in the expected location
         status_dir = tmp_path / "docs" / "lld"
         status_dir.mkdir(parents=True)
+        # #1160: entries are nested under the repo they belong to. A flat
+        # `issues` map is the pre-#1160 layout and is no longer served to any
+        # repo — see TestLegacyUnscopedMigration.
         tracking_data = {
-            "version": "1.0",
+            "version": "2.0",
             "last_updated": "2026-02-25T00:00:00Z",
-            "issues": {
-                "100": {
-                    "lld_path": "docs/lld/active/LLD-100.md",
-                    "status": "approved",
-                    "has_gemini_review": True,
-                    "final_verdict": "APPROVED",
-                    "last_review_date": "2026-02-20",
-                    "review_count": 1,
+            "repos": {
+                Path(tmp_path).resolve().as_posix(): {
+                    "issues": {
+                        "100": {
+                            "lld_path": "docs/lld/active/LLD-100.md",
+                            "status": "approved",
+                            "has_gemini_review": True,
+                            "final_verdict": "APPROVED",
+                            "last_review_date": "2026-02-20",
+                            "review_count": 1,
+                        },
+                    },
                 },
             },
         }
@@ -329,32 +336,36 @@ class TestLoadLLDTracking:
         status_dir = tmp_path / "docs" / "lld"
         status_dir.mkdir(parents=True)
         tracking_data = {
-            "version": "1.0",
+            "version": "2.0",
             "last_updated": "2026-02-25T00:00:00Z",
-            "issues": {
-                "100": {
-                    "lld_path": "docs/lld/active/LLD-100.md",
-                    "status": "approved",
-                    "has_gemini_review": True,
-                    "final_verdict": "APPROVED",
-                    "last_review_date": "2026-02-20",
-                    "review_count": 1,
-                },
-                "200": {
-                    "lld_path": "docs/lld/active/LLD-200.md",
-                    "status": "draft",
-                    "has_gemini_review": False,
-                    "final_verdict": None,
-                    "last_review_date": None,
-                    "review_count": 0,
-                },
-                "300": {
-                    "lld_path": "docs/lld/active/LLD-300.md",
-                    "status": "blocked",
-                    "has_gemini_review": True,
-                    "final_verdict": "REJECTED",
-                    "last_review_date": "2026-02-24",
-                    "review_count": 1,
+            "repos": {
+                Path(tmp_path).resolve().as_posix(): {
+                    "issues": {
+                        "100": {
+                            "lld_path": "docs/lld/active/LLD-100.md",
+                            "status": "approved",
+                            "has_gemini_review": True,
+                            "final_verdict": "APPROVED",
+                            "last_review_date": "2026-02-20",
+                            "review_count": 1,
+                        },
+                        "200": {
+                            "lld_path": "docs/lld/active/LLD-200.md",
+                            "status": "draft",
+                            "has_gemini_review": False,
+                            "final_verdict": None,
+                            "last_review_date": None,
+                            "review_count": 0,
+                        },
+                        "300": {
+                            "lld_path": "docs/lld/active/LLD-300.md",
+                            "status": "blocked",
+                            "has_gemini_review": True,
+                            "final_verdict": "REJECTED",
+                            "last_review_date": "2026-02-24",
+                            "review_count": 1,
+                        },
+                    },
                 },
             },
         }

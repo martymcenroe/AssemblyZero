@@ -38,10 +38,21 @@ LLD_DONE_DIR = Path("docs/lld/done")
 # #1151: LLD approval cache lives OUTSIDE any repo tree. Pre-#1151 this
 # was relative and dirtied every worktree the moment a workflow run
 # wrote an approval entry. Operational cache state shouldn't live in
-# tracked repo paths. Caller pattern `target_repo / LLD_STATUS_FILE`
-# now resolves to the absolute path -- cache is shared across target
-# repos. Each entry self-identifies via issue_number / target_repo.
+# tracked repo paths.
+#
+# #1160: the file is shared by every target repo, and the old caller pattern
+# `target_repo / LLD_STATUS_FILE` collapses to this absolute path (Python's
+# `/` semantics), so target_repo was silently discarded. Entries were keyed by
+# bare issue number, and the comment here claimed each one "self-identifies via
+# issue_number / target_repo" -- it did not; no entry carried a repo at all.
+# boostgauge #4 and any other repo's #4 shared one entry, and every entry
+# outlived every repo reset. Entries are now nested under a repo key; see
+# _repo_key and _read_status_file.
 LLD_STATUS_FILE = Path.home() / ".claude" / "assemblyzero" / "lld-status.json"
+
+# Schema version of the shared cache file. "1.0" is the pre-#1160 flat layout
+# whose entries cannot be attributed to a repo.
+LLD_STATUS_CACHE_VERSION = "2.0"
 IDEAS_ACTIVE_DIR = Path("ideas/active")
 IDEAS_DONE_DIR = Path("ideas/done")
 
@@ -577,54 +588,111 @@ class LLDStatusCache(TypedDict):
     issues: dict[str, LLDStatusEntry]
 
 
-def load_lld_tracking(target_repo: Path) -> LLDStatusCache:
-    """Load lld-status.json cache file.
+def _repo_key(target_repo: Path) -> str:
+    """Stable identity for a target repo inside the shared cache file (#1160).
 
-    Args:
-        target_repo: Target repository root.
-
-    Returns:
-        LLDStatusCache dict. Returns empty cache if file doesn't exist.
+    The resolved absolute path, POSIX-normalised so the same repo reached via
+    different separators or a relative path lands on one key. The cache is
+    machine-local, so an absolute path is the right identity — repo *names*
+    collide across the fleet, which is the collision this fix exists to end.
     """
-    status_file = target_repo / LLD_STATUS_FILE
+    try:
+        return Path(target_repo).resolve().as_posix()
+    except OSError:
+        return Path(target_repo).as_posix()
 
-    if not status_file.exists():
-        return {
-            "version": "1.0",
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-            "issues": {},
-        }
+
+def _empty_status_file() -> dict:
+    return {
+        "version": LLD_STATUS_CACHE_VERSION,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "repos": {},
+    }
+
+
+def _read_status_file() -> dict:
+    """The whole shared cache file, migrated forward to the repo-scoped layout.
+
+    A pre-#1160 file is flat: ``issues`` keyed by bare issue number, with no
+    record of which repo each entry came from. Those entries genuinely cannot
+    be attributed, so they are moved aside under ``legacy_unscoped`` — kept on
+    disk, never served to a repo. An approval whose provenance is unknown must
+    not be trusted, which is #279's rule ("a stale approval must be
+    invalidated") applied to provenance rather than to age. The cost of
+    dropping them is one extra review per issue; the cost of honouring them is
+    skipping a review the workflow was told to perform.
+    """
+    if not LLD_STATUS_FILE.exists():
+        return _empty_status_file()
 
     try:
-        content = status_file.read_text(encoding="utf-8")
-        data = json.loads(content)
-        return data
+        data = json.loads(LLD_STATUS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
+        return _empty_status_file()
+
+    if not isinstance(data, dict):
+        return _empty_status_file()
+
+    if "repos" not in data:
+        legacy = data.get("issues")
         return {
-            "version": "1.0",
-            "last_updated": datetime.now(timezone.utc).isoformat(),
-            "issues": {},
+            "version": LLD_STATUS_CACHE_VERSION,
+            "last_updated": data.get(
+                "last_updated", datetime.now(timezone.utc).isoformat()
+            ),
+            "repos": {},
+            "legacy_unscoped": legacy if isinstance(legacy, dict) else {},
         }
+
+    if not isinstance(data.get("repos"), dict):
+        data["repos"] = {}
+    return data
+
+
+def load_lld_tracking(target_repo: Path) -> LLDStatusCache:
+    """Load THIS target repo's slice of the shared LLD status cache.
+
+    Args:
+        target_repo: Target repository root. Now actually honoured — before
+            #1160 it was discarded by `target_repo / LLD_STATUS_FILE`, so every
+            repo read every other repo's entries.
+
+    Returns:
+        LLDStatusCache dict. Empty cache when the file is missing, corrupt, or
+        carries nothing for this repo.
+    """
+    raw = _read_status_file()
+    slice_ = raw.get("repos", {}).get(_repo_key(target_repo), {})
+    issues = slice_.get("issues") if isinstance(slice_, dict) else None
+    return {
+        "version": LLD_STATUS_CACHE_VERSION,
+        "last_updated": raw.get(
+            "last_updated", datetime.now(timezone.utc).isoformat()
+        ),
+        "issues": issues if isinstance(issues, dict) else {},
+    }
 
 
 def save_lld_tracking(tracking: LLDStatusCache, target_repo: Path) -> None:
-    """Save lld-status.json cache file.
+    """Write THIS target repo's slice back into the shared cache file.
+
+    Read-modify-write of the whole file: other repos' slices are preserved
+    untouched, so two target repos no longer overwrite each other (#1160).
 
     Args:
-        tracking: LLDStatusCache dict to save.
+        tracking: LLDStatusCache dict for this repo.
         target_repo: Target repository root.
     """
-    status_file = target_repo / LLD_STATUS_FILE
+    raw = _read_status_file()
+    raw.setdefault("repos", {})[_repo_key(target_repo)] = {
+        "issues": tracking.get("issues", {}),
+    }
+    raw["version"] = LLD_STATUS_CACHE_VERSION
+    raw["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-    # Ensure directory exists
-    status_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Update timestamp
-    tracking["last_updated"] = datetime.now(timezone.utc).isoformat()
-
-    # Write file
-    status_file.write_text(
-        json.dumps(tracking, indent=2) + "\n",
+    LLD_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LLD_STATUS_FILE.write_text(
+        json.dumps(raw, indent=2) + "\n",
         encoding="utf-8",
     )
 
