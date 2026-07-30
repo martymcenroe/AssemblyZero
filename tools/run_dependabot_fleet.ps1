@@ -36,15 +36,55 @@ $env:PYTHONIOENCODING = 'utf-8'
 $env:PYTHONUTF8 = '1'
 
 $LogFile = 'C:\Users\mcwiz\Projects\dependabot-fleet.log'
-$RepoRoot = 'C:\Users\mcwiz\Projects\AssemblyZero'
+
+# #1879: the scheduled run executes a PINNED clone, never the shared
+# interactive checkout. The interactive AssemblyZero tree cycles branches
+# continuously under concurrent sessions, so "what code runs at 06:00"
+# used to be "whatever branch someone left checked out at 05:59". The
+# pinned clone is synced ff-only to origin/main each run; on ANY sync
+# surprise the run refuses loudly instead of executing wrong code.
+# (No force-sync by design: reset --hard is banned fleet-wide, and a
+# diverged pinned clone means tampering that deserves eyes, not a wipe.)
+$RepoRoot = 'C:\Users\mcwiz\Projects\AssemblyZero-scheduled'
 $Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
+Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet" -Encoding utf8
+
+# --- #1879 sync gate -------------------------------------------------------
+if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
+    Add-Content -Path $LogFile -Value "$Timestamp | BOOTSTRAP | pinned clone absent; cloning" -Encoding utf8
+    & gh repo clone martymcenroe/AssemblyZero $RepoRoot 2>&1 | Out-Null
+    if (-not (Test-Path (Join-Path $RepoRoot '.git'))) {
+        Add-Content -Path $LogFile -Value "$Timestamp | ERROR | bootstrap clone failed; aborting" -Encoding utf8
+        exit 1
+    }
+}
+
+& git -C $RepoRoot fetch origin 2>&1 | Out-Null
+$branch = (& git -C $RepoRoot branch --show-current | Out-String).Trim()
+if ($branch -ne 'main') {
+    Add-Content -Path $LogFile -Value "$Timestamp | SYNC-REFUSED | pinned clone on '$branch', not main — investigate before next run" -Encoding utf8
+    exit 1
+}
+& git -C $RepoRoot merge --ff-only origin/main 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Add-Content -Path $LogFile -Value "$Timestamp | SYNC-REFUSED | ff-only to origin/main failed (diverged pinned clone) — investigate" -Encoding utf8
+    exit 1
+}
+
+# Provenance (#1879 option 3): every run log answers "which code ran".
+$sha = (& git -C $RepoRoot rev-parse --short HEAD | Out-String).Trim()
+$dirtyCount = (& git -C $RepoRoot status --porcelain | Measure-Object -Line).Lines
+Add-Content -Path $LogFile -Value "$Timestamp | PROVENANCE | branch=$branch sha=$sha dirty=$dirtyCount root=$RepoRoot" -Encoding utf8
 
 # Set-Location instead of Push-Location so that environment poetry
 # pick-up matches an interactive shell (poetry resolves its venv from
 # the current directory).
 Set-Location -Path $RepoRoot
 
-Add-Content -Path $LogFile -Value "$Timestamp | START | dependabot --fleet" -Encoding utf8
+# Keep the pinned clone's venv current with its lock (no-op when synced;
+# builds the venv on first run after bootstrap).
+& cmd.exe /c "poetry install --no-interaction >> `"$LogFile`" 2>&1"
 
 try {
     # Bypass PowerShell's pipeline and use cmd.exe's native >>
