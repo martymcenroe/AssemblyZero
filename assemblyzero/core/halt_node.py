@@ -17,6 +17,7 @@ from assemblyzero.core.errors import (
     CapacityError,
     RateLimitError,
     classify_http_status,
+    is_capacity_message,
 )
 from assemblyzero.core.recovery_plan import generate_recovery_plan
 from assemblyzero.core.state_persistence import STATE_DIR, save_state_snapshot
@@ -60,8 +61,11 @@ def classify_error(error_message: str) -> str:
         if isinstance(classified, AuthenticationError):
             return "auth"
 
-    # Fallback: pattern matching for messages without status codes
-    if any(p in msg_lower for p in ("capacity exhausted", "503", "529", "overloaded")):
+    # Fallback: pattern matching for messages without status codes.
+    # #1909: markers live in errors.CAPACITY_MESSAGE_MARKERS so the halt
+    # classifier and the orchestrator's escalating retry agree on what
+    # "capacity" looks like.
+    if is_capacity_message(error_message):
         return "capacity_exhausted"
     if any(p in msg_lower for p in ("quota exhausted", "429", "all credentials exhausted")):
         return "quota_exhausted"

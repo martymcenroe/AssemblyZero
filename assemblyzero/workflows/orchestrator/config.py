@@ -26,6 +26,7 @@ class OrchestratorConfig(TypedDict, total=False):
     gates: dict[str, bool]
     max_stage_retries: int
     retry_delay_seconds: int
+    capacity_retry_delays: list[int]
 
 
 VALID_STAGES = ["triage", "lld", "spec", "impl", "pr"]
@@ -86,6 +87,11 @@ def get_default_config() -> OrchestratorConfig:
         },
         max_stage_retries=3,
         retry_delay_seconds=10,
+        # #1909: capacity storms (503/529/overloaded) outlast a flat 10s
+        # delay — the 2026-07-29 phase-4 run burned all three stage attempts
+        # inside ~2 minutes while the Gemini storm ran for several. Attempt
+        # N sleeps capacity_retry_delays[N-1] (last entry repeats).
+        capacity_retry_delays=[10, 60, 300],
     )
 
 
@@ -123,6 +129,19 @@ def validate_config(config: OrchestratorConfig) -> list[str]:
     retry_delay = config.get("retry_delay_seconds", 0)
     if not isinstance(retry_delay, (int, float)) or retry_delay < 0:
         errors.append("retry_delay_seconds must be >= 0")
+
+    capacity_delays = config.get("capacity_retry_delays", [10, 60, 300])
+    if (
+        not isinstance(capacity_delays, list)
+        or not capacity_delays
+        or any(
+            not isinstance(d, (int, float)) or isinstance(d, bool) or d < 0
+            for d in capacity_delays
+        )
+    ):
+        errors.append(
+            "capacity_retry_delays must be a non-empty list of numbers >= 0"
+        )
 
     stages = config.get("stages", {})
     if not isinstance(stages, dict):
