@@ -18,11 +18,14 @@ This node populates:
 - error_message: "" on success, error text on failure
 """
 
+import ast
 import json
 import re
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from assemblyzero.workflows.implementation_spec.state import (
     CompletenessCheck,
@@ -953,6 +956,389 @@ def check_visual_baselines_not_self_referential(
     )
 
 
+# =============================================================================
+# Fence analysis — how the symbol checker reads Python (#1956)
+# =============================================================================
+#
+# #1948 (receivers) -> #1950 (callbacks and docstrings) -> #1952 (self-attribute
+# handles, import-less stdlib) -> #1954 (diff markers): four false-positive
+# families in a single night, each patch correct and each followed by another,
+# because the collectors modelled Python with line-anchored regexes. A regex
+# cannot tell a call from a comment, a string, or a diff marker, and cannot
+# resolve what a name is bound to — so every new snippet shape was a new
+# family. `ast` answers all four questions by construction: string and comment
+# content carries no nodes at all, which is why docstring stripping stops being
+# a special case here.
+#
+# A fence that will not parse (a genuinely malformed snippet, or a diff whose
+# context lines cannot be reconciled into valid Python) falls back to the
+# original regex collectors below, so it degrades to the previous behaviour
+# instead of going unscanned.
+
+_CODE_FENCE_RE = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
+
+# Diff decoration has to come off before a fence can parse: the spec template
+# REQUIRES before/after snippets (#1954). Drop the ---/+++ file headers, DELETE
+# a single leading +/- (deleting rather than blanking keeps the snippet's own
+# indentation intact), then dedent so the body sits at column zero.
+_DIFF_HEADER_RE = re.compile(r"(?m)^(?:\+\+\+|---).*$")
+_DIFF_MARKER_RE = re.compile(r"(?m)^[+-](?![+-])")
+
+# A spec snippet legitimately omits its import header (#1952), so stdlib module
+# names are exempt receivers whether or not any fence shows the import.
+_STDLIB_MODULE_NAMES: frozenset[str] = frozenset(sys.stdlib_module_names)
+
+# ---- regex fallback collectors: pre-#1956 behaviour, unchanged --------------
+_IMPORT_RE = re.compile(
+    r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
+    re.MULTILINE,
+)
+_DEF_RE = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
+_SELF_ASSIGN_RE = re.compile(r"^\s*self\.(\w+)\s*=", re.MULTILINE)
+_ASSIGN_RE = re.compile(r"^\s*(?:self\.)?(\w+)\s*=\s*(\w+)[.(]", re.MULTILINE)
+_METHOD_CALL_RE = re.compile(r"\b(\w+)\.(\w+)\s*\(")
+_DOCSTRING_RE = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
+
+
+class _CallSite(NamedTuple):
+    """One ``<receiver>.<method>(...)`` call found inside a fence."""
+
+    receiver: str
+    method: str
+    site: str
+
+
+class _FenceFacts(NamedTuple):
+    """What one code fence says about names, definitions, and calls."""
+
+    imported: frozenset[str]
+    defined: frozenset[str]
+    # (names bound, names the bound value derives from) — drives receiver
+    # exemption once every fence has been read.
+    assignments: tuple[tuple[frozenset[str], frozenset[str]], ...]
+    calls: tuple[_CallSite, ...]
+    parsed: bool  # False when this fence fell back to the regex collectors
+
+
+def _normalize_fence(block: str) -> str:
+    """Strip diff decoration so a before/after snippet can parse as Python."""
+    block = _DIFF_HEADER_RE.sub("", block)
+    block = _DIFF_MARKER_RE.sub("", block)
+    return textwrap.dedent(block)
+
+
+def _receiver_key(node: ast.expr) -> str | None:
+    """The name a call's receiver is looked up under, or None if unresolvable.
+
+    ``q.Queue()`` keys on ``q``. ``self.root.attributes(...)`` keys on ``root``
+    — the attribute holding the handle, which is what ``self.root = tk.Tk()``
+    exempts (#1952). Receivers that are call results, subscripts, or literals
+    (``Image.open(p).convert()``, ``d["k"].foo()``) stay unjudged, exactly as
+    the old call regex could not see past a ``)`` or ``]``.
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _value_provenance(node: ast.expr) -> frozenset[str]:
+    """Names a bound value derives from, for propagating receiver exemption.
+
+    ``tk.Tk()`` derives from ``tk``; ``Path(d).iterdir()`` from ``Path``;
+    ``self.root.nametowidget(".")`` from ``root`` — the handle that
+    ``self.root = tk.Tk()`` already exempted (#1952), which the leftmost name
+    (``self``) would miss. Both the immediate receiver and the leftmost name are
+    offered, because either can be the one carrying the exemption.
+    """
+    keys: set[str] = set()
+    inner = node.func if isinstance(node, ast.Call) else node
+    if isinstance(inner, ast.Attribute):
+        receiver = _receiver_key(inner.value)
+        if receiver is not None:
+            keys.add(receiver)
+    leftmost = _leftmost_name(node)
+    if leftmost is not None:
+        keys.add(leftmost)
+    return frozenset(keys)
+
+
+def _leftmost_name(node: ast.expr) -> str | None:
+    """Leftmost name an expression is rooted in: ``tk.Canvas(self.root)`` -> ``tk``."""
+    while True:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, (ast.Attribute, ast.Subscript, ast.Starred)):
+            node = node.value
+        elif isinstance(node, ast.Call):
+            node = node.func
+        elif isinstance(node, ast.Await):
+            node = node.value
+        else:
+            return None
+
+
+def _bound_names(target: ast.expr) -> set[str]:
+    """Receiver keys an assignment target binds.
+
+    A plain name binds itself; ``self.root = ...`` binds ``root``, because that
+    is the key ``self.root.attributes(...)`` looks up (#1952). Tuple and list
+    targets bind each element.
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Attribute):
+        return {target.attr}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for element in target.elts:
+            names |= _bound_names(element)
+        return names
+    if isinstance(target, ast.Starred):
+        return _bound_names(target.value)
+    return set()
+
+
+def _self_attributes(target: ast.expr) -> set[str]:
+    """Attribute names assigned onto ``self`` — spec-defined symbols (#1950).
+
+    ``self._on_quit_cb = on_quit`` then ``self._on_quit_cb()`` is how the
+    drafter writes GUI callbacks; a def-only collector could not see the
+    definition and drove a rename-oscillation across revise cycles.
+    """
+    if isinstance(target, ast.Attribute):
+        if isinstance(target.value, ast.Name) and target.value.id == "self":
+            return {target.attr}
+        return set()
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names: set[str] = set()
+        for element in target.elts:
+            names |= _self_attributes(element)
+        return names
+    if isinstance(target, ast.Starred):
+        return _self_attributes(target.value)
+    return set()
+
+
+class _FenceVisitor(ast.NodeVisitor):
+    """Collects imports, definitions, bindings, and method calls from a fence."""
+
+    def __init__(self, source: str) -> None:
+        self._lines = source.splitlines()
+        self.imported: set[str] = set()
+        self.defined: set[str] = set()
+        self.assignments: list[tuple[frozenset[str], frozenset[str]]] = []
+        self.calls: list[_CallSite] = []
+
+    # ---- imports: receivers the target repo has no authority over (#1948) ----
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.imported.add(alias.asname or alias.name.split(".")[0])
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module:
+            self.imported.add(node.module.split(".")[0])
+        for alias in node.names:
+            if alias.name != "*":
+                self.imported.add(alias.asname or alias.name)
+        self.generic_visit(node)
+
+    # ---- definitions the spec itself supplies ----
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.defined.add(node.name)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.defined.add(node.name)
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.defined.add(node.name)
+        self.generic_visit(node)
+
+    # ---- bindings: what each name actually holds ----
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self._record_binding(node.targets, node.value)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._record_binding([node.target], node.value)
+        self.generic_visit(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._record_binding([node.target], node.iter)
+        self.generic_visit(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._record_binding([node.target], node.iter)
+        self.generic_visit(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        self._record_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._record_with(node)
+
+    def _record_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            if item.optional_vars is not None:
+                self._record_binding([item.optional_vars], item.context_expr)
+        self.generic_visit(node)
+
+    def _record_binding(
+        self, targets: list[ast.expr], value: ast.expr | None
+    ) -> None:
+        bound: set[str] = set()
+        for target in targets:
+            bound |= _bound_names(target)
+            self.defined |= _self_attributes(target)
+        if value is not None and bound:
+            self.assignments.append((frozenset(bound), _value_provenance(value)))
+
+    # ---- calls: the only thing actually judged ----
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute):
+            receiver = _receiver_key(node.func.value)
+            if receiver is not None:
+                self.calls.append(
+                    _CallSite(receiver, node.func.attr, self._site(node))
+                )
+        self.generic_visit(node)
+
+    def _site(self, node: ast.AST) -> str:
+        """The source line a call sits on, for the failure message."""
+        index = getattr(node, "lineno", 0) - 1
+        if 0 <= index < len(self._lines):
+            return self._lines[index].strip()[:80]
+        return ""
+
+
+def _fence_facts_ast(block: str) -> _FenceFacts | None:
+    """Facts from a parsed fence, or None when the snippet will not parse."""
+    try:
+        tree = ast.parse(block)
+    except (SyntaxError, ValueError, RecursionError):
+        return None
+    visitor = _FenceVisitor(block)
+    visitor.visit(tree)
+    return _FenceFacts(
+        imported=frozenset(visitor.imported),
+        defined=frozenset(visitor.defined),
+        assignments=tuple(visitor.assignments),
+        calls=tuple(visitor.calls),
+        parsed=True,
+    )
+
+
+def _fence_facts_regex(block: str) -> _FenceFacts:
+    """The pre-#1956 collectors, kept as the fallback for unparseable fences."""
+    # #1950: docstrings inside fences quote code ('No tkinter.Tk() instantiated'
+    # — the test-strategy rule itself). The AST path never needs this; a string
+    # holds no call nodes.
+    block = _DOCSTRING_RE.sub("", block)
+
+    imported: set[str] = set()
+    for imp in _IMPORT_RE.finditer(block):
+        if imp.group(1):  # from X import a, b — names land in scope
+            imported.add(imp.group(1).split(".")[0])
+            for raw_name in imp.group(2).split(","):
+                name = raw_name.strip().split(" as ")[-1].strip()
+                if name:
+                    imported.add(name)
+        elif imp.group(3):  # import X [as y]
+            imported.add(imp.group(4) or imp.group(3).split(".")[0])
+
+    defined = {m.group(1) for m in _DEF_RE.finditer(block)}
+    defined |= {m.group(1) for m in _SELF_ASSIGN_RE.finditer(block)}
+
+    assignments = tuple(
+        (frozenset({m.group(1)}), frozenset({m.group(2)}))
+        for m in _ASSIGN_RE.finditer(block)
+    )
+
+    calls: list[_CallSite] = []
+    for call in _METHOD_CALL_RE.finditer(block):
+        site = (
+            block[max(0, call.start() - 10) : call.end() + 20]
+            .strip()
+            .replace("\n", " ")[:80]
+        )
+        calls.append(_CallSite(call.group(1), call.group(2), site))
+
+    return _FenceFacts(
+        imported=frozenset(imported),
+        defined=frozenset(defined),
+        assignments=assignments,
+        calls=tuple(calls),
+        parsed=False,
+    )
+
+
+def _scan_fences(text: str) -> list[_FenceFacts]:
+    """Read every code fence in ``text`` — AST where it parses, regex where not."""
+    facts: list[_FenceFacts] = []
+    for match in _CODE_FENCE_RE.finditer(text):
+        block = _normalize_fence(match.group(1))
+        parsed = _fence_facts_ast(block)
+        facts.append(parsed if parsed is not None else _fence_facts_regex(block))
+    return facts
+
+
+def _flag_calls(
+    facts: list[_FenceFacts],
+    symbol_set: set[str],
+) -> dict[str, list[str]]:
+    """Judge every collected call against the target repo's symbol table.
+
+    Facts are pooled across ALL fences before anything is judged: a spec
+    routinely shows its imports in one snippet and the usage in another.
+    """
+    # #1948: three universes the target repo's symbol table has no authority
+    # over — the phase-5 kill was this check rejecting Pillow's documented API
+    # (ImageDraw.Draw, alpha_composite), pathlib, and a method the spec itself
+    # defined. Same wrong-universe disease #1901 fixed for imports.
+    exempt: set[str] = set(_STDLIB_MODULE_NAMES)
+    spec_defined: set[str] = set()
+    for fence in facts:
+        exempt |= fence.imported
+        spec_defined |= fence.defined
+
+    # Exemption propagates through bindings to a fixed point rather than the
+    # single level the old regex managed: `self.root = tk.Tk()` exempts `root`,
+    # and `frame = self.root.frame()` then exempts `frame`. Whoever owns the
+    # root owns everything derived from it, so the target repo's symbols have
+    # no authority anywhere down that chain. Terminates because `exempt` only
+    # grows and the set of bound names is finite.
+    assignments = [
+        (bound, source) for fence in facts for bound, source in fence.assignments
+    ]
+    changed = True
+    while changed:
+        changed = False
+        for bound, source in assignments:
+            if source & exempt and not bound <= exempt:
+                exempt |= bound
+                changed = True
+
+    flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
+    for fence in facts:
+        for call in fence.calls:
+            if call.receiver in exempt:
+                continue
+            if call.method in symbol_set or call.method in spec_defined:
+                continue
+            if call.method in _API_SYMBOL_ALLOWLIST:
+                continue
+            flagged.setdefault(call.method, []).append(call.site)
+    return flagged
+
+
 def detect_unknown_method_calls(
     text: str,
     symbol_set: set[str],
@@ -972,107 +1358,7 @@ def detect_unknown_method_calls(
         Mapping of unknown method name -> truncated example call sites.
         Empty when every call resolves to a known or allowlisted symbol.
     """
-    # Extract method/function call names from code fences only
-    code_block_re = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
-    # Match  <receiver>.<method>(  —  the opening paren marks a call, not an
-    # annotation. #1948: capture the receiver too — WHOSE method it is decides
-    # whether the target repo's symbol table has any authority over it.
-    method_call_re = re.compile(r"\b(\w+)\.(\w+)\s*\(")
-    import_re = re.compile(
-        r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
-        re.MULTILINE,
-    )
-    def_re = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
-    # #1950: `self._on_quit_cb = on_quit` then `self._on_quit_cb()` —
-    # constructor-assigned callables are spec-defined too. The def-only
-    # collector drove the drafter into rename-oscillation (_on_quit ->
-    # _on_quit_cb) because the checker could never see the definitions.
-    self_assign_re = re.compile(r"^\s*self\.(\w+)\s*=", re.MULTILINE)
-    # #1950: docstrings inside fences quote code ('No tkinter.Tk()
-    # instantiated' — the test-strategy rule itself) — prose, not calls.
-    docstring_re = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
-
-    # #1954: the spec template REQUIRES before/after diff snippets, whose
-    # +/- prefixes blinded every line-anchored collector (imports, defs,
-    # assignments never matched `^\s*` past a '+') while the \b-anchored
-    # call regex still fired inside them — `+ root = tk.Tk()` invisible,
-    # `root.after(...)` flagged. Normalize: drop +++/--- file headers,
-    # strip a single leading +/- as whitespace.
-    diff_header_re = re.compile(r"(?m)^(?:\+\+\+|---).*$")
-    diff_marker_re = re.compile(r"(?m)^[+-](?![+-])")
-
-    def _normalize(block: str) -> str:
-        block = diff_header_re.sub("", block)
-        block = diff_marker_re.sub(" ", block)
-        return docstring_re.sub("", block)
-
-    blocks = [_normalize(m.group(1)) for m in code_block_re.finditer(text)]
-
-    # #1948: three universes the target repo's symbol table has no authority
-    # over — the phase-5 kill was this check rejecting Pillow's documented
-    # API (ImageDraw.Draw, alpha_composite), pathlib, and a method the spec
-    # itself defined. Same wrong-universe disease #1901 fixed for imports.
-    exempt_receivers: set[str] = set()
-    spec_defined: set[str] = set()
-    for block_content in blocks:
-        for imp in import_re.finditer(block_content):
-            if imp.group(1):  # from X import a, b — names land in scope
-                exempt_receivers.add(imp.group(1).split(".")[0])
-                for name in imp.group(2).split(","):
-                    name = name.strip().split(" as ")
-                    exempt_receivers.add(name[-1].strip())
-            elif imp.group(3):  # import X [as y]
-                exempt_receivers.add(
-                    imp.group(4) or imp.group(3).split(".")[0]
-                )
-        for d in def_re.finditer(block_content):
-            spec_defined.add(d.group(1))
-        for a in self_assign_re.finditer(block_content):
-            spec_defined.add(a.group(1))
-
-    # #1952: stdlib module names are exempt receivers even without a
-    # visible import — spec snippets legitimately omit import headers
-    # (`copy.deepcopy(config)` flagged with no `import copy` in any fence).
-    import sys as _sys
-
-    exempt_receivers |= set(_sys.stdlib_module_names)
-
-    # One propagation pass: `draw = ImageDraw.Draw(...)` makes `draw` an
-    # exempt receiver too. Single level, matching how spec snippets read.
-    # #1952: same for self-attributes — `self.root = tk.Tk()` then
-    # `self.root.attributes(...)`: the call regex sees receiver `root`,
-    # so the ATTRIBUTE name joins the exempt receivers when its value
-    # came from one (the whole tkinter widget surface arrives this way).
-    assign_re = re.compile(r"^\s*(?:self\.)?(\w+)\s*=\s*(\w+)[.(]", re.MULTILINE)
-    for block_content in blocks:
-        for a in assign_re.finditer(block_content):
-            if a.group(2) in exempt_receivers:
-                exempt_receivers.add(a.group(1))
-
-    flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
-
-    for block_content in blocks:
-        for call_match in method_call_re.finditer(block_content):
-            receiver = call_match.group(1)
-            method_name = call_match.group(2)
-
-            if receiver in exempt_receivers:
-                continue
-            if method_name in symbol_set or method_name in spec_defined:
-                continue
-            if method_name in _API_SYMBOL_ALLOWLIST:
-                continue
-
-            # Capture the call site for the error message (truncated)
-            call_site = block_content[
-                max(0, call_match.start() - 10) : call_match.end() + 20
-            ].strip().replace("\n", " ")
-
-            if method_name not in flagged:
-                flagged[method_name] = []
-            flagged[method_name].append(call_site[:80])
-
-    return flagged
+    return _flag_calls(_scan_fences(text), symbol_set)
 
 
 def check_api_symbols_exist(
@@ -1120,7 +1406,19 @@ def check_api_symbols_exist(
         )
 
     symbol_set: set[str] = set(gathered_symbols)
-    flagged = detect_unknown_method_calls(spec, symbol_set)
+    facts = _scan_fences(spec)
+    flagged = _flag_calls(facts, symbol_set)
+
+    # #1870's honesty rule applied to the scan itself: a fence that fell back
+    # to the regex collectors was read with the weaker instrument, and saying
+    # so keeps "checked" from overstating what was verified.
+    fell_back = sum(1 for fence in facts if not fence.parsed)
+    scan_note = (
+        f" {fell_back} of {len(facts)} fence(s) would not parse as Python and "
+        f"were read with the regex fallback."
+        if fell_back
+        else ""
+    )
 
     if not flagged:
         return CompletenessCheck(
@@ -1128,7 +1426,8 @@ def check_api_symbols_exist(
             passed=True,
             details=(
                 f"All method calls in spec code fences are present in the "
-                f"target repo's gathered symbols ({len(symbol_set)} symbols checked)."
+                f"target repo's gathered symbols "
+                f"({len(symbol_set)} symbols checked).{scan_note}"
             ),
         )
 
@@ -1149,7 +1448,7 @@ def check_api_symbols_exist(
             f"symbols: {flag_list}{suffix}. These may be hallucinated APIs "
             f"(e.g., pydantic methods on a plain dataclass). Verify these "
             f"symbols exist in the target repo or replace with the actual API "
-            f"the target class exposes."
+            f"the target class exposes.{scan_note}"
         ),
     )
 
