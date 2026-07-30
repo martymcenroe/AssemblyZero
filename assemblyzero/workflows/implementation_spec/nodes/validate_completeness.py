@@ -992,10 +992,21 @@ def detect_unknown_method_calls(
     # instantiated' — the test-strategy rule itself) — prose, not calls.
     docstring_re = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
 
-    blocks = [
-        docstring_re.sub("", m.group(1))
-        for m in code_block_re.finditer(text)
-    ]
+    # #1954: the spec template REQUIRES before/after diff snippets, whose
+    # +/- prefixes blinded every line-anchored collector (imports, defs,
+    # assignments never matched `^\s*` past a '+') while the \b-anchored
+    # call regex still fired inside them — `+ root = tk.Tk()` invisible,
+    # `root.after(...)` flagged. Normalize: drop +++/--- file headers,
+    # strip a single leading +/- as whitespace.
+    diff_header_re = re.compile(r"(?m)^(?:\+\+\+|---).*$")
+    diff_marker_re = re.compile(r"(?m)^[+-](?![+-])")
+
+    def _normalize(block: str) -> str:
+        block = diff_header_re.sub("", block)
+        block = diff_marker_re.sub(" ", block)
+        return docstring_re.sub("", block)
+
+    blocks = [_normalize(m.group(1)) for m in code_block_re.finditer(text)]
 
     # #1948: three universes the target repo's symbol table has no authority
     # over — the phase-5 kill was this check rejecting Pillow's documented
