@@ -236,21 +236,39 @@ class TestReadIsBounded:
 
     def test_silent_child_is_killed_at_the_bound(self):
         import threading
+        import time
 
-        release = threading.Event()
+        killed = threading.Event()
         proc = MagicMock()
         proc.pid = 777
-        proc.read.side_effect = lambda n: release.wait(10) or ""
+
+        def _read_until_killed(n):
+            # Block like a real silent child; the tree-kill below forces the
+            # blocked read to EOF, exactly as on a live PTY.
+            killed.wait(30)
+            raise EOFError
+
+        proc.read.side_effect = _read_until_killed
         proc.isalive.return_value = True
 
-        with patch.object(gc, "kill_process_tree") as killer:
+        threads_before = threading.active_count()
+        with patch.object(
+            gc, "kill_process_tree", side_effect=lambda pid: killed.set()
+        ) as killer:
             ok, payload, status = gc._read_pty_bounded(proc, timeout_seconds=0.3)
 
-        release.set()
         assert ok is False
         assert "timeout" in payload.lower()
         assert status is None
         killer.assert_called_once_with(777)
+
+        # #1915: an unkillable mock (no EOF, isalive always True) leaked the
+        # drain thread spinning hot, which took down the CI runner. The
+        # drain must actually exit once the kill lands.
+        deadline = time.time() + 5
+        while threading.active_count() > threads_before and time.time() < deadline:
+            time.sleep(0.01)
+        assert threading.active_count() <= threads_before
 
     def test_completing_child_returns_its_output(self):
         proc = MagicMock()
