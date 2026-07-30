@@ -57,11 +57,19 @@ The panel has, top to bottom:
 - **Builds for non-production branches** — checkbox, **checked by default. Uncheck it.** With it on, every push to any non-production branch triggers a build running `npx wrangler versions upload`. AssemblyZero has constant agent branch activity, and because watch paths cannot be scoped until *after* connecting, this would burn account build limits on pushes that never touch `sentinel/`. There is also no upside: preview versions exist to exercise a change before promoting it, and this Worker is a webhook receiver with no UI — its real test is the vitest suite, which already runs in AssemblyZero's CI. Re-enable later only if per-branch preview versions become useful, and only once watch paths are scoped.
 - **Build command** *(marked Optional)* — see table below.
 - **Deploy command** — pre-filled `npx wrangler deploy`.
-- **Advanced settings** — a set of collapsed accordions. **Root directory is in here**, not at top level. Expand the chevron. Also holds Non-production branch deploy command, API Token, Build variables, and Build caching.
+- **Advanced settings** — a **static section heading, not a control.** It does not expand. Beneath it sit five individually-collapsible rows, each with its own `>` chevron on the left:
+
+  1. Non-production branch deploy command
+  2. **Root directory** ← click *this* row's chevron
+  3. API Token
+  4. Build variables
+  5. Build caching
+
+  **Root directory is row 2.** Click the chevron beside the words "Root directory" itself. Do not look for a way to open "Advanced settings" first — there isn't one, and telling the operator to "expand Advanced settings" sends them clicking a heading that does nothing.
 
 | Setting | Value | Where | Why |
 |---|---|---|---|
-| **Root directory** | `sentinel` | Advanced settings (collapsed) | The Wrangler config lives in a subdirectory of a large repo. Documented [monorepo](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos) mechanism. Required — without it the build finds no `wrangler.toml`. |
+| **Root directory** | `sentinel` | Own collapsible row, 2nd under the Advanced settings heading | The Wrangler config lives in a subdirectory of a large repo. Documented [monorepo](https://developers.cloudflare.com/workers/ci-cd/builds/advanced-setups/#monorepos) mechanism. Required — without it the build finds no `wrangler.toml`. |
 | **Deploy command** | `npx wrangler deploy` | Main panel | The default. Stated explicitly so it is not silently changed. |
 | **Build command** | `npm test` | Main panel, Optional | Gates the deploy on the vitest suite, answering the "should deploys be test-gated?" question #1974 raised. Optional — if the form misbehaves, leave it blank and add it after connecting. |
 | **API token** | leave blank | Advanced settings | Cloudflare auto-generates and reuses one. Do not create a token. |
