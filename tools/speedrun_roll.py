@@ -47,6 +47,14 @@ import speedrun_reset as reset
 HEARTBEAT_SECONDS = 15
 DEFAULT_PREFIX = "hardening-run"
 
+# Directories whose contents ARE the pipeline. A tracked modification here means
+# the roll would execute code that is not what main says it is (#2007).
+_CODE_DIRS = ("tools", "assemblyzero")
+
+
+class SignalExit(SystemExit):
+    """Raised from a signal handler so the restore in `finally` still runs."""
+
 
 def _stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -299,6 +307,139 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+def install_signal_handlers(log: EventLog) -> None:
+    """Log TERM/INT/BREAK/HUP to the events file, then exit via the normal path.
+
+    #2006: the bash wrapper trapped these and logged them; the Python rewrite
+    kept the docstring claiming "trapped signals" and shipped none. A roll of
+    boostgauge #7 then died seven minutes in leaving only START/BASE/LAUNCH, so
+    "killed by a supervisor" and "died silently" were indistinguishable -- and
+    those have different remedies.
+
+    The log line is the point, not the graceful exit. SIGKILL cannot be caught,
+    but once TERM and INT are recorded, a death with NO signal line becomes
+    evidence FOR SIGKILL rather than an absence of information.
+    """
+    import signal
+
+    def _handler(signum: int, _frame: object) -> None:
+        try:
+            name = signal.Signals(signum).name
+        except ValueError:  # pragma: no cover - platform-specific numbers
+            name = str(signum)
+        log.write(f"SIGNAL: {name} received")
+        raise SignalExit(90)
+
+    for attr in ("SIGTERM", "SIGINT", "SIGBREAK", "SIGHUP"):
+        sig = getattr(signal, attr, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handler)
+        except (OSError, ValueError):  # pragma: no cover - not settable here
+            continue
+
+
+def check_assemblyzero_tree(az_root: Path) -> list[str]:
+    """Reasons the AssemblyZero tree running this roll is not trustworthy (#2007).
+
+    The checkout is shared across concurrent lanes and can be parked on another
+    lane's branch at an older commit, in which case the roll executes stale
+    pipeline code with no indication. That happened: `Projects/AssemblyZero` sat
+    on `1428-canonical-claude-backup` two commits behind main, and a reset run
+    from it failed with a TypeError that was already fixed and merged.
+
+    The assertion is about the COMMIT, not the branch. "Is it named main" is
+    wrong in both directions -- on main but behind is exactly the failure above,
+    and a detached worktree pinned at origin/main is a perfectly good way to run
+    a roll. Untracked files are ignored: other lanes routinely leave one-off
+    scripts in tools/, and those do not change the code being executed.
+    """
+    problems: list[str] = []
+    if not (az_root / ".git").exists():
+        return [f"{az_root} is not an AssemblyZero checkout"]
+
+    _run(["git", "fetch", "origin"], cwd=az_root)
+
+    behind = _run(
+        ["git", "rev-list", "--count", "HEAD..origin/main"], cwd=az_root
+    )
+    if behind.returncode != 0 or not behind.stdout.strip().isdigit():
+        problems.append("cannot compare this tree against origin/main")
+    elif int(behind.stdout.strip()) > 0:
+        head = _run(["git", "log", "--oneline", "-1"], cwd=az_root).stdout.strip()
+        problems.append(
+            f"{int(behind.stdout.strip())} commit(s) behind origin/main "
+            f"(HEAD: {head}) -- this roll would run stale pipeline code"
+        )
+
+    dirty = _run(
+        ["git", "status", "--porcelain", "--", *_CODE_DIRS], cwd=az_root
+    )
+    modified = [
+        line for line in dirty.stdout.splitlines() if not line.startswith("??")
+    ]
+    if modified:
+        problems.append(
+            f"{len(modified)} tracked modification(s) under "
+            f"{'/, '.join(_CODE_DIRS)}/ -- the pipeline is not what main says"
+        )
+    return problems
+
+
+def restore_repo(repo_root: Path, issues: list[int], log: EventLog) -> list[str]:
+    """Hand the repo back the way it was borrowed (#2005). Returns failures.
+
+    A roll leaves the target checked out on the attempt branch with pipeline
+    worktrees registered. Being handed that back is a defect: a run should
+    return the repo to the state it took.
+
+    Called from a `finally`, so it runs on success, on failure, and on any
+    exception -- including the SignalExit raised by the handlers above. It
+    cannot run under SIGKILL; that gap is covered only by the next invocation's
+    self-heal, and is stated rather than papered over.
+    """
+    log.write("RESTORE returning the repo to its default branch")
+
+    for issue in issues:
+        reset.remove_worktree(repo_root, issue)
+
+    base = attempt.default_branch(repo_root)
+    if not base:
+        return ["cannot resolve origin/HEAD; leaving the checkout as it is"]
+
+    checkout = _run(["git", "checkout", base], cwd=repo_root)
+    if checkout.returncode != 0:
+        return [f"could not check out {base}: {(checkout.stderr or '').strip()}"]
+
+    failures: list[str] = []
+    current = attempt.current_branch(repo_root)
+    if current != base:
+        failures.append(f"expected to end on '{base}', ended on '{current}'")
+
+    worktrees = [
+        line for line in _run(
+            ["git", "worktree", "list", "--porcelain"], cwd=repo_root
+        ).stdout.splitlines() if line.startswith("worktree ")
+    ]
+    if len(worktrees) != 1:
+        failures.append(
+            f"{len(worktrees) - 1} pipeline worktree(s) still registered"
+        )
+
+    tracked = [
+        line for line in _run(
+            ["git", "status", "--porcelain"], cwd=repo_root
+        ).stdout.splitlines() if not line.startswith("??")
+    ]
+    if tracked:
+        failures.append(f"{len(tracked)} tracked modification(s) left behind")
+
+    if not failures:
+        log.write(f"RESTORE verified: on '{base}', no pipeline worktrees, clean")
+    return failures
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -337,15 +478,44 @@ def main(argv: list[str] | None = None) -> int:
         else repo_root / "data" / "speedrun" / "runs"
     )
 
-    for issue in args.issue:
-        code = roll_issue(repo_root, issue, log_dir, az_root, extra)
-        if code != 0:
-            print(f"\nSTOPPED at #{issue} (exit {code}); later issues not rolled.")
-            return code
-        time.sleep(1)
+    session = EventLog(log_dir / "session-events.log")
+    install_signal_handlers(session)
 
-    print(f"\nAll {len(args.issue)} issue(s) rolled.")
-    return 0
+    # #2007: refuse before spending anything if the tree running this roll is
+    # not the code main says it is.
+    stale = check_assemblyzero_tree(az_root)
+    if stale:
+        print(f"BLOCKED: the AssemblyZero tree at {az_root} is not trustworthy:")
+        for s in stale:
+            print(f"  - {s}")
+        print(
+            "\n  Bring it level with origin/main (or point --assemblyzero-root "
+            "at a tree that is)\n  before rolling. A roll that runs stale "
+            "pipeline code fails in ways that look\n  like target-repo problems."
+        )
+        return 91
+
+    code = 0
+    try:
+        for issue in args.issue:
+            code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+            if code != 0:
+                print(
+                    f"\nSTOPPED at #{issue} (exit {code}); later issues not rolled."
+                )
+                return code
+            time.sleep(1)
+
+        print(f"\nAll {len(args.issue)} issue(s) rolled.")
+        return 0
+    finally:
+        # #2005: hand the repo back the way it was borrowed -- on success, on
+        # failure, and on the SignalExit raised by the handlers.
+        failures = restore_repo(repo_root, args.issue, session)
+        if failures:
+            print("\nRESTORE INCOMPLETE:")
+            for f in failures:
+                print(f"  - {f}")
 
 
 if __name__ == "__main__":
