@@ -622,12 +622,72 @@ def run_tests(worktree: Path) -> int:
     # run. Without it, any target repo whose .gitignore lacks __pycache__/
     # ends up with untracked .pyc files that dirty the audit worktree, making
     # `git worktree remove` (no --force) refuse and leak the worktree.
+    return run_tests_detailed(worktree)[0]
+
+
+def run_tests_detailed(worktree: Path) -> tuple[int, str]:
+    """#1992: as run_tests, but also returns captured output so the caller
+    can compare WHICH tests failed against a baseline run of the base."""
     pytest_env = _clean_subprocess_env()
     pytest_env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = run(["poetry", "run", "pytest", "-q", "--tb=short"],
                  cwd=str(worktree), timeout=PYTEST_TIMEOUT_S, env=pytest_env)
     print(f"  pytest exit code: {result.returncode}")
-    return result.returncode
+    return result.returncode, (result.stdout or "") + (result.stderr or "")
+
+
+# #1992: strip ANSI before matching -- vitest and jest colour their failure
+# lines, so escape codes sit between the marker and the test name and
+# defeat a naive pattern.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Failure-identifier patterns for the frameworks this fleet uses. Each must
+# capture something stable enough to compare across two runs of one suite.
+_FAILURE_PATTERNS = (
+    re.compile(r"^FAILED\s+(\S+)", re.M),                        # pytest
+    re.compile(r"^\s*●\s+(.+?)\s*$", re.M),                      # jest
+    re.compile(r"^\s*[×✕]\s+(.+?)(?:\s+\d+\s*ms)?\s*$", re.M),   # vitest
+    re.compile(r"^\s*FAIL\s+(\S+)", re.M),                       # file-level
+)
+
+
+def extract_failures(output: str) -> set[str]:
+    """#1992: the set of failing-test identifiers in a gate's output.
+
+    Used ONLY to decide whether a failing PR fails in exactly the ways its
+    base already fails. An empty result means "could not determine", which
+    callers MUST treat as non-exonerable -- never as "nothing failed".
+    """
+    text = _ANSI_RE.sub("", output or "")
+    found: set[str] = set()
+    for pattern in _FAILURE_PATTERNS:
+        for m in pattern.finditer(text):
+            ident = m.group(1).strip()
+            # Drop trailing duration noise so one test compares equal
+            # between runs.
+            ident = re.sub(r"\s*\(?\d+(\.\d+)?\s*m?s\)?$", "", ident).strip()
+            if ident and not ident.startswith("-"):
+                found.add(ident)
+    return found
+
+
+def is_exonerated_by_baseline(pr_failures: set[str],
+                              baseline_failures: set[str]) -> bool:
+    """#1992: True iff every test failing WITH the bump was already failing
+    WITHOUT it.
+
+    Deliberately conservative -- this is the one place a red gate can still
+    merge, so it must never fire on uncertainty:
+
+    * either side unparseable (empty) -> False. An empty PR-failure set
+      means the parser did not understand the output, NOT that nothing
+      failed; treating it as exoneration would merge on ignorance.
+    * a single failure absent from the baseline -> False. That is exactly
+      the regression the gate exists to catch.
+    """
+    if not pr_failures or not baseline_failures:
+        return False
+    return pr_failures <= baseline_failures
 
 
 def _npm_cmd() -> str:
@@ -683,7 +743,8 @@ def _remove_node_modules(pkg_dir: Path) -> None:
               file=sys.stderr)
 
 
-def run_js_gate(worktree: Path, js_dirs: list[str]) -> tuple[bool, str]:
+def run_js_gate(worktree: Path, js_dirs: list[str],
+                output_sink: list[str] | None = None) -> tuple[bool, str]:
     """#1839: install + test gate for npm ecosystems, one pass per
     touched manifest directory.
 
@@ -728,6 +789,11 @@ def run_js_gate(worktree: Path, js_dirs: list[str]) -> tuple[bool, str]:
                          timeout=NPM_TEST_TIMEOUT_S,
                          env=_clean_subprocess_env())
             print(f"  npm test exit code ('{d}'): {result.returncode}")
+            if output_sink is not None:
+                # #1992: hand the raw output back so the caller can compare
+                # which tests failed against a baseline run of the base.
+                output_sink.append((result.stdout or "")
+                                   + (result.stderr or ""))
             if result.returncode != 0:
                 return False, (f"npm test FAILED "
                                f"(exit {result.returncode}) in '{d}'")
@@ -1238,6 +1304,59 @@ def check_for_orphan_worktrees(target_repo: Path) -> list[str]:
 # Per-PR processing
 # ---------------------------------------------------------------------------
 
+def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
+                      js_dirs: list[str]) -> tuple[int, str]:
+    """#1992: re-run the gate with the PR's changes REMOVED.
+
+    The audit worktree was created as `dependabot-audit-<N>` pointing at
+    the base, then `gh pr checkout --detach` moved HEAD onto the PR. So
+    checking that branch back out restores the base content in the very
+    same worktree -- same machine, same env, same suite, only the bump
+    removed. That is what makes the comparison meaningful.
+
+    Returns (exit_code, combined_output). Returns (0, "") when the base
+    could not be established, which the caller reads as "not exonerable"
+    -- an unknown baseline must never license a merge.
+    """
+    branch = f"dependabot-audit-{pr.number}"
+    print(f"  BASELINE: re-running the gate on the base ({branch}) to see "
+          f"whether these failures predate the bump (#1992)")
+    # #1997: a missing worktree makes subprocess raise OSError on the cwd
+    # BEFORE git runs, which killed the whole sweep. That is exactly an
+    # unestablishable baseline, and this function already has the safe answer
+    # for one -- (0, "") reads as "not exonerable" -- so route there rather
+    # than raising.
+    try:
+        checkout = run(["git", "checkout", branch], cwd=str(worktree))
+    except OSError as err:
+        print(f"  BASELINE: worktree unusable ({err}) -- not exonerable",
+              file=sys.stderr)
+        return 0, ""
+    if checkout.returncode != 0:
+        print("  BASELINE: could not restore the base commit -- not "
+              "exonerable", file=sys.stderr)
+        return 0, ""
+
+    output = ""
+    code = 0
+    if touches_py:
+        evict_poetry_venv(worktree)
+        if not install_deps(worktree):
+            print("  BASELINE: poetry install failed on the base -- not "
+                  "exonerable", file=sys.stderr)
+            return 0, ""
+        code, output = run_tests_detailed(worktree)
+        if code == PYTEST_EXIT_NO_TESTS_COLLECTED:
+            code = 0
+    if code == 0 and js_dirs:
+        sink: list[str] = []
+        ok, _ = run_js_gate(worktree, js_dirs, sink)
+        output += "\n" + "\n".join(sink)
+        if not ok:
+            code = 1
+    return code, output
+
+
 def _process_pr_inside_worktree(
     pr: PRInfo, repo: str, worktree: Path,
 ) -> str:
@@ -1261,6 +1380,7 @@ def _process_pr_inside_worktree(
     gate_descs: list[str] = []
     exit_code = 0
     defer_reason = ""
+    gate_output = ""
 
     # #1400: only run the Python gate (poetry install + pytest) when the
     # PR actually touches a Python file or manifest. A Dockerfile-only
@@ -1284,7 +1404,7 @@ def _process_pr_inside_worktree(
             )
             return "deferred"
 
-        exit_code = run_tests(worktree)
+        exit_code, gate_output = run_tests_detailed(worktree)
 
         # #1397: exit 5 = "no tests collected" is a normal pytest result for
         # test-less repos (decorative-deps honeypots, scaffold stubs), not a
@@ -1305,11 +1425,44 @@ def _process_pr_inside_worktree(
     # #1839: npm gate for every touched manifest directory, after the
     # Python gate -- a grouped PR touching both ecosystems must pass both.
     if exit_code == 0 and js_dirs:
-        js_ok, js_desc = run_js_gate(worktree, js_dirs)
+        js_sink: list[str] = []
+        js_ok, js_desc = run_js_gate(worktree, js_dirs, js_sink)
         gate_descs.append(js_desc)
         if not js_ok:
             exit_code = 1
             defer_reason = js_desc
+            gate_output = "\n".join(js_sink)
+
+    # #1992: baseline-aware gating. A red gate might mean the bump broke
+    # something -- or it might mean this repo's default branch was ALREADY
+    # broken, in which case the bump is being blamed for a failure that
+    # predates it. Re-run the same gate against the base and compare.
+    # Only ever runs on the failure path, so a passing PR costs nothing.
+    if exit_code != 0:
+        pr_failures = extract_failures(gate_output)
+        base_code, base_output = run_baseline_gate(
+            pr, worktree, touches_py, js_dirs)
+        base_failures = extract_failures(base_output)
+        if base_code != 0 and is_exonerated_by_baseline(
+                pr_failures, base_failures):
+            shared = ", ".join(sorted(pr_failures)[:3])
+            print(f"  EXONERATED: every failure here already fails on the "
+                  f"base without this bump ({len(pr_failures)} failing, "
+                  f"base has {len(base_failures)}) -- #1992")
+            gate_descs.append(
+                f"gate RED but exonerated against a RED baseline (#1992): "
+                f"the {len(pr_failures)} failing test(s) already fail on the "
+                f"base commit without this bump [{shared}]. This repository's "
+                f"suite is broken independently of this dependency")
+            exit_code = 0
+            defer_reason = ""
+        else:
+            why = ("base is green -- this bump introduced the failure"
+                   if base_code == 0 else
+                   "failures differ from the base run" if base_failures
+                   else "baseline could not be established")
+            print(f"  NOT exonerated ({why}) -- deferring")
+            defer_reason = f"{defer_reason} [baseline check: {why}]"
 
     if not touches_py and not js_dirs:
         # #1400: PR touches neither ecosystem -- docker / workflow / docs

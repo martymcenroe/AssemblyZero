@@ -135,6 +135,11 @@ def test_deferred_test_fail_path_calls_cleanup_worktree(tmp_path):
     returning 'deferred'. #1116."""
     main_repo = tmp_path / "repo"
     main_repo.mkdir()
+    # #1997: the real create_audit_worktree CREATES this directory, and #1992's
+    # baseline gate chdirs into it. Returning the path without creating it
+    # asserted against a state that cannot occur, and made CI red on Linux
+    # where a nonexistent cwd raises before git ever runs.
+    (tmp_path / "repo-dependabot-43").mkdir()
     pr = dependabot_review.PRInfo(
         number=43, title="bump foo", author_login="dependabot[bot]",
         body="", head_ref="dependabot/pip/foo",
@@ -1038,3 +1043,47 @@ class TestProcessRepoWithBudget:
         assert set(sub) == {
             "merged", "deferred", "errored", "limit_skipped", "skipped_unchanged",
         }
+
+
+# ---- #1997: an unusable worktree is an unestablishable baseline ----
+
+
+class TestBaselineGateSurvivesAMissingWorktree:
+    """#1992's baseline gate chdirs into the audit worktree. On Linux a
+    nonexistent cwd raises OSError before git runs, and nothing caught it, so
+    one vanished directory killed an entire fleet sweep. The function already
+    documents the safe answer for a baseline it cannot establish -- (0, "")
+    reads as 'not exonerable' -- and that is where this must land."""
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=43, title="bump foo", author_login="dependabot[bot]",
+            body="", head_ref="dependabot/pip/foo",
+        )
+
+    def test_missing_worktree_returns_not_exonerable(self, tmp_path):
+        code, output = dependabot_review.run_baseline_gate(
+            self._pr(), tmp_path / "does-not-exist", touches_py=True, js_dirs=[]
+        )
+
+        assert (code, output) == (0, "")
+
+    def test_missing_worktree_does_not_raise(self, tmp_path):
+        """The regression itself: this used to raise FileNotFoundError."""
+        try:
+            dependabot_review.run_baseline_gate(
+                self._pr(), tmp_path / "gone", touches_py=True, js_dirs=[]
+            )
+        except OSError as err:  # pragma: no cover - the failure being pinned
+            raise AssertionError(f"baseline gate raised instead of deferring: {err}")
+
+    def test_it_says_why_on_stderr(self, tmp_path, capsys):
+        dependabot_review.run_baseline_gate(
+            self._pr(), tmp_path / "gone", touches_py=True, js_dirs=[]
+        )
+
+        assert "not exonerable" in capsys.readouterr().err
+
+    def test_a_red_gate_is_never_exonerated_by_an_unknown_baseline(self):
+        """(0, "") must not read as a green baseline that clears the bump."""
+        assert not dependabot_review.is_exonerated_by_baseline({"test_a"}, set())
