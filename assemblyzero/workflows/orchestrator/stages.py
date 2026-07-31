@@ -671,6 +671,50 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
+_MISSING_ROOT_PACKAGE = "the current project could not be installed"
+
+
+def _provision_worktree_env(worktree_path: Path) -> subprocess.CompletedProcess:
+    """Install the target worktree's dependencies, tolerating a not-yet-built package.
+
+    #1904 provisions the worktree so tests run in the TARGET's environment
+    rather than AssemblyZero's -- phase 3 of the boostgauge campaign passed on
+    AssemblyZero's Pillow and phase 4 died on the target's psutil. That finding
+    is about DEPENDENCIES; installing the project's own package is incidental.
+
+    #1994: provisioning runs BEFORE the implementation stage writes any code, so
+    on a base that predates the work -- exactly what an idempotent roll requires
+    (#1959, #1968, #1986) -- the project package does not exist yet and poetry
+    refuses with "No file/folder found for package <name>". The first roll of
+    any arc therefore failed to provision.
+
+    So: try the full install, and retry with --no-root ONLY when the failure was
+    the absent root package. Where the package does exist it is still installed,
+    because that is what makes `import <pkg>` resolve the way the target repo
+    expects; dropping it unconditionally would trade a loud failure for a subtle
+    one.
+    """
+    result = run_command(
+        ["poetry", "install"],
+        cwd=str(worktree_path), check=False, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        return result
+
+    combined = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
+    if _MISSING_ROOT_PACKAGE not in combined:
+        return result
+
+    print(
+        "    [ENV] project package not present yet (base predates the code); "
+        "retrying with --no-root"
+    )
+    return run_command(
+        ["poetry", "install", "--no-root"],
+        cwd=str(worktree_path), check=False, capture_output=True, text=True,
+    )
+
+
 def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation workflow (TDD).
 
@@ -758,28 +802,33 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # are worse than no tests.
             if (worktree_path / "pyproject.toml").is_file():
                 print("    [ENV] poetry install (target worktree)...")
-                install_result = run_command(
-                    ["poetry", "install"],
-                    cwd=str(worktree_path),
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
+                install_result = _provision_worktree_env(worktree_path)
                 if install_result.returncode != 0:
                     detail = (
                         (install_result.stderr or "").strip()
                         or (install_result.stdout or "").strip()
                         or "no output"
                     )
-                    return _make_stage_result(
-                        status="failed",
-                        error_message=(
-                            f"Worktree environment provisioning failed "
-                            f"(poetry install exit {install_result.returncode}): "
-                            f"{detail[:400]}"
+                    # #1993: every OTHER exit from this function returns
+                    # update_stage_result(...). This one returned a bare stage
+                    # result, so `state` -- and with it `issue_number` -- was
+                    # gone by the time graph.py persisted it, and the run died
+                    # with `KeyError: 'issue_number'` from save_orchestration_state.
+                    # The path that exists to REPORT a provisioning failure was
+                    # destroying the report and hiding its own cause.
+                    return update_stage_result(
+                        state,
+                        stage,
+                        _make_stage_result(
+                            status="failed",
+                            error_message=(
+                                f"Worktree environment provisioning failed "
+                                f"(poetry install exit "
+                                f"{install_result.returncode}): {detail[:400]}"
+                            ),
+                            duration_seconds=time.monotonic() - start_time,
+                            attempts=1,
                         ),
-                        duration_seconds=time.monotonic() - start_time,
-                        attempts=1,
                     )
                 print("    [ENV] worktree environment ready")
 
