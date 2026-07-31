@@ -489,8 +489,15 @@ def main() -> int:
     # for the operator per #1762) is reported honestly instead of the
     # unconditional success banner this tool used to print.
     from speedrun_clean_check import check_repo
+    from speedrun_clean_check import current_branch as gate_current_branch
 
-    findings = check_repo(repo_root, reset_issues)
+    # #2000: check_repo grew a required base_ref in #1959 and this production
+    # caller was not updated -- the whole test suite stayed green because
+    # nothing exercised speedrun_reset.main() past the reset itself, so the
+    # TypeError only appeared when a real reset ran. A reset verifies the tree
+    # it is standing on, which is the branch the debris was cleared from.
+    base_ref = gate_current_branch(repo_root) or "HEAD"
+    findings = check_repo(repo_root, reset_issues, base_ref)
     errors = [f for f in findings if f.startswith("ERROR:")]
     debris = [f for f in findings if not f.startswith("ERROR:")]
     if errors:
