@@ -179,6 +179,33 @@ def find_artifact_debris(repo_root: Path, issue: int) -> list[str]:
     return findings
 
 
+def resolve_base_ref(repo_root: Path, base_ref: str) -> str:
+    """The ref that actually reflects the base, preferring origin (#2021).
+
+    A bare branch name resolves to the LOCAL branch, which for an attempt
+    branch is whatever it was when the branch was cut -- the pipeline merges
+    everything on origin and nothing pulls it back down. So `origin/<base>` is
+    used whenever it exists, after a fetch to make it current.
+
+    Falls back to the name as given when there is no remote counterpart: an
+    explicit sha, a detached ref, or a local-only branch in a test fixture are
+    all legitimate and must keep working.
+    """
+    if not base_ref:
+        return base_ref
+    if base_ref.startswith("origin/"):
+        _run(["git", "fetch", "origin", "--quiet"], cwd=repo_root)
+        return base_ref
+
+    _run(["git", "fetch", "origin", "--quiet"], cwd=repo_root)
+    remote = f"origin/{base_ref}"
+    verified = _run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{remote}^{{commit}}"],
+        cwd=repo_root,
+    )
+    return remote if verified.returncode == 0 else base_ref
+
+
 def find_committed_artifact_debris(
     repo_root: Path, issue: int, base_ref: str
 ) -> list[str]:
@@ -200,14 +227,25 @@ def find_committed_artifact_debris(
     be what the repo is checked out on. Measuring the checkout would answer a
     question nobody asked, and would refuse a perfectly clean
     `--base-branch main` roll launched from a dirty checkout (#1963).
+
+    Reads the REMOTE-TRACKING ref, not the bare name (#2021). Every PR the
+    pipeline opens merges on origin, and since #2012 the checkout stays on the
+    default branch forever, so nothing ever fast-forwards the local attempt
+    branch. Resolving `hardening-run-13` to the local ref therefore measured a
+    commit from before the pipeline's own merges: boostgauge's base carried
+    LLD-007 and its spec on origin while this check reported CLEAN and a roll
+    of #7 started on top of it. Before #2012 the checkout stood on the attempt
+    branch and got dragged forward incidentally -- that accident was the only
+    thing that had kept this honest.
     """
+    ref = resolve_base_ref(repo_root, base_ref)
     result = _run(
-        ["git", "ls-tree", "-r", "--name-only", base_ref, "--", "docs/lld"],
+        ["git", "ls-tree", "-r", "--name-only", ref, "--", "docs/lld"],
         cwd=repo_root,
     )
     if result.returncode != 0:
         return [
-            f"ERROR: git ls-tree failed for {base_ref}: {result.stderr.strip()}"
+            f"ERROR: git ls-tree failed for {ref}: {result.stderr.strip()}"
         ]
     needles = _artifact_needles(issue)
     findings: list[str] = []
