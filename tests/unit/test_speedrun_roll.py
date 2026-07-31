@@ -227,7 +227,15 @@ class TestNoHumanInputBeyondRepoAndIssue:
             seen[issue] = (repo_root, log_dir)
             return 0
 
-        with patch.object(sr, "roll_issue", fake_roll):
+        # #2005/#2007: main() now gates on the AssemblyZero tree and
+        # restores the repo in a finally. Neither is what these tests
+        # measure, and both reach the real filesystem, so both are stubbed.
+        stubs = {
+            "check_assemblyzero_tree": lambda p: [],
+            "restore_repo": lambda *a: [],
+            "roll_issue": fake_roll,
+        }
+        with patch.multiple(sr, **stubs):
             code = sr.main(["--repo", str(repo), "--issue", "4", "--issue", "2"])
 
         assert code == 0
@@ -240,7 +248,15 @@ class TestNoHumanInputBeyondRepoAndIssue:
             rolled.append(issue)
             return 91 if issue == 4 else 0
 
-        with patch.object(sr, "roll_issue", fake_roll):
+        # #2005/#2007: main() now gates on the AssemblyZero tree and
+        # restores the repo in a finally. Neither is what these tests
+        # measure, and both reach the real filesystem, so both are stubbed.
+        stubs = {
+            "check_assemblyzero_tree": lambda p: [],
+            "restore_repo": lambda *a: [],
+            "roll_issue": fake_roll,
+        }
+        with patch.multiple(sr, **stubs):
             code = sr.main(["--repo", str(repo), "--issue", "4", "--issue", "2"])
 
         assert code == 91
@@ -253,7 +269,15 @@ class TestNoHumanInputBeyondRepoAndIssue:
             captured["extra"] = extra
             return 0
 
-        with patch.object(sr, "roll_issue", fake_roll):
+        # #2005/#2007: main() now gates on the AssemblyZero tree and
+        # restores the repo in a finally. Neither is what these tests
+        # measure, and both reach the real filesystem, so both are stubbed.
+        stubs = {
+            "check_assemblyzero_tree": lambda p: [],
+            "restore_repo": lambda *a: [],
+            "roll_issue": fake_roll,
+        }
+        with patch.multiple(sr, **stubs):
             sr.main(["--repo", str(repo), "--issue", "4", "--max-iterations", "5"])
 
         assert captured["extra"] == ["--max-iterations", "5"]
