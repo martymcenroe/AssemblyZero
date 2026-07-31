@@ -966,8 +966,37 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
             }
 
+        # #2023: coverage is not the only way an iteration makes progress, and
+        # this branch is reached with EVERY test passing -- so the iteration
+        # that fixes the last failing test lands right here. boostgauge #41 was
+        # halted on exactly that iteration: 14/15 -> 15/15 passing with coverage
+        # flat at 94.0% against a 95% target, three of five iterations unspent.
+        #
+        # The tests-failing branch above has three guards and can tell progress
+        # from a loop. This one had a single guard, on the one metric that had
+        # not moved. previous_passed and previous_green_failures are written on
+        # every return from this node and were simply never read here.
+        previous_passed = state.get("previous_passed", -1)
+        previous_green_failures = state.get("previous_green_failures", [])
+        tests_improved = (
+            (previous_passed >= 0 and passed_count > previous_passed)
+            or (bool(previous_green_failures) and not current_green_failures)
+        )
+        coverage_stagnant = (
+            previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0
+        )
+
+        if coverage_stagnant and tests_improved:
+            # Progress the guard could not see. Spending another iteration here
+            # is the point of the iteration budget it exists to protect.
+            print(
+                f"    [N5] Coverage flat at {coverage_achieved:.1f}%, but tests "
+                f"improved ({previous_passed} -> {passed_count} passing) — "
+                f"continuing rather than halting."
+            )
+
         # Stagnation check: if coverage didn't improve by at least 1%, halt
-        if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+        if coverage_stagnant and not tests_improved:
             stagnant_msg = (
                 f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
                 f"(< 1% improvement). Halting to prevent token waste."
