@@ -2,7 +2,36 @@
 
 - **Date:** 2026-07-30 (UI section corrected same day against the live dashboard)
 - **Issue:** #1974
-- **Status:** Setup pending — the dashboard connection is a one-time operator action; everything else is already in place.
+- **Status:** **Connected and configured 2026-07-30.** Live settings verified via the builds API and recorded below.
+
+## Live configuration (verified 2026-07-30)
+
+Read back from `GET /accounts/{account_id}/builds/workers/{script_tag}`:
+
+| Setting | Value |
+|---|---|
+| Repository / branch | `martymcenroe/AssemblyZero` / `main` |
+| Root directory | `/sentinel` |
+| Build command | `npm test` |
+| Deploy command | `npx wrangler deploy` |
+| Build watch paths (`path_includes`) | `sentinel/*` |
+| Non-production branch builds (`previews_enabled`) | `false` |
+| Build caching | enabled |
+| API token | auto-generated, `Workers Builds - 2026-07-30 18:46` |
+
+**`npm test` is load-bearing, not a nicety.** AssemblyZero's `ci.yml` is Python-only — pytest on `tests/unit/` and `tests/integration/`, never vitest — so nothing else in CI runs the sentinel's 58 tests. This build command is the only automated gate on that code.
+
+## The connect procedure that actually works
+
+The **"Connect to a repository" slide-out drawer flashes and refuses to persist edits.** Build command and Root directory cannot be set in it. This is not in the docs and is not predictable from them.
+
+Do this instead:
+
+1. In the connect drawer, set only what it accepts — repository, production branch — then press **Connect**. Do not fight it over the other fields.
+2. The drawer closes and the ordinary **Settings → Build** page renders, listing Build configuration, Branch control, Build watch paths, API token, Variables and secrets, Deploy Hooks, Build cache.
+3. **Each row has its own pencil, which opens a smaller single-purpose drawer that works correctly.** Make every edit there.
+
+Step 3 is the whole trick. The per-row drawers behave; the big one does not.
 
 > **Writing rule for this runbook.** Every UI step here is either linked to its current Cloudflare docs page or verified against a screenshot of the live dashboard. Do **not** update it from recalled navigation. #1818 records two incidents of stale Cloudflare paths being handed to the operator, and the first draft of this file repeated the mistake — it listed Root directory as a top-level field (it is under Advanced settings) and Build watch paths as available at connect time (it only appears after connecting). If Cloudflare moves something, re-query the docs and correct this file.
 - **Related:** #1972 (deployed-source proof), #1973 (the manual deploy that motivated this), standard `0016-pr-sentinel-system-architecture.md`
