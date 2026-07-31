@@ -141,8 +141,11 @@ def check_preconditions(repo_root: Path, new_name: str) -> list[str]:
             f"{', '.join(Path(p).name for p in extra)}"
         )
 
-    if not current_branch(repo_root):
-        problems.append("detached HEAD -- check out the attempt branch first")
+    # A detached HEAD is NOT a blocker. There is simply no branch to graveyard,
+    # so the rename step is skipped and the fresh attempt is cut from the
+    # default branch as usual. Refusing here (as this tool first did) told a
+    # human to "check out the attempt branch first" -- an instruction the tool
+    # can carry out itself, which makes it a ritual rather than a safeguard.
 
     if not default_branch(repo_root):
         problems.append(
@@ -215,13 +218,19 @@ def verify_postconditions(
 
 
 def plan_steps(old_name: str, new_name: str, base: str) -> list[list[str]]:
-    """The exact git commands, in order. Printed on dry runs, executed on --apply."""
-    return [
-        ["git", "fetch", "origin"],
-        ["git", "branch", "-m", old_name, f"{GRAVEYARD_PREFIX}{old_name}"],
-        ["git", "checkout", "-b", new_name, f"origin/{base}"],
-        ["git", "push", "-u", "origin", new_name],
-    ]
+    """The exact git commands, in order. Printed on dry runs, executed on --apply.
+
+    ``old_name`` is empty on a detached HEAD: there is no branch to graveyard,
+    so that step is simply absent rather than being a reason to stop.
+    """
+    steps: list[list[str]] = [["git", "fetch", "origin"]]
+    if old_name:
+        steps.append(
+            ["git", "branch", "-m", old_name, f"{GRAVEYARD_PREFIX}{old_name}"]
+        )
+    steps.append(["git", "checkout", "-b", new_name, f"origin/{base}"])
+    steps.append(["git", "push", "-u", "origin", new_name])
+    return steps
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -256,8 +265,9 @@ def main(argv: list[str] | None = None) -> int:
     base = default_branch(repo_root)
 
     print(f"Repo:            {repo_root}")
-    print(f"Current attempt: {old_name}")
-    print(f"Graveyard as:    {GRAVEYARD_PREFIX}{old_name}")
+    print(f"Current attempt: {old_name or '(detached HEAD -- nothing to graveyard)'}")
+    if old_name:
+        print(f"Graveyard as:    {GRAVEYARD_PREFIX}{old_name}")
     print(f"New attempt:     {new_name} (from origin/{base})")
     print()
 
