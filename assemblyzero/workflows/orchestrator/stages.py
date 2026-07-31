@@ -1213,12 +1213,30 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
     # entirely; without it the attempt branch never receives the code and the
     # next phase of an arc builds against a base that has never seen this one.
     # LLD first, matching the order every previous arc landed in.
+    # #2019: decide against what the run actually produced, not against one
+    # optional key. `pr_url` is the pr stage's own artifact and a declared
+    # field, so when impl_pr_url is missing it still says whether there IS an
+    # implementation PR. Treating "no URL" as "nothing to land" is what let a
+    # dropped key report green while the arc failed to accumulate.
     impl_pr_url = state.get("impl_pr_url", "")
+    pr_stage = state.get("stage_results", {}).get("pr", {})
+    pr_stage_produced = pr_stage.get("status") == "passed" and state.get("pr_url", "")
+    if not impl_pr_url and pr_stage_produced:
+        impl_pr_url = state.get("pr_url", "")
+        notes.append(
+            f"implementation PR URL was missing from state; recovered the pr "
+            f"stage's own artifact ({impl_pr_url})"
+        )
+
     impl_merged = False
     if impl_pr_url:
         impl_merged = _merge_pr(impl_pr_url, merge_timeout, notes, label="impl")
+    elif pr_stage_produced:
+        # Unreachable via the recovery above, but a pr stage that passed and
+        # left nothing landable is a fault, never a quiet pass.
+        notes.append("the pr stage passed but no implementation PR can be found")
     else:
-        notes.append("no implementation PR URL in state — nothing to land")
+        notes.append("the pr stage produced no implementation PR — nothing to land")
 
     # #1624: only delete the working-tree copies once the content is safely on main.
     if lld_merged and target_repo:
@@ -1234,13 +1252,16 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
     # which is the wrong contract for a step the next phase depends on. A cleanup
     # hiccup still passes; an unlanded implementation does not -- that is the run
     # not having landed, and reporting it green is how the gap stayed invisible.
-    landed = impl_merged or not impl_pr_url
+    # #2019: a run whose pr stage produced an implementation PR has landed only
+    # when that PR is merged. Only a run that produced none may pass unlanded.
+    landed = impl_merged or not (impl_pr_url or pr_stage_produced)
     result = _make_stage_result(
         status="passed" if landed else "failed",
         error_message=(
             "" if landed else
             f"implementation PR was not merged into the attempt branch "
-            f"({impl_pr_url}); the arc cannot accumulate without it"
+            f"({impl_pr_url or 'URL missing from state'}); the arc cannot "
+            f"accumulate without it"
         ),
         artifact_path=impl_pr_url if impl_merged else (lld_pr_url if lld_merged else ""),
         duration_seconds=time.monotonic() - start_time,

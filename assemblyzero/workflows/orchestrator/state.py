@@ -48,6 +48,13 @@ class OrchestrationState(TypedDict, total=False):
     worktree_path: str
     pr_url: str
     lld_pr_url: str  # Issue #1531: the LLD PR, captured so the terminal cleanup stage can merge it
+    # #2018: the implementation PR, written by the pr stage and read by cleanup.
+    # This MUST stay declared. The graph is StateGraph(OrchestrationState), so
+    # LangGraph builds its channels from these annotations and discards any key
+    # it has no channel for. #2011 wrote state["impl_pr_url"] without declaring
+    # it here: the write succeeded, the value never crossed the node boundary,
+    # and boostgauge #7 landed its design with the code left in an open PR.
+    impl_pr_url: str
 
     # Progress tracking
     stage_results: dict[str, StageResult]
@@ -133,6 +140,7 @@ def create_initial_state(
         worktree_path="",
         pr_url="",
         lld_pr_url="",
+        impl_pr_url="",
         stage_results={},
         stage_attempts={stage: 0 for stage in STAGE_ORDER},
         started_at=now,
