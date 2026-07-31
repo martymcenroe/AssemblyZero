@@ -287,13 +287,82 @@ def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
     findings = gate.check_repo(repo_root, [issue], base)
     debris = [f for f in findings if not f.startswith("ERROR:")]
     if debris:
-        log.write(f"GATE still dirty after reset ({len(debris)}) -- fresh attempt")
+        log.write(f"GATE still dirty after reset ({len(debris)}) -- {len(debris)} left")
         for d in debris:
             log.write(f"  {d}")
-        return establish_new_attempt(repo_root, log)
+        return replace_or_refuse(repo_root, base, issue, debris, log)
 
     log.write(f"BASE '{base}' clean for #{issue} after self-heal")
     return base
+
+
+def commits_carried(repo_root: Path, base: str) -> int | None:
+    """Commits the base holds beyond the default branch, or None if unknowable.
+
+    None is deliberate and is NOT folded into 0. "I could not measure this" and
+    "there is nothing here" lead to opposite decisions, and treating the first
+    as the second fails in the destructive direction -- it would authorise
+    discarding an arc precisely when the tooling cannot see what is on it.
+    """
+    default = attempt.default_branch(repo_root)
+    candidates = [default] if default else []
+    candidates += ["origin/main", "origin/master"]
+
+    for ref in candidates:
+        if not ref:
+            continue
+        if _run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            cwd=repo_root,
+        ).returncode != 0:
+            continue
+        result = _run(
+            ["git", "rev-list", "--count", f"{ref}..origin/{base}"], cwd=repo_root
+        )
+        out = result.stdout.strip()
+        if result.returncode == 0 and out.isdigit():
+            return int(out)
+    return None
+
+
+def replace_or_refuse(
+    repo_root: Path, base: str, issue: int, debris: list[str], log: EventLog
+) -> str | None:
+    """Cut a fresh attempt only when nothing is lost by it (#2028).
+
+    Replacing the base is right for one that is level with the default branch,
+    or already carries this issue's work: nothing accumulated is discarded.
+
+    Mid-arc it is not. On 2026-07-31 a single local branch the reset could not
+    delete -- one branch, for #2 -- was met by walking away from a base holding
+    four finished phases of #7, #41, #1 and #4, and the log called it routine
+    progress. It happened twice; both times the arc survived by accident rather
+    than design.
+
+    The costs are not comparable. Refusing costs one stopped run and a message
+    naming what to clear. Replacing silently discards every phase accumulated
+    so far, and the next roll builds against a base that has never seen them.
+    """
+    carried = commits_carried(repo_root, base)
+    if carried == 0:
+        return establish_new_attempt(repo_root, log)
+
+    amount = (
+        "an unknown amount of" if carried is None else f"{carried} commit(s) of"
+    )
+    log.write(
+        f"ABORT refusing to replace '{base}': it carries {amount} "
+        f"accumulated work beyond the default branch, and {len(debris)} finding(s) "
+        f"for #{issue} could not be cleared."
+    )
+    for d in debris:
+        log.write(f"  unresolved: {d}")
+    log.write(
+        "  Clear the finding(s) above and roll again. A branch carrying commits "
+        "reachable from nowhere else refuses a safe delete, which is correct -- "
+        "rename it under graveyard/ to keep the commits and free the name."
+    )
+    return None
 
 
 # =============================================================================
