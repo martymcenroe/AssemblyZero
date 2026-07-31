@@ -513,7 +513,78 @@ def launch_detached(
     print(f"  run lifecycle       {log_dir / 'session-events.log'}")
     print(f"  per-issue logs      {log_dir}")
     print(f"\n  status   schtasks /Query /TN {TASK_NAME}")
-    print(f"  stop     schtasks /End /TN {TASK_NAME}")
+    # NOT `schtasks /End`: that ends the task's own process and leaves the
+    # pipeline running, reparented to nothing (#2016).
+    print(f"  stop     {Path(__file__).name} --repo {repo_root} --detach-stop")
+    return 0
+
+
+def pid_file(log_dir: Path) -> Path:
+    return log_dir / "detached-roll.pid"
+
+
+def is_live_python(pid: str) -> bool:
+    """Is this pid a running python process right now?
+
+    Guards the tree kill against pid reuse: a leftover pid file naming a number
+    Windows has since handed to something else must not authorise killing that
+    something else, on a machine that runs concurrent lanes.
+    """
+    if not pid.isdigit():
+        return False
+    result = _run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"])
+    out = result.stdout or ""
+    # tasklist reports "INFO: No tasks..." on stdout with exit 0 when nothing
+    # matches, so the pid must be looked for rather than trusting the code.
+    return f'"{pid}"' in out and "python" in out.lower()
+
+
+def stop_detached(log_dir: Path) -> int:
+    """Stop a detached roll and everything it spawned (#2016).
+
+    `schtasks /End` is not enough on its own: it ends the task's own process and
+    leaves the pipeline running, reparented to nothing. Measured 2026-07-31 --
+    ending a roll left two orchestrate processes alive, and the tree kill that
+    followed had to walk four more levels that /End never touched. Those orphans
+    keep calling models and keep writing to the target repo.
+
+    So the pid the roll recorded is killed WITH its tree first, and the task is
+    ended afterwards to return it to Ready.
+    """
+    if sys.platform != "win32":
+        print(f"ERROR: --detach-stop is Windows-only; this is {sys.platform}")
+        return 91
+
+    log = EventLog(log_dir / "detach-events.log")
+    path = pid_file(log_dir)
+    killed = False
+    if path.exists():
+        pid = path.read_text(encoding="utf-8").strip()
+        if not is_live_python(pid):
+            # Windows recycles pids. A stale file plus an unlucky reuse would
+            # tree-kill somebody else's work on a shared machine.
+            log.write(f"DETACH-STOP pid {pid} is not a live python; refusing")
+            print(f"Recorded pid {pid} is not a running python process.")
+            print("Refusing to kill it -- the roll is already gone.")
+            path.unlink(missing_ok=True)
+        else:
+            result = _run(["taskkill", "/PID", pid, "/T", "/F"])
+            if result.returncode == 0:
+                killed = True
+                log.write(f"DETACH-STOP tree-killed pid {pid}")
+                print(f"Stopped the roll and its process tree (pid {pid}).")
+            else:
+                detail = (result.stdout + result.stderr).strip()
+                log.write(f"DETACH-STOP pid {pid} not killed: {detail}")
+                print(f"No live tree for pid {pid} ({detail}).")
+            path.unlink(missing_ok=True)
+    else:
+        print(f"No recorded pid at {path}.")
+
+    ended = _run(["schtasks", "/End", "/TN", TASK_NAME])
+    if ended.returncode != 0 and not killed:
+        log.write("DETACH-STOP nothing was running")
+        print(f"Task '{TASK_NAME}' was not running.")
     return 0
 
 
@@ -691,6 +762,10 @@ def main(argv: list[str] | None = None) -> int:
             "then return immediately (#2015)"
         ),
     )
+    parser.add_argument(
+        "--detach-stop", action="store_true",
+        help="Stop a detached roll and every process it spawned (#2016)",
+    )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     args, extra = parser.parse_known_args(argv)
@@ -713,6 +788,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.log_dir
         else repo_root / "data" / "speedrun" / "runs"
     )
+
+    # Stopping is about processes, not code: it must work even from a stale or
+    # dirty tree, so it comes before the staleness gate.
+    if args.detach_stop:
+        return stop_detached(log_dir)
 
     # #2007: refuse before spending anything if the tree running this roll is
     # not the code main says it is. Runs before the detach hand-off too, so a
@@ -737,6 +817,11 @@ def main(argv: list[str] | None = None) -> int:
     session = EventLog(log_dir / "session-events.log")
     install_signal_handlers(session)
 
+    # How --detach-stop finds the tree to kill (#2016). Written by whichever
+    # process does the rolling, detached or not.
+    log_dir.mkdir(parents=True, exist_ok=True)
+    pid_file(log_dir).write_text(str(os.getpid()), encoding="utf-8")
+
     code = 0
     try:
         for issue in args.issue:
@@ -753,6 +838,9 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # #2005: hand the repo back the way it was borrowed -- on success, on
         # failure, and on the SignalExit raised by the handlers.
+        # A finished roll leaves no pid behind to be stopped, or mistaken for a
+        # live one once Windows reuses the number.
+        pid_file(log_dir).unlink(missing_ok=True)
         failures = restore_repo(repo_root, args.issue, session)
         if failures:
             print("\nRESTORE INCOMPLETE:")

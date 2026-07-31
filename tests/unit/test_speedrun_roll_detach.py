@@ -227,6 +227,144 @@ class TestTheSessionLogStaysDiagnostic:
         assert (runs / "detach-events.log").exists()
 
 
+class TestStoppingADetachedRoll:
+    """`schtasks /End` ends the task's own process and leaves the pipeline
+    running, reparented to nothing -- measured 2026-07-31, where the tree kill
+    that followed had to walk four levels /End never reached (#2016)."""
+
+    @pytest.fixture
+    def runs(self, repo):
+        d = repo / "data" / "speedrun" / "runs"
+        d.mkdir(parents=True)
+        return d
+
+    def _stop(self, repo, recorder, platform="win32"):
+        with patch.object(sr, "_run", recorder), \
+                patch.object(sr.sys, "platform", platform):
+            return sr.main(["--repo", str(repo), "--issue", "7", "--detach-stop"])
+
+    def test_it_kills_the_whole_tree_not_just_the_task(self, repo, runs):
+        runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "is_live_python", lambda pid: True):
+            assert self._stop(repo, rec) == 0
+
+        kill = [c for c in rec.calls if c[0] == "taskkill"]
+        assert kill and kill[0] == ["taskkill", "/PID", "4242", "/T", "/F"], kill
+
+    def test_the_task_is_ended_after_the_tree_is_killed(self, repo, runs):
+        runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "is_live_python", lambda pid: True):
+            self._stop(repo, rec)
+
+        order = [c[0] for c in rec.calls if c[0] in ("taskkill", "schtasks")]
+        assert order == ["taskkill", "schtasks"], order
+
+    def test_a_recycled_pid_is_not_killed(self, repo, runs):
+        """Windows reuses pids. A stale file must never authorise tree-killing
+        whatever now holds that number on a machine running other lanes."""
+        runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "is_live_python", lambda pid: False):
+            assert self._stop(repo, rec) == 0
+
+        assert [c for c in rec.calls if c[0] == "taskkill"] == []
+
+    def test_a_stale_pid_file_is_cleared(self, repo, runs):
+        pid = runs / "detached-roll.pid"
+        pid.write_text("4242", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "is_live_python", lambda p: False):
+            self._stop(repo, rec)
+        assert not pid.exists()
+
+    def test_stopping_with_nothing_running_is_not_an_error(self, repo, runs):
+        rec = _Recorder(codes={"/End": 1})
+        assert self._stop(repo, rec) == 0
+
+    def test_stopping_works_from_a_stale_tree(self, repo, runs):
+        """Stopping is about processes, not code -- a staleness gate standing
+        between the operator and a runaway roll would be the wrong tradeoff."""
+        runs.joinpath("detached-roll.pid").write_text("99", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "check_assemblyzero_tree",
+                          lambda p: ["2 commit(s) behind origin/main"]), \
+                patch.object(sr, "is_live_python", lambda p: True), \
+                patch.object(sr, "_run", rec), \
+                patch.object(sr.sys, "platform", "win32"):
+            code = sr.main(["--repo", str(repo), "--issue", "7", "--detach-stop"])
+
+        assert code == 0
+        assert [c for c in rec.calls if c[0] == "taskkill"]
+
+    def test_a_roll_records_its_pid_so_it_can_be_stopped(self, repo):
+        with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
+                patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "roll_issue", lambda *a: 0):
+            seen = {}
+
+            def _capture(repo_root, issue, log_dir, az_root, extra):
+                seen["pid"] = sr.pid_file(log_dir).read_text(encoding="utf-8")
+                return 0
+
+            with patch.object(sr, "roll_issue", _capture):
+                sr.main(["--repo", str(repo), "--issue", "7"])
+
+        assert seen["pid"] == str(__import__("os").getpid())
+
+    def test_a_finished_roll_leaves_no_pid_behind(self, repo):
+        with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
+                patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "roll_issue", lambda *a: 0):
+            sr.main(["--repo", str(repo), "--issue", "7"])
+
+        assert not sr.pid_file(repo / "data" / "speedrun" / "runs").exists()
+
+    def test_non_windows_refuses(self, repo, runs, capsys):
+        rec = _Recorder()
+        assert self._stop(repo, rec, platform="linux") == 91
+        assert "ERROR" in capsys.readouterr().out
+
+
+class TestPidLivenessGuard:
+    def test_a_non_numeric_pid_is_never_trusted(self):
+        assert sr.is_live_python("not-a-pid") is False
+
+    def test_no_matching_task_reads_as_not_live(self):
+        """tasklist prints an INFO line on stdout and still exits 0, so the
+        return code alone would say every pid is alive."""
+        def _run(cmd, cwd=None):
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout="INFO: No tasks are running which match the criteria.",
+                stderr="",
+            )
+
+        with patch.object(sr, "_run", _run):
+            assert sr.is_live_python("4242") is False
+
+    def test_a_matching_python_process_reads_as_live(self):
+        def _run(cmd, cwd=None):
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='"python.exe","4242","Console","1","90,000 K"',
+                stderr="",
+            )
+
+        with patch.object(sr, "_run", _run):
+            assert sr.is_live_python("4242") is True
+
+    def test_a_reused_pid_running_something_else_reads_as_not_live(self):
+        def _run(cmd, cwd=None):
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout='"chrome.exe","4242","Console","1","90,000 K"',
+                stderr="",
+            )
+
+        with patch.object(sr, "_run", _run):
+            assert sr.is_live_python("4242") is False
+
+
 class TestConsolelessNarration:
     def test_stdout_is_rebound_to_the_file(self, tmp_path):
         """A scheduled task inherits no console, so prints must land somewhere
