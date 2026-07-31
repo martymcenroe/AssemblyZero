@@ -52,6 +52,17 @@ import speedrun_clean_check as gate
 import speedrun_new_attempt as attempt
 import speedrun_reset as reset
 
+# #2040: this tool spawns git, gh and schtasks itself, and a detached roll has
+# no console for them to inherit. Installed at import, so it is in force before
+# the first _run().
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+try:
+    from assemblyzero.core.no_console import install as _install_no_console
+
+    _install_no_console()
+except ImportError:  # pragma: no cover - tool copied outside the package
+    pass
+
 HEARTBEAT_SECONDS = 15
 DEFAULT_PREFIX = "hardening-run"
 
