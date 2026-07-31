@@ -1321,7 +1321,18 @@ def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
     branch = f"dependabot-audit-{pr.number}"
     print(f"  BASELINE: re-running the gate on the base ({branch}) to see "
           f"whether these failures predate the bump (#1992)")
-    if run(["git", "checkout", branch], cwd=str(worktree)).returncode != 0:
+    # #1997: a missing worktree makes subprocess raise OSError on the cwd
+    # BEFORE git runs, which killed the whole sweep. That is exactly an
+    # unestablishable baseline, and this function already has the safe answer
+    # for one -- (0, "") reads as "not exonerable" -- so route there rather
+    # than raising.
+    try:
+        checkout = run(["git", "checkout", branch], cwd=str(worktree))
+    except OSError as err:
+        print(f"  BASELINE: worktree unusable ({err}) -- not exonerable",
+              file=sys.stderr)
+        return 0, ""
+    if checkout.returncode != 0:
         print("  BASELINE: could not restore the base commit -- not "
               "exonerable", file=sys.stderr)
         return 0, ""
