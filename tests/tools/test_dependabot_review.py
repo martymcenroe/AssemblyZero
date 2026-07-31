@@ -320,6 +320,10 @@ class TestProcessPrDeferralStaleBranchPriority:
     def _stub_pipeline(self, monkeypatch, exit_code, package_count, is_stale):
         """Stub the pieces of process_pr we need to exercise the deferral branch."""
         monkeypatch.setattr(dependabot_review, "verify_author", lambda pr: True)
+        # #1992: base reads green -> failures are NOT exonerable, so
+        # these deferral-path expectations hold unchanged.
+        monkeypatch.setattr(dependabot_review, "run_baseline_gate",
+                            lambda pr, wt, py, js: (0, ""))
         monkeypatch.setattr(
             dependabot_review,
             "create_audit_worktree",
@@ -333,6 +337,8 @@ class TestProcessPrDeferralStaleBranchPriority:
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda worktree: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda worktree: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda worktree: exit_code)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda worktree: (exit_code, ""))
         monkeypatch.setattr(dependabot_review, "count_packages", lambda body: package_count)
         monkeypatch.setattr(dependabot_review, "is_pr_branch_stale", lambda pr, repo: is_stale)
 
@@ -511,6 +517,8 @@ class TestExitCodeFiveIsPass:
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: exit_code)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: (exit_code, ""))
         # Green-path stubs (only used when the gate doesn't defer).
         monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "approve_pr",
@@ -621,6 +629,8 @@ class TestWaitForMergeableTimeoutDeferred:
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
         monkeypatch.setattr(dependabot_review, "install_deps", lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 0)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: (0, ""))
         monkeypatch.setattr(dependabot_review, "inject_no_issue", lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "approve_pr",
                             lambda pr, repo, gate_desc: True)
@@ -844,8 +854,8 @@ class TestPipelineSkippedForNonPythonPR:
         tests_called = []
         monkeypatch.setattr(dependabot_review, "install_deps",
                             lambda wt: install_called.append(wt) or True)
-        monkeypatch.setattr(dependabot_review, "run_tests",
-                            lambda wt: tests_called.append(wt) or 0)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: tests_called.append(wt) or (0, ""))
 
         result = dependabot_review._process_pr_inside_worktree(
             self._pr(), "owner/repo", Path("/tmp/wt"),
@@ -872,8 +882,8 @@ class TestPipelineSkippedForNonPythonPR:
         monkeypatch.setattr(dependabot_review, "evict_poetry_venv", lambda wt: None)
         monkeypatch.setattr(dependabot_review, "install_deps",
                             lambda wt: install_called.append(wt) or True)
-        monkeypatch.setattr(dependabot_review, "run_tests",
-                            lambda wt: tests_called.append(wt) or 0)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: tests_called.append(wt) or (0, ""))
 
         result = dependabot_review._process_pr_inside_worktree(
             self._pr(), "owner/repo", Path("/tmp/wt"),
@@ -1501,6 +1511,10 @@ class TestProcessPrJsFlow:
     def _stub_green_path(self, monkeypatch):
         monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
                             lambda worktree, pr_number, repo: True)
+        # #1992: base green -> a failing PR is a real regression, not
+        # exonerable. Tests that want exoneration stub this themselves.
+        monkeypatch.setattr(dependabot_review, "run_baseline_gate",
+                            lambda pr, wt, py, js: (0, ""))
         monkeypatch.setattr(dependabot_review, "inject_no_issue",
                             lambda pr, repo: True)
         monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
@@ -1527,11 +1541,11 @@ class TestProcessPrJsFlow:
         installs, tests, js = [], [], []
         monkeypatch.setattr(dependabot_review, "install_deps",
                             lambda wt: installs.append(wt) or True)
-        monkeypatch.setattr(dependabot_review, "run_tests",
-                            lambda wt: tests.append(wt) or 0)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: tests.append(wt) or (0, ""))
         monkeypatch.setattr(
             dependabot_review, "run_js_gate",
-            lambda wt, dirs: js.append(dirs) or
+            lambda wt, dirs, sink=None: js.append(dirs) or
             (True, "npm test passed (exit 0) in 'dashboard'"))
 
         result = dependabot_review._process_pr_inside_worktree(
@@ -1548,7 +1562,7 @@ class TestProcessPrJsFlow:
                             lambda pr, repo: ["package.json"])
         monkeypatch.setattr(
             dependabot_review, "run_js_gate",
-            lambda wt, dirs: (False, "no runnable npm test script in '.' -- "
+            lambda wt, dirs, sink=None: (False, "no runnable npm test script in '.' -- "
                               "not auto-merging unverified (#1839)"))
         reviews: list[str] = []
         monkeypatch.setattr(
@@ -1582,10 +1596,12 @@ class TestProcessPrJsFlow:
         monkeypatch.setattr(dependabot_review, "install_deps",
                             lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 0)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: (0, ""))
         js: list = []
         monkeypatch.setattr(
             dependabot_review, "run_js_gate",
-            lambda wt, dirs: js.append(dirs) or
+            lambda wt, dirs, sink=None: js.append(dirs) or
             (True, "npm test passed (exit 0) in 'web'"))
 
         result = dependabot_review._process_pr_inside_worktree(
@@ -1606,9 +1622,11 @@ class TestProcessPrJsFlow:
         monkeypatch.setattr(dependabot_review, "install_deps",
                             lambda wt: True)
         monkeypatch.setattr(dependabot_review, "run_tests", lambda wt: 1)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda wt: (1, "FAILED t.py::a"))
         js: list = []
         monkeypatch.setattr(dependabot_review, "run_js_gate",
-                            lambda wt, dirs: js.append(dirs) or (True, "x"))
+                            lambda wt, dirs, sink=None: js.append(dirs) or (True, "x"))
         monkeypatch.setattr(dependabot_review, "review_comment_on_pr",
                             lambda pr, repo, body: True)
         monkeypatch.setattr(dependabot_review, "is_pr_branch_stale",
@@ -1773,3 +1791,166 @@ class TestTeeSurvivesUndecodableTerminal:
         assert tee.write("plain ascii line") == len("plain ascii line")
         logfile.close()
         assert stream.written == ["plain ascii line"]
+
+
+VITEST_FAIL = (
+    "\x1b[31m × \x1b[39msrc/api.test.ts > auth > rejects bad token 12ms\n"
+    " × src/api.test.ts > auth > returns 400 on malformed body\n"
+    " Test Files  1 failed | 110 passed (111)\n"
+)
+PYTEST_FAIL = (
+    "FAILED tests/test_a.py::TestX::test_one - AssertionError\n"
+    "FAILED tests/test_b.py::test_two - ValueError\n"
+    "2 failed, 300 passed in 5.2s\n"
+)
+
+
+class TestExtractFailures:
+    """#1992: identifiers must be stable enough to compare across runs."""
+
+    def test_pytest_ids(self):
+        got = dependabot_review.extract_failures(PYTEST_FAIL)
+        assert "tests/test_a.py::TestX::test_one" in got
+        assert "tests/test_b.py::test_two" in got
+
+    def test_vitest_ids_with_ansi_and_timings_stripped(self):
+        got = dependabot_review.extract_failures(VITEST_FAIL)
+        assert any("rejects bad token" in g for g in got)
+        assert all("\x1b" not in g for g in got), "ANSI must be stripped"
+        assert all(not g.endswith("12ms") for g in got), "timing must be cut"
+
+    def test_same_suite_twice_yields_equal_sets(self):
+        """The whole comparison rests on this: identical output must give
+        identical identifiers, or exoneration is meaningless."""
+        assert (dependabot_review.extract_failures(VITEST_FAIL)
+                == dependabot_review.extract_failures(VITEST_FAIL))
+
+    def test_clean_output_yields_nothing(self):
+        assert dependabot_review.extract_failures(
+            "300 passed in 5.2s\n") == set()
+
+    def test_empty_and_none_safe(self):
+        assert dependabot_review.extract_failures("") == set()
+        assert dependabot_review.extract_failures(None) == set()
+
+
+class TestIsExoneratedByBaseline:
+    """#1992: the ONLY path where a red gate still merges. It must never
+    fire on uncertainty."""
+
+    def test_identical_failures_exonerate(self):
+        f = {"a::t1", "b::t2"}
+        assert dependabot_review.is_exonerated_by_baseline(f, set(f)) is True
+
+    def test_subset_exonerates(self):
+        """Base is broken in 3 ways, PR fails 2 of them -- introduced
+        nothing new."""
+        assert dependabot_review.is_exonerated_by_baseline(
+            {"a::t1"}, {"a::t1", "b::t2", "c::t3"}) is True
+
+    def test_one_new_failure_blocks(self):
+        assert dependabot_review.is_exonerated_by_baseline(
+            {"a::t1", "NEW::regression"}, {"a::t1"}) is False
+
+    def test_green_baseline_blocks(self):
+        """Base passes, PR fails -> the bump did it."""
+        assert dependabot_review.is_exonerated_by_baseline(
+            {"a::t1"}, set()) is False
+
+    def test_unparseable_pr_output_blocks(self):
+        """Empty PR set means 'could not parse', NOT 'nothing failed'.
+        Exonerating here would merge on ignorance."""
+        assert dependabot_review.is_exonerated_by_baseline(
+            set(), {"a::t1"}) is False
+
+    def test_both_unparseable_blocks(self):
+        assert dependabot_review.is_exonerated_by_baseline(
+            set(), set()) is False
+
+
+class TestBaselineGateFlow:
+    """#1992: end-to-end behaviour inside _process_pr_inside_worktree."""
+
+    def _pr(self):
+        return dependabot_review.PRInfo(
+            number=77, title="bump x", author_login="app/dependabot",
+            body="", head_ref="dependabot/pip/x-2")
+
+    def _wire(self, monkeypatch, baseline):
+        monkeypatch.setattr(dependabot_review, "checkout_pr_into_worktree",
+                            lambda w, n, r: True)
+        monkeypatch.setattr(dependabot_review, "_pr_changed_files",
+                            lambda pr, repo: ["poetry.lock"])
+        monkeypatch.setattr(dependabot_review, "evict_poetry_venv",
+                            lambda w: None)
+        monkeypatch.setattr(dependabot_review, "install_deps", lambda w: True)
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda w: (1, PYTEST_FAIL))
+        monkeypatch.setattr(dependabot_review, "run_baseline_gate",
+                            lambda pr, w, py, js: baseline)
+        monkeypatch.setattr(dependabot_review, "inject_no_issue",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "wait_for_mergeable",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review, "squash_merge",
+                            lambda pr, repo: True)
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+        approvals: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "approve_pr",
+            lambda pr, repo, gate_desc: approvals.append(gate_desc) or True)
+        reviews: list[str] = []
+        monkeypatch.setattr(
+            dependabot_review, "review_comment_on_pr",
+            lambda pr, repo, body: reviews.append(body) or True)
+        monkeypatch.setattr(dependabot_review, "is_pr_branch_stale",
+                            lambda pr, repo: False)
+        return approvals, reviews
+
+    def test_red_pr_on_red_base_merges_and_says_so(self, monkeypatch):
+        approvals, _ = self._wire(monkeypatch, (1, PYTEST_FAIL))
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "o/r", Path("/tmp/wt"))
+        assert result == "merged"
+        body = approvals[0]
+        assert "exonerated" in body.lower()
+        assert "already fail" in body.lower(), (
+            "the audit trail must never imply a green suite")
+
+    def test_red_pr_on_green_base_still_defers(self, monkeypatch):
+        approvals, reviews = self._wire(monkeypatch, (0, ""))
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "o/r", Path("/tmp/wt"))
+        assert result == "deferred"
+        assert approvals == [], "a real regression must never be approved"
+        assert reviews and "baseline check" in reviews[0]
+
+    def test_new_failure_against_red_base_defers(self, monkeypatch):
+        """Base is red, but the PR adds a failure the base does not have."""
+        approvals, _ = self._wire(
+            monkeypatch, (1, "FAILED tests/test_a.py::TestX::test_one\n"))
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "o/r", Path("/tmp/wt"))
+        assert result == "deferred"
+        assert approvals == []
+
+    def test_unparseable_baseline_defers(self, monkeypatch):
+        approvals, _ = self._wire(monkeypatch, (1, "something unparseable"))
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "o/r", Path("/tmp/wt"))
+        assert result == "deferred"
+        assert approvals == []
+
+    def test_passing_pr_never_runs_baseline(self, monkeypatch):
+        """Cost control: the baseline must only run on the failure path."""
+        called: list = []
+        self._wire(monkeypatch, (1, PYTEST_FAIL))
+        monkeypatch.setattr(dependabot_review, "run_tests_detailed",
+                            lambda w: (0, ""))
+        monkeypatch.setattr(
+            dependabot_review, "run_baseline_gate",
+            lambda pr, w, py, js: called.append(1) or (0, ""))
+        result = dependabot_review._process_pr_inside_worktree(
+            self._pr(), "o/r", Path("/tmp/wt"))
+        assert result == "merged"
+        assert called == [], "baseline must not run when the gate passes"
