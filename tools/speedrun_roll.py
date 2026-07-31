@@ -24,6 +24,13 @@ Preserved verbatim from the wrapper, because each was earned:
   - direct redirect -- the child's stdout goes straight to a file with no pipe
                       in the path, which is what stopped the kills
 
+`--detach` hands the roll to Windows Task Scheduler instead of running it here
+(#2015). A roll started from an agent session is a descendant of that session's
+shell, and a harness kill of the shell takes the entire tree with it -- measured
+2026-07-31, and neither DETACHED_PROCESS nor CREATE_BREAKAWAY_FROM_JOB escaped
+it. A scheduled task is spawned by the Task Scheduler service, so it is not in
+the tree at all and nothing done to the launching session can reach it.
+
 Exit codes: 0 all issues rolled; 91 a base or gate problem this tool could not
 heal; otherwise the failing child's return code.
 """
@@ -39,6 +46,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import speedrun_clean_check as gate
 import speedrun_new_attempt as attempt
@@ -340,6 +348,260 @@ def _child_env() -> dict[str, str]:
     return env
 
 
+# =============================================================================
+# Detached launch -- outliving the session that started the roll (#2015)
+# =============================================================================
+
+TASK_NAME = "AZ-SpeedrunRoll"
+
+# No <Triggers> element: the task can never fire on its own, so there is no
+# far-future trigger date to pick and nothing to clean up on a calendar.
+# It exists solely to be started on demand.
+#
+# ExecutionTimeLimit PT0S means no limit -- the default would stop a long arc
+# partway. AllowHardTerminate false keeps the scheduler from killing the roll,
+# which is the entire point of running here. The battery settings matter on a
+# laptop: the defaults refuse to start, and stop a running task, on battery.
+_TASK_XML = """<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>{description}</Description>
+  </RegistrationInfo>
+  <Triggers />
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>false</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{command}</Command>
+      <Arguments>{arguments}</Arguments>
+      <WorkingDirectory>{working_dir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"""
+
+
+def _quote(arg: str) -> str:
+    return f'"{arg}"' if " " in arg else arg
+
+
+def current_user() -> str:
+    domain = os.environ.get("USERDOMAIN", "")
+    name = os.environ.get("USERNAME", "")
+    return f"{domain}\\{name}" if domain else name
+
+
+def detached_argv(
+    args: argparse.Namespace,
+    extra: list[str],
+    repo_root: Path,
+    az_root: Path,
+    log_dir: Path,
+) -> list[str]:
+    """The argv the scheduled task runs: this same roll, minus the detach ask.
+
+    Every path is made absolute because the detached process inherits whatever
+    working directory the scheduler gives it, not the one the operator typed in.
+    """
+    argv = ["--repo", str(repo_root)]
+    for issue in args.issue:
+        argv += ["--issue", str(issue)]
+    argv += [
+        "--log-dir", str(log_dir),
+        "--assemblyzero-root", str(az_root),
+        "--detached-stdout", str(log_dir / "detached-launcher.log"),
+    ]
+    return argv + extra
+
+
+def build_task_xml(
+    command: str, arguments: str, working_dir: str, description: str, user: str
+) -> str:
+    return _TASK_XML.format(
+        description=escape(description),
+        user=escape(user),
+        command=escape(command),
+        arguments=escape(arguments),
+        working_dir=escape(working_dir),
+    )
+
+
+def launch_detached(
+    args: argparse.Namespace,
+    extra: list[str],
+    repo_root: Path,
+    az_root: Path,
+    log_dir: Path,
+) -> int:
+    """Hand the roll to Task Scheduler and return immediately (#2015).
+
+    Deliberately logs to `detach-events.log`, NOT the session log: the absence
+    of `session-events.log` is the evidence that distinguishes an uncatchable
+    kill from an orderly exit, and a launcher writing to it would destroy that
+    signal for every future diagnosis.
+    """
+    if sys.platform != "win32":
+        print(
+            "ERROR: --detach is implemented against Windows Task Scheduler and "
+            f"this is {sys.platform}. Run without --detach, or add an equivalent "
+            "for this platform."
+        )
+        return 91
+
+    log = EventLog(log_dir / "detach-events.log")
+    argv = detached_argv(args, extra, repo_root, az_root, log_dir)
+    arguments = " ".join(
+        _quote(a) for a in [str(Path(__file__).resolve()), *argv]
+    )
+    issues = ", ".join(f"#{i}" for i in args.issue)
+    xml = build_task_xml(
+        command=sys.executable,
+        arguments=arguments,
+        working_dir=str(az_root),
+        description=f"Detached speedrun roll of {issues} in {repo_root.name}",
+        user=current_user(),
+    )
+
+    xml_path = log_dir / "detached-task.xml"
+    xml_path.parent.mkdir(parents=True, exist_ok=True)
+    # schtasks requires UTF-16 here; it rejects a UTF-8 definition as malformed.
+    xml_path.write_text(xml, encoding="utf-16")
+
+    created = _run(
+        ["schtasks", "/Create", "/TN", TASK_NAME, "/XML", str(xml_path), "/F"]
+    )
+    if created.returncode != 0:
+        detail = (created.stdout + created.stderr).strip()
+        log.write(f"DETACH create failed: {detail}")
+        return 91
+
+    started = _run(["schtasks", "/Run", "/TN", TASK_NAME])
+    if started.returncode != 0:
+        detail = (started.stdout + started.stderr).strip()
+        log.write(f"DETACH start failed: {detail}")
+        return 91
+
+    log.write(f"DETACH launched '{TASK_NAME}' for {issues} (interpreter {sys.executable})")
+    print(f"Detached: scheduled task '{TASK_NAME}' is rolling {issues}.")
+    print("It is parented by the Task Scheduler service, so ending this session")
+    print("(or killing this shell) cannot reach it.\n")
+    print(f"  launcher narration  {log_dir / 'detached-launcher.log'}")
+    print(f"  run lifecycle       {log_dir / 'session-events.log'}")
+    print(f"  per-issue logs      {log_dir}")
+    print(f"\n  status   schtasks /Query /TN {TASK_NAME}")
+    # NOT `schtasks /End`: that ends the task's own process and leaves the
+    # pipeline running, reparented to nothing (#2016).
+    print(f"  stop     {Path(__file__).name} --repo {repo_root} --detach-stop")
+    return 0
+
+
+def pid_file(log_dir: Path) -> Path:
+    return log_dir / "detached-roll.pid"
+
+
+def is_live_python(pid: str) -> bool:
+    """Is this pid a running python process right now?
+
+    Guards the tree kill against pid reuse: a leftover pid file naming a number
+    Windows has since handed to something else must not authorise killing that
+    something else, on a machine that runs concurrent lanes.
+    """
+    if not pid.isdigit():
+        return False
+    result = _run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"])
+    out = result.stdout or ""
+    # tasklist reports "INFO: No tasks..." on stdout with exit 0 when nothing
+    # matches, so the pid must be looked for rather than trusting the code.
+    return f'"{pid}"' in out and "python" in out.lower()
+
+
+def stop_detached(log_dir: Path) -> int:
+    """Stop a detached roll and everything it spawned (#2016).
+
+    `schtasks /End` is not enough on its own: it ends the task's own process and
+    leaves the pipeline running, reparented to nothing. Measured 2026-07-31 --
+    ending a roll left two orchestrate processes alive, and the tree kill that
+    followed had to walk four more levels that /End never touched. Those orphans
+    keep calling models and keep writing to the target repo.
+
+    So the pid the roll recorded is killed WITH its tree first, and the task is
+    ended afterwards to return it to Ready.
+    """
+    if sys.platform != "win32":
+        print(f"ERROR: --detach-stop is Windows-only; this is {sys.platform}")
+        return 91
+
+    log = EventLog(log_dir / "detach-events.log")
+    path = pid_file(log_dir)
+    killed = False
+    if path.exists():
+        pid = path.read_text(encoding="utf-8").strip()
+        if not is_live_python(pid):
+            # Windows recycles pids. A stale file plus an unlucky reuse would
+            # tree-kill somebody else's work on a shared machine.
+            log.write(f"DETACH-STOP pid {pid} is not a live python; refusing")
+            print(f"Recorded pid {pid} is not a running python process.")
+            print("Refusing to kill it -- the roll is already gone.")
+            path.unlink(missing_ok=True)
+        else:
+            result = _run(["taskkill", "/PID", pid, "/T", "/F"])
+            if result.returncode == 0:
+                killed = True
+                log.write(f"DETACH-STOP tree-killed pid {pid}")
+                print(f"Stopped the roll and its process tree (pid {pid}).")
+            else:
+                detail = (result.stdout + result.stderr).strip()
+                log.write(f"DETACH-STOP pid {pid} not killed: {detail}")
+                print(f"No live tree for pid {pid} ({detail}).")
+            path.unlink(missing_ok=True)
+    else:
+        print(f"No recorded pid at {path}.")
+
+    ended = _run(["schtasks", "/End", "/TN", TASK_NAME])
+    if ended.returncode != 0 and not killed:
+        log.write("DETACH-STOP nothing was running")
+        print(f"Task '{TASK_NAME}' was not running.")
+    return 0
+
+
+def _redirect_stdio(path: Path) -> None:
+    """Point stdout and stderr at a file, for a run with no console (#2015).
+
+    A scheduled task inherits no console. Without this every print in this tool
+    -- including EventLog's, which is how a roll narrates itself -- would go
+    nowhere or fail outright. Rebinding before anything else makes the narration
+    durable instead of merely absent.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stream = path.open("a", encoding="utf-8", errors="replace", buffering=1)
+    sys.stdout = stream
+    sys.stderr = stream
+
+
 def install_signal_handlers(log: EventLog) -> None:
     """Log TERM/INT/BREAK/HUP to the events file, then exit via the normal path.
 
@@ -482,7 +744,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--repo", required=True, help="Target repo root path")
     parser.add_argument(
-        "--issue", type=int, action="append", required=True,
+        # Not required at parse time: --detach-stop names no issue, it stops
+        # whatever is running. Enforced below for the paths that do roll.
+        "--issue", type=int, action="append", default=None,
         help="Issue to roll (repeatable; rolled in order)",
     )
     parser.add_argument(
@@ -493,7 +757,23 @@ def main(argv: list[str] | None = None) -> int:
         "--assemblyzero-root", default=None,
         help="AssemblyZero checkout that owns orchestrate.py. Default: this tool's repo",
     )
+    parser.add_argument(
+        "--detach", action="store_true",
+        help=(
+            "Run via Windows Task Scheduler so the roll outlives this session, "
+            "then return immediately (#2015)"
+        ),
+    )
+    parser.add_argument(
+        "--detach-stop", action="store_true",
+        help="Stop a detached roll and every process it spawned (#2016)",
+    )
+    # Set by --detach on the relaunch; not something anyone types.
+    parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     args, extra = parser.parse_known_args(argv)
+
+    if args.detached_stdout:
+        _redirect_stdio(Path(args.detached_stdout))
 
     repo_root = Path(args.repo).resolve()
     if not (repo_root / ".git").exists():
@@ -511,11 +791,18 @@ def main(argv: list[str] | None = None) -> int:
         else repo_root / "data" / "speedrun" / "runs"
     )
 
-    session = EventLog(log_dir / "session-events.log")
-    install_signal_handlers(session)
+    # Stopping is about processes, not code: it must work even from a stale or
+    # dirty tree, so it comes before the staleness gate.
+    if args.detach_stop:
+        return stop_detached(log_dir)
+
+    if not args.issue:
+        print("ERROR: --issue is required (repeatable) unless stopping a roll")
+        return 91
 
     # #2007: refuse before spending anything if the tree running this roll is
-    # not the code main says it is.
+    # not the code main says it is. Runs before the detach hand-off too, so a
+    # stale tree is caught here rather than inside a task nobody is watching.
     stale = check_assemblyzero_tree(az_root)
     if stale:
         print(f"BLOCKED: the AssemblyZero tree at {az_root} is not trustworthy:")
@@ -527,6 +814,19 @@ def main(argv: list[str] | None = None) -> int:
             "pipeline code fails in ways that look\n  like target-repo problems."
         )
         return 91
+
+    if args.detach:
+        return launch_detached(args, extra, repo_root, az_root, log_dir)
+
+    # Created only by a process that actually rolls, never by the launcher --
+    # see launch_detached on why that separation is load-bearing.
+    session = EventLog(log_dir / "session-events.log")
+    install_signal_handlers(session)
+
+    # How --detach-stop finds the tree to kill (#2016). Written by whichever
+    # process does the rolling, detached or not.
+    log_dir.mkdir(parents=True, exist_ok=True)
+    pid_file(log_dir).write_text(str(os.getpid()), encoding="utf-8")
 
     code = 0
     try:
@@ -544,11 +844,17 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         # #2005: hand the repo back the way it was borrowed -- on success, on
         # failure, and on the SignalExit raised by the handlers.
+        # A finished roll leaves no pid behind to be stopped, or mistaken for a
+        # live one once Windows reuses the number.
+        pid_file(log_dir).unlink(missing_ok=True)
         failures = restore_repo(repo_root, args.issue, session)
         if failures:
             print("\nRESTORE INCOMPLETE:")
             for f in failures:
                 print(f"  - {f}")
+                # Also to the events file: a detached run has no one reading
+                # stdout, and this is exactly the state the next roll inherits.
+                session.write(f"RESTORE INCOMPLETE: {f}")
 
 
 if __name__ == "__main__":
