@@ -12,24 +12,12 @@ Tests for:
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, patch
-import tempfile
-import shutil
 
 
-@pytest.fixture(autouse=True)
-def _patch_lld_status_file(monkeypatch, tmp_path: Path) -> None:
-    """Redirect LLD_STATUS_FILE under tmp_path for test isolation (#1158).
-
-    PR #1156 made the constant absolute (~/.claude/assemblyzero/lld-status.json);
-    `target_repo / LLD_STATUS_FILE` now silently ignores target_repo. Tests that
-    pass `tmp_path` were reading the user's real ~/.claude file instead of the
-    test's tmp_path. This fixture restores per-test isolation.
-    """
-    monkeypatch.setattr(
-        "assemblyzero.workflows.requirements.audit.LLD_STATUS_FILE",
-        tmp_path / "docs" / "lld" / "lld-status.json",
-    )
+# #1970: the LLD cache now lives at <target_repo>/data/assemblyzero/, so a
+# test whose target repo is tmp_path is isolated by construction. The
+# autouse fixture that used to redirect an absolute constant is gone --
+# it was isolation-by-remembering, and two test files forgot.
 
 
 class TestCreateAuditDir:
@@ -467,7 +455,7 @@ class TestUpdateLLDStatus:
         """Test creates lld-status.json if it doesn't exist."""
         from assemblyzero.workflows.requirements.audit import update_lld_status
 
-        status_file = tmp_path / "docs" / "lld" / "lld-status.json"
+        status_file = tmp_path / "data" / "assemblyzero" / "lld-status.json"
         assert not status_file.exists()
 
         update_lld_status(
@@ -584,7 +572,6 @@ class TestAssembleContextEdgeCases:
     def test_handles_oserror_in_directory_files(self, tmp_path):
         """Test handles OSError when reading files in directory."""
         from assemblyzero.workflows.requirements.audit import assemble_context
-        import os
 
         # Create directory with a file that will cause OSError
         ctx_dir = tmp_path / "context"
@@ -629,7 +616,7 @@ class TestLoadLLDTrackingErrors:
         """Test returns empty cache when JSON is invalid."""
         from assemblyzero.workflows.requirements.audit import load_lld_tracking
 
-        status_file = tmp_path / "docs" / "lld" / "lld-status.json"
+        status_file = tmp_path / "data" / "assemblyzero" / "lld-status.json"
         status_file.parent.mkdir(parents=True)
         status_file.write_text("not valid json {")
 
@@ -643,7 +630,7 @@ class TestLoadLLDTrackingErrors:
         from assemblyzero.workflows.requirements.audit import load_lld_tracking
 
         # Create a directory where the status file should be
-        status_file = tmp_path / "docs" / "lld" / "lld-status.json"
+        status_file = tmp_path / "data" / "assemblyzero" / "lld-status.json"
         status_file.parent.mkdir(parents=True)
         status_file.mkdir()  # Directory, not file - will cause OSError
 

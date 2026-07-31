@@ -34,26 +34,6 @@ from assemblyzero.workflows.requirements.audit import (
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "lld_tracking"
 
 
-@pytest.fixture(autouse=True)
-def _patch_lld_status_file(monkeypatch, tmp_path: Path) -> None:
-    """Redirect LLD_STATUS_FILE under tmp_path for test isolation.
-
-    PR #1156 made LLD_STATUS_FILE an absolute Path (~/.claude/assemblyzero/...).
-    The function `load_lld_tracking(target_repo)` uses `target_repo / LLD_STATUS_FILE`
-    which collapses to the absolute path (Python Path `/` semantics), so passing
-    `tmp_path` is silently ignored. The function reads from the user's real
-    ~/.claude file instead of the test's tmp_path.
-
-    This autouse fixture monkeypatches the constant to live under tmp_path,
-    restoring per-test isolation. Tests still write to `tmp_path/docs/lld/...`
-    so the original test write locations remain valid. (#1158)
-    """
-    monkeypatch.setattr(
-        "assemblyzero.workflows.requirements.audit.LLD_STATUS_FILE",
-        tmp_path / "docs" / "lld" / "lld-status.json",
-    )
-
-
 @pytest.fixture
 def lld_with_review() -> str:
     """Load sample LLD content that contains a Gemini review section."""
@@ -265,7 +245,7 @@ class TestLoadLLDTracking:
     def test_loads_valid_json(self, tmp_path: Path) -> None:
         """T120: Valid tracking JSON returns parsed dict with expected keys."""
         # Set up lld-status.json in the expected location
-        status_dir = tmp_path / "docs" / "lld"
+        status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         # #1160: entries are nested under the repo they belong to. A flat
         # `issues` map is the pre-#1160 layout and is no longer served to any
@@ -308,7 +288,7 @@ class TestLoadLLDTracking:
 
     def test_corrupt_json(self, tmp_path: Path) -> None:
         """T140: Corrupt JSON returns empty cache (exercises JSONDecodeError branch)."""
-        status_dir = tmp_path / "docs" / "lld"
+        status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         # Write intentionally corrupt JSON (from fixture)
         corrupt_content = (
@@ -323,7 +303,7 @@ class TestLoadLLDTracking:
 
     def test_empty_file(self, tmp_path: Path) -> None:
         """T150: Empty file returns empty cache (exercises empty-input branch)."""
-        status_dir = tmp_path / "docs" / "lld"
+        status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         (status_dir / "lld-status.json").write_text("", encoding="utf-8")
 
@@ -333,7 +313,7 @@ class TestLoadLLDTracking:
 
     def test_multiple_entries(self, tmp_path: Path) -> None:
         """T160: Tracking file with 3 entries returns all entries correctly."""
-        status_dir = tmp_path / "docs" / "lld"
+        status_dir = tmp_path / "data" / "assemblyzero"
         status_dir.mkdir(parents=True)
         tracking_data = {
             "version": "2.0",
@@ -451,7 +431,7 @@ class TestUpdateLLDStatus:
 
     def test_creates_new_file(self, tmp_path: Path) -> None:
         """T190: If the tracking file doesn't exist, it is created with a single entry."""
-        status_file = tmp_path / "docs" / "lld" / "lld-status.json"
+        status_file = tmp_path / "data" / "assemblyzero" / "lld-status.json"
         assert not status_file.exists()  # precondition
 
         update_lld_status(

@@ -49,9 +49,11 @@ def test_workflow_audit_file_is_absolute():
 
 
 def test_lld_status_file_is_absolute():
-    from assemblyzero.workflows.requirements.audit import LLD_STATUS_FILE
-    assert LLD_STATUS_FILE.is_absolute(), (
-        f"LLD_STATUS_FILE={LLD_STATUS_FILE} must be absolute "
+    from assemblyzero.workflows.requirements.audit import LLD_STATUS_RELATIVE
+    assert not LLD_STATUS_RELATIVE.is_absolute(), (
+        f"LLD_STATUS_RELATIVE={LLD_STATUS_RELATIVE} must be RELATIVE so it "
+        "resolves inside the target repo (#1970) -- an absolute constant "
+        "is exactly how this cache escaped into ~/.claude "
         "(#1151: LLD approval cache lives outside any repo tree)"
     )
 
@@ -65,7 +67,6 @@ def test_all_relocated_paths_live_under_claude_home():
         AGE_METER_STATE_PATH,
         HISTORY_PATH,
     )
-    from assemblyzero.workflows.requirements.audit import LLD_STATUS_FILE
     from assemblyzero.workflows.testing.audit import WORKFLOW_AUDIT_FILE
 
     claude_home = Path.home() / ".claude"
@@ -73,7 +74,11 @@ def test_all_relocated_paths_live_under_claude_home():
         ("HISTORY_PATH", Path(HISTORY_PATH)),
         ("AGE_METER_STATE_PATH", Path(AGE_METER_STATE_PATH)),
         ("WORKFLOW_AUDIT_FILE", WORKFLOW_AUDIT_FILE),
-        ("LLD_STATUS_FILE", LLD_STATUS_FILE),
+        # LLD_STATUS_RELATIVE is deliberately NOT here: #1970 moved the LLD
+        # approval cache back INTO the target repo. It is application state,
+        # not harness state, and consolidating it under ~/.claude is what made
+        # it shared across every repo, invisible, and untouched by cleanup.
+        # The three paths above remain out-of-repo and are under fleet audit.
     ]:
         try:
             p.relative_to(claude_home)
