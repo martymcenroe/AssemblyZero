@@ -146,6 +146,27 @@ class TestPreconditions:
         assert _apply(repo) == 1
         assert "origin already has a branch" in capsys.readouterr().out
 
+    def test_detached_head_is_handled_not_refused(self, repo):
+        """Nothing to graveyard is not a reason to stop. Refusing here told a
+        human to check out a branch first -- an instruction the tool can carry
+        out itself, which makes it a ritual rather than a safeguard (#1919)."""
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(repo),
+            capture_output=True, text=True,
+        ).stdout.strip()
+        _git(repo, "checkout", sha)
+
+        assert _apply(repo) == 0
+        assert sna.current_branch(repo) == "hardening-run-12"
+        assert sna.remote_branch_exists(repo, "hardening-run-12")
+        # The old attempt keeps its own name; it was never checked out.
+        assert sna.local_branch_exists(repo, "hardening-run-11")
+
+    def test_plan_omits_the_rename_when_there_is_no_branch(self):
+        flat = [" ".join(c) for c in sna.plan_steps("", "attempt-2", "main")]
+        assert not any("branch -m" in c for c in flat), flat
+        assert any("checkout -b attempt-2 origin/main" in c for c in flat), flat
+
     def test_missing_origin_head_is_refused_with_the_remedy(self, repo, capsys):
         _git(repo, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
 
