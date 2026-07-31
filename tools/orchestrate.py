@@ -17,12 +17,19 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from assemblyzero.workflows.orchestrator.graph import (
+# #2040: installed before anything can spawn. A detached roll has no console to
+# inherit, so every child -- git, gh, poetry, pytest, claude -- would otherwise
+# open its own window on the operator's desktop.
+from assemblyzero.core.no_console import install as _install_no_console  # noqa: E402
+
+_install_no_console()
+
+from assemblyzero.workflows.orchestrator.graph import (  # noqa: E402
     ConcurrentOrchestrationError,
     OrchestrationResult,
     orchestrate,
 )
-from assemblyzero.workflows.orchestrator.state import (
+from assemblyzero.workflows.orchestrator.state import (  # noqa: E402
     STAGE_ORDER,
     OrchestrationState,
     StageResult,
