@@ -595,6 +595,61 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     }
 
 
+COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
+
+
+def coverage_has_stagnated(
+    coverage_achieved: float,
+    previous_coverage: float,
+    passed_count: int,
+    previous_passed: int,
+    current_green_failures: list[str],
+    previous_green_failures: list[str],
+) -> bool:
+    """Whether this iteration earned another one (#2029, #2030).
+
+    ONE decision, called from both branches of verify_green_phase. They carried
+    near-identical copies of this check, and #2023 repaired only the branch
+    whose symptom had been seen -- so the twin halted a plainly improving run on
+    the very next live arc: 20 -> 22 passing, 3 -> 1 failing, 97.0% -> 98.0%,
+    reported as stagnant. A duplicated guard is how a fix lands on one side
+    only, so there is now nowhere for the two to disagree.
+
+    Two things count that the old condition missed.
+
+    Test outcomes are progress (#2029). The point of another iteration is that
+    the last one moved something, and in the tests-failing branch the two guards
+    immediately above compute exactly this and then it was thrown away.
+
+    An improvement of exactly the threshold MEETS the threshold (#2030). The old
+    `<= previous + 1.0` halted on a 1.0 point gain while printing
+    "< 1% improvement", so the code and its own message described different
+    rules.
+    """
+    if previous_coverage < 0:
+        return False  # first iteration has nothing to compare against
+
+    if coverage_achieved - previous_coverage >= COVERAGE_IMPROVEMENT_THRESHOLD:
+        return False
+
+    tests_improved = (
+        (previous_passed >= 0 and passed_count > previous_passed)
+        or (
+            bool(previous_green_failures)
+            and len(current_green_failures) < len(previous_green_failures)
+        )
+    )
+    if tests_improved:
+        print(
+            f"    [N5] Coverage {previous_coverage:.1f}% -> {coverage_achieved:.1f}%, "
+            f"but tests improved ({previous_passed} -> {passed_count} passing) — "
+            f"continuing rather than halting."
+        )
+        return False
+
+    return True
+
+
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N5: Verify all tests pass with coverage target.
 
@@ -873,10 +928,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": stagnant_msg,
             }
 
-        # Stagnation check: if coverage didn't improve by at least 1%, halt.
+        # Stagnation check: one shared decision, see coverage_has_stagnated.
         # Skip when passed_count == 0: coverage is vacuously 100% with no passing
         # tests, so the metric is meaningless. The test-count check above handles that case.
-        if passed_count > 0 and previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
+        if passed_count > 0 and coverage_has_stagnated(
+            coverage_achieved, previous_coverage, passed_count, previous_passed,
+            current_green_failures, previous_green_failures,
+        ):
             stagnant_msg = (
                 f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
                 f"(< 1% improvement). Halting to prevent token waste."
@@ -966,37 +1024,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
             }
 
-        # #2023: coverage is not the only way an iteration makes progress, and
-        # this branch is reached with EVERY test passing -- so the iteration
-        # that fixes the last failing test lands right here. boostgauge #41 was
-        # halted on exactly that iteration: 14/15 -> 15/15 passing with coverage
-        # flat at 94.0% against a 95% target, three of five iterations unspent.
-        #
-        # The tests-failing branch above has three guards and can tell progress
-        # from a loop. This one had a single guard, on the one metric that had
-        # not moved. previous_passed and previous_green_failures are written on
-        # every return from this node and were simply never read here.
+        # Stagnation check: one shared decision, see coverage_has_stagnated.
         previous_passed = state.get("previous_passed", -1)
         previous_green_failures = state.get("previous_green_failures", [])
-        tests_improved = (
-            (previous_passed >= 0 and passed_count > previous_passed)
-            or (bool(previous_green_failures) and not current_green_failures)
-        )
-        coverage_stagnant = (
-            previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0
-        )
-
-        if coverage_stagnant and tests_improved:
-            # Progress the guard could not see. Spending another iteration here
-            # is the point of the iteration budget it exists to protect.
-            print(
-                f"    [N5] Coverage flat at {coverage_achieved:.1f}%, but tests "
-                f"improved ({previous_passed} -> {passed_count} passing) — "
-                f"continuing rather than halting."
-            )
-
-        # Stagnation check: if coverage didn't improve by at least 1%, halt
-        if coverage_stagnant and not tests_improved:
+        if coverage_has_stagnated(
+            coverage_achieved, previous_coverage, passed_count, previous_passed,
+            current_green_failures, previous_green_failures,
+        ):
             stagnant_msg = (
                 f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
                 f"(< 1% improvement). Halting to prevent token waste."
