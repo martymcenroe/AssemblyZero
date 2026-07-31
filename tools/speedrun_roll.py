@@ -334,6 +334,12 @@ def roll_issue(
             proc = subprocess.run(
                 cmd, cwd=str(az_root), stdout=fh, stderr=subprocess.STDOUT,
                 env=_child_env(),
+                # #2037: no console for the pipeline either. Under Task
+                # Scheduler the parent has none to inherit, so without this the
+                # child allocates its own.
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ),
             )
         log.write(f"CHILD EXITED rc={proc.returncode}")
 
@@ -409,6 +415,25 @@ def _quote(arg: str) -> str:
     return f'"{arg}"' if " " in arg else arg
 
 
+def windowless_interpreter(executable: str) -> str:
+    """pythonw.exe beside this interpreter, if there is one (#2037).
+
+    A scheduled task running python.exe puts a console on the operator's
+    desktop for the whole roll. pythonw has none, and is safe here only because
+    --detached-stdout rebinds stdout and stderr to the launcher log before
+    anything prints -- under pythonw they would otherwise be absent.
+
+    Falls back to the interpreter as given when no pythonw is present, since a
+    visible console is much better than a task that cannot start.
+    """
+    path = Path(executable)
+    if path.name.lower() == "python.exe":
+        candidate = path.with_name("pythonw.exe")
+        if candidate.is_file():
+            return str(candidate)
+    return executable
+
+
 def current_user() -> str:
     domain = os.environ.get("USERDOMAIN", "")
     name = os.environ.get("USERNAME", "")
@@ -479,7 +504,7 @@ def launch_detached(
     )
     issues = ", ".join(f"#{i}" for i in args.issue)
     xml = build_task_xml(
-        command=sys.executable,
+        command=windowless_interpreter(sys.executable),
         arguments=arguments,
         working_dir=str(az_root),
         description=f"Detached speedrun roll of {issues} in {repo_root.name}",
