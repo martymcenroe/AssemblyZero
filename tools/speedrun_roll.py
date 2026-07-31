@@ -744,7 +744,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--repo", required=True, help="Target repo root path")
     parser.add_argument(
-        "--issue", type=int, action="append", required=True,
+        # Not required at parse time: --detach-stop names no issue, it stops
+        # whatever is running. Enforced below for the paths that do roll.
+        "--issue", type=int, action="append", default=None,
         help="Issue to roll (repeatable; rolled in order)",
     )
     parser.add_argument(
@@ -793,6 +795,10 @@ def main(argv: list[str] | None = None) -> int:
     # dirty tree, so it comes before the staleness gate.
     if args.detach_stop:
         return stop_detached(log_dir)
+
+    if not args.issue:
+        print("ERROR: --issue is required (repeatable) unless stopping a roll")
+        return 91
 
     # #2007: refuse before spending anything if the tree running this roll is
     # not the code main says it is. Runs before the detach hand-off too, so a

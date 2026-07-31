@@ -239,9 +239,34 @@ class TestStoppingADetachedRoll:
         return d
 
     def _stop(self, repo, recorder, platform="win32"):
+        # Deliberately no --issue: stopping names no issue, and every stop test
+        # passing one is how the missing-argument defect survived a green suite
+        # until a live run hit it.
         with patch.object(sr, "_run", recorder), \
                 patch.object(sr.sys, "platform", platform):
-            return sr.main(["--repo", str(repo), "--issue", "7", "--detach-stop"])
+            return sr.main(["--repo", str(repo), "--detach-stop"])
+
+    def test_stopping_needs_no_issue_number(self, repo, runs):
+        """The live defect: --issue was required at parse time, so the stop
+        path could not be invoked at all without inventing an issue."""
+        runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
+        rec = _Recorder()
+        with patch.object(sr, "is_live_python", lambda pid: True), \
+                patch.object(sr, "_run", rec), \
+                patch.object(sr.sys, "platform", "win32"):
+            code = sr.main(["--repo", str(repo), "--detach-stop"])
+
+        assert code == 0
+        assert [c for c in rec.calls if c[0] == "taskkill"]
+
+    def test_rolling_still_demands_an_issue(self, repo, capsys):
+        """Relaxing --issue for the stop path must not let a roll start with
+        nothing to roll."""
+        with patch.object(sr, "check_assemblyzero_tree", lambda p: []):
+            code = sr.main(["--repo", str(repo)])
+
+        assert code == 91
+        assert "--issue is required" in capsys.readouterr().out
 
     def test_it_kills_the_whole_tree_not_just_the_task(self, repo, runs):
         runs.joinpath("detached-roll.pid").write_text("4242", encoding="utf-8")
@@ -293,7 +318,7 @@ class TestStoppingADetachedRoll:
                 patch.object(sr, "is_live_python", lambda p: True), \
                 patch.object(sr, "_run", rec), \
                 patch.object(sr.sys, "platform", "win32"):
-            code = sr.main(["--repo", str(repo), "--issue", "7", "--detach-stop"])
+            code = sr.main(["--repo", str(repo), "--detach-stop"])
 
         assert code == 0
         assert [c for c in rec.calls if c[0] == "taskkill"]
