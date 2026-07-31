@@ -86,9 +86,24 @@ class TestTheHandRunDefect:
 
 
 class TestOutcome:
-    def test_repo_ends_on_the_new_branch(self, repo):
+    def test_the_checkout_ends_on_the_default_branch(self, repo):
+        """#2012: an attempt is a REF, and the operator is never parked on one.
+        The repo starts this test standing on hardening-run-11, which is also
+        the branch being graveyarded -- `git branch -m` would drag the checkout
+        to `graveyard/hardening-run-11`, worse than where it began."""
+        assert sna.current_branch(repo) == "hardening-run-11"
+
         assert _apply(repo) == 0
-        assert sna.current_branch(repo) == "hardening-run-12"
+
+        assert sna.current_branch(repo) == "main"
+
+    def test_the_graveyarded_branch_is_not_where_you_land(self, repo):
+        assert _apply(repo) == 0
+        assert not sna.current_branch(repo).startswith("graveyard/")
+
+    def test_the_new_attempt_exists_as_a_local_ref(self, repo):
+        assert _apply(repo) == 0
+        assert sna.local_branch_exists(repo, "hardening-run-12")
 
     def test_new_branch_is_level_with_the_default(self, repo):
         assert _apply(repo) == 0
@@ -114,9 +129,14 @@ class TestOutcome:
         assert _apply(repo) == 0
         assert sna.remote_branch_exists(repo, "hardening-run-11")
 
-    def test_the_arc_work_is_gone_from_the_new_base(self, repo):
+    def test_the_new_base_does_not_carry_the_old_arc_work(self, repo):
+        """Checked against the REF, since the checkout is no longer moved."""
         assert _apply(repo) == 0
-        assert not (repo / "src.py").exists()
+        shown = subprocess.run(
+            ["git", "show", "hardening-run-12:src.py"],
+            cwd=str(repo), capture_output=True, text=True,
+        )
+        assert shown.returncode != 0, "new attempt must not carry the old work"
 
 
 class TestPreconditions:
@@ -157,7 +177,7 @@ class TestPreconditions:
         _git(repo, "checkout", sha)
 
         assert _apply(repo) == 0
-        assert sna.current_branch(repo) == "hardening-run-12"
+        assert sna.local_branch_exists(repo, "hardening-run-12")
         assert sna.remote_branch_exists(repo, "hardening-run-12")
         # The old attempt keeps its own name; it was never checked out.
         assert sna.local_branch_exists(repo, "hardening-run-11")
@@ -165,7 +185,7 @@ class TestPreconditions:
     def test_plan_omits_the_rename_when_there_is_no_branch(self):
         flat = [" ".join(c) for c in sna.plan_steps("", "attempt-2", "main")]
         assert not any("branch -m" in c for c in flat), flat
-        assert any("checkout -b attempt-2 origin/main" in c for c in flat), flat
+        assert any("branch attempt-2 origin/main" in c for c in flat), flat
 
     def test_missing_origin_head_is_refused_with_the_remedy(self, repo, capsys):
         _git(repo, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
@@ -188,7 +208,7 @@ class TestDryRunIsDefault:
 
         assert "DRY RUN" in out
         assert "git branch -m hardening-run-11 graveyard/hardening-run-11" in out
-        assert "git checkout -b hardening-run-12 origin/main" in out
+        assert "git branch hardening-run-12 origin/main" in out
         assert "git push -u origin hardening-run-12" in out
 
     def test_no_banned_command_appears_in_the_plan(self, repo):

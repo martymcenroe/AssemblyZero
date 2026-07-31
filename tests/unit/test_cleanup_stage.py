@@ -43,7 +43,7 @@ def test_cleanup_registered_in_order_and_runners():
 
 def test_cleanup_merges_deletes_removes_when_lld_pr_present(tmp_path):
     state = _state(tmp_path, lld_pr_url="https://github.com/o/r/pull/9")
-    with patch.object(stages, "_merge_lld_pr", return_value=True) as m_merge, \
+    with patch.object(stages, "_merge_pr", return_value=True) as m_merge, \
          patch.object(stages, "_delete_landed_working_copies") as m_del, \
          patch.object(stages, "_remove_orchestrator_worktrees") as m_rm:
         new_state = stages.run_cleanup_stage(state)
@@ -56,7 +56,7 @@ def test_cleanup_merges_deletes_removes_when_lld_pr_present(tmp_path):
 
 def test_cleanup_no_lld_pr_skips_merge_and_delete(tmp_path):
     state = _state(tmp_path)  # lld_pr_url == "" from create_initial_state
-    with patch.object(stages, "_merge_lld_pr") as m_merge, \
+    with patch.object(stages, "_merge_pr") as m_merge, \
          patch.object(stages, "_delete_landed_working_copies") as m_del, \
          patch.object(stages, "_remove_orchestrator_worktrees") as m_rm:
         new_state = stages.run_cleanup_stage(state)
@@ -70,7 +70,7 @@ def test_cleanup_unmerged_lld_skips_delete_but_passes(tmp_path):
     """Gate: if the LLD PR did not merge, the working-tree copies are NOT deleted
     (they would be lost), but the stage still passes and worktrees are still removed."""
     state = _state(tmp_path, lld_pr_url="https://github.com/o/r/pull/9")
-    with patch.object(stages, "_merge_lld_pr", return_value=False), \
+    with patch.object(stages, "_merge_pr", return_value=False), \
          patch.object(stages, "_delete_landed_working_copies") as m_del, \
          patch.object(stages, "_remove_orchestrator_worktrees") as m_rm:
         new_state = stages.run_cleanup_stage(state)
@@ -79,9 +79,9 @@ def test_cleanup_unmerged_lld_skips_delete_but_passes(tmp_path):
     assert new_state["stage_results"]["cleanup"]["status"] == "passed"
 
 
-# ---- _merge_lld_pr ----
+# ---- _merge_pr (was _merge_lld_pr; #2011 applies it to both PRs) ----
 
-def test_merge_lld_pr_merges_when_clean():
+def test_merge_pr_merges_when_clean():
     notes = []
 
     def fake_run(cmd, **kw):
@@ -90,11 +90,11 @@ def test_merge_lld_pr_merges_when_clean():
         return _resp()  # merge succeeds
 
     with patch.object(stages, "run_command", side_effect=fake_run):
-        ok = stages._merge_lld_pr("https://github.com/o/r/pull/9", 600, notes)
+        ok = stages._merge_pr("https://github.com/o/r/pull/9", 600, notes)
     assert ok is True
 
 
-def test_merge_lld_pr_already_merged_no_merge_call():
+def test_merge_pr_already_merged_no_merge_call():
     calls = []
 
     def fake_run(cmd, **kw):
@@ -102,12 +102,12 @@ def test_merge_lld_pr_already_merged_no_merge_call():
         return _resp(stdout="MERGED\tCLEAN\n")
 
     with patch.object(stages, "run_command", side_effect=fake_run):
-        ok = stages._merge_lld_pr("https://github.com/o/r/pull/9", 600, [])
+        ok = stages._merge_pr("https://github.com/o/r/pull/9", 600, [])
     assert ok is True
     assert all("merge" not in c for c in calls), "must not attempt merge when already MERGED"
 
 
-def test_merge_lld_pr_timeout_returns_false():
+def test_merge_pr_timeout_returns_false():
     notes = []
 
     def fake_run(cmd, **kw):
@@ -115,7 +115,7 @@ def test_merge_lld_pr_timeout_returns_false():
 
     # timeout_s=0 → exits after the first check without sleeping
     with patch.object(stages, "run_command", side_effect=fake_run):
-        ok = stages._merge_lld_pr("https://github.com/o/r/pull/9", 0, notes)
+        ok = stages._merge_pr("https://github.com/o/r/pull/9", 0, notes)
     assert ok is False
     assert any("not merged within" in n for n in notes)
 
@@ -222,3 +222,58 @@ def test_lld_stage_captures_lld_pr_url(tmp_path):
         "run_lld_stage must capture final_lld_pr_url into orchestration state for the "
         "terminal cleanup stage to merge"
     )
+
+
+# ---- #2011: the implementation PR must actually land ----
+
+
+def test_cleanup_merges_the_impl_pr_too(tmp_path):
+    """Nothing merged the impl PR before this. The attempt branch received the
+    design and never the code, so an arc could not accumulate -- every previous
+    'pipeline-built' arc had a human merging six impl PRs by hand."""
+    merged: list[str] = []
+
+    def fake_merge(url, timeout, notes, label="LLD"):
+        merged.append(label)
+        return True
+
+    state = _state(tmp_path)
+    state["impl_pr_url"] = "https://github.com/o/r/pull/155"
+    with patch.object(stages, "_merge_pr", side_effect=fake_merge), \
+         patch.object(stages, "_delete_landed_working_copies"), \
+         patch.object(stages, "_remove_orchestrator_worktrees"):
+        new_state = stages.run_cleanup_stage(state)
+
+    assert "impl" in merged, f"impl PR was not merged: {merged}"
+    assert new_state["stage_results"]["cleanup"]["status"] == "passed"
+
+
+def test_an_unlanded_impl_pr_fails_the_stage(tmp_path):
+    """This stage always returned 'passed', which is the wrong contract for a
+    step the next phase depends on. Reporting an unlanded implementation as
+    green is exactly how the gap stayed invisible."""
+    def fake_merge(url, timeout, notes, label="LLD"):
+        return label != "impl"
+
+    state = _state(tmp_path)
+    state["impl_pr_url"] = "https://github.com/o/r/pull/155"
+    with patch.object(stages, "_merge_pr", side_effect=fake_merge), \
+         patch.object(stages, "_delete_landed_working_copies"), \
+         patch.object(stages, "_remove_orchestrator_worktrees"):
+        new_state = stages.run_cleanup_stage(state)
+
+    result = new_state["stage_results"]["cleanup"]
+    assert result["status"] == "failed", result
+    assert "cannot accumulate" in result.get("error_message", "")
+
+
+def test_a_cleanup_hiccup_without_an_impl_pr_still_passes(tmp_path):
+    """Best-effort housekeeping keeps its old contract; only the landing is
+    now load-bearing."""
+    state = _state(tmp_path)
+    with patch.object(stages, "_merge_pr", return_value=False), \
+         patch.object(stages, "_delete_landed_working_copies"), \
+         patch.object(stages, "_remove_orchestrator_worktrees"):
+        new_state = stages.run_cleanup_stage(state)
+
+    assert new_state["stage_results"]["cleanup"]["status"] == "passed"
