@@ -20,6 +20,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.workflows.implementation_spec.base_tree import (
+    base_ref,
+    read_from_base,
+    reclassify_against_base,
+)
 from assemblyzero.workflows.requirements.audit import get_repo_structure
 from assemblyzero.workflows.implementation_spec.state import (
     FileToModify,
@@ -122,6 +127,18 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     print(f"    Repo root: {repo_root}")
     print(f"    Files to analyze: {len(files_to_modify)}")
 
+    # #2033: plan against the tree the implementation will be built on, not the
+    # checkout. Mid-arc a file the LLD calls "Add" is already on the attempt
+    # branch, put there by an earlier phase, and specifying it as new is what
+    # produced a spec describing modules to create instead of modules to extend.
+    base_branch = state.get("base_branch", "")
+    files_to_modify, base_notes = reclassify_against_base(
+        files_to_modify, repo_root, base_branch
+    )
+    for note in base_notes:
+        print(f"    [BASE] {note}")
+    base_ref_name = base_ref(repo_root, base_branch) if base_branch else ""
+
     # Step 1: Load current content for Modify/Delete files
     current_state_snapshots: dict[str, str] = {}
     updated_files: list[FileToModify] = []
@@ -133,6 +150,29 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
         full_path = repo_root / file_path
 
         if change_type in ("Modify", "Delete"):
+            # #2033: the checkout is on the default branch, so a file an earlier
+            # phase landed on the attempt branch is absent here while being very
+            # much present in the tree the implementation is cut from. Read the
+            # base before concluding the file does not exist.
+            if not full_path.exists() and base_ref_name:
+                base_content = read_from_base(repo_root, base_ref_name, file_path)
+                if base_content:
+                    excerpt = extract_relevant_excerpt(
+                        file_path, base_content, lld_content
+                    )
+                    current_state_snapshots[file_path] = excerpt
+                    updated_files.append(FileToModify(
+                        path=file_path,
+                        change_type=change_type,
+                        description=file_spec["description"],
+                        current_content=base_content,
+                    ))
+                    print(
+                        f"    [BASE] Loaded from {base_ref_name}: {file_path} "
+                        f"({len(excerpt):,} chars excerpt)"
+                    )
+                    continue
+
             # --------------------------------------------------------------------------
             # GUARD: File must exist for Modify/Delete
             # --------------------------------------------------------------------------
