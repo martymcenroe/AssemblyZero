@@ -270,6 +270,16 @@ PYTEST_EXIT_NO_TESTS_COLLECTED = 5
 # already_deferred_at_head key on this string -- if it drifts, the skip
 # silently disarms and standing deferrals go back to daily re-audits.
 REVIEW_BODY_PREFIX = "Automated review via tools/dependabot_review.py"
+# #1947: how many deferrals at the SAME head SHA before the skip engages.
+# 1 (the original #1838 behaviour) made a nondeterministic failure
+# permanently sticky: re-running the test is the only thing that can clear
+# a flake, and skipping on the first deferral prevented exactly that. 3
+# keeps the anti-spam benefit for genuinely-red repos -- they cost a
+# bounded number of audits rather than one per day forever -- while giving
+# a flake two more chances to come up green. `--reaudit-all` sets this to
+# 0, disabling the skip entirely for a run (audits everything; strictly
+# more verification, never less).
+SKIP_AFTER_DEFERRALS = 3
 
 
 @dataclass
@@ -792,8 +802,16 @@ def wait_for_mergeable(pr_number: int, repo: str) -> bool:
         print(f"  mergeable_state: {state} (elapsed {elapsed}s)")
         if state in ("clean", "unstable"):
             return True
-        if state == "dirty":
-            return False  # merge conflict; waiting won't help
+        if state in ("dirty", "behind"):
+            # #1975: neither resolves by waiting. 'dirty' is a merge
+            # conflict; 'behind' means the head is behind base and clears
+            # only when the branch is rebased. Measured on the 2026-07-30
+            # fleet run: 328 polls sat in 'behind' (~55 min) and 4 PRs
+            # burned the full 900s budget without ever clearing. Bail now
+            # and let the caller request a rebase. 'blocked' still polls
+            # to timeout -- that one genuinely self-resolves when
+            # cerberus-az approves, which is the #1399 finding.
+            return False
         time.sleep(POLL_INTERVAL_S)
     elapsed = int(time.time() - start)
     print(f"  mergeable_state: timed out after {elapsed}s "
@@ -916,9 +934,19 @@ def is_pr_branch_stale(pr_number: int, repo: str) -> bool:
     return pr_base != main_head
 
 
-def already_deferred_at_head(pr: PRInfo, repo: str) -> bool:
-    """#1838: True iff this tool already posted a deferral review at the
-    PR's CURRENT head SHA.
+def already_deferred_at_head(pr: PRInfo, repo: str,
+                             max_attempts: int = SKIP_AFTER_DEFERRALS) -> bool:
+    """#1838: True iff this tool has deferred this PR at its CURRENT head
+    SHA at least `max_attempts` times.
+
+    #1947: the original form returned True on the FIRST matching deferral,
+    which made a NONDETERMINISTIC failure permanently sticky -- running
+    the test again is the one thing that could clear a flake, and the skip
+    prevented exactly that. A PR that lost a coin flip once was never
+    retried. Requiring `max_attempts` consecutive deferrals at the same
+    SHA keeps nearly all of #1838's benefit (a permanently-red repo costs
+    a bounded number of audits instead of one per day forever) while
+    letting a flake clear itself.
 
     The scheduled harvest re-audited every standing deferral daily -- full
     worktree + install + test cycle, a duplicate COMMENTED review, and a
@@ -941,7 +969,7 @@ def already_deferred_at_head(pr: PRInfo, repo: str) -> bool:
     Conservative on ANY failure: return False (re-audit). A wasted audit
     is recoverable; a wrongly-skipped PR never merges.
     """
-    if not pr.head_oid:
+    if not pr.head_oid or max_attempts <= 0:
         return False
     result = run(
         ["gh", "api", f"repos/{repo}/pulls/{pr.number}/reviews?per_page=100",
@@ -956,15 +984,14 @@ def already_deferred_at_head(pr: PRInfo, repo: str) -> bool:
         reviews = json.loads(result.stdout or "[]")
     except json.JSONDecodeError:
         return False
-    for rv in reviews:
-        if (
-            rv.get("user") == GITHUB_USER
-            and rv.get("state") == "COMMENTED"
-            and (rv.get("body") or "").startswith(REVIEW_BODY_PREFIX)
-            and rv.get("commit_id") == pr.head_oid
-        ):
-            return True
-    return False
+    attempts = sum(
+        1 for rv in reviews
+        if rv.get("user") == GITHUB_USER
+        and rv.get("state") == "COMMENTED"
+        and (rv.get("body") or "").startswith(REVIEW_BODY_PREFIX)
+        and rv.get("commit_id") == pr.head_oid
+    )
+    return attempts >= max_attempts
 
 
 # #1400: file patterns that mean "this PR could affect the Python test
@@ -1348,8 +1375,14 @@ def _process_pr_inside_worktree(
             "--jq", ".mergeable_state",
         ])
         final_state = (final_state_result.stdout or "").strip().strip('"')
-        if final_state == "dirty":
-            print(f"  ERROR: mergeable_state '{final_state}' -- merge conflict, "
+        if final_state in ("dirty", "behind"):
+            # #1975: 'behind' joins 'dirty' here. Both need the branch
+            # rebased before they can merge, and neither improves with
+            # more waiting -- so request the rebase immediately instead
+            # of spending the full poll budget discovering it.
+            reason = ("merge conflict" if final_state == "dirty"
+                      else "head is behind base")
+            print(f"  ERROR: mergeable_state '{final_state}' -- {reason}, "
                   f"requesting @dependabot rebase. Approval persists; next run "
                   f"re-evaluates post-rebase.")
             request_dependabot_rebase(pr.number, repo)
@@ -1499,6 +1532,7 @@ def process_repo(
     dry_run: bool = False,
     ignore_orphans: bool = False,
     budget: PRBudget | None = None,
+    skip_after: int = SKIP_AFTER_DEFERRALS,
 ) -> dict[str, list[str]]:
     """Process all dependabot PRs in one repo, sequentially.
 
@@ -1590,9 +1624,10 @@ def process_repo(
         # #1838: a PR already deferred at this exact head SHA cannot
         # produce a different result -- skip before spending a budget
         # slot, building a worktree, or posting a duplicate review.
-        if already_deferred_at_head(pr, repo):
-            print(f"  SKIP #{pr.number}: already deferred at current head "
-                  f"{pr.head_oid[:9]} -- unchanged since last audit (#1838)")
+        if already_deferred_at_head(pr, repo, skip_after):
+            print(f"  SKIP #{pr.number}: deferred {skip_after}+ times at "
+                  f"current head {pr.head_oid[:9]} -- unchanged since last "
+                  f"audit (#1838/#1947)")
             sub["skipped_unchanged"].append(f"{repo}#{pr.number}")
             continue
         if budget is not None and not budget.try_acquire():
@@ -1727,6 +1762,18 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--reaudit-all", action="store_true",
+        help=(
+            "#1947: audit every PR even if this tool already deferred it at "
+            "the same head SHA. Normally a PR deferred SKIP_AFTER_DEFERRALS "
+            "times at one SHA is skipped, which keeps a permanently-red repo "
+            "from costing an audit per day forever -- but it also strands "
+            "PRs whose deferral came from a flaky test or from a bug since "
+            "fixed. This forces a full sweep: strictly MORE verification "
+            "than the default, never less."
+        ),
+    )
+    parser.add_argument(
         "--no-run-log", action="store_true",
         help=(
             "#1403: by default every run tees its full output to a "
@@ -1776,6 +1823,12 @@ def main() -> None:
     # (non-deterministic run to run), so a limited run sorts repos by name
     # — with oldest-first PRs inside process_repo, consecutive limited
     # runs drain the fleet queue FIFO, deterministically.
+    # #1947: 0 disables the deferral skip entirely for this run.
+    skip_after = 0 if args.reaudit_all else SKIP_AFTER_DEFERRALS
+    if args.reaudit_all:
+        print("Re-audit mode: the deferral skip is disabled; every open PR "
+              "will be audited regardless of prior deferrals (#1947).")
+
     if args.limit < 0:
         sys.exit(f"--limit must be >= 0, got {args.limit}")
     budget = PRBudget(args.limit) if args.limit > 0 else None
@@ -1810,7 +1863,7 @@ def main() -> None:
                 futures = {
                     executor.submit(
                         process_repo, repo, main_repo, args.dry_run,
-                        args.ignore_orphans,
+                        args.ignore_orphans, None, skip_after,
                     ): repo
                     for repo in repos
                 }
@@ -1852,7 +1905,7 @@ def main() -> None:
                     continue
                 sub = process_repo(
                     repo, main_repo, args.dry_run, args.ignore_orphans,
-                    budget=budget,
+                    budget=budget, skip_after=skip_after,
                 )
                 for k in ("merged", "deferred", "errored", "limit_skipped",
                           "skipped_unchanged"):

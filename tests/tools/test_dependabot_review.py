@@ -661,14 +661,46 @@ class TestWaitForMergeableTimeoutDeferred:
         assert "DEFER" in out
         assert "#1399" in out
 
-    def test_behind_after_timeout_returns_deferred(self, monkeypatch):
-        """`behind` = base branch moved; still transient, recoverable."""
+    def test_behind_returns_errored_with_rebase(self, monkeypatch):
+        """#1975: `behind` no longer waits out the poll budget.
+
+        It was previously treated as transient and deferred after the full
+        900s. But `behind` means the head is behind base, and only a rebase
+        clears it -- measured on the 2026-07-30 fleet run, 328 polls sat in
+        `behind` (~55 min) and 4 PRs burned the entire budget without ever
+        clearing. It now joins `dirty`: bail, request a rebase, report
+        errored so the next run re-evaluates post-rebase.
+        """
         self._stub_to_wait_for_mergeable(monkeypatch)
+        rebase_calls: list = []
+        monkeypatch.setattr(
+            dependabot_review, "request_dependabot_rebase",
+            lambda pr, repo: rebase_calls.append(pr))
         self._stub_wait_then_final_state(monkeypatch, "behind")
         result = dependabot_review._process_pr_inside_worktree(
             self._pr(), "owner/repo", Path("/tmp/wt"),
         )
-        assert result == "deferred"
+        assert result == "errored"
+        assert rebase_calls, "a `behind` PR must get a rebase request"
+
+    def test_wait_for_mergeable_bails_on_behind_without_polling(
+            self, monkeypatch):
+        """The bail must happen on the FIRST poll -- the whole point is not
+        spending 900s discovering it."""
+        polls: list = []
+        sleeps: list = []
+
+        def _fake(cmd, *a, **kw):
+            polls.append(cmd)
+            return subprocess.CompletedProcess(
+                args=cmd, returncode=0, stdout='"behind"', stderr="")
+        monkeypatch.setattr(dependabot_review, "run", _fake)
+        monkeypatch.setattr(dependabot_review.time, "sleep",
+                            lambda s: sleeps.append(s))
+
+        assert dependabot_review.wait_for_mergeable(7, "o/r") is False
+        assert len(polls) == 1, f"must bail on first poll, saw {len(polls)}"
+        assert sleeps == [], "must not sleep through the poll interval"
 
     def test_unknown_after_timeout_returns_deferred(self, monkeypatch):
         """`unknown` = GitHub still computing; also transient."""
@@ -1103,10 +1135,52 @@ class TestAlreadyDeferredAtHead:
                 stderr="")
         monkeypatch.setattr(dependabot_review, "run", _fake)
 
-    def test_matching_deferral_review_skips(self, monkeypatch):
+    def test_single_deferral_does_not_skip(self, monkeypatch):
+        """#1947: one deferral is not enough. Skipping on the first made a
+        flaky failure permanently sticky -- re-running the test is the only
+        thing that can clear a flake, and the skip prevented exactly that."""
         self._stub(monkeypatch, [self._review()])
         assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_skips_once_budget_reached(self, monkeypatch):
+        """At SKIP_AFTER_DEFERRALS deferrals on one SHA, stop re-auditing."""
+        n = dependabot_review.SKIP_AFTER_DEFERRALS
+        self._stub(monkeypatch, [self._review() for _ in range(n)])
+        assert dependabot_review.already_deferred_at_head(
             self._pr(), "o/r") is True
+
+    def test_one_below_budget_still_processes(self, monkeypatch):
+        n = dependabot_review.SKIP_AFTER_DEFERRALS
+        self._stub(monkeypatch, [self._review() for _ in range(n - 1)])
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
+
+    def test_max_attempts_zero_disables_skip(self, monkeypatch):
+        """--reaudit-all passes 0: audit everything regardless of history,
+        and do not even spend the API call."""
+        called: list = []
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda *a, **kw: called.append(a) or subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="[]", stderr=""))
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r", 0) is False
+        assert called == [], "max_attempts=0 must short-circuit before the API"
+
+    def test_only_matching_reviews_count_toward_budget(self, monkeypatch):
+        """Foreign reviewers, APPROVED states, and non-tool bodies must not
+        accumulate toward the skip budget."""
+        n = dependabot_review.SKIP_AFTER_DEFERRALS
+        noise = (
+            [self._review(user="cerberus-az[bot]") for _ in range(n)]
+            + [self._review(state="APPROVED") for _ in range(n)]
+            + [self._review(body="LGTM") for _ in range(n)]
+            + [self._review(commit_id="0" * 40) for _ in range(n)]
+        )
+        self._stub(monkeypatch, noise)
+        assert dependabot_review.already_deferred_at_head(
+            self._pr(), "o/r") is False
 
     def test_commit_mismatch_reaudits(self, monkeypatch):
         """A rebase/new push moves the head SHA -- must re-audit (#994)."""
@@ -1204,12 +1278,18 @@ class TestProcessRepoSkipsUnchanged:
                             lambda t: [])
         monkeypatch.setattr(dependabot_review, "list_dependabot_prs",
                             lambda repo: [pr])
-        monkeypatch.setattr(dependabot_review, "already_deferred_at_head",
-                            lambda p, repo: deferred_at_head)
+        # #1947: signature gained max_attempts; capture what process_repo
+        # threads through so the --reaudit-all wiring is covered too.
+        seen_attempts: list[int] = []
+        monkeypatch.setattr(
+            dependabot_review, "already_deferred_at_head",
+            lambda p, repo, n=dependabot_review.SKIP_AFTER_DEFERRALS:
+                seen_attempts.append(n) or deferred_at_head)
         processed: list[int] = []
         monkeypatch.setattr(
             dependabot_review, "process_pr",
             lambda p, repo, target: processed.append(p.number) or "merged")
+        self._seen_attempts = seen_attempts
         return processed
 
     def test_unchanged_pr_is_skipped_and_budget_untouched(
@@ -1229,6 +1309,23 @@ class TestProcessRepoSkipsUnchanged:
         sub = dependabot_review.process_repo("o/r", tmp_path)
         assert processed == [9]
         assert sub["merged"] == ["o/r#9"]
+        assert sub["skipped_unchanged"] == []
+
+    def test_default_threads_the_configured_budget(
+            self, monkeypatch, tmp_path):
+        """#1947: process_repo must pass SKIP_AFTER_DEFERRALS by default."""
+        self._wire(monkeypatch, tmp_path, deferred_at_head=False)
+        dependabot_review.process_repo("o/r", tmp_path)
+        assert self._seen_attempts == [dependabot_review.SKIP_AFTER_DEFERRALS]
+
+    def test_reaudit_all_threads_zero_and_processes_everything(
+            self, monkeypatch, tmp_path):
+        """--reaudit-all resolves to skip_after=0, which must reach the
+        detector so a previously-stranded PR gets audited again."""
+        processed = self._wire(monkeypatch, tmp_path, deferred_at_head=False)
+        sub = dependabot_review.process_repo("o/r", tmp_path, skip_after=0)
+        assert self._seen_attempts == [0]
+        assert processed == [9]
         assert sub["skipped_unchanged"] == []
 
 
