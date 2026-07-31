@@ -120,6 +120,12 @@ class ImplementationSpecState(TypedDict, total=False):
     repo_root: str
     assemblyzero_root: str
     audit_dir: str
+    # #2033: the integration branch the implementation worktree is cut from.
+    # repo_root's checkout sits on the default branch (#2012), which mid-arc
+    # carries none of the phases landed so far -- so a spec drafted from the
+    # checkout plans against the wrong tree. Empty when there is no attempt
+    # branch, which restores the previous behaviour exactly.
+    base_branch: str
 
     # Configuration (set by CLI runner)
     config_mock_mode: bool

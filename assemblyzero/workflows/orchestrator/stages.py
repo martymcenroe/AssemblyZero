@@ -627,6 +627,9 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             "lld_path": lld_path,
             "repo_root": state.get("target_repo", ""),
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            # #2033: the tree the implementation will actually be built on. The
+            # checkout is on the default branch and mid-arc has none of the arc.
+            "base_branch": state.get("base_branch", ""),
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
