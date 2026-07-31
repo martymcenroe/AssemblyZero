@@ -11,6 +11,10 @@ from assemblyzero.workflows.testing.nodes.implement_code import (
     compute_dynamic_timeout,
     CLI_TIMEOUT,
 )
+from assemblyzero.workflows.testing.nodes.implementation.claude_client import (
+    FILE_TIMEOUT_CAP,
+    FILE_TIMEOUT_FLOOR,
+)
 
 
 # =============================================================================
@@ -162,32 +166,54 @@ class Config(TypedDict):
 
 
 class TestComputeDynamicTimeout:
-    """Tests for dynamic timeout calculation."""
+    """Tests for dynamic timeout calculation.
 
-    def test_small_prompt_gets_base_timeout(self):
-        """Short prompts should get close to the base 300s timeout."""
-        timeout = compute_dynamic_timeout("short prompt")
-        assert timeout == 300
+    #2026: these previously asserted a 300s base -- the value that killed
+    boostgauge #1. `skins/stingray.py`, a large renderer described in about
+    1.5 KB, computed 301s and hit the same deterministic wall 15 times across
+    11m28s before the stage gave up and stalled the arc at phase 3 of 6.
+
+    The old `test_small_prompt_gets_base_timeout` pinned exactly that behaviour
+    and passed the whole time, because it asserted the formula rather than what
+    the formula is for.
+    """
+
+    def test_a_short_prompt_still_gets_a_generous_timeout(self):
+        """The decisive case: prompt size does not predict response size, so a
+        compact request for a large file must not receive the smallest budget."""
+        timeout = compute_dynamic_timeout("Implement the Stingray skin.")
+        assert timeout >= FILE_TIMEOUT_FLOOR, (
+            "a short prompt can ask for a very large file; the floor is what "
+            "keeps that from killing the stage"
+        )
+
+    def test_the_prompt_size_that_killed_the_arc_now_gets_room(self):
+        """~1.5 KB, which computed 301s before."""
+        timeout = compute_dynamic_timeout("x" * 1500)
+        assert timeout > 301
+        assert timeout >= FILE_TIMEOUT_FLOOR
 
     def test_large_prompt_gets_higher_timeout(self):
-        """Large prompts should scale up the timeout."""
-        # 88KB prompt (like the one that failed)
         large_prompt = "x" * 88000
         timeout = compute_dynamic_timeout(large_prompt)
-        assert timeout > 300
-        assert timeout == min(300 + 88, CLI_TIMEOUT)
+        assert timeout > FILE_TIMEOUT_FLOOR
+        assert timeout == min(FILE_TIMEOUT_FLOOR + 88, FILE_TIMEOUT_CAP)
 
-    def test_timeout_capped_at_cli_timeout(self):
-        """Timeout should never exceed CLI_TIMEOUT."""
-        huge_prompt = "x" * 1_000_000
+    def test_timeout_is_capped(self):
+        huge_prompt = "x" * 10_000_000
         timeout = compute_dynamic_timeout(huge_prompt)
-        assert timeout == CLI_TIMEOUT
+        assert timeout == FILE_TIMEOUT_CAP
 
     def test_medium_prompt_scales_linearly(self):
-        """50KB prompt should get ~350s timeout."""
         medium_prompt = "x" * 50000
         timeout = compute_dynamic_timeout(medium_prompt)
-        assert timeout == 350
+        assert timeout == FILE_TIMEOUT_FLOOR + 50
+
+    def test_the_floor_never_drops_back(self):
+        """Guard against a later edit quietly lowering the floor toward the
+        value that produced 15 timeouts in a single stage."""
+        assert FILE_TIMEOUT_FLOOR >= CLI_TIMEOUT
+        assert FILE_TIMEOUT_CAP > FILE_TIMEOUT_FLOOR
 
 
 # =============================================================================

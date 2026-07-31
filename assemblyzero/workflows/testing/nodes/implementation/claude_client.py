@@ -14,6 +14,13 @@ from assemblyzero.core.llm_provider import get_provider
 # Issue #373: Increased from 300s — large test file prompts need more time
 CLI_TIMEOUT = 600  # 10 minutes base (used by compute_dynamic_timeout)
 
+# #2026: what a file generation gets at minimum, and at most. The floor is what
+# matters: generation time tracks the RESPONSE, and a compact prompt can ask for
+# a very large file. The costs are asymmetric — an over-long timeout waits out
+# one slow call, while an under-long one kills the stage and stalls the arc.
+FILE_TIMEOUT_FLOOR = CLI_TIMEOUT
+FILE_TIMEOUT_CAP = 1200
+
 
 class ProgressReporter:
     """Print elapsed time periodically during long operations.
@@ -76,16 +83,26 @@ def compute_dynamic_timeout(prompt: str) -> int:
     Issue #373: Larger prompts need more time for Claude to generate
     correspondingly large responses. Scale linearly with a floor and cap.
 
+    #2026: that premise only ever held one way round. Generation time tracks the
+    RESPONSE, and prompt size does not predict it — a compact spec can ask for a
+    very large file. boostgauge #1 died on `skins/stingray.py`, a big renderer
+    described in about 1.5 KB: it computed 301s, the old floor, and every one of
+    15 attempts hit the same deterministic wall for 11m28s before the stage gave
+    up and stalled the arc at phase 3 of 6.
+
+    So the floor now carries the weight and the scaling is left as a bonus for
+    genuinely large prompts. A too-long timeout costs waiting on one slow call;
+    a too-short one costs the stage.
+
     Args:
         prompt: The prompt string.
 
     Returns:
-        Timeout in seconds (300-600 range).
+        Timeout in seconds (FILE_TIMEOUT_FLOOR–FILE_TIMEOUT_CAP range).
     """
-    base = 300
     # Add 1 second per 1000 characters of prompt
-    scaled = base + len(prompt) // 1000
-    return min(scaled, CLI_TIMEOUT)
+    scaled = FILE_TIMEOUT_FLOOR + len(prompt) // 1000
+    return min(scaled, FILE_TIMEOUT_CAP)
 
 
 def build_system_prompt(file_path: str) -> str:
