@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -35,20 +36,32 @@ AUDIT_ACTIVE_DIR = Path("docs/lineage/active")
 AUDIT_DONE_DIR = Path("docs/lineage/done")
 LLD_ACTIVE_DIR = Path("docs/lld/active")
 LLD_DONE_DIR = Path("docs/lld/done")
-# #1151: LLD approval cache lives OUTSIDE any repo tree. Pre-#1151 this
-# was relative and dirtied every worktree the moment a workflow run
-# wrote an approval entry. Operational cache state shouldn't live in
-# tracked repo paths.
+# Where the LLD approval cache lives, RELATIVE TO THE TARGET REPO (#1970).
 #
-# #1160: the file is shared by every target repo, and the old caller pattern
-# `target_repo / LLD_STATUS_FILE` collapses to this absolute path (Python's
-# `/` semantics), so target_repo was silently discarded. Entries were keyed by
-# bare issue number, and the comment here claimed each one "self-identifies via
-# issue_number / target_repo" -- it did not; no entry carried a repo at all.
-# boostgauge #4 and any other repo's #4 shared one entry, and every entry
-# outlived every repo reset. Entries are now nested under a repo key; see
-# _repo_key and _read_status_file.
-LLD_STATUS_FILE = Path.home() / ".claude" / "assemblyzero" / "lld-status.json"
+# History, because the wrong answer here was deliberate and survived review:
+# #1151 saw that a repo-relative cache dirtied every worktree the moment a run
+# wrote an approval, and "fixed" it by moving the file to
+# `~/.claude/assemblyzero/lld-status.json` -- outside every repo. That traded a
+# visible problem for four hidden ones. The file was shared by every target
+# repo, invisible to the operator, outside version control, and untouched by
+# every cleanup tool including speedrun_reset.
+#
+# The damage was real. #1160 found entries keyed by bare issue number, so two
+# repos' issue #4 shared one entry and every entry outlived every repo reset.
+# #1970 found 42 slices in the live file, all pytest temp directories, because
+# test isolation depended on each test file remembering to monkeypatch a
+# constant -- and before repo-scoping those writes had been OVERWRITING real
+# approvals, leaving fixture issue numbers (42, 50, 77, 99, 100, 200, 300) in a
+# production cache.
+#
+# The universal CLAUDE.md already mandated the right answer: the repo's
+# gitignored `data/`. Operator-visible, per-repo, wiped by repo cleanup, and
+# incapable of colliding. `~/.claude/**` is sanctioned for HARNESS state; an
+# application's approval cache was wearing that exception as a costume.
+#
+# Test isolation now falls out of the design instead of being remembered: a
+# test whose target repo is `tmp_path` writes under `tmp_path`.
+LLD_STATUS_RELATIVE = Path("data") / "assemblyzero" / "lld-status.json"
 
 # Schema version of the shared cache file. "1.0" is the pre-#1160 flat layout
 # whose entries cannot be attributed to a repo.
@@ -597,9 +610,46 @@ def _repo_key(target_repo: Path) -> str:
     collide across the fleet, which is the collision this fix exists to end.
     """
     try:
-        return Path(target_repo).resolve().as_posix()
+        return _main_worktree_root(target_repo).resolve().as_posix()
     except OSError:
         return Path(target_repo).as_posix()
+
+
+def lld_status_path(target_repo: Path) -> Path:
+    """Where THIS repo's approval cache lives: inside it, gitignored (#1970).
+
+    Resolved against the MAIN worktree, not the calling one. A repo's worktrees
+    are separate directories, and the pipeline runs stages from `{repo}-{issue}`
+    worktrees; without this, each worktree would keep its own cache and an
+    approval recorded in one would be invisible to the next.
+
+    `data/` is the destination the universal CLAUDE.md names for agent-written
+    state, and is gitignored fleet-wide, so writing here neither dirties the
+    repo nor hides from the operator.
+    """
+    return _main_worktree_root(target_repo) / LLD_STATUS_RELATIVE
+
+
+def _main_worktree_root(path: Path) -> Path:
+    """The repo's MAIN worktree root, or ``path`` when it is not a git tree.
+
+    Both the cache file's location and its repo key must agree on this. They
+    did not at first: the path resolved to the main worktree while the key
+    resolved to the calling tree, so an approval written from `{repo}-{issue}`
+    landed under a key the repo itself never read -- caught by the worktree
+    test below.
+    """
+    root = Path(path)
+    common = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        cwd=str(root), capture_output=True, text=True,
+    )
+    if common.returncode != 0 or not common.stdout.strip():
+        return root
+    git_dir = Path(common.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = (root / git_dir).resolve()
+    return git_dir.parent
 
 
 def _empty_status_file() -> dict:
@@ -610,7 +660,7 @@ def _empty_status_file() -> dict:
     }
 
 
-def _read_status_file() -> dict:
+def _read_status_file(target_repo: Path) -> dict:
     """The whole shared cache file, migrated forward to the repo-scoped layout.
 
     A pre-#1160 file is flat: ``issues`` keyed by bare issue number, with no
@@ -622,11 +672,12 @@ def _read_status_file() -> dict:
     dropping them is one extra review per issue; the cost of honouring them is
     skipping a review the workflow was told to perform.
     """
-    if not LLD_STATUS_FILE.exists():
+    status_file = lld_status_path(target_repo)
+    if not status_file.exists():
         return _empty_status_file()
 
     try:
-        data = json.loads(LLD_STATUS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(status_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return _empty_status_file()
 
@@ -654,14 +705,14 @@ def load_lld_tracking(target_repo: Path) -> LLDStatusCache:
 
     Args:
         target_repo: Target repository root. Now actually honoured — before
-            #1160 it was discarded by `target_repo / LLD_STATUS_FILE`, so every
+            #1160 it was discarded by path-joining against an absolute constant, so every
             repo read every other repo's entries.
 
     Returns:
         LLDStatusCache dict. Empty cache when the file is missing, corrupt, or
         carries nothing for this repo.
     """
-    raw = _read_status_file()
+    raw = _read_status_file(target_repo)
     slice_ = raw.get("repos", {}).get(_repo_key(target_repo), {})
     issues = slice_.get("issues") if isinstance(slice_, dict) else None
     return {
@@ -683,15 +734,16 @@ def save_lld_tracking(tracking: LLDStatusCache, target_repo: Path) -> None:
         tracking: LLDStatusCache dict for this repo.
         target_repo: Target repository root.
     """
-    raw = _read_status_file()
+    raw = _read_status_file(target_repo)
     raw.setdefault("repos", {})[_repo_key(target_repo)] = {
         "issues": tracking.get("issues", {}),
     }
     raw["version"] = LLD_STATUS_CACHE_VERSION
     raw["last_updated"] = datetime.now(timezone.utc).isoformat()
 
-    LLD_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LLD_STATUS_FILE.write_text(
+    status_file = lld_status_path(target_repo)
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    status_file.write_text(
         json.dumps(raw, indent=2) + "\n",
         encoding="utf-8",
     )
