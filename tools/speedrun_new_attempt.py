@@ -184,9 +184,14 @@ def verify_postconditions(
     """
     problems: list[str] = []
 
-    if current_branch(repo_root) != new_name:
-        problems.append(f"repo is not checked out on '{new_name}'")
-
+    # #2012: the attempt is a REF, so the assertion is the inverse of what it
+    # used to be -- the checkout must be on the DEFAULT branch, not on the
+    # attempt. Being handed back on a branch is the defect this closes.
+    if base and current_branch(repo_root) != base:
+        problems.append(
+            f"checkout ended on '{current_branch(repo_root) or 'detached'}', "
+            f"expected the default branch '{base}'"
+        )
     if not remote_branch_exists(repo_root, new_name):
         problems.append(
             f"origin has no branch '{new_name}' -- PRs targeting it would fail"
@@ -224,11 +229,21 @@ def plan_steps(old_name: str, new_name: str, base: str) -> list[list[str]]:
     so that step is simply absent rather than being a reason to stop.
     """
     steps: list[list[str]] = [["git", "fetch", "origin"]]
-    if old_name:
+    # #2012: step off the branch BEFORE renaming it. `git branch -m` moves the
+    # checkout along with the branch, so graveyarding the branch you are
+    # standing on lands you on `graveyard/<name>` -- worse than where you
+    # started. Ending on the default branch is the guarantee, so take it first.
+    if old_name != base:
+        steps.append(["git", "checkout", base])
+    if old_name and old_name != base:
         steps.append(
             ["git", "branch", "-m", old_name, f"{GRAVEYARD_PREFIX}{old_name}"]
         )
-    steps.append(["git", "checkout", "-b", new_name, f"origin/{base}"])
+    # #2012: create the ref WITHOUT checking it out. Nothing needs the main
+    # checkout to stand on the attempt branch -- the worktree is cut from an
+    # explicit base and PRs target it by name. Parking the operator on it was a
+    # leftover from the manual ritual this tool replaced.
+    steps.append(["git", "branch", new_name, f"origin/{base}"])
     steps.append(["git", "push", "-u", "origin", new_name])
     return steps
 
@@ -300,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"\nVERIFIED: {repo_root.name} is on '{new_name}'.")
     print(f"  exists on origin, tracks origin/{new_name}, level with origin/{base}.")
+    print(f"  checkout on '{current_branch(repo_root)}' -- an attempt is a ref, not a place to stand.")
     print(f"  previous attempt preserved as '{GRAVEYARD_PREFIX}{old_name}'.")
     print(
         f"\nPass --base-branch {new_name} to BOTH speedrun_clean_check.py and "

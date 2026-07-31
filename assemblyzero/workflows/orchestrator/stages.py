@@ -752,6 +752,23 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # --base-branch now controls the roll's CONTENT as well as the PR
             # target, and the resolved base is printed rather than implied.
             base_branch = state.get("base_branch", "")
+            if base_branch and target_repo:
+                # #2011: the pipeline merges on ORIGIN but cuts the worktree from
+                # the LOCAL ref, so each phase was built from a base that had not
+                # received the previous phase's merge. `fetch origin b:b` is
+                # atomic and fast-forward-only, and REFUSES if the branch is
+                # checked out anywhere -- which is the correct failure, and why
+                # the main checkout must stay on the default branch (#2012).
+                sync = run_command(
+                    ["git", "-C", target_repo, "fetch", "origin",
+                     f"{base_branch}:{base_branch}"],
+                    check=False, capture_output=True, text=True,
+                )
+                if sync.returncode == 0:
+                    print(f"    Base synced from origin/{base_branch}")
+                else:
+                    detail = (sync.stderr or "").strip()[:200]
+                    print(f"    [WARN] could not sync {base_branch}: {detail}")
             if not base_branch:
                 # current_branch raises GitBranchError on detached HEAD by
                 # design (it must not silently fall back to main), and OSError
@@ -1000,6 +1017,10 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
         )
 
         pr_url = pr_result.stdout.strip()
+        # #2011: the impl PR was created and then abandoned -- nothing merged it,
+        # so the attempt branch received the design and never the code. Record it
+        # so the cleanup stage can land it alongside the LLD PR.
+        state["impl_pr_url"] = pr_url
         result = _make_stage_result(
             status="passed",
             artifact_path=pr_url,
@@ -1024,11 +1045,16 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
-def _merge_lld_pr(pr_url: str, timeout_s: int, notes: list[str]) -> bool:
-    """Closes #1531. Poll the LLD PR until mergeable, then squash-merge it (landing
-    the LLD + spec on target main per ADR 0221). Best-effort; returns True iff the PR
-    is now merged. Bounded by ``timeout_s``; on timeout the PR is left open and
-    deferred to manual ``/cleanup``. No ``--admin``, no force.
+def _merge_pr(pr_url: str, timeout_s: int, notes: list[str], label: str = "LLD") -> bool:
+    """Poll a PR until mergeable, then squash-merge it. Returns True iff merged.
+
+    Closes #1531 for the LLD PR (landing LLD + spec per ADR 0221). #2011 applies
+    the same discipline to the IMPLEMENTATION PR, which nothing merged: the arc
+    could not accumulate, and every previous "pipeline-built" arc had a human
+    merging six impl PRs by hand.
+
+    Bounded by ``timeout_s``; on timeout the PR is left open and reported. No
+    ``--admin``, no force -- a PR that will not merge cleanly is a finding.
     """
     deadline = time.monotonic() + max(0, timeout_s)
     last = ""
@@ -1051,13 +1077,13 @@ def _merge_lld_pr(pr_url: str, timeout_s: int, notes: list[str]) -> bool:
                 )
                 if merge.returncode == 0:
                     return True
-                notes.append(f"LLD PR merge attempt failed: {(merge.stderr or '').strip()[:160]}")
+                notes.append(f"{label} PR merge attempt failed: {(merge.stderr or '').strip()[:160]}")
         else:
-            notes.append(f"LLD PR view failed: {(view.stderr or '').strip()[:160]}")
+            notes.append(f"{label} PR view failed: {(view.stderr or '').strip()[:160]}")
         if time.monotonic() >= deadline:
             notes.append(
-                f"LLD PR not merged within {timeout_s}s (last merge-state="
-                f"{last or '?'}); deferred to manual /cleanup"
+                f"{label} PR not merged within {timeout_s}s (last merge-state="
+                f"{last or '?'})"
             )
             return False
         time.sleep(15)
@@ -1179,9 +1205,20 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
 
     lld_merged = False
     if lld_pr_url:
-        lld_merged = _merge_lld_pr(lld_pr_url, merge_timeout, notes)
+        lld_merged = _merge_pr(lld_pr_url, merge_timeout, notes, label="LLD")
     else:
         notes.append("no LLD PR URL in state — skipping LLD merge")
+
+    # #2011: land the IMPLEMENTATION PR. This is the step that was missing
+    # entirely; without it the attempt branch never receives the code and the
+    # next phase of an arc builds against a base that has never seen this one.
+    # LLD first, matching the order every previous arc landed in.
+    impl_pr_url = state.get("impl_pr_url", "")
+    impl_merged = False
+    if impl_pr_url:
+        impl_merged = _merge_pr(impl_pr_url, merge_timeout, notes, label="impl")
+    else:
+        notes.append("no implementation PR URL in state — nothing to land")
 
     # #1624: only delete the working-tree copies once the content is safely on main.
     if lld_merged and target_repo:
@@ -1193,9 +1230,19 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
     for note in notes:
         print(f"    [cleanup] {note}")
 
+    # #2011: this stage was documented as best-effort and ALWAYS returned passed,
+    # which is the wrong contract for a step the next phase depends on. A cleanup
+    # hiccup still passes; an unlanded implementation does not -- that is the run
+    # not having landed, and reporting it green is how the gap stayed invisible.
+    landed = impl_merged or not impl_pr_url
     result = _make_stage_result(
-        status="passed",
-        artifact_path=lld_pr_url if lld_merged else "",
+        status="passed" if landed else "failed",
+        error_message=(
+            "" if landed else
+            f"implementation PR was not merged into the attempt branch "
+            f"({impl_pr_url}); the arc cannot accumulate without it"
+        ),
+        artifact_path=impl_pr_url if impl_merged else (lld_pr_url if lld_merged else ""),
         duration_seconds=time.monotonic() - start_time,
         attempts=1,
     )

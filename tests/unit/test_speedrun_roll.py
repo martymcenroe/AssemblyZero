@@ -135,7 +135,7 @@ class TestEnsureBaseDecides:
         with _no_network():
             base = sr.ensure_base(repo, 4, log)
 
-        assert base == "hardening-run-13"
+        assert base == "hardening-run-11", "must use the attempt that is on origin"
         assert sr.base_is_structurally_sound(repo, base) == []
 
     def test_base_holding_this_issues_work_triggers_a_fresh_attempt(
@@ -190,15 +190,18 @@ class TestEnsureBaseDecides:
 
         assert base == "hardening-run-12"
 
-    def test_detached_head_triggers_a_fresh_attempt(self, repo, log):
-        sha = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=str(repo),
-            capture_output=True, text=True,
-        ).stdout.strip()
-        _git(repo, "checkout", sha)
+    def test_no_attempt_ref_at_all_establishes_one(self, repo, log):
+        """#2012: base discovery no longer reads HEAD, so the trigger is the
+        absence of an attempt REF, not the state of the checkout."""
+        _git(repo, "checkout", "main")
+        _git(repo, "push", "origin", "--delete", "hardening-run-11")
+        _git(repo, "fetch", "origin", "--prune")
 
         with _no_network():
-            assert sr.ensure_base(repo, 4, log) == "hardening-run-12"
+            base = sr.ensure_base(repo, 4, log)
+
+        assert base and base != "hardening-run-11", base
+        assert sr.base_is_structurally_sound(repo, base) == []
 
 
 class TestInstrumentationSurvives:

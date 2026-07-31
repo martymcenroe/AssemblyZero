@@ -120,6 +120,9 @@ def attempt_prefix(repo_root: Path) -> str:
     attempt (e.g. `main`) falls back to the campaign default, so a repo sitting
     on its default branch still gets a sensibly named first attempt.
     """
+    # #2012: the checkout is normally on the DEFAULT branch now, so HEAD is no
+    # longer a source of the prefix. It is still honoured when the operator has
+    # deliberately checked an attempt out; otherwise the campaign default wins.
     current = attempt.current_branch(repo_root)
     match = re.match(r"^(.*)-\d+$", current or "")
     return match.group(1) if match else DEFAULT_PREFIX
@@ -151,6 +154,36 @@ def next_attempt_name(repo_root: Path, prefix: str) -> str:
             seen.add(int(match.group(1)))
 
     return f"{prefix}-{(max(seen) + 1) if seen else 1}"
+
+
+def resolve_attempt_branch(repo_root: Path) -> str:
+    """The newest attempt branch on origin, or "" if there is none (#2012).
+
+    Base discovery used to read the CHECKOUT, which is why every operation left
+    the operator parked on an attempt branch: the tooling had to stand on it to
+    know its name. Nothing else needs that -- the worktree is cut from an
+    explicit base and PRs target it by name -- so the attempt is resolved from
+    refs and the main checkout stays on the default branch.
+
+    Graveyarded attempts are excluded by prefix: they are the lab notebook of
+    finished runs, not candidates to roll onto.
+    """
+    prefix = attempt_prefix(repo_root)
+    esc = re.escape(prefix)
+    pattern = re.compile(rf"^{esc}-(\d+)$")
+
+    result = _run(["git", "ls-remote", "--heads", "origin"], cwd=repo_root)
+    best: tuple[int, str] | None = None
+    for line in result.stdout.splitlines():
+        if "refs/heads/" not in line:
+            continue
+        name = line.split("refs/heads/", 1)[1].strip()
+        match = pattern.match(name)
+        if match:
+            n = int(match.group(1))
+            if best is None or n > best[0]:
+                best = (n, name)
+    return best[1] if best else ""
 
 
 def establish_new_attempt(repo_root: Path, log: EventLog) -> str | None:
@@ -200,9 +233,9 @@ def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
     however clean it looks), then this issue's debris, then this issue's
     already-merged work.
     """
-    base = attempt.current_branch(repo_root)
+    base = resolve_attempt_branch(repo_root)
     if not base:
-        log.write("BASE detached HEAD -- establishing a fresh attempt")
+        log.write("BASE no attempt branch exists -- establishing one")
         return establish_new_attempt(repo_root, log)
 
     problems = base_is_structurally_sound(repo_root, base)
