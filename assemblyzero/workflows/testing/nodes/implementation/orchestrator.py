@@ -3,6 +3,7 @@
 Contains implement_code() (the N4 node entry point) and supporting functions.
 """
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -272,8 +273,28 @@ def validate_files_to_modify(
     return errors
 
 
+def came_from_base(repo_root: Path, filepath: str) -> bool:
+    """Is this path TRACKED, i.e. inherited from the base branch? (#2032)
+
+    The discriminator the skip-on-resume guard was missing. A pipeline worktree
+    is cut from the integration branch, so a file present when a run starts is
+    tracked and belongs to an earlier phase. A file a previous attempt of THIS
+    run wrote is untracked, because nothing commits mid-stage.
+
+    Same observation -- "the file is already there" -- with opposite correct
+    responses: resume past our own half-written output, never past another
+    phase's finished work.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", filepath],
+        cwd=str(repo_root), capture_output=True, text=True,
+    )
+    return result.returncode == 0
+
+
 def _should_skip_existing_file(
-    change_type: str, target_path: Path, iteration_count: int
+    change_type: str, target_path: Path, iteration_count: int,
+    repo_root: Path | None = None, filepath: str = "",
 ) -> bool:
     """Issue #547 skip-on-resume, scoped by Issue #1842 to the first pass only.
 
@@ -283,14 +304,48 @@ def _should_skip_existing_file(
     so no retry ever called the model — N5 re-ran byte-identical files until
     the stagnation detector halted the run (hardening runs 8/10/11, boostgauge
     campaign 2026-07-28).
+
+    #2032: a file that came from the BASE is never a resume. boostgauge #2
+    skipped all five planned files -- #41 and #1 had landed them on the
+    integration branch -- printed "5 files written" having written none, and
+    died at pytest with nothing collected.
     """
     if iteration_count > 0:
+        return False
+    if repo_root is not None and filepath and came_from_base(repo_root, filepath):
         return False
     return (
         change_type.lower() == "add"
         and target_path.exists()
         and target_path.stat().st_size > 0
     )
+
+
+def resolve_change_type(
+    change_type: str, repo_root: Path, filepath: str, target_path: Path
+) -> str:
+    """An Add whose file the base already ships is really a Modify (#2032/#2033).
+
+    The spec plans every file as Add because it is drafted against an empty tree
+    rather than the base the worktree is cut from. Followed literally on a
+    mid-arc phase that OVERWRITES an earlier phase: #2 would have replaced the
+    telltale module #41 built instead of extending it.
+
+    Coercing here makes the destructive case impossible while the plan is still
+    wrong, and routes the file through the Modify prompt, which carries the
+    current contents and asks for a change rather than a replacement.
+    """
+    if (
+        change_type.lower() == "add"
+        and target_path.exists()
+        and came_from_base(repo_root, filepath)
+    ):
+        print(
+            f"        Base already ships {filepath}; implementing as Modify so "
+            f"the earlier phase's work is extended rather than replaced."
+        )
+        return "Modify"
+    return change_type
 
 
 def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
@@ -548,12 +603,22 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Issue #547: Skip-on-resume — don't re-call Claude for files already on disk
         target_path = repo_root / filepath
-        if _should_skip_existing_file(change_type, target_path, iteration_count):
+        if _should_skip_existing_file(
+            change_type, target_path, iteration_count, repo_root, filepath
+        ):
             existing_content = target_path.read_text(encoding="utf-8")
             print(f"        Skipped (already exists): {target_path}")
             completed_files.append((filepath, existing_content))
             written_paths.append(str(target_path))
             continue
+
+        # #2032: the base already ships this file, so extend it rather than
+        # overwriting an earlier phase. Must run AFTER the resume check, whose
+        # subject is our own output, and BEFORE the validation below, which
+        # reads change_type.
+        change_type = resolve_change_type(
+            change_type, repo_root, filepath, target_path
+        )
 
         # Validate change type
         if change_type.lower() == "modify" and not target_path.exists():
