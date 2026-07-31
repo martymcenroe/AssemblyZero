@@ -524,9 +524,18 @@ class ClaudeCLIProvider(LLMProvider):
             # only kills the root process; grandchild processes keep the
             # pipes open, blocking for 200-400s after the timeout fires.
             # See issue #526.
+            # #2037: CREATE_NO_WINDOW or this opens a console window per model
+            # call. Whether that shows depends on the PARENT: under the agent's
+            # shell the child inherited an existing console and nothing
+            # appeared, but a roll running under Task Scheduler (#2015) has no
+            # console, so every call allocated its own -- continuously, for the
+            # length of an unattended run. Composes with CREATE_NEW_PROCESS_GROUP,
+            # which #526 needs to tree-kill on timeout.
             creation_flags = 0
             if sys.platform == "win32":
-                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+                creation_flags = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+                )
 
             # Issue #787: When using temp dir, wrap in TemporaryDirectory
             # context manager so cleanup is guaranteed.
