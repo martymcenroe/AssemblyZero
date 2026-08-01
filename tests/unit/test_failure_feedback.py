@@ -229,6 +229,9 @@ FAILED tests/test_foo.py::test_baz - TypeError
         state = _make_state(
             previous_passed=1,
             previous_coverage=-1.0,
+            # #2064: the first repeat now freezes tests and retries; the halt
+            # comes on the THIRD identical set. Seed two prior strikes.
+            identity_plateau_strikes=2,
             previous_green_failures=[
                 "tests/test_foo.py::test_bar",
                 "tests/test_foo.py::test_baz",

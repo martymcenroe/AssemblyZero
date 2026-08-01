@@ -1153,16 +1153,31 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Issue #501: Identity-based stagnation — same tests failing across iterations.
         # Catches cases where pass count fluctuates but the SAME tests keep failing.
+        #
+        # #2064: a repeated failing set is a FIXED POINT, not just fatigue. Both
+        # tests and impl are regenerated from the same spec that causes their
+        # disagreement, so a deterministic drafter reproduces the exact failure
+        # set — six boostgauge #2 runs repeated their counts to the digit. The
+        # first repeat now breaks the symmetry instead of halting: the tests
+        # become a frozen contract (the passing ones prove they can run) and N4
+        # rewrites ONLY the implementation to satisfy them. Halt on the third
+        # identical set, when the symmetry-break has had its chance.
         previous_green_failures = state.get("previous_green_failures", [])
         identity_stagnant = (
             bool(current_green_failures)
             and bool(previous_green_failures)
             and current_green_failures == sorted(previous_green_failures)
         )
+        identity_strikes = state.get("identity_plateau_strikes", 0)
         if identity_stagnant:
+            identity_strikes += 1
+        else:
+            identity_strikes = 0
+        if identity_stagnant and identity_strikes >= 2:
             stagnant_msg = (
                 f"Test identity stagnant: same {len(current_green_failures)} test(s) failing "
-                f"across iterations. Halting to prevent token waste."
+                f"across {identity_strikes + 1} iterations (tests were frozen for the "
+                f"retry). Halting to prevent token waste."
             )
             print(f"    [STAGNANT] {stagnant_msg}")
             return {
@@ -1178,6 +1193,12 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "next_node": "end",
                 "error_message": stagnant_msg,
             }
+        if identity_stagnant:
+            print(
+                f"    [N5] same {len(current_green_failures)} test(s) failing again — "
+                f"freezing tests as the contract; next revision rewrites only the "
+                f"implementation (strike {identity_strikes})"
+            )
 
         # Stagnation check: one shared decision, see coverage_has_stagnated.
         # Skip when passed_count == 0: coverage is vacuously 100% with no passing
@@ -1255,6 +1276,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "next_node": "N4_implement_code",
             "error_message": "",
             "count_plateau_strikes": plateau_strikes,
+            "identity_plateau_strikes": identity_strikes,
+            "freeze_tests": identity_stagnant,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)
@@ -1355,6 +1378,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": "",
             # All tests pass here; a count plateau is a failing-branch concept.
             "count_plateau_strikes": 0,
+            "identity_plateau_strikes": 0,
+            "freeze_tests": False,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)

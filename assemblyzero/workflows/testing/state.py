@@ -177,6 +177,10 @@ class TestingWorkflowState(TypedDict, total=False):
     best_iteration: dict | None
     # #2062: consecutive identical nonzero pass counts (three-strike plateau).
     count_plateau_strikes: int
+    # #2064: consecutive identical failing SETS, and the symmetry-break flag --
+    # when True, N4 must not rewrite test files; they are the frozen contract.
+    identity_plateau_strikes: int
+    freeze_tests: bool
     test_failure_summary: str  # Issue #498: Structured test failure feedback for N4
     e2e_failure_summary: str  # Issue #498: Structured E2E failure feedback for N4
     full_suite_validated: bool  # Issue #842: True after full test suite passes regression check
