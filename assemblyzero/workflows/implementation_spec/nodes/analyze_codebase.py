@@ -318,6 +318,22 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     else:
         print(f"    Gathered {len(gathered_symbols)} target-repo symbols for API check")
 
+    # #2054: names alone were not enough. The drafter still invented kwargs for
+    # APIs outside its plan (Telltale(window_seconds=...) against #41's actual
+    # parameter -- 41 of 74 tests failed on one TypeError, twice). Ride the
+    # base's declared signatures into the drafter's context via
+    # project_context, which reaches both the initial and revision prompts.
+    if base_ref_name:
+        surface = _base_api_surface(repo_root, base_ref_name)
+        if surface:
+            project_context = (
+                f"{project_context}\n\n{surface}" if project_context else surface
+            )
+            print(
+                f"    [BASE] API surface of {base_ref_name} added to drafter "
+                f"context ({len(surface):,} chars)"
+            )
+
     return {
         "current_state_snapshots": current_state_snapshots,
         "pattern_references": pattern_references,
@@ -896,6 +912,74 @@ def _extract_import_dependencies(
         lines.append(f"- **{filename}** imports: {import_list}")
 
     return "\n".join(lines)
+
+
+def _list_base_python_files(repo_root: Path, base_ref_name: str) -> list[str]:
+    """Non-test .py paths on the base ref, capped with a visible message."""
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", base_ref_name],
+        cwd=str(repo_root), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if result.returncode != 0:
+        return []
+    paths = [
+        p.strip() for p in result.stdout.splitlines()
+        if p.strip().endswith(".py") and not p.strip().startswith("tests/")
+    ]
+    cap = 200
+    if len(paths) > cap:
+        print(
+            f"    [BASE] sweep capped at {cap} of {len(paths)} .py file(s); "
+            f"calls into uncovered files may be misflagged"
+        )
+        paths = paths[:cap]
+    return paths
+
+
+def _base_api_surface(
+    repo_root: Path, base_ref_name: str, max_chars: int = 12_000
+) -> str:
+    """Signatures of everything the base publishes, for the drafter (#2054).
+
+    #2052 taught the CHECKER the base's symbol names, so a call to
+    Telltale.current_peak() stopped being flagged as hallucinated. The DRAFTER
+    still could not see the signatures of files outside its plan, so it
+    invented kwargs: boostgauge #2 called Telltale(window_seconds=...) against
+    #41's actual parameter and 41 of 74 tests failed on one TypeError, twice,
+    until the stagnation guard halted the stage.
+
+    A phase that must CALL an earlier phase's API needs to read that API's
+    declaration, exactly as a human would before writing the call.
+    """
+    from assemblyzero.workflows.implementation_spec.base_tree import read_from_base
+
+    sections: list[str] = [
+        "## Existing APIs on the integration branch "
+        "(call these EXACTLY as declared — do not invent parameter names)"
+    ]
+    total = len(sections[0])
+    truncated = False
+    for rel in _list_base_python_files(repo_root, base_ref_name):
+        content = read_from_base(repo_root, base_ref_name, rel)
+        if not content:
+            continue
+        summary = _summarize_python_file(content).strip()
+        if not summary:
+            continue
+        block = f"### {rel}\n{summary}"
+        if total + len(block) > max_chars:
+            truncated = True
+            break
+        sections.append(block)
+        total += len(block)
+    if len(sections) == 1:
+        return ""
+    if truncated:
+        sections.append(
+            "(base API surface truncated — files beyond the budget omitted)"
+        )
+    return "\n\n".join(sections)
 
 
 def _extract_symbols_from_base(repo_root: Path, base_ref_name: str) -> set[str]:
