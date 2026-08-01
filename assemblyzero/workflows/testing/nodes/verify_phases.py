@@ -597,6 +597,59 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
 COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
+# "cannot import name 'render' from 'boostgauge.gauge'" — the shape pytest
+# prints when a phase removed something an earlier phase published.
+_MISSING_NAME_RE = re.compile(
+    r"cannot import name ['\"](?P<name>[\w.]+)['\"] from ['\"](?P<module>[\w.]+)['\"]"
+)
+_MISSING_MODULE_RE = re.compile(
+    r"No module named ['\"](?P<module>[\w.]+)['\"]"
+)
+_COLLECT_ERROR_RE = re.compile(r"ERROR collecting (?P<path>\S+)")
+
+
+def describe_collection_failures(output: str, limit: int = 3) -> str:
+    """Name what failed to import, from pytest's own output (#2035).
+
+    Exit 2 is usually a collection failure, and pytest has already said which
+    import broke. That was discarded, so a phase deleting a symbol an earlier
+    phase published surfaced as "pytest test execution interrupted" with
+    Error: unknown -- and diagnosing one took a manual worktree from a
+    checkpoint commit plus a re-run by hand.
+
+    Deliberately reports the symbol and its module rather than the traceback:
+    "cannot import name render from boostgauge.gauge" is the whole diagnosis,
+    and the phase that published `render` is then obvious.
+    """
+    if not output:
+        return ""
+
+    parts: list[str] = []
+    seen: set[str] = set()
+
+    for match in _MISSING_NAME_RE.finditer(output):
+        item = f"{match.group('module')}.{match.group('name')} no longer exists"
+        if item not in seen:
+            seen.add(item)
+            parts.append(item)
+    for match in _MISSING_MODULE_RE.finditer(output):
+        item = f"module {match.group('module')} not found"
+        if item not in seen:
+            seen.add(item)
+            parts.append(item)
+
+    if not parts:
+        files = [m.group("path") for m in _COLLECT_ERROR_RE.finditer(output)]
+        unique = list(dict.fromkeys(files))
+        if unique:
+            return f"Collection failed in: {', '.join(unique[:limit])}"
+        return ""
+
+    shown = "; ".join(parts[:limit])
+    if len(parts) > limit:
+        shown += f" (and {len(parts) - limit} more)"
+    return f"Imports that no longer resolve: {shown}"
+
 
 def coverage_has_stagnated(
     coverage_achieved: float,
@@ -831,6 +884,17 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         reason = describe_exit_code(exit_code)
         print(f"    [EXIT CODE {exit_code}] {reason} — stopping workflow")
 
+        # #2035: exit 2 is usually a COLLECTION failure, and pytest has already
+        # said exactly which import broke. That detail was discarded, so a phase
+        # that deleted a symbol an earlier phase published surfaced as
+        # "pytest test execution interrupted" with Error: unknown -- diagnosing
+        # one took a manual worktree from a checkpoint commit and a re-run by
+        # hand. Everything below was in the output all along.
+        broken = describe_collection_failures(output)
+        detail = f" {broken}" if broken else ""
+        if broken:
+            print(f"    [EXIT CODE {exit_code}] {broken}")
+
         return {
             "green_phase_output": output,
             "coverage_achieved": 0,
@@ -838,7 +902,10 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count,
             "next_node": "end",
-            "error_message": f"Green phase stopped: pytest {reason} (exit code {exit_code})",
+            "error_message": (
+                f"Green phase stopped: pytest {reason} "
+                f"(exit code {exit_code}).{detail}"
+            ),
         }
 
     # Analyze results (exit codes 0 and 1)
