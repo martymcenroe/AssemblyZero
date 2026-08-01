@@ -72,9 +72,10 @@ tests/test_foo.py::test_b PASSED
         result = _build_failure_summary(output)
         assert result == ""
 
-    def test_truncates_long_output(self):
-        """Truncates output exceeding MAX_FAILURE_SUMMARY_CHARS."""
-        # Build output with many FAILED lines
+    def test_identical_causes_compress_instead_of_truncating(self):
+        """#2058: 200 tests failing on ONE cause are one fact. The old cap fed
+        N4 the first ~16 lines and cut the rest -- now the group compresses and
+        nothing is lost."""
         lines = ["=========================== short test summary info ============================"]
         for i in range(200):
             lines.append(f"FAILED tests/test_x.py::test_{i:04d} - AssertionError: value mismatch")
@@ -82,7 +83,25 @@ tests/test_foo.py::test_b PASSED
         output = "\n".join(lines)
 
         result = _build_failure_summary(output)
-        assert len(result) <= 2100  # 2000 + truncation message
+        assert "200 test(s):" in result
+        assert "truncated" not in result
+
+    def test_truly_oversized_distinct_causes_still_truncate(self):
+        """The cap survives as the last resort for pathological suites."""
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            MAX_FAILURE_SUMMARY_CHARS,
+        )
+
+        lines = ["=========================== short test summary info ============================"]
+        for i in range(400):
+            lines.append(
+                f"FAILED tests/test_x.py::test_{i:04d} - AssertionError: "
+                f"unique cause {i} " + "x" * 80
+            )
+        lines.append("=" * 50 + " 400 failed " + "=" * 50)
+        result = _build_failure_summary("\n".join(lines))
+
+        assert len(result) <= MAX_FAILURE_SUMMARY_CHARS + 100
         assert "truncated" in result
 
     def test_empty_input(self):

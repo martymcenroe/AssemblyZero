@@ -42,7 +42,10 @@ from assemblyzero.workflows.testing.state import TestingWorkflowState
 PYTEST_TIMEOUT_SECONDS = 300
 
 # Issue #498: Max chars for failure summary fed back to N4
-MAX_FAILURE_SUMMARY_CHARS = 2000
+# #2058: was 2000 -- roughly the first 16 lines of a 100-failure suite. With
+# root-cause grouping in _build_failure_summary, 12000 comfortably holds every
+# DISTINCT cause of even a large generated test plan.
+MAX_FAILURE_SUMMARY_CHARS = 12000
 
 # Issue #562: Critical skip keywords (aligned with tools/test-gate.py)
 _CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
@@ -129,7 +132,34 @@ def _build_failure_summary(output: str) -> str:
     if not summary_lines:
         return ""
 
-    result = "\n".join(summary_lines)
+    # #2058: group by root cause before spending the budget. Three consecutive
+    # runs of boostgauge #2 rewrote all 7 files and landed on an identical pass
+    # count -- N4 was revising against the first ~16 of 100+ failure lines the
+    # 2000-char cap let through, blind to the rest. 41 tests failing on one
+    # TypeError are ONE fact; grouping says so in one line and leaves budget
+    # for every other distinct cause.
+    grouped: dict[str, list[str]] = {}
+    ungrouped: list[str] = []
+    for line in summary_lines:
+        m = re.match(r"FAILED\s+(\S+?)(?:\s+-\s+(.*))?$", line)
+        if m and m.group(2):
+            grouped.setdefault(m.group(2).strip(), []).append(m.group(1))
+        else:
+            ungrouped.append(line)
+
+    if grouped:
+        blocks: list[str] = []
+        for reason, tests in sorted(
+            grouped.items(), key=lambda kv: len(kv[1]), reverse=True
+        ):
+            shown = ", ".join(tests[:3])
+            more = f" (and {len(tests) - 3} more)" if len(tests) > 3 else ""
+            blocks.append(f"{len(tests)} test(s): {reason}\n    e.g. {shown}{more}")
+        blocks.extend(ungrouped)
+        result = "\n".join(blocks)
+    else:
+        result = "\n".join(summary_lines)
+
     if len(result) > MAX_FAILURE_SUMMARY_CHARS:
         result = result[:MAX_FAILURE_SUMMARY_CHARS] + "\n... (truncated)"
     return result
