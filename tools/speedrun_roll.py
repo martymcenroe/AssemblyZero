@@ -539,6 +539,10 @@ def detached_argv(
         "--log-dir", str(log_dir),
         "--assemblyzero-root", str(az_root),
         "--detached-stdout", str(log_dir / "detached-launcher.log"),
+        # #2068: the redraw budget must ride the relaunch or the detached run
+        # silently falls back to a single attempt. getattr: callers that build
+        # a bare Namespace (tests, embedders) predate the flag.
+        "--attempts", str(max(1, getattr(args, "attempts", 1))),
     ]
     return argv + extra
 
@@ -870,6 +874,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--attempts", type=int, default=1,
+        help=(
+            "Redraw a failed issue up to N times before stopping (#2068). "
+            "Base/gate problems (exit 91) are never retried."
+        ),
+    )
+    parser.add_argument(
         "--detach-stop", action="store_true",
         help="Stop a detached roll and every process it spawned (#2016)",
     )
@@ -936,7 +947,22 @@ def main(argv: list[str] | None = None) -> int:
     code = 0
     try:
         for issue in args.issue:
-            code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+            # #2068: generation quality varies wildly between draws -- the same
+            # issue produced 39/41-passing and 4/75-passing initial iterations
+            # on consecutive rolls. A failed draw is self-healing (ensure_base
+            # clears its debris), so retrying inside the detached task removes
+            # the human relaunch from the loop entirely. A base or gate problem
+            # (91) is NOT a draw and is never retried.
+            for attempt_no in range(1, max(1, args.attempts) + 1):
+                code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+                if code == 0 or code == 91:
+                    break
+                if attempt_no < max(1, args.attempts):
+                    print(
+                        f"\n#{issue} attempt {attempt_no}/{args.attempts} failed "
+                        f"(exit {code}) — self-healing and redrawing."
+                    )
+                    time.sleep(2)
             if code != 0:
                 print(
                     f"\nSTOPPED at #{issue} (exit {code}); later issues not rolled."
