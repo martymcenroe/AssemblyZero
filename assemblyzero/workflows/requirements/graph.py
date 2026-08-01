@@ -69,6 +69,31 @@ from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 from assemblyzero.core.halt_node import create_halt_node
 
 
+def describe_validation_failure(result: dict | None, limit: int = 3) -> str:
+    """The errors a revision loop could not clear, as one readable line (#2042).
+
+    The halt used to carry nothing, so `Error: unknown` was all a stopped run
+    said. Everything needed is already on the validation result; it just never
+    left the node that produced it.
+
+    Errors only, and capped: a halt message that dumps forty warnings is read
+    as noise and is no more use than the empty one it replaces.
+    """
+    if not result:
+        return "no validation detail was recorded"
+    violations = [
+        v for v in result.get("violations", []) if v.get("severity") == "error"
+    ]
+    if not violations:
+        return "validation reported failure with no error-level violations"
+    shown = "; ".join(
+        v.get("message", "(no message)") for v in violations[:limit]
+    )
+    if len(violations) > limit:
+        shown += f" (and {len(violations) - limit} more)"
+    return shown
+
+
 # =============================================================================
 # Node Name Constants
 # =============================================================================
@@ -240,7 +265,21 @@ def route_after_validate_test_plan(
         iteration_count = state.get("iteration_count", 0)
         max_iterations = state.get("max_iterations", 3)
         if iteration_count >= max_iterations:
-            print(f"    [ROUTING] Max iterations ({max_iterations}) reached with test plan errors - halting")
+            # #2042: say what could not be fixed. This halt reported
+            # `Error: unknown` with an empty message, so a run that stopped here
+            # gave no way to tell WHICH check failed -- characterising one took
+            # two runs and re-executing the checker by hand. The detail is right
+            # there in the result and was simply never carried out.
+            summary = describe_validation_failure(result)
+            print(
+                f"    [ROUTING] Max iterations ({max_iterations}) reached with "
+                f"test plan errors - halting"
+            )
+            print(f"    [ROUTING] Unfixed: {summary}")
+            state["error_message"] = (
+                f"test plan validation failed after {max_iterations} "
+                f"revision(s): {summary}"
+            )
             return "HALT"
         print("    [ROUTING] Test plan validation failed - returning to drafter")
         return "N1_generate_draft"

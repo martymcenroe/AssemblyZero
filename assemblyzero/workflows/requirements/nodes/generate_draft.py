@@ -100,7 +100,18 @@ def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
     audit_dir = Path(state.get("audit_dir", ""))
 
     draft_count = state.get("draft_count", 0) + 1
-    is_revision = bool(state.get("current_draft") and state.get("verdict_history"))
+    # #2042: the same predicate the prompt builder uses. This one drives only
+    # the log line, and requiring verdict_history made every mechanical-validation
+    # retry announce "Generating initial draft" while it was in fact revising --
+    # so a loop that was working looked like one that had reset each time.
+    is_revision = bool(
+        state.get("current_draft")
+        and (
+            state.get("verdict_history")
+            or state.get("validation_errors")
+            or state.get("user_feedback")
+        )
+    )
 
     if is_revision:
         print(f"\n[N1] Generating revision (draft #{draft_count})...")
