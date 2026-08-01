@@ -549,9 +549,46 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     # Replace files_to_modify with regular_specs for the main loop
     files_to_modify = regular_specs
 
+    # #2064: symmetry-break for a repeated failing set. Tests and impl are both
+    # regenerated from the same spec, so when they disagree, a deterministic
+    # drafter reproduces the exact same failures every iteration -- six
+    # boostgauge #2 runs repeated their counts to the digit. When N5 saw the
+    # same set twice it froze the tests: they are the contract now (the passing
+    # ones prove they run), and only the implementation may change.
+    freeze_tests = bool(state.get("freeze_tests"))
+    revision_error_context = (
+        (test_failure_summary or e2e_failure_summary or green_phase_output)
+        if iteration_count > 0 else ""
+    )
+    if freeze_tests and revision_error_context:
+        revision_error_context = (
+            "THE TESTS ARE A FROZEN CONTRACT. They will not be rewritten. "
+            "Change the implementation so the tests pass exactly as written; "
+            "read the failing assertions for the expected behavior.\n\n"
+            + revision_error_context
+        )
+    if freeze_tests:
+        print(
+            "    [N4] tests are FROZEN this iteration (repeated failing set): "
+            "rewriting implementation only, against the tests as written"
+        )
+
     for i, file_spec in enumerate(files_to_modify):
         filepath = file_spec["path"]
         change_type = file_spec.get("change_type", "Add")
+
+        if freeze_tests and filepath.replace("\\", "/").startswith("tests/"):
+            target_path = repo_root / filepath
+            if target_path.is_file():
+                completed_files.append(
+                    (filepath, target_path.read_text(encoding="utf-8"))
+                )
+                written_paths.append(str(target_path))
+                print(
+                    f"\n    [{i+1}/{len(files_to_modify)}] {filepath} — frozen "
+                    f"(contract; not rewritten)"
+                )
+                continue
 
         existing_content = ""
         target_path = repo_root / filepath
@@ -665,8 +702,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             repo_root=repo_root,
             test_content=test_content,
             # Issue #498: Use structured failure summary (targeted) over raw output (noisy)
-            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
-            if iteration_count > 0 else "",
+            previous_error=revision_error_context,
             path_enforcement_section=path_enforcement_section,
             context_content=state.get("context_content", ""),
             repo_structure=repo_structure,
@@ -680,8 +716,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             completed_files=[],  # <-- PRUNED
             repo_root=repo_root,
             test_content=test_content,
-            previous_error=(test_failure_summary or e2e_failure_summary or green_phase_output)
-            if iteration_count > 0 else "",
+            previous_error=revision_error_context,
             path_enforcement_section=path_enforcement_section,
             context_content=state.get("context_content", ""),
             repo_structure=repo_structure,
