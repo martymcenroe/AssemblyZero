@@ -131,7 +131,11 @@ class TestingWorkflowState(TypedDict, total=False):
 
     # Input
     issue_number: int
-    lld_path: str
+    lld_path: str  # legacy name: in this workflow it holds the SPEC (#2024)
+    # #2024: the canonical LLD. Must stay declared -- an undeclared key is
+    # discarded by LangGraph at the node boundary and never reaches the reader
+    # (#2018 lost the implementation PR exactly that way).
+    original_lld_path: str
     repo_root: str
 
     # Worktree isolation (for multi-branch safety)
