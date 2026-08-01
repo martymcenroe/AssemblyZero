@@ -68,30 +68,13 @@ from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 from assemblyzero.core.halt_node import create_halt_node
 
+# #2042: lives beside the node whose final-iteration return carries it into
+# the halt; re-exported here for the router's logging and existing importers.
+from assemblyzero.workflows.requirements.nodes.validate_test_plan import (  # noqa: E402
+    describe_validation_failure,
+)
 
-def describe_validation_failure(result: dict | None, limit: int = 3) -> str:
-    """The errors a revision loop could not clear, as one readable line (#2042).
 
-    The halt used to carry nothing, so `Error: unknown` was all a stopped run
-    said. Everything needed is already on the validation result; it just never
-    left the node that produced it.
-
-    Errors only, and capped: a halt message that dumps forty warnings is read
-    as noise and is no more use than the empty one it replaces.
-    """
-    if not result:
-        return "no validation detail was recorded"
-    violations = [
-        v for v in result.get("violations", []) if v.get("severity") == "error"
-    ]
-    if not violations:
-        return "validation reported failure with no error-level violations"
-    shown = "; ".join(
-        v.get("message", "(no message)") for v in violations[:limit]
-    )
-    if len(violations) > limit:
-        shown += f" (and {len(violations) - limit} more)"
-    return shown
 
 
 # =============================================================================
@@ -276,10 +259,9 @@ def route_after_validate_test_plan(
                 f"test plan errors - halting"
             )
             print(f"    [ROUTING] Unfixed: {summary}")
-            state["error_message"] = (
-                f"test plan validation failed after {max_iterations} "
-                f"revision(s): {summary}"
-            )
+            # The node has already put this summary in error_message on its
+            # final-iteration return; a router's state writes are discarded at
+            # the graph boundary (#2018's channel rule), so nothing is set here.
             return "HALT"
         print("    [ROUTING] Test plan validation failed - returning to drafter")
         return "N1_generate_draft"

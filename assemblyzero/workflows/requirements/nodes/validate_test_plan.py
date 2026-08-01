@@ -10,6 +10,7 @@ Routes:
 - MAX_ATTEMPTS → END (prevent infinite loops)
 """
 
+from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.validation.test_plan_validator import (
@@ -17,6 +18,29 @@ from assemblyzero.core.validation.test_plan_validator import (
     validate_test_plan,
 )
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
+
+
+def describe_validation_failure(result: dict | None, limit: int = 3) -> str:
+    """The errors a revision loop could not clear, as one readable line (#2042).
+
+    Lives beside the node that produces the result, because the consumer that
+    matters is this node's own final-iteration return -- a router cannot carry
+    it (see the halt comment in validate_test_plan_node). graph.py re-exports
+    this for its logging.
+    """
+    if not result:
+        return "no validation detail was recorded"
+    violations = [
+        v for v in result.get("violations", []) if v.get("severity") == "error"
+    ]
+    if not violations:
+        return "validation reported failure with no error-level violations"
+    shown = "; ".join(
+        v.get("message", "(no message)") for v in violations[:limit]
+    )
+    if len(violations) > limit:
+        shown += f" (and {len(violations) - limit} more)"
+    return shown
 
 
 def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -97,14 +121,48 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
     feedback = _build_validation_feedback(result)
     print(f"    Feedback:\n{feedback}")
 
-    return {
+    # #2042 follow-up: the failing DRAFT must outlive the run. Both LLD-stage
+    # halts of boostgauge #2 judged content that no longer existed afterwards
+    # -- the worktree is removed on restore, so the document the validator
+    # rejected was unrecoverable and the drafter's regression (a table that
+    # parsed as 8 scenarios in one iteration and 0 in the next) could not be
+    # inspected at all. Best-effort: never fail validation over archiving.
+    new_iteration = state.get("iteration_count", 0) + 1
+    audit_dir = state.get("audit_dir", "")
+    if audit_dir:
+        try:
+            keep = Path(audit_dir) / f"failed-draft-iter{new_iteration}.md"
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            keep.write_text(
+                lld_content + "\n\n<!-- validation feedback -->\n" + feedback,
+                encoding="utf-8",
+            )
+            print(f"    [KEEP] failing draft preserved: {keep}")
+        except OSError as exc:
+            print(f"    [KEEP] could not preserve failing draft: {exc}")
+
+    updates = {
         "test_plan_validation_result": result,
         "test_plan_validation_attempts": new_attempts,
         "user_feedback": feedback,
-        "iteration_count": state.get("iteration_count", 0) + 1,
+        "iteration_count": new_iteration,
         "lld_status": "BLOCKED",
         "error_message": "",
     }
+
+    # #2042: the halt message is set HERE, not in the router. A conditional
+    # edge's return value is a node name; mutating state inside one is
+    # discarded at the graph boundary (the same channel rule that ate
+    # impl_pr_url in #2018), which is why the first version of this fix
+    # printed the summary and still halted with `Error: unknown`. This node's
+    # RETURN is a real state update, and the router halts on error_message
+    # first, so the message and the halt arrive together.
+    if new_iteration >= state.get("max_iterations", 3):
+        updates["error_message"] = (
+            f"test plan validation failed after {new_iteration} revision(s): "
+            f"{describe_validation_failure(result)}"
+        )
+    return updates
 
 
 def _build_validation_feedback(result: dict) -> str:

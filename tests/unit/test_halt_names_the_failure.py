@@ -77,34 +77,61 @@ class TestDegradedInputs:
         assert "no message" in summary
 
 
-class TestTheRouterCarriesIt:
-    def test_the_halt_sets_a_non_empty_error_message(self):
-        """The whole point: the summary has to reach the halt payload, not just
-        stdout, or the exit path still reports 'unknown'."""
+class TestTheNodeCarriesIt:
+    """The message must ride the NODE's return. The first version of this fix
+    mutated state inside the conditional-edge router; a router returns a node
+    name and its state writes are discarded at the graph boundary (#2018's
+    channel rule) -- so the summary printed and the run still halted with
+    `Error: unknown`. The unit test passed because it called the router as a
+    plain function, where the mutation is visible: it tested the function,
+    not the graph."""
+
+    def _node_state(self, iteration, tmp_path, draft="## 3. Requirements\n"):
+        return {
+            "current_draft": draft,
+            "iteration_count": iteration,
+            "max_iterations": 3,
+            "test_plan_validation_attempts": 0,
+            "audit_dir": str(tmp_path),
+        }
+
+    def test_the_final_failed_iteration_returns_the_message(self, tmp_path):
+        from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
+            validate_test_plan_node,
+        )
+
+        updates = validate_test_plan_node(self._node_state(2, tmp_path))
+        assert updates.get("error_message"), "final iteration must name the failure"
+        assert "revision(s)" in updates["error_message"]
+
+    def test_an_earlier_iteration_loops_without_an_error(self, tmp_path):
+        from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
+            validate_test_plan_node,
+        )
+
+        updates = validate_test_plan_node(self._node_state(0, tmp_path))
+        assert updates.get("error_message") == ""
+        assert updates.get("lld_status") == "BLOCKED"
+
+    def test_the_failing_draft_is_preserved(self, tmp_path):
+        """Both LLD halts of boostgauge #2 judged content that was destroyed
+        with the worktree; the drafter regression they rejected could not be
+        inspected at all."""
+        from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
+            validate_test_plan_node,
+        )
+
+        validate_test_plan_node(self._node_state(0, tmp_path))
+        kept = list(tmp_path.glob("failed-draft-iter*.md"))
+        assert kept, "the rejected draft must outlive the run"
+        body = kept[0].read_text(encoding="utf-8")
+        assert "## 3. Requirements" in body
+        assert "validation feedback" in body
+
+    def test_the_router_halts_on_the_node_set_error(self):
+        """End of the chain: error_message present -> HALT, first check."""
         from assemblyzero.workflows.requirements.graph import (
             route_after_validate_test_plan,
         )
 
-        state = {
-            "test_plan_validation_result": _result("Section 10.1 produced no rows"),
-            "iteration_count": 3,
-            "max_iterations": 3,
-        }
-        assert route_after_validate_test_plan(state) == "HALT"
-        assert state.get("error_message"), "the halt must name the failure"
-        assert "Section 10.1" in state["error_message"]
-
-    def test_a_loop_back_does_not_set_an_error(self):
-        """Iterations that will retry are not failures and must not look like
-        them."""
-        from assemblyzero.workflows.requirements.graph import (
-            route_after_validate_test_plan,
-        )
-
-        state = {
-            "test_plan_validation_result": _result("fixable"),
-            "iteration_count": 1,
-            "max_iterations": 3,
-        }
-        assert route_after_validate_test_plan(state) == "N1_generate_draft"
-        assert not state.get("error_message")
+        assert route_after_validate_test_plan({"error_message": "named failure"}) == "HALT"
