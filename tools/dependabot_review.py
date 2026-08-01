@@ -645,6 +645,13 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # capture something stable enough to compare across two runs of one suite.
 _FAILURE_PATTERNS = (
     re.compile(r"^FAILED\s+(\S+)", re.M),                        # pytest
+    # #2060: pytest COLLECTION errors (exit 2/3) print `ERROR <path>`, not
+    # `FAILED`. Without this, a suite that dies at import parses to an
+    # empty set on BOTH the PR and the baseline run, so the comparison is
+    # impossible and every such PR defers as "baseline could not be
+    # established" -- even when the base is equally broken and the bump
+    # changes nothing. Seen stranding a repo's entire dependabot queue.
+    re.compile(r"^ERROR\s+(\S+)", re.M),                         # pytest collect
     re.compile(r"^\s*●\s+(.+?)\s*$", re.M),                      # jest
     re.compile(r"^\s*[×✕]\s+(.+?)(?:\s+\d+\s*ms)?\s*$", re.M),   # vitest
     re.compile(r"^\s*FAIL\s+(\S+)", re.M),                       # file-level
