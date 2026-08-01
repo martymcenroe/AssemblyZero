@@ -597,6 +597,60 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
 COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
+
+def _snapshot_untracked(repo_root) -> set[str] | None:
+    """Untracked paths right now, or None when git cannot say (#2048)."""
+    # -uall: without it git collapses an untracked directory to "dir/" and the
+    # files inside never appear -- exactly where generated baselines land
+    # (tests/visual/baselines/ is born whole during the run).
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "-uall"],
+            cwd=str(repo_root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+    except OSError:
+        # Nonexistent cwd, git missing -- could not measure, so measure nothing.
+        return None
+    if result.returncode != 0:
+        return None
+    return {
+        line[3:].strip().strip('"')
+        for line in result.stdout.splitlines()
+        if line.startswith("??")
+    }
+
+
+def _remove_test_run_droppings(repo_root, before: set[str] | None) -> None:
+    """Delete untracked files a pytest run just created (#2048).
+
+    Scope is exact: only paths untracked NOW that were not untracked BEFORE the
+    run started. Implementation files are written by N4 before pytest ever
+    runs, so they are in the before-set; anything newer was created by the test
+    execution itself -- generated baselines, caches, stray outputs -- and
+    carrying it into the next iteration makes iterations judge each other. The
+    poisoning case: a generated visual test saved its baseline in iteration 1
+    and every later iteration failed against it, unwinnable by revision.
+
+    None for `before` means the snapshot failed; delete nothing rather than
+    guess ("could not measure" is not "nothing was there" -- #2028's rule).
+    """
+    if before is None:
+        return
+    after = _snapshot_untracked(repo_root)
+    if after is None:
+        return
+    from pathlib import Path as _Path
+
+    for rel in sorted(after - before):
+        target = _Path(repo_root) / rel
+        try:
+            if target.is_file():
+                target.unlink()
+                print(f"    [N5] removed test-run dropping: {rel}")
+        except OSError as exc:
+            print(f"    [N5] could not remove test-run dropping {rel}: {exc}")
+
 # "cannot import name 'render' from 'boostgauge.gauge'" — the shape pytest
 # prints when a phase removed something an earlier phase published.
 _MISSING_NAME_RE = re.compile(
@@ -1176,7 +1230,17 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     # --------------------------------------------------------------------------
     if not state.get("full_suite_validated", False):
         print("    [N5] Running full test suite regression check...")
+        # #2048: iterations must be independent. boostgauge #2's generated
+        # visual test wrote its baseline PNG on first run; the revise loop then
+        # changed the renderer, and every later iteration failed RMS-diff
+        # against the stale baseline forever -- "2 regressions" became "same 4
+        # failing, stagnant" without the model having any way to win. Files a
+        # test RUN creates are droppings, not implementation: N4 writes its
+        # files before pytest starts, so anything new afterwards was made by
+        # the run itself and is removed before the next iteration judges.
+        droppings_before = _snapshot_untracked(repo_root)
         full_result = run_pytest([], repo_root=repo_root)
+        _remove_test_run_droppings(repo_root, droppings_before)
         full_parsed = full_result["parsed"]
         full_failed = full_parsed.get("failed", 0)
         full_errors = full_parsed.get("errors", 0)
@@ -1190,9 +1254,14 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             # Check for stagnation: same regressions across 2 iterations → halt
             previous_regressions = state.get("full_suite_regressions", [])
             if previous_regressions and sorted(regression_names) == sorted(previous_regressions):
+                # #2048: name them. "same 4 test(s)" sent the diagnosis to a
+                # manual worktree + full-suite re-run; the names were in hand.
+                named = ", ".join(regression_names[:4])
+                if len(regression_names) > 4:
+                    named += f" (and {len(regression_names) - 4} more)"
                 stagnant_msg = (
                     f"Full suite regression stagnant: same {len(regression_names)} test(s) "
-                    f"failing across iterations. Halting."
+                    f"failing across iterations: {named}. Halting."
                 )
                 print(f"    [STAGNANT] {stagnant_msg}")
                 return {
