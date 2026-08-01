@@ -598,6 +598,89 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 COVERAGE_IMPROVEMENT_THRESHOLD = 1.0
 
 
+def _hill_climb(
+    state, repo_root, passed_count, coverage_achieved, current_green_failures,
+    updates,
+) -> None:
+    """Never revise from a state worse than the best one seen (#2050).
+
+    boostgauge #2 oscillated 36% -> 99% (39/41 passing) -> 36% (7/15) and
+    halted holding the WORST state it had produced: iteration 2 was one
+    revision from done and iteration 3 threw it away. The loop was a random
+    walk over drafter variance with no memory of its best result.
+
+    After each measurement: a new best snapshots the implementation and test
+    files; a worse iteration restores the best files to the worktree before N4
+    revises again and carries the BEST metrics as previous_*, so the stagnation
+    guards compare against the best rather than the latest roll of the dice.
+    A worse iteration then costs one revision instead of the run.
+
+    Mutates `updates` in place. Best-effort: snapshot or restore trouble is
+    reported and never fails the node.
+    """
+    import shutil
+
+    impl_files = state.get("implementation_files", []) or []
+    test_files = state.get("test_files", []) or []
+    tracked = [f for f in (*impl_files, *test_files) if f]
+    if not tracked:
+        return
+
+    best = state.get("best_iteration") or None
+    score = (passed_count, coverage_achieved)
+    best_score = (
+        (best.get("passed", -1), best.get("coverage", -1.0)) if best else None
+    )
+
+    if best_score is None or score > best_score:
+        snap_root = Path(state.get("audit_dir") or Path(repo_root) / ".az-best-iteration")
+        snap_dir = snap_root / "best-iteration"
+        manifest: dict[str, str] = {}
+        try:
+            if snap_dir.exists():
+                shutil.rmtree(snap_dir)
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            for idx, file_str in enumerate(tracked):
+                src = Path(file_str)
+                if src.is_file():
+                    dst = snap_dir / f"{idx:02d}-{src.name}"
+                    shutil.copy2(src, dst)
+                    manifest[str(src)] = str(dst)
+        except OSError as exc:
+            print(f"    [N5] best-iteration snapshot failed (non-fatal): {exc}")
+            return
+        updates["best_iteration"] = {
+            "passed": passed_count,
+            "coverage": coverage_achieved,
+            "green_failures": list(current_green_failures or []),
+            "files": manifest,
+        }
+        print(
+            f"    [N5] best iteration so far: {passed_count} passing at "
+            f"{coverage_achieved:.1f}% — snapshotted {len(manifest)} file(s)"
+        )
+        return
+
+    if score < best_score:
+        restored = 0
+        for src_str, snap_str in (best.get("files") or {}).items():
+            try:
+                if Path(snap_str).is_file():
+                    shutil.copy2(snap_str, src_str)
+                    restored += 1
+            except OSError as exc:
+                print(f"    [N5] could not restore {src_str} (non-fatal): {exc}")
+        updates["previous_passed"] = best.get("passed", passed_count)
+        updates["previous_coverage"] = best.get("coverage", coverage_achieved)
+        updates["previous_green_failures"] = best.get("green_failures", [])
+        print(
+            f"    [N5] iteration regressed ({passed_count} passing at "
+            f"{coverage_achieved:.1f}% vs best {best.get('passed')} at "
+            f"{best.get('coverage'):.1f}%) — restored {restored} file(s) from "
+            f"the best iteration; revising from there instead"
+        )
+
+
 def _snapshot_untracked(repo_root) -> set[str] | None:
     """Untracked paths right now, or None when git cannot say (#2048)."""
     # -uall: without it git collapses an untracked directory to "dir/" and the
@@ -1112,7 +1195,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         )
 
         # Loop back to implementation with failure feedback
-        return {
+        updates = {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -1125,6 +1208,9 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "next_node": "N4_implement_code",
             "error_message": "",
         }
+        _hill_climb(state, repo_root, passed_count, coverage_achieved,
+                    current_green_failures, updates)
+        return updates
 
     # Check coverage
     if coverage_achieved < coverage_target:
@@ -1207,7 +1293,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         )
 
         # Loop back to implementation for more coverage
-        return {
+        updates = {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
             "previous_coverage": coverage_achieved,
@@ -1220,6 +1306,9 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "next_node": "N4_implement_code",
             "error_message": "",
         }
+        _hill_climb(state, repo_root, passed_count, coverage_achieved,
+                    current_green_failures, updates)
+        return updates
 
     # Success: all tests pass and coverage meets target
     print(f"    [N5] Green phase PASSED: {passed_count} tests, {coverage_achieved:.1f}% coverage")
