@@ -17,6 +17,7 @@ This node populates:
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -298,7 +299,24 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # Runs over the full current_content (before excerpt trimming) so that
     # methods defined deep in a class body are captured.
     gathered_symbols = _extract_symbols_from_files(updated_files)
-    print(f"    Gathered {len(gathered_symbols)} target-repo symbols for API check")
+
+    # #2052: the plan is not the universe. This gathered only files_to_modify,
+    # so a spec CALLING an earlier phase's API without modifying its file was
+    # judged hallucinated -- boostgauge #2 was blocked for using
+    # Telltale.current_peak(), which #41 landed on the base, because
+    # telltale.py was not in #2's plan. Mid-arc, calling earlier phases' APIs
+    # is the entire point of accumulation, so the base tree's symbols join the
+    # universe. No base branch -> unchanged behavior.
+    if base_ref_name:
+        base_symbols = _extract_symbols_from_base(repo_root, base_ref_name)
+        before = len(gathered_symbols)
+        gathered_symbols = sorted(set(gathered_symbols) | base_symbols)
+        print(
+            f"    Gathered {before} planned-file symbol(s) + "
+            f"{len(base_symbols)} from {base_ref_name} for API check"
+        )
+    else:
+        print(f"    Gathered {len(gathered_symbols)} target-repo symbols for API check")
 
     return {
         "current_state_snapshots": current_state_snapshots,
@@ -878,6 +896,55 @@ def _extract_import_dependencies(
         lines.append(f"- **{filename}** imports: {import_list}")
 
     return "\n".join(lines)
+
+
+def _extract_symbols_from_base(repo_root: Path, base_ref_name: str) -> set[str]:
+    """Class/function names from every non-test .py on the base ref (#2052).
+
+    Read through git, never the checkout -- the checkout sits on the default
+    branch and mid-arc carries none of the arc (#2033's two-trees rule).
+    Tests are excluded (their helpers are not an API surface), and the sweep
+    is capped: past the cap the check degrades toward false positives, which
+    the message below makes visible rather than silent.
+    """
+    from assemblyzero.workflows.implementation_spec.base_tree import read_from_base
+
+    result = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", base_ref_name],
+        cwd=str(repo_root), capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if result.returncode != 0:
+        return set()
+
+    paths = [
+        p.strip() for p in result.stdout.splitlines()
+        if p.strip().endswith(".py") and not p.strip().startswith("tests/")
+    ]
+    cap = 200
+    if len(paths) > cap:
+        print(
+            f"    [BASE] symbol sweep capped at {cap} of {len(paths)} .py "
+            f"file(s); calls into uncovered files may be misflagged"
+        )
+        paths = paths[:cap]
+
+    _def_re = re.compile(r"^\s*def\s+(\w+)", re.MULTILINE)
+    _cls_re = re.compile(r"^\s*class\s+(\w+)", re.MULTILINE)
+    symbols: set[str] = set()
+    for rel in paths:
+        content = read_from_base(repo_root, base_ref_name, rel)
+        if not content:
+            continue
+        try:
+            tree = ast.parse(content)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    symbols.add(node.name)
+        except SyntaxError:
+            symbols.update(_def_re.findall(content))
+            symbols.update(_cls_re.findall(content))
+    return symbols
 
 
 def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
