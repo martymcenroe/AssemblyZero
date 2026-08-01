@@ -1954,3 +1954,53 @@ class TestBaselineGateFlow:
             self._pr(), "o/r", Path("/tmp/wt"))
         assert result == "merged"
         assert called == [], "baseline must not run when the gate passes"
+
+
+PYTEST_COLLECT_ERR = (
+    "ERROR tests/unit/test_enrich.py\n"
+    "ERROR tests/unit/test_export.py\n"
+    "!!!!!! Interrupted: 2 errors during collection !!!!!!\n"
+)
+
+
+class TestCollectionErrorExtraction:
+    """#2060: a suite that dies at IMPORT prints `ERROR <path>`, not
+    `FAILED`. Missing it made both sides parse empty, so the comparison was
+    impossible and every such PR deferred."""
+
+    def test_collection_errors_are_extracted(self):
+        got = dependabot_review.extract_failures(PYTEST_COLLECT_ERR)
+        assert "tests/unit/test_enrich.py" in got
+        assert "tests/unit/test_export.py" in got
+
+    def test_identical_collection_failures_exonerate(self):
+        """The case that stranded a whole repo: base and PR both die at
+        import in exactly the same modules."""
+        f = dependabot_review.extract_failures(PYTEST_COLLECT_ERR)
+        assert dependabot_review.is_exonerated_by_baseline(f, f) is True
+
+    def test_a_newly_erroring_module_still_defers(self):
+        """Safety unchanged: an extra broken module is a real regression."""
+        base = dependabot_review.extract_failures(PYTEST_COLLECT_ERR)
+        pr = dependabot_review.extract_failures(
+            PYTEST_COLLECT_ERR + "ERROR tests/unit/test_new.py\n")
+        assert dependabot_review.is_exonerated_by_baseline(pr, base) is False
+
+    def test_does_not_swallow_ordinary_error_prose(self):
+        """`ERROR:` narrative output must not masquerade as a test id.
+
+        An inflated baseline is the DANGEROUS direction: it would let a real
+        regression look like it was already failing on the base.
+        """
+        got = dependabot_review.extract_failures(
+            "ERROR: poetry install failed\n"
+            "ERROR: something else went wrong\n")
+        assert got == set(), f"prose must not parse as failures; got {got}"
+
+    def test_prose_cannot_exonerate_a_real_regression(self):
+        """End-to-end of that danger: prose in the baseline output must not
+        absorb a genuine PR failure."""
+        base = dependabot_review.extract_failures(
+            "ERROR: poetry install failed\n")
+        pr = dependabot_review.extract_failures("FAILED tests/x.py::test_a\n")
+        assert dependabot_review.is_exonerated_by_baseline(pr, base) is False
