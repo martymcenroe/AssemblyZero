@@ -82,7 +82,8 @@ class TestTheTestsFailingBranch:
         mock_pytest.return_value = _pytest(1, passed=20, failed=3, coverage=94)
         result = verify_green_phase(
             _state(previous_passed=20, previous_coverage=94.0,
-                   previous_green_failures=["t_a", "t_b", "t_c"])
+                   previous_green_failures=["t_a", "t_b", "t_c"],
+                   count_plateau_strikes=1)  # #2062: third identical count
         )
         assert result["next_node"] == "end"
         assert "stagnant" in result.get("error_message", "").lower()

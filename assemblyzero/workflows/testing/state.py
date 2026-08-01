@@ -175,6 +175,8 @@ class TestingWorkflowState(TypedDict, total=False):
     # snapshots. MUST stay declared -- an undeclared key is discarded at the
     # node boundary (#2018) and the hill-climb would silently never engage.
     best_iteration: dict | None
+    # #2062: consecutive identical nonzero pass counts (three-strike plateau).
+    count_plateau_strikes: int
     test_failure_summary: str  # Issue #498: Structured test failure feedback for N4
     e2e_failure_summary: str  # Issue #498: Structured E2E failure feedback for N4
     full_suite_validated: bool  # Issue #842: True after full test suite passes regression check
