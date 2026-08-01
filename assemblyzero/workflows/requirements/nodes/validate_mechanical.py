@@ -338,7 +338,8 @@ def validate_repo_root(repo_root: Path | None) -> tuple[bool, str | None]:
 
 def validate_file_paths_with_repo_check(
     files: list[dict],
-    repo_root: Path | None
+    repo_root: Path | None,
+    base_branch: str = "",
 ) -> tuple[list[ValidationError], bool]:
     """Validate file paths against repo, with explicit repo validation.
     
@@ -366,7 +367,7 @@ def validate_file_paths_with_repo_check(
         return (errors, False)
     
     # repo_root is valid, proceed with file path validation
-    path_errors = validate_file_paths(files, repo_root)
+    path_errors = validate_file_paths(files, repo_root, base_branch)
     errors.extend(path_errors)
     
     return (errors, True)
@@ -753,9 +754,33 @@ def find_similar_files(filename: str, repo_root: Path, max_results: int = 3) -> 
     return suggestions
 
 
+def _exists_on_base(repo_root: Path, base_branch: str, path: str) -> bool:
+    """Does the integration branch ship this path? (#2056)
+
+    Resolved against origin/<base> -- the local attempt ref is never
+    fast-forwarded (#2021), so a bare name would read a stale tree. Empty
+    base or any git trouble reads as "no", which restores the old behavior.
+    """
+    if not base_branch:
+        return False
+    import subprocess as _sp
+
+    ref = base_branch if base_branch.startswith("origin/") else f"origin/{base_branch}"
+    normalised = path.replace("\\", "/")
+    try:
+        probe = _sp.run(
+            ["git", "cat-file", "-e", f"{ref}:{normalised}"],
+            cwd=str(repo_root), capture_output=True, text=True,
+        )
+    except OSError:
+        return False
+    return probe.returncode == 0
+
+
 def validate_file_paths(
     files: list[dict],
     repo_root: Path,
+    base_branch: str = "",
 ) -> list[ValidationError]:
     """Check that Modify/Delete files exist, Add files have valid parents.
 
@@ -810,6 +835,16 @@ def validate_file_paths(
         full_path = repo_root / path
 
         if change_type in ("Modify", "Delete"):
+            # #2056: fourth organ of the two-trees disease. The checkout sits
+            # on the default branch and mid-arc carries none of the arc, so a
+            # CORRECT plan -- Modify a file an earlier phase landed on the
+            # integration branch -- was rejected here, while a wrong Add for
+            # the same file sailed through. boostgauge #2's LLD stage burned
+            # its iterations against this and halted.
+            if not full_path.exists() and _exists_on_base(
+                repo_root, base_branch, path
+            ):
+                continue
             if not full_path.exists():
                 # Issue #300: Find similar files to suggest
                 filename = Path(path).name
@@ -1337,7 +1372,9 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # Step 4: Issue #322 - Validate file paths with explicit repo_root check
     # This replaces the old silent skip behavior
-    path_errors, path_validation_ran = validate_file_paths_with_repo_check(files, repo_root)
+    path_errors, path_validation_ran = validate_file_paths_with_repo_check(
+        files, repo_root, state.get("base_branch", "")
+    )
     all_errors.extend(path_errors)
 
     # If repo_root validation failed, we have a blocking error - return early
