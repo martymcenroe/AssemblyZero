@@ -1113,11 +1113,28 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
         # Stagnation check: if passed count unchanged from previous iteration, halt.
         # Catches 0/N->0/N loops (e.g., circular imports, total import failures).
+        #
+        # #2062: two strikes for ZERO passing (the #457 import-death loop this
+        # guard was built for), three for a nonzero plateau. Five boostgauge #2
+        # runs halted on the SECOND identical count with three iterations
+        # unspent -- and the first of those seconds was judged while the
+        # revision was starving on a 2000-char feedback window (#2058). With
+        # full-cause feedback now flowing, one identical count is one revision
+        # that did not move the needle, not proof no revision can.
         previous_passed = state.get("previous_passed", -1)
+        plateau_strikes = state.get("count_plateau_strikes", 0)
         if previous_passed >= 0 and passed_count == previous_passed:
+            plateau_strikes += 1
+        else:
+            plateau_strikes = 0
+        strikes_needed = 1 if passed_count == 0 else 2
+        if previous_passed >= 0 and passed_count == previous_passed and (
+            plateau_strikes >= strikes_needed
+        ):
             stagnant_msg = (
                 f"Test count stagnant: {passed_count}/{passed_count + failed_count} passed "
-                f"(unchanged from previous iteration). Halting to prevent token waste."
+                f"(unchanged across {plateau_strikes + 1} iterations). "
+                f"Halting to prevent token waste."
             )
             print(f"    [STAGNANT] {stagnant_msg}")
             return {
@@ -1237,6 +1254,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "iteration_count": iteration_count + 1,
             "next_node": "N4_implement_code",
             "error_message": "",
+            "count_plateau_strikes": plateau_strikes,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)
@@ -1335,6 +1353,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "iteration_count": iteration_count + 1,
             "next_node": "N4_implement_code",
             "error_message": "",
+            # All tests pass here; a count plateau is a failing-branch concept.
+            "count_plateau_strikes": 0,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)
