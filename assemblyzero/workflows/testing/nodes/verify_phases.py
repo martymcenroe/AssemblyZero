@@ -1194,11 +1194,34 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": stagnant_msg,
             }
         if identity_stagnant:
+            # #2066: the armed break LOOPS BACK HERE, before any further guard.
+            # The first version printed this and fell through -- the coverage
+            # guard then saw the same flat numbers and halted the run before
+            # the frozen iteration ever executed. A break that never runs is
+            # the old halt with extra words. If the frozen attempt also fails
+            # to move anything, the NEXT pass halts through the normal guards,
+            # which is the break having had its chance.
             print(
                 f"    [N5] same {len(current_green_failures)} test(s) failing again — "
                 f"freezing tests as the contract; next revision rewrites only the "
                 f"implementation (strike {identity_strikes})"
             )
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "N4_implement_code",
+                "error_message": "",
+                "count_plateau_strikes": plateau_strikes,
+                "identity_plateau_strikes": identity_strikes,
+                "freeze_tests": True,
+            }
 
         # Stagnation check: one shared decision, see coverage_has_stagnated.
         # Skip when passed_count == 0: coverage is vacuously 100% with no passing

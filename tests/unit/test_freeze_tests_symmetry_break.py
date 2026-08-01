@@ -140,3 +140,18 @@ class TestN4HonorsTheFreeze:
         source = inspect.getsource(orchestrator.implement_code)
         assert "FROZEN CONTRACT" in source
         assert "revision_error_context" in source
+
+
+class TestTheArmedBreakOutranksOtherGuards:
+    def test_flat_coverage_does_not_steal_the_frozen_iteration(self):
+        """The live failure of the first version: identity armed the freeze,
+        fell through, and the coverage guard halted on the same flat numbers
+        before the frozen iteration ever executed (run-issue2-015725:
+        40/74 twice, 'Coverage stagnant: 45.0% -> 45.0%')."""
+        out = _run(
+            _state(previous_passed=5, previous_coverage=45.0,
+                   previous_green_failures=PREV, count_plateau_strikes=0),
+            5, 2, FAILS,
+        )
+        assert out["next_node"] == "N4_implement_code", out.get("error_message")
+        assert out["freeze_tests"] is True
