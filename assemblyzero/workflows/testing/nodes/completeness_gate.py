@@ -84,7 +84,12 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     issue_number = state.get("issue_number", 0)
-    lld_path_str = state.get("lld_path", "")
+    # #2024: prefer the canonical LLD. `lld_path` is a legacy name that in this
+    # workflow holds the SPEC, whose Section 3 is "Current State" -- so the
+    # requirement extractor found nothing, said so in a log warning, and the
+    # gate reviewed the implementation against ZERO requirements and returned a
+    # verdict anyway. Falls back to lld_path when no LLD was resolved.
+    lld_path_str = state.get("original_lld_path", "") or state.get("lld_path", "")
     implementation_files_strs = state.get("implementation_files", [])
     test_files_strs = state.get("test_files", [])
     audit_dir_str = state.get("audit_dir", "")

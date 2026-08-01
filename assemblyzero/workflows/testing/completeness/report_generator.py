@@ -161,6 +161,17 @@ def prepare_review_materials(
     """
     # Extract requirements from LLD
     lld_requirements = extract_lld_requirements(lld_path)
+    if not lld_requirements:
+        # #2024: with nothing to check against, a verdict from this gate is not
+        # meaningful -- "reviewed and found minor issues" and "reviewed nothing"
+        # came out identical, and the only trace was a logger warning nobody
+        # reads. Say it where the run can see it.
+        print(
+            f"    [N4b] NO REQUIREMENTS extracted from {lld_path} — this review "
+            f"compares the implementation against nothing. A Section 3 "
+            f"'Requirements' heading was expected; the implementation spec has "
+            f"'Current State' there, so check which document was passed."
+        )
 
     # Read code snippets from implementation files
     code_snippets: dict[str, str] = {}

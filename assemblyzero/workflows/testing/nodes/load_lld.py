@@ -965,6 +965,12 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     return {
         "lld_path": str(lld_path_obj),
+        # #2024: the canonical LLD, which is NOT lld_path -- that key holds the
+        # SPEC here (legacy name; see find_spec_path above). The completeness
+        # gate needs Section 3 "Requirements", and only the LLD has it: the
+        # spec's Section 3 is "Current State". #656 already resolves this path
+        # for its own use; it was simply never put in state for anyone else.
+        "original_lld_path": str(original_lld_path) if original_lld_path else "",
         "lld_content": lld_content,
         "test_plan_section": test_plan_section,
         "test_scenarios": test_scenarios,
