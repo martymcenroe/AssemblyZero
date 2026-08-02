@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from assemblyzero.core import provider_storm
 from assemblyzero.core.errors import (
     APIError,
     AuthenticationError,
@@ -584,11 +585,23 @@ class ClaudeCLIProvider(LLMProvider):
                     except (subprocess.TimeoutExpired, OSError):
                         pass
                     duration_ms = int((time.time() - start_time) * 1000)
+                    # #2086: consecutive timeouts are a provider storm, not a
+                    # run of bad luck. Eighteen in one roll on 2026-08-01 killed
+                    # two rolls; the counter is what lets the launcher wait
+                    # instead of redrawing straight into the same wall.
+                    consecutive = provider_storm.record_timeout(timeout_seconds)
+                    message = f"claude -p timed out after {timeout_seconds}s"
+                    if provider_storm.is_storm():
+                        message = (
+                            f"{message} "
+                            f"({consecutive} consecutive — "
+                            f"{provider_storm.STORM_MARKER})"
+                        )
                     call_result = LLMCallResult(
                         success=False,
                         response=None,
                         raw_response=None,
-                        error_message=f"claude -p timed out after {timeout_seconds}s",
+                        error_message=message,
                         provider=self.provider_name,
                         model_used=self._model,
                         duration_ms=duration_ms,
@@ -598,6 +611,12 @@ class ClaudeCLIProvider(LLMProvider):
                     return call_result
 
                 duration_ms = int((time.time() - start_time) * 1000)
+
+                # #2086: only a completed call clears the storm counter. A
+                # non-timeout error keeps its own classification and leaves the
+                # counter alone -- a 400 is a bug in what we sent, and waiting
+                # fifteen minutes would not improve it.
+                provider_storm.record_success()
 
                 filtered_stderr = _filter_stderr(stderr)
 
