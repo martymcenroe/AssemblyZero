@@ -879,6 +879,10 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
+            # #1941: RESUMED lets the runner reuse a prior attempt's files;
+            # REGENERATED forbids it. Absent on a first attempt, which reuses
+            # nothing because there is nothing to reuse.
+            "retry_mode": state.get("retry_mode", ""),
         })
 
         error_msg = sub_result.get("error_message", "")

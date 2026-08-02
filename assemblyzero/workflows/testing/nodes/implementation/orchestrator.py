@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from assemblyzero.core.llm_provider import get_cumulative_cost
+from assemblyzero.core.retry_mode import is_regeneration
 from assemblyzero.hooks.file_write_validator import validate_file_write
 from assemblyzero.telemetry import emit
 from assemblyzero.utils.cost_tracker import accumulate_node_cost
@@ -295,6 +296,7 @@ def came_from_base(repo_root: Path, filepath: str) -> bool:
 def _should_skip_existing_file(
     change_type: str, target_path: Path, iteration_count: int,
     repo_root: Path | None = None, filepath: str = "",
+    regenerate: bool = False,
 ) -> bool:
     """Issue #547 skip-on-resume, scoped by Issue #1842 to the first pass only.
 
@@ -310,6 +312,12 @@ def _should_skip_existing_file(
     integration branch -- printed "5 files written" having written none, and
     died at pytest with nothing collected.
     """
+    #1941: a clean-slate regeneration must not consult this path at all. The
+    # whole point of regenerating is that the previous attempt's output is the
+    # thing being discarded, so "it is already on disk" is not a reason to keep
+    # it -- it is the reason to replace it.
+    if regenerate:
+        return False
     if iteration_count > 0:
         return False
     if repo_root is not None and filepath and came_from_base(repo_root, filepath):
@@ -354,6 +362,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
     Issue #272: File-by-file prompting with mechanical validation.
     """
     iteration_count = state.get("iteration_count", 0)
+    # #1941: set when a stage retry classified the previous failure as
+    # deterministic (or could not classify it). Discards that attempt's files
+    # rather than resuming them, which is what made run11b's attempt 2 a
+    # byte-identical replay of attempt 1.
+    _regenerating = is_regeneration(state.get("retry_mode"))
     gate_log(f"[N4] Implementing code file-by-file (iteration {iteration_count})...")
 
     if state.get("mock_mode"):
@@ -641,7 +654,8 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         # Issue #547: Skip-on-resume — don't re-call Claude for files already on disk
         target_path = repo_root / filepath
         if _should_skip_existing_file(
-            change_type, target_path, iteration_count, repo_root, filepath
+            change_type, target_path, iteration_count, repo_root, filepath,
+            regenerate=_regenerating,
         ):
             existing_content = target_path.read_text(encoding="utf-8")
             print(f"        Skipped (already exists): {target_path}")
