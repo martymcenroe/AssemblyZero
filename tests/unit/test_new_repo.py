@@ -11,7 +11,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -36,6 +36,87 @@ from new_repo import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# #1934 / standard 0024: the I/O BOUNDARY is what gets patched -- subprocess.run,
+# requests.get, the PAT session. What those boundaries RETURN is ordinary data,
+# and standing a MagicMock in for it is the hasattr placebo from the standard's
+# §2: a MagicMock answers `.stdout`, `.ok`, `.anything` truthfully, so a test
+# written against one verifies the mock's willingness to invent attributes
+# rather than the code's handling of a real result.
+
+
+# mock-ok: `new_repo.run_command` shells out to poetry, git and gh -- real
+#   subprocess execution against a real GitHub account is not a unit test.
+# mock-ok: `new_repo.requests.get` and `new_repo._request_with_retry` are
+#   network calls to the GitHub REST API.
+# mock-ok: `new_repo.pr_sentinel_app_session` decrypts a GPG-encrypted
+#   credential bundle and would raise a pinentry prompt.
+# mock-ok: `new_repo.config` reads machine-level fleet configuration from
+#   outside the repo under test.
+# Everything these boundaries RETURN is constructed for real above.
+
+
+def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess:
+    """A real CompletedProcess, which is what run_command actually returns.
+
+    Construction is free, so the standard's first preference applies: use the
+    real class. A wrong attribute name in production now raises AttributeError
+    here instead of silently passing.
+    """
+    return subprocess.CompletedProcess(
+        args=["fake-command"], returncode=returncode, stdout=stdout, stderr=stderr
+    )
+
+
+class FakeResponse:
+    """Typed stand-in for `requests.Response`, with proof-of-life.
+
+    Only the surface the production code actually touches: `status_code`,
+    `text`, and `json()`. Anything else raises AttributeError, which is the
+    point -- a MagicMock would invent it.
+
+    `json_calls` is the standard's §4 proof-of-life: a test asserting a payload
+    was parsed can prove the parse happened rather than trusting that it did.
+    """
+
+    def __init__(self, status_code: int, payload=None, text: str = ""):
+        self.status_code = status_code
+        self.text = text
+        self._payload = payload
+        self.json_calls = 0
+
+    def json(self):
+        self.json_calls += 1
+        if self._payload is None:
+            raise ValueError("no JSON payload configured for this FakeResponse")
+        return self._payload
+
+
+class FakeSession:
+    """Typed context manager standing in for the credential-session helpers.
+
+    Yields a fixed value and records that the context was entered AND exited,
+    so a test can prove the caller used `with` rather than leaking the
+    credential -- which a pair of bare MagicMocks on __enter__/__exit__ cannot
+    distinguish from never being called at all.
+    """
+
+    def __init__(self, value="bundle"):
+        self.value = value
+        self.entered = 0
+        self.exited = 0
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __enter__(self):
+        self.entered += 1
+        return self.value
+
+    def __exit__(self, *exc):
+        self.exited += 1
+        return False
+
 
 SCHEMA_PATH = Path(__file__).parent.parent.parent / "docs" / "standards" / "0009-structure-schema.json"
 STANDARD_PATH = Path(__file__).parent.parent.parent / "docs" / "standards" / "0009-canonical-project-structure.md"
@@ -420,7 +501,7 @@ class TestPythonBootstrap:
     @patch("new_repo.run_command")
     def test_T280_happy_path_writes_artifacts(self, mock_run, tmp_path):
         """Successful poetry calls produce pyproject append + conftest.py."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         project = tmp_path / "TestProject"
         project.mkdir()
         # poetry init normally writes this; with mocked run_command,
@@ -451,7 +532,7 @@ class TestPythonBootstrap:
     @patch("new_repo.run_command")
     def test_T281_poetry_init_failure_returns_false(self, mock_run, tmp_path):
         """If poetry init fails, function returns False without writing files."""
-        mock_run.return_value = MagicMock(returncode=1, stderr="poetry: not found")
+        mock_run.return_value = completed(returncode=1, stderr="poetry: not found")
         project = tmp_path / "FailProject"
         project.mkdir()
         from new_repo import create_python_project
@@ -462,7 +543,7 @@ class TestPythonBootstrap:
     @patch("new_repo.run_command")
     def test_T282_license_polyform_maps_correctly(self, mock_run, tmp_path):
         """polyform license maps to PolyForm-Noncommercial-1.0.0 in poetry init."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         project = tmp_path / "PolyProject"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
@@ -475,7 +556,7 @@ class TestPythonBootstrap:
     @patch("new_repo.run_command")
     def test_T283_license_mit_maps_correctly(self, mock_run, tmp_path):
         """mit license maps to MIT in poetry init."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         project = tmp_path / "MitProject"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
@@ -488,7 +569,7 @@ class TestPythonBootstrap:
     @patch("new_repo.run_command")
     def test_T284_package_name_is_lowercased(self, mock_run, tmp_path):
         """Mixed-case repo names are lowercased for the Poetry package name."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         project = tmp_path / "CamelCaseRepo"
         project.mkdir()
         (project / "pyproject.toml").write_text("# stub\n", encoding="utf-8")
@@ -503,7 +584,7 @@ class TestPythonBootstrap:
     def test_T285_lang_none_skips_poetry(self, mock_run, mock_config, tmp_path):
         """--lang none short-circuits the Python bootstrap (no poetry calls)."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv",
                    ["new_repo.py", "NoLang", "--no-github", "--lang", "none"]):
             main()
@@ -518,7 +599,7 @@ class TestPythonBootstrap:
     ):
         """--lang python (the default) calls poetry init + poetry add."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "PyDefault", "--no-github"]):
             main()
         commands = [call[0][0] for call in mock_run.call_args_list]
@@ -538,7 +619,7 @@ class TestCanonicalLabels:
     @patch("new_repo.run_command")
     def test_T215_creates_all_canonical_labels(self, mock_run):
         """Both implementation and lld labels get created."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         from new_repo import create_canonical_labels
         created, total = create_canonical_labels("martymcenroe", "boostgauge")
         assert created == 2
@@ -552,7 +633,7 @@ class TestCanonicalLabels:
     @patch("new_repo.run_command")
     def test_T216_uses_force_for_idempotency(self, mock_run):
         """gh label create is invoked with --force so reruns succeed."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "TestRepo")
         for call in mock_run.call_args_list:
@@ -562,7 +643,7 @@ class TestCanonicalLabels:
     @patch("new_repo.run_command")
     def test_T217_targets_correct_repo(self, mock_run):
         """--repo flag is set to {github_user}/{repo_name}."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "MyRepo")
         for call in mock_run.call_args_list:
@@ -575,8 +656,8 @@ class TestCanonicalLabels:
         """If one label fails, count reflects only successes; warning printed."""
         # First call succeeds, second call fails.
         mock_run.side_effect = [
-            MagicMock(returncode=0, stderr=""),
-            MagicMock(returncode=1, stderr="GraphQL error: insufficient scope"),
+            completed(returncode=0),
+            completed(returncode=1, stderr="GraphQL error: insufficient scope"),
         ]
         from new_repo import create_canonical_labels
         created, total = create_canonical_labels("martymcenroe", "TestRepo")
@@ -588,7 +669,7 @@ class TestCanonicalLabels:
     @patch("new_repo.run_command")
     def test_T219_check_false_passed(self, mock_run):
         """run_command is called with check=False so non-zero exit doesn't raise."""
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = completed(returncode=0)
         from new_repo import create_canonical_labels
         create_canonical_labels("martymcenroe", "TestRepo")
         for call in mock_run.call_args_list:
@@ -667,7 +748,7 @@ class TestMainLocalWorkflow:
     def test_T250_no_github_skips_remote(self, mock_run, mock_config, tmp_path):
         """--no-github skips GitHub repo creation and starring."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "LocalProject", "--no-github"]):
             main()
         # Should have called git init and git commit, but NOT gh repo create
@@ -680,7 +761,7 @@ class TestMainLocalWorkflow:
     def test_T260_local_creates_all_files(self, mock_run, mock_config, tmp_path):
         """--no-github creates directory structure, config, and content files."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "FullLocal", "--no-github"]):
             main()
         project = tmp_path / "FullLocal"
@@ -702,7 +783,7 @@ class TestMainLocalWorkflow:
         """`.unleashed.json` defaults to assemblyZero=true (#1059) and
         does NOT include the deprecated pickupThresholdMinutes (#1060)."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "DefaultsProject", "--no-github"]):
             main()
         unleashed_json = (tmp_path / "DefaultsProject" / ".unleashed.json").read_text()
@@ -723,7 +804,7 @@ class TestMainLocalWorkflow:
     def test_T270_force_flag_passed(self, mock_run, mock_config, tmp_path):
         """--force flag is accepted without error."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "ForceProject", "--no-github", "--force"]):
             main()
         assert (tmp_path / "ForceProject").exists()
@@ -774,7 +855,7 @@ class TestCerberusPemRequired:
     def test_T291_no_github_bypasses_requirement(self, mock_run, mock_config, tmp_path):
         """--no-github skips the requirement — local scaffold proceeds without --cerberus-pem."""
         _setup_config_mock(mock_config, tmp_path)
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.return_value = completed(returncode=0)
         with patch("sys.argv", ["new_repo.py", "NoGitTest", "--no-github"]):
             main()  # should NOT raise
         assert (tmp_path / "NoGitTest").exists()
@@ -818,29 +899,30 @@ class TestVerifyBranchProtection:
     @patch("new_repo._request_with_retry")
     def test_T293_pass_when_all_dimensions_match(self, mock_req):
         """enforce_admins=True, 1 review, pr-sentinel check present → (True, ...)."""
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
+        mock_resp = FakeResponse(200, payload={
             "enforce_admins": {"enabled": True},
             "required_pull_request_reviews": {"required_approving_review_count": 1},
             "required_status_checks": {
                 "contexts": ["pr-sentinel / issue-reference"],
             },
-        }
+        })
         mock_req.return_value = mock_resp
         ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
         assert ok is True
+        # Standard 0024 §4 proof-of-life: a verdict reached without reading the
+        # payload would be a test asserting its own fixture.
+        assert mock_resp.json_calls == 1
 
     @patch("new_repo._request_with_retry")
     def test_T294_fail_when_enforce_admins_off(self, mock_req):
         """enforce_admins=False → (False, msg) and msg names the dimension."""
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
+        mock_resp = FakeResponse(200, payload={
             "enforce_admins": {"enabled": False},
             "required_pull_request_reviews": {"required_approving_review_count": 1},
             "required_status_checks": {
                 "contexts": ["pr-sentinel / issue-reference"],
             },
-        }
+        })
         mock_req.return_value = mock_resp
         ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
         assert ok is False
@@ -849,7 +931,7 @@ class TestVerifyBranchProtection:
     @patch("new_repo._request_with_retry")
     def test_T295_fail_on_404(self, mock_req):
         """404 → (False, 'no branch protection set on origin')."""
-        mock_resp = MagicMock(status_code=404, text="Not Found")
+        mock_resp = FakeResponse(404, text="Not Found")
         mock_req.return_value = mock_resp
         ok, msg = verify_branch_protection_on_origin("owner", "repo", "pat")
         assert ok is False
@@ -862,15 +944,14 @@ class TestVerifyRepoSettings:
     @patch("new_repo._request_with_retry")
     def test_T296_pass_when_squash_only_no_wiki(self, mock_req):
         """All settings match fleet standard → (True, ...)."""
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
+        mock_resp = FakeResponse(200, payload={
             "has_wiki": False,
             "has_projects": False,
             "allow_merge_commit": False,
             "allow_rebase_merge": False,
             "allow_squash_merge": True,
             "delete_branch_on_merge": True,
-        }
+        })
         mock_req.return_value = mock_resp
         ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
         assert ok is True
@@ -878,15 +959,14 @@ class TestVerifyRepoSettings:
     @patch("new_repo._request_with_retry")
     def test_T297_fail_when_wiki_enabled(self, mock_req):
         """has_wiki=True → (False, msg) and msg names the violation."""
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {
+        mock_resp = FakeResponse(200, payload={
             "has_wiki": True,
             "has_projects": False,
             "allow_merge_commit": False,
             "allow_rebase_merge": False,
             "allow_squash_merge": True,
             "delete_branch_on_merge": True,
-        }
+        })
         mock_req.return_value = mock_resp
         ok, msg = verify_repo_settings_on_origin("owner", "repo", "pat")
         assert ok is False
@@ -902,8 +982,7 @@ class TestVerifyWorkflowContent:
         encoded = _base64.b64encode(
             _CANONICAL_AUTO_REVIEWER_CALLER.encode("utf-8")
         ).decode("ascii")
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {"content": encoded}
+        mock_resp = FakeResponse(200, payload={"content": encoded})
         mock_req.return_value = mock_resp
         ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
         assert ok is True
@@ -929,8 +1008,7 @@ class TestVerifyWorkflowContent:
             "    secrets: inherit\n"
         )
         encoded = _base64.b64encode(old_format.encode("utf-8")).decode("ascii")
-        mock_resp = MagicMock(status_code=200)
-        mock_resp.json.return_value = {"content": encoded}
+        mock_resp = FakeResponse(200, payload={"content": encoded})
         mock_req.return_value = mock_resp
         ok, msg = verify_workflow_content_on_origin("owner", "repo", "pat")
         assert ok is False
@@ -949,14 +1027,14 @@ class TestVerifyPrSentinelInstallation:
     @patch("new_repo.requests.get")
     def test_T300_pass_when_app_installed_on_repo(self, mock_get):
         """200 from /repos/{o}/{r}/installation → (True, covers)."""
-        resp = MagicMock(status_code=200)
-        resp.json.return_value = {"id": 12345}
+        resp = FakeResponse(200, payload={"id": 12345})
         mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
             "martymcenroe", "repo-name", "fake-jwt",
         )
         assert ok is True
         assert "covers" in msg
+        assert resp.json_calls == 1, "the installation id must actually be read"
         # Bearer auth with the App JWT, not a PAT token header.
         headers = mock_get.call_args.kwargs["headers"]
         assert headers["Authorization"] == "Bearer fake-jwt"
@@ -964,7 +1042,7 @@ class TestVerifyPrSentinelInstallation:
     @patch("new_repo.requests.get")
     def test_T301_fail_when_app_not_installed(self, mock_get):
         """404 → (False, NOT installed / scope drift)."""
-        resp = MagicMock(status_code=404, text="Not Found")
+        resp = FakeResponse(404, text="Not Found")
         mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
             "martymcenroe", "repo-name", "fake-jwt",
@@ -976,7 +1054,7 @@ class TestVerifyPrSentinelInstallation:
     @patch("new_repo.requests.get")
     def test_T302_fail_on_unexpected_http_status(self, mock_get):
         """Non-200/404 (e.g. 401 bad JWT) → (False, HTTP detail)."""
-        resp = MagicMock(status_code=401, text="Bad credentials")
+        resp = FakeResponse(401, text="Bad credentials")
         mock_get.return_value = resp
         ok, msg = verify_pr_sentinel_installation(
             "martymcenroe", "repo-name", "fake-jwt",
@@ -1085,8 +1163,8 @@ class TestRunPrSentinelCheck:
         self, mock_session, mock_parse, mock_mint, mock_verify,
     ):
         """Decrypt + mint + 200 probe → ('pass', ...)."""
-        mock_session.return_value.__enter__ = MagicMock(return_value="bundle")
-        mock_session.return_value.__exit__ = MagicMock(return_value=False)
+        session = FakeSession("bundle")
+        mock_session.side_effect = session
         mock_parse.return_value = ("123456", "PEM")
         mock_mint.return_value = "jwt"
         mock_verify.return_value = (True, "App installation covers this repo (id 1)")
@@ -1095,6 +1173,9 @@ class TestRunPrSentinelCheck:
         )
         assert outcome == "pass"
         assert "covers" in msg
+        # Proof-of-life: the credential was borrowed through `with`, and given
+        # back. A pair of bare mocks could not tell this from never running.
+        assert (session.entered, session.exited) == (1, 1)
 
     @patch("new_repo.verify_pr_sentinel_installation")
     @patch("new_repo._mint_github_app_jwt")
@@ -1104,8 +1185,8 @@ class TestRunPrSentinelCheck:
         self, mock_session, mock_parse, mock_mint, mock_verify,
     ):
         """Credential fine but App genuinely not installed → ('fail', ...)."""
-        mock_session.return_value.__enter__ = MagicMock(return_value="bundle")
-        mock_session.return_value.__exit__ = MagicMock(return_value=False)
+        session = FakeSession("bundle")
+        mock_session.side_effect = session
         mock_parse.return_value = ("123456", "PEM")
         mock_mint.return_value = "jwt"
         mock_verify.return_value = (False, "App is NOT installed on o/r")
