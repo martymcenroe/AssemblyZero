@@ -24,6 +24,14 @@ TOOLS = Path(__file__).resolve().parents[2] / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+
+def _healthy_box(*_args, **_kwargs):
+    """#1920: these tests exercise argv and the task definition, not machine
+    health. Stubbed like the sibling staleness gate above it."""
+    from assemblyzero.speedrun.box_health import BoxHealth
+
+    return BoxHealth(True, [], "")
+
 import speedrun_roll as sr  # noqa: E402
 
 
@@ -110,6 +118,7 @@ class TestRelaunchArgv:
         )
         rolled = []
         with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
+                patch.object(sr, "check_box_health", _healthy_box), \
                 patch.object(sr, "roll_issue",
                              lambda *a: rolled.append(a) or 0), \
                 patch.object(sr, "restore_repo", lambda *a: []):
