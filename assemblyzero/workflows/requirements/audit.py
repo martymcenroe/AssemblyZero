@@ -700,6 +700,51 @@ def _read_status_file(target_repo: Path) -> dict:
     return data
 
 
+def _prune_dead_repo_slices(raw: dict, *, keep: str) -> list[str]:
+    """Drop slices whose repo path no longer exists. Returns what was pruned.
+
+    #1160 scoped entries per repo and fixed the collision, but nothing ever
+    removed a slice, so a deleted, renamed or moved repo left its approvals on
+    disk permanently and the file grew without bound. A path that is gone cannot
+    be the target of a future run, so its approvals can never be consulted
+    again -- pruning them loses nothing.
+
+    Two deliberate choices:
+
+    **A missing path is not always a dead repo.** An unmounted drive or a
+    temporarily-renamed checkout is pruned too, and its approvals are lost,
+    costing one re-review. That is the affordable direction -- the opposite
+    error is a cache that grows forever -- but it is a chosen tradeoff, not an
+    accident.
+
+    **``legacy_unscoped`` is never pruned.** It has no path to test, and it is
+    deliberately retained history rather than live cache state.
+
+    The slice being written is never pruned either: it is the repo the caller is
+    running against, and a target that somehow fails an existence check mid-run
+    should not have this run's own result discarded underneath it.
+    """
+    repos = raw.get("repos")
+    if not isinstance(repos, dict):
+        return []
+
+    pruned = []
+    for repo_key in list(repos):
+        if repo_key == keep:
+            continue
+        if not Path(repo_key).exists():
+            del repos[repo_key]
+            pruned.append(repo_key)
+
+    for repo_key in pruned:
+        # Logged, not silent: an operator who notices a re-review they did not
+        # expect needs to be able to find out why without reading this source.
+        logger.info(
+            "LLD status cache: pruned slice for %s (path no longer exists)", repo_key
+        )
+    return pruned
+
+
 def load_lld_tracking(target_repo: Path) -> LLDStatusCache:
     """Load THIS target repo's slice of the shared LLD status cache.
 
@@ -738,6 +783,7 @@ def save_lld_tracking(tracking: LLDStatusCache, target_repo: Path) -> None:
     raw.setdefault("repos", {})[_repo_key(target_repo)] = {
         "issues": tracking.get("issues", {}),
     }
+    _prune_dead_repo_slices(raw, keep=_repo_key(target_repo))
     raw["version"] = LLD_STATUS_CACHE_VERSION
     raw["last_updated"] = datetime.now(timezone.utc).isoformat()
 
