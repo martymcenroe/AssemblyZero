@@ -65,6 +65,10 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.core.provider_storm import (  # noqa: E402
+    STORM_EXIT_CODE,
+    backoff_minutes,
+)
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     RUN_START_ENV,
@@ -650,6 +654,22 @@ def launch_detached(
     return 0
 
 
+def _interruptible_sleep(seconds: int, tick: int = 5) -> None:
+    """Sleep in short ticks so a stop lands promptly (#2086).
+
+    A single long `time.sleep` is a poor citizen here: `--detach-stop` kills the
+    process tree, but between the kill and the wake there is nothing checking
+    signals, and on Windows a SIGTERM handler cannot interrupt a blocking sleep.
+    Ticking keeps the wait responsive and, just as importantly, keeps it
+    testable -- a test can assert the loop is bounded rather than waiting an
+    actual quarter of an hour.
+    """
+    remaining = max(0, int(seconds))
+    while remaining > 0:
+        time.sleep(min(tick, remaining))
+        remaining -= tick
+
+
 def pid_file(log_dir: Path) -> Path:
     return log_dir / "detached-roll.pid"
 
@@ -1009,11 +1029,41 @@ def main(argv: list[str] | None = None) -> int:
             # clears its debris), so retrying inside the detached task removes
             # the human relaunch from the loop entirely. A base or gate problem
             # (91) is NOT a draw and is never retried.
+            storm_streak = 0
             for attempt_no in range(1, max(1, args.attempts) + 1):
                 code = roll_issue(repo_root, issue, log_dir, az_root, extra)
                 if code == 0 or code == 91:
                     break
-                if attempt_no < max(1, args.attempts):
+
+                # #2086: eighteen consecutive provider timeouts in one roll on
+                # 2026-08-01 killed two rolls, because a redraw fires straight
+                # into the same wall. A storm-classified attempt waits; every
+                # other failure redraws immediately, exactly as before.
+                if code == STORM_EXIT_CODE:
+                    storm_streak += 1
+                else:
+                    storm_streak = 0
+
+                if attempt_no >= max(1, args.attempts):
+                    if storm_streak:
+                        # Nothing left to wait for; a terminal wait would just
+                        # delay the operator finding out.
+                        session.write("STORM on final attempt - exiting without waiting")
+                    continue
+
+                if storm_streak:
+                    minutes = backoff_minutes(storm_streak)
+                    session.write(
+                        f"STORM BACKOFF {minutes}m before attempt "
+                        f"{attempt_no + 1}/{args.attempts}"
+                    )
+                    print(
+                        f"\n#{issue} attempt {attempt_no}/{args.attempts}: the model "
+                        f"provider stopped answering. Waiting {minutes} minutes before "
+                        f"trying again, so the next attempt is not spent on the same wall."
+                    )
+                    _interruptible_sleep(minutes * 60)
+                else:
                     print(
                         f"\n#{issue} attempt {attempt_no}/{args.attempts} failed "
                         f"(exit {code}) — self-healing and redrawing."

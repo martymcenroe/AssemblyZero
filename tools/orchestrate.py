@@ -29,6 +29,7 @@ from assemblyzero.workflows.orchestrator.graph import (  # noqa: E402
     OrchestrationResult,
     orchestrate,
 )
+from assemblyzero.core import provider_storm
 from assemblyzero.workflows.orchestrator.state import (  # noqa: E402
     STAGE_ORDER,
     OrchestrationState,
@@ -244,6 +245,13 @@ Examples:
 
             if result["error_summary"]:
                 print(f"[ORCHESTRATOR] {result['error_summary']}")
+
+            # #2086: a provider storm exits with its own code so the launcher
+            # can tell it from every other failure without parsing text, and
+            # back off instead of redrawing into the same wall.
+            if provider_storm.is_storm():
+                print(f"\n[ORCHESTRATOR] {provider_storm.storm_message()}")
+                sys.exit(provider_storm.STORM_EXIT_CODE)
 
             sys.exit(1)
 
