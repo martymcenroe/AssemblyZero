@@ -1,5 +1,14 @@
 # Babysit Protocol (The Perdita Protocol)
 
+> **Solo operation is the default; this document is the exception (#2087).**
+> For an ordinary campaign run — launch, walk away, evaluate afterwards from
+> artifacts — follow `docs/runbooks/0952-speedrun-operator-solo.md`. Watching a
+> run costs tokens for the whole of its duration to learn what the logs already
+> record.
+>
+> Use this protocol only when you intend to **intervene mid-run**: debugging a
+> new failure mode live, or validating a change to the pipeline itself.
+
 When the user says "babysit": run a workflow in the background, monitor its execution mechanically, and intervene only when the **Perdita Protocol** guardrails are triggered.
 
 ## The Perdita Shift (Mechanical Monitoring)
