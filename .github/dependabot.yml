@@ -1,0 +1,32 @@
+# Dependabot version updates (#1923).
+#
+# Before this file the repo had only GitHub's default security updates, and
+# those do not cover everything. Observed 2026-07-29: high-severity npm alerts
+# in sentinel/package-lock.json (postcss, sharp) sat from 07-25 with no PRs,
+# because transitive dev-dependency bumps never get security PRs and there was
+# no version-update config to sweep them.
+#
+# This is a CONFIG file. It lives in .github/ but outside .github/workflows/,
+# so it lands by ordinary push with no elevated token.
+version: 2
+updates:
+  # The sentinel Worker's own dependency tree. Its vitest suite is the only
+  # automated gate on that code -- AssemblyZero's CI is Python-only -- so a bump
+  # here is exercised by the Workers Builds test-gated deploy (runbook 0951).
+  - package-ecosystem: "npm"
+    directory: "/sentinel"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Monthly rather than weekly: action majors move slowly, and this also clears
+  # the Node-20 deprecation warnings that appear on every CI run for
+  # actions/cache, actions/checkout and actions/setup-python.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
