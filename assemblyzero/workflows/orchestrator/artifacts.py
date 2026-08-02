@@ -23,14 +23,20 @@ def _base_dir(target_repo: str | None) -> Path:
 def worktree_path_for(issue_number: int, target_repo: str | None = None) -> Path:
     """Return the worktree path for an issue.
 
-    A sibling of the target repo named ``{repo_name}-{issue_number}`` (mirrors
-    ``run_implement_from_lld.py``). Falls back to ``../AssemblyZero-{N}`` when
-    no target is given (backward compatibility).
+    ``{target_repo}/data/worktrees/{issue_number}`` (#2077). These used to be
+    siblings of the target repo, which put one directory per roll into
+    ``~/Projects`` -- ten accumulated in a single day. ``data/`` is already
+    gitignored in every campaign repo, so a roll now adds nothing to
+    ``~/Projects`` and nothing to ``git status``.
+
+    Falls back to ``data/worktrees/{N}`` relative to cwd when no target is
+    given (AssemblyZero self-build).
     """
+    from assemblyzero.speedrun.worktrees import pipeline_worktree_path
+
     if target_repo:
-        repo = Path(target_repo)
-        return repo.parent / f"{repo.name}-{issue_number}"
-    return Path(f"../AssemblyZero-{issue_number}")
+        return pipeline_worktree_path(target_repo, issue_number)
+    return Path("data/worktrees") / str(issue_number)
 
 
 def detect_existing_artifacts(

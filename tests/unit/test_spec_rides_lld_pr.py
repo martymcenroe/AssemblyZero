@@ -28,8 +28,9 @@ def test_ride_spec_commits_to_lld_worktree(tmp_path):
     drafts.mkdir(parents=True)
     spec = drafts / "spec-0042-implementation-readiness.md"
     spec.write_text("# spec")
-    worktree = tmp_path / "target-42-lld"  # == lld_worktree_path_for(target, 42)
-    worktree.mkdir()
+    # == lld_worktree_path_for(target, 42); under the repo's data/ since #2077.
+    worktree = target / "data" / "worktrees" / "42-lld"
+    worktree.mkdir(parents=True)
 
     calls = []
 

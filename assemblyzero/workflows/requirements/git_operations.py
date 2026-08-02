@@ -49,17 +49,21 @@ def lld_worktree_path_for(target_repo: Path | str, issue_number: int) -> Path:
 
     Mirrors `orchestrator/artifacts.worktree_path_for` (impl stage) but with
     a `-lld` suffix so the LLD worktree is distinct from any later impl
-    worktree for the same issue. Closes #1459.
+    worktree for the same issue. See #1459.
+
+    Lives under the target repo's gitignored `data/` since #2077; it used to be
+    a sibling, which put a second directory per roll into `~/Projects`.
 
     Args:
         target_repo: Path to the target repository.
         issue_number: GitHub issue number.
 
     Returns:
-        Sibling path: {target_parent}/{target_name}-{issue_number}-lld
+        {target_repo}/data/worktrees/{issue_number}-lld
     """
-    repo = Path(target_repo)
-    return repo.parent / f"{repo.name}-{issue_number}-lld"
+    from assemblyzero.speedrun.worktrees import pipeline_worktree_path
+
+    return pipeline_worktree_path(target_repo, issue_number, lld=True)
 
 
 def setup_lld_worktree(target_repo: Path | str, issue_number: int) -> tuple[Path, str]:

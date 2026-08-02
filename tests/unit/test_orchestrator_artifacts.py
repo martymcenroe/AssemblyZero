@@ -103,8 +103,9 @@ class TestGetArtifactPath:
         assert path == Path("docs/lineage/305/impl-spec.md")
 
     def test_impl_path(self):
+        # #2077: inside the repo's gitignored data/, not a sibling.
         path = get_artifact_path(305, "impl")
-        assert path == Path("../AssemblyZero-305")
+        assert path == Path("data/worktrees/305")
 
     def test_pr_raises(self):
         with pytest.raises(ValueError, match="PR artifact is a URL"):
