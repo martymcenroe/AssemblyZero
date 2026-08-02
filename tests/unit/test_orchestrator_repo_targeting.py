@@ -136,8 +136,9 @@ def test_impl_carves_worktree_from_target(mock_run, mock_create_graph):
     argv = add_calls[0].args[0]
     assert argv[:3] == ["git", "-C", EXTERNAL], f"worktree not carved from target: {argv}"
 
-    expected_wt = str(Path(EXTERNAL).parent / "Chiron-5")
-    assert expected_wt in argv, f"worktree path is not a sibling of target: {argv}"
+    # #2077: under the target repo's gitignored data/, not beside it.
+    expected_wt = str(Path(EXTERNAL) / "data" / "worktrees" / "5")
+    assert expected_wt in argv, f"worktree path is not under target data/: {argv}"
     assert "issue-5" in argv  # branch
 
     # Closes #1504. The testing sub-workflow writes files relative to
@@ -162,22 +163,22 @@ def test_create_initial_state_defaults_to_assemblyzero():
     assert "AssemblyZero" in state["assemblyzero_root"]
 
 
-def test_worktree_path_for_default_is_assemblyzero_sibling():
-    # Backward-compatible fallback when no target is supplied.
-    assert worktree_path_for(5, None) == Path("../AssemblyZero-5")
+def test_worktree_path_for_default_is_under_data_worktrees():
+    # Fallback when no target is supplied (#2077: no longer a sibling).
+    assert worktree_path_for(5, None) == Path("data/worktrees/5")
 
 
 # --- artifact path resolution ----------------------------------------------
 
 
-def test_worktree_path_for_external_is_target_sibling():
-    assert worktree_path_for(5, EXTERNAL) == Path(EXTERNAL).parent / "Chiron-5"
+def test_worktree_path_for_external_is_under_target_data():
+    assert worktree_path_for(5, EXTERNAL) == Path(EXTERNAL) / "data" / "worktrees" / "5"
 
 
 def test_get_artifact_path_resolves_under_target():
     assert get_artifact_path(5, "triage", EXTERNAL) == Path(EXTERNAL) / "docs/lineage/5/issue-brief.md"
     assert get_artifact_path(5, "spec", EXTERNAL) == Path(EXTERNAL) / "docs/lineage/5/impl-spec.md"
-    assert get_artifact_path(5, "impl", EXTERNAL) == Path(EXTERNAL).parent / "Chiron-5"
+    assert get_artifact_path(5, "impl", EXTERNAL) == Path(EXTERNAL) / "data" / "worktrees" / "5"
 
 
 def test_detect_existing_artifacts_scoped_to_target(tmp_path):

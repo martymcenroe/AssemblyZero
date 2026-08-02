@@ -63,6 +63,12 @@ try:
 except ImportError:  # pragma: no cover - tool copied outside the package
     pass
 
+# Imported after the sys.path insert above -- the package root is not on the
+# path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.speedrun.worktrees import (  # noqa: E402
+    sweep_pipeline_worktrees,
+)
+
 HEARTBEAT_SECONDS = 15
 DEFAULT_PREFIX = "hardening-run"
 
@@ -943,6 +949,19 @@ def main(argv: list[str] | None = None) -> int:
     # process does the rolling, detached or not.
     log_dir.mkdir(parents=True, exist_ok=True)
     pid_file(log_dir).write_text(str(os.getpid()), encoding="utf-8")
+
+    # #2077: sweep EVERY pipeline worktree, not just the issue about to roll.
+    # Healing only the current issue is how ten stranded directories piled up
+    # in one day. Nothing here deletes content -- dirty work is committed to a
+    # graveyard branch first and unregistered directories are relocated -- so a
+    # sweep problem is reported and never costs the roll.
+    session.write("SWEEP pipeline worktrees")
+    try:
+        sweep = sweep_pipeline_worktrees(repo_root, log=lambda m: session.write(m.strip()))
+        for problem in sweep.problems:
+            session.write(f"SWEEP UNRESOLVED {problem.describe()}")
+    except Exception as exc:  # noqa: BLE001 - a sweep must never abort a roll
+        session.write(f"SWEEP FAILED (continuing): {exc}")
 
     code = 0
     try:

@@ -122,9 +122,16 @@ def remove_worktree(repo_root: Path, issue: int) -> bool:
     parent = repo_root.parent
     removed_any = False
     for suffix in (f"{issue}", f"{issue}-lld"):
-        worktree_path = parent / f"{repo_root.name}-{suffix}"
-        if _remove_worktree_at(repo_root, worktree_path):
-            removed_any = True
+        candidates = [
+            # Current home (#2077): inside the repo's gitignored data/.
+            repo_root / "data" / "worktrees" / suffix,
+            # Pre-#2077 sibling. Still checked so a reset run against debris
+            # left by an older pipeline still finds and clears it.
+            parent / f"{repo_root.name}-{suffix}",
+        ]
+        for worktree_path in candidates:
+            if _remove_worktree_at(repo_root, worktree_path):
+                removed_any = True
     return removed_any
 
 

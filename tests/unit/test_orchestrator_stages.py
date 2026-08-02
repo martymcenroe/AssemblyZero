@@ -311,8 +311,9 @@ class TestWorktreeRemovalRetry:
 
         target = tmp_path / "boostgauge"
         target.mkdir()
-        (tmp_path / "boostgauge-7-lld").mkdir()
-        (tmp_path / "boostgauge-7").mkdir()
+        # #2077: worktrees live under the repo's gitignored data/, not beside it.
+        (target / "data" / "worktrees" / "7-lld").mkdir(parents=True)
+        (target / "data" / "worktrees" / "7").mkdir(parents=True)
 
         # Each worktree: first attempt locked, second succeeds
         mock_remove.side_effect = [
@@ -340,7 +341,7 @@ class TestWorktreeRemovalRetry:
 
         target = tmp_path / "boostgauge"
         target.mkdir()
-        (tmp_path / "boostgauge-7").mkdir()
+        (target / "data" / "worktrees" / "7").mkdir(parents=True)  # #2077
 
         mock_remove.side_effect = OSError("exit 128: file in use")
 

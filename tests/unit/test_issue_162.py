@@ -254,13 +254,18 @@ def test_080(tmp_path):
 # --------------------------------
 
 def test_lld_worktree_path_for_appends_lld_suffix():
-    """Worktree path is `{parent}/{name}-{N}-lld`, distinct from impl's
-    `{parent}/{name}-{N}` so LLD and impl worktrees don't collide."""
+    """Worktree path is `{repo}/data/worktrees/{N}-lld`, distinct from impl's
+    `{repo}/data/worktrees/{N}` so LLD and impl worktrees don't collide.
+
+    Moved inside the repo's gitignored data/ by #2077; it used to be a sibling,
+    which put a directory per roll into ~/Projects.
+    """
     from assemblyzero.workflows.requirements.git_operations import lld_worktree_path_for
 
     path = lld_worktree_path_for("/c/Users/x/Projects/Chiron", 4)
-    assert path.name == "Chiron-4-lld"
-    assert path.parent.name == "Projects"
+    assert path.name == "4-lld"
+    assert path.parent.name == "worktrees"
+    assert path == Path("/c/Users/x/Projects/Chiron/data/worktrees/4-lld")
 
 
 def test_commit_and_pr_returns_empty_for_empty_created_files():
