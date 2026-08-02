@@ -117,6 +117,27 @@ def validate_test_plan_node(state: RequirementsWorkflowState) -> dict[str, Any]:
             "error_message": "",
         }
 
+    # #2074: count every violation before the retry re-rolls and the failure
+    # mode evaporates. One record per violation -- the rate is the measurement.
+    try:
+        from assemblyzero.speedrun.must_resolve import run_context
+        from assemblyzero.speedrun.prompt_telemetry import record_failures
+
+        run_id, _ = run_context()
+        record_failures(
+            state.get("target_repo") or ".",
+            [str(v.get("message", v)) for v in result.get("violations", [])
+             if isinstance(v, dict) and v.get("severity") == "error"],
+            stage="lld",
+            check="test-plan",
+            issue=int(state.get("issue_number") or 0) or None,
+            draft_number=state.get("iteration_count", 0) + 1,
+            drafter_model=state.get("config_drafter", ""),
+            run_id=run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll
+        print(f"    [telemetry] test-plan failure telemetry skipped: {exc}")
+
     # Build feedback for drafter
     feedback = _build_validation_feedback(result)
     print(f"    Feedback:\n{feedback}")

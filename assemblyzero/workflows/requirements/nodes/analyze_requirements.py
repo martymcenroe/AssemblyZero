@@ -186,6 +186,25 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     # roll over an unresolved ambiguity. File it where a human will see it.
     # Never changes the halt outcome: the roll was already halting, and a filing
     # failure is loud in the log but returns the same error_message.
+    # #2074: count it too. The must-resolve issue is the human-facing record;
+    # this is the one a rate is computed from.
+    try:
+        from assemblyzero.speedrun.must_resolve import run_context
+        from assemblyzero.speedrun.prompt_telemetry import record_failures
+
+        run_id, _ = run_context()
+        record_failures(
+            state.get("target_repo") or ".",
+            [str(c.get("criterion_a", "")) for c in conflicts],
+            stage="lld",
+            check="requirements-conflict",
+            issue=int(state.get("issue_number") or 0) or None,
+            drafter_model=state.get("config_drafter", ""),
+            run_id=run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry never breaks a halt
+        print(f"  [telemetry] conflict telemetry skipped: {exc}")
+
     try:
         from assemblyzero.speedrun.must_resolve import file_all_conflicts
 
