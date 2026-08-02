@@ -1081,6 +1081,16 @@ data/unleashed/
 # the parked artifacts don't pollute git status across the fleet.
 *.bak
 *.parked-*
+
+# Office owner / lock files (#1912). Word, Excel and PowerPoint create a `~$`
+# companion for EVERY open document and orphan it whenever the app or machine
+# dies rather than closing cleanly. An orphan looks like ordinary content to
+# `git add <dir>`, which is how IEEE-IC25-004 committed three of them, and once
+# tracked they churn on every open and close. Also covered on this machine by
+# the fleet-wide global gitignore; repeated here so a repo scaffolded on a
+# machine without that file is still protected.
+~$*
+.~lock.*#
 """
     gitignore_path = project_path / ".gitignore"
     gitignore_path.write_text(content, encoding='utf-8')
