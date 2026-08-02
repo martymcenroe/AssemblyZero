@@ -1231,7 +1231,7 @@ def run_ast_sentinel_on_modify_files(
 # =============================================================================
 
 
-def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     """Mechanical validation of LLD content.
 
     Issue #277: Validates LLD structure and paths without LLM calls.
@@ -1460,3 +1460,36 @@ def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
         "lld_status": "PENDING",  # Clear BLOCKED status from previous Gemini verdicts
         "error_message": "",
     }
+
+
+def validate_lld_mechanical(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Mechanical validation, with every failure counted (#2074).
+
+    A wrapper rather than an emission at each of the failure returns: a return
+    added later would silently escape per-site instrumentation, and this node is
+    exactly where new checks get added. Wrapping means a new check is counted
+    the day it ships.
+    """
+    result = _validate_lld_mechanical_inner(state)
+
+    errors = result.get("validation_errors") or []
+    if errors:
+        try:
+            from assemblyzero.speedrun.must_resolve import run_context
+            from assemblyzero.speedrun.prompt_telemetry import record_failures
+
+            run_id, _ = run_context()
+            record_failures(
+                state.get("target_repo") or ".",
+                [str(e) for e in errors],
+                stage="lld",
+                check="mechanical",
+                issue=int(state.get("issue_number") or 0) or None,
+                draft_number=state.get("draft_number"),
+                drafter_model=state.get("config_drafter", ""),
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - telemetry never breaks a roll
+            print(f"  [telemetry] validation-failure telemetry skipped: {exc}")
+
+    return result
