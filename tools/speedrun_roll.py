@@ -65,6 +65,7 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     RUN_START_ENV,
     RUN_TAG_ENV,
@@ -950,6 +951,14 @@ def main(argv: list[str] | None = None) -> int:
             "at a tree that is)\n  before rolling. A roll that runs stale "
             "pipeline code fails in ways that look\n  like target-repo problems."
         )
+        return 91
+
+    # #1920: refuse before spending anything if this machine is degraded. On
+    # 2026-07-29 pytest stopped completing for ~45 minutes; a roll launched into
+    # that wastes hours AND makes every failure look like a target-repo problem.
+    health = check_box_health(az_root, log_dir)
+    if not health.ok:
+        print(health.message)
         return 91
 
     # #2073: refuse while the target repo has unanswered questions about what

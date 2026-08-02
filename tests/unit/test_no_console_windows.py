@@ -20,6 +20,14 @@ from unittest.mock import patch
 
 import pytest
 
+
+def _healthy_box(*_args, **_kwargs):
+    """#1920: these tests exercise argv and the task definition, not machine
+    health. Stubbed like the sibling staleness gate above it."""
+    from assemblyzero.speedrun.box_health import BoxHealth
+
+    return BoxHealth(True, [], "")
+
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
@@ -106,7 +114,7 @@ class TestTheRollItselfIsWindowless:
         with patch.object(sr, "_run", _run), \
                 patch.object(sr.sys, "platform", "win32"), \
                 patch.object(sr.sys, "executable", str(py)), \
-                patch.object(sr, "check_assemblyzero_tree", lambda p: []):
+                patch.object(sr, "check_assemblyzero_tree", lambda p: []),                 patch.object(sr, "check_box_health", _healthy_box):
             code = sr.main(["--repo", str(repo), "--issue", "7", "--detach"])
 
         assert code == 0
