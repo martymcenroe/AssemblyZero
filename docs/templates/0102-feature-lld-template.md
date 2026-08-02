@@ -336,11 +336,15 @@ poetry run pytest tests/test_{module}.py -v -m live
 
 ## 11. Risks & Mitigations
 
+**This section is MANDATORY and mechanically checked. If `## 11` is missing, the LLD is BLOCKED.**
+
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | {Risk description} | High/Med/Low | High/Med/Low | {How addressed} |
 
 ## 12. Definition of Done
+
+**This section is MANDATORY and mechanically checked. If `## 12` is missing, the LLD is BLOCKED.**
 
 ### Code
 - [ ] Implementation complete and linted
