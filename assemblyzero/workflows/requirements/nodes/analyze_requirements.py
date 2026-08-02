@@ -180,4 +180,21 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
 
     message = _format_conflict_message(conflicts)
     print(f"  [N0c] {message}")
+
+    # #2072: the finding used to go to a run log and nowhere else, and N0c is
+    # LLM-judged, so a lenient redraw could pass the same text minutes later and
+    # roll over an unresolved ambiguity. File it where a human will see it.
+    # Never changes the halt outcome: the roll was already halting, and a filing
+    # failure is loud in the log but returns the same error_message.
+    try:
+        from assemblyzero.speedrun.must_resolve import file_all_conflicts
+
+        file_all_conflicts(
+            state.get("target_repo") or ".",
+            int(state.get("issue_number") or 0),
+            conflicts,
+        )
+    except Exception as exc:  # noqa: BLE001 - filing must never mask the halt
+        print(f"  [N0c] WARNING: must-resolve filing failed ({exc}); halting anyway.")
+
     return {"error_message": message}
