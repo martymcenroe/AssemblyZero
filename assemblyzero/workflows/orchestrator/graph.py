@@ -11,6 +11,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from assemblyzero.core.retry_mode import RESUMED, retry_mode_for
 from assemblyzero.utils.git import (
     GitBranchError,
     current_branch,
@@ -140,8 +141,23 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
             )
             # Update attempt count in result
             stage_result["attempts"] = attempt
+
+            # #1941: decide whether the NEXT attempt may reuse this one's
+            # artifacts. Replaying a deterministic failure against the same
+            # worktree reproduces it exactly -- run11b's attempt 2 logged
+            # "Skipped (already exists)" for every file and returned the
+            # identical outcome. Recorded on the result so the stage table
+            # says which happened without anyone reading transcripts.
+            mode = retry_mode_for(stage_result)
+            stage_result["retry_mode"] = mode
+            print(
+                f"[ORCHESTRATOR] Next attempt will be {mode.lower()} "
+                f"({'reusing' if mode == RESUMED else 'discarding'} "
+                f"the previous attempt's generated files)."
+            )
             time.sleep(delay)
-            last_state = new_state
+            last_state = dict(new_state)
+            last_state["retry_mode"] = mode
         else:
             if not transient:
                 print(

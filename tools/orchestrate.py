@@ -88,13 +88,22 @@ def format_error_message(stage: str, stage_result: StageResult) -> str:
     minutes = int(duration // 60)
     seconds = int(duration % 60)
 
+    # #1941: a replayed attempt must be legible as such without reading
+    # transcripts. Diagnosing run11b -- where attempt 2 resumed attempt 1's
+    # artifacts verbatim and reproduced its outcome exactly -- required exactly
+    # that archaeology.
+    retry_mode = stage_result.get("retry_mode", "")
+    attempts_line = f"  Attempts: {attempts} | Duration: {minutes}m {seconds}s"
+    if attempts > 1 and retry_mode:
+        attempts_line += f" | Retries: {retry_mode}"
+
     lines = [
         "",
         "=" * 58,
         f"  ORCHESTRATION FAILED at stage: {stage}",
         "=" * 58,
         f"  Error: {error}",
-        f"  Attempts: {attempts} | Duration: {minutes}m {seconds}s",
+        attempts_line,
         "",
         f"  Resume: orchestrate --issue N --resume-from {stage}",
         "=" * 58,
