@@ -8,7 +8,6 @@ import json
 import logging
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.requirements.audit import (
     LLD_STATUS_CACHE_VERSION,
