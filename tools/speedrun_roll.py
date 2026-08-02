@@ -65,6 +65,10 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.speedrun.must_resolve import (  # noqa: E402
+    RUN_START_ENV,
+    RUN_TAG_ENV,
+)
 from assemblyzero.speedrun.worktrees import (  # noqa: E402
     sweep_pipeline_worktrees,
 )
@@ -391,6 +395,7 @@ def roll_issue(
     repo_root: Path, issue: int, log_dir: Path, az_root: Path, extra: list[str]
 ) -> int:
     tag = f"run-issue{issue}-{datetime.now().strftime('%H%M%S')}"
+    run_start = _stamp()
     log = EventLog(log_dir / f"{tag}-events.log")
     heartbeat_path = log_dir / f"{tag}-heartbeat.log"
     out_path = log_dir / f"{tag}.log"
@@ -419,7 +424,7 @@ def roll_issue(
         with out_path.open("w", encoding="utf-8", errors="replace") as fh:
             proc = subprocess.run(
                 cmd, cwd=str(az_root), stdout=fh, stderr=subprocess.STDOUT,
-                env=_child_env(),
+                env=_child_env(tag, run_start),
                 # #2037: no console for the pipeline either. Under Task
                 # Scheduler the parent has none to inherit, so without this the
                 # child allocates its own.
@@ -433,10 +438,18 @@ def roll_issue(
     return proc.returncode
 
 
-def _child_env() -> dict[str, str]:
+def _child_env(tag: str = "", start: str = "") -> dict[str, str]:
     env = dict(os.environ)
     env["CLAUDECODE"] = ""         # nested Claude sessions fail without this
     env["PYTHONUNBUFFERED"] = "1"  # Python buffers stdout when not on a TTY
+    # #2072: only the launcher knows the tag its events/heartbeat/stdout triplet
+    # is named after, and that name is what a human needs to go read the logs.
+    # The workflow's own run id identifies a run within the lineage, which is a
+    # different thing, so this has to be handed down rather than guessed.
+    if tag:
+        env[RUN_TAG_ENV] = tag
+    if start:
+        env[RUN_START_ENV] = start
     return env
 
 
