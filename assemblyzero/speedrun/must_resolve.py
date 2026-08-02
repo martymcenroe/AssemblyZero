@@ -308,6 +308,62 @@ def file_must_resolve(
     return FilingResult(True, "filed", number, fingerprint)
 
 
+def open_must_resolve_issues(
+    repo_root: Path | str, *, runner=_default_runner
+) -> tuple[list[dict], str | None]:
+    """Open must-resolve issues in the target repo (#2073).
+
+    Returns `(issues, error)`. `error` is non-None when GitHub could not be
+    consulted at all -- the caller warns and proceeds in that case. The
+    availability of GitHub must not brick local rolls; the auto-filer is the
+    enforcement backstop.
+    """
+    slug = repo_slug(repo_root, runner=runner)
+    if not slug:
+        return [], f"no GitHub remote for {repo_root}"
+
+    result = runner([
+        "gh", "issue", "list", "--repo", slug,
+        "--label", MUST_RESOLVE_LABEL, "--state", "open",
+        "--limit", "100", "--json", "number,title",
+    ])
+    if result.returncode != 0:
+        return [], (result.stderr or "gh issue list failed").strip()
+    try:
+        rows = json.loads(result.stdout or "[]")
+    except ValueError:
+        return [], "could not read the issue list response"
+    return [
+        {"number": r.get("number"), "title": r.get("title", "")} for r in rows
+    ], None
+
+
+def refusal_message(issues: list[dict]) -> str:
+    """Plain English. No stage names, no internal identifiers, no jargon.
+
+    The operator reads this at a terminal, possibly having just been woken by
+    it, and must be able to act on it without opening any code or document.
+    """
+    count = len(issues)
+    noun = "question" if count == 1 else "questions"
+    lines = [
+        f"BLOCKED: this repository has {count} unanswered {noun} about what its "
+        f"issue text actually asks for.",
+        "",
+    ]
+    for issue in issues:
+        lines.append(f"  #{issue['number']}  {issue['title']}")
+    lines += [
+        "",
+        "  Each was raised because an issue's own wording supports two different",
+        "  readings, and building the wrong one wastes the whole run. Decide which",
+        "  reading is right, edit that issue so only one reading survives, and close",
+        "  the question above. Rolling before then means the outcome is decided by",
+        "  which reading the machine happened to pick.",
+    ]
+    return "\n".join(lines)
+
+
 def _issue_number_from_url(url: str) -> int | None:
     tail = url.rstrip("/").rsplit("/", 1)[-1]
     return int(tail) if tail.isdigit() else None

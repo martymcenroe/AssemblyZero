@@ -68,6 +68,8 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     RUN_START_ENV,
     RUN_TAG_ENV,
+    open_must_resolve_issues,
+    refusal_message,
 )
 from assemblyzero.speedrun.worktrees import (  # noqa: E402
     sweep_pipeline_worktrees,
@@ -948,6 +950,19 @@ def main(argv: list[str] | None = None) -> int:
             "at a tree that is)\n  before rolling. A roll that runs stale "
             "pipeline code fails in ways that look\n  like target-repo problems."
         )
+        return 91
+
+    # #2073: refuse while the target repo has unanswered questions about what
+    # its issue text asks for. Checked ONCE per invocation, here rather than per
+    # redraw, and before the detach hand-off -- so nothing is spent, no branch
+    # is created, and a batch is refused as a whole rather than partly rolled.
+    blocking, gh_error = open_must_resolve_issues(repo_root)
+    if gh_error:
+        # Offline is not a reason to brick a local roll; the auto-filer (#2072)
+        # is the enforcement backstop.
+        print(f"WARNING: could not check for unresolved questions ({gh_error}); proceeding.")
+    elif blocking:
+        print(refusal_message(blocking))
         return 91
 
     if args.detach:
