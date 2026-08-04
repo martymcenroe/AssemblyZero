@@ -447,6 +447,17 @@
 
 ---
 
+### 2026-08-04
+
+---
+
+**18:37** — *On Om discovering the medals were real*
+> "If you can't learn to ride, you can at least learn to fall."
+
+**Context:** The day after Palaestra's first outside audience, fourteen improvements shipped and deployed in one autonomous run: a colleague's 403 at the door hunted through the worker logs to a stale open tab, the battery's round-trip toll written plainly on a physics page after [The Great God Om](The-Great-God-Om) himself asked why 50 megawatts stored only 45, and the settlement screen taught to offer the next pull — bronze quoted in the player's own dollars. Om returned from play delighted: "I LOVE the achievements! What a delightful surprise!" The reply, in Granny Weatherwax's voice: the board cannot flatter, because every star is a measured distance from a certified optimum the engine verified to the penny — and the settlement now tells you precisely how far you fell, and how close the next medal stands. Honest medals are the only kind worth striking; learning through play, with denominators.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
