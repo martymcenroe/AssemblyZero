@@ -458,6 +458,15 @@
 
 ---
 
+**22:51** — *On the eve of the first brigades' departure*
+> "Why do you go away? So that you can come back. So that you can see the place you came from with new eyes and extra colours."
+
+*— Terry Pratchett, A Hat Full of Sky*
+
+**Context:** The night before SC-5's August meeting, [The Great God Om](The-Great-God-Om) outfitted the whole expedition season in one sitting: The SC-5 Outfit Survey, twelve candidate voyages each asking who joins the patrol, who would lead, and when they would launch, was built through the Apps Script pipeline, verified live, and announced to the committee; the agenda mailed; the September session on data centers anchored with its lead's chair standing visibly, deliberately empty. The two-year working model runs on the fur-trade rhythm of Montreal itself: confluence, portage, dispatches from the field, and SC-5 as the return post where every voyage reports back. Asked why anyone would keep leaving, Tiffany Aching's teachers had already answered: the going away is how the coming back gets its colours.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
