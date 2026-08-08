@@ -56,7 +56,7 @@ build-backend = "poetry.core.masonry.api"
 dev = [
     "pytest (>=9.0.3,<10.0.0)",
     "mypy (>=1.0.0,<2.0.0)",
-    "pytest-cov (>=7.0.0,<8.0.0)"
+    "pytest-cov (>=7.1.0,<8.0.0)"
 ]
 
 [tool.coverage.run]
