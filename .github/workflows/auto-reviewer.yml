@@ -40,8 +40,16 @@ permissions:
 jobs:
   auto-review:
     runs-on: ubuntu-latest
-    # Only run on PRs, not on the PR created by the App itself (prevent loops)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_call'
+    # Only run on PRs, not on the PR created by the App itself (prevent loops).
+    #
+    # Cerberus is the AGENT fence, not the Dependabot enabler (#1251).
+    # On an agent PR the author is the repo owner, so GitHub's no-self-approval
+    # rule leaves no eligible reviewer and one has to be manufactured -- that is
+    # what this workflow is for. On a Dependabot PR the author is Dependabot, so
+    # the owner already IS an eligible third-party reviewer and there is nothing
+    # at that gate to guard. Dependabot gets its own lane: tools/dependabot_review.py
+    # runs the suite and approves as the owner.
+    if: (github.event_name == 'pull_request' || github.event_name == 'workflow_call') && github.event.pull_request.user.login != 'dependabot[bot]'
     steps:
       - name: Generate App token
         id: app-token
