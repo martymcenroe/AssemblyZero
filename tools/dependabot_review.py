@@ -536,6 +536,24 @@ def checkout_pr_into_worktree(worktree: Path, pr_number: int, repo: str) -> bool
     return result.returncode == 0
 
 
+# #2126: the audit venv is destroyed and rebuilt from scratch for every PR
+# (evict_poetry_venv, below), so every locked binary dependency must have a
+# wheel for whichever interpreter poetry resolves. On this machine poetry
+# resolves Python 3.14, the lock pins numpy 2.2.6 (which publishes no cp314
+# wheel), pip falls back to a source build, and the build fails for want of a
+# C compiler -- for EVERY PR, including a no-change baseline checkout of main.
+#
+# CI never hits this because it restores a cached .venv keyed on poetry.lock
+# with a `venv-${{ runner.os }}-` restore-key fallback, so it installs only the
+# delta and never rebuilds numpy. That makes CI green and the local gate red
+# for the same commit, which is what made this look like a per-PR problem for
+# five days.
+#
+# When set, the audit venv is pinned to this interpreter before install.
+# Unset means "whatever poetry picks", i.e. the previous behaviour.
+AUDIT_PYTHON: str | None = os.environ.get("DEPENDABOT_AUDIT_PYTHON") or None
+
+
 def evict_poetry_venv(worktree: Path) -> None:
     """Fix 5 / #944 — evict poetry-cached venv to release Windows file locks."""
     if not (worktree / "pyproject.toml").exists():
@@ -604,6 +622,15 @@ def install_deps(worktree: Path) -> bool:
     pyproject = worktree / "pyproject.toml"
     if not pyproject.exists():
         return True  # Not a poetry project
+    # #2126: pin the interpreter before poetry creates the venv, so a locked
+    # binary dependency without a wheel for the default interpreter cannot
+    # turn every audit into a source build. Failure here is reported as an
+    # install failure, which it is -- there is no venv to install into.
+    if AUDIT_PYTHON:
+        env_result = run(["poetry", "env", "use", AUDIT_PYTHON],
+                         cwd=str(worktree), env=_clean_subprocess_env())
+        if env_result.returncode != 0:
+            return False
     cmd = ["poetry", "install", "--no-root"]
     if _has_dev_group(pyproject):
         cmd.extend(["--with", "dev"])
@@ -1941,7 +1968,22 @@ def main() -> None:
             "(manual drains previously left no record). Pass this to skip."
         ),
     )
+    parser.add_argument(
+        "--audit-python", default=None, metavar="PATH",
+        help=(
+            "#2126: interpreter to build the audit venv with. The venv is "
+            "rebuilt from scratch per PR, so a locked binary dependency with "
+            "no wheel for the default interpreter makes every audit a source "
+            "build -- and fail, for every PR, including an unchanged baseline. "
+            "Overrides DEPENDABOT_AUDIT_PYTHON. Unset means whatever poetry "
+            "picks."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.audit_python:
+        global AUDIT_PYTHON
+        AUDIT_PYTHON = args.audit_python
 
     # #1876: UTF-8 the streams BEFORE _Tee wraps them, so both the
     # terminal and the run log can carry subprocess output verbatim.

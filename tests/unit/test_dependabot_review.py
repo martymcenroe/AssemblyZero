@@ -1087,3 +1087,87 @@ class TestBaselineGateSurvivesAMissingWorktree:
     def test_a_red_gate_is_never_exonerated_by_an_unknown_baseline(self):
         """(0, "") must not read as a green baseline that clears the bump."""
         assert not dependabot_review.is_exonerated_by_baseline({"test_a"}, set())
+
+
+# ---- #2126: audit venv interpreter pinning ----
+#
+# The audit venv is destroyed and rebuilt per PR, so a locked binary dependency
+# with no wheel for the default interpreter turns every audit into a source
+# build. On this machine that made `poetry install` fail for EVERY PR, including
+# an unchanged baseline, and the tool reported it as a per-PR deferral.
+
+def _pyproject_at(tmp_path, with_dev: bool = False):
+    wt = tmp_path / "wt"
+    wt.mkdir(parents=True, exist_ok=True)
+    body = '[project]\nname = "x"\nversion = "0"\n'
+    if with_dev:
+        body += '\n[dependency-groups]\ndev = ["pytest"]\n'
+    (wt / "pyproject.toml").write_text(body)
+    return wt
+
+
+def test_audit_python_pins_the_interpreter_before_install(tmp_path):
+    """`poetry env use <python>` must run BEFORE `poetry install`.
+
+    Ordering is the whole point: poetry creates the venv on first use, so
+    pinning after install would pin a venv that was already built with the
+    wrong interpreter.
+    """
+    wt = _pyproject_at(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return _mk_completed(0)
+
+    with patch.object(dependabot_review, "run", side_effect=fake_run), \
+         patch.object(dependabot_review, "AUDIT_PYTHON", r"C:\Python313\python.exe"):
+        assert dependabot_review.install_deps(wt) is True
+
+    env_use = [c for c in calls if c[:3] == ["poetry", "env", "use"]]
+    install = [c for c in calls if c[:2] == ["poetry", "install"]]
+    assert env_use, f"expected a `poetry env use` call, got {calls}"
+    assert env_use[0][3] == r"C:\Python313\python.exe"
+    assert install, f"expected a `poetry install` call, got {calls}"
+    assert calls.index(env_use[0]) < calls.index(install[0]), \
+        "interpreter must be pinned before the venv is created"
+
+
+def test_no_audit_python_leaves_interpreter_selection_alone(tmp_path):
+    """Unset must preserve the previous behaviour exactly -- no `env use`."""
+    wt = _pyproject_at(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return _mk_completed(0)
+
+    with patch.object(dependabot_review, "run", side_effect=fake_run), \
+         patch.object(dependabot_review, "AUDIT_PYTHON", None):
+        assert dependabot_review.install_deps(wt) is True
+
+    assert not [c for c in calls if c[:3] == ["poetry", "env", "use"]]
+
+
+def test_unusable_audit_python_fails_install_rather_than_installing_elsewhere(tmp_path):
+    """A bad interpreter must fail, not silently fall through to the default.
+
+    Falling through would rebuild the venv with the very interpreter the pin
+    exists to avoid, and the audit would fail again with an unrelated-looking
+    build error.
+    """
+    wt = _pyproject_at(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:3] == ["poetry", "env", "use"]:
+            return _mk_completed(1, stderr="no such python")
+        return _mk_completed(0)
+
+    with patch.object(dependabot_review, "run", side_effect=fake_run), \
+         patch.object(dependabot_review, "AUDIT_PYTHON", "/nope/python"):
+        assert dependabot_review.install_deps(wt) is False
+
+    assert not [c for c in calls if c[:2] == ["poetry", "install"]], \
+        "install must not run when the interpreter pin failed"
