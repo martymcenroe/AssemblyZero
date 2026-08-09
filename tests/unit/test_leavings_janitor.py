@@ -50,7 +50,10 @@ def repo(tmp_path: Path) -> Path:
     """A repo with a bare origin, gitignored data/, and origin/HEAD set."""
     origin = tmp_path / "origin.git"
     subprocess.run(
-        ["git", "init", "-q", "--bare", str(origin)],
+        # --initial-branch pins the bare repo's HEAD to main on every
+        # machine; without it a runner with no init.defaultBranch creates
+        # HEAD -> master and `remote set-head --auto` cannot resolve.
+        ["git", "init", "-q", "--bare", "--initial-branch=main", str(origin)],
         capture_output=True, text=True, check=True,
     )
     root = tmp_path / "proj"
