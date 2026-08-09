@@ -242,6 +242,59 @@ class TestFollowLoop:
         assert code == 0
         assert "All 1 issue(s) rolled." in capsys.readouterr().out
 
+    def test_the_roll_log_streams_alongside_the_narration(self, tmp_path, capsys):
+        """#2158: the NODE lines land in the per-roll stdout log; the
+        follower merges it so the operator sees the graph position live.
+        Content present at attach is history and stays out."""
+        runs = self._runs(tmp_path)
+        (runs / "detached-launcher.log").write_bytes(b"")
+        roll = runs / "run-issue1-101010.log"
+        roll.write_bytes(b"old history\n")
+
+        def _flip():
+            with roll.open("ab") as fh:
+                fh.write(b"NODE [3/11] requirements consistency gate\n")
+            return "Ready"
+
+        statuses = iter([lambda: "Running", _flip])
+        with patch.object(sr, "_task_status", lambda: next(statuses)()), \
+                patch.object(sr, "_task_last_result", lambda: 0), \
+                patch.object(sr.time, "sleep", lambda s: None):
+            sr.follow_roll(runs)
+
+        out = capsys.readouterr().out
+        assert "NODE [3/11]" in out
+        assert "old history" not in out
+
+    def test_a_new_attempts_log_takes_over_and_the_old_tail_drains(
+        self, tmp_path, capsys
+    ):
+        runs = self._runs(tmp_path)
+        (runs / "detached-launcher.log").write_bytes(b"")
+        first = runs / "run-issue1-101010.log"
+        first.write_bytes(b"")
+
+        def _second_attempt():
+            with first.open("ab") as fh:
+                fh.write(b"attempt 1 tail\n")
+            second = runs / "run-issue1-202020.log"
+            second.write_bytes(b"attempt 2 begins\n")
+            # Same-tick writes tie on mtime granularity; the new attempt
+            # must win the newest-file race deterministically.
+            newer = first.stat().st_mtime + 10
+            os.utime(second, (newer, newer))
+            return "Ready"
+
+        statuses = iter([lambda: "Running", _second_attempt])
+        with patch.object(sr, "_task_status", lambda: next(statuses)()), \
+                patch.object(sr, "_task_last_result", lambda: 0), \
+                patch.object(sr.time, "sleep", lambda s: None):
+            sr.follow_roll(runs)
+
+        out = capsys.readouterr().out
+        assert "attempt 1 tail" in out
+        assert "attempt 2 begins" in out
+
     def test_reattach_to_nothing_says_so_immediately(self, tmp_path, capsys):
         runs = self._runs(tmp_path)
         with patch.object(sr, "_task_status", lambda: "Ready"), \

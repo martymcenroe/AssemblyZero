@@ -817,6 +817,22 @@ def _task_last_result() -> int | None:
     return code if 0 <= code < 256 else 1
 
 
+def _roll_log_candidates(log_dir: Path) -> list[Path]:
+    return [
+        p for p in log_dir.glob("run-*.log")
+        if not p.name.endswith("-events.log")
+        and not p.name.endswith("-heartbeat.log")
+    ]
+
+
+def _newest_roll_log(log_dir: Path) -> Path | None:
+    """The active attempt's stdout log, where the NODE lines land (#2158)."""
+    candidates = _roll_log_candidates(log_dir)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def _newest_heartbeat(log_dir: Path) -> str:
     """`<file>: <last line>` for the freshest heartbeat, or "" without one."""
     beats = sorted(
@@ -857,6 +873,36 @@ def follow_roll(
     if narration.exists():
         pos = max(0, narration.stat().st_size - context_bytes)
 
+    # #2158: the per-roll stdout (stage tables, NODE position lines) streams
+    # too. History present at attach is skipped; a fresh attempt's log starts
+    # from byte zero; when the attempt changes, the old log's tail drains
+    # before the new one takes over.
+    roll_positions = {
+        p.name: p.stat().st_size for p in _roll_log_candidates(log_dir)
+    }
+    current_roll: str | None = None
+
+    def _drain_roll_log() -> bool:
+        nonlocal current_roll
+        newest = _newest_roll_log(log_dir)
+        if newest is None:
+            return False
+        printed = False
+        if current_roll and current_roll != newest.name:
+            old = log_dir / current_roll
+            old_pos, tail = _drain(old, roll_positions.get(current_roll, 0))
+            roll_positions[current_roll] = old_pos
+            if tail:
+                print(tail, end="", flush=True)
+                printed = True
+        current_roll = newest.name
+        new_pos, chunk = _drain(newest, roll_positions.get(newest.name, 0))
+        roll_positions[newest.name] = new_pos
+        if chunk:
+            print(chunk, end="", flush=True)
+            printed = True
+        return printed
+
     seen_running = False
     unknown_streak = 0
     start_deadline = time.time() + _START_GRACE_SECONDS
@@ -866,6 +912,8 @@ def follow_roll(
             pos, chunk = _drain(narration, pos)
             if chunk:
                 print(chunk, end="", flush=True)
+                last_line_at = time.time()
+            if _drain_roll_log():
                 last_line_at = time.time()
 
             status = _task_status()
@@ -890,6 +938,9 @@ def follow_roll(
                 pos, chunk = _drain(narration, pos)
                 if chunk:
                     print(chunk, end="", flush=True)
+                # #2158: the roll's final stdout lines land between the last
+                # drain and the status flip, same race as the narration's.
+                _drain_roll_log()
                 if seen_running or wait_for_start:
                     code = _task_last_result() or 0
                     # #2165: the word, not just the number. The full verdict
