@@ -927,7 +927,7 @@ class _NarrationView:
     def __init__(self, level: str) -> None:
         self.level = level
         self._partial: dict[str, str] = {}
-        self._teach = _teach_map() if level == "tutorial" else {}
+        self._teach = _teach_map() if level in ("tutorial", "quiz") else {}
 
     def _annotate(self, line: str) -> list[str]:
         """Tutorial mode: the atlas teach text under a NODE line, an event
@@ -965,14 +965,14 @@ class _NarrationView:
         lines = buf.split("\n")
         self._partial[stream] = lines.pop()
         kept = [line for line in lines if _is_terse_line(line)]
-        if self.level == "tutorial":
+        if self.level in ("tutorial", "quiz"):
             kept = [a for line in kept for a in self._annotate(line)]
         return "".join(line + "\n" for line in kept)
 
     def toggle(self) -> str:
         # Tutorial drops to terse first (annotations off), then verbose,
         # then back to terse -- tutorial is an attach-time choice.
-        self.level = "terse" if self.level in ("verbose", "tutorial") else "verbose"
+        self.level = "terse" if self.level in ("verbose", "tutorial", "quiz") else "verbose"
         # Stale partials must not replay across a mode switch.
         self._partial.clear()
         return self.level
@@ -996,6 +996,153 @@ def _poll_view_keys(view: _NarrationView) -> None:
         pass
 
 
+# =============================================================================
+# Quiz mode -- the live roll as exam material (#2161). The display pauses;
+# the roll never does, and the logs ARE the buffer: while a question holds
+# the screen, nothing drains, and the normal loop catches up on release.
+# =============================================================================
+
+
+def _quiz_bank() -> dict:
+    """{total_steps: atlas} for every workflow, or {} when unimportable."""
+    try:
+        from assemblyzero.workflows.implementation_spec.atlas import (
+            ATLAS as SPEC_ATLAS, TOTAL_STEPS as SPEC_TOTAL,
+        )
+        from assemblyzero.workflows.requirements.atlas import (
+            ATLAS as REQ_ATLAS, TOTAL_STEPS as REQ_TOTAL,
+        )
+        return {REQ_TOTAL: REQ_ATLAS, SPEC_TOTAL: SPEC_ATLAS}
+    except Exception:  # noqa: BLE001 - the quiz never costs the view
+        return {}
+
+
+class _QuizMaster:
+    """Questions generated from the atlas, never hand-maintained (#2161).
+
+    The correct option is a REAL successor of the current node; distractors
+    are real node titles from the same workflow that are NOT successors, so
+    the atlas drift guard keeps the exam honest for free. A seed makes the
+    draw stable under test.
+    """
+
+    def __init__(self, seed: int | None = None) -> None:
+        import random
+
+        self._rng = random.Random(seed)
+        self._bank = _quiz_bank()
+        self.asked = 0
+        self.correct = 0
+
+    def question_from_output(self, out: str) -> dict | None:
+        match = None
+        for m in _NODE_LINE.finditer(out):
+            match = m  # the LAST node line in the drained chunk
+        if match is None or not match.group(2):
+            return None
+        return self.build(int(match.group(2)), match.group(3))
+
+    def build(self, total: int, title: str) -> dict | None:
+        atlas = self._bank.get(total)
+        if not atlas:
+            return None
+        entry = next(
+            (e for e in atlas.values() if e["title"] == title), None
+        )
+        if entry is None:
+            return None
+        successors = {
+            atlas[s]["title"] for s in entry["successors"] if s in atlas
+        }
+        non_successors = [
+            e["title"] for e in atlas.values()
+            if e["title"] not in successors and e["title"] != title
+        ]
+        if not successors or len(non_successors) < 3:
+            return None
+        answer_title = self._rng.choice(sorted(successors))
+        options = [answer_title] + self._rng.sample(sorted(non_successors), 3)
+        self._rng.shuffle(options)
+        letters = "abcd"
+        answer = letters[options.index(answer_title)]
+        return {
+            "prompt": (
+                f"QUIZ: '{title}' is running. Which of these can the run "
+                "enter NEXT?"
+            ),
+            "options": list(zip(letters, options)),
+            "answer": answer,
+            "teach": entry["teach"],
+        }
+
+    def grade(self, question: dict, key: str | None) -> None:
+        if key is None or key == "skip":
+            print("  (skipped)\n", flush=True)
+            return
+        self.asked += 1
+        if key == question["answer"]:
+            self.correct += 1
+            print("  Correct.", flush=True)
+        else:
+            print(f"  The answer was ({question['answer']}).", flush=True)
+        for line in question["teach"].split(". "):
+            if line.strip():
+                print(f"  | {line.strip().rstrip('.')}.", flush=True)
+        print(flush=True)
+
+    def tally(self) -> str:
+        if not self.asked:
+            return "Quiz: no questions answered."
+        return f"Quiz: {self.correct}/{self.asked} correct."
+
+
+def _read_quiz_key() -> str | None:
+    """One quiz keypress if pending: a-d, Enter=skip, q=drop to tutorial."""
+    try:
+        import msvcrt
+    except ImportError:  # pragma: no cover - non-Windows
+        return None
+    if not msvcrt.kbhit():
+        return None
+    ch = msvcrt.getwch()
+    if ch in "abcdABCD":
+        return ch.lower()
+    if ch in ("\r", "\n"):
+        return "skip"
+    if ch in ("q", "Q"):
+        return "q"
+    return None
+
+
+def _quiz_hold(question: dict, *, status_fn, beat_fn) -> str | None:
+    """Show the question and hold the DISPLAY until answered.
+
+    The roll never pauses -- the logs buffer everything while the screen
+    waits. A liveness ticker renders during long holds so a question can
+    never mask a dead roll, and a roll that finishes releases the hold.
+    """
+    print(f"\n  {question['prompt']}", flush=True)
+    for letter, text in question["options"]:
+        print(f"    {letter}) {text}", flush=True)
+    print("  [a-d, Enter to skip, q for tutorial mode]", flush=True)
+
+    last_tick = time.time()
+    while True:
+        key = _read_quiz_key()
+        if key is not None:
+            return key
+        status = status_fn()
+        if status and status != "Running":
+            print("  (the roll finished; releasing the question)", flush=True)
+            return None
+        if time.time() - last_tick >= 30:
+            beat = beat_fn()
+            if beat:
+                print(f"  ... roll alive while you think ({beat})", flush=True)
+            last_tick = time.time()
+        time.sleep(0.2)
+
+
 def follow_roll(
     log_dir: Path, *, context_bytes: int = 0, wait_for_start: bool = True,
     level: str = "verbose",
@@ -1015,6 +1162,7 @@ def follow_roll(
     """
     narration = log_dir / "detached-launcher.log"
     view = _NarrationView(level)
+    quiz = _QuizMaster() if level == "quiz" else None
     print(
         "Following the roll. Ctrl+C stops WATCHING only -- the roll keeps "
         f"running. Narration level: {level} (press v to toggle).\n",
@@ -1068,6 +1216,23 @@ def follow_roll(
             out = view.feed("roll", chunk)
             if out:
                 print(out, end="", flush=True)
+                # #2161: a NODE transition in quiz mode holds the DISPLAY
+                # for a question. The roll never pauses; the logs buffer.
+                if quiz is not None and view.level == "quiz":
+                    question = quiz.question_from_output(out)
+                    if question:
+                        key = _quiz_hold(
+                            question,
+                            status_fn=_task_status,
+                            beat_fn=lambda: _newest_heartbeat(log_dir),
+                        )
+                        if key == "q":
+                            view.level = "tutorial"
+                            print("[view] narration level: tutorial",
+                                  flush=True)
+                            quiz.grade(question, "skip")
+                        else:
+                            quiz.grade(question, key)
         return printed
 
     seen_running = False
@@ -1121,6 +1286,8 @@ def follow_roll(
                     # #2165: the word, not just the number. The full verdict
                     # block streams above this from the narration; this line
                     # is the follower's own sign-off.
+                    if quiz is not None:
+                        print(f"\n{quiz.tally()}", flush=True)
                     word = "SUCCEEDED" if code == 0 else "FAILED"
                     print(
                         f"\nThe roll is done: {word} "
@@ -1580,7 +1747,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--narration", choices=("terse", "verbose", "tutorial"),
+        "--narration", choices=("terse", "verbose", "tutorial", "quiz"),
         default="verbose",
         help=(
             "Starting view level while following (#2159/#2160): terse shows "
