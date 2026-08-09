@@ -29,6 +29,13 @@ run must not tighten the threshold onto a machine that cannot meet it again, and
 one slow run must not loosen it forever. The median over a small window tracks
 the machine.
 
+**A slow first run earns a retry, not a refusal (#2141).** The canary times a
+whole fresh interpreter launch, so the first run after days away pays cold
+disk caches and AV rescans -- a one-time startup toll indistinguishable from
+load in a single sample, and unlearnable by a nominal fed only passing (warm)
+runs. Cold is paid once; load is not: a second run fast means healthy, a
+second run slow means degraded. Only warm samples feed the nominal.
+
 **psutil is read directly here.** An earlier phrasing of this work said to
 dogfood the boostgauge collector; that is not buildable today -- the collector
 exists only on integration branches, is absent from boostgauge main, and is not
@@ -202,10 +209,13 @@ def _format_message(failures: list[Metric]) -> str:
         if metric.value is None:
             lines.append(f"  {metric.name}: {metric.detail}")
         elif metric.nominal is not None:
-            lines.append(
+            line = (
                 f"  {metric.name}: {metric.value:.1f}{metric.unit} measured, "
                 f"against a normal of {metric.nominal:.1f}{metric.unit}"
             )
+            if metric.detail:
+                line += f" ({metric.detail})"
+            lines.append(line)
         else:
             lines.append(f"  {metric.name}: {metric.value:.1f}{metric.unit} — {metric.detail}")
     lines += [
@@ -263,13 +273,33 @@ def check_box_health(
         return BoxHealth(False, metrics, _format_message([metrics[-1]]))
 
     if nominal is not None and seconds > multiplier * nominal:
-        metrics.append(
-            Metric(
-                "quick self-check", seconds, nominal=nominal, unit="s", ok=False,
-                detail=f"more than {multiplier} times its normal time",
+        # #2141: cold is paid once; load is not. The canary times a whole
+        # fresh interpreter launch, so the first run after days away pays
+        # disk-cache misses and AV rescans that look exactly like a sick
+        # machine -- and since only passing samples feed the nominal, the
+        # median is warm-only and a cold start can NEVER pass it. One retry
+        # discriminates: a cold box is fast the second time, a degraded one
+        # (the 2026-07-29 incident) is slow both times. Measured live
+        # 2026-08-09: idle machine, 5.8s against a 0.9s nominal, refused.
+        first = seconds
+        seconds, problem = canary(az_root, ceiling=ceiling)
+        if seconds is None:
+            metrics.append(Metric("quick self-check", None, ok=False, detail=problem))
+            return BoxHealth(False, metrics, _format_message([metrics[-1]]))
+        if seconds > multiplier * nominal:
+            metrics.append(
+                Metric(
+                    "quick self-check", seconds, nominal=nominal, unit="s", ok=False,
+                    detail=(
+                        f"slow twice in a row ({first:.1f}s, then {seconds:.1f}s "
+                        "on a retry that rules out a cold start)"
+                    ),
+                )
             )
-        )
-        return BoxHealth(False, metrics, _format_message([metrics[-1]]))
+            return BoxHealth(False, metrics, _format_message([metrics[-1]]))
+        # The retry passed: the slowness was startup cost, not load. Fall
+        # through with the WARM measurement -- the nominal must keep tracking
+        # warm behavior, which is what the comparison above assumes.
 
     # Passing: record the sample so the nominal tracks the machine. A missing
     # baseline is created here and never blocks.
