@@ -613,7 +613,7 @@ def install_deps(worktree: Path) -> bool:
     has no dev group for a tool-level reason unrelated to the dep upgrade.
 
     `--no-root` skips installing the project itself, only its dependencies.
-    Required for decorative-deps repos like dependabot-honeypot that have
+    Required for decorative-deps fixture repos that have
     no src/ directory -- without --no-root, every fleet sweep on such a
     PR errors with "No file/folder found for package <name>". The fleet
     sweep tests dep upgrades, not the project's own code, so installing
@@ -788,7 +788,7 @@ def run_js_gate(worktree: Path, js_dirs: list[str],
     installability from package.json, and no untracked lockfile is
     generated). Then `npm test`, gated on exit code. A directory with no
     runnable test script fails the gate -- do not auto-merge unverified
-    (martymcenroe/dependabot-honeypot#171 point 4). node_modules is
+    (the private fixture repo's issue #171, point 4). node_modules is
     removed on every exit path so worktree cleanup stays force-free.
 
     Returns (ok, desc); desc goes verbatim into the review body.

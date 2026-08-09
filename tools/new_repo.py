@@ -3393,7 +3393,7 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
                     # Private repos default to Dependabot DISABLED at the
                     # repo settings level. Without this step, .github/
                     # dependabot.yml is inert -- no PRs emit, wedge starves.
-                    # Confirmed defect 2026-05-26 on dependabot-honeypot.
+                    # Confirmed defect 2026-05-26 on a private fixture repo.
                     print("\n20. Enabling Dependabot (security updates, alerts, "
                           "automated fixes)...")
                     db_result = enable_dependabot_for_repo(

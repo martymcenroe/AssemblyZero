@@ -58,7 +58,7 @@ def universal_lines(universal_text: str) -> list[str]:
 _FLEET_REPO_PREFIXES = (
     "AssemblyZero", "sentinel", "Aletheia", "Clio", "dispatch",
     "patent-general", "boostgauge", "automation-scripts",
-    "Chiron", "Heuriskon", "dependabot-honeypot",
+    "Chiron", "Heuriskon",
 )
 RE_RELATIVE_PATH = re.compile(
     r"`((?:" + "|".join(_FLEET_REPO_PREFIXES) + r")/[A-Za-z0-9_/.\-]+\.[a-z]{2,5})`"
