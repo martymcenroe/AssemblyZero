@@ -184,3 +184,33 @@ class TestLauncherHooks:
         storms = [h for h in read_heals(repo) if h["category"] == "storm-backoff"]
         assert storms and storms[0]["target"] == "#7"
         assert "waited" in storms[0]["detail"]
+
+
+class TestEvidenceExemption:
+    def test_the_ledger_is_never_classified_as_dirt(self, tmp_path):
+        """#2164's CI catch: in a repo that does not gitignore data/, the
+        ledger itself blocked the branch-cutter. Evidence is exempt from
+        classification structurally, not by convention."""
+        import subprocess as sp
+
+        from assemblyzero.speedrun.leavings import classify_dirt, untracked_files
+
+        repo = tmp_path / "proj"
+        repo.mkdir()
+        for args in (["init", "-q", "-b", "main"],
+                     ["config", "user.email", "t@t"],
+                     ["config", "user.name", "t"]):
+            sp.run(["git", "-C", str(repo), *args], check=True,
+                   capture_output=True)
+        (repo / "README.md").write_text("x\n", encoding="utf-8")
+        sp.run(["git", "-C", str(repo), "add", "."], check=True,
+               capture_output=True)
+        sp.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True,
+               capture_output=True)
+        # No .gitignore at all: the ledger would be visible dirt without
+        # the structural exemption.
+        record_heal(repo, "reset", "#4", "partial", detail="x")
+
+        machinery, operator = classify_dirt(repo)
+        assert machinery == [] and operator == []
+        assert untracked_files(repo) == []
