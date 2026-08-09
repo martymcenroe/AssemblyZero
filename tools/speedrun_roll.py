@@ -846,8 +846,67 @@ def _newest_heartbeat(log_dir: Path) -> str:
     return f"{beats[-1].name}: {lines[-1]}" if lines else ""
 
 
+# #2159: the roll emits everything once; verbosity is a property of the VIEW.
+# Terse keeps the lines an operator acts on; verbose is the full stream. The
+# filter is line-buffered because a drain can end mid-line.
+_TERSE_MARKERS = (
+    "NODE ", "NEXT ", "BASE", "LAUNCH", "EXIT", "START ", "CHILD EXITED",
+    "STOPPED", "BLOCKED", "STORM", "ROLL ", "RESTORE", "SWEEP", "JANITOR",
+    " attempt ", "OVERRIDE", "Previous run's questions", "must-resolve",
+    "VERIFIED", "UNVERIFIED", "Pipeline failed", "WARNING", "Resume",
+)
+
+
+def _is_terse_line(line: str) -> bool:
+    return any(marker in line for marker in _TERSE_MARKERS)
+
+
+class _NarrationView:
+    """Line-buffered level filter for the follower's streams (#2159)."""
+
+    def __init__(self, level: str) -> None:
+        self.level = level
+        self._partial: dict[str, str] = {}
+
+    def feed(self, stream: str, chunk: str) -> str:
+        if not chunk:
+            return ""
+        if self.level == "verbose":
+            return chunk
+        buf = self._partial.get(stream, "") + chunk
+        lines = buf.split("\n")
+        self._partial[stream] = lines.pop()
+        kept = [line for line in lines if _is_terse_line(line)]
+        return "".join(line + "\n" for line in kept)
+
+    def toggle(self) -> str:
+        self.level = "terse" if self.level == "verbose" else "verbose"
+        # Stale partials must not replay across a mode switch.
+        self._partial.clear()
+        return self.level
+
+
+def _poll_view_keys(view: _NarrationView) -> None:
+    """`v` toggles the view level live (#2159). The keypress reaches only the
+    VIEW; nothing here can touch the roll. Windows console only; a harmless
+    no-op everywhere else (following is Windows-gated anyway)."""
+    try:
+        import msvcrt
+    except ImportError:  # pragma: no cover - non-Windows
+        return
+    try:
+        while msvcrt.kbhit():
+            ch = msvcrt.getwch()
+            if ch in ("v", "V"):
+                level = view.toggle()
+                print(f"\n[view] narration level: {level}", flush=True)
+    except Exception:  # noqa: BLE001 - a key poll must never cost the view
+        pass
+
+
 def follow_roll(
-    log_dir: Path, *, context_bytes: int = 0, wait_for_start: bool = True
+    log_dir: Path, *, context_bytes: int = 0, wait_for_start: bool = True,
+    level: str = "verbose",
 ) -> int:
     """Stream the detached roll's narration to THIS console until it finishes.
 
@@ -863,9 +922,10 @@ def follow_roll(
     the grace window.
     """
     narration = log_dir / "detached-launcher.log"
+    view = _NarrationView(level)
     print(
         "Following the roll. Ctrl+C stops WATCHING only -- the roll keeps "
-        "running.\n",
+        f"running. Narration level: {level} (press v to toggle).\n",
         flush=True,
     )
 
@@ -893,14 +953,18 @@ def follow_roll(
             old_pos, tail = _drain(old, roll_positions.get(current_roll, 0))
             roll_positions[current_roll] = old_pos
             if tail:
-                print(tail, end="", flush=True)
                 printed = True
+                out = view.feed("roll", tail)
+                if out:
+                    print(out, end="", flush=True)
         current_roll = newest.name
         new_pos, chunk = _drain(newest, roll_positions.get(newest.name, 0))
         roll_positions[newest.name] = new_pos
         if chunk:
-            print(chunk, end="", flush=True)
             printed = True
+            out = view.feed("roll", chunk)
+            if out:
+                print(out, end="", flush=True)
         return printed
 
     seen_running = False
@@ -909,10 +973,16 @@ def follow_roll(
     last_line_at = time.time()
     try:
         while True:
+            _poll_view_keys(view)
             pos, chunk = _drain(narration, pos)
             if chunk:
-                print(chunk, end="", flush=True)
+                # Liveness tracks RAW arrival: filtered-out detail still
+                # proves the roll is moving, so terse mode does not emit
+                # quiet-notes into an active run.
                 last_line_at = time.time()
+                out = view.feed("narration", chunk)
+                if out:
+                    print(out, end="", flush=True)
             if _drain_roll_log():
                 last_line_at = time.time()
 
@@ -937,7 +1007,9 @@ def follow_roll(
             ):
                 pos, chunk = _drain(narration, pos)
                 if chunk:
-                    print(chunk, end="", flush=True)
+                    out = view.feed("narration", chunk)
+                    if out:
+                        print(out, end="", flush=True)
                 # #2158: the roll's final stdout lines land between the last
                 # drain and the status flip, same race as the narration's.
                 _drain_roll_log()
@@ -1397,6 +1469,14 @@ def main(argv: list[str] | None = None) -> int:
             "narration into this console (#2138). Takes no --issue."
         ),
     )
+    parser.add_argument(
+        "--narration", choices=("terse", "verbose"), default="verbose",
+        help=(
+            "Starting view level while following (#2159): terse shows the "
+            "lines you act on, verbose shows everything. Press v in the "
+            "console to toggle live; the log on disk is always complete."
+        ),
+    )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     args, extra = parser.parse_known_args(argv)
@@ -1437,7 +1517,10 @@ def main(argv: list[str] | None = None) -> int:
         if sys.platform != "win32":
             print(f"ERROR: --follow is Windows-only; this is {sys.platform}")
             return 91
-        return follow_roll(log_dir, context_bytes=2048, wait_for_start=False)
+        return follow_roll(
+            log_dir, context_bytes=2048, wait_for_start=False,
+            level=args.narration,
+        )
 
     if not args.issue:
         print("ERROR: --issue is required (repeatable) unless stopping a roll")
@@ -1492,7 +1575,7 @@ def main(argv: list[str] | None = None) -> int:
             return code
         # Standard 0026: the console the operator launched from is the
         # display. The work is detached; the view is not.
-        return follow_roll(log_dir)
+        return follow_roll(log_dir, level=args.narration)
 
     # Created only by a process that actually rolls, never by the launcher --
     # see launch_detached on why that separation is load-bearing.

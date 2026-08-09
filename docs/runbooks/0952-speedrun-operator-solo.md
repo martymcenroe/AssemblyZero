@@ -47,6 +47,7 @@ than transcribed:
 | `--assemblyzero-root` | checkout that owns `orchestrate.py`. Default: the tool's own repo |
 | `--detach-stop` | stop a detached roll and everything it spawned |
 | `--override-prereqs` | launch even though the previous run's unresolved questions are still open (#2167) — runs anyway once; the next launch re-checks |
+| `--narration` | starting view level, `terse` or `verbose` (#2159). Press `v` in the console to toggle live; the log on disk is always complete |
 
 **Use `--detach`.** A roll started from a session is a descendant of that
 session's shell, and a harness kill of the shell takes the whole tree with it.
