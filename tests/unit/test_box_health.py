@@ -89,6 +89,83 @@ def test_canary_exactly_at_the_multiplier_still_passes(tmp_path):
     assert health.ok, "the threshold is 'more than 3x', not '3x or more'"
 
 
+# --- "a slow first run earns a retry, not a refusal" (#2141) --------------
+
+
+def _canary_sequence(*results):
+    """A canary whose consecutive calls replay `results`, counting calls."""
+    calls = {"n": 0}
+
+    def canary(_az_root, **_kw):
+        result = results[min(calls["n"], len(results) - 1)]
+        calls["n"] += 1
+        return result
+
+    canary.calls = calls
+    return canary
+
+
+def test_a_cold_first_run_passes_when_the_retry_is_fast(tmp_path):
+    """The live 2026-08-09 false positive: idle machine, warm-only nominal,
+    first launch in days pays cold caches and AV rescans once. The retry is
+    warm and must clear the box."""
+    for _ in range(3):
+        record_sample(tmp_path, 2.0)
+
+    health = check_box_health(
+        tmp_path, tmp_path,
+        canary=_canary_sequence((6.5, ""), (2.1, "")),
+        resources=_resources(),
+    )
+
+    assert health.ok, "a cold start is not a sick machine"
+    assert read_samples(tmp_path)[-1] == 2.1, (
+        "the WARM measurement feeds the nominal; recording the cold 6.5 "
+        "would loosen the threshold the retry just defended"
+    )
+
+
+def test_slow_twice_blocks_and_names_both_measurements(tmp_path):
+    for _ in range(3):
+        record_sample(tmp_path, 2.0)
+
+    health = check_box_health(
+        tmp_path, tmp_path,
+        canary=_canary_sequence((6.5, ""), (7.0, "")),
+        resources=_resources(),
+    )
+
+    assert not health.ok
+    assert health.failures[0].value == 7.0
+    assert "6.5" in health.message and "7.0" in health.message
+    assert "cold start" in health.message
+
+
+def test_a_passing_first_run_spends_exactly_one_canary(tmp_path):
+    record_sample(tmp_path, 2.0)
+    canary = _canary_sequence((2.2, ""))
+
+    health = check_box_health(
+        tmp_path, tmp_path, canary=canary, resources=_resources()
+    )
+
+    assert health.ok
+    assert canary.calls["n"] == 1, "the retry is for suspects, not for everyone"
+
+
+def test_a_retry_that_cannot_be_timed_blocks(tmp_path):
+    record_sample(tmp_path, 2.0)
+
+    health = check_box_health(
+        tmp_path, tmp_path,
+        canary=_canary_sequence((6.5, ""), (None, "the quick self-check died")),
+        resources=_resources(),
+    )
+
+    assert not health.ok
+    assert "the quick self-check died" in health.message
+
+
 # --- "canary that never completes aborts at the ceiling" -----------------
 
 
