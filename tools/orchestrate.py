@@ -253,6 +253,16 @@ Examples:
                 print(f"\n[ORCHESTRATOR] {provider_storm.storm_message()}")
                 sys.exit(provider_storm.STORM_EXIT_CODE)
 
+            # #2166: a requirements conflict is not a bad draw -- the ISSUE
+            # needs an operator ruling, so the launcher must stop this issue
+            # (never redraw it) and continue the batch. The code carries the
+            # classification; the marker is our own structured prefix.
+            from assemblyzero.core.exit_codes import (
+                CONFLICT_EXIT_CODE, is_requirements_conflict,
+            )
+            if is_requirements_conflict(result["error_summary"]):
+                sys.exit(CONFLICT_EXIT_CODE)
+
             sys.exit(1)
 
     except ConcurrentOrchestrationError as exc:
