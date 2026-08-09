@@ -83,6 +83,12 @@ from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     open_must_resolve_issues,
     refusal_message,
 )
+from assemblyzero.speedrun.leavings import (  # noqa: E402
+    classify_dirt,
+    is_machinery_owned,
+    preserve_and_clear,
+    untracked_files,
+)
 from assemblyzero.speedrun.worktrees import (  # noqa: E402
     sweep_pipeline_worktrees,
 )
@@ -1001,17 +1007,29 @@ def check_assemblyzero_tree(az_root: Path) -> list[str]:
     return problems
 
 
-def restore_repo(repo_root: Path, issues: list[int], log: EventLog) -> list[str]:
+def restore_repo(
+    repo_root: Path,
+    issues: list[int],
+    log: EventLog,
+    baseline_untracked: set[str] | None = None,
+) -> list[str]:
     """Hand the repo back the way it was borrowed (#2005). Returns failures.
 
     A roll leaves the target checked out on the attempt branch with pipeline
     worktrees registered. Being handed that back is a defect: a run should
     return the repo to the state it took.
 
+    #2145 / standard 0027: `baseline_untracked` is the untracked-file set the
+    roll borrowed. Any NEW untracked file the pipeline emitted is preserved
+    to a graveyard ref and cleared; a new file the machinery cannot prove it
+    made is a restore failure by name, never deleted. "RESTORE verified" may
+    only print when the untracked delta is empty. `data/speedrun/**` is
+    gitignored, so the evidence never appears in the delta at all.
+
     Called from a `finally`, so it runs on success, on failure, and on any
     exception -- including the SignalExit raised by the handlers above. It
-    cannot run under SIGKILL; that gap is covered only by the next invocation's
-    self-heal, and is stated rather than papered over.
+    cannot run under SIGKILL; that gap is covered only by the next
+    invocation's entry janitor, and is stated rather than papered over.
     """
     log.write("RESTORE returning the repo to its default branch")
 
@@ -1049,8 +1067,31 @@ def restore_repo(repo_root: Path, issues: list[int], log: EventLog) -> list[str]
     if tracked:
         failures.append(f"{len(tracked)} tracked modification(s) left behind")
 
+    if baseline_untracked is not None:
+        new = sorted(set(untracked_files(repo_root)) - baseline_untracked)
+        machinery_new = [f for f in new if is_machinery_owned(f)]
+        operator_new = [f for f in new if not is_machinery_owned(f)]
+
+        if machinery_new:
+            janitor = preserve_and_clear(
+                repo_root, machinery_new,
+                log=lambda m: log.write(m.strip()),
+            )
+            failures += [
+                f"pipeline leaving not cleared: {p.describe()}"
+                for p in janitor.problems
+            ]
+        for f in operator_new:
+            # Not the machinery's to touch: a new file it cannot prove it
+            # made is surfaced, never preserved or deleted on its author's
+            # behalf.
+            failures.append(f"new untracked file not made by the pipeline: {f}")
+
     if not failures:
-        log.write(f"RESTORE verified: on '{base}', no pipeline worktrees, clean")
+        log.write(
+            f"RESTORE verified: on '{base}', no pipeline worktrees, clean, "
+            "no new untracked files"
+        )
     return failures
 
 
@@ -1221,6 +1262,29 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - a sweep must never abort a roll
         session.write(f"SWEEP FAILED (continuing): {exc}")
 
+    # #2144 / standard 0027: the entry janitor for FILES. A predecessor that
+    # died uncontrolled may have left pipeline-authored untracked files in the
+    # target repo (run-16's LLD droppings blocked two launches). Preserve them
+    # to a pushed graveyard ref, then clear them -- and like the sweep, a
+    # janitor problem is reported and never costs the roll.
+    session.write("JANITOR pipeline file leavings")
+    try:
+        machinery, _operator = classify_dirt(repo_root)
+        if machinery:
+            janitor = preserve_and_clear(
+                repo_root, machinery, log=lambda m: session.write(m.strip())
+            )
+            for problem in janitor.problems:
+                session.write(f"JANITOR UNRESOLVED {problem.describe()}")
+        else:
+            session.write("  file janitor: nothing to do")
+    except Exception as exc:  # noqa: BLE001 - a janitor must never abort a roll
+        session.write(f"JANITOR FAILED (continuing): {exc}")
+
+    # #2145: the untracked set the roll borrows. Everything beyond this at
+    # exit is the roll's own emission, and restore_repo reconciles it.
+    baseline_untracked = set(untracked_files(repo_root))
+
     code = 0
     try:
         for issue in args.issue:
@@ -1285,7 +1349,9 @@ def main(argv: list[str] | None = None) -> int:
         # A finished roll leaves no pid behind to be stopped, or mistaken for a
         # live one once Windows reuses the number.
         pid_file(log_dir).unlink(missing_ok=True)
-        failures = restore_repo(repo_root, args.issue, session)
+        # Positional: pre-#2145 test stubs replace restore_repo with bare
+        # *args lambdas, and the keyword form would break every one of them.
+        failures = restore_repo(repo_root, args.issue, session, baseline_untracked)
         if failures:
             print("\nRESTORE INCOMPLETE:")
             for f in failures:
