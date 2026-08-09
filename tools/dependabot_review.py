@@ -175,7 +175,8 @@ def _force_utf8_streams(streams=None) -> None:
     process_repo's sequential path and killed the whole drain, printing
     an all-zero Summary that hid the PR's real outcome.
 
-    tools/run_dependabot_fleet.ps1 sets PYTHONIOENCODING/PYTHONUTF8, so
+    The scheduled-run wrapper (private orchestration repo, #2156) sets
+    PYTHONIOENCODING/PYTHONUTF8, so
     the scheduled task never hit this -- correctness depended on the
     launcher, leaving every manual run (including the /dependabot skill)
     unprotected. #1839 widened the exposure: before it the tool never

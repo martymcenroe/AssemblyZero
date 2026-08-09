@@ -11,7 +11,8 @@ Four checks in one place:
 
 Stdlib only -- no third-party imports. Runs from anywhere; uses the
 local `gh` CLI for GitHub queries and reads the fixed log file path
-written by tools/run_dependabot_fleet.ps1.
+written by the scheduled-run wrapper (in the fleet's private
+orchestration repo since #2156).
 
 Usage:
     poetry run python tools/dependabot_morning_status.py
