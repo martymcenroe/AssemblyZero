@@ -38,10 +38,35 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _rmtree_clearing_readonly(path: Path) -> None:
+    """rmtree that survives the ReadOnly attribute (#2162).
+
+    The pipeline's own lineage directories carry the Windows ReadOnly
+    attribute (root cause hunted in #2136), and a plain rmtree dies on them
+    with WinError 5 -- measured live 2026-08-09, mid-roll. The handler
+    clears the attribute on the failing entry AND its parent (POSIX refusals
+    come from a write-protected parent), then retries that one deletion.
+    Plain deletion first; the chmod fires only on failure. Same pattern as
+    dependabot_review's worktree cleanup.
+    """
+
+    def _clear_and_retry(func, failing, _exc):
+        for target in (failing, os.path.dirname(failing)):
+            try:
+                os.chmod(target, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            except OSError:
+                pass
+        func(failing)
+
+    shutil.rmtree(path, onexc=_clear_and_retry)
 
 
 def _run(cmd: list[str], cwd: Path | None = None, check: bool = False):
@@ -166,7 +191,7 @@ def _remove_worktree_at(repo_root: Path, worktree_path: Path) -> bool:
     # Clean, but git would not remove it — typically a directory that is no
     # longer registered as a worktree. Nothing uncommitted is at stake.
     try:
-        shutil.rmtree(worktree_path)
+        _rmtree_clearing_readonly(worktree_path)
         print(f"  Removed unregistered worktree directory: {worktree_path}")
         _prune_worktrees(repo_root)
         return True
@@ -317,7 +342,7 @@ def delete_lineage_dirs(repo_root: Path, issue: int) -> int:
         if not d.is_dir():
             continue
         try:
-            shutil.rmtree(d)
+            _rmtree_clearing_readonly(d)
             print(f"  Deleted lineage dir: {d.relative_to(repo_root)}")
             deleted += 1
         except OSError as e:
