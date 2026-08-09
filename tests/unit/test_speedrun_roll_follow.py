@@ -250,6 +250,17 @@ class TestFollowLoop:
         assert code == 0
         assert "No roll is running" in capsys.readouterr().out
 
+    def test_an_unqueryable_scheduler_bounds_the_wait(self, tmp_path, capsys):
+        """A stub or broken schtasks answering nothing must never hold the
+        viewer forever -- this exact shape hung CI for its full 30-minute
+        timeout before the bound existed."""
+        runs = self._runs(tmp_path)
+        with patch.object(sr, "_task_status", lambda: ""), \
+                patch.object(sr.time, "sleep", lambda s: None):
+            code = sr.follow_roll(runs)
+        assert code == 1
+        assert "Cannot query the scheduler" in capsys.readouterr().out
+
     def test_ctrl_c_detaches_the_view_and_never_the_roll(self, tmp_path, capsys):
         """The whole reason following can be the default: stopping the watch
         must be consequence-free for the work."""

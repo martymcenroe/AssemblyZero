@@ -754,6 +754,10 @@ def stop_detached(log_dir: Path) -> int:
 FOLLOW_POLL_SECONDS = 2
 QUIET_NOTE_SECONDS = 300
 _START_GRACE_SECONDS = 60
+# A viewer that cannot ask the scheduler anything must eventually let go: an
+# unbounded unknown-status loop held CI for its full 30-minute timeout when a
+# test stub answered every query with nothing (#2138).
+_MAX_UNKNOWN_STATUS = 30
 
 
 def _drain(path: Path, pos: int) -> tuple[int, str]:
@@ -842,6 +846,7 @@ def follow_roll(
         pos = max(0, narration.stat().st_size - context_bytes)
 
     seen_running = False
+    unknown_streak = 0
     start_deadline = time.time() + _START_GRACE_SECONDS
     last_line_at = time.time()
     try:
@@ -852,9 +857,20 @@ def follow_roll(
                 last_line_at = time.time()
 
             status = _task_status()
-            if status == "Running":
+            if not status:
+                unknown_streak += 1
+                if unknown_streak >= _MAX_UNKNOWN_STATUS:
+                    print(
+                        f"\nCannot query the scheduler after {unknown_streak} "
+                        "attempts; detaching the view. The roll, if any, is "
+                        "unaffected -- re-attach with --follow.",
+                        flush=True,
+                    )
+                    return 1
+            elif status == "Running":
+                unknown_streak = 0
                 seen_running = True
-            elif status and (
+            elif (
                 seen_running
                 or not wait_for_start
                 or time.time() > start_deadline
