@@ -4,9 +4,9 @@
 The defect this addresses: private repos created via runbooks 0901+0927
 land with `.github/dependabot.yml` in place but Dependabot itself
 disabled at the repo settings level. Result: yml is inert, no PRs emit,
-the wedge starves. Confirmed 2026-05-26 on `martymcenroe/dependabot-honeypot`
-— 11+ hours after yml landed + 65 decorative deps pinned to ~12-18mo old
-versions, zero dependabot PRs opened.
+the wedge starves. Confirmed 2026-05-26 on a private decorative-deps
+fixture repo — 11+ hours after yml landed + 65 decorative deps pinned to
+~12-18mo old versions, zero dependabot PRs opened.
 
 What this tool does (per target repo):
   1. GET /repos/{owner}/{repo} — read current security_and_analysis state
@@ -253,7 +253,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     group.add_argument(
         "--repo",
         metavar="OWNER/NAME",
-        help="Single repo to enable (e.g., martymcenroe/dependabot-honeypot)",
+        help="Single repo to enable (e.g., martymcenroe/AssemblyZero)",
     )
     group.add_argument(
         "--fleet",
