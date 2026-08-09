@@ -861,12 +861,87 @@ def _is_terse_line(line: str) -> bool:
     return any(marker in line for marker in _TERSE_MARKERS)
 
 
+# #2160: teach text for events the atlas cannot know (gate refusals,
+# storms). One entry per marker; the first matching marker teaches.
+_EVENT_TEACH = {
+    "STORM BACKOFF": (
+        "The model provider stopped answering several times in a row. "
+        "Retrying immediately would burn an attempt on the same wall, so "
+        "the launcher waits and says for how long."
+    ),
+    "ROLL BLOCKED": (
+        "The run found the issue's own wording ambiguous and filed a "
+        "question for the human to rule on. No redraw can help until the "
+        "ruling; the machine never rewrites meaning on its own."
+    ),
+    "BLOCKED:": (
+        "A gate refused to spend anything. Refusals are the system "
+        "working: the reason names what to fix, and nothing was lost."
+    ),
+}
+
+
+def _teach_map() -> dict:
+    """(total_steps, title) -> teach text, from every atlas (#2160).
+
+    Keyed by total because the NODE line carries [n/total], and totals
+    differ per workflow -- which disambiguates titles both graphs share.
+    Import failure degrades to an empty map; teaching never costs a view.
+    """
+    table: dict = {}
+    try:
+        from assemblyzero.workflows.implementation_spec.atlas import (
+            ATLAS as SPEC_ATLAS, TOTAL_STEPS as SPEC_TOTAL,
+        )
+        from assemblyzero.workflows.requirements.atlas import (
+            ATLAS as REQ_ATLAS, TOTAL_STEPS as REQ_TOTAL,
+        )
+        for total, atlas in ((REQ_TOTAL, REQ_ATLAS), (SPEC_TOTAL, SPEC_ATLAS)):
+            for entry in atlas.values():
+                table[(total, entry["title"])] = entry["teach"]
+                table[(None, entry["title"])] = entry["teach"]
+    except Exception:  # noqa: BLE001 - teaching never costs the view
+        pass
+    return table
+
+
+_NODE_LINE = re.compile(r"NODE (?:\[(\d+)/(\d+)\] )?(.+?) -- ")
+
+
 class _NarrationView:
-    """Line-buffered level filter for the follower's streams (#2159)."""
+    """Line-buffered level filter for the follower's streams (#2159, #2160)."""
 
     def __init__(self, level: str) -> None:
         self.level = level
         self._partial: dict[str, str] = {}
+        self._teach = _teach_map() if level == "tutorial" else {}
+
+    def _annotate(self, line: str) -> list[str]:
+        """Tutorial mode: the atlas teach text under a NODE line, an event
+        teach under its first marker; everything else passes bare."""
+        out = [line]
+        teach = None
+        match = _NODE_LINE.search(line)
+        if match:
+            total = int(match.group(2)) if match.group(2) else None
+            teach = self._teach.get((total, match.group(3)))
+        else:
+            for marker, text in _EVENT_TEACH.items():
+                if marker in line:
+                    teach = text
+                    break
+        if teach:
+            width = 66
+            words, cur = [], ""
+            for word in teach.split():
+                if len(cur) + len(word) + 1 > width:
+                    words.append(cur)
+                    cur = word
+                else:
+                    cur = f"{cur} {word}".strip()
+            words.append(cur)
+            out += [f"  | {w}" for w in words]
+        return out
 
     def feed(self, stream: str, chunk: str) -> str:
         if not chunk:
@@ -877,10 +952,14 @@ class _NarrationView:
         lines = buf.split("\n")
         self._partial[stream] = lines.pop()
         kept = [line for line in lines if _is_terse_line(line)]
+        if self.level == "tutorial":
+            kept = [a for line in kept for a in self._annotate(line)]
         return "".join(line + "\n" for line in kept)
 
     def toggle(self) -> str:
-        self.level = "terse" if self.level == "verbose" else "verbose"
+        # Tutorial drops to terse first (annotations off), then verbose,
+        # then back to terse -- tutorial is an attach-time choice.
+        self.level = "terse" if self.level in ("verbose", "tutorial") else "verbose"
         # Stale partials must not replay across a mode switch.
         self._partial.clear()
         return self.level
@@ -928,6 +1007,17 @@ def follow_roll(
         f"running. Narration level: {level} (press v to toggle).\n",
         flush=True,
     )
+    if level == "tutorial":
+        # #2160: orientation comes from an editable markdown file, once per
+        # attach. A missing file is one line, never a failure.
+        orientation = (
+            Path(__file__).resolve().parents[1]
+            / "docs" / "tutorial" / "0001-follow-orientation.md"
+        )
+        try:
+            print(orientation.read_text(encoding="utf-8"), flush=True)
+        except OSError:
+            print(f"(orientation file missing: {orientation})\n", flush=True)
 
     pos = 0
     if narration.exists():
@@ -1470,11 +1560,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--narration", choices=("terse", "verbose"), default="verbose",
+        "--narration", choices=("terse", "verbose", "tutorial"),
+        default="verbose",
         help=(
-            "Starting view level while following (#2159): terse shows the "
-            "lines you act on, verbose shows everything. Press v in the "
-            "console to toggle live; the log on disk is always complete."
+            "Starting view level while following (#2159/#2160): terse shows "
+            "the lines you act on, verbose shows everything, tutorial is "
+            "terse annotated with what each node and gate is for. Press v "
+            "in the console to toggle live; the log on disk is always "
+            "complete."
         ),
     )
     # Set by --detach on the relaunch; not something anyone types.
