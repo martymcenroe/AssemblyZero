@@ -306,10 +306,23 @@ def main(argv: list[str] | None = None) -> int:
     old_name = current_branch(repo_root)
     base = default_branch(repo_root)
 
+    # #2163: standing on the DEFAULT branch means there is no previous
+    # attempt. plan_steps already refuses to graveyard it; the display must
+    # not claim otherwise -- a VERIFIED block asserting an action that never
+    # happened teaches the operator to distrust verification prose.
+    graveyarding = bool(old_name) and old_name != base
+
     print(f"Repo:            {repo_root}")
-    print(f"Current attempt: {old_name or '(detached HEAD -- nothing to graveyard)'}")
-    if old_name:
+    if graveyarding:
+        print(f"Current attempt: {old_name}")
         print(f"Graveyard as:    {GRAVEYARD_PREFIX}{old_name}")
+    elif old_name:
+        print(
+            f"Current attempt: (none -- checkout is on '{old_name}', the "
+            "default branch; nothing to graveyard)"
+        )
+    else:
+        print("Current attempt: (detached HEAD -- nothing to graveyard)")
     print(f"New attempt:     {new_name} (from origin/{base})")
     print()
 
@@ -334,6 +347,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     failures = verify_postconditions(repo_root, new_name, base)
+    # #2163: a preservation may only be claimed after the ref is verified to
+    # exist -- and only when a rename actually ran.
+    if graveyarding and not local_branch_exists(
+        repo_root, f"{GRAVEYARD_PREFIX}{old_name}"
+    ):
+        failures.append(
+            f"expected preserved branch '{GRAVEYARD_PREFIX}{old_name}' "
+            "does not exist"
+        )
     if failures:
         print(f"\nUNVERIFIED: '{new_name}' was created but is not usable:")
         for f in failures:
@@ -343,7 +365,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nVERIFIED: {repo_root.name} is on '{new_name}'.")
     print(f"  exists on origin, tracks origin/{new_name}, level with origin/{base}.")
     print(f"  checkout on '{current_branch(repo_root)}' -- an attempt is a ref, not a place to stand.")
-    print(f"  previous attempt preserved as '{GRAVEYARD_PREFIX}{old_name}'.")
+    if graveyarding:
+        print(f"  previous attempt preserved as '{GRAVEYARD_PREFIX}{old_name}'.")
     print(
         f"\nPass --base-branch {new_name} to BOTH speedrun_clean_check.py and "
         f"orchestrate.py\n  so the gate and the roll judge the same tree "

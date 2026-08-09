@@ -265,3 +265,46 @@ class TestDefaultBranchIsReadNotAssumed:
 
         assert sna.main(["--repo", str(r), "--name", "attempt-2", "--apply"]) == 0
         assert sna.commits_ahead(r, "attempt-2", "origin/trunk") == 0
+
+
+class TestDefaultBranchDisplay:
+    """#2163: standing on the default branch, there is no previous attempt,
+    and the display must not fabricate one. Live 2026-08-09: the VERIFIED
+    block claimed "previous attempt preserved as 'graveyard/main'" while no
+    rename ran and no such branch existed."""
+
+    def test_no_graveyard_is_claimed_from_the_default_branch(self, repo, capsys):
+        _git(repo, "checkout", "main")
+
+        assert _apply(repo) == 0
+
+        out = capsys.readouterr().out
+        assert "Graveyard as:" not in out
+        assert "preserved as" not in out
+        assert "nothing to graveyard" in out
+        assert sna.local_branch_exists(repo, "main")
+        assert not sna.local_branch_exists(repo, "graveyard/main")
+
+    def test_a_real_attempt_still_claims_its_verified_graveyard(self, repo, capsys):
+        assert _apply(repo) == 0
+        out = capsys.readouterr().out
+        assert "preserved as 'graveyard/hardening-run-11'" in out
+
+    def test_a_missing_graveyard_ref_fails_verification(self, repo, monkeypatch, capsys):
+        """The claim requires the ref: sabotage the plan to skip the rename
+        and the run must end UNVERIFIED, never assert the preservation."""
+        def _no_rename(old_name, new_name, base):
+            return [
+                ["git", "fetch", "origin"],
+                ["git", "checkout", base],
+                ["git", "branch", new_name, f"origin/{base}"],
+                ["git", "push", "-u", "origin", new_name],
+            ]
+
+        monkeypatch.setattr(sna, "plan_steps", _no_rename)
+
+        assert _apply(repo) == 2
+
+        out = capsys.readouterr().out
+        assert "does not exist" in out
+        assert "preserved as" not in out
