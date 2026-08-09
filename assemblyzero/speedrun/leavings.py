@@ -92,12 +92,25 @@ class LeavingsResult:
         )
 
 
+#: The machinery's own record (heals, telemetry, run logs). Standard 0027
+#: exempts evidence from every janitor; #2164 taught us it must ALSO be
+#: exempt from dirt classification structurally, not just by gitignore
+#: convention -- in a repo that does not ignore data/, the healing ledger
+#: itself blocked the branch-cutter's preconditions.
+_EVIDENCE_PREFIXES = ("data/speedrun/",)
+
+
+def _is_evidence(rel_path: str) -> bool:
+    normalized = rel_path.replace("\\", "/")
+    return any(normalized.startswith(p) for p in _EVIDENCE_PREFIXES)
+
+
 def untracked_files(repo: Path | str) -> list[str]:
     """Repo-relative untracked files, individually (-uall expands dirs).
 
-    Gitignored paths (data/, and with them data/speedrun/**) never appear
-    here, which is the standard-0027 evidence exemption falling out of the
-    plumbing rather than being special-cased.
+    Evidence under data/speedrun/ never appears: usually because data/ is
+    gitignored, and structurally even when it is not (the exemption must
+    not depend on a convention a target repo might miss).
     """
     result = _run(
         ["git", "-C", str(repo), "status", "--porcelain", "-uall"]
@@ -105,9 +118,10 @@ def untracked_files(repo: Path | str) -> list[str]:
     if result.returncode != 0:
         return []
     return [
-        line[3:].strip().strip('"')
+        path
         for line in result.stdout.splitlines()
         if line.startswith("?? ")
+        and not _is_evidence(path := line[3:].strip().strip('"'))
     ]
 
 
@@ -134,6 +148,9 @@ def classify_dirt(repo: Path | str) -> tuple[list[str], list[str]]:
         if not line.strip():
             continue
         path = line[3:].strip().strip('"')
+        if _is_evidence(path):
+            # The machinery's own record is never dirt (#2164).
+            continue
         if line.startswith("?? ") and is_machinery_owned(path):
             machinery.append(path)
         else:
