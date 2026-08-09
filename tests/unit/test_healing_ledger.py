@@ -1,0 +1,186 @@
+"""The healing ledger and its report (#2164).
+
+Every self-heal leaves a structured record; the report rolls them up and
+proposes (never files) issues for recurring heals. An empty ledger is a
+real answer with a denominator, never an empty-but-confident report.
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+from unittest.mock import patch
+
+TOOLS = Path(__file__).resolve().parents[2] / "tools"
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+import heal_report  # noqa: E402
+import speedrun_roll as sr  # noqa: E402
+
+from assemblyzero.speedrun.healing import (  # noqa: E402
+    heals_path,
+    read_heals,
+    record_heal,
+)
+
+
+class TestRecording:
+    def test_a_heal_lands_as_one_jsonl_record(self, tmp_path):
+        assert record_heal(
+            tmp_path, "janitor", "docs/lld/active/LLD-002.md", "healed",
+            detail="preserved on graveyard/leavings", run_tag="run-issue1-x",
+        )
+        records = read_heals(tmp_path)
+        assert len(records) == 1
+        assert records[0]["category"] == "janitor"
+        assert records[0]["outcome"] == "healed"
+        assert records[0]["run_tag"] == "run-issue1-x"
+
+    def test_partial_outcomes_are_first_class(self, tmp_path):
+        record_heal(
+            tmp_path, "reset", "docs/lineage/active/1-lld", "partial",
+            detail="WinError 5 Access is denied", run_tag="run-issue1-152826",
+        )
+        assert read_heals(tmp_path)[0]["outcome"] == "partial"
+
+    def test_recording_never_raises(self, tmp_path):
+        """A file in the directory's place makes mkdir fail; the ledger
+        swallows it and reports False -- a ledger problem never costs a roll."""
+        blocker = tmp_path / "data"
+        blocker.write_text("not a directory", encoding="utf-8")
+        assert record_heal(tmp_path, "sweep", "x", "healed") is False
+
+    def test_corrupt_lines_are_skipped_not_fatal(self, tmp_path):
+        record_heal(tmp_path, "sweep", "a", "healed")
+        with heals_path(tmp_path).open("a", encoding="utf-8") as fh:
+            fh.write("{not json\n")
+        record_heal(tmp_path, "sweep", "b", "healed")
+        assert [r["target"] for r in read_heals(tmp_path)] == ["a", "b"]
+
+    def test_the_ledger_lives_under_gitignored_telemetry(self, tmp_path):
+        assert "telemetry" in str(heals_path(tmp_path))
+        assert str(heals_path(tmp_path)).endswith("heals.jsonl")
+
+
+class TestReport:
+    def _seed(self, repo, runs):
+        for tag in runs:
+            record_heal(
+                repo, "reset", "docs/lineage/active/1-lld", "partial",
+                detail="WinError 5", run_tag=tag,
+            )
+
+    def test_an_empty_ledger_says_so_with_the_cold_start_rule(
+        self, tmp_path, capsys
+    ):
+        assert heal_report.main(["--repo", str(tmp_path)]) == 0
+        out = capsys.readouterr().out
+        assert "No heal records" in out
+        assert "never fabricate" in out
+
+    def test_per_run_rollup_flags_non_healed_outcomes(self, tmp_path, capsys):
+        self._seed(tmp_path, ["run-a"])
+        record_heal(tmp_path, "janitor", "leaving.md", "healed", run_tag="run-a")
+
+        heal_report.main(["--repo", str(tmp_path)])
+
+        out = capsys.readouterr().out
+        assert "run-a: 2 heal(s)" in out
+        assert "! reset: docs/lineage/active/1-lld -- partial" in out
+
+    def test_recurrence_across_three_runs_proposes_an_issue_stub(
+        self, tmp_path, capsys
+    ):
+        self._seed(tmp_path, ["run-a", "run-b", "run-c"])
+
+        heal_report.main(["--repo", str(tmp_path)])
+
+        out = capsys.readouterr().out
+        assert "TITLE: fix: the machinery keeps healing" in out
+        assert "3 runs" in out
+        assert "operator's call, never automatic" in out
+
+    def test_below_the_threshold_proposes_nothing(self, tmp_path, capsys):
+        self._seed(tmp_path, ["run-a", "run-b"])
+
+        heal_report.main(["--repo", str(tmp_path)])
+
+        out = capsys.readouterr().out
+        assert "TITLE:" not in out
+        assert "nothing proposes an issue" in out
+
+
+def _healthy_box(*_args, **_kwargs):
+    from assemblyzero.speedrun.box_health import BoxHealth
+
+    return BoxHealth(True, [], "")
+
+
+def _git(repo, *args):
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert result.returncode == 0, f"git {' '.join(args)}: {result.stderr}"
+    return result
+
+
+class TestLauncherHooks:
+    def test_the_janitor_writes_heal_records_through_a_real_launch(self, tmp_path):
+        """The run-16 shape again: a leaving at launch becomes a janitor heal
+        record, not only a narration line."""
+        origin = tmp_path / "origin.git"
+        subprocess.run(
+            ["git", "init", "-q", "--bare", "--initial-branch=main", str(origin)],
+            capture_output=True, text=True, check=True,
+        )
+        repo = tmp_path / "proj"
+        repo.mkdir()
+        _git(repo, "init", "-q", "-b", "main")
+        _git(repo, "config", "user.email", "t@t")
+        _git(repo, "config", "user.name", "t")
+        (repo / ".gitignore").write_text("data/\n", encoding="utf-8")
+        (repo / "README.md").write_text("x\n", encoding="utf-8")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "base")
+        _git(repo, "remote", "add", "origin", str(origin))
+        _git(repo, "push", "-qu", "origin", "main")
+        _git(repo, "remote", "set-head", "origin", "--auto")
+        leaving = repo / "docs" / "lld" / "active" / "LLD-002.md"
+        leaving.parent.mkdir(parents=True)
+        leaving.write_text("drafted\n", encoding="utf-8")
+
+        with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
+                patch.object(sr, "check_box_health", _healthy_box), \
+                patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)), \
+                patch.object(sr, "roll_issue", lambda *a: 0):
+            code = sr.main(["--repo", str(repo), "--issue", "7"])
+
+        assert code == 0
+        heals = read_heals(repo)
+        janitor = [h for h in heals if h["category"] == "janitor"]
+        assert janitor and janitor[0]["outcome"] == "healed"
+        assert "LLD-002.md" in janitor[0]["target"]
+
+    def test_a_storm_backoff_writes_a_heal_record(self, tmp_path):
+        repo = tmp_path / "proj"
+        (repo / ".git").mkdir(parents=True)
+        from assemblyzero.core.provider_storm import STORM_EXIT_CODE
+
+        rolls = iter([STORM_EXIT_CODE, 0])
+
+        with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
+                patch.object(sr, "check_box_health", _healthy_box), \
+                patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)), \
+                patch.object(sr, "roll_issue", lambda *a: next(rolls)), \
+                patch.object(sr, "restore_repo", lambda *a: []), \
+                patch.object(sr, "_interruptible_sleep", lambda s: None), \
+                patch.object(sr.time, "sleep", lambda s: None):
+            code = sr.main(["--repo", str(repo), "--issue", "7",
+                            "--attempts", "2"])
+
+        assert code == 0
+        storms = [h for h in read_heals(repo) if h["category"] == "storm-backoff"]
+        assert storms and storms[0]["target"] == "#7"
+        assert "waited" in storms[0]["detail"]

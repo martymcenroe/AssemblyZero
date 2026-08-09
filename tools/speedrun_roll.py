@@ -85,6 +85,7 @@ from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     open_must_resolve_issues,
     refusal_message,
 )
+from assemblyzero.speedrun.healing import record_heal  # noqa: E402
 from assemblyzero.speedrun.leavings import (  # noqa: E402
     classify_dirt,
     is_machinery_owned,
@@ -313,7 +314,13 @@ def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
             f"BASE '{base}' already contains #{issue}'s work "
             f"({len(committed)} artifact(s)) -- establishing a fresh attempt"
         )
-        return establish_new_attempt(repo_root, log)
+        fresh = establish_new_attempt(repo_root, log)
+        record_heal(
+            repo_root, "base-replace", base,
+            "healed" if fresh else "failed",
+            detail=f"#{issue}'s work already on the base",
+        )
+        return fresh
 
     # Recoverable debris. The old wrapper printed "run speedrun_reset.py,
     # verify clean, relaunch" and quit; that instruction is now the code path.
@@ -333,8 +340,14 @@ def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
         log.write(f"GATE still dirty after reset ({len(debris)}) -- {len(debris)} left")
         for d in debris:
             log.write(f"  {d}")
+        record_heal(
+            repo_root, "reset", f"#{issue}", "partial",
+            detail=f"{len(debris)} finding(s) survived the reset",
+        )
         return replace_or_refuse(repo_root, base, issue, debris, log)
 
+    record_heal(repo_root, "reset", f"#{issue}", "healed",
+                detail="base clean after self-heal")
     log.write(f"BASE '{base}' clean for #{issue} after self-heal")
     return base
 
@@ -1304,6 +1317,13 @@ def restore_repo(
                 f"pipeline leaving not cleared: {p.describe()}"
                 for p in janitor.problems
             ]
+            # #2164: exit reconciles are heals too.
+            for entry in janitor.entries:
+                record_heal(
+                    repo_root, "restore-reconcile", entry.path,
+                    "healed" if entry.ok else "partial",
+                    detail=entry.describe(),
+                )
         for f in operator_new:
             # Not the machinery's to touch: a new file it cannot prove it
             # made is surfaced, never preserved or deleted on its author's
@@ -1690,6 +1710,13 @@ def main(argv: list[str] | None = None) -> int:
         sweep = sweep_pipeline_worktrees(repo_root, log=lambda m: session.write(m.strip()))
         for problem in sweep.problems:
             session.write(f"SWEEP UNRESOLVED {problem.describe()}")
+        # #2164: every sweep action is a heal record.
+        for entry in sweep.entries:
+            record_heal(
+                repo_root, "sweep", entry.path.name,
+                "healed" if entry.ok else "partial",
+                detail=entry.describe(),
+            )
     except Exception as exc:  # noqa: BLE001 - a sweep must never abort a roll
         session.write(f"SWEEP FAILED (continuing): {exc}")
 
@@ -1707,6 +1734,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             for problem in janitor.problems:
                 session.write(f"JANITOR UNRESOLVED {problem.describe()}")
+            # #2164: every janitor action is a heal record.
+            for entry in janitor.entries:
+                record_heal(
+                    repo_root, "janitor", entry.path,
+                    "healed" if entry.ok else "partial",
+                    detail=entry.describe(),
+                )
         else:
             session.write("  file janitor: nothing to do")
     except Exception as exc:  # noqa: BLE001 - a janitor must never abort a roll
@@ -1766,6 +1800,13 @@ def main(argv: list[str] | None = None) -> int:
                     session.write(
                         f"STORM BACKOFF {minutes}m before attempt "
                         f"{attempt_no + 1}/{args.attempts}"
+                    )
+                    # #2164: a backoff is a heal (waiting instead of burning
+                    # an attempt on the same wall).
+                    record_heal(
+                        repo_root, "storm-backoff", f"#{issue}", "healed",
+                        detail=f"waited {minutes}m before attempt "
+                               f"{attempt_no + 1}/{args.attempts}",
                     )
                     print(
                         f"\n#{issue} attempt {attempt_no}/{args.attempts}: the model "

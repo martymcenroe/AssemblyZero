@@ -240,6 +240,18 @@ If it has content, rank it by cost and follow
 poetry run python tools/prompt_revision_rank.py --repo /c/Users/mcwiz/Projects/<repo>
 ```
 
+**3b. The healing ledger.** What the machinery fixed about itself (#2164) —
+resets, sweeps, janitor acts, storm waits, restore reconciles — one record
+per heal, partials first-class. A heal that recurs across three runs is a
+defect wearing a bandage, and the report emits a ready-to-file issue stub.
+Filing is the operator's call, never automatic.
+
+```bash
+poetry run python tools/heal_report.py --repo /c/Users/mcwiz/Projects/<repo>
+```
+
+An empty ledger is a real answer, same cold-start rule as the telemetry.
+
 **4. Regenerate the timing dashboard.** Where the wall-clock went.
 
 ```bash
@@ -289,7 +301,8 @@ delete any branch or worktree. Work steps 1 through 6 in order and report:
   2. which stage failed on each failed roll, and whether its retry RESUMED or
      REGENERATED
   3. any provider-storm backoffs, with their durations
-  4. the top validation-failure fingerprints by cost, or "telemetry empty"
+  4. the top validation-failure fingerprints by cost, or "telemetry empty",
+     plus the healing ledger's recurring-heal issue stubs, or "no recurrences"
   5. run time vs diagnose+fix time for the run's dates
   6. any must-resolve issues now open
   7. the archive path and whether index.json says complete: true
