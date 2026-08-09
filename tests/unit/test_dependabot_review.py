@@ -1171,3 +1171,36 @@ def test_unusable_audit_python_fails_install_rather_than_installing_elsewhere(tm
 
     assert not [c for c in calls if c[:2] == ["poetry", "install"]], \
         "install must not run when the interpreter pin failed"
+
+
+# ---- #2130: the baseline must differ from the PR head ONLY in content ----
+
+def test_baseline_checkout_stays_detached_like_the_pr_head(tmp_path, capsys):
+    """`gh pr checkout --detach` leaves HEAD detached; the baseline must match.
+
+    A plain `git checkout <branch>` restores the base content AND re-attaches
+    HEAD. Six orchestrator tests read the current branch and fail when there
+    is none, so the PR head failed them while the base passed -- on every PR,
+    in every ecosystem, regardless of content. Measured on one commit in one
+    worktree: attached 9 passed, detached 6 failed.
+    """
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return _mk_completed(0)
+
+    pr = type("PR", (), {"number": 4242})()
+
+    with patch.object(dependabot_review, "run", side_effect=fake_run):
+        dependabot_review.run_baseline_gate(pr, worktree, touches_py=False, js_dirs=[])
+
+    checkouts = [c for c in calls if c[:2] == ["git", "checkout"]]
+    assert checkouts, f"expected a baseline checkout, got {calls}"
+    assert "--detach" in checkouts[0], (
+        "baseline checkout must stay detached so content is the only variable; "
+        f"got {checkouts[0]}"
+    )
+    assert "dependabot-audit-4242" in checkouts[0]

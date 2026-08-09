@@ -1348,6 +1348,23 @@ def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
     same worktree -- same machine, same env, same suite, only the bump
     removed. That is what makes the comparison meaningful.
 
+    #2130: `--detach` is load-bearing here and must match the PR-head side.
+    `gh pr checkout --detach` leaves HEAD detached, so a plain
+    `git checkout <branch>` restores the base content AND re-attaches HEAD,
+    changing two variables at once. Six orchestrator integration tests read
+    the current branch and fail when there isn't one, so the PR head failed
+    them and the base passed them -- on every PR, in every ecosystem,
+    regardless of content. Five unrelated bumps (pathspec, packaging,
+    langgraph-checkpoint-sqlite, mypy, pytest-cov) each drew an identical
+    six-test verdict of "this bump introduced the failure"; an npm-only PR
+    drew it too. Measured on one commit in one worktree: attached, 9 passed;
+    detached, 6 failed.
+
+    Staying detached keeps content the only thing that differs. It does not
+    fix those tests' dependence on being on a branch -- that is a real defect
+    in them, tracked separately -- but it stops the gate from misattributing
+    it to whatever it happens to be auditing.
+
     Returns (exit_code, combined_output). Returns (0, "") when the base
     could not be established, which the caller reads as "not exonerable"
     -- an unknown baseline must never license a merge.
@@ -1361,7 +1378,8 @@ def run_baseline_gate(pr: PRInfo, worktree: Path, touches_py: bool,
     # for one -- (0, "") reads as "not exonerable" -- so route there rather
     # than raising.
     try:
-        checkout = run(["git", "checkout", branch], cwd=str(worktree))
+        checkout = run(["git", "checkout", "--detach", branch],
+                       cwd=str(worktree))
     except OSError as err:
         print(f"  BASELINE: worktree unusable ({err}) -- not exonerable",
               file=sys.stderr)
