@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import subprocess
@@ -72,6 +73,7 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.core.exit_codes import CONFLICT_EXIT_CODE  # noqa: E402
 from assemblyzero.core.provider_storm import (  # noqa: E402
     STORM_EXIT_CODE,
     backoff_minutes,
@@ -583,6 +585,10 @@ def detached_argv(
         # a bare Namespace (tests, embedders) predate the flag.
         "--attempts", str(max(1, getattr(args, "attempts", 1))),
     ]
+    # #2167: an operator's deliberate override must ride the relaunch too, or
+    # the detached run re-refuses on the very gate the operator waived.
+    if getattr(args, "override_prereqs", False):
+        argv.append("--override-prereqs")
     return argv + extra
 
 
@@ -886,9 +892,13 @@ def follow_roll(
                     print(chunk, end="", flush=True)
                 if seen_running or wait_for_start:
                     code = _task_last_result() or 0
+                    # #2165: the word, not just the number. The full verdict
+                    # block streams above this from the narration; this line
+                    # is the follower's own sign-off.
+                    word = "SUCCEEDED" if code == 0 else "FAILED"
                     print(
-                        f"\nThe roll is done (task status: {status}, "
-                        f"exit {code}).",
+                        f"\nThe roll is done: {word} "
+                        f"(task status: {status}, exit {code}).",
                         flush=True,
                     )
                     return code
@@ -1095,6 +1105,185 @@ def restore_repo(
     return failures
 
 
+# =============================================================================
+# Verdict and prerequisites -- the last words in the narration (#2165, #2167)
+# =============================================================================
+
+PREREQS_FILENAME = "prereqs.json"
+
+
+def prereqs_path(repo_root: Path) -> Path:
+    return Path(repo_root) / "data" / "speedrun" / PREREQS_FILENAME
+
+
+def write_prereqs(repo_root: Path, blocking: list[dict], note: str) -> None:
+    path = prereqs_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {"created": _stamp(), "note": note, "blocking": blocking},
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+
+def check_prereqs(repo_root: Path, override: bool) -> int | None:
+    """The previous run's unresolved questions gate this launch (#2167).
+
+    Returns None to proceed, 91 to refuse. Unlike the general must-resolve
+    query (which proceeds with a warning offline), this file is local,
+    certain knowledge of a known block -- unverifiable closure REFUSES.
+    The override runs anyway ONCE and leaves the file, so the following
+    launch re-checks: override means "run anyway", never "forget".
+    """
+    path = prereqs_path(repo_root)
+    if not path.exists():
+        return None
+
+    if override:
+        print(
+            "OVERRIDE: launching despite the previous run's open questions "
+            f"({path.name} kept; the next launch will re-check)."
+        )
+        return None
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        blocking = data.get("blocking") or []
+    except (OSError, ValueError):
+        blocking = []
+
+    if not blocking:
+        print(
+            "BLOCKED: a previous run recorded unresolved questions but their "
+            f"numbers could not be read from {path}. Check "
+            "must-resolve issues by hand, or pass --override-prereqs to run anyway."
+        )
+        return 91
+
+    still_open: list[dict] = []
+    for item in blocking:
+        number = item.get("number")
+        state = _run(
+            ["gh", "issue", "view", str(number), "--json", "state",
+             "--jq", ".state"],
+            cwd=repo_root,
+        )
+        if state.returncode != 0:
+            print(
+                f"BLOCKED: cannot verify that question #{number} was resolved "
+                "(gh unreachable). This launch refuses rather than re-roll "
+                "into a known wall. Pass --override-prereqs to run anyway."
+            )
+            return 91
+        if state.stdout.strip().upper() != "CLOSED":
+            still_open.append(item)
+
+    if still_open:
+        print("BLOCKED: the previous run's questions are still open:")
+        for item in still_open:
+            print(f"  #{item.get('number')}  {item.get('title', '')}")
+        print(
+            "\n  Resolve them (edit the source issue, close each question), "
+            "then launch again.\n  Do not re-roll without resolution -- the "
+            "same conflicts will refire.\n  Deliberately rolling anyway: "
+            "--override-prereqs."
+        )
+        return 91
+
+    path.unlink(missing_ok=True)
+    numbers = ", ".join(f"#{i.get('number')}" for i in blocking)
+    print(f"Previous run's questions resolved ({numbers}) -- proceeding.")
+    return None
+
+
+def print_verdict(
+    repo_root: Path,
+    *,
+    requested: list[int],
+    rolled: list[int],
+    blocked: list[int],
+    stopped_at: int | None,
+    code: int,
+) -> None:
+    """State the outcome in words, last, with the next step (#2165).
+
+    Never raises: a verdict must not cost a run, and it must render even
+    when gh is unreachable.
+    """
+    try:
+        _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code)
+    except Exception as exc:  # noqa: BLE001 - the verdict is best-effort display
+        print(f"(verdict rendering failed: {exc})")
+
+
+def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code):
+    names = ", ".join(f"#{i}" for i in rolled) or "none"
+    print()
+    if blocked:
+        blocked_names = ", ".join(f"#{i}" for i in blocked)
+        print(f"ROLL BLOCKED: issue(s) {blocked_names} await an operator ruling.")
+        if stopped_at is not None:
+            print(
+                f"  Also FAILED at #{stopped_at} (exit {code}); later "
+                "issues were not rolled."
+            )
+        print(f"  Rolled successfully: {names}.")
+        questions, gh_error = open_must_resolve_issues(repo_root)
+        if gh_error:
+            print(
+                "  Questions were filed during this run, but gh was "
+                "unreachable to list them."
+            )
+            write_prereqs(
+                repo_root, [],
+                f"blocked issue(s) {blocked_names}; question numbers unverified",
+            )
+        else:
+            print("  This run filed the questions blocking it:")
+            for q in questions:
+                print(f"    #{q['number']}  {q['title']}")
+            write_prereqs(
+                repo_root, questions,
+                f"blocked issue(s) {blocked_names}",
+            )
+            shortlist = " and ".join(f"#{q['number']}" for q in questions)
+            print(f"\n  Next step: resolve {shortlist}.")
+        print(
+            "  Do not re-roll without resolution -- the next launch will "
+            "refuse while these stay open (--override-prereqs to run anyway)."
+        )
+    elif stopped_at is not None:
+        print(
+            f"ROLL FAILED at #{stopped_at} (exit {code}) after exhausting "
+            "its attempts."
+        )
+        remaining = [i for i in requested if i not in rolled and i != stopped_at]
+        if remaining:
+            print(f"  Not rolled: {', '.join(f'#{i}' for i in remaining)}.")
+        print(f"  Rolled successfully: {names}.")
+        print(
+            "  Next step: hand an agent runbook 0952 section Inspect for the "
+            "post-mortem before rolling again."
+        )
+    elif rolled == requested and code == 0:
+        print(f"ROLL SUCCEEDED: all {len(rolled)} issue(s) rolled ({names}).")
+        print(
+            "  Next step: archive the run (runbook 0952 section Inspect, "
+            "step 6), then roll the next batch."
+        )
+    else:
+        print(
+            f"ROLL DID NOT COMPLETE (exit {code}) -- interrupted or errored "
+            f"mid-batch. Rolled before the interruption: {names}."
+        )
+        print(
+            "  Next step: hand an agent runbook 0952 section Inspect; the "
+            "events logs say where it died."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -1134,6 +1323,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--detach-stop", action="store_true",
         help="Stop a detached roll and every process it spawned (#2016)",
+    )
+    parser.add_argument(
+        "--override-prereqs", action="store_true",
+        help=(
+            "Launch even though a previous run's questions are still open "
+            "(#2167). Runs anyway ONCE; the prerequisite file survives and "
+            "the following launch re-checks."
+        ),
     )
     parser.add_argument(
         "--no-follow", action="store_true",
@@ -1218,6 +1415,13 @@ def main(argv: list[str] | None = None) -> int:
         print(health.message)
         return 91
 
+    # #2167: the previous run's own unresolved questions gate this launch,
+    # from a local file, before the live query -- certain knowledge refuses
+    # even offline.
+    prereq_refusal = check_prereqs(repo_root, args.override_prereqs)
+    if prereq_refusal is not None:
+        return prereq_refusal
+
     # #2073: refuse while the target repo has unanswered questions about what
     # its issue text asks for. Checked ONCE per invocation, here rather than per
     # redraw, and before the detach hand-off -- so nothing is spent, no branch
@@ -1286,6 +1490,9 @@ def main(argv: list[str] | None = None) -> int:
     baseline_untracked = set(untracked_files(repo_root))
 
     code = 0
+    rolled: list[int] = []
+    blocked: list[int] = []
+    stopped_at: int | None = None
     try:
         for issue in args.issue:
             # #2068: generation quality varies wildly between draws -- the same
@@ -1298,6 +1505,17 @@ def main(argv: list[str] | None = None) -> int:
             for attempt_no in range(1, max(1, args.attempts) + 1):
                 code = roll_issue(repo_root, issue, log_dir, az_root, extra)
                 if code == 0 or code == 91:
+                    break
+
+                # #2166: a requirements conflict means the ISSUE needs an
+                # operator ruling. No redraw can help; the auto-filer (#2072)
+                # has already raised the questions. Stop this issue, keep the
+                # batch moving.
+                if code == CONFLICT_EXIT_CODE:
+                    session.write(
+                        f"BLOCKED #{issue} on an operator ruling -- "
+                        "no redraw can help; continuing the batch"
+                    )
                     break
 
                 # #2086: eighteen consecutive provider timeouts in one roll on
@@ -1334,14 +1552,20 @@ def main(argv: list[str] | None = None) -> int:
                         f"(exit {code}) — self-healing and redrawing."
                     )
                     time.sleep(2)
+            if code == CONFLICT_EXIT_CODE:
+                blocked.append(issue)
+                continue
             if code != 0:
+                stopped_at = issue
                 print(
                     f"\nSTOPPED at #{issue} (exit {code}); later issues not rolled."
                 )
                 return code
+            rolled.append(issue)
             time.sleep(1)
 
-        print(f"\nAll {len(args.issue)} issue(s) rolled.")
+        if blocked:
+            return CONFLICT_EXIT_CODE
         return 0
     finally:
         # #2005: hand the repo back the way it was borrowed -- on success, on
@@ -1359,6 +1583,17 @@ def main(argv: list[str] | None = None) -> int:
                 # Also to the events file: a detached run has no one reading
                 # stdout, and this is exactly the state the next roll inherits.
                 session.write(f"RESTORE INCOMPLETE: {f}")
+        # #2165/#2167: the verdict is the LAST thing in the narration, after
+        # the restore -- the operator's eye lands at the bottom. It also
+        # persists the blocking questions as the next launch's prerequisite.
+        print_verdict(
+            repo_root,
+            requested=list(args.issue),
+            rolled=rolled,
+            blocked=blocked,
+            stopped_at=stopped_at,
+            code=code,
+        )
 
 
 if __name__ == "__main__":
