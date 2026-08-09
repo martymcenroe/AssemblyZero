@@ -34,6 +34,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The tool runs as a script from tools/, so the package root needs adding
+# before assemblyzero imports resolve (same pattern as speedrun_roll).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from assemblyzero.speedrun.leavings import (  # noqa: E402
+    classify_dirt,
+    preserve_and_clear,
+)
+
 GRAVEYARD_PREFIX = "graveyard/"
 
 
@@ -119,14 +127,22 @@ def check_preconditions(repo_root: Path, new_name: str) -> list[str]:
     if not (repo_root / ".git").exists():
         return [f"{repo_root} is not a git repository root"]
 
-    status = _run(["git", "status", "--porcelain"], cwd=repo_root)
-    if status.returncode != 0:
-        problems.append(f"git status failed: {status.stderr.strip()}")
-    elif status.stdout.strip():
-        dirty = len(status.stdout.strip().splitlines())
+    # #2146 / standard 0027: classify before refusing. Machinery-owned dirt
+    # (untracked, under the pipeline-emission allowlist) is the janitor's to
+    # preserve-and-clear -- main() runs it under --apply before this check,
+    # so anything still here means the janitor failed or was not allowed to
+    # run, and the message says so. Operator-owned dirt refuses BY NAME:
+    # that refusal is the safeguard working.
+    machinery, operator = classify_dirt(repo_root)
+    for path in machinery:
         problems.append(
-            f"working tree has {dirty} uncommitted change(s) -- commit, stash, "
-            f"or resolve them first (a rename must not strand work)"
+            f"{path}: pipeline-authored leaving -- preserved and cleared "
+            "automatically under --apply (a rename must not strand work)"
+        )
+    for entry in operator:
+        problems.append(
+            f"{entry}: not machinery-owned -- commit, stash, or resolve it "
+            "first (a rename must not strand work)"
         )
 
     worktrees = _run(["git", "worktree", "list", "--porcelain"], cwd=repo_root)
@@ -268,6 +284,17 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = Path(args.repo).resolve()
     new_name = args.name
+
+    # #2146: the janitor runs before the preconditions, so a tree dirty only
+    # with pipeline leavings does not stop a launch. Mutation, so --apply
+    # only; a dry run classifies and reports instead (via the precondition
+    # message). Nothing is cleared without first being preserved on a pushed
+    # ref -- preserve_and_clear leaves files in place on any failure.
+    if args.apply:
+        machinery, _operator = classify_dirt(repo_root)
+        if machinery:
+            print(f"Janitor: {len(machinery)} pipeline-authored leaving(s):")
+            preserve_and_clear(repo_root, machinery, log=print)
 
     problems = check_preconditions(repo_root, new_name)
     if problems:

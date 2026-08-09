@@ -141,11 +141,15 @@ class TestOutcome:
 
 class TestPreconditions:
     def test_dirty_tree_is_refused(self, repo, capsys):
+        # #2146: refusal now classifies. An untracked file OUTSIDE the
+        # pipeline-emission allowlist is operator-owned and refuses by name;
+        # machinery-owned leavings are the janitor's (test_leavings_janitor).
         (repo / "uncommitted.txt").write_text("wip", encoding="utf-8")
 
         assert _apply(repo) == 1
         out = capsys.readouterr().out
-        assert "uncommitted change" in out
+        assert "uncommitted.txt" in out
+        assert "not machinery-owned" in out
         assert sna.current_branch(repo) == "hardening-run-11", "must not mutate"
 
     def test_extra_worktree_is_refused(self, repo, tmp_path, capsys):
