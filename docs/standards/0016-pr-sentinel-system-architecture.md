@@ -277,7 +277,7 @@ gh auth login -h github.com -p https   # paste fine-grained PAT back
 | No main branch | github-readme-stats (fork), sextant-wiki (wiki repo) | Expected — no main to protect. |
 | Ruleset instead of classic protection | patent-general | GitHub auto-created ruleset on web UI repo creation. |
 
-Full audit data: `data/branch-protection-audit.csv`
+Full audit data: `data/branch-protection-audit.csv` (machine-local since #2170 — data/ artifacts are not tracked)
 
 ---
 
