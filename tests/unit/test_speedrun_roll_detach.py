@@ -60,7 +60,11 @@ class _Recorder:
 
 
 def _detach(repo, recorder, issues=("7",), platform="win32"):
-    argv = ["--repo", str(repo), "--detach"]
+    # --no-follow: these tests pin the HAND-OFF mechanics. Following after a
+    # successful hand-off is the default now (#2138) and is pinned by
+    # test_speedrun_roll_follow.py; entering the real follow loop here would
+    # hang on the patched recorder's unknowable task status.
+    argv = ["--repo", str(repo), "--detach", "--no-follow"]
     for i in issues:
         argv += ["--issue", str(i)]
     with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \

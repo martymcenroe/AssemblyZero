@@ -31,6 +31,12 @@ shell, and a harness kill of the shell takes the entire tree with it -- measured
 it. A scheduled task is spawned by the Task Scheduler service, so it is not in
 the tree at all and nothing done to the launching session can reach it.
 
+Detaching the WORK never detaches the VIEW (standard 0026, #2138): after the
+hand-off the launching command stays attached, streaming the roll's narration
+into the console the operator launched from until the final line. Ctrl+C stops
+the view, never the roll. `--no-follow` restores fire-and-forget; `--follow`
+re-attaches to a roll already running.
+
 Exit codes: 0 all issues rolled; 91 a base or gate problem this tool could not
 heal; otherwise the failing child's return code.
 """
@@ -38,6 +44,7 @@ heal; otherwise the failing child's return code.
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import re
 import subprocess
@@ -739,6 +746,167 @@ def stop_detached(log_dir: Path) -> int:
     return 0
 
 
+# =============================================================================
+# Following a detached roll -- the console the operator launched from IS the
+# display (standard 0026, #2138)
+# =============================================================================
+
+FOLLOW_POLL_SECONDS = 2
+QUIET_NOTE_SECONDS = 300
+_START_GRACE_SECONDS = 60
+# A viewer that cannot ask the scheduler anything must eventually let go: an
+# unbounded unknown-status loop held CI for its full 30-minute timeout when a
+# test stub answered every query with nothing (#2138).
+_MAX_UNKNOWN_STATUS = 30
+
+
+def _drain(path: Path, pos: int) -> tuple[int, str]:
+    """New content of `path` since byte `pos`. A missing file is quiet."""
+    if not path.exists():
+        return pos, ""
+    with path.open("rb") as fh:
+        fh.seek(pos)
+        data = fh.read()
+    return pos + len(data), data.decode("utf-8", errors="replace")
+
+
+def _task_status() -> str:
+    """The scheduled task's status ('Running', 'Ready', ...), or "" if unknown.
+
+    Unknown is NOT folded into "done": a transient query failure while the
+    roll is mid-arc must keep the view attached, not declare victory.
+    """
+    result = _run(["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "CSV", "/NH"])
+    if result.returncode != 0:
+        return ""
+    for line in (result.stdout or "").splitlines():
+        fields = [f.strip().strip('"') for f in line.split('","')]
+        if len(fields) >= 3 and TASK_NAME in fields[0]:
+            return fields[-1]
+    return ""
+
+
+def _task_last_result() -> int | None:
+    """The task's Last Result as an exit code, when schtasks will say.
+
+    Clamped to the exit-code range: outside it the value is a scheduler status
+    (e.g. SCHED_S_TASK_HAS_NOT_RUN), not the roll's result.
+    """
+    result = _run(["schtasks", "/Query", "/TN", TASK_NAME, "/V", "/FO", "CSV"])
+    if result.returncode != 0:
+        return None
+    rows = list(csv.reader((result.stdout or "").splitlines()))
+    if len(rows) < 2:
+        return None
+    try:
+        code = int(rows[1][rows[0].index("Last Result")].strip())
+    except (ValueError, IndexError):
+        return None
+    return code if 0 <= code < 256 else 1
+
+
+def _newest_heartbeat(log_dir: Path) -> str:
+    """`<file>: <last line>` for the freshest heartbeat, or "" without one."""
+    beats = sorted(
+        log_dir.glob("*-heartbeat.log"), key=lambda p: p.stat().st_mtime
+    )
+    if not beats:
+        return ""
+    lines = beats[-1].read_text(
+        encoding="utf-8", errors="replace"
+    ).strip().splitlines()
+    return f"{beats[-1].name}: {lines[-1]}" if lines else ""
+
+
+def follow_roll(
+    log_dir: Path, *, context_bytes: int = 0, wait_for_start: bool = True
+) -> int:
+    """Stream the detached roll's narration to THIS console until it finishes.
+
+    The roll runs under Task Scheduler; this process is only a viewer. Nothing
+    here can reach the roll: the only schtasks verb used is /Query, and Ctrl+C
+    detaches the view and says so. That is what makes following safe to be the
+    default (standard 0026, #2138).
+
+    `wait_for_start` covers the launch race: right after the hand-off the task
+    may not have reached Running yet, and declaring "done" off that first poll
+    would abandon a roll that is seconds old. Re-attaching passes False so a
+    finished (or never-started) roll is reported immediately instead of after
+    the grace window.
+    """
+    narration = log_dir / "detached-launcher.log"
+    print(
+        "Following the roll. Ctrl+C stops WATCHING only -- the roll keeps "
+        "running.\n",
+        flush=True,
+    )
+
+    pos = 0
+    if narration.exists():
+        pos = max(0, narration.stat().st_size - context_bytes)
+
+    seen_running = False
+    unknown_streak = 0
+    start_deadline = time.time() + _START_GRACE_SECONDS
+    last_line_at = time.time()
+    try:
+        while True:
+            pos, chunk = _drain(narration, pos)
+            if chunk:
+                print(chunk, end="", flush=True)
+                last_line_at = time.time()
+
+            status = _task_status()
+            if not status:
+                unknown_streak += 1
+                if unknown_streak >= _MAX_UNKNOWN_STATUS:
+                    print(
+                        f"\nCannot query the scheduler after {unknown_streak} "
+                        "attempts; detaching the view. The roll, if any, is "
+                        "unaffected -- re-attach with --follow.",
+                        flush=True,
+                    )
+                    return 1
+            elif status == "Running":
+                unknown_streak = 0
+                seen_running = True
+            elif (
+                seen_running
+                or not wait_for_start
+                or time.time() > start_deadline
+            ):
+                pos, chunk = _drain(narration, pos)
+                if chunk:
+                    print(chunk, end="", flush=True)
+                if seen_running or wait_for_start:
+                    code = _task_last_result() or 0
+                    print(
+                        f"\nThe roll is done (task status: {status}, "
+                        f"exit {code}).",
+                        flush=True,
+                    )
+                    return code
+                print(f"\nNo roll is running (task status: {status}).", flush=True)
+                return 0
+
+            if time.time() - last_line_at >= QUIET_NOTE_SECONDS:
+                quiet = int((time.time() - last_line_at) // 60)
+                beat = _newest_heartbeat(log_dir)
+                note = f"... still running; narration quiet {quiet}m"
+                if beat:
+                    note += f" (freshest heartbeat {beat})"
+                print(note, flush=True)
+                last_line_at = time.time()
+
+            time.sleep(FOLLOW_POLL_SECONDS)
+    except KeyboardInterrupt:
+        name = Path(__file__).name
+        print("\n\nStopped WATCHING. The roll is still running under Task Scheduler.")
+        print(f"  re-attach   {name} --repo <repo> --follow")
+        print(f"  stop roll   {name} --repo <repo> --detach-stop")
+        return 0
+
+
 def _redirect_stdio(path: Path) -> None:
     """Point stdout and stderr at a file, for a run with no console (#2015).
 
@@ -926,6 +1094,20 @@ def main(argv: list[str] | None = None) -> int:
         "--detach-stop", action="store_true",
         help="Stop a detached roll and every process it spawned (#2016)",
     )
+    parser.add_argument(
+        "--no-follow", action="store_true",
+        help=(
+            "With --detach: hand the roll off and return immediately instead "
+            "of streaming its narration into this console (#2138)"
+        ),
+    )
+    parser.add_argument(
+        "--follow", action="store_true",
+        help=(
+            "Attach to a roll that is already running and stream its "
+            "narration into this console (#2138). Takes no --issue."
+        ),
+    )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
     args, extra = parser.parse_known_args(argv)
@@ -953,6 +1135,20 @@ def main(argv: list[str] | None = None) -> int:
     # dirty tree, so it comes before the staleness gate.
     if args.detach_stop:
         return stop_detached(log_dir)
+
+    # #2138 / standard 0026: a viewer, not a launcher. It spends nothing and
+    # runs no gates, so it must work even when a gate would refuse a launch.
+    if args.follow:
+        if args.issue:
+            print(
+                "ERROR: --follow attaches to a roll already running; it takes "
+                "no --issue"
+            )
+            return 91
+        if sys.platform != "win32":
+            print(f"ERROR: --follow is Windows-only; this is {sys.platform}")
+            return 91
+        return follow_roll(log_dir, context_bytes=2048, wait_for_start=False)
 
     if not args.issue:
         print("ERROR: --issue is required (repeatable) unless stopping a roll")
@@ -995,7 +1191,12 @@ def main(argv: list[str] | None = None) -> int:
         return 91
 
     if args.detach:
-        return launch_detached(args, extra, repo_root, az_root, log_dir)
+        code = launch_detached(args, extra, repo_root, az_root, log_dir)
+        if code != 0 or args.no_follow:
+            return code
+        # Standard 0026: the console the operator launched from is the
+        # display. The work is detached; the view is not.
+        return follow_roll(log_dir)
 
     # Created only by a process that actually rolls, never by the launcher --
     # see launch_detached on why that separation is load-bearing.

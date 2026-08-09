@@ -40,7 +40,9 @@ than transcribed:
 | `--repo` | target repo root (required) |
 | `--issue` | issue to roll — **repeatable**, rolled in order |
 | `--attempts` | redraw a failed issue up to N times before stopping. Base/gate problems never retry. |
-| `--detach` | run via Windows Task Scheduler so the roll outlives this session, then return immediately |
+| `--detach` | run via Windows Task Scheduler so the roll outlives this session — then **stay attached, streaming the roll's output into this console** until it finishes (#2138) |
+| `--no-follow` | with `--detach`: hand off and return immediately instead of streaming (for scripted callers) |
+| `--follow` | re-attach to a roll already running and stream its output here. Takes no `--issue` |
 | `--log-dir` | where the triplets land. Default `<repo>/data/speedrun/runs` |
 | `--assemblyzero-root` | checkout that owns `orchestrate.py`. Default: the tool's own repo |
 | `--detach-stop` | stop a detached roll and everything it spawned |
@@ -49,6 +51,11 @@ than transcribed:
 session's shell, and a harness kill of the shell takes the whole tree with it.
 A scheduled task is parented by the Task Scheduler service instead, so nothing
 done to the launching session can reach it.
+
+**Detaching the work does not detach the view** (standard 0026). The command
+you typed keeps your console: it streams the roll's narration live until the
+final line, then exits with the roll's result. There is nothing else to open
+and nothing to type. Ctrl+C stops watching only — the roll keeps running.
 
 > **The launch command is the one command in this runbook not executed during
 > authoring.** Running it would start a real pipeline roll, and the shakedown of
@@ -72,29 +79,43 @@ tracks the machine rather than one lucky run.
 
 ---
 
-## § Watch — optional, and free
+## § Watch
 
-**Operator.** One file. Do not tail anything else:
-
-```bash
-tail -f /c/Users/mcwiz/Projects/boostgauge/data/speedrun/runs/detached-launcher.log
-```
-
-Healthy output looks like this — a `BASE` line, then a `LAUNCH` line per roll:
+**You are already watching.** The launch command streams the roll's narration
+into the console you launched from (#2138, standard 0026). Healthy output looks
+like this — a `BASE` line, then a `LAUNCH` line per roll:
 
 ```
 2026-08-01 16:34:55 BASE 'hardening-run-16' clean for #2 after self-heal
 2026-08-01 16:34:55 LAUNCH base=hardening-run-16 -> run-issue2-163450.log
 ```
 
-**Liveness lives in the heartbeat, not the launcher log.** A roll writes a beat
-every 15 seconds; the last beat is the time of death under an uncatchable kill.
-A quiet launcher log during a long stage is normal. A heartbeat that stopped is
-not:
+**A quiet stretch is normal, and the follower says so.** Model stages run long
+between narration lines. After five minutes of silence the follower prints one
+liveness note naming the freshest heartbeat (a roll beats every 15 seconds), so
+"slow stage" and "dead" are distinguishable without touching anything.
+
+**Ctrl+C stops WATCHING only, never the roll.** It prints the re-attach and
+stop commands as it exits. **Closed the console entirely?** Nothing was lost —
+the roll is parented by the scheduler. Re-attach from AssemblyZero:
 
 ```bash
+poetry run python tools/speedrun_roll.py --repo /c/Users/mcwiz/Projects/boostgauge --follow
+```
+
+### Recovery — reading the record by hand
+
+The narration and heartbeats are durable files whether or not anything is
+watching. If no follower is available (remote shell, agent doing § Inspect):
+
+```bash
+tail -f /c/Users/mcwiz/Projects/boostgauge/data/speedrun/runs/detached-launcher.log
 tail -3 /c/Users/mcwiz/Projects/boostgauge/data/speedrun/runs/run-issue1-051632-heartbeat.log
 ```
+
+**Liveness lives in the heartbeat, not the launcher log.** The last beat is the
+time of death under an uncatchable kill; a quiet launcher log during a long
+stage is normal, a stopped heartbeat is not:
 
 ```
 2026-08-01 05:23:03 alive

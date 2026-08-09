@@ -115,7 +115,12 @@ class TestTheRollItselfIsWindowless:
                 patch.object(sr.sys, "platform", "win32"), \
                 patch.object(sr.sys, "executable", str(py)), \
                 patch.object(sr, "check_assemblyzero_tree", lambda p: []),                 patch.object(sr, "check_box_health", _healthy_box):
-            code = sr.main(["--repo", str(repo), "--issue", "7", "--detach"])
+            # --no-follow: this test pins the task XML, not the view. Without
+            # it the default follower (#2138) polls the stubbed _run for a
+            # task status that can never come.
+            code = sr.main(
+                ["--repo", str(repo), "--issue", "7", "--detach", "--no-follow"]
+            )
 
         assert code == 0
         xml = (repo / "data" / "speedrun" / "runs" / "detached-task.xml").read_text(
