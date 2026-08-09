@@ -313,15 +313,25 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
     # Create graph with state schema
     graph = StateGraph(ImplementationSpecState)
 
+    # #2158: every node narrates its graph position on entry, sourced from
+    # the atlas (#2157) so the lines can never drift from the real graph.
+    from assemblyzero.workflows.implementation_spec.atlas import (
+        ATLAS, TOTAL_STEPS,
+    )
+    from assemblyzero.workflows.narration import narrated
+
+    def _add(name, fn):
+        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS))
+
     # Add nodes
-    graph.add_node(N0_LOAD_LLD, load_lld)
-    graph.add_node(N1_ANALYZE_CODEBASE, analyze_codebase)
-    graph.add_node(N2_GENERATE_SPEC, generate_spec)
-    graph.add_node(N3_VALIDATE_COMPLETENESS, validate_completeness)
-    graph.add_node(N4_HUMAN_GATE, human_gate)
-    graph.add_node(N5_REVIEW_SPEC, review_spec)
-    graph.add_node(N6_FINALIZE_SPEC, finalize_spec)
-    graph.add_node(HALT, create_halt_node("implementation_spec"))  # Issue #486
+    _add(N0_LOAD_LLD, load_lld)
+    _add(N1_ANALYZE_CODEBASE, analyze_codebase)
+    _add(N2_GENERATE_SPEC, generate_spec)
+    _add(N3_VALIDATE_COMPLETENESS, validate_completeness)
+    _add(N4_HUMAN_GATE, human_gate)
+    _add(N5_REVIEW_SPEC, review_spec)
+    _add(N6_FINALIZE_SPEC, finalize_spec)
+    _add(HALT, create_halt_node("implementation_spec"))  # Issue #486
 
     # START -> N0
     graph.add_edge(START, N0_LOAD_LLD)

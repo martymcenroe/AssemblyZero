@@ -495,19 +495,27 @@ def create_requirements_graph() -> StateGraph:
     # Create graph with state schema
     graph = StateGraph(RequirementsWorkflowState)
 
+    # #2158: every node narrates its graph position on entry, sourced from
+    # the atlas (#2157) so the lines can never drift from the real graph.
+    from assemblyzero.workflows.narration import narrated
+    from assemblyzero.workflows.requirements.atlas import ATLAS, TOTAL_STEPS
+
+    def _add(name, fn):
+        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS))
+
     # Add nodes
-    graph.add_node(N0_LOAD_INPUT, load_input)
-    graph.add_node(N0B_ANALYZE_CODEBASE, analyze_codebase)  # Issue #401
-    graph.add_node(N0C_ANALYZE_REQUIREMENTS, analyze_requirements)  # Issue #1899
-    graph.add_node(N1_GENERATE_DRAFT, generate_draft)
-    graph.add_node(N1_5_VALIDATE_MECHANICAL, validate_lld_mechanical)  # Issue #277
-    graph.add_node(N1B_VALIDATE_TEST_PLAN, validate_test_plan_node)  # Issue #166
-    graph.add_node(N_PONDER, ponder_stibbons_node)  # Issue #307
-    graph.add_node(N2_HUMAN_GATE_DRAFT, human_gate_draft)
-    graph.add_node(N3_REVIEW, review)
-    graph.add_node(N4_HUMAN_GATE_VERDICT, human_gate_verdict)
-    graph.add_node(N5_FINALIZE, finalize)
-    graph.add_node(HALT, create_halt_node("requirements"))  # Issue #486
+    _add(N0_LOAD_INPUT, load_input)
+    _add(N0B_ANALYZE_CODEBASE, analyze_codebase)  # Issue #401
+    _add(N0C_ANALYZE_REQUIREMENTS, analyze_requirements)  # Issue #1899
+    _add(N1_GENERATE_DRAFT, generate_draft)
+    _add(N1_5_VALIDATE_MECHANICAL, validate_lld_mechanical)  # Issue #277
+    _add(N1B_VALIDATE_TEST_PLAN, validate_test_plan_node)  # Issue #166
+    _add(N_PONDER, ponder_stibbons_node)  # Issue #307
+    _add(N2_HUMAN_GATE_DRAFT, human_gate_draft)
+    _add(N3_REVIEW, review)
+    _add(N4_HUMAN_GATE_VERDICT, human_gate_verdict)
+    _add(N5_FINALIZE, finalize)
+    _add(HALT, create_halt_node("requirements"))  # Issue #486
 
     # Add edges
     # START -> N0
