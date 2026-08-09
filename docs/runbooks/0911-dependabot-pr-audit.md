@@ -26,7 +26,7 @@ Safely review, approve, and merge Dependabot PRs with regression verification. D
 - `--fleet` flag enumerates user-owned Poetry repos via `gh repo list` and processes dependabot PRs across all of them. Multiplies review-event volume. Single-repo mode unchanged when the flag is omitted.
 
 **New in v2.2 (#1092):**
-- Windows Task Scheduler integration. `tools/run_dependabot_fleet.ps1` wraps the `--fleet` invocation; `Claude-DependabotFleet` runs daily at 06:00 with the operator's gh credentials so review-event attribution stays correct. See §Integration → Daily Schedule.
+- Windows Task Scheduler integration. A PowerShell wrapper wraps the `--fleet` invocation (relocated 2026-08-09 to the fleet's private orchestration repo — see #2156; it names private paths and its run records enumerate the fleet, so it cannot live on this public repo); `Claude-DependabotFleet` runs daily at 06:00 with the operator's gh credentials so review-event attribution stays correct. See §Integration → Daily Schedule.
 
 **New in v2.3 (#1093):**
 - `--workers N` flag (default 3) enables cross-repo parallelism in `--fleet` mode. PRs within a single repo remain sequential (subsequent PRs need to test against the post-merge HEAD); only repos run in parallel. Substantially shortens fleet-sweep wall-clock time when many repos have queued PRs.
@@ -213,18 +213,12 @@ Run this audit:
 
 The fleet sweep is wired to a Windows Scheduled Task `Claude-DependabotFleet` so dependabot PRs are processed automatically each morning regardless of whether the operator remembers to run `/dependabot`. The task uses the operator's logged-in account so the `gh pr review` events still attribute to the user (Code Review profile-stat credit accrues correctly).
 
-**Setup (run once on a fresh machine):**
-
-```powershell
-$action = New-ScheduledTaskAction `
-  -Execute 'powershell.exe' `
-  -Argument '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File C:\Users\mcwiz\Projects\AssemblyZero\tools\run_dependabot_fleet.ps1'
-$trigger = New-ScheduledTaskTrigger -Daily -At 06:00
-Register-ScheduledTask `
-  -TaskName 'Claude-DependabotFleet' `
-  -Action $action -Trigger $trigger `
-  -Description 'Daily fleet-wide dependabot PR review + merge (#1091, #1092)'
-```
+**Setup (run once on a fresh machine):** the task is registered by the private
+environment-tooling repo's launcher converter (a silent wscript launcher — see
+#1819 for why powershell.exe cannot be the direct task action without a console
+flash). The launcher invokes the wrapper script, which lives in the fleet's
+private orchestration repo as of 2026-08-09 (#2156) — it names private paths
+and its run records enumerate the fleet, so it cannot live here.
 
 **Manual invocation (between scheduled runs):**
 
@@ -245,7 +239,7 @@ Enable-ScheduledTask -TaskName 'Claude-DependabotFleet'
 tail -50 /c/Users/mcwiz/Projects/dependabot-fleet.log
 ```
 
-The PowerShell wrapper at `tools/run_dependabot_fleet.ps1` is the durable definition of what the task runs — the schedule above just points at it. Modifying the wrapper changes future runs without touching the task registration.
+The PowerShell wrapper (in the private orchestration repo since #2156) is the durable definition of what the task runs — the registration just points at it via the launcher. Modifying the wrapper changes future runs without touching the task registration. Per-run logs are archived by the wrapper into the private fleet-ledger repo's `data/dependabot-runs/`; the flat status log above stays at `Projects/dependabot-fleet.log` (read by `tools/dependabot_morning_status.py`).
 
 **Why daily, not hourly?** Dependabot opens PRs at most a few times per day across the fleet. Hourly runs would add noise without adding value. 06:00 was chosen so the run completes before the operator's typical 09:00 start; merged PRs are visible in the morning git pull.
 
