@@ -293,7 +293,12 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
         verdict_path = None
 
     # Issue #248: Check open questions resolution status
-    open_questions_status = _check_open_questions_status(current_draft, audit_content)
+    # #2199: hand over the structured verdict — audit_content is rendered
+    # without the open-questions field, so re-parsing it can never find
+    # the reviewer's answer.
+    open_questions_status = _check_open_questions_status(
+        current_draft, audit_content, feedback_result
+    )
 
     # Issue #257: Update draft with resolutions if APPROVED
     updated_draft = current_draft
@@ -696,7 +701,11 @@ def _extract_section(content: str, section_name: str) -> str:
     return ""
 
 
-def _check_open_questions_status(draft_content: str, verdict_content: str) -> str:
+def _check_open_questions_status(
+    draft_content: str,
+    verdict_content: str,
+    feedback_result: dict | None = None,
+) -> str:
     """Check whether open questions have been resolved.
 
     Issue #248: After Gemini review, check if:
@@ -704,11 +713,20 @@ def _check_open_questions_status(draft_content: str, verdict_content: str) -> st
     2. Questions marked as HUMAN REQUIRED
     3. Questions remain unanswered
 
-    Issue #775: Uses parse_structured_draft_questions for structured parsing.
+    #2199: when the reviewer's verdict parsed structured, its
+    ``open_questions`` field IS the answer — consume it directly. The old
+    path re-parsed ``verdict_content``, which the caller re-renders from the
+    parsed verdict WITHOUT the open-questions field, so the extraction found
+    nothing and every question-bearing draft was ruled UNANSWERED even when
+    the reviewer had APPROVED — twelve approved LLDs were discarded that way
+    in the boostgauge campaign. The markdown/regex path survives only for
+    verdicts that genuinely failed structured parsing.
 
     Args:
         draft_content: The draft that was reviewed.
-        verdict_content: Gemini's verdict.
+        verdict_content: Gemini's verdict (rendered audit text).
+        feedback_result: The structured parse of the reviewer's raw response
+            (FeedbackResult-shaped dict), when the caller has one.
 
     Returns:
         One of:
@@ -725,6 +743,17 @@ def _check_open_questions_status(draft_content: str, verdict_content: str) -> st
     # Check for HUMAN REQUIRED in verdict
     if _verdict_has_human_required(verdict_content):
         return "HUMAN_REQUIRED"
+
+    # #2199: structured verdict first — the parsed object in hand outranks
+    # any re-parse of rendered text. An unresolved item listed by the
+    # reviewer is a real UNANSWERED; none listed means the reviewer stands
+    # behind the draft as reviewed, which is RESOLVED.
+    if feedback_result is not None and feedback_result.get("source") == "structured":
+        unresolved = [
+            q for q in (feedback_result.get("open_questions") or [])
+            if isinstance(q, dict) and not q.get("resolved")
+        ]
+        return "UNANSWERED" if unresolved else "RESOLVED"
 
     # Check if verdict has "Open Questions Resolved" section with answers
     if _verdict_has_resolved_questions(verdict_content):
