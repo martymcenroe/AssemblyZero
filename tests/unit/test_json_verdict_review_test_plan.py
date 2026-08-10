@@ -1,7 +1,9 @@
 """Tests for Issue #494: JSON verdict migration in review_test_plan.
 
 Validates that review_test_plan uses structured JSON verdict parsing
-(parse_structured_verdict) first, falling back to regex _parse_verdict.
+(parse_structured_verdict). Standard 0028 retired the regex fallback:
+a response with no schema-valid verdict is rejected loudly (see
+test_review_test_plan_structured_output.py for the rejection pins).
 """
 
 import json
@@ -14,7 +16,6 @@ from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
     parse_structured_verdict,
 )
-from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
 
 
 class TestStructuredVerdictParsing:
@@ -79,24 +80,9 @@ class TestStructuredVerdictParsing:
         assert parse_structured_verdict(None) is None
 
 
-class TestRegexFallback:
-    """Test _parse_verdict regex fallback still works."""
-
-    def test_approved_checkbox(self):
-        verdict = "## Verdict\n[X] **APPROVED** — all good"
-        assert _parse_verdict(verdict)["verdict"] == "APPROVED"
-
-    def test_blocked_checkbox(self):
-        verdict = "## Verdict\n[X] **BLOCKED** — needs work"
-        assert _parse_verdict(verdict)["verdict"] == "BLOCKED"
-
-    def test_verdict_keyword(self):
-        verdict = "After review, Verdict: APPROVED"
-        assert _parse_verdict(verdict)["verdict"] == "APPROVED"
-
-    def test_default_unknown(self):
-        verdict = "Unclear response with no verdict markers"
-        assert _parse_verdict(verdict)["verdict"] == "UNKNOWN"
+# TestRegexFallback removed: _parse_verdict and its regex fallback were
+# retired by standard 0028. A response that is not schema-valid JSON is a
+# rejected review, not a scraped one.
 
 
 class TestVerdictSchemaShape:

@@ -5,6 +5,7 @@ Issue #102: TDD Initialization
 Issue #93: N8 Documentation Node
 """
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -2008,41 +2009,39 @@ class TestReviewTestPlanModule:
         assert "test_example" in context
         assert "90%" in context
 
-    def test_parse_verdict_approved_explicit(self):
-        """_parse_verdict detects explicit APPROVED."""
-        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
+    def test_structured_verdict_parses(self):
+        """Standard 0028: _parse_verdict is retired; the node consumes
+        parse_structured_verdict directly — JSON or rejection."""
+        import json
+        from assemblyzero.core.verdict_schema import parse_structured_verdict
 
-        verdict = "[x] **APPROVED** - Test plan is ready"
-        result = _parse_verdict(verdict)
+        raw = json.dumps({"verdict": "APPROVED", "rationale": "Test plan is ready"})
+        result = parse_structured_verdict(raw)
 
+        assert result is not None
         assert result["verdict"] == "APPROVED"
 
-    def test_parse_verdict_blocked_explicit(self):
-        """_parse_verdict detects explicit BLOCKED."""
-        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
+    def test_structured_blocked_verdict_parses(self):
+        import json
+        from assemblyzero.core.verdict_schema import parse_structured_verdict
 
-        verdict = "[x] **BLOCKED** - Test plan needs revision"
-        result = _parse_verdict(verdict)
+        raw = json.dumps({"verdict": "BLOCKED", "rationale": "Needs revision"})
+        result = parse_structured_verdict(raw)
 
+        assert result is not None
         assert result["verdict"] == "BLOCKED"
 
-    def test_parse_verdict_approved_implicit(self):
-        """_parse_verdict detects implicit APPROVED."""
-        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
+    def test_markdown_verdict_yields_none_for_rejection(self):
+        """A checkbox/prose response is no longer scraped: the parse yields
+        None and the node rejects with error_message (standard 0028)."""
+        from assemblyzero.core.verdict_schema import parse_structured_verdict
 
-        verdict = "The test plan is APPROVED for implementation."
-        result = _parse_verdict(verdict)
+        assert parse_structured_verdict("[x] **APPROVED** - Test plan is ready") is None
 
-        assert result["verdict"] == "APPROVED"
+    def test_unclear_response_yields_none_for_rejection(self):
+        from assemblyzero.core.verdict_schema import parse_structured_verdict
 
-    def test_parse_verdict_unknown_default(self):
-        """_parse_verdict returns UNKNOWN for unclear verdict (#775)."""
-        from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
-
-        verdict = "Some unclear response"
-        result = _parse_verdict(verdict)
-
-        assert result["verdict"] == "UNKNOWN"
+        assert parse_structured_verdict("Some unclear response") is None
 
     def test_extract_feedback_required_changes_section(self):
         """_extract_feedback extracts from Required Changes section."""
@@ -4512,7 +4511,7 @@ class TestReviewTestPlanCoverageGaps:
         )
 
         fake = self._fake_reviewer(
-            "## Verdict\n[x] **APPROVED** - Test plan is ready\n"
+            json.dumps({"verdict": "APPROVED", "rationale": "Test plan is ready"})
         )
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()
@@ -4560,10 +4559,14 @@ class TestReviewTestPlanCoverageGaps:
         )
 
         fake = self._fake_reviewer(
-            "## Verdict\n[x] **BLOCKED** - Test plan needs revision\n\n"
-            "## Required Changes\n"
-            "1. Add more test coverage\n"
-            "2. Fix assertion issues\n"
+            json.dumps({
+                "verdict": "BLOCKED",
+                "rationale": "Test plan needs revision",
+                "blocking_issues": [
+                    {"section": "Coverage", "issue": "Add more test coverage", "severity": "BLOCKING"},
+                    {"section": "Assertions", "issue": "Fix assertion issues", "severity": "BLOCKING"},
+                ],
+            })
         )
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()

@@ -214,6 +214,28 @@ def parse_structured_verdict(response_text: str) -> dict | None:
     return None
 
 
+class StructuredContractError(RuntimeError):
+    """A structured ask returned output that does not honor its schema.
+
+    Standard 0028 (operator ruling 2026-08-10): ask structured, get
+    structured, or reject. Raised by the strict parsers in place of the
+    retired regex fallbacks. Carries what a halt banner needs (#2197
+    legibility): the parser's name, the reason, and a bounded excerpt.
+    The caller surfaces it as an error; the stage retry machinery is the
+    bounded re-ask.
+    """
+
+    def __init__(self, parser: str, reason: str, raw: str = ""):
+        excerpt = (raw or "").strip().replace("\n", " ")[:160]
+        self.parser = parser
+        self.reason = reason
+        self.excerpt = excerpt
+        detail = f" | response begins: {excerpt!r}" if excerpt else " | response empty"
+        super().__init__(
+            f"structured contract violated in {parser}: {reason}{detail}"
+        )
+
+
 def _loads_lenient(raw: str) -> dict:
     """json.loads that tolerates a fenced or prose-wrapped JSON object.
 
@@ -259,9 +281,10 @@ def _validate_enum(value: str, allowed: list[str] | set[str]) -> bool:
 def parse_structured_feedback(raw: str) -> FeedbackResult:
     """Parse structured JSON feedback response into FeedbackResult.
 
-    Issue #775: Primary structured parse with regex fallback.
-    Clamps verdict to _FEEDBACK_VERDICTS; remaps out-of-enum to UNKNOWN.
-    Emits counter metric on fallback (REQ-3, T150).
+    Standard 0028: strict. The response either parses and validates against
+    FEEDBACK_SCHEMA or this raises StructuredContractError — there is no
+    degraded parse. The caller surfaces the rejection; the stage retry
+    machinery re-asks.
     """
     try:
         data = _loads_lenient(raw)
@@ -278,21 +301,14 @@ def parse_structured_feedback(raw: str) -> FeedbackResult:
             source="structured",
         )
     except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
-        logger.warning("Structured feedback parse failed (%s); falling back to regex", e)
-        logger.debug("verdict_schema.regex_fallback parser=feedback")
-        result = _regex_fallback_feedback(raw)
-        # Clamp verdict to FEEDBACK_SCHEMA enum
-        if result["verdict"] not in _FEEDBACK_VERDICTS:
-            result["verdict"] = "UNKNOWN"
-        return result
+        raise StructuredContractError("feedback", str(e), raw) from e
 
 
 def parse_structured_review_spec(raw: str) -> ReviewSpecResult:
     """Parse structured JSON review-spec response into ReviewSpecResult.
 
-    Issue #775: Primary structured parse with regex fallback.
-    Clamps verdict to _REVIEW_SPEC_VERDICTS; remaps out-of-enum to UNKNOWN.
-    Emits counter metric on fallback (REQ-3, T150).
+    Standard 0028: strict. Parses and validates against REVIEW_SPEC_SCHEMA
+    or raises StructuredContractError — no degraded parse.
     """
     try:
         data = _loads_lenient(raw)
@@ -307,225 +323,90 @@ def parse_structured_review_spec(raw: str) -> ReviewSpecResult:
             source="structured",
         )
     except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
-        logger.warning("Structured review-spec parse failed (%s); falling back to regex", e)
-        logger.debug("verdict_schema.regex_fallback parser=review_spec")
-        result = _regex_fallback_verdict(raw)
-        verdict = result["verdict"]
-        # Clamp verdict to REVIEW_SPEC_SCHEMA enum
-        if verdict not in _REVIEW_SPEC_VERDICTS:
-            verdict = "UNKNOWN"
-        # Attempt to extract feedback_items via regex for richer fallback
-        feedback_items = []
-        feedback_section = _extract_section_from_markdown(raw, "Feedback")
-        if not feedback_section:
-            feedback_section = _extract_section_from_markdown(raw, "Required Changes")
-        if not feedback_section:
-            feedback_section = _extract_section_from_markdown(raw, "Blocking Issues")
-        if feedback_section:
-            feedback_items = re.findall(r"^(?:[-*]|\d+\.)\s+(.+)$", feedback_section, re.MULTILINE)
-        return ReviewSpecResult(
-            verdict=verdict,
-            rationale=result["rationale"],
-            feedback_items=feedback_items,
-            source="regex_fallback",
-        )
+        raise StructuredContractError("review_spec", str(e), raw) from e
 
 
-def parse_structured_draft_questions(raw: str) -> DraftQuestionsResult:
-    """Parse structured JSON open-questions response into DraftQuestionsResult.
+def _iter_section_lines(text: str, *titles: str):
+    """Yield the stripped body lines of the first heading matching a title.
 
-    Issue #775: Primary structured parse with regex fallback.
-    Emits counter metric on fallback (REQ-3, T150).
+    A deterministic walk of OUR OWN markdown format — headings the templates
+    define — implemented with string operations. Not a parser of model
+    output and not a fallback (standard 0028 §3). Heading match is
+    case-insensitive and tolerates parenthetical suffixes like
+    "## Open Questions (3 remaining)".
     """
-    try:
-        data = _loads_lenient(raw)
-        if not _validate_required_keys(data, ["open_questions"]):
-            raise ValueError("Missing required key: open_questions")
-        return DraftQuestionsResult(
-            open_questions=data["open_questions"],
-            source="structured",
-        )
-    except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
-        logger.warning("Structured draft-questions parse failed (%s); falling back to regex", e)
-        logger.debug("verdict_schema.regex_fallback parser=draft_questions")
-        return _regex_fallback_draft_questions(raw)
+    wanted = tuple(t.casefold() for t in titles)
+    in_section = False
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip().rstrip(":").casefold()
+            in_section = heading.startswith(wanted)
+            continue
+        if in_section:
+            yield stripped
 
 
-def parse_structured_finalize_questions(raw: str) -> FinalizeQuestionsResult:
-    """Parse structured JSON question-detection response into FinalizeQuestionsResult.
+def scan_open_questions_section(text: str) -> DraftQuestionsResult:
+    """Deterministic checkbox scan of a document's ``## Open Questions``.
 
-    Issue #775: Primary structured parse with regex fallback.
-    Emits counter metric on fallback (REQ-3, T150).
+    Replaces parse_structured_draft_questions (standard 0028): the inputs
+    here were never model JSON — they are the pipeline's own markdown
+    documents (the drafter's document response; the rendered verdict), so
+    "structured parse with fallback" was a fiction and the section scan was
+    always the real mechanism. Now it is the named mechanism.
     """
-    try:
-        data = _loads_lenient(raw)
-        if not _validate_required_keys(data, ["has_open_questions", "question_count", "questions"]):
-            raise ValueError("Missing required keys")
+    open_questions: list[dict] = []
+    for line in _iter_section_lines(text, "open questions"):
+        if line.startswith("- [ ]"):
+            question = line[len("- [ ]"):].strip()
+            if question:
+                open_questions.append({"text": question, "resolved": False})
+        elif line[: len("- [x]")].casefold() == "- [x]":
+            question = line[len("- [x]"):].strip()
+            if question:
+                open_questions.append({"text": question, "resolved": True})
+    return DraftQuestionsResult(open_questions=open_questions, source="document_scan")
+
+
+def scan_residual_questions(text: str) -> FinalizeQuestionsResult:
+    """Deterministic residual question/TODO scan of generated content.
+
+    Replaces parse_structured_finalize_questions (standard 0028): the input
+    is already-generated document content, not a model response — finalize
+    validates its own artifact, a scan, not a parse. Lines ending with '?'
+    must be > 5 chars to filter bare punctuation and headings like "Why?";
+    any line carrying a TODO marker counts.
+    """
+    if not text:
         return FinalizeQuestionsResult(
-            has_open_questions=data["has_open_questions"],
-            question_count=data["question_count"],
-            questions=data["questions"],
-            source="structured",
+            has_open_questions=False, question_count=0, questions=[],
+            source="document_scan",
         )
-    except (json.JSONDecodeError, ValueError, TypeError, KeyError) as e:
-        logger.warning("Structured finalize-questions parse failed (%s); falling back to regex", e)
-        logger.debug("verdict_schema.regex_fallback parser=finalize_questions")
-        return _regex_fallback_finalize_questions(raw)
-
-
-def _regex_fallback_verdict(raw: str) -> VerdictResult:
-    """Last-resort regex extraction for verdict checkbox patterns.
-
-    Issue #775: Logs WARNING when invoked. Never raises.
-    Returns verdict='UNKNOWN' if all patterns fail.
-    Note: Does NOT call emit_counter — callers are responsible for metrics.
-    """
-    logger.warning("Using regex fallback for verdict extraction")
-    if not raw or not isinstance(raw, str):
-        return VerdictResult(verdict="UNKNOWN", rationale="", source="regex_fallback")
-    for pattern, verdict in [
-        (r"\[X\]\s*\**APPROVED\**", "APPROVED"),
-        (r"\[X\]\s*\**REVISE\**", "REVISE"),
-        (r"\[X\]\s*\**DISCUSS\**", "DISCUSS"),
-        (r"\[X\]\s*\**BLOCKED\**", "BLOCKED"),
-    ]:
-        if re.search(pattern, raw, re.IGNORECASE):
-            # Try to extract rationale from next paragraph
-            rationale = ""
-            rationale_match = re.search(
-                r"(?:Rationale|Reason|Summary)[:\s]*(.+?)(?:\n\n|\n##|\Z)",
-                raw,
-                re.DOTALL | re.IGNORECASE,
-            )
-            if rationale_match:
-                rationale = rationale_match.group(1).strip()
-            return VerdictResult(verdict=verdict, rationale=rationale, source="regex_fallback")
-
-    # Secondary fallback: keyword patterns (e.g., "Verdict: APPROVED")
-    for keyword in ["APPROVED", "REVISE", "BLOCKED", "DISCUSS"]:
-        if re.search(rf"\b{keyword}\b", raw, re.IGNORECASE):
-            return VerdictResult(verdict=keyword, rationale="", source="regex_fallback")
-
-    logger.error("Regex fallback could not extract verdict from response")
-    return VerdictResult(verdict="UNKNOWN", rationale="", source="regex_fallback")
-
-
-def _regex_fallback_feedback(raw: str) -> FeedbackResult:
-    """Last-resort regex extraction for feedback section patterns.
-
-    Issue #775: Logs WARNING when invoked.
-    Note: verdict is NOT clamped here — caller (parse_structured_feedback)
-    is responsible for clamping to the appropriate enum.
-    Does NOT call emit_counter — caller handles metrics.
-    """
-    logger.warning("Using regex fallback for feedback extraction")
-    if not raw:
-        return FeedbackResult(verdict="UNKNOWN", rationale="", feedback_items=[], open_questions=[], resolved_issues=[], source="regex_fallback")
-    verdict_result = _regex_fallback_verdict(raw)
-
-    # Extract feedback items from bullet lists under Feedback/Required Changes
-    feedback_items = []
-    feedback_section = _extract_section_from_markdown(raw, "Feedback")
-    if not feedback_section:
-        feedback_section = _extract_section_from_markdown(raw, "Required Changes")
-    if feedback_section:
-        feedback_items = re.findall(r"^[-*]\s+(.+)$", feedback_section, re.MULTILINE)
-
-    # Extract open questions
-    open_questions = []
-    oq_section = _extract_section_from_markdown(raw, "Open Questions")
-    if oq_section:
-        unchecked = re.findall(r"^- \[ \] (.+)$", oq_section, re.MULTILINE)
-        checked = re.findall(r"^- \[X\] (.+)$", oq_section, re.MULTILINE | re.IGNORECASE)
-        for q in unchecked:
-            open_questions.append({"text": q.strip(), "resolved": False})
-        for q in checked:
-            open_questions.append({"text": q.strip(), "resolved": True})
-
-    # Extract resolved issues
-    resolved_issues = []
-    ri_section = _extract_section_from_markdown(raw, "Resolved Issues")
-    if not ri_section:
-        ri_section = _extract_section_from_markdown(raw, "Open Questions Resolved")
-    if ri_section:
-        resolved_issues = re.findall(r"^[-*]\s+(.+)$", ri_section, re.MULTILINE)
-
-    return FeedbackResult(
-        verdict=verdict_result["verdict"],
-        rationale=verdict_result["rationale"],
-        feedback_items=feedback_items,
-        open_questions=open_questions,
-        resolved_issues=resolved_issues,
-        source="regex_fallback",
-    )
-
-
-def _regex_fallback_draft_questions(raw: str) -> DraftQuestionsResult:
-    """Last-resort regex extraction for open questions from draft content.
-
-    Issue #775: Logs WARNING when invoked.
-    Does NOT call emit_counter — caller handles metrics.
-    """
-    logger.warning("Using regex fallback for draft questions extraction")
-    if not raw:
-        return DraftQuestionsResult(open_questions=[], source="regex_fallback")
-    open_questions = []
-    oq_match = re.search(r"## Open Questions.*?(?=\n## |\Z)", raw, re.DOTALL)
-    if oq_match:
-        section = oq_match.group(0)
-        unchecked = re.findall(r"^- \[ \] (.+)$", section, re.MULTILINE)
-        checked = re.findall(r"^- \[X\] (.+)$", section, re.MULTILINE | re.IGNORECASE)
-        for q in unchecked:
-            open_questions.append({"text": q.strip(), "resolved": False})
-        for q in checked:
-            open_questions.append({"text": q.strip(), "resolved": True})
-    return DraftQuestionsResult(open_questions=open_questions, source="regex_fallback")
-
-
-def _regex_fallback_finalize_questions(raw: str) -> FinalizeQuestionsResult:
-    """Last-resort regex extraction for question/TODO detection.
-
-    Issue #775: Logs WARNING when invoked.
-    Does NOT call emit_counter — caller handles metrics.
-
-    Note: Lines ending with '?' must be > 5 chars to filter out bare
-    punctuation or headings like "Why?" that are section titles, not
-    unresolved questions. The threshold catches "TODO?" but skips "?".
-    """
-    logger.warning("Using regex fallback for finalize questions detection")
-    if not raw:
-        return FinalizeQuestionsResult(has_open_questions=False, question_count=0, questions=[], source="regex_fallback")
-    questions = []
-    # Detect lines ending with ? (min 6 chars to filter noise)
-    for line in raw.splitlines():
+    questions: list[str] = []
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped.endswith("?") and len(stripped) > 5:
             questions.append(stripped)
-    # Detect TODO markers
-    todo_matches = re.findall(r"^.*\bTODO\b.*$", raw, re.MULTILINE | re.IGNORECASE)
-    for match in todo_matches:
-        questions.append(match.strip())
+    for line in text.splitlines():
+        stripped = line.strip()
+        words = {w.strip(":,.;!?()[]").casefold() for w in stripped.split()}
+        if "todo" in words:
+            questions.append(stripped)
     return FinalizeQuestionsResult(
         has_open_questions=len(questions) > 0,
         question_count=len(questions),
         questions=questions,
-        source="regex_fallback",
+        source="document_scan",
     )
 
 
-def _extract_section_from_markdown(content: str, section_name: str) -> str:
-    """Extract content from a named markdown section.
-
-    Issue #775: Shared helper for regex fallback section extraction.
-    Returns text between a ## heading matching section_name and the next ## heading or EOF.
-    The pattern uses .* after the escaped name to handle parenthetical suffixes
-    like "## Open Questions (3 remaining)".
-    """
-    if not content:
-        return ""
-    pattern = rf"##\s+{re.escape(section_name)}.*?\n(.*?)(?=\n## |\Z)"
-    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-    return match.group(1).strip() if match else ""
+# The _regex_fallback_* scrapers and their _extract_section_from_markdown
+# helper were retired by standard 0028 (operator ruling 2026-08-10): a
+# structured ask that returns unstructured output is rejected and re-asked,
+# never scraped. The #2199 incident is the case study — the fallback masked
+# a rendering defect for eight days and converted twelve approvals into
+# dead rolls.
 
 
 def same_blocking_issues(

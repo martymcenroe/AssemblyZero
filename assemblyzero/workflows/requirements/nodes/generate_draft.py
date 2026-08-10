@@ -50,9 +50,8 @@ from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
     parse_files_changed_table,
 )
 from assemblyzero.core.verdict_schema import (
-    DRAFT_QUESTIONS_SCHEMA,
     DraftQuestionsResult,
-    parse_structured_draft_questions,
+    scan_open_questions_section,
 )
 
 
@@ -61,17 +60,17 @@ def _extract_open_questions(
     response: str,
     system_prompt: str,
 ) -> DraftQuestionsResult:
-    """Extract open questions from reviewer response using DRAFT_QUESTIONS_SCHEMA.
+    """Extract open questions from the drafter's document response.
 
-    Issue #775: First attempts structured JSON parse of the existing response.
-    If that fails (response is markdown), the parse helper's regex fallback
-    extracts the ## Open Questions section automatically.
-
-    The provider and system_prompt params are accepted for future use
-    (re-extraction via LLM call) but are not used in v1 — we parse the
-    existing response directly.
+    Standard 0028: the drafter's response is a markdown DOCUMENT (its prompt
+    demands "emit ONLY the revised markdown"), so this was never a
+    structured-JSON contract — the old "structured parse with regex
+    fallback" failed the JSON step on every draft by construction and the
+    section scrape was the actual mechanism. Now the deterministic section
+    scan is the named mechanism. The provider and system_prompt params are
+    retained for signature compatibility; they are not used.
     """
-    return parse_structured_draft_questions(response)
+    return scan_open_questions_section(response)
 
 
 def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -266,16 +265,14 @@ Use the template structure provided. Include all sections. Be specific about:
 
     cost_before = get_cumulative_cost()
 
-    # Issue #775: Pass DRAFT_QUESTIONS_SCHEMA to provider for structured output (REQ-2)
-    from assemblyzero.core.llm_provider import GeminiProvider
-
-    schema_kwargs = {}
-    if isinstance(drafter, GeminiProvider):
-        schema_kwargs["response_schema"] = DRAFT_QUESTIONS_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = DRAFT_QUESTIONS_SCHEMA
-
-    result = drafter.invoke(system_prompt=system_prompt, content=prompt, **schema_kwargs)
+    # Standard 0028: one ask, one contract. The drafter's contract is a
+    # markdown document ("emit ONLY the revised markdown") enforced by
+    # mechanical validation downstream — the old code ALSO sent
+    # DRAFT_QUESTIONS_SCHEMA as the response schema, demanding JSON from
+    # the same call. Two contradictory contracts on one ask is how drafts
+    # come back malformed; the schema is gone and the open questions are
+    # scanned from the document it was actually asked to produce.
+    result = drafter.invoke(system_prompt=system_prompt, content=prompt)
     node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:

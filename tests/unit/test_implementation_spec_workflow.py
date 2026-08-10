@@ -31,6 +31,7 @@ Test IDs map to LLD Section 10.0/10.1:
 - T100: CLI runs full workflow
 """
 
+import json
 import os
 import pytest
 import textwrap
@@ -1997,10 +1998,13 @@ class TestReviewSpec:
     def test_approved_verdict(self, mock_provider, base_state):
         """APPROVED verdict returned."""
         reviewer = Mock()
+        _approved = json.dumps(
+            {"verdict": "APPROVED", "rationale": "Ready", "feedback_items": []}
+        )
         reviewer.invoke.return_value = Mock(
             success=True,
-            response="## Verdict\n[X] **APPROVED** - Ready\n",
-            content="## Verdict\n[X] **APPROVED** - Ready\n",
+            response=_approved,
+            content=_approved,
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -2020,10 +2024,11 @@ class TestReviewSpec:
     def test_revise_verdict(self, mock_provider, base_state):
         """REVISE verdict returned with feedback."""
         reviewer = Mock()
-        _response = (
-            "## Blocking Issues\n1. Missing excerpts.\n\n"
-            "## Verdict\n[X] **REVISE** - Fix issues\n"
-        )
+        _response = json.dumps({
+            "verdict": "REVISE",
+            "rationale": "Fix issues",
+            "feedback_items": ["Missing excerpts."],
+        })
         reviewer.invoke.return_value = Mock(
             success=True,
             response=_response,
@@ -2051,10 +2056,13 @@ class TestReviewSpec:
         Loop safety lives in the routing functions, which require
         review_iteration < max_iterations before any regeneration."""
         reviewer = Mock()
+        _approved = json.dumps(
+            {"verdict": "APPROVED", "rationale": "Ready", "feedback_items": []}
+        )
         reviewer.invoke.return_value = Mock(
             success=True,
-            response="## Verdict\n[X] **APPROVED** - Ready\n",
-            content="## Verdict\n[X] **APPROVED** - Ready\n",
+            response=_approved,
+            content=_approved,
             error_message=None,
             input_tokens=0,
             output_tokens=0,
@@ -2100,56 +2108,82 @@ class TestReviewSpec:
 
 
 class TestParseReviewVerdict:
-    """Tests for parse_review_verdict helper."""
+    """Tests for parse_review_verdict helper.
 
-    def test_approved_checkbox(self):
-        """[X] APPROVED → APPROVED."""
+    Standard 0028: strict — JSON verdicts parse; markdown checkboxes and
+    keyword prose are contract violations that raise, never scrapes.
+    """
+
+    def test_approved_json(self):
+        import json
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        verdict, _ = parse_review_verdict("[X] **APPROVED** - Ready\n")
+        raw = json.dumps({"verdict": "APPROVED", "rationale": "Ready", "feedback_items": []})
+        verdict, _ = parse_review_verdict(raw)
         assert verdict == "APPROVED"
 
-    def test_revise_checkbox(self):
-        """[X] REVISE → REVISE."""
+    def test_revise_json_carries_feedback(self):
+        import json
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        verdict, feedback = parse_review_verdict(
-            "## Blocking Issues\n1. Fix X.\n\n## Verdict\n[X] **REVISE**\n"
-        )
+        raw = json.dumps({
+            "verdict": "REVISE", "rationale": "Fix X.",
+            "feedback_items": ["Fix X in section 2"],
+        })
+        verdict, feedback = parse_review_verdict(raw)
         assert verdict == "REVISE"
         assert feedback != ""
 
-    def test_blocked_checkbox(self):
-        """[X] BLOCKED → BLOCKED."""
+    def test_blocked_json(self):
+        import json
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        verdict, _ = parse_review_verdict("[X] **BLOCKED** - Issues\n")
+        raw = json.dumps({"verdict": "BLOCKED", "rationale": "Issues", "feedback_items": []})
+        verdict, _ = parse_review_verdict(raw)
         assert verdict == "BLOCKED"
 
-    def test_keyword_fallback(self):
-        """VERDICT: APPROVED keyword → APPROVED."""
+    def test_markdown_checkbox_rejects(self):
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        verdict, _ = parse_review_verdict("Verdict: APPROVED\n\nGreat work!")
-        assert verdict == "APPROVED"
+        with pytest.raises(StructuredContractError):
+            parse_review_verdict("[X] **APPROVED** - Ready\n")
+
+    def test_keyword_prose_rejects(self):
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
+        from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
+
+        with pytest.raises(StructuredContractError):
+            parse_review_verdict("Verdict: APPROVED\n\nGreat work!")
 
     def test_empty_response_blocked(self):
-        """Empty → BLOCKED."""
+        """Empty → BLOCKED (an empty response is an infrastructure signal;
+        the conservative pre-0028 behavior stands)."""
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
         assert parse_review_verdict("")[0] == "BLOCKED"
 
-    def test_discuss_maps_to_blocked(self):
-        """DISCUSS → BLOCKED."""
+    def test_discuss_json_rejects_not_in_enum(self):
+        """DISCUSS is not in REVIEW_SPEC_SCHEMA's enum — a contract
+        violation, not a silent mapping to BLOCKED."""
+        import json
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        assert parse_review_verdict("[X] **DISCUSS** - Need discussion")[0] == "BLOCKED"
+        raw = json.dumps({"verdict": "DISCUSS", "rationale": "talk", "feedback_items": []})
+        with pytest.raises(StructuredContractError):
+            parse_review_verdict(raw)
 
-    def test_no_verdict_defaults_blocked(self):
-        """No verdict marker → BLOCKED."""
+    def test_prose_without_verdict_rejects(self):
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import parse_review_verdict
 
-        assert parse_review_verdict("Some text without verdict.")[0] == "BLOCKED"
+        with pytest.raises(StructuredContractError):
+            parse_review_verdict("Some text without verdict.")
 
 
 # =============================================================================

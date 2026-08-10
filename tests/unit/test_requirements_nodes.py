@@ -1895,10 +1895,10 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        # #1766: empty/failed reviewer content is an LLM-format error, not a
-        # synthesized review outcome (was: UNKNOWN -> REVISE -> BLOCKED with
-        # an empty rationale). The stage retry machinery re-runs the review.
-        assert "unparseable" in result.get("error_message", "")
+        # #1766 → standard 0028: empty/failed reviewer content is a rejected
+        # structured contract, not a synthesized review outcome. The stage
+        # retry machinery re-runs the review.
+        assert "rejected" in result.get("error_message", "")
         assert "lld_status" not in result
 
     @patch("assemblyzero.workflows.requirements.nodes.review.get_provider")
@@ -2037,9 +2037,9 @@ class TestReviewNodeCoverage:
 
         result = review(state)
 
-        # #1766: no extractable verdict -> honest LLM-format error, no
-        # synthesized BLOCKED.
-        assert "unparseable" in result.get("error_message", "")
+        # #1766 → standard 0028: no schema-valid verdict -> honest rejection,
+        # no synthesized BLOCKED.
+        assert "rejected" in result.get("error_message", "")
         assert "lld_status" not in result
 
 

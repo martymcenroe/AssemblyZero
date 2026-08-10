@@ -20,9 +20,10 @@ from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
     FEEDBACK_SCHEMA,
     FeedbackResult,
+    StructuredContractError,
     parse_structured_verdict,
     parse_structured_feedback,
-    parse_structured_draft_questions,
+    scan_open_questions_section,
 )
 from assemblyzero.workflows.requirements.audit import (
     load_review_prompt,
@@ -192,11 +193,18 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # Issue #775: Use structured schema-passing helper (REQ-2).
     # _invoke_reviewer_with_feedback_schema passes FEEDBACK_SCHEMA to the
     # provider via response_schema (Gemini) or json_schema (Claude CLI),
-    # then parses the response through parse_structured_feedback which
-    # falls back to regex if JSON parse fails.
-    feedback_result = _invoke_reviewer_with_feedback_schema(
-        reviewer, review_content, system_prompt
-    )
+    # then parses the response through parse_structured_feedback.
+    # Standard 0028: a response that violates the contract is rejected —
+    # the error return below hands it to the stage retry machinery, which
+    # is the bounded re-ask. No degraded parse exists.
+    try:
+        feedback_result = _invoke_reviewer_with_feedback_schema(
+            reviewer, review_content, system_prompt
+        )
+    except StructuredContractError as e:
+        msg = f"Reviewer response rejected: {e}"
+        print(f"    ERROR: {msg}")
+        return {"error_message": msg}
 
     node_cost_usd = get_cumulative_cost() - cost_before
 
@@ -212,20 +220,9 @@ Follow the Review Instructions exactly. Be specific about what needs to change f
     # (e.g., logging, state snapshots). Raw text no longer primary; structured result is authoritative.
     response = ""
     verdict_status = feedback_result["verdict"]
-    if verdict_status == "UNKNOWN":
-        # #1766: an unparseable reviewer response is an LLM-format error,
-        # not a review outcome. Silently mapping UNKNOWN -> REVISE produced
-        # contradictory logs ('could not extract verdict' followed by
-        # 'Parsed structured verdict: REVISE' -> BLOCKED with an empty
-        # rationale) and burned two-strike halts on garbage. Fail loudly;
-        # the stage retry machinery re-runs the review.
-        msg = (
-            "Reviewer response unparseable — no verdict found (structured "
-            "parse and regex fallback both failed). Treating as LLM "
-            "format error."
-        )
-        print(f"    ERROR: {msg}")
-        return {"error_message": msg}
+    # #1766's UNKNOWN check is gone: under standard 0028 the parse either
+    # yields a schema-valid verdict or raises StructuredContractError above
+    # — UNKNOWN can no longer reach this point.
     # Backward compat: derive `structured` dict for any remaining callers
     structured = {"verdict": verdict_status, "rationale": feedback_result["rationale"]}
 
@@ -759,12 +756,9 @@ def _check_open_questions_status(
     if _verdict_has_resolved_questions(verdict_content):
         return "RESOLVED"
 
-    # Issue #775: Use structured parse when verdict_content is available.
-    # We parse the full verdict_content (not questions_section) because
-    # parse_structured_draft_questions handles both JSON (from structured
-    # output) and markdown (via regex fallback that finds the ## Open
-    # Questions section internally).
-    dq_result = parse_structured_draft_questions(verdict_content)
+    # Standard 0028: verdict_content is the pipeline's own rendered text, so
+    # this is a document scan, not a parse of model output.
+    dq_result = scan_open_questions_section(verdict_content)
     unchecked = [q["text"] for q in dq_result["open_questions"] if not q["resolved"]]
     checked = [q["text"] for q in dq_result["open_questions"] if q["resolved"]]
 

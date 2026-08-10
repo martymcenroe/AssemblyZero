@@ -31,6 +31,7 @@ from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
     REVIEW_SPEC_SCHEMA,
     ReviewSpecResult,
+    StructuredContractError,
     parse_structured_verdict,
     parse_structured_review_spec,
 )
@@ -173,7 +174,13 @@ def _invoke_reviewer_with_spec_schema(
     raw = getattr(result, "response", None) or ""
     if not raw.strip():
         return None, "LLM call returned an empty response"
-    return parse_structured_review_spec(raw), ""
+    # Standard 0028: a schema-violating response is rejected through the
+    # same (None, error) path as an infrastructure failure — the caller
+    # surfaces it and the stage retry re-asks. No regex fallback exists.
+    try:
+        return parse_structured_review_spec(raw), ""
+    except StructuredContractError as e:
+        return None, str(e)
 
 
 # =============================================================================
@@ -593,9 +600,13 @@ IMPORTANT:
 def parse_review_verdict(response: str) -> tuple[str, str]:
     """Extract verdict and feedback from reviewer response.
 
-    Issue #775: Uses structured JSON as primary path, regex as fallback.
-    Kept for backward compatibility — external callers may invoke this directly.
-    The primary call path in review_spec() now uses _invoke_reviewer_with_spec_schema().
+    Kept for backward compatibility — external callers may invoke this
+    directly. The primary call path in review_spec() uses
+    _invoke_reviewer_with_spec_schema(). Standard 0028: the parse is
+    strict — a schema-violating response raises StructuredContractError
+    for the caller to surface; nothing is scraped. (The old UNKNOWN
+    downgrade is gone: a structured verdict is enum-valid by construction,
+    and DISCUSS is not in REVIEW_SPEC_SCHEMA's enum.)
 
     Args:
         response: Raw reviewer response text.
@@ -609,8 +620,6 @@ def parse_review_verdict(response: str) -> tuple[str, str]:
         return "BLOCKED", ""
     result = parse_structured_review_spec(response)
     verdict = result["verdict"]
-    if verdict in ("UNKNOWN", "DISCUSS"):
-        verdict = "BLOCKED"
     feedback = result["rationale"]
     if not feedback and result["feedback_items"]:
         feedback = "\n".join(f"- {item}" for item in result["feedback_items"])
