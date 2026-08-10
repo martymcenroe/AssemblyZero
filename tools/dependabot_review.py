@@ -281,6 +281,18 @@ REVIEW_BODY_PREFIX = "Automated review via tools/dependabot_review.py"
 # 0, disabling the skip entirely for a run (audits everything; strictly
 # more verification, never less).
 SKIP_AFTER_DEFERRALS = 3
+# #2155: how many never-audited PRs the pre-pass may take before the normal
+# alphabetical sweep runs. Repos process in sorted-name order, so under a
+# --limit budget the alphabetically-early repos spend it and the tail is
+# skipped "(queue untouched)" EVERY day -- deterministically the same tail,
+# so a PR there can go unaudited forever rather than merely late. Two repos'
+# PRs had never received a single automated review.
+#
+# 5 is a floor on tail progress, not a redistribution: it guarantees the
+# starved end of the fleet gets some budget every run while leaving the
+# majority to the normal sweep. It does NOT raise the total (--limit is
+# unchanged, #1339 stands) and it does not reorder anything else.
+ZERO_REVIEW_PREPASS_MAX = 5
 
 
 @dataclass
@@ -293,6 +305,11 @@ class PRInfo:
     # #1838: current head SHA (headRefOid). "" when the listing did not
     # provide one; every consumer must treat "" as "unknown, re-audit".
     head_oid: str = ""
+    # #2155: ISO-8601 creation time, used to order the zero-review pre-pass
+    # oldest-first ACROSS repos. PR numbers are per-repo and say nothing
+    # about relative age between them, so they cannot order a fleet queue.
+    # "" sorts last -- an unknown age must not jump the queue.
+    created_at: str = ""
 
 
 class PRBudget:
@@ -452,7 +469,7 @@ def list_dependabot_prs(repo: str) -> list[PRInfo]:
         "gh", "pr", "list", "--repo", repo,
         "--author", "app/dependabot",
         "--state", "open",
-        "--json", "number,title,author,body,headRefName,headRefOid",
+        "--json", "number,title,author,body,headRefName,headRefOid,createdAt",
     ])
     if result.returncode != 0:
         raise PRListError(
@@ -467,6 +484,7 @@ def list_dependabot_prs(repo: str) -> list[PRInfo]:
             body=r["body"] or "",
             head_ref=r["headRefName"],
             head_oid=r.get("headRefOid") or "",
+            created_at=r.get("createdAt") or "",
         )
         for r in raw
     ]
@@ -1093,6 +1111,79 @@ def already_deferred_at_head(pr: PRInfo, repo: str,
         and rv.get("commit_id") == pr.head_oid
     )
     return attempts >= max_attempts
+
+
+def has_automated_review(pr: PRInfo, repo: str) -> bool:
+    """#2155: True iff this tool has EVER reviewed this PR, at any SHA.
+
+    Distinct from already_deferred_at_head, which asks "did we defer this
+    exact head N times". This asks "has this PR ever been looked at at all",
+    which is what identifies the starved tail: a PR the alphabetical sweep
+    has never reached carries zero reviews from this tool at any SHA.
+
+    Counts APPROVED and COMMENTED alike -- both are audits that happened.
+
+    Conservative on ANY failure: returns True, i.e. "assume already
+    reviewed, do not prioritise". The inverse default would be dangerous in
+    exactly the case that matters: a transient GitHub outage would make
+    every PR in the fleet look never-audited at once and flood the pre-pass
+    with the whole queue. A missed prioritisation costs one day of latency
+    and the normal sweep still reaches the PR; the opposite error re-orders
+    the entire harvest off bad data.
+    """
+    result = run(
+        ["gh", "api", f"repos/{repo}/pulls/{pr.number}/reviews?per_page=100",
+         "--jq", "[.[] | {user: .user.login, body: .body}]"],
+        quiet_on_failure=True,
+    )
+    if result.returncode != 0:
+        return True
+    try:
+        reviews = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError:
+        return True
+    return any(
+        rv.get("user") == GITHUB_USER
+        and (rv.get("body") or "").startswith(REVIEW_BODY_PREFIX)
+        for rv in reviews
+    )
+
+
+def build_zero_review_queue(
+    repos: list[str],
+    max_prs: int = ZERO_REVIEW_PREPASS_MAX,
+) -> list[tuple[str, PRInfo]]:
+    """#2155: up to `max_prs` never-audited PRs, oldest-first across repos.
+
+    Ordering is by PR creation time, not by repo name and not by PR number.
+    PR numbers are per-repo counters, so comparing them across repos is
+    meaningless -- repo-a#3 may be far older than repo-z#900. Creation time
+    is the only fleet-wide ordering that means what it says.
+
+    A PR with no known creation time sorts last: an unknown age must not
+    jump a queue whose whole purpose is to serve the oldest starved work.
+    Ties break on (repo, number) so the selection is deterministic run to
+    run, which matters because a nondeterministic pre-pass would make the
+    harvest unreproducible.
+
+    A repo whose PR listing fails is skipped rather than fatal -- the same
+    posture process_repo takes. The normal sweep will report the failure.
+    Returns [] when max_prs <= 0, which disables the pre-pass entirely.
+    """
+    if max_prs <= 0:
+        return []
+    candidates: list[tuple[str, PRInfo]] = []
+    for repo in repos:
+        try:
+            prs = list_dependabot_prs(repo)
+        except PRListError:
+            continue
+        for pr in prs:
+            if not has_automated_review(pr, repo):
+                candidates.append((repo, pr))
+    candidates.sort(key=lambda rp: (rp[1].created_at or "￿",
+                                    rp[0], rp[1].number))
+    return candidates[:max_prs]
 
 
 # #1400: file patterns that mean "this PR could affect the Python test
@@ -1739,6 +1830,8 @@ def process_repo(
     ignore_orphans: bool = False,
     budget: PRBudget | None = None,
     skip_after: int = SKIP_AFTER_DEFERRALS,
+    only_prs: set[int] | None = None,
+    skip_prs: set[int] | None = None,
 ) -> dict[str, list[str]]:
     """Process all dependabot PRs in one repo, sequentially.
 
@@ -1827,6 +1920,16 @@ def process_repo(
     if dry_run:
         return sub
     for pr in sorted(prs, key=lambda p: p.number):
+        # #2155: the zero-review pre-pass runs this same function with
+        # `only_prs` set, so its PRs go through every gate below exactly as
+        # the normal sweep would -- no second processing path to drift.
+        # The sweep then passes `skip_prs` for whatever the pre-pass already
+        # handled, so a PR is never audited twice in one run (which would
+        # post a duplicate review and spend a second budget slot).
+        if only_prs is not None and pr.number not in only_prs:
+            continue
+        if skip_prs and pr.number in skip_prs:
+            continue
         # #1838: a PR already deferred at this exact head SHA cannot
         # produce a different result -- skip before spending a budget
         # slot, building a worktree, or posting a duplicate review.
@@ -2063,6 +2166,33 @@ def main() -> None:
         "skipped_unchanged": [],
     }
 
+    # #2155: zero-review pre-pass. Repos process in sorted-name order, so a
+    # --limit budget is spent by the alphabetically-early repos and the same
+    # tail is skipped "(queue untouched)" every single day. Deterministic
+    # ordering makes that starvation permanent rather than merely unlucky:
+    # two repos' PRs had never received one automated review.
+    #
+    # Only meaningful when a budget can actually run out, so it is gated on
+    # `budget`. Uncapped runs reach everything anyway and would just pay the
+    # extra review lookups for nothing.
+    prepass: list[tuple[str, PRInfo]] = []
+    if budget and repos:
+        print(f"\nZero-review pre-pass: scanning {len(repos)} repo(s) for "
+              f"PRs this tool has never audited (#2155)...")
+        prepass = build_zero_review_queue(repos)
+        if prepass:
+            print(f"  {len(prepass)} never-audited PR(s), oldest first "
+                  f"(max {ZERO_REVIEW_PREPASS_MAX}):")
+            for repo, pr in prepass:
+                print(f"    {repo}#{pr.number}  created {pr.created_at or '?'}"
+                      f"  {pr.title[:60]}")
+        else:
+            print("  none — every open PR has been audited at least once.")
+
+    # Numbers the pre-pass handled, per repo, so the normal sweep does not
+    # audit them a second time in the same run.
+    done_by_repo: dict[str, set[int]] = {}
+
     # Wrap the worker dispatch + summary print in try/finally so the
     # Summary block ALWAYS prints, even when a stray SIGINT trips the
     # KeyboardInterrupt handler in __main__ before we'd otherwise
@@ -2074,6 +2204,27 @@ def main() -> None:
     # scheduled-task subprocess tree. Not worth chasing further --
     # belt-and-suspenders: print summary in finally.)
     try:
+        # #2155: serve the starved tail first, through the ordinary
+        # process_repo path so every gate (orphan canary, deferral skip,
+        # budget, author/exit-code gates) applies unchanged. Grouped by repo
+        # so each repo's worktree preconditions are established once.
+        if prepass and not args.dry_run:
+            by_repo: dict[str, set[int]] = {}
+            for repo, pr in prepass:
+                by_repo.setdefault(repo, set()).add(pr.number)
+            for repo, numbers in by_repo.items():
+                if budget is not None and budget.exhausted:
+                    break
+                print(f"\n{'=' * 60}\nPRE-PASS REPO: {repo}\n{'=' * 60}")
+                sub = process_repo(
+                    repo, main_repo, args.dry_run, args.ignore_orphans,
+                    budget=budget, skip_after=skip_after, only_prs=numbers,
+                )
+                for k in ("merged", "deferred", "errored", "limit_skipped",
+                          "skipped_unchanged"):
+                    results[k].extend(sub[k])
+                done_by_repo.setdefault(repo, set()).update(numbers)
+
         # Issue #1093: parallelize across repos in --fleet mode. Single-
         # repo mode (or --workers=1) keeps the sequential path. Within a
         # repo, processing is always sequential.
@@ -2127,6 +2278,7 @@ def main() -> None:
                 sub = process_repo(
                     repo, main_repo, args.dry_run, args.ignore_orphans,
                     budget=budget, skip_after=skip_after,
+                    skip_prs=done_by_repo.get(repo),
                 )
                 for k in ("merged", "deferred", "errored", "limit_skipped",
                           "skipped_unchanged"):
