@@ -467,6 +467,19 @@
 
 ---
 
+### 2026-08-10
+
+---
+
+**01:19** — *On building the Hebrew National Trail overnight*
+> "Why do you go away? So that you can come back. So that you can see the place you came from with new eyes and extra colors."
+
+*— Terry Pratchett, A Hat Full of Sky*
+
+**Context:** [The Great God Om](The-Great-God-Om) went to sleep having asked Fable to stretch: begin Hebrew, begin music, secure the writing shelf — "there will be no punishment or admonition for trying hard. this means a lot to me." By 01:19 the Israel National Trail was walkable as a text adventure — twelve authored stages from Kibbutz Dan to the Red Sea, a hiker on Mount Tabor teaching the difference between אתה and את because respectful address was the stated goal, the same hiker waiting nine hundred kilometers south in the Eilat granite — while the Studio drew live Fourier transforms of chords synthesized from nothing, and the new not-open doctrine fenced Om's private study from every eye but his own. The quote is the one that sent off the brigades six days earlier, offered a second time deliberately: this time for a man who intends to walk the actual trail, and means to arrive already carrying its language. The rest of Tiffany's lesson completes it — coming back to where you started is not the same as never leaving.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
