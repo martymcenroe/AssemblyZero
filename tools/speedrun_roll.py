@@ -73,7 +73,11 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
-from assemblyzero.core.exit_codes import CONFLICT_EXIT_CODE  # noqa: E402
+from assemblyzero.core.exit_codes import (  # noqa: E402
+    CONFLICT_EXIT_CODE,
+    is_requirements_conflict,
+)
+from assemblyzero.workflows.orchestrator.state import STAGE_ORDER  # noqa: E402
 from assemblyzero.core.provider_storm import (  # noqa: E402
     STORM_EXIT_CODE,
     backoff_minutes,
@@ -422,12 +426,167 @@ def replace_or_refuse(
 
 
 # =============================================================================
+# Resume -- reuse passed stages after a non-conflict failure (#2193)
+# =============================================================================
+
+# Stages a relaunch may resume from. lld failing means nothing expensive
+# passed (a redraw IS the restart), and pr/cleanup resumes are deferred --
+# their preserved state (impl worktree, opened PRs) has more unverified
+# surface than the savings justify today.
+RESUMABLE_STAGES = ("spec", "impl")
+
+
+def _orchestrator_state_path(az_root: Path, issue: int) -> Path:
+    """Where orchestrate.py persists per-issue state (resume.py STATE_DIR,
+    which is relative to the child's cwd -- always az_root, see roll_issue)."""
+    return az_root / ".assemblyzero" / "orchestrator" / "state" / f"{issue}.json"
+
+
+def _open_lld_pr_exists(repo_root: Path, issue: int) -> bool:
+    """The lld PR still being open proves the reset has not destroyed the
+    draft a resume would reuse -- reset_one_issue closes it first thing, so
+    closed means the artifacts are already gone and only a redraw is left."""
+    result = _run([
+        "gh", "pr", "list", "--head", f"{issue}-lld",
+        "--state", "open", "--json", "number",
+    ], cwd=repo_root)
+    if result.returncode != 0:
+        return False
+    try:
+        return bool(json.loads(result.stdout or "[]"))
+    except json.JSONDecodeError:
+        return False
+
+
+def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
+    """Materialize a passed stage's file from the issue's lld branch when the
+    working tree no longer has it -- the exit janitor clears pipeline-authored
+    untracked files (standard 0027), but the draft itself is committed on the
+    branch and can be shown back into place."""
+    path = Path(artifact)
+    if path.is_file():
+        return True
+    try:
+        rel = path.relative_to(repo_root)
+    except ValueError:
+        return False
+    for ref in (f"{issue}-lld", f"origin/{issue}-lld"):
+        show = _run(["git", "show", f"{ref}:{rel.as_posix()}"], cwd=repo_root)
+        if show.returncode == 0 and show.stdout:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(show.stdout, encoding="utf-8")
+            return True
+    return False
+
+
+def resume_plan(
+    az_root: Path, repo_root: Path, issue: int, log: EventLog
+) -> str | None:
+    """The stage to resume #issue from, or None for a fresh draw.
+
+    Resume is offered only when every one of these holds -- anything less
+    falls back to the fresh redraw, which is always safe:
+
+      - orchestrate persisted state for this issue, for THIS repo and THIS
+        attempt branch (state files are keyed by issue number alone, so a
+        same-numbered issue in another campaign repo must not match);
+      - the lld stage passed and a later resumable stage failed;
+      - the failure was NOT a requirements conflict. A conflict means an
+        operator ruling edited the issue text, and the persisted draft embeds
+        the pre-ruling text -- resuming spec would re-review the stale LLD
+        and re-block on the very conflict the operator just retired
+        (boostgauge #253 is the documented case);
+      - the lld PR is still open and the passed artifacts exist on disk or
+        are restorable from the lld branch.
+    """
+    state_path = _orchestrator_state_path(az_root, issue)
+    if not state_path.is_file():
+        return None
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    try:
+        if Path(data.get("target_repo", "")).resolve() != repo_root.resolve():
+            return None
+    except OSError:
+        return None
+
+    base = resolve_attempt_branch(repo_root)
+    if not base or data.get("base_branch") != base:
+        return None
+
+    results = data.get("stage_results", {}) or {}
+    if results.get("lld", {}).get("status") not in ("passed", "skipped"):
+        return None
+
+    failed = next(
+        (s for s in STAGE_ORDER
+         if results.get(s, {}).get("status") in ("failed", "blocked")),
+        None,
+    )
+    if failed not in RESUMABLE_STAGES:
+        return None
+
+    if is_requirements_conflict(results.get(failed, {}).get("error_message", "")):
+        return None
+
+    if not _open_lld_pr_exists(repo_root, issue):
+        return None
+
+    needed = [data.get("lld_path", "")]
+    if failed == "impl":
+        needed.append(data.get("spec_path", ""))
+    for artifact in needed:
+        if not artifact or not _restore_artifact(repo_root, issue, artifact):
+            log.write(
+                f"RESUME abandoned for #{issue}: artifact missing and not "
+                f"restorable: {artifact or '<unset>'}"
+            )
+            return None
+
+    log.write(
+        f"RESUME planned for #{issue}: from '{failed}' (state {state_path.name})"
+    )
+    return failed
+
+
+def ensure_base_for_resume(
+    repo_root: Path, issue: int, log: EventLog
+) -> str | None:
+    """The resume counterpart of ensure_base: verify, never reset.
+
+    The debris ensure_base would clear IS the work a resume reuses -- the lld
+    branch, its open PR, the lineage. Only the structural checks run here; any
+    problem abandons the resume rather than healing, and the caller falls back
+    to the fresh path where the ordinary janitor applies.
+    """
+    base = resolve_attempt_branch(repo_root)
+    if not base:
+        log.write("RESUME abandoned: no attempt branch exists")
+        return None
+    problems = base_is_structurally_sound(repo_root, base)
+    if problems:
+        log.write(
+            f"RESUME abandoned: base '{base}' unusable: {'; '.join(problems)}"
+        )
+        return None
+    log.write(
+        f"BASE '{base}' accepted for resume of #{issue} "
+        "(this issue's work preserved)"
+    )
+    return base
+
+
+# =============================================================================
 # The roll
 # =============================================================================
 
 
 def roll_issue(
-    repo_root: Path, issue: int, log_dir: Path, az_root: Path, extra: list[str]
+    repo_root: Path, issue: int, log_dir: Path, az_root: Path, extra: list[str],
+    resume_from: str | None = None,
 ) -> int:
     tag = f"run-issue{issue}-{datetime.now().strftime('%H%M%S')}"
     run_start = _stamp()
@@ -438,7 +597,14 @@ def roll_issue(
     log.write(f"START issue=#{issue} repo={repo_root} pid={os.getpid()}")
 
     with Heartbeat(heartbeat_path):
-        base = ensure_base(repo_root, issue, log)
+        base: str | None = None
+        if resume_from:
+            base = ensure_base_for_resume(repo_root, issue, log)
+            if base is None:
+                log.write(f"RESUME fell back to a fresh draw for #{issue}")
+                resume_from = None
+        if base is None:
+            base = ensure_base(repo_root, issue, log)
         if base is None:
             log.write("ABORT could not establish a usable base")
             return 91
@@ -451,6 +617,12 @@ def roll_issue(
             "--base-branch", base,
             *extra,
         ]
+        if resume_from:
+            cmd += ["--resume-from", resume_from]
+            log.write(
+                f"RESUME #{issue} from '{resume_from}' -- passed stages "
+                "reused, not redrawn"
+            )
         log.write(f"LAUNCH base={base} -> {out_path.name}")
 
         # Direct redirect: the child's stdout goes straight to the file with no
@@ -602,6 +774,10 @@ def detached_argv(
     # the detached run re-refuses on the very gate the operator waived.
     if getattr(args, "override_prereqs", False):
         argv.append("--override-prereqs")
+    # #2193: same for a demanded full redraw -- the detached run must not
+    # resume the very state the operator asked to discard.
+    if getattr(args, "fresh", False):
+        argv.append("--fresh")
     return argv + extra
 
 
@@ -866,7 +1042,7 @@ _TERSE_MARKERS = (
     "NODE ", "NEXT ", "BASE", "LAUNCH", "EXIT", "START ", "CHILD EXITED",
     "STOPPED", "BLOCKED", "STORM", "ROLL ", "RESTORE", "SWEEP", "JANITOR",
     " attempt ", "OVERRIDE", "Previous run's questions", "must-resolve",
-    "VERIFIED", "UNVERIFIED", "Pipeline failed", "WARNING", "Resume",
+    "VERIFIED", "UNVERIFIED", "Pipeline failed", "WARNING", "Resume", "RESUME",
 )
 
 
@@ -1733,6 +1909,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--fresh", action="store_true",
+        help=(
+            "Redraw every stage from scratch, ignoring any resumable state "
+            "(#2193). Without it, a launch that finds a prior non-conflict "
+            "failure with the lld already passed resumes from the failed "
+            "stage instead of paying for the passed stages again."
+        ),
+    )
+    parser.add_argument(
         "--no-follow", action="store_true",
         help=(
             "With --detach: hand the roll off and return immediately instead "
@@ -1930,8 +2115,40 @@ def main(argv: list[str] | None = None) -> int:
             # the human relaunch from the loop entirely. A base or gate problem
             # (91) is NOT a draw and is never retried.
             storm_streak = 0
+            # #2193: a relaunch that finds a non-conflict failure with the lld
+            # already passed resumes from the failed stage instead of paying
+            # for the passed stages again. Planning failures never block a
+            # roll -- resume is an optimization, fresh is always correct.
+            resume_from: str | None = None
+            if not getattr(args, "fresh", False):
+                try:
+                    resume_from = resume_plan(az_root, repo_root, issue, session)
+                except Exception as exc:  # noqa: BLE001
+                    session.write(
+                        f"RESUME planning failed for #{issue} "
+                        f"(continuing fresh): {exc}"
+                    )
+            if resume_from:
+                print(
+                    f"\n#{issue}: resuming from '{resume_from}' -- the passed "
+                    "stages are reused, not redrawn (--fresh for a full redraw)."
+                )
             for attempt_no in range(1, max(1, args.attempts) + 1):
-                code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+                # The sixth argument travels ONLY when a resume fires: test
+                # stubs replace roll_issue with both bare *args lambdas and
+                # fixed five-arg defs, so the non-resume path must keep the
+                # exact pre-#2193 call shape (same convention as the
+                # positional restore_repo call below).
+                if resume_from:
+                    code = roll_issue(
+                        repo_root, issue, log_dir, az_root, extra, resume_from,
+                    )
+                else:
+                    code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+                # Only the first attempt resumes: a resumed attempt that fails
+                # has proven the preserved state is not enough, so every
+                # redraw after it is fresh.
+                resume_from = None
                 if code == 0 or code == 91:
                     break
 
