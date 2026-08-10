@@ -1204,3 +1204,179 @@ def test_baseline_checkout_stays_detached_like_the_pr_head(tmp_path, capsys):
         f"got {checkouts[0]}"
     )
     assert "dependabot-audit-4242" in checkouts[0]
+
+
+# ---- #2155: zero-review pre-pass (starved-tail fix) ----
+#
+# Repos process in sorted-name order, so a --limit budget is spent by the
+# alphabetically-early repos and the SAME tail is skipped every day. Two
+# repos' PRs had never received a single automated review.
+
+def _pr(number, created_at="", title="t"):
+    return dependabot_review.PRInfo(
+        number=number, title=title, author_login="app/dependabot",
+        body="", head_ref=f"db/{number}", head_oid=f"sha{number}",
+        created_at=created_at,
+    )
+
+
+def _reviews_payload(*bodies):
+    import json as _json
+    return _mk_completed(0, stdout=_json.dumps(
+        [{"user": dependabot_review.GITHUB_USER, "body": b} for b in bodies]
+    ))
+
+
+def test_has_automated_review_true_when_this_tool_reviewed_at_any_sha():
+    """Any prior review counts — APPROVED or COMMENTED, at any SHA."""
+    body = dependabot_review.REVIEW_BODY_PREFIX + " — gate: npm test passed"
+    with patch.object(dependabot_review, "run",
+                      return_value=_reviews_payload(body)):
+        assert dependabot_review.has_automated_review(_pr(7), "o/r") is True
+
+
+def test_has_automated_review_false_when_only_foreign_reviews_exist():
+    """A human review is not an audit by this tool; the PR is still starved."""
+    with patch.object(dependabot_review, "run",
+                      return_value=_reviews_payload("LGTM, merging")):
+        assert dependabot_review.has_automated_review(_pr(7), "o/r") is False
+
+
+def test_has_automated_review_assumes_reviewed_when_the_api_fails():
+    """Fail-safe direction matters: an outage must not flood the pre-pass.
+
+    Returning False on error would make every PR in the fleet look
+    never-audited during a GitHub blip and reorder the whole harvest off
+    bad data. A missed prioritisation only costs a day of latency.
+    """
+    with patch.object(dependabot_review, "run",
+                      return_value=_mk_completed(1, stderr="503")):
+        assert dependabot_review.has_automated_review(_pr(7), "o/r") is True
+
+    with patch.object(dependabot_review, "run",
+                      return_value=_mk_completed(0, stdout="not json")):
+        assert dependabot_review.has_automated_review(_pr(7), "o/r") is True
+
+
+def test_queue_orders_oldest_first_across_repos_not_by_repo_name():
+    """The whole point: an alphabetically-late repo can outrank an early one.
+
+    PR numbers are per-repo counters, so `zzz#2` really can be older than
+    `aaa#900`. Ordering by name or number is what starved the tail.
+    """
+    listings = {
+        "o/aaa": [_pr(900, "2026-08-01T00:00:00Z")],
+        "o/zzz": [_pr(2, "2026-01-01T00:00:00Z")],
+    }
+    with patch.object(dependabot_review, "list_dependabot_prs",
+                      side_effect=lambda r: listings[r]), \
+         patch.object(dependabot_review, "has_automated_review",
+                      return_value=False):
+        q = dependabot_review.build_zero_review_queue(["o/aaa", "o/zzz"])
+
+    assert [(r, p.number) for r, p in q] == [("o/zzz", 2), ("o/aaa", 900)]
+
+
+def test_queue_excludes_already_audited_prs():
+    listings = {"o/a": [_pr(1, "2026-01-01T00:00:00Z"),
+                        _pr(2, "2026-02-01T00:00:00Z")]}
+    audited = {1}
+    with patch.object(dependabot_review, "list_dependabot_prs",
+                      side_effect=lambda r: listings[r]), \
+         patch.object(dependabot_review, "has_automated_review",
+                      side_effect=lambda pr, repo: pr.number in audited):
+        q = dependabot_review.build_zero_review_queue(["o/a"])
+
+    assert [p.number for _, p in q] == [2]
+
+
+def test_queue_is_capped_and_unknown_age_sorts_last():
+    """The cap bounds the pre-pass; a PR with no creation time cannot jump it."""
+    prs = [_pr(1, "")] + [_pr(n, f"2026-0{n}-01T00:00:00Z") for n in range(2, 8)]
+    with patch.object(dependabot_review, "list_dependabot_prs",
+                      side_effect=lambda r: prs), \
+         patch.object(dependabot_review, "has_automated_review",
+                      return_value=False):
+        q = dependabot_review.build_zero_review_queue(["o/a"], max_prs=3)
+
+    assert len(q) == 3
+    assert [p.number for _, p in q] == [2, 3, 4]
+    assert 1 not in [p.number for _, p in q]
+
+
+def test_queue_disabled_returns_empty_and_makes_no_calls():
+    with patch.object(dependabot_review, "list_dependabot_prs") as lister:
+        assert dependabot_review.build_zero_review_queue(["o/a"], max_prs=0) == []
+    lister.assert_not_called()
+
+
+def test_queue_survives_a_repo_whose_listing_fails():
+    """One unreachable repo must not sink the pre-pass for the rest."""
+    def lister(repo):
+        if repo == "o/broken":
+            raise dependabot_review.PRListError("boom")
+        return [_pr(5, "2026-03-01T00:00:00Z")]
+
+    with patch.object(dependabot_review, "list_dependabot_prs",
+                      side_effect=lister), \
+         patch.object(dependabot_review, "has_automated_review",
+                      return_value=False):
+        q = dependabot_review.build_zero_review_queue(["o/broken", "o/ok"])
+
+    assert [(r, p.number) for r, p in q] == [("o/ok", 5)]
+
+
+# ---- #2155: the filter that keeps one run from auditing a PR twice ----
+
+def _run_process_repo(tmp_path, prs, **kwargs):
+    """Drive process_repo with its preconditions satisfied, recording calls."""
+    processed: list[int] = []
+
+    def fake_process_pr(pr, repo, target_repo):
+        processed.append(pr.number)
+        return "merged"
+
+    with patch.object(dependabot_review, "resolve_target_repo_dir",
+                      return_value=tmp_path), \
+         patch.object(dependabot_review, "check_for_orphan_worktrees",
+                      return_value=[]), \
+         patch.object(dependabot_review, "list_dependabot_prs",
+                      return_value=prs), \
+         patch.object(dependabot_review, "already_deferred_at_head",
+                      return_value=False), \
+         patch.object(dependabot_review, "process_pr",
+                      side_effect=fake_process_pr):
+        sub = dependabot_review.process_repo("o/r", tmp_path, **kwargs)
+    return processed, sub
+
+
+def test_only_prs_restricts_the_prepass_to_its_selection(tmp_path):
+    prs = [_pr(1), _pr(2), _pr(3)]
+    processed, _ = _run_process_repo(tmp_path, prs, only_prs={2})
+    assert processed == [2]
+
+
+def test_skip_prs_stops_the_sweep_reauditing_what_the_prepass_did(tmp_path):
+    """Without this the pre-pass PR is audited twice in one run.
+
+    That would post a duplicate review and spend a second budget slot —
+    turning a fix for starvation into extra consumption of the same budget.
+    """
+    prs = [_pr(1), _pr(2), _pr(3)]
+    processed, _ = _run_process_repo(tmp_path, prs, skip_prs={2})
+    assert processed == [1, 3]
+
+
+def test_no_filters_preserves_existing_behaviour_exactly(tmp_path):
+    prs = [_pr(3), _pr(1), _pr(2)]
+    processed, _ = _run_process_repo(tmp_path, prs)
+    assert processed == [1, 2, 3]  # still oldest-number-first within a repo
+
+
+def test_prepass_then_sweep_audits_each_pr_exactly_once(tmp_path):
+    """End-to-end invariant: the two passes partition the repo's PRs."""
+    prs = [_pr(1), _pr(2), _pr(3)]
+    pre, _ = _run_process_repo(tmp_path, prs, only_prs={3})
+    sweep, _ = _run_process_repo(tmp_path, prs, skip_prs={3})
+    assert sorted(pre + sweep) == [1, 2, 3]
+    assert set(pre).isdisjoint(sweep)
