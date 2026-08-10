@@ -97,6 +97,10 @@ class TestParsersUseLenientRecovery:
         assert result["source"] == "structured"
         assert result["verdict"] == "APPROVED"
 
-    def test_markdown_review_spec_still_falls_back(self):
-        result = parse_structured_review_spec("## Verdict\n[x] **APPROVED**\n")
-        assert result["source"] == "regex_fallback"
+    def test_markdown_review_spec_rejects(self):
+        """Standard 0028: markdown is a contract violation, not a fallback."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
+
+        with pytest.raises(StructuredContractError):
+            parse_structured_review_spec("## Verdict\n[x] **APPROVED**\n")

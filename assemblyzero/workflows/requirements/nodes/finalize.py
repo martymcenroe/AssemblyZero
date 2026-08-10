@@ -31,7 +31,7 @@ from ..git_operations import (
 )
 from assemblyzero.core.verdict_schema import (
     FinalizeQuestionsResult,
-    parse_structured_finalize_questions,
+    scan_residual_questions,
 )
 
 # Constants
@@ -259,19 +259,14 @@ def _mirror_to_worktree(
 
 
 def _detect_open_questions(content: str) -> FinalizeQuestionsResult:
-    """Detect unresolved questions/TODOs in content, trying structured JSON first.
+    """Detect unresolved questions/TODOs in content.
 
-    Issue #775: This is a local parse — no LLM call. Tries json.loads() first
-    (for content that is already structured JSON from a prior step), falls
-    back to regex line scanning via parse_structured_finalize_questions.
-
-    Deviation from LLD: The LLD Section 2.4 defines this function with a
-    `provider: LLMProvider` parameter for an LLM call. This implementation
-    intentionally uses local parsing only because finalize.py validates
-    already-generated content for residual questions/TODOs — a deterministic
-    scan, not a semantic analysis task.
+    Standard 0028: finalize validates its own already-generated artifact —
+    a deterministic document scan, not a parse of model output, and never
+    a "fallback." (The LLD Section 2.4 defined this with an LLM call; the
+    local-scan deviation predates this change and stands.)
     """
-    return parse_structured_finalize_questions(content)
+    return scan_residual_questions(content)
 
 
 def validate_lld_final(content: str, open_questions_resolved: bool = False) -> list[str]:

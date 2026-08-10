@@ -355,10 +355,13 @@ class TestStateHasOpenQuestionsStatus:
         with patch("assemblyzero.workflows.requirements.nodes.review.get_provider") as mock_get:
             import json as _json
             mock_provider = Mock()
+            _verdict_json = _json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []})
             mock_provider.invoke.return_value = Mock(
                 success=True,
-                content=_json.dumps({"verdict": "APPROVED", "rationale": "", "feedback_items": [], "open_questions": []}),
-                response="[x] APPROVED",
+                content=_verdict_json,
+                # Standard 0028: review reads .response, which must honor the
+                # schema — the old "[x] APPROVED" markdown would be rejected.
+                response=_verdict_json,
                 error_message=None,
                 input_tokens=0,
                 output_tokens=0,

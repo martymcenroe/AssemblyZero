@@ -121,8 +121,11 @@ class TestInvokeReviewerWithFeedbackSchema:
         assert call_kwargs["response_schema"] == FEEDBACK_SCHEMA
         assert "json_schema" not in call_kwargs
 
-    def test_falls_back_to_regex_on_malformed_json(self):
-        """Fallback path triggered when provider returns non-JSON markdown."""
+    def test_markdown_response_rejects(self):
+        """Standard 0028: non-JSON markdown is a contract violation — it
+        raises for the node to surface, never a regex scrape."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
@@ -130,10 +133,8 @@ class TestInvokeReviewerWithFeedbackSchema:
         raw = "[X] **APPROVED**\n\n## Feedback\n- looks good"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
-
-        assert result["verdict"] == "APPROVED"
-        assert result["source"] == "regex_fallback"
+        with pytest.raises(StructuredContractError):
+            _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
 
     def test_revise_verdict_propagated(self):
         """REVISE verdict from structured result is returned correctly."""
@@ -313,8 +314,11 @@ class TestFeedbackResultPropagation:
 
         assert result["source"] == "structured"
 
-    def test_source_is_regex_fallback_on_markdown(self):
-        """source field is 'regex_fallback' when JSON parse fails."""
+    def test_markdown_never_yields_a_source(self):
+        """Standard 0028: there is no regex_fallback source anymore — a
+        markdown verdict raises instead of producing a degraded result."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
@@ -322,17 +326,18 @@ class TestFeedbackResultPropagation:
         raw = "[X] **REVISE**\n\nRationale: missing tests"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
-
-        assert result["source"] == "regex_fallback"
+        with pytest.raises(StructuredContractError):
+            _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
 
 
 class TestFallbackBehavior:
-    """Tests for regex fallback path in review node."""
+    """Standard 0028: there is no fallback — violations reject."""
 
-    @patch("assemblyzero.core.verdict_schema.logger")
-    def test_fallback_logs_debug_metric(self, mock_logger):
-        """T150: logger.debug called when fallback fires in feedback parse."""
+    def test_contract_violation_raises_not_logs(self):
+        """The pre-0028 fallback logged a debug metric and guessed; now the
+        violation raises with the parser named."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
@@ -340,10 +345,9 @@ class TestFallbackBehavior:
         raw = "[X] **REVISE**\n\n## Feedback\n- Fix error handling"
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
-
-        assert result["source"] == "regex_fallback"
-        mock_logger.debug.assert_any_call("verdict_schema.regex_fallback parser=feedback")
+        with pytest.raises(StructuredContractError) as exc_info:
+            _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
+        assert exc_info.value.parser == "feedback"
 
     def test_no_fallback_on_structured_success(self):
         """Structured parse succeeds — source is 'structured'."""
@@ -363,56 +367,41 @@ class TestFallbackBehavior:
 
         assert result["source"] == "structured"
 
-    def test_empty_response_returns_unknown_verdict(self):
-        """Empty provider response returns UNKNOWN verdict via fallback."""
+    def test_empty_response_rejects(self):
+        """An empty provider response is a contract violation, not an
+        UNKNOWN verdict to be remapped downstream."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
 
         provider = _make_mock_provider("")
 
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
+        with pytest.raises(StructuredContractError) as exc_info:
+            _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
+        assert "response empty" in str(exc_info.value)
 
-        assert result["source"] == "regex_fallback"
-        assert result["verdict"] in {"UNKNOWN", "REVISE"}  # fallback may remap UNKNOWN
-
-    def test_feedback_items_extracted_via_fallback(self):
-        """Feedback items extracted from markdown via regex fallback."""
-        from assemblyzero.workflows.requirements.nodes.review import (
-            _invoke_reviewer_with_feedback_schema,
-        )
-
-        raw = "[X] **REVISE**\n\n## Feedback\n- Fix error handling\n- Add missing tests\n"
-        provider = _make_mock_provider(raw)
-
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
-
-        assert result["source"] == "regex_fallback"
-        assert "Fix error handling" in result["feedback_items"]
-        assert "Add missing tests" in result["feedback_items"]
-
-    def test_open_questions_extracted_via_fallback(self):
-        """Open questions extracted from markdown via regex fallback."""
+    def test_markdown_feedback_sections_are_not_scraped(self):
+        """The old fallback scraped feedback bullets and question checkboxes
+        out of markdown; both are rejections now — the reviewer's data
+        arrives through the schema or not at all."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.requirements.nodes.review import (
             _invoke_reviewer_with_feedback_schema,
         )
 
         raw = (
             "[X] **REVISE**\n\n"
+            "## Feedback\n- Fix error handling\n\n"
             "## Open Questions\n"
             "- [ ] What timeout value?\n"
-            "- [X] Rate limit decided\n"
         )
         provider = _make_mock_provider(raw)
 
-        result = _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
-
-        assert result["source"] == "regex_fallback"
-        texts = [q["text"] for q in result["open_questions"]]
-        assert "What timeout value?" in texts
-        resolved = {q["text"]: q["resolved"] for q in result["open_questions"]}
-        assert resolved["What timeout value?"] is False
-        assert resolved["Rate limit decided"] is True
+        with pytest.raises(StructuredContractError):
+            _invoke_reviewer_with_feedback_schema(provider, "prompt", "system")
 
 
 class TestExtractActionableFeedback:

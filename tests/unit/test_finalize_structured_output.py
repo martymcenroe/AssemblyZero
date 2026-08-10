@@ -1,12 +1,12 @@
-"""Tests for finalize question detection structured output.
+"""Tests for finalize residual-question detection.
 
-Issue #775: Verify _detect_open_questions and validate_lld_final use
-structured JSON parse with regex fallback.
+Standard 0028 reframed this surface: finalize validates its OWN generated
+artifact, so `_detect_open_questions` is a deterministic document scan
+(`scan_residual_questions`) — never a structured parse of model output and
+never a "fallback." JSON content is just text to the scan; the pre-0028
+structured branch (which read JSON verdict-shaped content) is retired with
+its parser.
 """
-
-import json
-from unittest.mock import patch
-import pytest
 
 from assemblyzero.workflows.requirements.nodes.finalize import (
     _detect_open_questions,
@@ -14,266 +14,82 @@ from assemblyzero.workflows.requirements.nodes.finalize import (
 )
 
 
-class TestDetectOpenQuestionsStructured:
-    """T060: Structured JSON content detection."""
-
-    def test_structured_json_with_questions(self):
-        content = json.dumps({
-            "has_open_questions": True,
-            "question_count": 1,
-            "questions": ["What timeout value?"],
-        })
-        result = _detect_open_questions(content)
-        assert result["source"] == "structured"
-        assert result["has_open_questions"] is True
-        assert result["question_count"] == 1
-        assert "What timeout value?" in result["questions"]
-
-    def test_structured_json_no_questions(self):
-        content = json.dumps({
-            "has_open_questions": False,
-            "question_count": 0,
-            "questions": [],
-        })
-        result = _detect_open_questions(content)
-        assert result["source"] == "structured"
-        assert result["has_open_questions"] is False
-        assert result["question_count"] == 0
-        assert result["questions"] == []
-
-    def test_structured_json_multiple_questions(self):
-        content = json.dumps({
-            "has_open_questions": True,
-            "question_count": 2,
-            "questions": ["What timeout value?", "TODO: fix this"],
-        })
-        result = _detect_open_questions(content)
-        assert result["source"] == "structured"
-        assert result["question_count"] == 2
-        assert len(result["questions"]) == 2
-
-
-class TestDetectOpenQuestionsRegexFallback:
-    """T070: Regex fallback for plain text content."""
-
+class TestDetectOpenQuestionsScan:
     def test_markdown_content_with_question(self):
         content = "## Requirements\n\nWhat timeout value?\nThe system shall process requests.\n"
         result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
         assert result["has_open_questions"] is True
         assert "What timeout value?" in result["questions"]
 
     def test_markdown_content_with_todo(self):
-        content = "## Design\n\nTODO: determine rate limit\nImplement retry logic.\n"
+        content = "## Design\n\nTODO: decide on retry policy\nDone otherwise.\n"
         result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
         assert result["has_open_questions"] is True
         assert any("TODO" in q for q in result["questions"])
 
     def test_markdown_content_with_both(self):
-        content = "## Requirements\n\nThe system should TODO: determine rate limit\nWhat timeout value?\n"
+        content = "Is this the right approach?\nTODO: verify\n"
         result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
         assert result["has_open_questions"] is True
+        assert result["question_count"] == len(result["questions"])
         assert result["question_count"] >= 2
 
     def test_clean_content_no_issues(self):
-        content = "## Requirements\n\nThe system shall process requests within 200ms.\nAll responses are JSON.\n"
+        content = "## Design\n\nEverything is decided.\nShip it.\n"
         result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
         assert result["has_open_questions"] is False
         assert result["question_count"] == 0
 
     def test_empty_content(self):
         result = _detect_open_questions("")
-        assert result["source"] == "regex_fallback"
         assert result["has_open_questions"] is False
-        assert result["question_count"] == 0
+        assert result["questions"] == []
 
     def test_short_question_mark_not_detected(self):
-        # Lines ending with ? but very short (noise filtering)
-        content = "Why?\n"
-        result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
-        # "Why?" is only 4 chars, below the 5-char threshold
+        result = _detect_open_questions("Why?\nAll settled.\n")
         assert result["has_open_questions"] is False
 
     def test_longer_question_detected(self):
-        content = "Why is this?\n"
-        result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
+        result = _detect_open_questions("Should we use asyncio here?\n")
         assert result["has_open_questions"] is True
 
     def test_todo_case_insensitive(self):
-        content = "todo: fix the rate limiting logic\n"
-        result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
+        result = _detect_open_questions("todo: lowercase marker\n")
         assert result["has_open_questions"] is True
 
-    def test_invalid_json_falls_back_to_regex(self):
-        content = '{"has_open_questions": true, "invalid json'
+    def test_source_is_document_scan(self):
+        result = _detect_open_questions("Anything at all.\n")
+        assert result["source"] == "document_scan"
+
+    def test_json_content_is_just_text_to_the_scan(self):
+        """The retired structured branch read verdict-shaped JSON; the scan
+        treats JSON as text — no line ends with '?' so nothing is found."""
+        content = '{"has_open_questions": true, "question_count": 1, "questions": ["What timeout value?"]}'
         result = _detect_open_questions(content)
-        assert result["source"] == "regex_fallback"
+        assert result["has_open_questions"] is False
 
 
-class TestValidateLldFinalStructured:
-    """Integration with validate_lld_final using structured detection."""
-
-    def test_questions_detected_when_not_resolved(self):
-        content = "## Section\n\nWhat is the correct timeout value?\n"
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any("unresolved questions" in i for i in issues)
-
-    def test_no_questions_when_resolved(self):
-        content = "## Section\n\nWhat is the correct timeout value?\n"
-        issues = validate_lld_final(content, open_questions_resolved=True)
-        assert not any("unresolved questions" in i for i in issues)
-
-    def test_todos_detected_even_when_questions_resolved(self):
-        content = "## Section\n\nTODO: finalize this section\n"
-        issues = validate_lld_final(content, open_questions_resolved=True)
-        assert any("TODO" in i for i in issues)
-
-    def test_todos_detected_when_not_resolved(self):
-        content = "## Section\n\nTODO: finalize this section\n"
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any("TODO" in i for i in issues)
-
-    def test_clean_content_no_issues(self):
-        content = "## Section\n\nThe system shall process requests within 200ms.\n"
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert not any("unresolved questions" in i for i in issues)
-        assert not any("TODO" in i for i in issues)
-
-    def test_both_question_and_todo(self):
-        content = "## Section\n\nWhat timeout value?\nTODO: fix this\n"
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any("unresolved questions" in i for i in issues)
-        assert any("TODO" in i for i in issues)
-
-    def test_returns_list(self):
-        content = "## Section\n\nThe system processes requests.\n"
-        issues = validate_lld_final(content)
-        assert isinstance(issues, list)
-
-
-class TestOpenQuestionsCheckboxIgnoresCodeBlocks:
-    """The unchecked-checkbox regex must not match inside fenced code blocks.
-
-    Closes #1470. A draft that documents the Open Questions section format
-    by showing the `- [ ]` syntax in a code block was falsely flagging
-    "Unresolved open questions remain" even when all real checkboxes were
-    checked or resolved.
-    """
-
-    def test_unchecked_inside_fenced_block_does_not_trigger(self):
+class TestValidateLldFinalStillUsesScan:
+    def test_clean_lld_passes(self):
         content = (
-            "# LLD\n\n"
-            "## Open Questions\n\n"
-            "All questions resolved. The format for tracking is:\n\n"
-            "```markdown\n"
-            "- [ ] Example unchecked question\n"
-            "- [x] Example resolved question\n"
-            "```\n\n"
-            "## Next Section\n"
+            "# LLD-001\n\n## Summary\nDone.\n\n"
+            "## Open Questions\n- [x] Decided already\n"
         )
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert not any(
-            "Unresolved open questions remain" in i for i in issues
-        ), f"got: {issues}"
+        errors = validate_lld_final(content)
+        assert errors == []
 
-    def test_real_unchecked_outside_block_still_triggers(self):
+    def test_unchecked_question_flagged(self):
         content = (
-            "# LLD\n\n"
-            "## Open Questions\n\n"
-            "- [ ] What is the timeout?\n\n"
-            "## Next Section\n"
+            "# LLD-001\n\n## Summary\nDone.\n\n"
+            "## Open Questions\n- [ ] Still undecided thing\n"
         )
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any(
-            "Unresolved open questions remain" in i for i in issues
-        ), f"got: {issues}"
+        errors = validate_lld_final(content)
+        assert errors, "an unchecked open question must flag"
 
-    def test_unchecked_in_block_with_real_unchecked_outside_still_triggers(self):
-        """Mixed case: code-block example AND a real unchecked item — the
-        real one must still trigger the error."""
+    def test_resolved_by_reviewer_skips_check(self):
         content = (
-            "# LLD\n\n"
-            "## Open Questions\n\n"
-            "Format example:\n\n"
-            "```markdown\n"
-            "- [ ] example only\n"
-            "```\n\n"
-            "Real questions:\n\n"
-            "- [ ] Actual question that needs answering\n\n"
-            "## Next Section\n"
+            "# LLD-001\n\n## Summary\nDone.\n\n"
+            "## Open Questions\n- [ ] Still undecided thing\n"
         )
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any(
-            "Unresolved open questions remain" in i for i in issues
-        ), f"got: {issues}"
-
-    def test_unchecked_inside_indented_block_does_not_trigger(self):
-        """CommonMark 4-space-indented code blocks: example checkbox syntax
-        in an indented block does NOT trip the regex. Closes #1476."""
-        content = (
-            "# LLD\n\n"
-            "## Open Questions\n\n"
-            "All resolved. The format for tracking is:\n\n"
-            "    - [ ] Example unchecked question (indented = code block)\n"
-            "    - [x] Example resolved question\n\n"
-            "## Next Section\n"
-        )
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert not any(
-            "Unresolved open questions remain" in i for i in issues
-        ), f"got: {issues}"
-
-    def test_unchecked_in_indented_block_with_real_unchecked_outside_still_triggers(self):
-        """Mixed: indented-block example AND a real unchecked item. Closes #1476."""
-        content = (
-            "# LLD\n\n"
-            "## Open Questions\n\n"
-            "Format example:\n\n"
-            "    - [ ] example only (indented = code block)\n\n"
-            "Real questions:\n\n"
-            "- [ ] Actual question that needs answering\n\n"
-            "## Next Section\n"
-        )
-        issues = validate_lld_final(content, open_questions_resolved=False)
-        assert any(
-            "Unresolved open questions remain" in i for i in issues
-        ), f"got: {issues}"
-
-
-class TestDetectOpenQuestionsReturnType:
-    """Verify FinalizeQuestionsResult TypedDict structure."""
-
-    def test_has_required_keys(self):
-        result = _detect_open_questions("some content with a question?")
-        assert "has_open_questions" in result
-        assert "question_count" in result
-        assert "questions" in result
-        assert "source" in result
-
-    def test_source_is_string(self):
-        result = _detect_open_questions("content")
-        assert isinstance(result["source"], str)
-        assert result["source"] in ("structured", "regex_fallback")
-
-    def test_has_open_questions_is_bool(self):
-        result = _detect_open_questions("content")
-        assert isinstance(result["has_open_questions"], bool)
-
-    def test_question_count_is_int(self):
-        result = _detect_open_questions("content")
-        assert isinstance(result["question_count"], int)
-
-    def test_questions_is_list(self):
-        result = _detect_open_questions("content")
-        assert isinstance(result["questions"], list)
-
-    def test_question_count_matches_questions_length(self):
-        content = "## Section\n\nWhat timeout value?\nTODO: fix this\n"
-        result = _detect_open_questions(content)
-        assert result["question_count"] == len(result["questions"])
+        errors = validate_lld_final(content, open_questions_resolved=True)
+        assert errors == []

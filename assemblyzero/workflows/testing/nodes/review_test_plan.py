@@ -21,9 +21,7 @@ from typing import Any
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.core.verdict_schema import (
     VERDICT_SCHEMA,
-    VerdictResult,
     parse_structured_verdict,
-    _regex_fallback_verdict,
 )
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.workflows.testing.audit import (
@@ -349,25 +347,10 @@ def _run_mechanical_gates(state: TestingWorkflowState) -> list[str]:
     return errors
 
 
-def _parse_verdict(raw: str) -> VerdictResult:
-    """Parse verdict from test-plan reviewer response.
-
-    Issue #775: Primary path: structured JSON via parse_structured_verdict.
-    Fallback: _regex_fallback_verdict with WARNING log.
-    Previously: regex-only after structured parse failure.
-
-    Returns VerdictResult TypedDict with 'verdict', 'rationale', 'source' keys.
-    """
-    structured = parse_structured_verdict(raw)
-    if structured:
-        return VerdictResult(
-            verdict=structured.get("verdict", "REVISE"),
-            rationale=structured.get("rationale", ""),
-            source="structured",
-        )
-
-    # Issue #775: Delegate to centralized regex fallback (logs WARNING internally)
-    return _regex_fallback_verdict(raw)
+# _parse_verdict (structured-then-regex-fallback) was retired by standard
+# 0028: the reviewer is asked with VERDICT_SCHEMA, so its response either
+# parses as a schema-valid verdict or the review is rejected and the stage
+# retry re-asks — never scraped.
 
 
 def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
@@ -599,27 +582,25 @@ def review_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         file_num = next_file_number(audit_dir)
         save_audit_file(audit_dir, file_num, "verdict.md", verdict_content)
 
-    # Issue #775: Parse verdict — structured JSON first, regex fallback via _parse_verdict
+    # Standard 0028: the reviewer was asked with VERDICT_SCHEMA — its
+    # response either parses as a schema-valid verdict or this review is
+    # rejected loudly and the stage retry machinery re-asks. The regex
+    # fallback (which silently downgraded garbage to BLOCKED) is retired.
     structured = parse_structured_verdict(verdict_content)
-    verdict_method = "regex"
-    if structured:
-        test_plan_status = structured["verdict"]
-        # Map REVISE -> BLOCKED for workflow purposes
-        if test_plan_status == "REVISE":
-            test_plan_status = "BLOCKED"
-        verdict_method = "structured"
-        print(f"    Verdict: {test_plan_status} (structured JSON)")
-    else:
-        verdict_result = _parse_verdict(verdict_content)
-        raw_verdict = verdict_result["verdict"]
-        if raw_verdict == "UNKNOWN":
-            raw_verdict = "REVISE"
-        # Map REVISE -> BLOCKED for workflow purposes
-        if raw_verdict == "REVISE":
-            test_plan_status = "BLOCKED"
-        else:
-            test_plan_status = raw_verdict
-        print(f"    Verdict: {test_plan_status} (regex fallback)")
+    if not structured:
+        excerpt = verdict_content.strip().replace("\n", " ")[:160]
+        msg = (
+            "Test-plan reviewer response rejected: no schema-valid verdict "
+            f"found | response begins: {excerpt!r}"
+        )
+        print(f"    ERROR: {msg}")
+        return {"error_message": msg}
+    verdict_method = "structured"
+    test_plan_status = structured["verdict"]
+    # Map REVISE -> BLOCKED for workflow purposes
+    if test_plan_status == "REVISE":
+        test_plan_status = "BLOCKED"
+    print(f"    Verdict: {test_plan_status} (structured JSON)")
 
     # Log review result
     log_workflow_execution(

@@ -116,13 +116,16 @@ class TestApprovedVerdictExtraction:
     @patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
     @patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
     @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
-    def test_approved_regex_fallback_stores_bare_approved(self, mock_root, mock_prompt, mock_log):
-        """Regex fallback (no structured JSON) → bare 'APPROVED' string."""
+    def test_markdown_verdict_rejected_not_scraped(self, mock_root, mock_prompt, mock_log):
+        """Standard 0028: the old regex fallback scraped APPROVED from this
+        markdown; now a response with no schema-valid verdict is rejected
+        with an error the stage retry acts on — nothing is stored."""
         mock_root.return_value = Path("/tmp/test-repo")
         mock_prompt.return_value = "review prompt"
 
         mock_result = MagicMock()
         mock_result.success = True
+        mock_result.content = ""
         mock_result.response = "## Verdict\n[x] **APPROVED** - Test plan is ready.\n\nLong explanation here..." + ("x" * 500)
         mock_result.input_tokens = 100
         mock_result.output_tokens = 50
@@ -137,8 +140,8 @@ class TestApprovedVerdictExtraction:
             state = _make_state()
             result = review_test_plan(state)
 
-        assert result["test_plan_status"] == "APPROVED"
-        assert result["test_plan_verdict"] == "APPROVED"
+        assert "rejected" in result.get("error_message", "")
+        assert "test_plan_status" not in result
 
 
 class TestFastPathCompliance:

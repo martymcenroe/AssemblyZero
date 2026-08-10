@@ -1379,7 +1379,13 @@ class MockProvider(LLMProvider):
             "# Mock Issue Title\n\n## Summary\n\nThis is a mock draft for testing.\n\n## Requirements\n\n- Mock requirement 1\n- Mock requirement 2\n\n## Acceptance Criteria\n\n- [ ] Mock criteria met",
         ],
         "review": [
-            "## Final Verdict\n\n[X] **APPROVED** - Ready for implementation\n[ ] **REVISE** - Requires changes\n[ ] **DISCUSS** - Needs clarification\n\n### Strengths\n- Well-structured\n- Clear requirements\n\n### Recommendations\n- None required for approval",
+            # Standard 0028: mock providers honor the structured contract
+            # like every other provider — a schema-valid verdict, never
+            # markdown for the retired scrapers. The shape satisfies both
+            # FEEDBACK_SCHEMA and REVIEW_SPEC_SCHEMA required keys.
+            '{"verdict": "APPROVED", "rationale": "Ready for implementation.'
+            ' Well-structured, clear requirements.", "feedback_items": [],'
+            ' "open_questions": [], "resolved_issues": []}',
         ],
     }
 

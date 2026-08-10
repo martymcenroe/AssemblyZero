@@ -1,124 +1,124 @@
-"""Tests for test-plan review node structured output and fallback parsing.
+"""Test-plan review under standard 0028: structured verdict or loud rejection.
 
-Issue #775: Verify _parse_verdict returns VerdictResult with correct source field.
+The pre-0028 file pinned _parse_verdict's structured-then-regex behavior;
+_parse_verdict is retired. A reviewer response that yields no schema-valid
+verdict is now rejected with error_message — the stage retry machinery is
+the re-ask — instead of being silently downgraded (UNKNOWN → REVISE →
+BLOCKED) by a regex scrape.
 """
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-from assemblyzero.core.verdict_schema import VerdictResult
-from assemblyzero.workflows.testing.nodes.review_test_plan import _parse_verdict
-
-
-class TestParseVerdictStructuredPath:
-    """T130: Structured JSON path returns VerdictResult(source='structured')."""
-
-    def test_approved_structured(self):
-        raw = json.dumps({"verdict": "APPROVED", "rationale": "All tests pass"})
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "APPROVED"
-        assert result["rationale"] == "All tests pass"
-        assert result["source"] == "structured"
-
-    def test_revise_structured(self):
-        raw = json.dumps({"verdict": "REVISE", "rationale": "Missing edge case"})
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "REVISE"
-        assert result["source"] == "structured"
-
-    def test_discuss_structured(self):
-        raw = json.dumps({"verdict": "DISCUSS", "rationale": "Needs clarification"})
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "DISCUSS"
-        assert result["source"] == "structured"
-
-    def test_structured_returns_typed_dict_keys(self):
-        raw = json.dumps({"verdict": "APPROVED", "rationale": "LGTM"})
-        result = _parse_verdict(raw)
-        assert "verdict" in result
-        assert "rationale" in result
-        assert "source" in result
-
-    def test_structured_missing_rationale_defaults_empty(self):
-        raw = json.dumps({"verdict": "APPROVED"})
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "APPROVED"
-        assert result["rationale"] == ""
-        assert result["source"] == "structured"
-
-    def test_structured_with_extra_fields(self):
-        raw = json.dumps({
-            "verdict": "REVISE",
-            "rationale": "Needs work",
-            "feedback_items": ["Fix test T042"],
-        })
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "REVISE"
-        assert result["source"] == "structured"
+def _state_forcing_llm_path() -> dict:
+    """<100% coverage so the fast-path is skipped and the LLM review runs."""
+    return {
+        "test_scenarios": [
+            {"name": "test_a", "type": "unit", "requirement_ref": "REQ-1"},
+            {"name": "test_b", "type": "unit", "requirement_ref": "REQ-1"},
+        ],
+        "requirements": ["REQ-1: A", "REQ-2: B"],
+        "lld_content": (
+            "This is a detailed low-level design document with sufficient "
+            "words to pass the mechanical gate minimum threshold. " * 5
+        ),
+        "issue_number": 42,
+        "repo_root": "/tmp/test-repo",
+        "audit_dir": "/tmp/nonexistent",
+        "mock_mode": False,
+        "node_costs": {},
+        "node_tokens": {},
+        "file_counter": 0,
+        "config_reviewer": "gemini:3.1-pro-preview",
+    }
 
 
-class TestParseVerdictFallbackPath:
-    """T140: Fallback path returns VerdictResult(source='regex_fallback'), emits WARNING."""
+def _llm_result(content: str) -> MagicMock:
+    result = MagicMock()
+    result.success = True
+    result.error_message = None
+    result.content = content
+    result.response = ""
+    result.input_tokens = 100
+    result.output_tokens = 50
+    return result
 
-    def test_markdown_checkbox_approved_triggers_fallback(self):
-        raw = "[X] **APPROVED**\n\nRationale: Looks good"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "APPROVED"
-        assert result["source"] == "regex_fallback"
 
-    def test_markdown_checkbox_revise_triggers_fallback(self):
-        raw = "[X] **REVISE**\n\nRationale: Needs changes"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "REVISE"
-        assert result["source"] == "regex_fallback"
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+@patch("assemblyzero.utils.retry.with_retry")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+def test_schema_valid_verdict_proceeds(
+    mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+):
+    from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+    from assemblyzero.core.llm_provider import GeminiProvider
 
-    def test_markdown_checkbox_discuss_triggers_fallback(self):
-        raw = "[X] **DISCUSS**\n\nRationale: Open questions remain"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "DISCUSS"
-        assert result["source"] == "regex_fallback"
+    mock_root.return_value = Path("/tmp/test-repo")
+    mock_prompt.return_value = "review prompt"
+    mock_cost.return_value = 0.0
+    mock_provider.return_value = MagicMock(spec=GeminiProvider)
+    mock_with_retry.return_value = _llm_result(
+        json.dumps({"verdict": "APPROVED", "rationale": "Coverage acceptable."})
+    )
 
-    def test_unparseable_returns_unknown(self):
-        raw = "This is just plain text with no verdict"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "UNKNOWN"
-        assert result["source"] == "regex_fallback"
+    result = review_test_plan(_state_forcing_llm_path())
+    assert result["test_plan_status"] == "APPROVED"
+    assert not result.get("error_message")
 
-    def test_empty_string_returns_unknown(self):
-        result = _parse_verdict("")
-        assert result["verdict"] == "UNKNOWN"
-        assert result["source"] == "regex_fallback"
 
-    def test_fallback_logs_warning(self, caplog):
-        import logging
-        raw = "[X] **APPROVED**\n\nRationale: LGTM"
-        with caplog.at_level(logging.WARNING):
-            result = _parse_verdict(raw)
-        assert result["source"] == "regex_fallback"
-        assert any("fallback" in record.message.lower() for record in caplog.records)
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+@patch("assemblyzero.utils.retry.with_retry")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+def test_markdown_verdict_is_rejected_loudly(
+    mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+):
+    """The old regex fallback would have scraped APPROVED out of this
+    markdown; under standard 0028 the review is rejected with an error the
+    stage retry machinery acts on."""
+    from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+    from assemblyzero.core.llm_provider import GeminiProvider
 
-    def test_invalid_json_triggers_fallback(self):
-        raw = '{"verdict": "APPROVED"'  # malformed JSON
-        result = _parse_verdict(raw)
-        assert result["source"] == "regex_fallback"
+    mock_root.return_value = Path("/tmp/test-repo")
+    mock_prompt.return_value = "review prompt"
+    mock_cost.return_value = 0.0
+    mock_provider.return_value = MagicMock(spec=GeminiProvider)
+    mock_with_retry.return_value = _llm_result(
+        "## Verdict\n[X] **APPROVED** — all good"
+    )
 
-    def test_fallback_returns_typed_dict_keys(self):
-        raw = "[X] **REVISE**"
-        result = _parse_verdict(raw)
-        assert "verdict" in result
-        assert "rationale" in result
-        assert "source" in result
+    result = review_test_plan(_state_forcing_llm_path())
+    assert result.get("error_message"), "unparseable verdict must reject, not proceed"
+    assert "rejected" in result["error_message"]
+    assert "test_plan_status" not in result
 
-    def test_case_insensitive_checkbox_match(self):
-        raw = "[X] **approved**"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "APPROVED"
-        assert result["source"] == "regex_fallback"
 
-    def test_blocked_verdict_via_fallback(self):
-        raw = "[X] **BLOCKED**\n\nRationale: Blocked by dependency"
-        result = _parse_verdict(raw)
-        assert result["verdict"] == "BLOCKED"
-        assert result["source"] == "regex_fallback"
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+@patch("assemblyzero.utils.retry.with_retry")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+def test_rejection_message_carries_excerpt(
+    mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+):
+    from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    mock_root.return_value = Path("/tmp/test-repo")
+    mock_prompt.return_value = "review prompt"
+    mock_cost.return_value = 0.0
+    mock_provider.return_value = MagicMock(spec=GeminiProvider)
+    mock_with_retry.return_value = _llm_result("Plain prose, no verdict anywhere.")
+
+    result = review_test_plan(_state_forcing_llm_path())
+    assert "Plain prose" in result.get("error_message", ""), (
+        "the halt banner must be legible (#2197): excerpt included"
+    )

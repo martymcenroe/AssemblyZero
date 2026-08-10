@@ -134,14 +134,14 @@ class TestFallbackToRegex:
         assert _parse_verdict_status("VERDICT: APPROVED") == "APPROVED"
         assert _parse_verdict_status("VERDICT: BLOCKED") == "BLOCKED"
 
-    def test_review_spec_fallback(self):
-        """review_spec.py's parse_review_verdict should still work for non-JSON."""
+    def test_review_spec_rejects_non_json(self):
+        """Standard 0028: parse_review_verdict rejects non-JSON — the old
+        checkbox scrape is retired."""
+        import pytest
+        from assemblyzero.core.verdict_schema import StructuredContractError
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import (
             parse_review_verdict,
         )
 
-        verdict, feedback = parse_review_verdict("[X] **APPROVED** - Spec ready")
-        assert verdict == "APPROVED"
-
-        verdict, feedback = parse_review_verdict("[X] **REVISE** - Fix issues")
-        assert verdict == "REVISE"
+        with pytest.raises(StructuredContractError):
+            parse_review_verdict("[X] **APPROVED** - Spec ready")
