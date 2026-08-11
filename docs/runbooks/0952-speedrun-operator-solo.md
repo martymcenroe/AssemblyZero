@@ -74,7 +74,7 @@ tokens are used. All exit **91**.
 |---|---|---|
 | The AssemblyZero tree is not trustworthy | this checkout is behind or dirty, so the roll would execute pipeline code that `main` does not describe | bring it level with `origin/main`, or point `--assemblyzero-root` at a tree that is |
 | This machine is not healthy enough | a quick self-check ran far slower than normal, or memory is above 90% | wait for the machine to recover, or find what is loading it. Do not override it — a roll on a sick box wastes hours *and* makes every failure look like a target-repo problem |
-| The repository has unanswered questions | one or more issues are open asking you to rule on ambiguous issue text | read each, decide which reading is right, edit the issue so only one survives, close the question |
+| The repository has unanswered questions | one or more issues are open asking you to rule on ambiguous issue text | work § Rule below — decide, edit, **pre-check**, then close the question |
 | The arc's binding docs conflict with the default branch | design docs or ADRs were ruled on both branches and the two edits collide (#2205) | merge them by hand, then roll. Nothing was changed — the launcher refuses rather than resolving a ruling on your behalf |
 
 **Binding docs sync themselves (#2205).** The roll reads design docs and ADRs
@@ -95,6 +95,65 @@ answered, and the answer was invisible to the pipeline.
 **The first-ever run on a machine records the health baseline and proceeds.** A
 missing baseline never blocks. Nominal is a rolling median over five runs, so it
 tracks the machine rather than one lucky run.
+
+---
+
+## § Rule — answering a must-resolve question
+
+A roll that finds two acceptance criteria specifying different outcomes for the
+same situation halts, files a `must-resolve` issue naming both sentences, and
+blocks every later launch until you answer. Only you can answer it: the gate
+reports that two readings are defensible, and choosing between them is a
+decision about the product.
+
+**The order is: decide, edit, pre-check, close, roll.**
+
+**1. Decide, and edit the issue so only one reading survives.** Read the two
+sentences the question quotes. Amend the issue text — both sentences, not only
+the one the gate named. A qualifier added to one sentence and not its
+neighbours is what produces the next contradiction.
+
+**2. Pre-check before you close anything.**
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/check_requirements.py \
+    --repo /c/Users/mcwiz/Projects/boostgauge --issue 7
+```
+
+This runs the roll's own gate against your edited text — the same function,
+imported, not a second implementation of it. One model call, a few minutes.
+
+| Exit | Meaning | What you do |
+|---|---|---|
+| 0 | the gate found no contradictions | go to step 3 |
+| 1 | it found more, printed verbatim | return to step 1. The pre-check filed them as must-resolve issues, exactly as a roll would |
+| 2 | the check could not run | fix that first. Nothing was verified, and unlike a roll this never passes quietly |
+
+> **This command's flags and its exit-2 path were executed while writing this
+> section; a full clean run against a live issue was not.** That call spends a
+> drafter-class model request and, on a conflict, files must-resolve issues on
+> the target repo — side effects that belong to a real ruling rather than to
+> authoring a runbook. The gate call itself is covered by
+> `tests/unit/test_check_requirements.py`, which drives the live node through
+> every one of its outcomes.
+
+**3. Close the must-resolve issues, and roll.** Close them only on a clean
+pre-check. Closing them on an unverified edit puts the launcher back in
+business against text that still contradicts itself.
+
+**Why the pre-check exists.** boostgauge #7 took five rulings, and each was
+verified by paying for the next launch: edit, roll, wait through the
+codebase-analysis node, and learn three minutes in that the amendment had
+introduced a fresh contradiction. Seven conflicts were discovered that way. On
+the sixth iteration the gate was run by hand against the draft first and caught
+three defects before anything was spent. This step is that pass, made
+repeatable (#2221).
+
+**The pre-check is advisory; the roll's gate is authoritative.** A pre-check
+attestation goes stale the same way a draft does — the issue text and the
+binding docs both keep moving (#2206). The roll runs the gate again on every
+launch, and that run is the one that counts.
 
 ---
 
@@ -287,7 +346,9 @@ they filed issues. These block the next launch until ruled on.
 gh issue list --repo martymcenroe/<repo> --label must-resolve --state open
 ```
 
-Empty output means none are open.
+Empty output means none are open. Anything listed is answered by working
+§ Rule above — decide, edit, pre-check, close — and the pre-check is what keeps
+the answer from costing a launch to verify.
 
 **6. Archive the run.** Last, because it is the only step that is unrecoverable
 if skipped — arcs are never merged to main, so a run's product lives only on
