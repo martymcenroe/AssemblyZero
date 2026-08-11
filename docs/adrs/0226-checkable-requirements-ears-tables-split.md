@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-11
 **Categories:** Process, Data, Reliability
-**Related:** #2218 (this ADR); #1899 (the requirements-consistency gate); standard 0028 (ask structured, get structured, or reject); boostgauge #7 (the first converted requirement); boostgauge #235, #240, #249, #252, #273, #274, #275 (the seven conflicts); boostgauge #270 (a pass criterion carries values, not pointers)
+**Related:** #2218 (this ADR); #2219 (the checker, and the rulings that scoped EARS and defined the row ID convention); #1899 (the requirements-consistency gate); #2221 (the standalone caller for that gate); standard 0028 (ask structured, get structured, or reject); boostgauge #7 (the first converted requirement); boostgauge #235, #240, #249, #252, #273, #274, #275 (the seven conflicts); boostgauge #270 (a pass criterion carries values, not pointers)
 
 ---
 
@@ -51,6 +51,8 @@ The benefit is that a conditional requirement cannot be written as though it wer
 
 A parser can reject a sentence matching none of the five patterns. That check is cheap and runs at authoring time.
 
+**EARS binds the sentences of the marked requirements section, and nothing else.** The requirements of an issue are the bullets under a `## Requirements` heading, and each of those bullets must match one of the five patterns. Prose elsewhere in the issue, including the summary, a narrative paragraph, and a table's preamble, is not read as a requirement sentence and is not EARS-checked. An issue with no such section is reported as zero requirement sentences examined out of zero, which is an honest vacuous result rather than a pass. Section 3.2 states the one exemption that matters, for acceptance criteria (#2219).
+
 ### 3.2 Lightweight Parnas tables
 
 David Parnas and the Naval Research Laboratory rebuilt the requirements document for the A-7E aircraft's flight software in the late 1970s, under the Software Cost Reduction project. Its central technique was the tabular expression. Where a function depends on several conditions, the document states it as a grid, and the grid is the definition rather than a summary of one.
@@ -78,6 +80,23 @@ The worked example is boostgauge #7, converted on 2026-08-11:
 Every one of the seven historical conflicts was a question about which row a sentence described. None of them can be stated against the table.
 
 Two disciplines keep a table readable. The column headers must be plain questions with plain answers, because a header written as a predicate expression removes the benefit. Each row must also appear as its own acceptance criterion, so the four combinations become four independently testable claims.
+
+**A row criterion takes the row form, and is exempt from EARS.** A row criterion is a table row's projection into the test list, not a requirement sentence, and it is written in the terse form the projection produces: the conditions in column order, then the outcome. "Position, reset, moved: `position` holds the new position" is correct and complete as written. Requiring EARS of it would demand a shall-sentence per row, which restates the grid in prose and reintroduces the ambiguity the grid removed. No acceptance criterion is EARS-checked (#2219).
+
+**Each row carries an ID, and its criterion opens with that ID.** The table gains a leading ID column holding the subject word's first letter, capitalised, plus the row number counting from one: `P1` through `P4` for a position table, `S1` through `S8` for a size table. Where two subjects share an initial, use enough letters to distinguish them. IDs are unique across the issue. The worked example above, under the convention:
+
+| ID | Launched with `--reset-config`? | Did the user move or resize the window? | Config file after quit |
+|---|---|---|---|
+| C1 | no | no | unchanged, byte-for-byte |
+| C2 | no | yes | prior contents, with the new position and size |
+| C3 | yes | no | defaults |
+| C4 | yes | yes | defaults, with the new position and size |
+
+The criterion for `C3` then reads `- [ ] C3. Reset, not moved: the config file holds defaults`.
+
+The ID is what makes the join between grid and test list exact rather than inferred. With IDs a checker verifies a bijection between the two ID sets and confirms that each criterion carries its own row's outcome, so a criterion labelled `C3` stating row two's outcome fails mechanically. Without them the strongest available check is a count of criteria per table plus a match on outcome text, which cannot tell whether a criterion describes its own row's combination. That residue is left to the semantic consistency gate, where a criterion contradicting its own table surfaces as the conflict class the gate already reports. The human-readable condition phrase after the ID is decoration for the reader; the ID is the join.
+
+The convention binds every issue converted after boostgauge #7, which was converted before it existed (#2219).
 
 ### 3.3 The split rule
 
@@ -193,7 +212,9 @@ We accept that a complete table can still be wrong. Completeness is a property o
 
 Conversion happens when an issue next rolls, and not as a sweep. An issue that is not rolling costs nothing by staying in prose, and a sweep would convert issues whose requirements may change before anything reads them.
 
-The mechanical checker is separate work and is not built. It verifies three things. Each requirement must match an EARS pattern. A table of `n` binary conditions must carry `2^n` rows, with no combination repeated. Each row must appear as an acceptance criterion. The checker reports what it verified and what it did not, per standard 0028.
+The mechanical checker is built (#2219): `tools/check_requirements_form.py --repo <path> --issue N`, or `--file <draft>` while authoring. It is fully deterministic and makes no model calls, so it is free and instant and runs before anything else. It verifies three things. Each bullet under `## Requirements` must match an EARS pattern. A table of `n` binary conditions must carry `2^n` rows, with no combination repeated. Each row must appear as an acceptance criterion. The checker reports what it verified and what it did not, per standard 0028, and names its row-join mode per table so the count-and-outcome mode can never be mistaken for the exact one.
+
+The full pre-roll sequence is this form check, then the semantic requirements-consistency gate via `tools/check_requirements.py` (#2221, one model call), then the roll.
 
 boostgauge #7 is the first converted requirement and was rolling as of 2026-08-11. Its result is the first evidence about whether this form prevents what it was adopted to prevent.
 
@@ -214,3 +235,4 @@ Bibliographic details below are recorded from recall. Confirm them against the p
 | Date | Author | Change |
 |---|---|---|
 | 2026-08-11 | Claude Opus 5 | Initial draft |
+| 2026-08-11 | Claude Fable 5 | Building the checker (#2219) surfaced a contradiction between rule 1 and this ADR's own worked example: boostgauge #7's row criteria are mandated by section 3.2 and match no EARS pattern, so an EARS check over acceptance criteria would fail the fixture the ADR cites as its first success. Operator rulings on #2219 scoped EARS to the bullets of a marked `## Requirements` section, exempted row criteria explicitly, and adopted a row ID convention that makes the grid-to-criteria join exact. Sections 3.1, 3.2 and 8 carry those rulings. |
