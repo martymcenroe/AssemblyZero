@@ -63,7 +63,9 @@ def _main(repo, issues, rolls, *, questions=None, gh_error=None, extra_argv=()):
         counts[issue] += 1
         return result
 
-    argv = ["--repo", str(repo), "--attempts", "3", *extra_argv]
+    # #2206 retired the redraw budget: one roll per issue, and any value
+    # above 1 refuses at preflight.
+    argv = ["--repo", str(repo), "--attempts", "1", *extra_argv]
     for i in issues:
         argv += ["--issue", str(i)]
 
@@ -120,9 +122,12 @@ class TestConflictClassification:
         assert counts[4] == 1 and counts[7] == 1
         assert code == CONFLICT_EXIT_CODE, "the batch result names the block"
 
-    def test_a_generic_failure_still_redraws_and_stops(self, repo):
+    def test_a_generic_failure_halts_without_redrawing(self, repo):
+        """#2206 inverted this: a generic failure used to spend the redraw
+        budget; it now halts on the first, so the cause gets diagnosed
+        instead of reproduced."""
         code, counts = _main(repo, [1, 4], {1: [1, 1, 1], 4: [0]})
-        assert counts[1] == 3, "generic failures keep the redraw budget"
+        assert counts[1] == 1, "the redraw budget is retired"
         assert counts.get(4, 0) == 0, "exhaustion still stops the batch"
         assert code == 1
 

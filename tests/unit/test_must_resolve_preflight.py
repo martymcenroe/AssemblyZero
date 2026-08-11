@@ -187,13 +187,14 @@ def test_gate_runs_once_per_invocation_not_per_redraw(
 
     monkeypatch.setattr(speedrun_roll, "roll_issue", failing_roll)
 
-    speedrun_roll.main(_argv(target_repo, 4, 9, 12) + ["--attempts", "3"])
+    speedrun_roll.main(_argv(target_repo, 4, 9, 12) + ["--attempts", "1"])
 
-    # The launcher stops the batch at the first issue that exhausts its
-    # attempts, so #4 redraws three times and #9/#12 never start. Three rolls of
-    # ONE issue is exactly the redraw storm this assertion needs.
-    assert launcher["rolls"] == [4, 4, 4], "redraws must actually have happened"
-    assert calls["n"] == 1, "the wall is checked once, not once per redraw"
+    # #2206 retired redraws, so the batch halts at the first failure: #4
+    # rolls once and #9/#12 never start. The invariant this test protects --
+    # the wall is queried once per invocation, never once per roll -- holds
+    # more simply than it did when redraws could multiply the queries.
+    assert launcher["rolls"] == [4], "one roll per issue, then the batch halts"
+    assert calls["n"] == 1, "the wall is checked once per invocation"
 
 
 # --- "a batch is refused as a whole, not partially rolled" ---------------

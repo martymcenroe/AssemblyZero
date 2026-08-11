@@ -93,6 +93,8 @@ def resumable(monkeypatch, az_root, repo):
     """Everything a spec-resume needs: matching state, arc, open PR, artifact."""
     monkeypatch.setattr(speedrun_roll, "resolve_attempt_branch", lambda _r: ARC)
     monkeypatch.setattr(speedrun_roll, "_open_lld_pr_exists", lambda *_a: True)
+    # #2206 staleness has its own suite; here the draft is current.
+    monkeypatch.setattr(speedrun_roll, "draft_is_stale", lambda *_a: False)
     lld = repo / "docs" / "lld" / "active" / "LLD-001.md"
     lld.parent.mkdir(parents=True)
     lld.write_text("# LLD\n", encoding="utf-8")
@@ -179,6 +181,7 @@ def test_spec_failure_resumes_from_spec(az_root, repo, log, resumable):
 def test_impl_failure_resumes_from_impl(az_root, repo, log, monkeypatch):
     monkeypatch.setattr(speedrun_roll, "resolve_attempt_branch", lambda _r: ARC)
     monkeypatch.setattr(speedrun_roll, "_open_lld_pr_exists", lambda *_a: True)
+    monkeypatch.setattr(speedrun_roll, "draft_is_stale", lambda *_a: False)
     lld = repo / "docs" / "lld" / "active" / "LLD-001.md"
     spec = repo / "docs" / "lld" / "active" / "SPEC-001.md"
     lld.parent.mkdir(parents=True)

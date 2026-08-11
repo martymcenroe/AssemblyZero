@@ -157,87 +157,51 @@ def launcher(monkeypatch, target_repo):
     return state
 
 
-def _argv(repo, attempts=3):
+def _argv(repo, attempts=1):
     return ["--repo", str(repo), "--issue", "4", "--attempts", str(attempts),
             "--log-dir", str(repo / "logs")]
 
 
-def test_a_storm_attempt_delays_the_next_redraw(launcher, target_repo):
+def test_a_storm_ends_the_issue_without_waiting(launcher, target_repo):
+    """#2206: with one roll per issue there is nothing to back off FOR. The
+    wait existed to keep the next redraw off the same wall; with no next
+    redraw, waiting only delays the operator learning the provider is down."""
     launcher["codes"] = [STORM_EXIT_CODE, 0]
 
-    speedrun_roll.main(_argv(target_repo))
+    code = speedrun_roll.main(_argv(target_repo))
 
-    assert launcher["slept"] == [15 * 60], "the first storm waits 15 minutes"
-
-
-def test_a_non_storm_failure_redraws_immediately(launcher, target_repo):
-    launcher["codes"] = [1, 0]
-
-    speedrun_roll.main(_argv(target_repo))
-
-    assert launcher["slept"] == [], "an ordinary failed draw waits for nothing"
-
-
-def test_consecutive_storms_escalate_then_cap(launcher, target_repo):
-    launcher["codes"] = [STORM_EXIT_CODE] * 5
-
-    speedrun_roll.main(_argv(target_repo, attempts=5))
-
-    assert launcher["slept"] == [15 * 60, 30 * 60, 60 * 60, 60 * 60]
-
-
-def test_a_success_between_storms_resets_the_backoff(launcher, target_repo):
-    # storm, ordinary failure, storm -> the second storm is a FIRST storm again
-    launcher["codes"] = [STORM_EXIT_CODE, 1, STORM_EXIT_CODE, 0]
-
-    speedrun_roll.main(_argv(target_repo, attempts=4))
-
-    assert launcher["slept"] == [15 * 60, 15 * 60]
-
-
-# --- "a storm on the final attempt exits without waiting" ---------------
-
-
-def test_storm_on_the_final_attempt_does_not_wait(launcher, target_repo):
-    launcher["codes"] = [STORM_EXIT_CODE]
-
-    code = speedrun_roll.main(_argv(target_repo, attempts=1))
-
-    assert launcher["slept"] == [], "a terminal wait only delays the bad news"
+    assert launcher["slept"] == [], "no redraw to protect, so no wait"
     assert code == STORM_EXIT_CODE
 
 
-def test_last_of_several_storms_does_not_wait_after_the_final_attempt(
-    launcher, target_repo
-):
-    launcher["codes"] = [STORM_EXIT_CODE, STORM_EXIT_CODE]
+def test_a_non_storm_failure_also_ends_the_issue(launcher, target_repo):
+    launcher["codes"] = [1, 0]
 
-    speedrun_roll.main(_argv(target_repo, attempts=2))
+    code = speedrun_roll.main(_argv(target_repo))
 
-    assert launcher["slept"] == [15 * 60], "one wait between two attempts, none after"
-
-
-# --- "the backoff line appears in the launcher events log" --------------
+    assert launcher["slept"] == []
+    assert code == 1
 
 
-def test_backoff_line_is_written_to_the_events_log(launcher, target_repo):
-    launcher["codes"] = [STORM_EXIT_CODE, 0]
+def test_the_storm_is_named_in_the_events_log(launcher, target_repo):
+    """A watcher must still be able to tell a dead provider from a dead run."""
+    launcher["codes"] = [STORM_EXIT_CODE]
 
     speedrun_roll.main(_argv(target_repo))
 
     log = (target_repo / "logs" / "session-events.log").read_text(encoding="utf-8")
-    assert "STORM BACKOFF 15m before attempt 2/3" in log, (
-        "a watcher must be able to tell backoff from a hang"
-    )
+    assert "STORM ended #4" in log
+    assert "#2206" in log
 
 
-def test_final_attempt_storm_is_also_recorded(launcher, target_repo):
-    launcher["codes"] = [STORM_EXIT_CODE]
+# --- backoff_minutes remains, as the storm classifier's pure helper ----
 
-    speedrun_roll.main(_argv(target_repo, attempts=1))
 
-    log = (target_repo / "logs" / "session-events.log").read_text(encoding="utf-8")
-    assert "STORM on final attempt" in log
+def test_backoff_helper_survives_for_future_use():
+    """The redraw loop is gone but the escalation curve is still the right
+    answer if a bounded wait is ever reintroduced deliberately."""
+    assert backoff_minutes(1) == 15
+    assert backoff_minutes(4) == 60
 
 
 # --- "a launcher in backoff is stopped cleanly (no orphaned sleep)" -----
@@ -336,4 +300,7 @@ def test_launcher_reads_the_storm_code_not_a_text_marker():
 
     source = inspect.getsource(speedrun_roll.main)
     assert "STORM_EXIT_CODE" in source
-    assert "storm_streak" in source
+    # `storm_streak` went with the redraw loop (#2206) — with one roll per
+    # issue there is no streak to count. Classification by exit code rather
+    # than by scraping prose is what this test actually protects.
+    assert "code == STORM_EXIT_CODE" in source

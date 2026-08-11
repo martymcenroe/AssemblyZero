@@ -163,27 +163,16 @@ class TestLauncherHooks:
         assert janitor and janitor[0]["outcome"] == "healed"
         assert "LLD-002.md" in janitor[0]["target"]
 
-    def test_a_storm_backoff_writes_a_heal_record(self, tmp_path):
-        repo = tmp_path / "proj"
-        (repo / ".git").mkdir(parents=True)
-        from assemblyzero.core.provider_storm import STORM_EXIT_CODE
+    def test_a_storm_is_recorded_without_a_backoff_heal(self):
+        """#2206 retired the redraw loop, and the storm BACKOFF heal with it:
+        a heal records something the machinery fixed about itself, and with
+        no redraw to protect there is no wait to record. The storm is still
+        announced in the events log -- pinned in test_provider_storm.py."""
+        import inspect
 
-        rolls = iter([STORM_EXIT_CODE, 0])
-
-        with patch.object(sr, "check_assemblyzero_tree", lambda p: []), \
-                patch.object(sr, "check_box_health", _healthy_box), \
-                patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)), \
-                patch.object(sr, "roll_issue", lambda *a: next(rolls)), \
-                patch.object(sr, "restore_repo", lambda *a: []), \
-                patch.object(sr, "_interruptible_sleep", lambda s: None), \
-                patch.object(sr.time, "sleep", lambda s: None):
-            code = sr.main(["--repo", str(repo), "--issue", "7",
-                            "--attempts", "2"])
-
-        assert code == 0
-        storms = [h for h in read_heals(repo) if h["category"] == "storm-backoff"]
-        assert storms and storms[0]["target"] == "#7"
-        assert "waited" in storms[0]["detail"]
+        source = inspect.getsource(sr.main)
+        assert "storm-backoff" not in source
+        assert "STORM ended" in source
 
 
 class TestEvidenceExemption:
