@@ -1884,3 +1884,52 @@ def test_merge_helper_does_not_mutate_its_input():
     snapshot = json.dumps(existing, sort_keys=True)
     _nr._merge_settings(existing, {"type": "command", "command": "x"})
     assert json.dumps(existing, sort_keys=True) == snapshot
+
+
+# ---- #2182: the scaffolder names npm dirs whose PRs could never merge ----
+
+def test_warns_for_npm_dir_without_runnable_test_script(tmp_path, capsys):
+    """A repo must not be born receiving PRs it cannot pass review on."""
+    web = tmp_path / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text(json.dumps({"name": "web"}), encoding="utf-8")
+    (web / "package-lock.json").write_text("{}", encoding="utf-8")
+
+    warned = _nr.warn_npm_dirs_without_test_script(tmp_path)
+
+    assert warned == ["/web"]
+    out = capsys.readouterr().out
+    assert "/web" in out
+    assert "1839" in out          # names the gate that will refuse the merge
+    assert "no test specified" in out   # tells them the placeholder won't do
+
+
+def test_compliant_repo_produces_no_warning(tmp_path, capsys):
+    web = tmp_path / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text(
+        json.dumps({"name": "web", "scripts": {"test": "vitest run"}}),
+        encoding="utf-8")
+    (web / "package-lock.json").write_text("{}", encoding="utf-8")
+
+    assert _nr.warn_npm_dirs_without_test_script(tmp_path) == []
+    assert capsys.readouterr().out == ""
+
+
+def test_warns_about_a_directory_dependabot_yml_never_declared(tmp_path, capsys):
+    """The case that prompted this: security updates ignore dependabot.yml.
+
+    AssemblyZero declared npm for /sentinel only and never for /dashboard,
+    yet /dashboard received npm PRs and deferred on every harvest. A guard
+    that only checked configured directories would have missed it.
+    """
+    for name, scripts in (("sentinel", {"test": "vitest run"}), ("dashboard", None)):
+        d = tmp_path / name
+        d.mkdir(parents=True)
+        body = {"name": name}
+        if scripts:
+            body["scripts"] = scripts
+        (d / "package.json").write_text(json.dumps(body), encoding="utf-8")
+        (d / "package-lock.json").write_text("{}", encoding="utf-8")
+
+    assert _nr.warn_npm_dirs_without_test_script(tmp_path) == ["/dashboard"]

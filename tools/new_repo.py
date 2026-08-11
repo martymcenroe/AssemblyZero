@@ -58,6 +58,14 @@ except ImportError:
     from enable_dependabot import enable_dependabot_for_repo
     from deploy_cerberus_secrets import deploy_to_repo, verify_secrets
 
+# #2182: npm manifest inspection, shared so the enabling side and any later
+# audit agree on what "has a runnable test script" means.
+try:
+    from _npm_manifest import dirs_missing_test_script
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from _npm_manifest import dirs_missing_test_script
+
 # In-process classic PAT for privileged REST calls (ADR-0216).
 # Branch protection PUT and repo settings PATCH used to shell out to
 # `gh api` which reads GH_TOKEN from the env block (snoopable by sibling
@@ -1810,7 +1818,51 @@ def create_dependabot_config(project_path: Path) -> list[str]:
     (github_dir / "dependabot.yml").write_text(
         render_dependabot_yml(ecosystems), encoding="utf-8", newline="",
     )
+    warn_npm_dirs_without_test_script(project_path)
     return [eco for eco, _label in ecosystems]
+
+
+def warn_npm_dirs_without_test_script(project_path: Path) -> list[str]:
+    """#2182: name every npm directory whose PRs could never be merged.
+
+    The review gate (#1839) refuses to merge an npm PR whose directory has no
+    runnable `test` script. Nothing on the enabling side checked for one, so a
+    repo could be born receiving PRs it was structurally incapable of passing
+    review on -- every one of them deferring, forever, for a reason visible
+    only in a harvest log.
+
+    Scans the repo rather than the dependabot.yml just written, because the
+    two sets differ. Security updates fire on any lockfile regardless of
+    version-update config: AssemblyZero declares npm for `/sentinel` only and
+    has never declared `/dashboard`, yet `/dashboard` received npm PRs (#2111)
+    and deferred on every harvest until a test script was added. Checking only
+    what we configured would have missed exactly that case.
+
+    Warns rather than refuses. A repo may legitimately be scaffolded before
+    its test story exists, and blocking creation over a script that can be
+    added in a minute trades a real capability for a hypothetical tidiness.
+    The diagnostic names each directory so the choice is informed, and
+    `dirs_missing_test_script` stays importable so an audit can find the
+    condition later in repos that already exist.
+
+    Returns the directories warned about, so callers and tests can assert.
+    """
+    missing = dirs_missing_test_script(project_path)
+    if not missing:
+        return []
+    print(
+        f"  WARNING: {len(missing)} npm director"
+        f"{'y' if len(missing) == 1 else 'ies'} with a lockfile but no "
+        f"runnable `test` script: {', '.join(missing)}"
+    )
+    print(
+        "    Dependabot can open npm PRs against these (security updates do "
+        "not require a dependabot.yml entry), and the review gate will refuse "
+        "to merge them unverified (#1839) -- so they would defer on every "
+        "harvest. Add a real `test` script to each. `npm init`'s "
+        "\"no test specified\" placeholder does not count."
+    )
+    return missing
 
 
 # #2113: the PreToolUse matcher this scaffolder owns. Merging keys on this
