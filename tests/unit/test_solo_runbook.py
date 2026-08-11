@@ -161,7 +161,11 @@ def test_the_three_launch_gates_named_in_the_runbook_are_real():
     assert "open_must_resolve_issues" in source
 
 
-def test_the_storm_backoff_line_the_runbook_quotes_is_the_real_format():
+def test_the_storm_line_the_runbook_quotes_is_the_real_format():
+    """#2206 replaced the backoff line with an end-the-issue line. The
+    invariant is unchanged: whatever the runbook quotes as a sample must be
+    what the launcher actually emits, or an operator reading the runbook is
+    watching for a string that never appears."""
     import importlib
     import inspect as _inspect
 
@@ -169,9 +173,14 @@ def test_the_storm_backoff_line_the_runbook_quotes_is_the_real_format():
     speedrun_roll = importlib.import_module("speedrun_roll")
 
     source = _inspect.getsource(speedrun_roll.main)
-    assert "STORM BACKOFF" in source
-    assert "STORM BACKOFF 15m before attempt 2/3" in _text(), (
+    assert "STORM ended" in source
+    assert "nothing was redrawn (#2206)" in source
+    text = _text()
+    assert "STORM ended #4 -- the provider stopped answering" in text, (
         "the runbook quotes a sample line; it must match the emitted format"
+    )
+    assert "STORM BACKOFF" not in text, (
+        "the retired backoff line must not survive in the runbook"
     )
 
 

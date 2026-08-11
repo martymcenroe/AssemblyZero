@@ -79,8 +79,9 @@ from assemblyzero.core.exit_codes import (  # noqa: E402
 )
 from assemblyzero.workflows.orchestrator.state import STAGE_ORDER  # noqa: E402
 from assemblyzero.core.provider_storm import (  # noqa: E402
+    # backoff_minutes went with the redraw loop (#2206) -- it survives in
+    # provider_storm for a future deliberate wait, but nothing here waits.
     STORM_EXIT_CODE,
-    backoff_minutes,
 )
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
@@ -479,6 +480,101 @@ def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
     return False
 
 
+# Binding-input paths: a commit touching either invalidates a draft derived
+# from them. Design docs and ADRs are what the drafter and the reviewer read
+# as law; issue text is checked separately against the GitHub API.
+BINDING_DOC_PATHS = ("docs/design", "docs/adrs")
+
+
+def _iso_to_epoch(value: str) -> float | None:
+    """Parse an ISO-8601 timestamp (with Z or offset) to epoch seconds."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def draft_is_stale(
+    repo_root: Path, issue: int, drafted_at: str, base: str, log: EventLog
+) -> bool:
+    """True when a binding input moved after the draft was made (#2206).
+
+    A resumed spec is built on a persisted LLD. If the law that LLD was
+    derived from has since changed, resuming spends the stage on a draft that
+    is already wrong -- and worse, produces a failure that reads as evidence
+    against whatever the ruling just fixed.
+
+    Two inputs can invalidate a draft, and BOTH are checked because the live
+    case proved one is not enough. On 2026-08-11 an LLD drafted at 01:27Z was
+    invalidated by design-doc rulings merged at 05:13Z and 06:18Z while the
+    issue's own text had last changed at 01:10Z -- BEFORE the draft. An
+    issue-only staleness check would have called that draft current and
+    resumed onto it.
+
+    Unknowable answers are stale: if the draft time cannot be read or a probe
+    fails, this returns True and the caller draws fresh, which is always safe.
+    """
+    drafted = _iso_to_epoch(drafted_at)
+    if drafted is None:
+        log.write(
+            f"RESUME abandoned for #{issue}: draft time unreadable "
+            f"({drafted_at!r})"
+        )
+        return True
+
+    # 1. Issue text.
+    result = _run(
+        ["gh", "issue", "view", str(issue), "--json", "updatedAt",
+         "--jq", ".updatedAt"],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        log.write(
+            f"RESUME abandoned for #{issue}: cannot read the issue's last-edit "
+            "time to check staleness"
+        )
+        return True
+    edited = _iso_to_epoch(result.stdout.strip())
+    if edited is None:
+        log.write(f"RESUME abandoned for #{issue}: unparseable issue timestamp")
+        return True
+    if edited > drafted:
+        log.write(
+            f"RESUME abandoned for #{issue}: the issue was edited after the "
+            "draft was made -- drawing fresh against the current text"
+        )
+        return True
+
+    # 2. Binding docs on the base branch -- the input that fired live.
+    docs = _run(
+        ["git", "log", "-1", "--format=%cI", f"origin/{base}", "--",
+         *BINDING_DOC_PATHS],
+        cwd=repo_root,
+    )
+    if docs.returncode != 0:
+        log.write(
+            f"RESUME abandoned for #{issue}: cannot read binding-doc history "
+            f"on '{base}' to check staleness"
+        )
+        return True
+    latest_doc = docs.stdout.strip()
+    if latest_doc:
+        doc_ts = _iso_to_epoch(latest_doc)
+        if doc_ts is None:
+            log.write(f"RESUME abandoned for #{issue}: unparseable doc timestamp")
+            return True
+        if doc_ts > drafted:
+            log.write(
+                f"RESUME abandoned for #{issue}: a binding doc "
+                f"({'/'.join(BINDING_DOC_PATHS)}) changed on '{base}' after "
+                "the draft was made -- drawing fresh against the current law"
+            )
+            return True
+    return False
+
+
 def resume_plan(
     az_root: Path, repo_root: Path, issue: int, log: EventLog
 ) -> str | None:
@@ -533,6 +629,12 @@ def resume_plan(
         return None
 
     if not _open_lld_pr_exists(repo_root, issue):
+        return None
+
+    # #2206: the draft must still be derived from current law. `started_at` is
+    # when the run that produced it began, so anything binding that moved
+    # since is a change the draft cannot know about.
+    if draft_is_stale(repo_root, issue, data.get("started_at", ""), base, log):
         return None
 
     needed = [data.get("lld_path", "")]
@@ -1892,8 +1994,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--attempts", type=int, default=1,
         help=(
-            "Redraw a failed issue up to N times before stopping (#2068). "
-            "Base/gate problems (exit 91) are never retried."
+            "Retired by operator ruling #2206: only 1 is accepted. A failure "
+            "halts for diagnosis; the relaunch resumes from the failed stage "
+            "(#2193) instead of redrawing. Values above 1 refuse at preflight, "
+            "before anything is spent."
         ),
     )
     parser.add_argument(
@@ -1989,6 +2093,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.issue:
         print("ERROR: --issue is required (repeatable) unless stopping a roll")
+        return 91
+
+    # #2206: automatic retries are deauthorized. Refuse here -- before the
+    # detach hand-off and before any gate spends anything -- so the refusal
+    # lands in the console the operator is standing in.
+    if getattr(args, "attempts", 1) > 1:
+        print(
+            f"BLOCKED: --attempts {args.attempts} is retired (operator ruling "
+            "#2206). Automatic retries are deauthorized:\n"
+            "\n  A failed roll halts so its cause can be found. The relaunch "
+            "after the fix resumes\n  from the failed stage (#2193), so the "
+            "stages that already passed are never re-paid.\n"
+            "\n  The campaign's failures proved systematic, not stochastic: a "
+            "redraw into an unfixed\n  cause spends tokens to reproduce a "
+            "result already known.\n"
+            "\n  Relaunch with --attempts 1."
+        )
         return 91
 
     # #2007: refuse before spending anything if the tree running this roll is
@@ -2114,7 +2235,6 @@ def main(argv: list[str] | None = None) -> int:
             # clears its debris), so retrying inside the detached task removes
             # the human relaunch from the loop entirely. A base or gate problem
             # (91) is NOT a draw and is never retried.
-            storm_streak = 0
             # #2193: a relaunch that finds a non-conflict failure with the lld
             # already passed resumes from the failed stage instead of paying
             # for the passed stages again. Planning failures never block a
@@ -2133,77 +2253,47 @@ def main(argv: list[str] | None = None) -> int:
                     f"\n#{issue}: resuming from '{resume_from}' -- the passed "
                     "stages are reused, not redrawn (--fresh for a full redraw)."
                 )
-            for attempt_no in range(1, max(1, args.attempts) + 1):
-                # The sixth argument travels ONLY when a resume fires: test
-                # stubs replace roll_issue with both bare *args lambdas and
-                # fixed five-arg defs, so the non-resume path must keep the
-                # exact pre-#2193 call shape (same convention as the
-                # positional restore_repo call below).
-                if resume_from:
-                    code = roll_issue(
-                        repo_root, issue, log_dir, az_root, extra, resume_from,
-                    )
-                else:
-                    code = roll_issue(repo_root, issue, log_dir, az_root, extra)
-                # Only the first attempt resumes: a resumed attempt that fails
-                # has proven the preserved state is not enough, so every
-                # redraw after it is fresh.
-                resume_from = None
-                if code == 0 or code == 91:
-                    break
+            # #2206: one roll per issue. The redraw loop is retired by
+            # operator ruling -- a failure halts for diagnosis, and the
+            # relaunch after the fix resumes from the failed stage (#2193)
+            # rather than re-paying for the passed ones. The campaign's
+            # failures proved overwhelmingly systematic, and a redraw into an
+            # unfixed cause spends tokens to reproduce a known result.
+            #
+            # The sixth argument travels ONLY when a resume fires: test stubs
+            # replace roll_issue with both bare *args lambdas and fixed
+            # five-arg defs, so the non-resume path must keep the exact
+            # pre-#2193 call shape (same convention as the positional
+            # restore_repo call below).
+            if resume_from:
+                code = roll_issue(
+                    repo_root, issue, log_dir, az_root, extra, resume_from,
+                )
+            else:
+                code = roll_issue(repo_root, issue, log_dir, az_root, extra)
 
-                # #2166: a requirements conflict means the ISSUE needs an
-                # operator ruling. No redraw can help; the auto-filer (#2072)
-                # has already raised the questions. Stop this issue, keep the
-                # batch moving.
-                if code == CONFLICT_EXIT_CODE:
-                    session.write(
-                        f"BLOCKED #{issue} on an operator ruling -- "
-                        "no redraw can help; continuing the batch"
-                    )
-                    break
-
-                # #2086: eighteen consecutive provider timeouts in one roll on
-                # 2026-08-01 killed two rolls, because a redraw fires straight
-                # into the same wall. A storm-classified attempt waits; every
-                # other failure redraws immediately, exactly as before.
-                if code == STORM_EXIT_CODE:
-                    storm_streak += 1
-                else:
-                    storm_streak = 0
-
-                if attempt_no >= max(1, args.attempts):
-                    if storm_streak:
-                        # Nothing left to wait for; a terminal wait would just
-                        # delay the operator finding out.
-                        session.write("STORM on final attempt - exiting without waiting")
-                    continue
-
-                if storm_streak:
-                    minutes = backoff_minutes(storm_streak)
-                    session.write(
-                        f"STORM BACKOFF {minutes}m before attempt "
-                        f"{attempt_no + 1}/{args.attempts}"
-                    )
-                    # #2164: a backoff is a heal (waiting instead of burning
-                    # an attempt on the same wall).
-                    record_heal(
-                        repo_root, "storm-backoff", f"#{issue}", "healed",
-                        detail=f"waited {minutes}m before attempt "
-                               f"{attempt_no + 1}/{args.attempts}",
-                    )
-                    print(
-                        f"\n#{issue} attempt {attempt_no}/{args.attempts}: the model "
-                        f"provider stopped answering. Waiting {minutes} minutes before "
-                        f"trying again, so the next attempt is not spent on the same wall."
-                    )
-                    _interruptible_sleep(minutes * 60)
-                else:
-                    print(
-                        f"\n#{issue} attempt {attempt_no}/{args.attempts} failed "
-                        f"(exit {code}) — self-healing and redrawing."
-                    )
-                    time.sleep(2)
+            # #2166: a requirements conflict means the ISSUE needs an operator
+            # ruling. The auto-filer (#2072) has already raised the questions.
+            # Stop this issue, keep the batch moving.
+            if code == CONFLICT_EXIT_CODE:
+                session.write(
+                    f"BLOCKED #{issue} on an operator ruling -- "
+                    "no redraw can help; continuing the batch"
+                )
+            # #2086 storms no longer back off and retry -- with one roll per
+            # issue there is nothing to wait for, and the operator finds out
+            # immediately instead of after an hour of sleeping.
+            elif code == STORM_EXIT_CODE:
+                session.write(
+                    f"STORM ended #{issue} -- the provider stopped answering; "
+                    "nothing was redrawn (#2206). Relaunch when it recovers."
+                )
+            elif code not in (0, 91):
+                session.write(
+                    f"HALT #{issue} exited {code} -- no redraw (#2206). "
+                    "Diagnose, fix the cause, then relaunch; the passed "
+                    "stages resume rather than re-run."
+                )
             if code == CONFLICT_EXIT_CODE:
                 blocked.append(issue)
                 continue

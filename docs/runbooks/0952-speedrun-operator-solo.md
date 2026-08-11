@@ -39,7 +39,7 @@ than transcribed:
 |---|---|
 | `--repo` | target repo root (required) |
 | `--issue` | issue to roll — **repeatable**, rolled in order |
-| `--attempts` | redraw a failed issue up to N times before stopping. Base/gate problems never retry. |
+| `--attempts` | retired by operator ruling #2206 — only `1` is accepted, and a higher value refuses at preflight before anything is spent. A failure halts so its cause can be found; the relaunch resumes from the failed stage (#2193) rather than re-paying for the stages that passed. |
 | `--detach` | run via Windows Task Scheduler so the roll outlives this session — then **stay attached, streaming the roll's output into this console** until it finishes (#2138) |
 | `--no-follow` | with `--detach`: hand off and return immediately instead of streaming (for scripted callers) |
 | `--follow` | re-attach to a roll already running and stream its output here. Takes no `--issue` |
@@ -126,15 +126,17 @@ stage is normal, a stopped heartbeat is not:
 2026-08-01 05:23:33 alive
 ```
 
-**A backoff is not a hang.** When the model provider stops answering, the
-launcher waits rather than burning a fresh attempt on the same wall, and says so:
+**A dead provider ends the issue immediately (#2206).** When the model provider
+stops answering, the roll says so and stops — with no redraw to protect, there
+is nothing to wait for:
 
 ```
-STORM BACKOFF 15m before attempt 2/3
+STORM ended #4 -- the provider stopped answering; nothing was redrawn (#2206). Relaunch when it recovers.
 ```
 
-Waits are 15, then 30, then 60 minutes, capped at 60. A storm on the final
-attempt exits immediately rather than waiting for nothing.
+The former behaviour — waiting 15, then 30, then 60 minutes before redrawing —
+went with the redraw loop. Relaunch once the provider recovers; the stages that
+already passed resume rather than re-run.
 
 **The one rule from the watchdog doctrine:** a stage running past three times its
 nominal is a fault, not patience. Waiting longer has never once helped.

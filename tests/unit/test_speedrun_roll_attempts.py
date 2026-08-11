@@ -1,9 +1,14 @@
-"""A failed draw redraws inside the detached task (#2068).
+"""The redraw budget is retired (#2206, superseding #2068).
 
-Generation quality varies wildly between draws -- the same issue produced
-39/41-passing and 4/75-passing initial iterations on consecutive rolls. A bad
-draw is self-healing (ensure_base clears its debris), so the retry belongs
-inside the detached task, not with a human relaunching every twenty minutes.
+#2068 added an in-task redraw loop on the premise that generation quality
+varies wildly between draws, so a bad draw was worth re-rolling without a
+human in the loop. The campaign disproved the premise: on 2026-08-10/11 every
+failure was systematic — a parse misroute, stale binding docs, an unwritable
+photo comparison, an under-specified palette — and each redraw re-paid for
+passed stages to reproduce a known result. The operator retired it.
+
+What replaces it: one roll per issue, then a halt with the reason, and a
+relaunch that resumes from the failed stage (#2193) once the cause is fixed.
 """
 
 import argparse
@@ -18,7 +23,7 @@ if str(TOOLS) not in sys.path:
 import speedrun_roll as sr  # noqa: E402
 
 
-def _main(repo, attempts, codes):
+def _main(repo, codes, attempts=1):
     """Run main() with roll_issue scripted to return `codes` in order."""
     calls = []
 
@@ -37,35 +42,35 @@ def _main(repo, attempts, codes):
     return code, calls
 
 
-class TestRedraw:
-    def test_a_failed_draw_is_redrawn(self, tmp_path):
+class TestTheBudgetIsRetired:
+    def test_a_failed_draw_is_not_redrawn(self, tmp_path):
+        """The inversion of the #2068 test this file used to carry."""
         repo = tmp_path / "r"
         (repo / ".git").mkdir(parents=True)
-        code, calls = _main(repo, 3, [1, 1, 0, 0])
+        code, calls = _main(repo, [1, 0, 0])
 
-        assert code == 0
-        assert calls == [2, 2, 2, 5], "three draws of #2, then #5 once"
+        assert code == 1
+        assert calls == [2], "one roll of #2, then the batch halts"
 
-    def test_success_does_not_burn_the_budget(self, tmp_path):
+    def test_success_rolls_every_issue_once(self, tmp_path):
         repo = tmp_path / "r"
         (repo / ".git").mkdir(parents=True)
-        code, calls = _main(repo, 5, [0, 0])
+        code, calls = _main(repo, [0, 0])
         assert code == 0
         assert calls == [2, 5]
 
-    def test_exhausted_attempts_stop_the_arc(self, tmp_path):
+    def test_a_failure_stops_the_arc(self, tmp_path):
         repo = tmp_path / "r"
         (repo / ".git").mkdir(parents=True)
-        code, calls = _main(repo, 2, [1, 1])
+        code, calls = _main(repo, [1, 1])
         assert code == 1
-        assert calls == [2, 2], "later issues must not roll after exhaustion"
+        assert calls == [2], "later issues must not roll after a failure"
 
-    def test_a_base_problem_is_never_redrawn(self, tmp_path):
-        """91 is a gate/base fault, not a draw; retrying it re-spends against
-        the same wall."""
+    def test_a_base_problem_still_stops_at_one(self, tmp_path):
+        """91 is a gate/base fault, not a draw — it was never redrawn."""
         repo = tmp_path / "r"
         (repo / ".git").mkdir(parents=True)
-        code, calls = _main(repo, 5, [91])
+        code, calls = _main(repo, [91])
         assert code == 91
         assert calls == [2]
 
@@ -83,14 +88,26 @@ class TestRedraw:
         assert code == 1
         assert calls == [1]
 
+    def test_a_budget_above_one_refuses(self, tmp_path):
+        """Asking for the retired behaviour is refused, not silently clamped:
+        an operator who typed --attempts 3 believes three draws will happen,
+        and a clamp would leave that belief intact."""
+        repo = tmp_path / "r"
+        (repo / ".git").mkdir(parents=True)
+        code, calls = _main(repo, [0, 0], attempts=3)
+        assert code == 91
+        assert calls == [], "a refused launch spends nothing"
 
-class TestTheBudgetRidesTheRelaunch:
+
+class TestTheFlagRidesTheRelaunch:
     def test_detached_argv_carries_attempts(self, tmp_path):
+        """The detached child re-parses argv, so the flag must still ride —
+        at the only value that now passes preflight."""
         args = argparse.Namespace(
             issue=[2, 5], log_dir=None, assemblyzero_root=None,
-            detach=True, detached_stdout=None, attempts=6,
+            detach=True, detached_stdout=None, attempts=1,
         )
         argv = sr.detached_argv(args, [], tmp_path / "r", tmp_path / "a",
                                 tmp_path / "l")
         assert "--attempts" in argv
-        assert argv[argv.index("--attempts") + 1] == "6"
+        assert argv[argv.index("--attempts") + 1] == "1"
