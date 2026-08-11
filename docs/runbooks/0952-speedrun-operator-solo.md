@@ -67,14 +67,30 @@ and nothing to type. Ctrl+C stops watching only — the roll keeps running.
 
 ### What can refuse to launch, and what you do about it
 
-All three gates run **before anything is spent** — no branch is created, no
-tokens are used. All three exit **91**.
+All of these gates run **before anything is spent** — no branch is created, no
+tokens are used. All exit **91**.
 
 | Refusal | What it means | What you do |
 |---|---|---|
 | The AssemblyZero tree is not trustworthy | this checkout is behind or dirty, so the roll would execute pipeline code that `main` does not describe | bring it level with `origin/main`, or point `--assemblyzero-root` at a tree that is |
 | This machine is not healthy enough | a quick self-check ran far slower than normal, or memory is above 90% | wait for the machine to recover, or find what is loading it. Do not override it — a roll on a sick box wastes hours *and* makes every failure look like a target-repo problem |
 | The repository has unanswered questions | one or more issues are open asking you to rule on ambiguous issue text | read each, decide which reading is right, edit the issue so only one survives, close the question |
+| The arc's binding docs conflict with the default branch | design docs or ADRs were ruled on both branches and the two edits collide (#2205) | merge them by hand, then roll. Nothing was changed — the launcher refuses rather than resolving a ruling on your behalf |
+
+**Binding docs sync themselves (#2205).** The roll reads design docs and ADRs
+from the attempt branch, not from `main` — issue text arrives live from
+GitHub, docs do not. Before anything is drawn, the launcher carries any
+binding-doc commits from the default branch onto the arc and says so:
+
+```
+SYNC 2 binding-doc commit(s) on 'main' not yet on 'hardening-run-17' -- carrying them onto the arc before the roll reads them
+SYNC verified: 'hardening-run-17' now carries the binding docs from 'main'
+```
+
+An arc already current is silent and costs nothing. This exists because an
+arc once carried a two-day-old aesthetic doc while five rulings sat on
+`main`: the spec stage failed twice on an objection the operator had already
+answered, and the answer was invisible to the pipeline.
 
 **The first-ever run on a machine records the health baseline and proceeds.** A
 missing baseline never blocks. Nominal is a rolling median over five runs, so it
