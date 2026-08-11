@@ -76,6 +76,25 @@ MANDATORY_SECTIONS = ["### 2.1", "## 11", "## 12"]
 # Common placeholder prefixes that often indicate hallucinated paths
 PLACEHOLDER_PREFIXES = ["src", "lib", "app"]
 
+# #2208: words a pass criterion uses when it defers a value rather than
+# carrying one. Matched case-insensitively as substrings, so "as specified"
+# also catches "exactly as specified".
+PLACEHOLDER_CRITERION_WORDS = (
+    "correct",
+    "appropriate",
+    "expected value",
+    "proper",
+    "as specified",
+    "per the design doc",
+    "per the aesthetic doc",
+    "per the spec",
+    "per spec",
+    "matching the",
+    "as documented",
+    "as defined in",
+    "defined in the",
+)
+
 # Stopwords to filter from keyword extraction
 STOPWORDS = {
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -574,6 +593,110 @@ def validate_title_issue_number(content: str, issue_number: int) -> list[Validat
 # =============================================================================
 # Validation Functions
 # =============================================================================
+
+
+def validate_test_plan_pass_criteria(lld_content: str) -> list[ValidationError]:
+    """Reject pass criteria that defer a value instead of carrying it (#2208).
+
+    The spec stage is drafted from the LLD, not from the design docs. A pass
+    criterion reading "needles show correct width/color" or "colors per the
+    aesthetic doc" hands the spec writer nothing to assert, so the only test
+    it can produce is one that verifies nothing --
+    ``assert isinstance(img, Image.Image)`` -- which the spec reviewer then
+    rejects for assertion traceability, round after round, to the cap.
+
+    That deadlock cost seven spec-stage halts on one issue across
+    2026-08-10/11, 6-12 minutes each, while the values sat in a design doc
+    the test writer never read. The defect was visible in the LLD's own text
+    at draft time, which is why it belongs here: this fails during the lld
+    stage, before any spec tokens are spent, and names the row to fix.
+
+    A criterion may cite the binding doc -- it must also carry the value.
+    ``needle pixels classify as candy-apple #F73923 (aesthetic doc)`` passes;
+    ``needle color per the aesthetic doc`` does not.
+    """
+    errors: list[ValidationError] = []
+    section = _extract_test_plan_section(lld_content)
+    if not section:
+        return errors
+
+    for row_id, criterion in _iter_pass_criteria(section):
+        lowered = criterion.lower()
+        hits = [w for w in PLACEHOLDER_CRITERION_WORDS if w in lowered]
+        if hits and not _carries_a_literal(criterion):
+            errors.append(
+                ValidationError(
+                    severity=ValidationSeverity.ERROR,
+                    section="10 Test Plan",
+                    message=(
+                        f"Critical: test {row_id}'s pass criterion says "
+                        f"{hits[0]!r} but carries no value -- quote the "
+                        f"literal it asserts (a number, a hex colour, a "
+                        f"backticked symbol), citing the binding doc if you "
+                        f"like: {criterion[:80]!r}"
+                    ),
+                )
+            )
+    return errors
+
+
+def _extract_test_plan_section(lld_content: str) -> str:
+    """The Test Plan section's body, or "" when the LLD has none.
+
+    Matched on heading text rather than number, so renumbering the template
+    cannot silently disable the check.
+    """
+    out: list[str] = []
+    inside = False
+    for line in (lld_content or "").splitlines():
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip().lower()
+            if "test plan" in heading:
+                inside = True
+                continue
+            if inside:
+                # Deeper subsections stay inside; a new top-level section ends it.
+                depth = len(line) - len(line.lstrip("#"))
+                if depth <= 2:
+                    inside = False
+        elif inside:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _iter_pass_criteria(section: str):
+    """Yield (row id, final cell) for each data row of the test table.
+
+    The pass criterion is the last column by template convention. Header and
+    separator rows are skipped; a row with fewer than three cells is not a
+    test row.
+    """
+    for line in section.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [c.strip() for c in stripped.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        if set("".join(cells)) <= set("-: "):        # separator row
+            continue
+        if cells[0].lower() in {"id", "test", "#"}:  # header row
+            continue
+        yield cells[0] or "?", cells[-1]
+
+
+def _carries_a_literal(text: str) -> bool:
+    """True when a criterion carries something a test can assert against.
+
+    Deliberately generous -- a backticked symbol, a quoted string, or any
+    digit counts. This catches criteria with NO value at all; it does not
+    adjudicate whether the value is the right one. A narrower rule would
+    fire on good rows and teach drafters to pad, which is worse than the
+    defect (the fleet's no-false-alarms rule).
+    """
+    if "`" in text or '"' in text or "'" in text:
+        return True
+    return any(ch.isdigit() for ch in text)
 
 
 def validate_mandatory_sections(lld_content: str) -> list[ValidationError]:
@@ -1408,6 +1531,11 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     # Step 6: Cross-reference DoD with Files Changed
     xref_errors = cross_reference_sections(lld_content, files)
     all_errors.extend(xref_errors)
+
+    # Step 6b (#2208): a pass criterion that defers its value leaves the spec
+    # stage nothing to assert. Caught here, in the lld stage, rather than
+    # after the spec has spent its budget discovering the same thing.
+    all_errors.extend(validate_test_plan_pass_criteria(lld_content))
 
     # Step 7: Trace risk mitigations (warnings only, with Issue #312 smart filtering)
     mitigations = extract_mitigations_from_risks(lld_content)
