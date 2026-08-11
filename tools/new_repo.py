@@ -23,6 +23,7 @@ See: docs/standards/0009-canonical-project-structure.md
 
 import argparse
 import base64
+import copy
 import json
 import logging
 import os
@@ -1812,41 +1813,125 @@ def create_dependabot_config(project_path: Path) -> list[str]:
     return [eco for eco, _label in ecosystems]
 
 
-def create_settings_json(project_path: Path) -> None:
+# #2113: the PreToolUse matcher this scaffolder owns. Merging keys on this
+# exact string so a repo's own entries under other matchers survive untouched.
+_GUARD_MATCHER = "Read|Write|Edit|Grep|NotebookEdit"
+
+
+def _merge_settings(existing: dict, canonical_hook: dict) -> dict:
+    """Return `existing` with the canonical guard hook ensured, nothing lost.
+
+    #2113: the previous implementation built a fixed dict and wrote it
+    unconditionally, so re-running the scaffolder over an existing repo -- a
+    normal catch-up when a template change needs to reach repos created before
+    it -- silently destroyed whatever that repo had added since: permission
+    rules, extra hooks, tool-specific config. `settings.json` is not a file
+    anyone opens routinely, so the loss surfaced much later as a repo
+    prompting for something it never prompted for.
+
+    Merge rules, deliberately the narrowest that still guarantees the guard:
+      * every top-level key is preserved; only `hooks` is touched
+      * every hook EVENT other than PreToolUse is preserved -- note the old
+        code wrote `"PostToolUse": []`, erasing post-hooks outright
+      * within PreToolUse, only the entry whose matcher we own is touched
+      * within that entry the guard command is appended only when absent, so a
+        repo may carry its own additional hooks on the same matcher
+
+    Pure: mutates neither argument, so the merge decision is testable without
+    a filesystem.
     """
-    Create .claude/settings.json with per-repo hooks.
+    merged = copy.deepcopy(existing)
+    hooks = merged.setdefault("hooks", {})
+    pre = hooks.setdefault("PreToolUse", [])
+
+    entry = next(
+        (e for e in pre
+         if isinstance(e, dict) and e.get("matcher") == _GUARD_MATCHER),
+        None,
+    )
+    if entry is None:
+        pre.append({"matcher": _GUARD_MATCHER, "hooks": [canonical_hook]})
+        return merged
+
+    entry_hooks = entry.setdefault("hooks", [])
+    if not any(
+        isinstance(h, dict) and h.get("command") == canonical_hook["command"]
+        for h in entry_hooks
+    ):
+        entry_hooks.append(canonical_hook)
+    return merged
+
+
+def create_settings_json(project_path: Path) -> str:
+    """
+    Ensure .claude/settings.json carries the per-repo secret-file guard.
 
     Only deploys secret-file-guard.sh per-repo. Security hooks (secret-guard.sh,
     bash-gate.sh) are registered globally in ~/.claude/settings.json and do not
     need per-repo copies. See AssemblyZero #872.
 
+    #2113: reads and merges rather than overwriting. Returns what it did, so
+    callers and tests assert on the outcome instead of inferring it from the
+    file's contents.
+
+    A file that does not parse as JSON is the one destructive path left. The
+    original is copied to `<name>.bak` beside itself before canonical settings
+    are written, and the outcome names that case; nothing is discarded quietly.
+
     Args:
         project_path: Path to the project root
+
+    Returns:
+        "created" | "unchanged" | "merged" | "replaced-unparseable"
     """
     projects_root_unix = config.projects_root_unix()
     project_name = project_path.name
 
-    settings = {
+    canonical_hook = {
+        "type": "command",
+        "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-file-guard.sh",
+        "timeout": 5,
+        "description": "Secret File Guard (blocks file tools on .env, credentials)"
+    }
+    canonical = {
         "hooks": {
             "PreToolUse": [
-                {
-                    "matcher": "Read|Write|Edit|Grep|NotebookEdit",
-                    "hooks": [
-                        {
-                            "type": "command",
-                            "command": f"bash {projects_root_unix}/{project_name}/.claude/hooks/secret-file-guard.sh",
-                            "timeout": 5,
-                            "description": "Secret File Guard (blocks file tools on .env, credentials)"
-                        }
-                    ]
-                }
+                {"matcher": _GUARD_MATCHER, "hooks": [canonical_hook]}
             ],
             "PostToolUse": []
         }
     }
 
     settings_path = project_path / ".claude" / "settings.json"
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding='utf-8')
+
+    if not settings_path.exists():
+        settings_path.write_text(
+            json.dumps(canonical, indent=2) + "\n", encoding='utf-8')
+        return "created"
+
+    raw = settings_path.read_text(encoding='utf-8')
+    try:
+        existing = json.loads(raw)
+        if not isinstance(existing, dict):
+            raise ValueError("settings.json is not a JSON object")
+    except (json.JSONDecodeError, ValueError):
+        backup = settings_path.with_suffix(settings_path.suffix + ".bak")
+        backup.write_text(raw, encoding='utf-8')
+        settings_path.write_text(
+            json.dumps(canonical, indent=2) + "\n", encoding='utf-8')
+        print(f"  WARNING: {settings_path} did not parse as JSON; original "
+              f"preserved at {backup.name} and canonical settings written")
+        return "replaced-unparseable"
+
+    merged = _merge_settings(existing, canonical_hook)
+    if merged == existing:
+        # #2113: a no-op run leaves the file untouched, so a catch-up sweep
+        # over already-compliant repos produces no diff and no mtime churn.
+        return "unchanged"
+
+    settings_path.write_text(
+        json.dumps(merged, indent=2) + "\n", encoding='utf-8')
+    return "merged"
 
 
 def deploy_canonical_hooks(project_path: Path) -> None:
