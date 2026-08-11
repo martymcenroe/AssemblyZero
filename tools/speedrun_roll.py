@@ -496,6 +496,105 @@ def _iso_to_epoch(value: str) -> float | None:
         return None
 
 
+def sync_binding_docs_to_arc(
+    repo_root: Path, base: str, log: EventLog
+) -> list[str]:
+    """Carry the default branch's binding-doc rulings onto the arc (#2205).
+
+    The roll's worktree stands on the attempt branch, so the design docs and
+    ADRs the drafter and reviewer read as law are the ARC's copies. Issue
+    text arrives live from GitHub; docs do not. An arc cut before a ruling
+    never sees it, and nothing in the machinery noticed.
+
+    The cost was not theoretical. On 2026-08-10 an arc carried a two-day-old
+    aesthetic doc while five rulings sat on the default branch; issue #1's
+    spec stage failed twice on an objection the operator had already
+    answered, invisibly. Worse, doc rulings had been reaching arcs only when
+    a pipeline PR happened to smuggle a snapshot -- nondeterministic and
+    version-skewed.
+
+    Preserve-then-proceed, never force: an ordinary merge, a conflict refuses
+    loudly rather than guessing, nothing discarded. Returns a list of
+    problems; empty means the arc now carries current law.
+    """
+    default = attempt.default_branch(repo_root)
+    if not default:
+        return ["cannot resolve the default branch to sync binding docs from"]
+    if base == default:
+        return []
+
+    _run(["git", "fetch", "--quiet", "origin"], cwd=repo_root)
+    pending = _run(
+        ["git", "log", "--oneline", f"origin/{base}..origin/{default}", "--",
+         *BINDING_DOC_PATHS],
+        cwd=repo_root,
+    )
+    if pending.returncode != 0:
+        return [
+            f"cannot compare binding docs between '{base}' and '{default}': "
+            f"{(pending.stderr or '').strip()}"
+        ]
+    commits = [ln for ln in pending.stdout.splitlines() if ln.strip()]
+    if not commits:
+        return []
+
+    log.write(
+        f"SYNC {len(commits)} binding-doc commit(s) on '{default}' not yet on "
+        f"'{base}' -- carrying them onto the arc before the roll reads them"
+    )
+    for line in commits[:5]:
+        log.write(f"  {line}")
+
+    # A worktree under data/speedrun/** -- evidence space, structurally exempt
+    # from dirt classification (standard 0027), and never a ~/Projects sibling
+    # (the stranded-worktree failure this campaign already paid for).
+    sync_tree = repo_root / "data" / "speedrun" / ".arc-sync"
+    problems: list[str] = []
+    try:
+        if sync_tree.exists():
+            _run(["git", "worktree", "remove", str(sync_tree)], cwd=repo_root)
+        add = _run(
+            ["git", "worktree", "add", str(sync_tree), base], cwd=repo_root
+        )
+        if add.returncode != 0:
+            return [
+                f"could not check out '{base}' to sync binding docs: "
+                f"{(add.stderr or '').strip()}"
+            ]
+        merge = _run(
+            ["git", "merge", f"origin/{default}", "-m",
+             f"Merge {default} into {base} - carry binding-doc rulings onto "
+             f"the arc before rolling (#2205)"],
+            cwd=sync_tree,
+        )
+        if merge.returncode != 0:
+            conflicted = _run(
+                ["git", "diff", "--name-only", "--diff-filter=U"], cwd=sync_tree
+            ).stdout.split()
+            _run(["git", "merge", "--abort"], cwd=sync_tree)
+            problems.append(
+                f"binding docs on '{default}' conflict with '{base}' in "
+                f"{', '.join(conflicted) or 'unknown file(s)'} -- resolve by "
+                "hand, then roll. Nothing was changed."
+            )
+        else:
+            push = _run(["git", "push", "origin", base], cwd=sync_tree)
+            if push.returncode != 0:
+                problems.append(
+                    f"synced '{base}' locally but could not push it: "
+                    f"{(push.stderr or '').strip()}"
+                )
+            else:
+                log.write(
+                    f"SYNC verified: '{base}' now carries the binding docs "
+                    f"from '{default}'"
+                )
+    finally:
+        _run(["git", "worktree", "remove", "--", str(sync_tree)], cwd=repo_root)
+        _run(["git", "worktree", "prune"], cwd=repo_root)
+    return problems
+
+
 def draft_is_stale(
     repo_root: Path, issue: int, drafted_at: str, base: str, log: EventLog
 ) -> bool:
@@ -2218,6 +2317,29 @@ def main(argv: list[str] | None = None) -> int:
             session.write("  file janitor: nothing to do")
     except Exception as exc:  # noqa: BLE001 - a janitor must never abort a roll
         session.write(f"JANITOR FAILED (continuing): {exc}")
+
+    # #2205: the arc is what the drafter and reviewer read as law. Carry the
+    # default branch's binding-doc rulings onto it BEFORE anything is drawn,
+    # and before resume planning, whose staleness check reads the same
+    # history. A conflict refuses the launch rather than rolling against
+    # docs nobody reconciled.
+    arc_base = resolve_attempt_branch(repo_root)
+    if arc_base:
+        try:
+            doc_problems = sync_binding_docs_to_arc(repo_root, arc_base, session)
+        except Exception as exc:  # noqa: BLE001
+            doc_problems = [f"binding-doc sync failed: {exc}"]
+        if doc_problems:
+            print("BLOCKED: the arc's binding docs could not be brought current:")
+            for p in doc_problems:
+                print(f"  - {p}")
+                session.write(f"SYNC BLOCKED: {p}")
+            print(
+                "\n  The roll reads design docs and ADRs from the attempt "
+                "branch, so rolling now\n  would build against rulings the "
+                "operator has already made. Nothing was spent."
+            )
+            return 91
 
     # #2145: the untracked set the roll borrows. Everything beyond this at
     # exit is the roll's own emission, and restore_repo reconciles it.
