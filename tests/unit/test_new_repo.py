@@ -1744,3 +1744,143 @@ class TestScaffoldValidationGate:
         (tmp_path / ".claude" / "project.json").write_text("{ not json", encoding="utf-8")
         blocking, _ = validate_scaffold(tmp_path)
         assert any("project.json" in m for m in blocking), blocking
+
+
+# ---- #2113: create_settings_json must merge, never overwrite ----
+#
+# The scaffolder is re-run over existing repos as a normal catch-up when a
+# template change needs to reach repos created before it. The previous
+# implementation wrote a fixed dict unconditionally, silently destroying
+# whatever that repo had added since.
+
+import new_repo as _nr  # noqa: E402
+
+
+def _settings_dir(tmp_path):
+    d = tmp_path / "myrepo" / ".claude"
+    d.mkdir(parents=True)
+    return tmp_path / "myrepo"
+
+
+def _read(project):
+    return json.loads(
+        (project / ".claude" / "settings.json").read_text(encoding="utf-8")
+    )
+
+
+def _guard_entry(settings):
+    return next(
+        e for e in settings["hooks"]["PreToolUse"]
+        if e.get("matcher") == _nr._GUARD_MATCHER
+    )
+
+
+def test_creates_settings_when_absent(tmp_path):
+    project = _settings_dir(tmp_path)
+    assert _nr.create_settings_json(project) == "created"
+    assert _guard_entry(_read(project))["hooks"][0]["type"] == "command"
+
+
+def test_preserves_unrelated_top_level_keys(tmp_path):
+    """A repo's own permissions must survive a scaffolder re-run.
+
+    This is the actual reported harm: permission rules vanishing, discovered
+    later as a repo prompting for something it never prompted for.
+    """
+    project = _settings_dir(tmp_path)
+    (project / ".claude" / "settings.json").write_text(json.dumps({
+        "permissions": {"allow": ["Bash(gh:*)"], "deny": ["Read(.env)"]},
+        "model": "opus",
+    }), encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "merged"
+    after = _read(project)
+    assert after["permissions"] == {"allow": ["Bash(gh:*)"], "deny": ["Read(.env)"]}
+    assert after["model"] == "opus"
+    assert _guard_entry(after)["hooks"][0]["command"].endswith("secret-file-guard.sh")
+
+
+def test_preserves_other_hook_events(tmp_path):
+    """The old code wrote PostToolUse: [] — erasing post-hooks outright."""
+    project = _settings_dir(tmp_path)
+    post = [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]}]
+    (project / ".claude" / "settings.json").write_text(
+        json.dumps({"hooks": {"PostToolUse": post}}), encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "merged"
+    assert _read(project)["hooks"]["PostToolUse"] == post
+
+
+def test_preserves_other_matchers_in_pretooluse(tmp_path):
+    project = _settings_dir(tmp_path)
+    other = {"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh"}]}
+    (project / ".claude" / "settings.json").write_text(
+        json.dumps({"hooks": {"PreToolUse": [other]}}), encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "merged"
+    pre = _read(project)["hooks"]["PreToolUse"]
+    assert other in pre
+    assert any(e.get("matcher") == _nr._GUARD_MATCHER for e in pre)
+
+
+def test_preserves_sibling_hooks_on_our_own_matcher(tmp_path):
+    """A repo may add its own hook to the same matcher; it must survive."""
+    project = _settings_dir(tmp_path)
+    sibling = {"type": "command", "command": "bash /repo/.claude/hooks/mine.sh"}
+    (project / ".claude" / "settings.json").write_text(json.dumps({
+        "hooks": {"PreToolUse": [
+            {"matcher": _nr._GUARD_MATCHER, "hooks": [sibling]}
+        ]}
+    }), encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "merged"
+    entry_hooks = _guard_entry(_read(project))["hooks"]
+    assert sibling in entry_hooks
+    assert any(h["command"].endswith("secret-file-guard.sh") for h in entry_hooks)
+
+
+def test_rerun_is_a_no_op_and_does_not_touch_the_file(tmp_path):
+    """A catch-up sweep over compliant repos must produce no diff, no churn."""
+    project = _settings_dir(tmp_path)
+    assert _nr.create_settings_json(project) == "created"
+
+    path = project / ".claude" / "settings.json"
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+
+    assert _nr.create_settings_json(project) == "unchanged"
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime
+
+
+def test_unparseable_file_is_backed_up_never_discarded(tmp_path):
+    """The one remaining destructive path must preserve the original."""
+    project = _settings_dir(tmp_path)
+    path = project / ".claude" / "settings.json"
+    garbage = "{ this is not json"
+    path.write_text(garbage, encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "replaced-unparseable"
+    backup = project / ".claude" / "settings.json.bak"
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == garbage
+    assert _guard_entry(_read(project))["hooks"][0]["type"] == "command"
+
+
+def test_json_array_at_top_level_is_treated_as_unparseable(tmp_path):
+    """Valid JSON that is not an object cannot be merged into; back it up."""
+    project = _settings_dir(tmp_path)
+    path = project / ".claude" / "settings.json"
+    path.write_text("[1, 2, 3]", encoding="utf-8")
+
+    assert _nr.create_settings_json(project) == "replaced-unparseable"
+    assert (project / ".claude" / "settings.json.bak").read_text(
+        encoding="utf-8") == "[1, 2, 3]"
+
+
+def test_merge_helper_does_not_mutate_its_input():
+    """Purity matters: the caller compares merged against existing."""
+    existing = {"hooks": {"PreToolUse": []}}
+    snapshot = json.dumps(existing, sort_keys=True)
+    _nr._merge_settings(existing, {"type": "command", "command": "x"})
+    assert json.dumps(existing, sort_keys=True) == snapshot
