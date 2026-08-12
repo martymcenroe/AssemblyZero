@@ -8,6 +8,18 @@ Creates a LangGraph-compatible node that:
 3. Generates a structured recovery plan
 4. Prints a human-readable summary
 5. Returns paths for downstream consumption
+
+#2197: a halt that reports "Error: unknown" is the one thing this node must
+never do -- it exists to make a stop legible. A router's state writes are
+discarded at the graph boundary (#2018), so a halt reached by routing alone
+arrived here with an empty error_message and printed exactly that. Nodes now
+record the reason where they know it, and `describe_halt_from_state` below
+synthesizes one from the state when they do not, so no path can print "unknown"
+again.
+
+The fallback is deliberately scoped to HALT. A finalize repair (#2233) leaves
+error_message empty ON PURPOSE -- an in-flight repair is not a failure -- and
+routes to the drafter, never here, so that emptiness is untouched.
 """
 
 from pathlib import Path
@@ -96,6 +108,65 @@ def classify_error(error_message: str) -> str:
     return "unknown"
 
 
+def describe_iteration_cap(
+    max_iterations: int, verdict: str, feedback: str = "", limit: int = 300
+) -> str:
+    """The message an iteration-cap halt should have carried (#2197).
+
+    Names the cap, what the last round said, and the first line of the reason,
+    so the operator reads a verdict instead of scrolling a transcript.
+    """
+    rounds = "round" if max_iterations == 1 else "rounds"
+    reason = (feedback or "").strip().splitlines()
+    head = reason[0].strip() if reason else ""
+    if len(head) > limit:
+        head = head[:limit].rstrip() + "..."
+
+    message = (
+        f"Iteration cap: {max_iterations} review {rounds} ended {verdict}, "
+        "so the run stopped rather than spend another round on the same "
+        "objection."
+    )
+    return f"{message} Last feedback: {head}" if head else message
+
+
+def describe_halt_from_state(state: dict, workflow_name: str) -> str:
+    """A best-effort reason when a halt arrived with no error_message (#2197).
+
+    Reports what the state SAYS rather than re-deciding why routing halted: a
+    synthesized message that disagreed with the real reason would be worse than
+    the blank it replaces. Every branch names the field it read.
+    """
+    verdict = state.get("review_verdict") or state.get("lld_status") or ""
+    iteration = state.get("review_iteration") or state.get("iteration_count") or 0
+    cap = state.get("max_iterations", 0)
+
+    if verdict and cap and iteration >= cap:
+        return describe_iteration_cap(
+            cap, verdict,
+            state.get("review_feedback") or state.get("current_verdict") or "",
+        )
+
+    issues = state.get("completeness_issues") or state.get("validation_errors") or []
+    if issues:
+        listed = "; ".join(str(i) for i in list(issues)[:3])
+        return (
+            f"Halted with {len(issues)} unresolved check(s) after "
+            f"{iteration} round(s): {listed}"
+        )
+
+    if verdict:
+        return (
+            f"Halted after {iteration} round(s) with verdict {verdict} and no "
+            "recorded reason; see the state snapshot for the full transcript."
+        )
+
+    return (
+        f"The {workflow_name} workflow halted without recording a reason. "
+        "The state snapshot beside this plan holds everything it knew."
+    )
+
+
 def create_halt_node(workflow_name: str):
     """Factory: returns a LangGraph-compatible node function.
 
@@ -117,7 +188,12 @@ def create_halt_node(workflow_name: str):
             Dict with recovery_plan_path and state_snapshot_path keys.
         """
         issue_number = state.get("issue_number", 0)
-        error_message = state.get("error_message", "Unknown error")
+        # #2197: "Unknown error" was the default AND the common case, because a
+        # halt reached by routing alone carries nothing. Synthesize from state
+        # rather than print a word that tells the operator nothing.
+        error_message = (state.get("error_message") or "").strip()
+        if not error_message:
+            error_message = describe_halt_from_state(state, workflow_name)
         cost_budget = state.get("cost_budget_usd", 0.0)
 
         # 1. Classify the error

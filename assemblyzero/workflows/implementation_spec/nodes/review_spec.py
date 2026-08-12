@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.halt_node import describe_iteration_cap  # #2197
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import (
@@ -402,6 +403,16 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
             f"Spec review BLOCKED: {feedback or spec_result['rationale'] or 'no reason given'}"
         )
         _file_conflict_if_any(state, spec_result.get("rationale", "") or feedback)
+    elif verdict_status == "REVISE" and review_iteration >= max_iterations:
+        # Closes #2197: this is the halt, and it recorded nothing. The router
+        # sends a capped REVISE to HALT, but a router's state writes are
+        # discarded at the graph boundary (#2018), so error_message stayed
+        # empty and the banner read "Error: unknown" at both the workflow and
+        # the orchestrator level -- a failure the operator had to diagnose by
+        # scrolling the raw log. The reason was in the transcript all along.
+        blocked_reason = describe_iteration_cap(
+            max_iterations, verdict_status, feedback
+        )
 
     return {
         "review_verdict": verdict_status,

@@ -234,11 +234,28 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
             "failures": list(completeness_issues),
         })
 
+    # Closes #2197: when this failure is the LAST one the budget allows, the
+    # router sends it to HALT -- and a router's state writes are discarded at
+    # the graph boundary (#2018), so the halt recorded nothing and the banner
+    # read "Error: unknown". Below the cap the message stays empty: the run is
+    # still going, and a pending revision is not a failure.
+    cap_message = ""
+    if not validation_passed:
+        iteration = state.get("review_iteration", 0)
+        max_iterations = state.get("max_iterations", 3)
+        if iteration >= max_iterations:
+            listed = "; ".join(completeness_issues[:3])
+            cap_message = (
+                f"Iteration cap: {max_iterations} revision(s) ended with "
+                f"{len(completeness_issues)} unresolved completeness check(s). "
+                f"Unfixed: {listed}"
+            )
+
     return {
         "completeness_issues": completeness_issues,
         "validation_passed": validation_passed,
         "prior_completeness_breakdown": prior_breakdown,
-        "error_message": "",
+        "error_message": cap_message,
     }
 
 
