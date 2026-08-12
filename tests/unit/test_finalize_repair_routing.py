@@ -523,14 +523,18 @@ class TestRepairBudget:
 class TestStepBudget:
     """The loop must reach its own halt, not a GraphRecursionError.
 
-    LangGraph bounds a run by super-steps. The orchestrator's `run_lld_stage`
-    passes no `recursion_limit`, so it gets LangGraph's default of 25;
-    `tools/run_requirements_workflow.py` computes `(max_iterations * 4) + 10`,
-    which is 22 at the default cap. Every repair round trip spends six of
-    those, and nothing in the graph notices until it runs out.
+    LangGraph bounds a run by super-steps, and every repair round trip spends
+    six of them. A comment asserting that would rot the first time a node joined
+    the loop, so this measures it.
 
-    That is what MAX_FINALIZE_REPAIRS is for, and a comment asserting it would
-    rot the first time a node is added to the loop. This measures it.
+    When #2233 wrote these, the two callers allowed 25 (the orchestrator's
+    `run_lld_stage`, which passed no config and took LangGraph's default by
+    accident) and `(max_iterations * 4) + 10`, which is 22 at the default cap --
+    smaller than the default it was raising. #2245 replaced both with a budget
+    derived from these measured costs, in
+    `assemblyzero/workflows/requirements/step_budget.py`, and the cases below
+    that name 25 and 22 are kept as the historical measurement that motivated
+    the clamp rather than as a description of what any caller does now.
     """
 
     @staticmethod
@@ -618,10 +622,10 @@ class TestStepBudget:
         assert (one, two) == (15, 21)
 
     @pytest.mark.parametrize("limit", [25, 22])
-    def test_a_full_repair_budget_fits_both_callers(
+    def test_a_full_repair_budget_fit_the_old_caller_limits(
         self, monkeypatch, capsys, limit
     ):
-        """The binding property. Both real limits, the budget spent in full."""
+        """Why the clamp was two: both pre-#2245 limits, budget spent in full."""
         steps = self._drive(
             monkeypatch, repairs=MAX_FINALIZE_REPAIRS, recursion_limit=limit
         )
@@ -629,14 +633,19 @@ class TestStepBudget:
 
         assert steps <= limit
 
-    def test_one_repair_past_the_budget_is_what_the_clamp_prevents(
+    def test_one_repair_past_the_old_limit_died_namelessly(
         self, monkeypatch, capsys
     ):
-        """Mutation: without the clamp, the loop dies namelessly.
+        """Why #2233 clamped, and what #2245 then removed the need for.
 
-        This is the evidence that MAX_FINALIZE_REPAIRS is load-bearing rather
-        than cautious. A third repair does not produce the halt message; it
-        produces a GraphRecursionError.
+        At the accidental limit of 25 a third repair produced no halt message at
+        all -- it produced a GraphRecursionError, which names no stage, no loop
+        and no document. That is what made MAX_FINALIZE_REPAIRS load-bearing.
+
+        It is no longer load-bearing for that reason: the derived budget carries
+        a third repair comfortably, so the cap is now a judgment about repairs.
+        `tests/unit/test_step_budget.py::TestTheDerivedLimit` pins that, and this
+        case stays as the measurement of the state it replaced.
         """
         from langgraph.errors import GraphRecursionError
 

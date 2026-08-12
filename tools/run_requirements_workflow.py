@@ -64,6 +64,10 @@ from assemblyzero.utils.git import current_branch, validate_integration_branch
 from assemblyzero.workflows.requirements.config import GateConfig
 from assemblyzero.workflows.requirements.graph import create_requirements_graph
 from assemblyzero.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
+from assemblyzero.workflows.requirements.step_budget import (  # noqa: E402  (#2245)
+    DEFAULT_MAX_ITERATIONS,
+    invoke_with_budget,
+)
 
 
 # =============================================================================
@@ -772,13 +776,16 @@ def run_single_workflow(
         print("Starting workflow...")
         print()
 
-        # Calculate recursion limit
-        max_iters = state.get("max_iterations", 20)
-        recursion_limit = (max_iters * 4) + 10
-
-        final_state = compiled.invoke(
+        # #2245: this was `(max_iters * 4) + 10` -- 22 at the default cap of 3,
+        # SMALLER than the LangGraph default of 25 it was presumably raising,
+        # and unrelated to what the loops actually cost. The budget is now
+        # derived from measured per-loop step costs, and exhausting it halts
+        # naming the loop that spent it instead of raising GraphRecursionError.
+        final_state = invoke_with_budget(
+            compiled,
             state,
-            config={"recursion_limit": recursion_limit}
+            stage="lld" if state.get("workflow_type") == "lld" else "issue",
+            max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
         )
 
         print_result(final_state)
@@ -1008,12 +1015,12 @@ def run_resume_review(
             print("Starting review (resume mode)...")
             print()
 
-            max_iters = state.get("max_iterations", 20)
-            recursion_limit = (max_iters * 4) + 10
-
-            final_state = compiled_resume.invoke(
+            # #2245: same derived budget as the full run above.
+            final_state = invoke_with_budget(
+                compiled_resume,
                 state,
-                config={"recursion_limit": recursion_limit},
+                stage="lld resume",
+                max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
             )
 
             print_result(final_state)

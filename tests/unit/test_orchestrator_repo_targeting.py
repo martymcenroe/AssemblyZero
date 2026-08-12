@@ -37,14 +37,25 @@ AZ_ROOT = str(Path("/fake/projects/AssemblyZero"))
 
 
 def _capturing_graph(captured: dict, return_value: dict):
-    """A mock create_graph() whose compiled app.invoke captures its payload."""
+    """A mock create_graph() whose compiled app captures the payload it is given.
+
+    Both drive shapes are wired. The spec and impl stages call `app.invoke`; the
+    lld stage streams through `invoke_with_budget` since #2245, so that an
+    exhausted step budget can name the loop that spent it rather than raising a
+    bare GraphRecursionError.
+    """
     app = MagicMock()
 
-    def _invoke(payload):
+    def _invoke(payload, *args, **kwargs):
         captured.update(payload)
         return return_value
 
+    def _stream(payload, *args, **kwargs):
+        captured.update(payload)
+        yield return_value
+
     app.invoke.side_effect = _invoke
+    app.stream.side_effect = _stream
     graph = MagicMock()
     graph.compile.return_value = app
     return graph

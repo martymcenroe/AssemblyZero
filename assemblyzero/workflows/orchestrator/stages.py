@@ -406,9 +406,17 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
         previous_draft_path = state.get("previous_lld_draft_path", "")
         previous_verdict_text = state.get("previous_lld_verdict_text", "")
 
+        # #2245: this stage passed no config at all, so every orchestrated roll
+        # took LangGraph's default of 25 super-steps by accident -- and a run
+        # that spent its loops raised GraphRecursionError, which names no stage,
+        # no loop and no document. The budget is derived from the loop costs and
+        # the caps that bound them; exhausting it now halts with what consumed
+        # it.
+        from assemblyzero.workflows.requirements.step_budget import invoke_with_budget
+
         graph = create_requirements_graph()
         app = graph.compile()
-        sub_result = app.invoke({
+        sub_result = invoke_with_budget(app, {
             "issue_number": issue_number,
             "workflow_type": "lld",
             "target_repo": state.get("target_repo", ""),
@@ -423,7 +431,7 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "config_gates_verdict": gate_enabled,
             "previous_draft_path": previous_draft_path,
             "previous_verdict_text": previous_verdict_text,
-        })
+        }, stage="lld")
 
         # The requirements workflow's finalize node writes the saved LLD
         # path as `final_lld_path` and the verdict as `final_verdict`

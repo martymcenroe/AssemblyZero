@@ -260,12 +260,16 @@ class TestMainFunction:
 
         mock_roots.return_value = (tmp_path, tmp_path)
 
-        # Create mock compiled graph
-        mock_compiled = Mock()
-        mock_compiled.invoke.return_value = {
+        # Create mock compiled graph. #2245: the runner drives the graph through
+        # invoke_with_budget, which streams under a derived step budget so an
+        # exhausted budget names the loop that spent it.
+        final = {
             "error_message": "",
             "issue_url": "https://github.com/test/repo/issues/123",
         }
+        mock_compiled = Mock()
+        mock_compiled.invoke.return_value = final
+        mock_compiled.stream.return_value = iter([final])
         mock_graph.return_value.compile.return_value = mock_compiled
 
         # Create brief file
@@ -276,9 +280,9 @@ class TestMainFunction:
         with patch("sys.argv", ["prog", "--type", "issue", "--brief", str(brief), "--mock"]):
             result = main()
 
-        # Verify graph was created and invoked
+        # Verify graph was created and driven
         mock_graph.assert_called_once()
-        mock_compiled.invoke.assert_called_once()
+        mock_compiled.stream.assert_called_once()
 
 
 class TestSelectFlag:
