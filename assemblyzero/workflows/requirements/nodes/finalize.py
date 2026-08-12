@@ -371,6 +371,89 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
     return errors
 
 
+#: Hard ceiling on finalize repairs, independent of the iteration cap.
+#:
+#: Measured on the compiled graph: a run costs 9 super-steps to reach finalize
+#: and each repair round trip (N1, Ponder, N1.5, N1b, N3, N5) costs 6 more. The
+#: two callers allow 25 (the orchestrator's `run_lld_stage`, which sets no
+#: limit and takes LangGraph's default) and `(max_iterations * 4) + 10`, which
+#: is 22 at the default cap. A third repair needs 27, so it does not raise the
+#: halt below — it raises GraphRecursionError instead, which says nothing about
+#: what failed. Two repairs cost 21 and fit both.
+#:
+#: Two is also enough to decide: a defect that survives two surgical repairs of
+#: the named errors is systematic, which is the case this issue was filed
+#: about.
+MAX_FINALIZE_REPAIRS = 2
+
+
+def _finalize_repair_budget(state: Dict[str, Any]) -> int:
+    """How many times finalize may hand a draft back for repair.
+
+    #2233 said the iteration cap still bounds the loop, so this reads the
+    workflow's own cap — then clamps it to what the graph's step budget can
+    actually carry (see MAX_FINALIZE_REPAIRS). At least one repair is always
+    allowed: a cap of zero would reproduce the defect.
+    """
+    try:
+        cap = int(state.get("max_iterations", 3) or 3)
+    except (TypeError, ValueError):
+        cap = 3
+    return max(1, min(cap, MAX_FINALIZE_REPAIRS))
+
+
+def _request_finalize_repair(
+    state: Dict[str, Any], validation_errors: list
+) -> Dict[str, Any]:
+    """Hand a blocked finalize back to the revision node, or stop trying.
+
+    #2233: a finalize validation failure is a mechanical property of a
+    finished, and usually APPROVED, document. Failing the stage here made the
+    orchestrator regenerate the whole attempt, discarding every validated
+    stage and re-rolling all of its variance. In run-issue7-234943 that cost a
+    requirements gate, an initial draft, a mechanical-fix revision and a
+    review, and arrived at the identical block, because the defect was
+    systematic rather than draft-specific.
+
+    So the errors become revision feedback instead of a stage failure. The
+    router reads ``finalize_repair_pending``; N1 sees ``validation_errors``,
+    takes the edit-script path (#2200) and repairs the named defects in place.
+    ``error_message`` is deliberately left empty here — that is the channel
+    the orchestrator reads to decide a stage failed, and this stage has not
+    failed.
+
+    Once the budget is spent the run stops with the errors named, because a
+    repair loop that will not converge is a defect to diagnose rather than one
+    to re-pay for.
+    """
+    error_msg = "BLOCKED: " + "; ".join(validation_errors)
+    print(f"    VALIDATION: {error_msg}")
+
+    repairs_done = state.get("finalize_repair_count", 0) or 0
+    budget = _finalize_repair_budget(state)
+
+    if repairs_done >= budget:
+        state["finalize_repair_pending"] = False
+        state["error_message"] = (
+            f"[FINALIZE] {error_msg}. {repairs_done} repair revision(s) were "
+            f"already spent on this draft and finalize still blocks, so the "
+            f"loop stops rather than regenerating (#2233). The draft is "
+            f"unchanged on disk; fix the named defect and relaunch to resume "
+            f"from this stage."
+        )
+        return state
+
+    state["finalize_repair_count"] = repairs_done + 1
+    state["finalize_repair_pending"] = True
+    state["validation_errors"] = list(validation_errors)
+    state["error_message"] = ""
+    print(
+        f"    [FINALIZE] Repair {repairs_done + 1}/{budget}: sending the named "
+        f"errors back as revision feedback, not regenerating (#2233)"
+    )
+    return state
+
+
 def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     """Save LLD file with embedded review evidence.
 
@@ -411,10 +494,8 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     # Gate 2: Validate LLD structure before finalization (Issue #235)
     validation_errors = validate_lld_final(current_draft, open_questions_resolved)
     if validation_errors:
-        error_msg = "BLOCKED: " + "; ".join(validation_errors)
-        print(f"    VALIDATION: {error_msg}")
-        state["error_message"] = error_msg
-        return state
+        # #2233: route to a surgical revision instead of failing the stage.
+        return _request_finalize_repair(state, validation_errors)
 
     # Embed review evidence with ACTUAL verdict (not hardcoded APPROVED!)
     review_date = datetime.now().strftime("%Y-%m-%d")
@@ -532,6 +613,12 @@ def finalize(state: Dict[str, Any]) -> Dict[str, Any]:
     if workflow_type == "lld":
         # For LLD workflow: save LLD file with embedded review evidence
         state = _save_lld_file(state)
+        # #2233: a blocked finalize is a repair request, not a finished stage.
+        # Return before the completion log, the lineage move and the commit —
+        # none of them describe what happened, and nothing was saved. The
+        # graph sends this draft to the revision node next.
+        if state.get("finalize_repair_pending"):
+            return state
     else:
         # For issue workflow: post comment to GitHub issue
         # _finalize_issue returns only updates, merge them into state

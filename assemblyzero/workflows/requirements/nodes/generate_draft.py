@@ -432,6 +432,11 @@ Use the template structure provided. Include all sections. Be specific about:
         "previous_review_feedback": state.get("current_verdict", ""),  # Issue #486: Save for two-strike
         "previous_draft": state.get("current_draft", ""),  # Issue #491: Save for diff-aware review
         "validation_errors": [],  # Clear validation errors after use (Issue #294)
+        # #2233: the repair request is consumed here. Leaving it set would
+        # send the next finalize straight back to this node no matter what
+        # finalize decided, and finalize_repair_count is what bounds the loop
+        # — so it is deliberately NOT reset.
+        "finalize_repair_pending": False,
         "error_message": "",
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
@@ -463,30 +468,49 @@ def build_revision_context(state: RequirementsWorkflowState) -> str:
 
     # Issue #294: Include mechanical validation errors FIRST (highest priority)
     # Issue #339: Include repo structure so drafter knows what directories exist
+    # #2233: finalize's own errors arrive on the same channel, so say which
+    # gate spoke. The document reaching a finalize repair has already passed
+    # mechanical and test-plan validation and usually carries an APPROVED
+    # verdict; telling the model it failed "mechanical validation" invites it
+    # to go looking for structural faults that are not there.
+    finalize_repair = bool(state.get("finalize_repair_pending"))
     if validation_errors:
-        revision_context += "## MECHANICAL VALIDATION ERRORS (MUST FIX FIRST)\n\n"
-        revision_context += "The following errors were found by automated validation. "
-        revision_context += "These MUST be fixed before the LLD can proceed:\n\n"
+        if finalize_repair:
+            revision_context += "## FINALIZE VALIDATION ERRORS (MUST FIX FIRST)\n\n"
+            revision_context += (
+                "This document has already passed structural and test-plan "
+                "validation and been reviewed. It is blocked only by the "
+                "final gate below. Fix exactly these errors and change "
+                "nothing else:\n\n"
+            )
+        else:
+            revision_context += "## MECHANICAL VALIDATION ERRORS (MUST FIX FIRST)\n\n"
+            revision_context += "The following errors were found by automated validation. "
+            revision_context += "These MUST be fixed before the LLD can proceed:\n\n"
         for error in validation_errors:
             revision_context += f"- **ERROR:** {error}\n"
         revision_context += "\n"
 
         # Issue #339: Show actual repo structure so drafter can use real paths
         # Issue #490: Use cached repo_structure from state, fallback to inline call
-        target_repo = state.get("target_repo", "")
-        if target_repo:
-            repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
-            revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
-            revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
-            revision_context += f"```\n{repo_structure}\n```\n\n"
-            revision_context += "**To add files in a NEW directory:**\n"
-            revision_context += "1. First add the directory itself with Change Type: `Add (Directory)`\n"
-            revision_context += "2. Then add files inside it with Change Type: `Add`\n\n"
-        else:
-            revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
-            revision_context += "- 'Modify' files MUST exist in the repository\n"
-            revision_context += "- 'Add' files must have existing parent directories\n"
-            revision_context += "- Use actual file names from the codebase, not generic names\n\n"
+        # #2233: skipped on a finalize repair — the repo dump exists to fix
+        # bad file paths in Section 2.1, which this document's paths already
+        # cleared, so here it is a large prompt for a question nobody asked.
+        if not finalize_repair:
+            target_repo = state.get("target_repo", "")
+            if target_repo:
+                repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
+                revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
+                revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
+                revision_context += f"```\n{repo_structure}\n```\n\n"
+                revision_context += "**To add files in a NEW directory:**\n"
+                revision_context += "1. First add the directory itself with Change Type: `Add (Directory)`\n"
+                revision_context += "2. Then add files inside it with Change Type: `Add`\n\n"
+            else:
+                revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
+                revision_context += "- 'Modify' files MUST exist in the repository\n"
+                revision_context += "- 'Add' files must have existing parent directories\n"
+                revision_context += "- Use actual file names from the codebase, not generic names\n\n"
 
     # Tiphys (#1688): revision feedback loop — the draft's own Files
     # Changed table declares the change's actual blast radius; refresh

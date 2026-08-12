@@ -237,6 +237,13 @@ class RequirementsWorkflowState(TypedDict, total=False):
     validation_errors: list[str]
     validation_warnings: list[str]
 
+    # Finalize repair loop (#2233). A blocked finalize hands the approved
+    # draft back to the revision node instead of failing the stage, so these
+    # two carry the request across the N5 -> N1 edge: the flag is what the
+    # router reads, and the count is what stops the loop.
+    finalize_repair_pending: bool
+    finalize_repair_count: int
+
     # Test plan validation (Issue #166)
     test_plan_validation_result: dict | None
     test_plan_validation_attempts: int
@@ -369,6 +376,9 @@ def create_initial_state(
         # Mechanical validation (Issue #277)
         "validation_errors": [],
         "validation_warnings": [],
+        # Finalize repair loop (#2233)
+        "finalize_repair_pending": False,
+        "finalize_repair_count": 0,
         # Test plan validation (Issue #166)
         "test_plan_validation_result": None,
         "test_plan_validation_attempts": 0,
