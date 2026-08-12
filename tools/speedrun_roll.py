@@ -1893,7 +1893,30 @@ def prereqs_path(repo_root: Path) -> Path:
     return Path(repo_root) / "data" / "speedrun" / PREREQS_FILENAME
 
 
-def write_prereqs(repo_root: Path, blocking: list[dict], note: str) -> None:
+def write_prereqs(repo_root: Path, blocking: list[dict], note: str) -> bool:
+    """Record the questions that gate the next launch. Returns True if written.
+
+    #2196: an empty `blocking` list is never written. It records "something
+    blocked but I do not know what", and the reader cannot verify an empty list
+    closed -- so every later launch refuses, permanently, with no way to
+    self-clear. Observed on boostgauge 2026-08-10, where a batch wrote
+    `"blocking": []` and the machine then sat idle about an hour and forty-five
+    minutes on a gate with nothing behind it; every must-resolve issue had been
+    closed within half an hour of the write.
+
+    Declining to write is safe because the launcher still runs the live
+    open-must-resolve query on every launch. That query is the same source of
+    truth this file caches, so the repo stays guarded -- what is lost is only
+    the cached certainty, which in this case was certainty of nothing.
+    """
+    if not blocking:
+        print(
+            "  (Not recording a launch gate: this run blocked but produced no "
+            "question numbers to record. The live must-resolve query still "
+            "guards the next launch.)"
+        )
+        return False
+
     path = prereqs_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -1903,6 +1926,7 @@ def write_prereqs(repo_root: Path, blocking: list[dict], note: str) -> None:
         ) + "\n",
         encoding="utf-8",
     )
+    return True
 
 
 def check_prereqs(repo_root: Path, override: bool) -> int | None:
@@ -1913,6 +1937,14 @@ def check_prereqs(repo_root: Path, override: bool) -> int | None:
     certain knowledge of a known block -- unverifiable closure REFUSES.
     The override runs anyway ONCE and leaves the file, so the following
     launch re-checks: override means "run anyway", never "forget".
+
+    #2196: with ONE exception. A file whose blocking list is empty or
+    unreadable is not certain knowledge of a block -- it is certain knowledge
+    of nothing, and refusing on it cannot self-heal, because the refusal sat
+    above the closure loop while the unlink that clears the file sat below it.
+    That state falls back to the live must-resolve query, which is the same
+    source of truth this file caches. The gate is not weakened: open questions
+    still refuse, by name, and an unreachable gh still refuses.
     """
     path = prereqs_path(repo_root)
     if not path.exists():
@@ -1932,12 +1964,47 @@ def check_prereqs(repo_root: Path, override: bool) -> int | None:
         blocking = []
 
     if not blocking:
+        # #2196: an empty or unreadable list is certain knowledge of NOTHING,
+        # and refusing on it converts an upstream numbers-lost bug into a total
+        # launch outage that cannot self-heal -- the refusal sits above the
+        # closure loop, and the unlink that clears the file sits below it.
+        # Fall back to the live query, which is the same source of truth this
+        # file caches. Open questions still block, by name; none means the
+        # cached gate was empty and can go.
         print(
-            "BLOCKED: a previous run recorded unresolved questions but their "
-            f"numbers could not be read from {path}. Check "
-            "must-resolve issues by hand, or pass --override-prereqs to run anyway."
+            f"A previous run recorded a launch gate in {path.name} with no "
+            "readable question numbers. Consulting the live must-resolve "
+            "query instead."
         )
-        return 91
+        questions, gh_error = open_must_resolve_issues(repo_root)
+
+        if gh_error:
+            print(
+                "BLOCKED: that file records unresolved questions whose numbers "
+                f"could not be read, and gh was unreachable to check for open "
+                f"questions directly ({gh_error}). This launch refuses rather "
+                "than roll into a wall it cannot see. Resolve the questions and "
+                "delete the file, or pass --override-prereqs to run anyway."
+            )
+            return 91
+
+        if questions:
+            print("BLOCKED: the repo has open questions awaiting a ruling:")
+            for item in questions:
+                print(f"  #{item.get('number')}  {item.get('title', '')}")
+            print(
+                "\n  Resolve them (edit the source issue, close each question), "
+                "then launch again.\n  Deliberately rolling anyway: "
+                "--override-prereqs."
+            )
+            return 91
+
+        path.unlink(missing_ok=True)
+        print(
+            "No open must-resolve questions remain, so that gate recorded "
+            "nothing that is still blocking -- removing it and proceeding."
+        )
+        return None
 
     still_open: list[dict] = []
     for item in blocking:
