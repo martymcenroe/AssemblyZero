@@ -143,6 +143,83 @@ def run_context(env: dict[str, str] | None = None) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class Origin:
+    """Which gate found the conflict (#2192).
+
+    The body used to state "Found by N0c" unconditionally. That is false on a
+    filing from the spec reviewer, and the operator reading the issue needs to
+    know which gate ruled -- an LLD-stage conflict and a spec-stage one are
+    found against different documents.
+    """
+
+    tag: str        # short label for log lines
+    sentence: str   # the provenance sentence that opens the issue body
+
+
+N0C_ORIGIN = Origin(
+    "N0c",
+    "Found by N0c (requirements-consistency gate, #1899) during a live roll. "
+    "The gate's own verdict: an operator ruling on the issue text is required "
+    "before any roll.",
+)
+
+SPEC_REVIEW_ORIGIN = Origin(
+    "spec review",
+    "Found by the implementation-spec reviewer (#1900 escalation) during a live "
+    "roll, after the LLD had already passed. The reviewer's verdict: two source "
+    "requirements specify different outcomes for the same situation, so no spec "
+    "can satisfy both and an operator ruling is required before any roll.",
+)
+
+
+#: The reviewer is told to quote the two conflicting sentences verbatim, so
+#: quoted spans are the signal. Straight and curly pairs both appear in model
+#: output, and a run that files nothing because of a typographic quote would
+#: reproduce the very defect this exists to close.
+_QUOTED = re.compile(r'"([^"]{8,})"|“([^”]{8,})”')
+_DIVERGE = re.compile(r"[^.!?]*\bdiverge\w*\b[^.!?]*[.!?]", re.IGNORECASE)
+
+
+def conflict_from_rationale(rationale: str, marker: str = "REQUIREMENTS CONFLICT:") -> dict:
+    """A conflict dict from the spec reviewer's free-text rationale (#2192).
+
+    N0c hands over a structured conflict; the spec reviewer writes prose behind
+    a marker. Parsing is best-effort ON PURPOSE: when the two sentences cannot
+    be separated, the whole finding becomes criterion A rather than the filing
+    being skipped. A slightly coarse issue is worth having; a missing one is the
+    defect -- it left a blocked roll with no question to resolve, an empty
+    launch gate, and a re-roll straight back into the same wall.
+
+    The result is deterministic for the same text, so the fingerprint is stable
+    and a repeat detection comments on the existing issue instead of duplicating.
+    """
+    text = (rationale or "").strip()
+    head, sep, tail = text.partition(marker)
+    body = (tail if sep else text).strip()
+
+    quotes = [a or b for a, b in _QUOTED.findall(body)]
+    if len(quotes) >= 2:
+        diverge = _DIVERGE.search(body)
+        return {
+            "criterion_a": quotes[0].strip(),
+            "criterion_b": quotes[1].strip(),
+            "diverging_situation": (
+                diverge.group(0).strip() if diverge
+                else "see the reviewer's finding above"
+            ),
+        }
+
+    return {
+        "criterion_a": body or text,
+        "criterion_b": "",
+        "diverging_situation": (
+            "the reviewer did not quote two separable sentences; its full "
+            "finding is recorded above"
+        ),
+    }
+
+
 def _first_line_summary(conflict: dict, limit: int = 60) -> str:
     text = normalize_criterion(conflict.get("criterion_a", "")) or "requirements conflict"
     text = text.splitlines()[0] if text else "requirements conflict"
@@ -164,11 +241,10 @@ def build_body(
     run_start: str,
     conflict_ts: str,
     fingerprint: str,
+    origin: Origin = N0C_ORIGIN,
 ) -> str:
     return "\n".join([
-        "Found by N0c (requirements-consistency gate, #1899) during a live roll. "
-        "The gate's own verdict: an operator ruling on the issue text is required "
-        "before any roll.",
+        origin.sentence,
         "",
         f"**Run:** {run_id} | **Start:** {run_start} | **Conflict reported:** {conflict_ts}",
         "",
@@ -233,6 +309,7 @@ def file_must_resolve(
     run_id: str | None = None,
     run_start: str | None = None,
     conflict_ts: str | None = None,
+    origin: Origin = N0C_ORIGIN,
     runner=_default_runner,
     log=print,
 ) -> FilingResult:
@@ -240,6 +317,11 @@ def file_must_resolve(
 
     Never raises. The roll is already halting; a filing problem is reported and
     the halt outcome is unchanged.
+
+    `origin` says which gate found it (#2192). The fingerprint deliberately does
+    NOT include it: the same contradiction found at the LLD stage and again at
+    the spec stage is one question for the operator, so the second detection
+    comments on the first issue instead of opening a duplicate.
     """
     if not source_issue:
         # Brief and idea entry paths carry file input, not an issue number.
@@ -257,7 +339,7 @@ def file_must_resolve(
 
     slug = repo_slug(repo_root, runner=runner)
     if not slug:
-        log(f"  [N0c] could not file must-resolve: no GitHub remote for {repo_root}")
+        log(f"  [{origin.tag}] could not file must-resolve: no GitHub remote for {repo_root}")
         return FilingResult(
             False, "failed", fingerprint=fingerprint, detail="no origin remote"
         )
@@ -271,18 +353,18 @@ def file_must_resolve(
             f"Still unresolved; the source issue text has not been ruled on.",
         ])
         if comment.returncode != 0:
-            log(f"  [N0c] could not comment on #{existing}: {comment.stderr.strip()}")
+            log(f"  [{origin.tag}] could not comment on #{existing}: {comment.stderr.strip()}")
             return FilingResult(
                 False, "failed", issue_number=existing, fingerprint=fingerprint,
                 detail=comment.stderr.strip(),
             )
-        log(f"  [N0c] recurrence recorded on existing must-resolve #{existing}")
+        log(f"  [{origin.tag}] recurrence recorded on existing must-resolve #{existing}")
         return FilingResult(True, "commented", existing, fingerprint)
 
     title = build_title(source_issue, conflict)
     body = build_body(
         source_issue, conflict, run_id=run_id, run_start=run_start,
-        conflict_ts=conflict_ts, fingerprint=fingerprint,
+        conflict_ts=conflict_ts, fingerprint=fingerprint, origin=origin,
     )
     create_args = [
         "gh", "issue", "create", "--repo", slug,
@@ -298,13 +380,13 @@ def file_must_resolve(
         created = runner(create_args)
 
     if created.returncode != 0:
-        log(f"  [N0c] could not file must-resolve issue: {created.stderr.strip()}")
+        log(f"  [{origin.tag}] could not file must-resolve issue: {created.stderr.strip()}")
         return FilingResult(
             False, "failed", fingerprint=fingerprint, detail=created.stderr.strip()
         )
 
     number = _issue_number_from_url((created.stdout or "").strip())
-    log(f"  [N0c] filed must-resolve issue #{number or '?'} in {slug}")
+    log(f"  [{origin.tag}] filed must-resolve issue #{number or '?'} in {slug}")
     return FilingResult(True, "filed", number, fingerprint)
 
 
@@ -374,6 +456,7 @@ def file_all_conflicts(
     source_issue: int,
     conflicts: list[dict],
     *,
+    origin: Origin = N0C_ORIGIN,
     runner=_default_runner,
     log=print,
 ) -> list[FilingResult]:
@@ -383,10 +466,11 @@ def file_all_conflicts(
         try:
             results.append(
                 file_must_resolve(
-                    repo_root, source_issue, conflict, runner=runner, log=log
+                    repo_root, source_issue, conflict,
+                    origin=origin, runner=runner, log=log
                 )
             )
         except Exception as exc:  # noqa: BLE001 - filing must never kill a halt
-            log(f"  [N0c] must-resolve filing raised, continuing: {exc}")
+            log(f"  [{origin.tag}] must-resolve filing raised, continuing: {exc}")
             results.append(FilingResult(False, "failed", detail=str(exc)))
     return results
