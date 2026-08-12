@@ -216,6 +216,20 @@ The mechanical checker is built (#2219): `tools/check_requirements_form.py --rep
 
 The full pre-roll sequence is this form check, then the semantic requirements-consistency gate via `tools/check_requirements.py` (#2221, one model call), then the roll.
 
+### The form check at launcher preflight (operator ruling, 2026-08-12, #2227)
+
+#2219 built the checker and left one question open: whether it should also run inside the launcher's preflight, where a refusal costs nothing because no branch exists and no token has been spent. The ruling:
+
+**The form check runs at launcher preflight, report-only by default.** It joins the existing refusals — an untrustworthy tree, a sick machine, the previous run's unresolved questions, open must-resolve issues — and runs before the detach hand-off, so a batch is judged as a whole before anything is spent.
+
+**It refuses only when the issue carries at least one decision table and that table is malformed.** An unconverted prose issue never refuses; a refusal there is a false alarm by definition. This matters because conversion happens when an issue next rolls rather than as a sweep, so nearly every issue in the fleet is still prose. A gate that fired on the ordinary case would be waved through, which is the same reasoning that scoped the ADR-0217 equivalence gate to the paths a branch actually changed.
+
+Malformation is read as the table's own shape — the second of the three rules, completeness and disjointness — because that is what a table can be malformed about and because a refusal must be an unambiguous fact. The third rule, row-to-criterion coverage, is treated on the checker's own account of its two join modes: with row IDs the join is exact and a missing criterion refuses; without them it rests on count and outcome text, which this ADR already delegates to the semantic gate, so it reports and does not refuse. EARS findings never refuse, since prose sentences are exactly where unconverted issues live. The two knobs are `REFUSING_KINDS` and `EXACT_JOIN_REFUSES` in `assemblyzero/workflows/requirements/form_gate.py`; widening the refusal is a one-line change.
+
+**The vacuous-EARS state is surfaced out loud.** An issue with no `## Requirements` section passes every EARS check while verifying nothing about its sentences. The preflight says so explicitly rather than letting a silent pass read as a clean bill — the failure mode the checker's report format exists to prevent.
+
+**Form-check findings are labelled as the form check's own**, distinct from the semantic gate's refusal, so one defect never reaches the operator as two complaints in two formats.
+
 boostgauge #7 is the first converted requirement and was rolling as of 2026-08-11. Its result is the first evidence about whether this form prevents what it was adopted to prevent.
 
 ## 9. References
@@ -235,4 +249,5 @@ Bibliographic details below are recorded from recall. Confirm them against the p
 | Date | Author | Change |
 |---|---|---|
 | 2026-08-11 | Claude Opus 5 | Initial draft |
+| 2026-08-12 | Claude Opus 5 | Operator ruling on #2227 recorded in section 8: the form check runs at launcher preflight, report-only, refusing only on a malformed decision table so unconverted prose issues never trip it; the vacuous-EARS state is surfaced explicitly; findings are labelled distinctly from the semantic gate's. |
 | 2026-08-11 | Claude Fable 5 | Building the checker (#2219) surfaced a contradiction between rule 1 and this ADR's own worked example: boostgauge #7's row criteria are mandated by section 3.2 and match no EARS pattern, so an EARS check over acceptance criteria would fail the fixture the ADR cites as its first success. Operator rulings on #2219 scoped EARS to the bullets of a marked `## Requirements` section, exempted row criteria explicitly, and adopted a row ID convention that makes the grid-to-criteria join exact. Sections 3.1, 3.2 and 8 carry those rulings. |
