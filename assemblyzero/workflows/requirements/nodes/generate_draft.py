@@ -49,10 +49,33 @@ from assemblyzero.workflows.requirements.feedback_window import (
 from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
     parse_files_changed_table,
 )
+from assemblyzero.workflows.requirements.nodes.lld_revision import (
+    EDIT_SCRIPT_SYSTEM_PROMPT,
+    apply_edit_blocks,
+    build_lld_edit_prompt,
+    parse_edit_blocks,
+    removed_required_sections,
+    unchanged_ratio,
+)
 from assemblyzero.core.verdict_schema import (
     DraftQuestionsResult,
     scan_open_questions_section,
 )
+
+
+def _edit_script_halt(reason: str) -> str:
+    """Halt message for a revision that could not be applied as edits (#2200).
+
+    Legible on its own in a halt banner (#2197): it names the contract, what
+    broke it, and the fact that nothing was lost.
+    """
+    return (
+        f"[EDIT-SCRIPT] LLD revision rejected: {reason}. The prior draft is "
+        f"unchanged and remains the working copy. A revision is applied as "
+        f"SEARCH/REPLACE edit blocks and is never redrawn wholesale (#2200), "
+        f"so there is no full-regeneration fallback to take. Relaunch to "
+        f"resume from this stage."
+    )
 
 
 def _extract_open_questions(
@@ -272,7 +295,37 @@ Use the template structure provided. Include all sections. Be specific about:
     # the same call. Two contradictory contracts on one ask is how drafts
     # come back malformed; the schema is gone and the open questions are
     # scanned from the document it was actually asked to produce.
-    result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+    # #2200: an LLD revision is applied as edit blocks, never redrawn. The
+    # model names its edits and the harness applies them, so content it does
+    # not name cannot change. Two measured regenerations lost required
+    # sections from drafts that had already passed validation; the prompt had
+    # asked for preservation both times.
+    use_edit_script = (
+        workflow_type == "lld"
+        and is_revision
+        and not drafter_spec.startswith("mock:")
+    )
+
+    if use_edit_script:
+        edit_context = build_revision_context(state)
+        # #1443's cross-run context rides in the classic system prompt, which
+        # the edit path does not use. Carry the prior attempt's verdict across
+        # explicitly so a resumed stage revises with everything it had before.
+        # The prior draft itself needs no carrying: it IS the patch target.
+        if previous_verdict_text:
+            edit_context += (
+                "## REVIEWER FEEDBACK ON A PRIOR ATTEMPT AT THIS STAGE\n\n"
+                f"{previous_verdict_text}\n\n"
+            )
+        edit_prompt = build_lld_edit_prompt(
+            existing_draft=state.get("current_draft", ""),
+            revision_context=edit_context,
+        )
+        result = drafter.invoke(
+            system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT, content=edit_prompt
+        )
+    else:
+        result = drafter.invoke(system_prompt=system_prompt, content=prompt)
     node_cost_usd = get_cumulative_cost() - cost_before
 
     if not result.success:
@@ -290,9 +343,55 @@ Use the template structure provided. Include all sections. Be specific about:
     response = result.response or ""
     draft_content = response
 
+    if use_edit_script:
+        # #2200: apply the named edits, or halt. There is no fall back to a
+        # full redraw -- wholesale regeneration is the defect being removed,
+        # so a revision that cannot be expressed as edits stops and names the
+        # contract it broke (standard 0028). The prior draft is untouched on
+        # disk and stays in state, and a relaunch resumes this stage (#2193).
+        prior_draft = state.get("current_draft", "")
+        blocks = parse_edit_blocks(response)
+        if not blocks:
+            return {
+                "error_message": _edit_script_halt(
+                    "the drafter returned no well-formed SEARCH/REPLACE blocks"
+                )
+            }
+
+        patched, failures = apply_edit_blocks(prior_draft, blocks)
+        if failures:
+            return {"error_message": _edit_script_halt("; ".join(failures))}
+        if patched == prior_draft:
+            return {
+                "error_message": _edit_script_halt(
+                    f"{len(blocks)} edit block(s) applied but changed nothing"
+                )
+            }
+
+        # The guard runs BEFORE the draft is saved, so a lossy revision never
+        # becomes the working copy and is never discovered downstream by
+        # mechanical validation.
+        removed = removed_required_sections(prior_draft, patched, template)
+        if removed:
+            return {
+                "error_message": _edit_script_halt(
+                    f"the edits would remove template-required section(s) "
+                    f"{', '.join(removed)}, which the prior draft carried"
+                )
+            }
+
+        ratio = unchanged_ratio(prior_draft, patched)
+        print(
+            f"    [EDIT-SCRIPT] Applied {len(blocks)} edit(s); "
+            f"{ratio:.0%} of prior draft preserved byte-identical (#2200)"
+        )
+        draft_content = patched
+
     # Issue #775: Use structured parse for open questions extraction (REQ-1, REQ-2).
     # parse_structured_draft_questions tries JSON first, falls back to regex.
-    dq_result = _extract_open_questions(drafter, response, system_prompt)
+    # #2200: scans the document, so on the edit path it must see the patched
+    # draft rather than the edit blocks that produced it.
+    dq_result = _extract_open_questions(drafter, draft_content, system_prompt)
     open_questions = dq_result["open_questions"]
 
     # Save to audit trail
@@ -337,6 +436,95 @@ Use the template structure provided. Include all sections. Be specific about:
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
     }
+
+
+def build_revision_context(state: RequirementsWorkflowState) -> str:
+    """Assemble the feedback a revision must act on.
+
+    Extracted from ``_build_prompt`` by #2200 so the classic revision prompt
+    and the edit-script prompt are fed from one place. Behavior is unchanged;
+    the assembly order (mechanical errors first, then repository structure,
+    the Tiphys interface refresh, the bounded verdict window, and finally
+    human feedback) is preserved exactly as the issues that added each piece
+    established it.
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        Markdown feedback block, empty when there is nothing to say.
+    """
+    current_draft = state.get("current_draft", "")
+    verdict_history = state.get("verdict_history", [])
+    user_feedback = state.get("user_feedback", "")
+    validation_errors = state.get("validation_errors", [])
+
+    revision_context = ""
+
+    # Issue #294: Include mechanical validation errors FIRST (highest priority)
+    # Issue #339: Include repo structure so drafter knows what directories exist
+    if validation_errors:
+        revision_context += "## MECHANICAL VALIDATION ERRORS (MUST FIX FIRST)\n\n"
+        revision_context += "The following errors were found by automated validation. "
+        revision_context += "These MUST be fixed before the LLD can proceed:\n\n"
+        for error in validation_errors:
+            revision_context += f"- **ERROR:** {error}\n"
+        revision_context += "\n"
+
+        # Issue #339: Show actual repo structure so drafter can use real paths
+        # Issue #490: Use cached repo_structure from state, fallback to inline call
+        target_repo = state.get("target_repo", "")
+        if target_repo:
+            repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
+            revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
+            revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
+            revision_context += f"```\n{repo_structure}\n```\n\n"
+            revision_context += "**To add files in a NEW directory:**\n"
+            revision_context += "1. First add the directory itself with Change Type: `Add (Directory)`\n"
+            revision_context += "2. Then add files inside it with Change Type: `Add`\n\n"
+        else:
+            revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
+            revision_context += "- 'Modify' files MUST exist in the repository\n"
+            revision_context += "- 'Add' files must have existing parent directories\n"
+            revision_context += "- Use actual file names from the codebase, not generic names\n\n"
+
+    # Tiphys (#1688): revision feedback loop — the draft's own Files
+    # Changed table declares the change's actual blast radius; refresh
+    # signatures for exactly those files (plus one-hop imports). Any
+    # draft-one selection miss becomes a one-iteration transient. Falls
+    # back to the N0b-computed map when the table yields nothing.
+    refreshed_map: dict = {}
+    revision_target_repo = state.get("target_repo", "")
+    if revision_target_repo and current_draft:
+        try:
+            entries, _parse_errors = parse_files_changed_table(current_draft)
+            draft_paths = [
+                e.get("path", "") for e in entries
+                if e.get("path", "").endswith(".py")
+            ]
+            if draft_paths:
+                refreshed_map = build_interface_map_for_paths(
+                    draft_paths, Path(revision_target_repo)
+                )
+        except Exception:  # noqa: BLE001 — Tiphys must never block revision
+            logger.warning("Tiphys revision refresh failed", exc_info=True)
+    interface_section = format_interface_map_section(
+        refreshed_map or state.get("interface_map") or {}
+    )
+    if interface_section:
+        revision_context += interface_section + "\n\n"
+
+    # Issue #497: Bounded feedback window replaces cumulative verdict history
+    if verdict_history:
+        window = build_feedback_block(verdict_history)
+        feedback_section = render_feedback_markdown(window)
+        if feedback_section:
+            revision_context += feedback_section + "\n\n"
+
+    if user_feedback:
+        revision_context += f"## Additional Human Feedback\n\n{user_feedback}\n\n"
+
+    return revision_context
 
 
 def _build_prompt(
@@ -405,71 +593,10 @@ def _build_prompt(
     # is_revision computed above, before input assembly (Issue #294 origin;
     # moved for Tiphys injection placement).
     if is_revision:
-        # Revision mode
-        revision_context = ""
-
-        # Issue #294: Include mechanical validation errors FIRST (highest priority)
-        # Issue #339: Include repo structure so drafter knows what directories exist
-        if validation_errors:
-            revision_context += "## MECHANICAL VALIDATION ERRORS (MUST FIX FIRST)\n\n"
-            revision_context += "The following errors were found by automated validation. "
-            revision_context += "These MUST be fixed before the LLD can proceed:\n\n"
-            for error in validation_errors:
-                revision_context += f"- **ERROR:** {error}\n"
-            revision_context += "\n"
-
-            # Issue #339: Show actual repo structure so drafter can use real paths
-            # Issue #490: Use cached repo_structure from state, fallback to inline call
-            target_repo = state.get("target_repo", "")
-            if target_repo:
-                repo_structure = state.get("repo_structure") or get_repo_structure(target_repo)
-                revision_context += "## ACTUAL REPOSITORY STRUCTURE\n\n"
-                revision_context += "**Use ONLY these existing directories** (or explicitly Add new ones):\n\n"
-                revision_context += f"```\n{repo_structure}\n```\n\n"
-                revision_context += "**To add files in a NEW directory:**\n"
-                revision_context += "1. First add the directory itself with Change Type: `Add (Directory)`\n"
-                revision_context += "2. Then add files inside it with Change Type: `Add`\n\n"
-            else:
-                revision_context += "**CRITICAL:** Check that all file paths in Section 2.1 are correct:\n"
-                revision_context += "- 'Modify' files MUST exist in the repository\n"
-                revision_context += "- 'Add' files must have existing parent directories\n"
-                revision_context += "- Use actual file names from the codebase, not generic names\n\n"
-
-        # Tiphys (#1688): revision feedback loop — the draft's own Files
-        # Changed table declares the change's actual blast radius; refresh
-        # signatures for exactly those files (plus one-hop imports). Any
-        # draft-one selection miss becomes a one-iteration transient. Falls
-        # back to the N0b-computed map when the table yields nothing.
-        refreshed_map: dict = {}
-        revision_target_repo = state.get("target_repo", "")
-        if revision_target_repo and current_draft:
-            try:
-                entries, _parse_errors = parse_files_changed_table(current_draft)
-                draft_paths = [
-                    e.get("path", "") for e in entries
-                    if e.get("path", "").endswith(".py")
-                ]
-                if draft_paths:
-                    refreshed_map = build_interface_map_for_paths(
-                        draft_paths, Path(revision_target_repo)
-                    )
-            except Exception:  # noqa: BLE001 — Tiphys must never block revision
-                logger.warning("Tiphys revision refresh failed", exc_info=True)
-        interface_section = format_interface_map_section(
-            refreshed_map or state.get("interface_map") or {}
-        )
-        if interface_section:
-            revision_context += interface_section + "\n\n"
-
-        # Issue #497: Bounded feedback window replaces cumulative verdict history
-        if verdict_history:
-            window = build_feedback_block(verdict_history)
-            feedback_section = render_feedback_markdown(window)
-            if feedback_section:
-                revision_context += feedback_section + "\n\n"
-
-        if user_feedback:
-            revision_context += f"## Additional Human Feedback\n\n{user_feedback}\n\n"
+        # Revision mode. #2200 extracted the context assembly so the
+        # edit-script path feeds the drafter exactly the same feedback this
+        # prompt does; two assemblies would drift.
+        revision_context = build_revision_context(state)
 
         # Issue #489: Try section-level revision for focused changes
         targeted = ""
