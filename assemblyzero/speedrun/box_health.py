@@ -169,13 +169,26 @@ def run_canary(
     return elapsed, ""
 
 
-def snapshot_resources() -> tuple[dict[str, float], list[str]]:
-    """(metrics, unreadable metric names). Never raises."""
+def _import_psutil():
+    """The default reader. Separated so tests can supply their own (#2248)."""
+    import psutil
+    return psutil
+
+
+def snapshot_resources(*, reader=None) -> tuple[dict[str, float], list[str]]:
+    """(metrics, unreadable metric names). Never raises.
+
+    `reader` returns the psutil-like module to measure with, and raises
+    ImportError when there is none. Injecting it lets a caller's tests drive
+    every branch here -- including the no-psutil one -- without patching
+    `psutil` or `builtins.__import__` globally, which is a session-wide change
+    made from inside one test (#2248).
+    """
     metrics: dict[str, float] = {}
     unreadable: list[str] = []
 
     try:
-        import psutil
+        psutil = (reader or _import_psutil)()
     except ImportError:
         return {}, ["memory in use", "running programs", "console windows"]
 

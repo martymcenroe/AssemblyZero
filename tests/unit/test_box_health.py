@@ -300,21 +300,16 @@ def test_unreadable_metric_aborts_and_names_it(tmp_path):
     assert "could not be read" in health.message
 
 
-def test_missing_psutil_is_unreadable_not_healthy(monkeypatch, tmp_path):
-    import builtins
-
-    real_import = builtins.__import__
-
-    def no_psutil(name, *args, **kwargs):
-        if name == "psutil":
-            raise ImportError("no psutil")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", no_psutil)
-
+def test_missing_psutil_is_unreadable_not_healthy(tmp_path):
+    """#2248: injected through `reader=` rather than by swapping
+    `builtins.__import__`, which is a session-wide change made from inside one
+    test and can strand any import that runs while it is in place."""
     from assemblyzero.speedrun.box_health import snapshot_resources
 
-    values, unreadable = snapshot_resources()
+    def no_psutil():
+        raise ImportError("no psutil")
+
+    values, unreadable = snapshot_resources(reader=no_psutil)
     assert values == {}
     assert "memory in use" in unreadable
 
