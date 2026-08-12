@@ -454,14 +454,22 @@ class TestLldStageBaseBranchThreading:
         final_lld = tmp_path / "LLD-007.md"
         final_lld.write_text("# LLD")
 
+        result = {
+            "error_message": "",
+            "final_lld_path": str(final_lld),
+            "final_verdict": "APPROVED",
+        }
+
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            # #2245: the lld stage streams through invoke_with_budget under a
+            # derived step budget. invoke stays for any caller that still uses it.
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 captured["payload"] = payload
-                return {
-                    "error_message": "",
-                    "final_lld_path": str(final_lld),
-                    "final_verdict": "APPROVED",
-                }
+                return result
+
+            def stream(self, payload: dict, *args, **kwargs):
+                captured["payload"] = payload
+                yield result
 
         class _StubGraph:
             def compile(self) -> _StubApp:

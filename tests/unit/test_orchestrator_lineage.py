@@ -53,9 +53,27 @@ STAGE_TO_SUBWORKFLOW = {
 _PROVISION_CALL = re.compile(r"(?<!def )\bcreate_\w*audit_dir\s*\(")
 
 
+def _is_subworkflow_call(node: ast.Call) -> bool:
+    """Either shape a stage uses to drive its sub-graph.
+
+    `app.invoke({...})` is the plain one. `invoke_with_budget(app, {...})` is
+    the lld stage since #2245, which streams under a derived step budget so an
+    exhausted budget can name the loop that spent it.
+    """
+    callee = node.func
+    if (
+        isinstance(callee, ast.Attribute)
+        and callee.attr == "invoke"
+        and isinstance(callee.value, ast.Name)
+        and callee.value.id == "app"
+    ):
+        return True
+    return isinstance(callee, ast.Name) and callee.id == "invoke_with_budget"
+
+
 def _invoke_payload_keys_by_stage(source: Path) -> dict[str, set[str]]:
-    """Map each `run_*_stage` function to the literal keys of the dict it
-    passes to `app.invoke({...})`."""
+    """Map each `run_*_stage` function to the literal keys of the state dict it
+    hands its sub-workflow."""
     tree = ast.parse(source.read_text(encoding="utf-8"))
     found: dict[str, set[str]] = {}
 
@@ -63,18 +81,16 @@ def _invoke_payload_keys_by_stage(source: Path) -> dict[str, set[str]]:
         if not isinstance(func, ast.FunctionDef):
             continue
         for node in ast.walk(func):
-            if not isinstance(node, ast.Call):
+            if not isinstance(node, ast.Call) or not _is_subworkflow_call(node):
                 continue
-            callee = node.func
-            if not (isinstance(callee, ast.Attribute) and callee.attr == "invoke"):
-                continue
-            if not (isinstance(callee.value, ast.Name) and callee.value.id == "app"):
-                continue
-            if not (node.args and isinstance(node.args[0], ast.Dict)):
+            payload = next(
+                (arg for arg in node.args if isinstance(arg, ast.Dict)), None
+            )
+            if payload is None:
                 continue
             found.setdefault(func.name, set()).update(
                 k.value
-                for k in node.args[0].keys
+                for k in payload.keys
                 if isinstance(k, ast.Constant) and isinstance(k.value, str)
             )
     return found

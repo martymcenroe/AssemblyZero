@@ -200,13 +200,20 @@ def test_lld_stage_captures_lld_pr_url(tmp_path):
     lld_file.parent.mkdir(parents=True)
     lld_file.write_text("# LLD\n\nAPPROVED")
 
+    result = {
+        "final_lld_path": str(lld_file),
+        "final_verdict": "APPROVED",
+        "final_lld_pr_url": "https://github.com/o/r/pull/9",
+    }
+
     class _App:
-        def invoke(self, payload):
-            return {
-                "final_lld_path": str(lld_file),
-                "final_verdict": "APPROVED",
-                "final_lld_pr_url": "https://github.com/o/r/pull/9",
-            }
+        # #2245: the lld stage streams through invoke_with_budget under a
+        # derived step budget, so a spent budget can name the loop.
+        def invoke(self, payload, *args, **kwargs):
+            return result
+
+        def stream(self, payload, *args, **kwargs):
+            yield result
 
     class _Graph:
         def compile(self):

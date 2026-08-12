@@ -373,17 +373,21 @@ def validate_lld_final(content: str, open_questions_resolved: bool = False) -> l
 
 #: Hard ceiling on finalize repairs, independent of the iteration cap.
 #:
-#: Measured on the compiled graph: a run costs 9 super-steps to reach finalize
-#: and each repair round trip (N1, Ponder, N1.5, N1b, N3, N5) costs 6 more. The
-#: two callers allow 25 (the orchestrator's `run_lld_stage`, which sets no
-#: limit and takes LangGraph's default) and `(max_iterations * 4) + 10`, which
-#: is 22 at the default cap. A third repair needs 27, so it does not raise the
-#: halt below — it raises GraphRecursionError instead, which says nothing about
-#: what failed. Two repairs cost 21 and fit both.
+#: Two is what a repair loop should try, not what happened to fit.
 #:
-#: Two is also enough to decide: a defect that survives two surgical repairs of
-#: the named errors is systematic, which is the case this issue was filed
-#: about.
+#: #2233 set this to 2 for two reasons at once: two repairs cost 21 super-steps
+#: and fit both callers' limits, and two is enough to decide. #2245 removed the
+#: first reason -- the step budget is now derived from the loop costs and the
+#: caps that bound them (assemblyzero/workflows/requirements/step_budget.py), so
+#: a third repair fits comfortably and would raise this loop's own halt rather
+#: than a nameless GraphRecursionError. A test pins that, so the value below is
+#: a judgment about repairs and provably not a constraint about steps.
+#:
+#: The judgment stands on its own: the repair is surgical -- finalize names the
+#: exact validation errors and hands them back -- so a defect that survives two
+#: repairs of named errors is systematic, and a third attempt at the same
+#: surgery buys a round trip rather than a different answer. That is the case
+#: #2233 was filed about.
 MAX_FINALIZE_REPAIRS = 2
 
 
