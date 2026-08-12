@@ -229,12 +229,104 @@ class TestPrereqGate:
         assert sr.prereqs_path(repo).exists(), "override is not forgetting"
         assert "OVERRIDE" in capsys.readouterr().out
 
-    def test_an_unreadable_file_refuses_rather_than_guessing(self, repo, capsys):
+    def test_an_unreadable_file_asks_the_live_query_rather_than_guessing(
+        self, repo, capsys
+    ):
+        """#2196 changed this. Refusing outright on an unreadable list was a
+        wall that could not self-clear -- the refusal sat above the closure
+        loop, and the unlink that clears the file sat below it. The live query
+        is consulted instead, and still refuses while questions are open."""
         path = sr.prereqs_path(repo)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json", encoding="utf-8")
-        assert sr.check_prereqs(repo, override=False) == 91
-        assert "could not be read" in capsys.readouterr().out
+
+        with patch.object(sr, "open_must_resolve_issues",
+                          lambda r: (QUESTIONS, None)):
+            assert sr.check_prereqs(repo, override=False) == 91
+
+        out = capsys.readouterr().out
+        assert "#228" in out and "#229" in out
+        assert path.exists(), "a real block must keep the gate in place"
+
+    # -- #2196: the empty-blocking-list brick ------------------------------
+    #
+    # A blocked batch whose question numbers went missing wrote
+    # `"blocking": []`. check_prereqs refused on the empty list, and could
+    # only self-delete after verifying recorded numbers closed -- which an
+    # empty list can never do. Every later launch refused, permanently, and
+    # --override-prereqs was no exit either because it keeps the file.
+    # Measured on boostgauge 2026-08-10: the machine sat idle about an hour
+    # and forty-five minutes on a gate with nothing behind it, every
+    # must-resolve issue having been closed within half an hour of the write.
+
+    def test_an_empty_blocking_list_is_never_written(self, repo, capsys):
+        """Half one: do not create the unverifiable file in the first place."""
+        written = sr.write_prereqs(repo, [], "blocked issue(s) #1, #7")
+
+        assert written is False
+        assert not sr.prereqs_path(repo).exists(), (
+            "a gate with no numbers records 'something blocked but I do not "
+            "know what', which no later launch can ever verify closed"
+        )
+        assert "Not recording a launch gate" in capsys.readouterr().out
+
+    def test_a_real_blocking_list_is_still_written(self, repo):
+        """The guard must not swallow the gate it exists to protect."""
+        assert sr.write_prereqs(repo, QUESTIONS, "blocked issue(s) #1") is True
+        assert sr.prereqs_path(repo).exists()
+
+    def test_an_empty_gate_clears_itself_when_nothing_is_open(self, repo, capsys):
+        """Half two: the brick already on disk heals. This is the boostgauge
+        file verbatim."""
+        path = sr.prereqs_path(repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "created": "2026-08-10 09:44:38",
+            "note": "blocked issue(s) #1, #7",
+            "blocking": [],
+        }), encoding="utf-8")
+
+        with patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)):
+            assert sr.check_prereqs(repo, override=False) is None
+
+        assert not path.exists(), "the empty gate must remove itself"
+        assert "proceeding" in capsys.readouterr().out
+
+    def test_an_empty_gate_still_blocks_on_live_open_questions(self, repo, capsys):
+        """Healing must not mean opening. The fallback is a real check."""
+        path = sr.prereqs_path(repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"blocking": []}), encoding="utf-8")
+
+        with patch.object(sr, "open_must_resolve_issues",
+                          lambda r: (QUESTIONS, None)):
+            assert sr.check_prereqs(repo, override=False) == 91
+
+        out = capsys.readouterr().out
+        assert "#228" in out and "#229" in out
+        assert "--override-prereqs" in out
+
+    def test_an_empty_gate_offline_still_refuses(self, repo, capsys):
+        """Unverifiable stays unverifiable. Falling back to a query that
+        cannot run is not a reason to roll into a wall."""
+        path = sr.prereqs_path(repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"blocking": []}), encoding="utf-8")
+
+        with patch.object(sr, "open_must_resolve_issues",
+                          lambda r: ([], "no net")):
+            assert sr.check_prereqs(repo, override=False) == 91
+
+        assert path.exists(), "an unverified gate must not be removed"
+        assert "gh was unreachable" in capsys.readouterr().out
+
+    def test_the_brick_is_gone_end_to_end(self, repo):
+        """The whole failure: a run blocks with no numbers, and the NEXT
+        launch proceeds instead of refusing forever."""
+        sr.write_prereqs(repo, [], "blocked issue(s) #1, #7")
+
+        with patch.object(sr, "open_must_resolve_issues", lambda r: ([], None)):
+            assert sr.check_prereqs(repo, override=False) is None
 
     def test_the_gate_runs_before_anything_is_spent(self, repo, capsys):
         self._seed(repo)
