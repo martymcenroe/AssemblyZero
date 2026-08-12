@@ -884,6 +884,67 @@ class TestExtractTitleIssueNumber:
         assert result is None
 
 
+class TestDrafterTitleFormat:
+    """The format the drafter actually produces (#2234).
+
+    The template's title line is ``# {IssueID} - Feature: {Title}`` and the
+    drafter renders the slot as "Issue #7", so the number arrives behind a
+    word and a sigil. The pattern expected a bare number, so every healthy
+    draft of run-issue7-234943 (boostgauge, 2026-08-11) warned "Could not
+    extract issue number from title" with the number at character four.
+
+    A warning that fires on every healthy draft is worse than one that never
+    fires: it teaches the operator to skim the warnings channel, and this one
+    did that while a genuine failure was in the same log.
+    """
+
+    #: The two title lines observed on that run, verbatim. They differ only in
+    #: the doubled conventional-commit prefix, which is the cosmetic half of
+    #: the issue and must not affect extraction either way.
+    OBSERVED = [
+        "# Issue #7 - Feature: configuration file and CLI arguments",
+        "# Issue #7 - Feature: feat: configuration file and CLI arguments",
+    ]
+
+    @pytest.mark.parametrize("title", OBSERVED)
+    def test_extracts_from_the_observed_titles(self, title):
+        assert extract_title_issue_number(f"{title}\n\n## 1. Context") == 7
+
+    @pytest.mark.parametrize("title", OBSERVED)
+    def test_the_observed_titles_raise_no_warning(self, title):
+        """The acceptance: zero "could not extract" warnings on a real draft."""
+        errors = validate_title_issue_number(f"{title}\n\n## 1. Context", 7)
+
+        assert [e for e in errors if "Could not extract" in e.message] == []
+        assert errors == []
+
+    def test_extracts_without_the_sigil(self):
+        content = "# Issue 306 - Feature: Test Title\n\n## 1. Context"
+        assert extract_title_issue_number(content) == 306
+
+    def test_extracts_with_leading_zeros_behind_the_word(self):
+        content = "# Issue #0099 - Feature: Test Title\n\n## 1. Context"
+        assert extract_title_issue_number(content) == 99
+
+    def test_a_title_with_no_number_still_warns(self):
+        """The negative case: the check must still be able to fail.
+
+        Widening a pattern until nothing can fail it is not a fix.
+        """
+        content = "# Issue - Feature: configuration file\n\n## 1. Context"
+
+        assert extract_title_issue_number(content) is None
+        errors = validate_title_issue_number(content, 7)
+        assert any("Could not extract" in e.message for e in errors)
+
+    def test_a_wrong_number_is_still_an_error(self):
+        content = "# Issue #8 - Feature: Test Title\n\n## 1. Context"
+
+        errors = validate_title_issue_number(content, 7)
+
+        assert any("doesn't match workflow issue" in e.message for e in errors)
+
+
 class TestValidateTitleIssueNumber:
     """Tests for validate_title_issue_number function."""
 

@@ -133,8 +133,16 @@ APPROACH_MITIGATION_PATTERNS = [
 # Issue #306: Pattern for extracting issue number from LLD title
 # Supports: hyphen (-), en-dash (–), em-dash (—)
 # Handles leading zeros: # 099 - Feature or # 99 - Feature
+#
+# #2234: the drafter renders the template's `{IssueID}` slot as "Issue #7", not
+# as a bare "7", so every healthy draft of run-issue7-234943 was titled
+# "# Issue #7 - Feature: ..." and warned "Could not extract issue number from
+# title" — with the number sitting at the fourth character. The optional
+# "Issue" word and "#" sigil below are what the drafter actually emits; the
+# digits, the separator and the leading-zero handling are unchanged.
 TITLE_ISSUE_NUMBER_PATTERN = re.compile(
-    r'^#\s+0*(\d+)\s+[-–—]',  # Matches "# 0099 -" or "# 99 –" or "# 99 —"
+    # Matches "# 0099 -", "# 99 –", "# 99 —", "# Issue #7 -", "# issue 7 -"
+    r'^#\s+(?:[Ii]ssue\s+)?#?\s*0*(\d+)\s+[-–—]',
     re.MULTILINE
 )
 
@@ -520,6 +528,7 @@ def extract_title_issue_number(content: str) -> int | None:
     
     Handles:
         - Standard format: # 306 - Feature: Title
+        - Drafter format: # Issue #306 - Feature: Title (#2234)
         - Leading zeros: # 099 - Feature: Title
         - Various dashes: hyphen (-), en-dash (–), em-dash (—)
         

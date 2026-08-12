@@ -78,6 +78,33 @@ def _edit_script_halt(reason: str) -> str:
     )
 
 
+#: A conventional-commit type at the head of a title: ``feat:``, ``fix(api):``,
+#: ``refactor!:``. Only the eleven standard types are stripped, so an issue
+#: titled ``config: reload on SIGHUP`` keeps its first word — that is prose,
+#: not a commit convention, and guessing at it would silently rewrite titles.
+_CONVENTIONAL_COMMIT_PREFIX = re.compile(
+    r"^\s*(?:feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)"
+    r"(?:\([^)]*\))?!?:\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_conventional_commit_prefix(title: str) -> str:
+    """Drop a leading conventional-commit type from an issue title (#2234).
+
+    The LLD template's title line is ``# {IssueID} - Feature: {Title}``, so it
+    supplies the label itself. Handing it a title that already begins with
+    ``feat:`` produced ``Feature: feat: configuration file and CLI arguments``
+    on every draft of run-issue7-234943.
+
+    Only the leading type is removed, and only once: a title is not a commit
+    message and the second colon in ``feat: fix: thing`` is the author's.
+    """
+    if not title:
+        return title
+    return _CONVENTIONAL_COMMIT_PREFIX.sub("", title, count=1).strip()
+
+
 def _extract_open_questions(
     provider,
     response: str,
@@ -582,7 +609,12 @@ def _build_prompt(
         input_label = "Brief (user's ideation notes)"
     else:
         issue_number = state.get("issue_number", 0)
-        issue_title = state.get("issue_title", "")
+        # #2234: the template's title slot already reads "Feature: {Title}", so
+        # an issue titled "feat: configuration file" produced
+        # "Feature: feat: configuration file" on every draft. The label is the
+        # template's to supply; the conventional-commit type is the commit
+        # convention's and carries nothing the drafter needs.
+        issue_title = strip_conventional_commit_prefix(state.get("issue_title", ""))
         issue_body = state.get("issue_body", "")
         context_content = state.get("context_content", "")
 
