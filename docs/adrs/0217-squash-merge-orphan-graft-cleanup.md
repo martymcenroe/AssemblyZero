@@ -29,6 +29,22 @@ A deep-research investigation (full prompt at `Aletheia/data/deep-research-squas
 #    in step 5 can detect residue. Typically PRE is 0 for a clean repo.
 PRE_REPLACE_COUNT=$(git replace --list | wc -l)
 
+# 0b. (Equivalence gate) Prove the orphan's content landed, SCOPED TO THE
+#     PATHS THE BRANCH ITSELF TOUCHED. See "Scoping the equivalence gate"
+#     below: an unscoped whole-tree diff reports DIVERGENT whenever anything
+#     unrelated merged to main while the PR was open, which on this repo is
+#     the ordinary case rather than the edge case.
+BASE=$(git merge-base <ORPHAN_TIP_SHA> <SQUASH_SHA>)
+mapfile -d '' PATHS < <(git diff -z --name-only "$BASE" <ORPHAN_TIP_SHA>)
+if [ "${#PATHS[@]}" -eq 0 ]; then
+  echo "ABORT: empty path list -- refusing to compare, see the abort note below"
+  exit 1
+fi
+if [ -n "$(git diff <ORPHAN_TIP_SHA> <SQUASH_SHA> -- "${PATHS[@]}")" ]; then
+  echo "DIVERGENT: the orphan's content is NOT on main. Do not graft, do not delete."
+  exit 1
+fi
+
 # 1. Identify the parent of the squash commit on main
 BASE_SHA=$(git rev-parse <SQUASH_SHA>^)
 
@@ -57,6 +73,39 @@ fi
 After step 4: local main is unchanged, the squash commit's parents are restored to their original single-parent form, no replace refs remain, and the orphan local branch ref is gone. The orphan commit itself becomes unreachable from any ref and is collected by `git gc` on its normal schedule.
 
 After step 5: the recipe is verified to have run to completion with no residue. This step is the load-bearing detection of a specific failure mode observed in the wild: a subagent (or an operator running the recipe partially) creates a non-standard replace ref — e.g., mapping the orphan tip to a synthetic commit instead of grafting the squash commit — abandons the sequence before step 3 or step 4, and reports success. Step 4 only removes the exact key it was told about; it cannot detect residue at a different key. Step 5 closes that gap.
+
+### Scoping the equivalence gate
+
+**The comparison is scoped to the paths the branch itself changed, and the path list is derived rather than typed.**
+
+A whole-tree `git diff <orphan> <squash>` does not compare what the branch changed. It compares two trees, and the squash commit sits on top of everything else that merged to main while the PR was open. Any unrelated commit in that window appears in the diff, and the gate reports DIVERGENT on a branch whose own content landed perfectly. Every PR that takes longer to land than the gap between two merges hits this, which on a repo merging at this rate is the normal case.
+
+Measured 2026-08-12, cleaning up after the PR for issue #2232. The unscoped form:
+
+```
+$ git diff a4ffb635 482680dc
+diff --git a/docs/adrs/0227-no-echo-secret-input.md b/docs/adrs/0227-no-echo-secret-input.md
+new file mode 100644
+```
+
+DIVERGENT, and the gate correctly refused to graft. But that ADR is not the branch's — it is ADR-0227, landed by a concurrent session as `dc70b36f` between the branch point (`16b85edf`) and the merge. (Its commit subject is not quoted here: the real message carries a live issue-closing directive, and reproducing it verbatim would plant a trigger phrase in text someone may later paste into a PR body.)
+
+Scoped to the seven paths the branch actually touched, the same commit pair is clean:
+
+```
+$ BASE=$(git merge-base a4ffb635 482680dc)          # 16b85edf
+$ mapfile -d '' PATHS < <(git diff -z --name-only "$BASE" a4ffb635)
+$ echo "${#PATHS[@]}"
+7
+$ git diff a4ffb635 482680dc -- "${PATHS[@]}"
+$                                                    # empty: EQUIVALENT
+```
+
+**An empty path list is an abort, never a fallback.** `git diff A B --` with nothing after the `--` compares the whole tree, silently restoring the behaviour the scoping exists to remove — verified on the same commit pair, where it reproduces the identical false DIVERGENT. A derivation that yields no paths means something is wrong with the inputs, not that there is nothing to check, so the recipe stops.
+
+**`git diff` does not accept `--pathspec-from-file`.** It is tempting as the space-safe form and it is not available on this command (`usage:` error, exit 129, verified on git 2.55.0). The path list must reach `git diff` as arguments, which is why the recipe uses `-z` and a NUL-delimited array rather than word-splitting a plain string — a path containing a space would otherwise be silently split into two pathspecs that match nothing, and matching nothing is indistinguishable from EQUIVALENT.
+
+**Why this is worth the extra lines.** The failure direction of an unscoped diff is safe on its own: it is strictly stricter, so it never authorises a graft it should refuse. The danger is second-order. This gate guards a destructive branch deletion, and a gate that fires spuriously on the ordinary case is a gate people learn to wave through. That is not hypothetical: the lessons-learned entry for 2026-08-11 records two deletions where the gate was skipped precisely because its output had been read as noise. The check that protects a delete must not be the one that is wrong most of the time.
 
 ## 3. Alternatives Considered
 
@@ -186,7 +235,8 @@ The selected option is a "Level 3" tool: higher overhead than `-D`, used only wh
 | GPG signature warning misread as repo damage | None (warning is about the temporary replacement object only) | Medium | 1 | Documented in this ADR; original commit signature is intact post-cleanup |
 | `core.useReplaceRefs` set to false locally | Method silently ineffective | Very Low (default is true) | 2 | Verify with `git config --get core.useReplaceRefs` before applying; falls back to leaving orphan alone |
 | Step 3 succeeds but step 4 fails | Replace ref lingers, distorting subsequent reads of the squash commit | Very Low | 2 | Step 4 is one command; if it fails, run it manually; check `git replace -l` after |
-| Operator types wrong SHAs (e.g., not actually content-equivalent) | Could leave a graft mapping unrelated commits | Low | 2 | Verify content equivalence with `git diff <ORPHAN_SHA> <SQUASH_SHA>` before step 2 (must return zero output) |
+| Operator types wrong SHAs (e.g., not actually content-equivalent) | Could leave a graft mapping unrelated commits | Low | 2 | Step 0b, the equivalence gate: scope the comparison to the paths the branch changed, derived from `git merge-base`, and require zero output before step 2. See "Scoping the equivalence gate" |
+| Equivalence gate reports DIVERGENT because unrelated work merged to main while the PR was open | Gate is ignored as noise; a later deletion skips it entirely | High (measured: the ordinary case on this repo) | 3 | Step 0b's scoping. The unscoped whole-tree form is what produced the false alarms; an empty derived path list aborts rather than falling back to it |
 | Subagent (or operator) deviates from the recipe and reports success — e.g., creates a non-standard replace ref mapping the orphan tip to a synthetic commit and skips the `branch -d` | Replace-ref residue persists; orphan branch is not deleted; cleanup report claims success | Medium (observed Hermes 2026-06-06) | 2 | Step 5 post-flight check (`git replace --list` count must match pre-flight). Any deviation is detected and surfaced; recipe consumers MUST run step 5 |
 
 **Residual Risk:** Minimal for properly verified inputs.
@@ -235,3 +285,4 @@ The selected option is a "Level 3" tool: higher overhead than `-D`, used only wh
 |------|--------|--------|
 | 2026-04-28 | Claude Opus 4.7 | Initial draft after sandbox + real-repo validation |
 | 2026-06-06 | Claude Opus 4.7 | Added Step 5 post-flight verification + Security Risk row for subagent-deviation failure mode observed on Hermes `feat-first-contact-disclosure` cleanup. See AssemblyZero #1558. |
+| 2026-08-12 | Claude Fable 5 | Scoped the equivalence gate to the branch's own paths and promoted it to step 0b. The unscoped whole-tree form reported DIVERGENT whenever anything unrelated merged to main while the PR was open, which is the ordinary case here; a gate that cries wolf on a destructive delete gets waved through, and the 2026-08-11 lessons entry records two deletions where it was. Adds the worked example, the empty-path-list abort, and the finding that `git diff` does not accept `--pathspec-from-file`. See AssemblyZero #2238; the shared helper is #1685. |
