@@ -113,8 +113,17 @@ def rank(rows: list[dict], durations: dict[tuple[int, str], float]) -> list[Rank
 
     ranked: list[Ranked] = []
     for fingerprint, entries in grouped.items():
+        # #2198: a record that measured its own cost is authoritative for
+        # itself; the run table is the fallback for records that did not.
+        # Existing rows carry no `duration_seconds`, so they resolve exactly as
+        # before -- through the run_id lookup.
         seconds = [
-            d for d in (duration_for(e.get("run_id", ""), durations) for e in entries)
+            d for d in (
+                e.get("duration_seconds")
+                if e.get("duration_seconds") is not None
+                else duration_for(e.get("run_id", ""), durations)
+                for e in entries
+            )
             if d is not None
         ]
         models = tuple(sorted({e.get("drafter_model") or "unknown" for e in entries}))

@@ -593,6 +593,62 @@ def _ride_spec_on_lld_pr(
         return False
 
 
+def _record_spec_convergence_failure(
+    target_repo: str,
+    issue_number: int,
+    sub_result: dict,
+    elapsed: float,
+    stage_cfg: dict,
+) -> None:
+    """One telemetry record when the spec stage burns its budget on REVISE.
+
+    Closes #2198. Standard 0025's loop can only fix what it can rank, and it
+    ranked nothing from spec land: on boostgauge the failure table held 24
+    fingerprints and every one was `lld:*`, while the spec stage's most
+    expensive failure mode -- 685 seconds of drafting and three review rounds
+    all objecting to the same thing -- left no record at all.
+
+    A REVISE verdict that survives to the end of the sub-workflow IS the
+    convergence failure: a REVISE with budget left routes back to the drafter
+    and never terminates the run.
+
+    Recorded here rather than in the reviewer node because this is where the
+    stage's wall clock exists, which is the cost the ranking needs. Never
+    raises -- telemetry that can break the thing it measures is worse than no
+    telemetry (the module's own rule).
+    """
+    if sub_result.get("review_verdict") != "REVISE":
+        return
+
+    try:
+        from assemblyzero.speedrun.must_resolve import run_context
+        from assemblyzero.speedrun.prompt_telemetry import (
+            rankable_detail,
+            record_failure,
+        )
+
+        detail = rankable_detail(
+            sub_result.get("review_feedback", "")
+            or sub_result.get("error_message", "")
+        )
+        if not detail:
+            return
+
+        run_id, _ = run_context()
+        record_failure(
+            target_repo or ".",
+            stage="spec",
+            check="reviewer-revise",
+            detail=detail,
+            issue=issue_number or None,
+            drafter_model=stage_cfg.get("drafter", ""),
+            run_id=run_id,
+            duration_seconds=round(elapsed, 1),
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry never breaks a stage
+        _stages_logger.warning("Spec convergence telemetry skipped: %s", exc)
+
+
 def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation spec workflow.
 
@@ -722,10 +778,14 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             )
         else:
             error_msg = sub_result.get("error_message", "Spec workflow completed but no artifact produced")
+            elapsed = time.monotonic() - start_time
+            _record_spec_convergence_failure(
+                target_repo, issue_number, sub_result, elapsed, stage_cfg,
+            )
             result = _make_stage_result(
                 status="failed",
                 error_message=error_msg,
-                duration_seconds=time.monotonic() - start_time,
+                duration_seconds=elapsed,
                 attempts=1,
                 transient=_classify_halt_transience(sub_result),
             )

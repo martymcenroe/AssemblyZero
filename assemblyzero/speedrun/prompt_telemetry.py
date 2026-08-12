@@ -75,6 +75,22 @@ def fingerprint(stage: str, check: str, detail: str) -> str:
     return f"{normalize_detail(stage)}:{normalize_detail(check)}:{normalize_detail(detail)}"
 
 
+#: A fingerprint that never repeats cannot be ranked, and ranking is the whole
+#: point. Mechanical details are short by nature ("Section 2.1 table
+#: malformed"); a reviewer's rationale is paragraphs, and normalizing all of it
+#: buckets every run separately. #2198 takes the first line, bounded.
+FINGERPRINT_DETAIL_CHARS = 160
+
+
+def rankable_detail(text: str, limit: int = FINGERPRINT_DETAIL_CHARS) -> str:
+    """The first line of a prose finding, bounded, for use as a detail."""
+    for line in (text or "").strip().splitlines():
+        stripped = line.strip().lstrip("-*# ").strip()
+        if stripped:
+            return stripped[:limit].rstrip()
+    return ""
+
+
 @dataclass
 class PromptFailure:
     ts_local: str
@@ -87,6 +103,10 @@ class PromptFailure:
     drafter_model: str
     run_id: str
     detail_raw: str
+    #: #2198: wall clock the failure cost, where the caller knows it. Optional
+    #: and last, so every historical row still reads and every existing caller
+    #: is unchanged.
+    duration_seconds: float | None = None
 
 
 def telemetry_path(repo_root: Path | str) -> Path:
@@ -103,6 +123,7 @@ def record_failure(
     draft_number: int | None = None,
     drafter_model: str = "",
     run_id: str = "",
+    duration_seconds: float | None = None,
     log=print,
 ) -> PromptFailure | None:
     """Append one record. Never raises; returns None if the write failed."""
@@ -120,6 +141,7 @@ def record_failure(
         drafter_model=drafter_model or "",
         run_id=run_id or "",
         detail_raw=detail,
+        duration_seconds=duration_seconds,
     )
 
     try:
