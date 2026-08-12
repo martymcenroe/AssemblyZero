@@ -84,6 +84,10 @@ from assemblyzero.core.provider_storm import (  # noqa: E402
     STORM_EXIT_CODE,
 )
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
+from assemblyzero.workflows.requirements.form_gate import (  # noqa: E402  (#2227)
+    check_form_at_preflight,
+)
+from assemblyzero.workflows.requirements.precheck import fetch_issue  # noqa: E402
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     RUN_START_ENV,
     RUN_TAG_ENV,
@@ -2361,6 +2365,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"WARNING: could not check for unresolved questions ({gh_error}); proceeding.")
     elif blocking:
         print(refusal_message(blocking))
+        return 91
+
+    # #2227: the ADR 0226 form check, report-only by default. Free and instant
+    # -- no model calls -- so it runs before anything is spent, like every
+    # refusal above it. It refuses ONLY on a malformed decision table: nearly
+    # every issue in the fleet is still unconverted prose (ADR 0226 section 8
+    # converts on the next roll, not in a sweep), and a gate that fired on the
+    # ordinary case would be waved through. Its output names itself so one
+    # defect never reads as two complaints beside the semantic gate's.
+    form_text, form_refuses = check_form_at_preflight(
+        repo_root, args.issue or [], fetch_issue,
+    )
+    if form_text:
+        print(form_text)
+    if form_refuses:
         return 91
 
     if args.detach:
