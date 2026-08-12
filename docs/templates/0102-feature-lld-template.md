@@ -16,6 +16,8 @@ Previous: Added sections based on 80 blocking issues from 164 governance verdict
 ### Open Questions
 *Questions that need clarification before or during implementation. Remove when resolved.*
 
+*If there are no open questions, delete the checkboxes and write exactly `None.` as plain text. Do NOT write `- [ ] None`: an unchecked box is read as an unresolved question and blocks finalization, whatever its text says.*
+
 - [ ] {Question 1}
 - [ ] {Question 2}
 

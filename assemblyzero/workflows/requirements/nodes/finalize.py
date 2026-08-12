@@ -269,6 +269,31 @@ def _detect_open_questions(content: str) -> FinalizeQuestionsResult:
     return scan_residual_questions(content)
 
 
+#: Review-node statuses that mean "nothing is outstanding", so finalize's
+#: unchecked-box scan has nothing left to protect.
+_SETTLED_STATUSES = frozenset({"RESOLVED", "NONE"})
+
+
+def open_questions_settled(status: str) -> bool:
+    """Whether the review node's status means no question is outstanding.
+
+    #259 built this escape hatch for the reviewer-answered case and wired it
+    to RESOLVED alone. But the review node reports NONE when its own detector
+    finds no real questions, and that detector already filters
+    none-placeholders -- so the template's "- [ ] None" scaffold produces
+    NONE. The semantically-correct verdict "this draft asks nothing"
+    therefore failed to suppress a form-based block, and in
+    run-issue7-234943 an APPROVED draft died on the difference between
+    "- [ ] None" and "None." (#2232).
+
+    An absent or empty status is NOT settled: a path that never reviewed is
+    never waved through. A draft carrying a real unchecked question cannot
+    reach NONE either -- the review detector returns UNANSWERED or
+    HUMAN_REQUIRED for those -- so widening this does not weaken the gate.
+    """
+    return status in _SETTLED_STATUSES
+
+
 def validate_lld_final(content: str, open_questions_resolved: bool = False) -> list[str]:
     """Final structural checks before LLD finalization.
 
@@ -377,10 +402,8 @@ def _save_lld_file(state: Dict[str, Any]) -> Dict[str, Any]:
     if not current_draft:
         return state
 
-    # Issue #259: Check if reviewer already resolved open questions
-    # If so, skip the open questions check (but still check for TODOs)
     open_questions_status = state.get("open_questions_status", "")
-    open_questions_resolved = open_questions_status == "RESOLVED"
+    open_questions_resolved = open_questions_settled(open_questions_status)
 
     # Issue #273: Clean up TODO placeholders in table cells before validation
     current_draft = cleanup_todo_placeholders(current_draft)

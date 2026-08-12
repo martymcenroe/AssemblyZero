@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from assemblyzero.core.verdict_schema import is_none_placeholder
+
 
 @dataclass
 class AutoFix:
@@ -269,10 +271,66 @@ def fix_directory_ordering(
     ]
 
 
+_OPEN_QUESTIONS_SECTION = re.compile(
+    r"(?:^##?#?[ \t]*Open Questions[ \t]*\n)(.*?)(?=^##|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+_UNCHECKED_ITEM = re.compile(r"^- \[ \] ?(.*)$", re.MULTILINE)
+
+
+def fix_none_open_questions(
+    draft: str, ctx: dict[str, Any]
+) -> tuple[str, list[AutoFix]]:
+    """Normalize a "no open questions" checkbox to plain text (#2232).
+
+    The template scaffolds Open Questions as an unchecked box, so a drafter
+    with nothing to ask writes ``- [ ] None``. The reviewer reads the meaning
+    and approves; finalize reads the form and blocks. In run-issue7-234943 an
+    APPROVED draft that had passed mechanical validation and test-plan
+    validation at 22/22 was discarded at the last node in the graph over that
+    one checkbox.
+
+    Repair happens here, at the earliest mechanical point, in one place. The
+    strictness stays in finalize: this rule never checks a box, it removes a
+    placeholder that was never a question. A section holding even one real
+    question is left completely alone, because "None" beside a real question
+    is not an empty state.
+    """
+    match = _OPEN_QUESTIONS_SECTION.search(draft)
+    if not match:
+        return draft, []
+
+    section = match.group(1)
+    items = _UNCHECKED_ITEM.findall(section)
+    if not items:
+        return draft, []
+    if not all(is_none_placeholder(item) for item in items):
+        # At least one real question. Not an empty state; leave it.
+        return draft, []
+
+    repaired = _UNCHECKED_ITEM.sub("None.", section, count=1)
+    repaired = _UNCHECKED_ITEM.sub("", repaired)
+    # Collapse the blank lines the removals leave behind.
+    repaired = re.sub(r"\n{3,}", "\n\n", repaired)
+
+    fixed = draft[: match.start(1)] + repaired + draft[match.end(1) :]
+    return fixed, [
+        AutoFix(
+            rule="none_open_questions",
+            description=(
+                f"Normalized {len(items)} placeholder open-question "
+                f"checkbox(es) to plain 'None.'"
+            ),
+            section="Open Questions",
+        )
+    ]
+
+
 # Registry of all auto-fix rules, applied in order
 PONDER_RULES = [
     fix_title_issue_number,
     fix_section_heading_format,
+    fix_none_open_questions,
     fix_trailing_whitespace,
     fix_missing_blank_before_heading,
     fix_directory_ordering,

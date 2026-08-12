@@ -21,6 +21,7 @@ from assemblyzero.core.verdict_schema import (
     FEEDBACK_SCHEMA,
     FeedbackResult,
     StructuredContractError,
+    is_none_placeholder,
     parse_structured_verdict,
     parse_structured_feedback,
     scan_open_questions_section,
@@ -795,11 +796,12 @@ def _draft_has_open_questions(content: str) -> bool:
     unchecked_lines = re.findall(
         r"^- \[ \] ?(.*)", open_questions_section, re.MULTILINE
     )
-    real_questions = [
-        q
-        for q in unchecked_lines
-        if not re.match(r"^none\b", q.strip(), re.IGNORECASE)
-    ]
+    # #2232: the placeholder test is the shared `is_none_placeholder` rather
+    # than a local regex. This detector and finalize's scan disagreed about
+    # "- [ ] None" for months and an APPROVED draft died in the gap; one
+    # predicate, imported by every caller, is what keeps them aligned. It also
+    # widens the vocabulary the local regex missed, notably "n/a".
+    real_questions = [q for q in unchecked_lines if not is_none_placeholder(q)]
     return len(real_questions) > 0
 
 
