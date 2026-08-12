@@ -87,7 +87,9 @@ from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
 from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     RUN_START_ENV,
     RUN_TAG_ENV,
+    merge_questions,
     open_must_resolve_issues,
+    read_filed,
     refusal_message,
 )
 from assemblyzero.speedrun.healing import record_heal  # noqa: E402
@@ -2050,19 +2052,42 @@ def print_verdict(
     blocked: list[int],
     stopped_at: int | None,
     code: int,
+    since: str = "",
 ) -> None:
     """State the outcome in words, last, with the next step (#2165).
 
     Never raises: a verdict must not cost a run, and it must render even
     when gh is unreachable.
+
+    `since` bounds the filed-questions ledger to this batch (#2179).
     """
     try:
-        _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code)
+        _render_verdict(
+            repo_root, requested, rolled, blocked, stopped_at, code, since,
+        )
     except Exception as exc:  # noqa: BLE001 - the verdict is best-effort display
         print(f"(verdict rendering failed: {exc})")
 
 
-def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code):
+def _blocking_questions(repo_root, since: str) -> tuple[list[dict], str | None]:
+    """The questions blocking this batch: the live list, plus what we filed.
+
+    Closes #2179. The live query alone returned short -- six times across
+    2026-08-09/10/11, once listing one question of three filed four seconds
+    apart -- because GitHub had not finished indexing a just-created issue. The
+    ledger records each number at the moment it is created, so the two together
+    cannot under-report the way one of them does alone.
+
+    The union also covers the offline case: gh unreachable used to mean an
+    empty list for both the summary and the gate, and now means whatever this
+    machine knows it filed.
+    """
+    live, gh_error = open_must_resolve_issues(repo_root)
+    recorded = read_filed(repo_root, since=since)
+    return merge_questions(live or [], recorded), gh_error
+
+
+def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, since=""):
     names = ", ".join(f"#{i}" for i in rolled) or "none"
     print()
     if blocked:
@@ -2074,17 +2099,8 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code):
                 "issues were not rolled."
             )
         print(f"  Rolled successfully: {names}.")
-        questions, gh_error = open_must_resolve_issues(repo_root)
-        if gh_error:
-            print(
-                "  Questions were filed during this run, but gh was "
-                "unreachable to list them."
-            )
-            write_prereqs(
-                repo_root, [],
-                f"blocked issue(s) {blocked_names}; question numbers unverified",
-            )
-        else:
+        questions, gh_error = _blocking_questions(repo_root, since)
+        if questions:
             print("  This run filed the questions blocking it:")
             for q in questions:
                 print(f"    #{q['number']}  {q['title']}")
@@ -2094,6 +2110,32 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code):
             )
             shortlist = " and ".join(f"#{q['number']}" for q in questions)
             print(f"\n  Next step: resolve {shortlist}.")
+        else:
+            # #2179 (and #2224, closed into it): printing the heading with
+            # nothing under it, then "Next step: resolve .", told the operator
+            # to resolve nothing. Say what is actually known instead.
+            if gh_error:
+                print(
+                    "  Questions were filed during this run, but gh was "
+                    f"unreachable to list them ({gh_error}), and this machine "
+                    "recorded no numbers locally."
+                )
+            else:
+                print(
+                    "  No open questions were found for this block, which is "
+                    "unexpected -- something stopped the run without leaving a "
+                    "question to rule on."
+                )
+            print(
+                "  Next step: check `gh issue list --label must-resolve "
+                "--state open` before launching again."
+            )
+            # #2196: declines to write an empty gate, which is what bricked
+            # every later launch when this path fired.
+            write_prereqs(
+                repo_root, [],
+                f"blocked issue(s) {blocked_names}; question numbers unverified",
+            )
         print(
             "  Do not re-roll without resolution -- the next launch will "
             "refuse while these stay open (--override-prereqs to run anyway)."
@@ -2416,6 +2458,9 @@ def main(argv: list[str] | None = None) -> int:
     rolled: list[int] = []
     blocked: list[int] = []
     stopped_at: int | None = None
+    # #2179: bounds the filed-questions ledger to this batch, so a question
+    # closed last week cannot reappear in tonight's summary.
+    batch_started = _stamp()
     try:
         for issue in args.issue:
             # #2068: generation quality varies wildly between draws -- the same
@@ -2524,6 +2569,7 @@ def main(argv: list[str] | None = None) -> int:
             blocked=blocked,
             stopped_at=stopped_at,
             code=code,
+            since=batch_started,
         )
 
 
