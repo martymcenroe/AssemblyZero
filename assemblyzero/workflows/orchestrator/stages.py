@@ -608,12 +608,68 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
 
     try:
         from assemblyzero.workflows.implementation_spec.graph import create_implementation_spec_graph as create_spec_graph
+        from assemblyzero.workflows.requirements.audit import make_run_id
 
         lld_path = state.get("lld_path", "")
+        target_repo = state.get("target_repo", "")
         # #1440: Plumb orchestrator config into the sub-workflow state.
         config = state.get("config", {})
         stage_cfg = config.get("stages", {}).get("spec", {})
         gate_enabled = bool(config.get("gates", {}).get("spec", False))
+
+        # Closes #2250: the spec workflow persists drafts and verdicts only when
+        # the caller hands it an audit_dir -- it is the one sub-workflow that
+        # does not provision its own (requirements does it in load_input,
+        # testing in load_lld). The standalone runner sets it; this stage did
+        # not, so every orchestrated spec run -- which is every speedrun roll --
+        # ended leaving nothing on disk to diagnose. run-issue7-082047 burned
+        # three revision iterations and died at the cap; none of its four drafts
+        # survives.
+        #
+        # Run-scoped for the same reason the LLD lineage is (#1467): generate_spec
+        # recovers a draft by globbing *-spec-draft.md out of this directory, so
+        # an unscoped dir would let a previous roll's draft be recovered into a
+        # fresh run and skip the LLM call outright.
+        # Lineage is diagnostic scaffolding, so provisioning it must never be
+        # the reason a spec stage fails: an unwritable target repo would
+        # otherwise be swallowed by the except below and read as a spec
+        # failure. On any OSError this degrades to the old behaviour -- no
+        # lineage -- and says so, rather than taking the run down with it.
+        audit_dir_str = ""
+        # is_dir() and not merely truthy: with no repo there, mkdir(parents=True)
+        # would conjure the whole tree out of nothing at a path that is not a
+        # checkout -- which on Windows means a fake target quietly materialises
+        # a real directory off the drive root.
+        if target_repo and Path(target_repo).is_dir():
+            spec_lineage = (
+                Path(target_repo)
+                / "docs" / "lineage" / "active"
+                / f"{issue_number}-implspec"
+            )
+            # make_run_id() is second-resolution and shared with the LLD
+            # lineage, so two attempts inside one second would land in the same
+            # directory -- the exact collision the scoping exists to prevent.
+            # Claim the dir with exist_ok=False so the winner is decided by the
+            # filesystem rather than by a check that can go stale.
+            run_id = make_run_id()
+            try:
+                for attempt in range(100):
+                    candidate = spec_lineage / (
+                        run_id if attempt == 0 else f"{run_id}-{attempt}"
+                    )
+                    try:
+                        candidate.mkdir(parents=True, exist_ok=False)
+                        audit_dir_str = str(candidate)
+                        break
+                    except FileExistsError:
+                        continue
+            except OSError as exc:
+                _stages_logger.warning(
+                    "Spec stage: could not create lineage dir under %s: %s. "
+                    "The stage will run, but its drafts and verdicts will not "
+                    "be persisted (#2250).",
+                    spec_lineage, exc,
+                )
 
         # create_implementation_spec_graph already returns CompiledStateGraph
         # (see implementation_spec/graph.py:273 + line 370 `return graph.compile()`).
@@ -625,8 +681,10 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         sub_result = app.invoke({
             "issue_number": issue_number,
             "lld_path": lld_path,
-            "repo_root": state.get("target_repo", ""),
+            "repo_root": target_repo,
             "assemblyzero_root": state.get("assemblyzero_root", ""),
+            # #2250: without this the spec workflow's writes are all no-ops.
+            "audit_dir": audit_dir_str,
             # #2033: the tree the implementation will actually be built on. The
             # checkout is on the default branch and mid-arc has none of the arc.
             "base_branch": state.get("base_branch", ""),
