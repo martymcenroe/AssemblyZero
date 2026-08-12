@@ -401,6 +401,7 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         blocked_reason = (
             f"Spec review BLOCKED: {feedback or spec_result['rationale'] or 'no reason given'}"
         )
+        _file_conflict_if_any(state, spec_result.get("rationale", "") or feedback)
 
     return {
         "review_verdict": verdict_status,
@@ -409,6 +410,49 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
     }
+
+
+def _file_conflict_if_any(state, rationale: str) -> None:
+    """File the must-resolve question for a spec-stage requirements conflict.
+
+    Closes #2192. A conflict found HERE exited 93 -- "blocked on an operator
+    ruling, no redraw can help" -- and filed nothing, unlike the LLD stage's N0c
+    gate which files one per conflict. Exit 93's meaning is only real if the
+    thing to rule on exists. Observed 2026-08-10 on boostgauge
+    `run-issue1-092650`: the LLD passed, spec review blocked on a contradiction
+    between two requirements, no issue was created, the verdict block printed
+    "Next step: resolve ." with nothing in it, and the question had to be filed
+    by hand for the block to be tracked at all.
+
+    Same contract as N0c's filing: never raises, never changes the halt. The
+    roll is already stopping; a filing problem is loud in the log and nothing
+    more.
+    """
+    from assemblyzero.core.exit_codes import CONFLICT_MARKER
+
+    if CONFLICT_MARKER not in (rationale or ""):
+        # An ordinary BLOCKED verdict. Only the escalation marker means the
+        # SOURCE REQUIREMENTS are at fault and a human must rule.
+        return
+
+    try:
+        from assemblyzero.speedrun.must_resolve import (
+            SPEC_REVIEW_ORIGIN,
+            conflict_from_rationale,
+            file_must_resolve,
+        )
+
+        file_must_resolve(
+            state.get("repo_root") or ".",
+            int(state.get("issue_number") or 0),
+            conflict_from_rationale(rationale, CONFLICT_MARKER),
+            origin=SPEC_REVIEW_ORIGIN,
+        )
+    except Exception as exc:  # noqa: BLE001 - filing must never mask the halt
+        print(
+            f"    [spec review] WARNING: must-resolve filing failed ({exc}); "
+            "halting anyway."
+        )
 
 
 # =============================================================================
