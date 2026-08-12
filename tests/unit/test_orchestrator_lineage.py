@@ -265,6 +265,93 @@ class TestDraftsSurviveAFailedStage:
         assert len(verdicts) == 3
 
 
+class TestLineageNeverTakesTheStageDown:
+    """Lineage is diagnostic scaffolding. Failing to write it must degrade to
+    the old behaviour -- no lineage -- not kill the run.
+
+    Caught in CI on the first cut of this fix: `test_spec_threads_repo_root`
+    drives the stage at ``/fake/projects/Chiron``, which mkdir can create on
+    Windows and cannot at a Linux filesystem root. The stage's broad `except`
+    swallowed the OSError, the sub-workflow never ran, and an unwritable repo
+    read as a spec failure.
+    """
+
+    def test_a_target_repo_that_does_not_exist_is_not_conjured(self, tmp_path):
+        """mkdir(parents=True) against a non-existent target would build the
+        whole tree at a path that is not a checkout. On Windows that silently
+        materialises a real directory off the drive root."""
+        absent = tmp_path / "no-such-repo"
+        ran: dict[str, dict] = {}
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                ran["payload"] = payload
+                return {"spec_path": "", "error_message": "stub"}
+
+        state = create_initial_state(
+            7,
+            get_default_config(),
+            target_repo=str(absent),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "assemblyzero.workflows.implementation_spec.graph."
+                "create_implementation_spec_graph",
+                lambda: _StubApp(),
+            )
+            run_spec_stage(state)
+
+        assert not absent.exists(), (
+            f"the spec stage created {absent}, a repo that was never there"
+        )
+        assert ran["payload"]["audit_dir"] == ""
+        assert ran["payload"]["repo_root"] == str(absent), (
+            "the stage must still run and still thread the repo it was given"
+        )
+
+    def test_an_unwritable_repo_still_runs_the_spec_workflow(self, tmp_path):
+        ran: dict[str, dict] = {}
+
+        class _StubApp:
+            def invoke(self, payload: dict) -> dict:
+                ran["payload"] = payload
+                return {"spec_path": "", "error_message": "stub"}
+
+        state = create_initial_state(
+            7,
+            get_default_config(),
+            target_repo=str(tmp_path / "target"),
+            assemblyzero_root=str(tmp_path / "az"),
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "assemblyzero.workflows.implementation_spec.graph."
+                "create_implementation_spec_graph",
+                lambda: _StubApp(),
+            )
+            mp.setattr(Path, "mkdir", _boom)
+            result = run_spec_stage(state)
+
+        assert "payload" in ran, (
+            "the spec workflow never ran because its lineage dir could not be "
+            "created. Losing the drafts is bad; losing the run is worse."
+        )
+        assert ran["payload"]["audit_dir"] == "", (
+            "with no dir to write into, audit_dir must be empty so the "
+            "downstream guards no-op cleanly rather than write to a bad path"
+        )
+        assert result["stage_results"]["spec"]["status"] == "failed"
+        assert "Permission denied" not in (
+            result["stage_results"]["spec"].get("error_message") or ""
+        ), "a lineage problem must not be reported as the spec failure"
+
+
 class TestEveryOrchestratedSubWorkflowPersistsLineage:
     """The audit, as a test rather than a one-time read (#2250 criterion 3).
 

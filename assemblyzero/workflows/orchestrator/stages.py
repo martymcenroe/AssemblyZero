@@ -630,8 +630,17 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         # recovers a draft by globbing *-spec-draft.md out of this directory, so
         # an unscoped dir would let a previous roll's draft be recovered into a
         # fresh run and skip the LLM call outright.
+        # Lineage is diagnostic scaffolding, so provisioning it must never be
+        # the reason a spec stage fails: an unwritable target repo would
+        # otherwise be swallowed by the except below and read as a spec
+        # failure. On any OSError this degrades to the old behaviour -- no
+        # lineage -- and says so, rather than taking the run down with it.
         audit_dir_str = ""
-        if target_repo:
+        # is_dir() and not merely truthy: with no repo there, mkdir(parents=True)
+        # would conjure the whole tree out of nothing at a path that is not a
+        # checkout -- which on Windows means a fake target quietly materialises
+        # a real directory off the drive root.
+        if target_repo and Path(target_repo).is_dir():
             spec_lineage = (
                 Path(target_repo)
                 / "docs" / "lineage" / "active"
@@ -643,17 +652,24 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             # Claim the dir with exist_ok=False so the winner is decided by the
             # filesystem rather than by a check that can go stale.
             run_id = make_run_id()
-            attempt = 0
-            while True:
-                candidate = spec_lineage / (
-                    run_id if attempt == 0 else f"{run_id}-{attempt}"
+            try:
+                for attempt in range(100):
+                    candidate = spec_lineage / (
+                        run_id if attempt == 0 else f"{run_id}-{attempt}"
+                    )
+                    try:
+                        candidate.mkdir(parents=True, exist_ok=False)
+                        audit_dir_str = str(candidate)
+                        break
+                    except FileExistsError:
+                        continue
+            except OSError as exc:
+                _stages_logger.warning(
+                    "Spec stage: could not create lineage dir under %s: %s. "
+                    "The stage will run, but its drafts and verdicts will not "
+                    "be persisted (#2250).",
+                    spec_lineage, exc,
                 )
-                try:
-                    candidate.mkdir(parents=True, exist_ok=False)
-                    break
-                except FileExistsError:
-                    attempt += 1
-            audit_dir_str = str(candidate)
 
         # create_implementation_spec_graph already returns CompiledStateGraph
         # (see implementation_spec/graph.py:273 + line 370 `return graph.compile()`).
