@@ -33,6 +33,10 @@ from assemblyzero.workflows.implementation_spec.state import (
     ImplementationSpecState,
     PatternRef,
 )
+from assemblyzero.workflows.implementation_spec.criteria_coverage import (
+    criteria_coverage,
+    format_report as format_coverage_report,
+)
 from assemblyzero.workflows.telemetry import (
     build_hallucination_event,
     record_hallucination_event,
@@ -169,6 +173,11 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     )
     checks.append(check_baselines)
     _log_check(check_baselines)
+
+    # Check 9: Every LLD pass criterion must have a test (Issue #2239)
+    check_criteria = check_criteria_have_tests(spec_draft, state.get("lld_content", ""))
+    checks.append(check_criteria)
+    _log_check(check_criteria)
 
     # Telemetry (#1812): record detector outcomes for the spec draft (every
     # pass) and the LLD (first pass only). Record-only — the try/except
@@ -953,6 +962,36 @@ def check_visual_baselines_not_self_referential(
             f"or name an independent reference source for the baselines in "
             f"such a section."
         ),
+    )
+
+
+def check_criteria_have_tests(spec: str, lld_content: str) -> CompletenessCheck:
+    """Every LLD pass criterion must have a test in the spec (Issue #2239).
+
+    The counting job the adversarial reviewer was doing. In run-issue7-082047 it
+    cost three iterations and the stage still died at the cap with "completely
+    omits 12 required state matrix tests" among the reasons; here it is free and
+    names all twelve at iteration zero, so one revision can fix the whole set.
+
+    An LLD with no pass-criteria table is not applicable rather than a failure --
+    the #1870 convention, so a spec that verified almost nothing cannot report a
+    full house.
+    """
+    if not lld_content.strip():
+        return CompletenessCheck(
+            check_name="criteria_have_tests",
+            passed=True,
+            details=(
+                "Criterion coverage not applicable: the LLD was not available to "
+                "this node, so its pass criteria could not be read."
+            ),
+        )
+
+    report = criteria_coverage(spec, lld_content)
+    return CompletenessCheck(
+        check_name="criteria_have_tests",
+        passed=report.ok,
+        details=format_coverage_report(report),
     )
 
 
