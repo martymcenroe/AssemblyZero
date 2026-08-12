@@ -12,8 +12,10 @@ happened to smuggle a snapshot along with it.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -189,3 +191,183 @@ def test_no_worktree_is_left_behind(repo, log, monkeypatch):
     listing = git(repo, "worktree", "list").stdout
     assert ".arc-sync" not in listing
     assert not (repo / "data" / "speedrun" / ".arc-sync").exists()
+
+
+# ---------------------------------------------------------------------------
+# CLAUDE.md is law too (#2244)
+# ---------------------------------------------------------------------------
+#
+# The tuple carried only docs/design and docs/adrs, so a CLAUDE.md correction
+# on the default branch never reached a running arc -- the exact invisibility
+# #2205 closed for design docs, left open for the file the drafter reads as
+# project context from the arc's own worktree.
+#
+# Live case, boostgauge #286: CLAUDE.md's Key modules list stated planned files
+# as existing, and four runs each paid a revision iteration for drafts that
+# marked the phantom files as Modify. Without this the fix lands on main and
+# every future draw on that arc keeps paying the iteration it was meant to end.
+
+
+def claude_md_on_main(repo: Path, text: str, msg: str = "docs: fix Key modules") -> None:
+    git(repo, "checkout", "-q", "main")
+    (repo / "CLAUDE.md").write_text(text, encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", msg)
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "fetch", "-q", "origin")
+
+
+def arc_claude_md(repo: Path) -> str:
+    return git(repo, "show", f"origin/{ARC}:CLAUDE.md").stdout
+
+
+def test_claude_md_is_a_binding_doc():
+    assert "CLAUDE.md" in speedrun_roll.BINDING_DOC_PATHS, (
+        "the drafter reads it from the arc's worktree as law, which is the "
+        "tuple's own definition"
+    )
+
+
+def test_a_claude_md_fix_reaches_the_arc(repo, log, monkeypatch):
+    """Acceptance 1. The boostgauge #286 shape: a Key-modules correction."""
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    claude_md_on_main(repo, "Key modules: gauge.py (planned, not yet built)\n")
+
+    assert "planned" not in arc_claude_md(repo), "precondition: the arc is behind"
+
+    problems = speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log)
+
+    assert problems == []
+    assert "planned" in arc_claude_md(repo), (
+        "the correction must reach the arc, or every future draw keeps paying "
+        "the iteration it was meant to end"
+    )
+
+
+def test_the_sync_names_the_claude_md_commit(repo, log, monkeypatch):
+    """Acceptance 1: shown by the launcher's SYNC lines naming it."""
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    claude_md_on_main(repo, "Key modules: corrected\n", "docs: correct Key modules")
+
+    speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log)
+
+    written = log.path.read_text(encoding="utf-8")
+    assert "SYNC 1 binding-doc commit(s)" in written
+    assert "correct Key modules" in written
+    assert "SYNC verified" in written
+
+
+def test_an_arc_already_carrying_current_claude_md_stays_silent(repo, log, monkeypatch):
+    """Acceptance 3: unchanged from today's behaviour for design docs."""
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    claude_md_on_main(repo, "Key modules: corrected\n")
+    assert speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log) == []
+
+    # Second launch, nothing new: no worktree, no push, no noise.
+    log.path.write_text("", encoding="utf-8")
+    assert speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log) == []
+    assert "SYNC" not in log.path.read_text(encoding="utf-8")
+
+
+def _commit_dated(repo: Path, rel: str, text: str, msg: str, when: str) -> None:
+    """Commit on the CURRENT branch with an explicit committer date.
+
+    The date is explicit because the fixture's own base commit is made at test
+    runtime: a draft timestamp hardcoded in the past is older than everything,
+    so the staleness check returns True whatever the path list says. That made
+    the first cut of these tests pass with CLAUDE.md absent from the tuple --
+    vacuously green, which is worse than red.
+    """
+    (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+    (repo / rel).write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-qm", msg],
+        capture_output=True,
+        env={**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when},
+    )
+
+
+def _drafted_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_a_claude_md_edit_makes_a_persisted_draft_stale(repo, log, monkeypatch):
+    """Acceptance 2. A draft older than the correction must redraw, not resume
+    onto a document the ruling has already invalidated."""
+    monkeypatch.setattr(
+        speedrun_roll, "_run",
+        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
+    )
+    drafted = _drafted_now()
+
+    git(repo, "checkout", "-q", ARC)
+    _commit_dated(
+        repo, "CLAUDE.md", "Key modules: corrected\n",
+        "docs: correct Key modules", "2099-01-01T00:00:00+0000",
+    )
+    git(repo, "push", "-q", "origin", ARC)
+    git(repo, "fetch", "-q", "origin")
+
+    assert speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log), (
+        "the draft predates the CLAUDE.md correction, so resuming spends the "
+        "stage on a document already known to be wrong"
+    )
+    assert "binding doc" in log.path.read_text(encoding="utf-8")
+
+
+def test_a_non_binding_edit_leaves_the_draft_current(repo, log, monkeypatch):
+    """The control that makes the test above mean something: the SAME shape
+    with a file outside the tuple must NOT invalidate the draft. Without this,
+    a staleness assertion proves only that some commit exists."""
+    monkeypatch.setattr(
+        speedrun_roll, "_run",
+        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
+    )
+    drafted = _drafted_now()
+
+    git(repo, "checkout", "-q", ARC)
+    _commit_dated(
+        repo, "README.md", "changed\n", "chore: readme",
+        "2099-01-01T00:00:00+0000",
+    )
+    git(repo, "push", "-q", "origin", ARC)
+    git(repo, "fetch", "-q", "origin")
+
+    assert not speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log), (
+        "code on the arc is not law; only the binding-doc paths invalidate a "
+        "draft"
+    )
+
+
+def test_the_staleness_message_reads_as_a_list_not_a_path(repo, log, monkeypatch):
+    """Three entries joined by '/' rendered 'docs/design/docs/adrs/CLAUDE.md',
+    which reads as one nonexistent path."""
+    monkeypatch.setattr(
+        speedrun_roll, "_run",
+        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
+    )
+    drafted = _drafted_now()
+
+    git(repo, "checkout", "-q", ARC)
+    _commit_dated(
+        repo, "CLAUDE.md", "changed\n", "docs: change",
+        "2099-01-01T00:00:00+0000",
+    )
+    git(repo, "push", "-q", "origin", ARC)
+    git(repo, "fetch", "-q", "origin")
+
+    speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log)
+
+    written = log.path.read_text(encoding="utf-8")
+    assert "docs/design, docs/adrs, CLAUDE.md" in written
+    assert "docs/adrs/CLAUDE.md" not in written
+
+
+def _issue_updated_at(stamp: str, real):
+    """Stub only the gh issue-view probe; every git call runs for real."""
+    def _run(cmd, cwd=None, env=None):
+        if cmd[:2] == ["gh", "issue"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=stamp, stderr="")
+        return real(cmd, cwd=cwd) if env is None else real(cmd, cwd=cwd)
+    return _run

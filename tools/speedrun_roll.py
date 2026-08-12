@@ -486,10 +486,19 @@ def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
     return False
 
 
-# Binding-input paths: a commit touching either invalidates a draft derived
-# from them. Design docs and ADRs are what the drafter and the reviewer read
-# as law; issue text is checked separately against the GitHub API.
-BINDING_DOC_PATHS = ("docs/design", "docs/adrs")
+# Binding-input paths: a commit touching any of them invalidates a draft
+# derived from them. Design docs and ADRs are what the drafter and the reviewer
+# read as law; issue text is checked separately against the GitHub API.
+#
+# #2244 added CLAUDE.md by the tuple's own definition -- it is law the drafter
+# reads, from the attempt branch's worktree, as project context. Leaving it out
+# reproduced for it the exact invisibility #2205 closed for design docs: a
+# correction landed on the default branch never reached a running arc. Live
+# case, boostgauge #286: CLAUDE.md listed planned files as existing, and four
+# runs each paid a revision iteration for drafts that marked the phantom files
+# as Modify. Without this the fix would land on main and every future draw on
+# that arc would keep paying the iteration the fix was meant to end.
+BINDING_DOC_PATHS = ("docs/design", "docs/adrs", "CLAUDE.md")
 
 
 def _iso_to_epoch(value: str) -> float | None:
@@ -673,7 +682,7 @@ def draft_is_stale(
         if doc_ts > drafted:
             log.write(
                 f"RESUME abandoned for #{issue}: a binding doc "
-                f"({'/'.join(BINDING_DOC_PATHS)}) changed on '{base}' after "
+                f"({', '.join(BINDING_DOC_PATHS)}) changed on '{base}' after "
                 "the draft was made -- drawing fresh against the current law"
             )
             return True
