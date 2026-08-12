@@ -36,6 +36,10 @@ route_after_validate_mechanical for immediate user feedback.
 Issue #166 addition: N1b validates test plan coverage, vague assertions,
 and human delegation before Gemini review.
 
+#2233 addition: N5 can loop back to N1 when finalize's own validation blocks.
+The errors ride back as revision feedback and are repaired as edit blocks, so
+a blocked finalize no longer fails the stage and costs the whole attempt.
+
 Routing is controlled by:
 - error_message: Non-empty routes to END
 - config_gates_*: Whether human gates are enabled
@@ -454,17 +458,36 @@ def route_from_human_gate_verdict(
 
 def route_after_finalize(
     state: RequirementsWorkflowState,
-) -> Literal["END"]:
+) -> Literal["N1_generate_draft", "END"]:
     """Route after finalize node.
 
-    Always routes to END (workflow complete).
+    #2233: a finalize validation failure goes back to the revision node with
+    the named errors as feedback — the same destination a mechanical-validation
+    failure already takes, and for the same reason. It is a mechanical defect
+    in a finished document, so it is repaired as edits (#2200) rather than
+    paid for again: the run that motivated this discarded an APPROVED draft,
+    re-ran every validated stage, and reached the identical block.
+
+    Everything else ends the workflow exactly as before, including a finalize
+    that stopped with an error, which the orchestrator reads off
+    ``error_message``.
+
+    Routes to:
+    - N1_generate_draft: finalize blocked and repair budget remains (#2233)
+    - END: workflow complete, or finalize stopped with an error
 
     Args:
         state: Current workflow state.
 
     Returns:
-        END.
+        Next node name.
     """
+    if state.get("finalize_repair_pending"):
+        print(
+            "    [ROUTING] Finalize validation failed - returning to the "
+            "revision node with the errors as feedback (#2233)"
+        )
+        return "N1_generate_draft"
     return "END"
 
 
@@ -633,7 +656,18 @@ def create_requirements_graph() -> StateGraph:
         },
     )
 
-    # N5 -> END
-    graph.add_edge(N5_FINALIZE, END)
+    # N5 -> N1 or END
+    # #2233: a blocked finalize is repaired as an edit-script revision, never
+    # by regenerating the attempt. This edge is what makes that possible; the
+    # unconditional N5 -> END it replaces is what forced the orchestrator to
+    # re-pay for an approved draft.
+    graph.add_conditional_edges(
+        N5_FINALIZE,
+        route_after_finalize,
+        {
+            "N1_generate_draft": N1_GENERATE_DRAFT,
+            "END": END,
+        },
+    )
 
     return graph

@@ -197,10 +197,14 @@ ATLAS: dict[str, dict] = {
         "teach": (
             "An approved LLD lands in the target repo's docs tree; a "
             "drafted issue is filed on GitHub. The artifact, not this run's "
-            "transcript, is what the next stage consumes."
+            "transcript, is what the next stage consumes. This stage carries "
+            "a validation gate of its own, and failing it sends the document "
+            "back for a surgical revision rather than discarding the attempt "
+            "and drafting it again."
         ),
         "successors": {
-            "END": "always",
+            "N1_generate_draft": "finalize's own validation blocked the document",
+            "END": "the artifact is saved, or the repair budget is spent",
         },
     },
     "HALT": {
