@@ -64,6 +64,7 @@ from assemblyzero.utils.git import current_branch, validate_integration_branch
 from assemblyzero.workflows.requirements.config import GateConfig
 from assemblyzero.workflows.requirements.graph import create_requirements_graph
 from assemblyzero.workflows.requirements.state import create_initial_state, RequirementsWorkflowState
+from assemblyzero.core.stage_watchdog import StageWatchdog  # noqa: E402  (#2231)
 from assemblyzero.workflows.requirements.step_budget import (  # noqa: E402  (#2245)
     DEFAULT_MAX_ITERATIONS,
     invoke_with_budget,
@@ -781,12 +782,20 @@ def run_single_workflow(
         # and unrelated to what the loops actually cost. The budget is now
         # derived from measured per-loop step costs, and exhausting it halts
         # naming the loop that spent it instead of raising GraphRecursionError.
-        final_state = invoke_with_budget(
-            compiled,
-            state,
-            stage="lld" if state.get("workflow_type") == "lld" else "issue",
-            max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
-        )
+        #
+        # #2231: and it says so while it runs. This runner emitted nothing
+        # during a multi-minute model call, which is exactly where silence gets
+        # misread as a hang -- and it is one of the two entry points the
+        # babysit protocol tells an operator to run. Same watchdog the
+        # orchestrator has had since #1886.
+        stage_name = "lld" if state.get("workflow_type") == "lld" else "issue"
+        with StageWatchdog(stage_name):
+            final_state = invoke_with_budget(
+                compiled,
+                state,
+                stage=stage_name,
+                max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
+            )
 
         print_result(final_state)
 
@@ -1016,12 +1025,14 @@ def run_resume_review(
             print()
 
             # #2245: same derived budget as the full run above.
-            final_state = invoke_with_budget(
-                compiled_resume,
-                state,
-                stage="lld resume",
-                max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
-            )
+            # #2231: and the same heartbeat.
+            with StageWatchdog("lld"):
+                final_state = invoke_with_budget(
+                    compiled_resume,
+                    state,
+                    stage="lld resume",
+                    max_iterations=state.get("max_iterations", DEFAULT_MAX_ITERATIONS),
+                )
 
             print_result(final_state)
 
