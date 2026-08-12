@@ -347,6 +347,44 @@ def _iter_section_lines(text: str, *titles: str):
             yield stripped
 
 
+#: What a drafter writes in the Open Questions section to mean "there are
+#: none". The template scaffolds that section as an unchecked checkbox, so a
+#: drafter with nothing to ask fills the scaffold rather than deleting it
+#: (#2232: four drafts out of four in one run wrote "- [ ] None").
+_NONE_PLACEHOLDERS = frozenset({"none", "n/a", "na", "none at this time", "nothing"})
+
+
+def is_none_placeholder(text: str) -> bool:
+    """True when an Open Questions entry means "there are none".
+
+    One predicate, imported by every caller, because the alternative is what
+    #2232 measured: ``review.py`` filtered "- [ ] None" and read the draft as
+    having no questions, ``finalize.py`` read the same line as an unresolved
+    question and blocked, and an APPROVED draft died between them. Two
+    detectors over one document must not disagree, so there is one detector.
+
+    Matching ignores case, surrounding whitespace, trailing punctuation and
+    markdown emphasis, and it accepts a placeholder carrying an aside, since
+    "None - scope is well-defined" is how drafters actually write it.
+
+    What it must NOT swallow is a real sentence that merely begins with the
+    word: "None of the thresholds are specified" is a question. The rule that
+    separates them is the character after the token -- a dash, colon, comma or
+    bracket introduces an aside, whereas a space followed by more sentence
+    does not.
+    """
+    cleaned = (text or "").strip().strip("*_`").strip()
+    cleaned = cleaned.rstrip(".!?,;:").strip().casefold()
+    if cleaned in _NONE_PLACEHOLDERS:
+        return True
+    for separator in ("—", "–", " - ", ":", ";", ",", "("):
+        if separator in cleaned:
+            head = cleaned.split(separator, 1)[0].strip().rstrip(".!?,;:").strip()
+            if head in _NONE_PLACEHOLDERS:
+                return True
+    return False
+
+
 def scan_open_questions_section(text: str) -> DraftQuestionsResult:
     """Deterministic checkbox scan of a document's ``## Open Questions``.
 
