@@ -359,6 +359,12 @@ def file_must_resolve(
                 detail=comment.stderr.strip(),
             )
         log(f"  [{origin.tag}] recurrence recorded on existing must-resolve #{existing}")
+        # #2179: a recurrence is still an OPEN question blocking this run, so
+        # it belongs in the summary and the gate exactly like a fresh filing.
+        record_filed(
+            repo_root, number=existing, title=build_title(source_issue, conflict),
+            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
+        )
         return FilingResult(True, "commented", existing, fingerprint)
 
     title = build_title(source_issue, conflict)
@@ -387,6 +393,14 @@ def file_must_resolve(
 
     number = _issue_number_from_url((created.stdout or "").strip())
     log(f"  [{origin.tag}] filed must-resolve issue #{number or '?'} in {slug}")
+    # #2179: record it HERE, where the number is known. The launcher used to
+    # re-derive the list from a live query seconds later, which returns short
+    # while GitHub is still indexing -- and that short answer fed both the
+    # operator summary and the launch gate.
+    record_filed(
+        repo_root, number=number, title=title,
+        fingerprint=fingerprint, run_id=run_id, ts=conflict_ts,
+    )
     return FilingResult(True, "filed", number, fingerprint)
 
 
@@ -418,6 +432,122 @@ def open_must_resolve_issues(
     return [
         {"number": r.get("number"), "title": r.get("title", "")} for r in rows
     ], None
+
+
+# ---------------------------------------------------------------------------
+# The filed-questions ledger (#2179)
+# ---------------------------------------------------------------------------
+#
+# The numbers exist in-process at filing time and were thrown away: this module
+# returns each one on its FilingResult, the N0c node discarded the return value,
+# and the launcher then re-derived the list from a live
+# `gh issue list --label must-resolve --state open` seconds later. That query
+# returns short when GitHub has not finished indexing a just-filed issue, and
+# the one short answer fed BOTH the operator summary and the launch gate file.
+#
+# Six occurrences across 2026-08-09/10/11. The worst listed one question of
+# three (run-issue7-083155 filed #273, #274, #275 within four seconds and
+# printed "Next step: resolve #273."), so the operator would have ruled on a
+# third of the block and been refused on the rest. The same short answer is
+# what wrote an empty `blocking` list into prereqs.json -- the write half of
+# #2196's launch brick.
+#
+# The ledger is a local record of what THIS machine filed, written at the
+# moment the number is known. It does not replace the live query: it is unioned
+# with it, so a question filed by an earlier run still surfaces and a question
+# GitHub has not indexed yet surfaces too.
+
+FILED_LEDGER_REL = Path("data") / "speedrun" / "filed-questions.jsonl"
+
+
+def filed_ledger_path(repo_root: Path | str) -> Path:
+    return Path(repo_root) / FILED_LEDGER_REL
+
+
+def record_filed(
+    repo_root: Path | str,
+    *,
+    number: int | None,
+    title: str,
+    fingerprint: str | None = None,
+    run_id: str = "",
+    ts: str | None = None,
+) -> bool:
+    """Append one filed question to the local ledger. Never raises.
+
+    Append-only JSONL so two rolls writing at once cannot lose each other's
+    line, and so a corrupt line costs one entry rather than the file.
+    """
+    if not number:
+        return False
+    try:
+        path = filed_ledger_path(repo_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "number": int(number),
+                "title": title or "",
+                "fingerprint": fingerprint or "",
+                "run_id": run_id or "",
+                "ts": ts or datetime.now().strftime(_TS_FMT),
+            }) + "\n")
+        return True
+    except OSError:
+        # The roll is already halting. Losing the ledger line costs the
+        # summary a number; raising here would cost the halt.
+        return False
+
+
+def read_filed(repo_root: Path | str, *, since: str = "") -> list[dict]:
+    """Ledger entries, newest last, optionally only those at or after `since`.
+
+    `since` is a `_TS_FMT` stamp, which is lexicographically sortable, so the
+    comparison needs no parsing. Bounding by the launcher's own start is what
+    keeps a question closed last week out of tonight's summary.
+    """
+    path = filed_ledger_path(repo_root)
+    entries: list[dict] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return entries
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue  # one bad line must not cost the rest
+        if not row.get("number"):
+            continue
+        if since and str(row.get("ts", "")) < since:
+            continue
+        entries.append({
+            "number": int(row["number"]),
+            "title": row.get("title", ""),
+        })
+    return entries
+
+
+def merge_questions(live: list[dict], recorded: list[dict]) -> list[dict]:
+    """Union by issue number, preferring the live title, ordered by number.
+
+    The live query is authoritative on titles -- an operator may have renamed
+    the issue since it was filed -- and the ledger is authoritative on
+    existence, because it recorded the number at the moment it was created.
+    """
+    merged: dict[int, dict] = {}
+    for item in list(recorded) + list(live):
+        number = item.get("number")
+        if not number:
+            continue
+        merged[int(number)] = {
+            "number": int(number),
+            "title": item.get("title") or merged.get(int(number), {}).get("title", ""),
+        }
+    return [merged[n] for n in sorted(merged)]
 
 
 def refusal_message(issues: list[dict]) -> str:
