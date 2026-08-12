@@ -57,6 +57,7 @@ configure_langsmith()
 
 # Issue #424: Telemetry instrumentation
 from assemblyzero.telemetry import emit, flush, track_tool
+from assemblyzero.core.stage_watchdog import StageWatchdog  # noqa: E402  (#2231)
 from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.utils.git import is_generated_work_branch, is_issue_work_branch
 atexit.register(flush)
@@ -916,7 +917,13 @@ def main():
         speedrun_logger = None
 
     try:
-      with WorkflowTimeout(minutes=args.timeout):
+      # #2231: under a watchdog, so a stalled model call is visible WHILE it
+      # stalls. Streaming prints a line per node, but a single node can run for
+      # many minutes -- the case #1886 was built for, and the one an operator
+      # misreads as a hang. This is one of the two entry points the babysit
+      # protocol tells an operator to run, which makes it the surface where
+      # silence is most costly.
+      with WorkflowTimeout(minutes=args.timeout), StageWatchdog("impl"):
         with SqliteSaver.from_conn_string(str(db_path)) as memory:
             app = workflow.compile(checkpointer=memory)
 
