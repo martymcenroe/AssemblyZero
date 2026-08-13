@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from assemblyzero.workflows.orchestrator.artifacts import (
     detect_existing_artifacts,
@@ -887,6 +888,78 @@ def _provision_worktree_env(worktree_path: Path) -> subprocess.CompletedProcess:
     )
 
 
+class _LeftoverBranch(NamedTuple):
+    """What a pre-existing pipeline branch holds, for #2310's decision.
+
+    `absent` is the ordinary case and is neither reusable nor divergent, so
+    the caller falls through to the normal `worktree add -b` path.
+    """
+
+    absent: bool
+    reusable: bool
+    divergent: bool
+    unique_commits: int | None
+
+    def describe_unique(self) -> str:
+        if self.unique_commits is None:
+            return "commits"
+        return f"{self.unique_commits} commit(s)"
+
+
+def _classify_leftover_branch(
+    target_repo: str, branch_name: str, base_branch: str,
+) -> _LeftoverBranch:
+    """Decide whether an existing `branch_name` may be adopted by this roll.
+
+    #2310: `git worktree add -b X` fails with a bare `fatal: a branch named
+    'X' already exists` when a previous failed roll left the name standing.
+    The measured case was pointer-identical to the base with zero unique
+    commits -- a name squatting on the exact SHA the new run wanted, killing
+    a roll for nothing. That case is safe to adopt. A branch holding commits
+    of its own is NOT this roll's to reuse or delete, and gets a halt naming
+    what it holds instead of an exit 255.
+
+    Every git failure here resolves to "not reusable, not divergent", so an
+    unreadable repo keeps the previous behaviour rather than inventing a new
+    failure mode.
+    """
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        cmd = ["git"]
+        if target_repo:
+            cmd += ["-C", target_repo]
+        return run_command(
+            [*cmd, *args], check=False, capture_output=True, text=True,
+        )
+
+    absent = _git(
+        "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}",
+    ).returncode != 0
+    if absent:
+        return _LeftoverBranch(True, False, False, None)
+
+    if not base_branch:
+        # Nothing to compare against: cannot prove it is safe to adopt, and
+        # cannot prove it diverges. Let git speak, as before.
+        return _LeftoverBranch(False, False, False, None)
+
+    counted = _git(
+        "rev-list", "--count", f"{base_branch}..{branch_name}",
+    )
+    if counted.returncode != 0:
+        return _LeftoverBranch(False, False, False, None)
+    try:
+        unique = int(counted.stdout.strip())
+    except ValueError:
+        return _LeftoverBranch(False, False, False, None)
+
+    return _LeftoverBranch(
+        absent=False,
+        reusable=unique == 0,
+        divergent=unique > 0,
+        unique_commits=unique,
+    )
+
+
 def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation workflow (TDD).
 
@@ -960,6 +1033,38 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     "    [WARN] could not resolve a base branch; worktree "
                     "will be carved from the target repo's current HEAD"
                 )
+
+            # #2310: a previous failed roll can leave `issue-{N}` standing.
+            # `worktree add -b` then dies with a bare `fatal: a branch named
+            # 'issue-7' already exists` (exit 255), which killed a roll whose
+            # spec stage had just passed for the first time in campaign
+            # history. Decide from what the leftover actually holds, before
+            # git gets the chance to fail uninformatively.
+            leftover = _classify_leftover_branch(
+                target_repo, branch_name, base_branch,
+            )
+            if leftover.divergent:
+                raise RuntimeError(
+                    f"branch '{branch_name}' already exists and carries "
+                    f"{leftover.describe_unique()} not on "
+                    f"'{base_branch or 'the base'}'. It is not this roll's to "
+                    f"reuse or delete. Preserve it under graveyard/ (a rename "
+                    f"keeps every commit and frees the name), then relaunch."
+                )
+            if leftover.reusable:
+                # Pointer-identical to the base: nothing to lose by adopting
+                # it, and adopting is what keeps the relaunch alive. Rebuild
+                # the command in the `worktree add <path> <existing-branch>`
+                # form -- `-b` would try to create it again and fail.
+                print(
+                    f"    Reusing leftover branch '{branch_name}' "
+                    f"(pointer-identical to {base_branch or 'the base'})"
+                )
+                add_cmd = ["git"]
+                if target_repo:
+                    add_cmd += ["-C", target_repo]
+                add_cmd += ["worktree", "add", str(worktree_path), branch_name]
+
             run_command(
                 add_cmd,
                 check=True,
