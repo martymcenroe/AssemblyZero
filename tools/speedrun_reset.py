@@ -279,7 +279,9 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
     return deleted
 
 
-def dispose_pipeline_branches(repo_root: Path, issue: int) -> list[str]:
+def dispose_pipeline_branches(
+    repo_root: Path, issue: int, base: str | None = None,
+) -> list[str]:
     """
     Free the pipeline branch names for one issue. Returns failure descriptions.
 
@@ -290,19 +292,35 @@ def dispose_pipeline_branches(repo_root: Path, issue: int) -> list[str]:
     on the base killed a roll whose spec stage had just passed for the first
     time in campaign history.
 
-    Two dispositions, decided by what the branch actually holds:
+    Two dispositions, decided by MEASURING what the branch holds:
 
-    - No commits beyond the base: `git branch -d` accepts it, and the name
-      is freed. This is the measured case from #2310 -- the stranded branch
-      was pointer-identical to `origin/hardening-run-17`'s tip.
-    - Commits of its own: the safe delete refuses, and that refusal is the
-      safety net working. The branch is RENAMED under `graveyard/`, which
-      keeps every commit and still frees the name. Never `-D`, never a
-      force delete, per the banned-commands rule and ADR-0217.
+    - Zero commits beyond `base`: safe-delete, and the name is freed. This
+      is the measured case from #2310 -- the stranded branch was
+      pointer-identical to `origin/hardening-run-17`'s tip.
+    - Anything else, INCLUDING a count that cannot be established: the
+      branch is RENAMED under `graveyard/`, which keeps every commit and
+      still frees the name. Never `-D`, never a force delete, per the
+      banned-commands rule and ADR-0217.
 
-    A rename rather than a delete is what makes this safe to run
-    unconditionally from RESTORE: the worst case is a preserved branch under
-    a new name, never lost work.
+    #2325: the decision must NOT be delegated to `git branch -d`. That
+    command accepts any branch merged into its UPSTREAM, and every pipeline
+    branch gets an upstream at creation (`push -u` in stages.py, #1780), so
+    `-d` accepts branches carrying arbitrary unique work. Asking it for the
+    verdict inverted this function: run against the boostgauge #7 branches
+    it deleted both while reporting "no unique commits", when they held 3
+    and 2 commits respectively. Nothing was lost only because the remote
+    refs still existed -- the brittle upstream-tracking path ADR-0217
+    rejects. Measure against `base` first; `-d` then merely executes a
+    decision already made.
+
+    Defaulting to preservation when the count is unknown costs a less tidy
+    graveyard and nothing else, which is the right side to err on: a rename
+    is non-destructive and still frees the name.
+
+    `base` should be the branch the pipeline cut from. It falls back to
+    `origin/HEAD`, which is right for a repo rolling on its default branch
+    and wrong for one rolling on an integration branch -- so callers that
+    know their base should pass it.
     """
     result = _run(
         [
@@ -314,6 +332,7 @@ def dispose_pipeline_branches(repo_root: Path, issue: int) -> list[str]:
     if result.returncode != 0:
         return [f"could not list branches for #{issue}"]
 
+    base_ref = base or _default_base_ref(repo_root)
     active = current_branch(repo_root)
     failures: list[str] = []
     for branch in (line.strip() for line in result.stdout.splitlines()):
@@ -324,26 +343,41 @@ def dispose_pipeline_branches(repo_root: Path, issue: int) -> list[str]:
             print(f"  Skipped branch {branch} (currently checked out).")
             continue
 
-        deleted = _run(["git", "branch", "-d", branch], cwd=repo_root)
-        if deleted.returncode == 0:
-            print(f"  Freed branch name: {branch} (no unique commits)")
+        unique = _unique_commit_count(repo_root, branch, base_ref)
+        if unique == 0:
+            # Proven to add nothing beyond the base. `-d` cannot refuse this,
+            # and if it somehow does, the refusal is reported rather than
+            # escalated.
+            deleted = _run(["git", "branch", "-d", branch], cwd=repo_root)
+            if deleted.returncode == 0:
+                print(
+                    f"  Freed branch name: {branch} "
+                    f"(no commits beyond {base_ref})"
+                )
+                continue
+            failures.append(
+                f"branch '{branch}' measured empty against '{base_ref}' but "
+                f"the safe delete refused: "
+                f"{(deleted.stderr or '').strip()[:200]}"
+            )
             continue
 
-        # Safe-delete refused -- the branch carries commits reachable from
-        # nowhere else. Preserve them under a name no relaunch will collide
-        # with. `-m` (not `-M`) so an existing graveyard name is never
-        # clobbered; the collision is reported instead.
+        # Unique work, or a count that could not be established. Preserve it
+        # under a name no relaunch will collide with. `-m` (not `-M`) so an
+        # existing graveyard name is never clobbered; the collision is
+        # reported instead.
         parked = f"{GRAVEYARD_PREFIX}{branch}-{_disposal_stamp()}"
         renamed = _run(["git", "branch", "-m", branch, parked], cwd=repo_root)
         if renamed.returncode == 0:
-            unique = _unique_commit_count(repo_root, parked)
-            detail = f"{unique} commit(s)" if unique is not None else "commits"
+            detail = (
+                f"{unique} commit(s)" if unique is not None
+                else f"commits (count against '{base_ref}' unavailable)"
+            )
             print(f"  Preserved branch {branch} -> {parked} ({detail} kept)")
         else:
             failures.append(
-                f"branch '{branch}' holds unique commits and could not be "
-                f"renamed to '{parked}': "
-                f"{(renamed.stderr or '').strip()[:200]}"
+                f"branch '{branch}' holds work and could not be renamed to "
+                f"'{parked}': {(renamed.stderr or '').strip()[:200]}"
             )
     return failures
 
@@ -355,15 +389,27 @@ def _disposal_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def _unique_commit_count(repo_root: Path, branch: str) -> int | None:
-    """Commits on `branch` not reachable from the default branch, or None."""
-    base = _run(
+def _default_base_ref(repo_root: Path) -> str:
+    """`origin/HEAD` as a name, or 'HEAD' when it cannot be resolved."""
+    result = _run(
         ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"], cwd=repo_root
     )
-    if base.returncode != 0 or not base.stdout.strip():
-        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return "HEAD"
+    return result.stdout.strip()
+
+
+def _unique_commit_count(
+    repo_root: Path, branch: str, base_ref: str,
+) -> int | None:
+    """
+    Commits on `branch` not reachable from `base_ref`, or None if unknown.
+
+    None means "could not measure" and is deliberately distinct from 0 --
+    the caller preserves on None and only deletes on a proven 0 (#2325).
+    """
     counted = _run(
-        ["git", "rev-list", "--count", f"{base.stdout.strip()}..{branch}"],
+        ["git", "rev-list", "--count", f"{base_ref}..{branch}"],
         cwd=repo_root,
     )
     if counted.returncode != 0:

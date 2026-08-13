@@ -1858,8 +1858,12 @@ def restore_repo(
     # relaunch wants to branch from and `worktree add -b` dies on it.
     # Branch names are freed by safe delete when they hold nothing unique, and
     # preserved under graveyard/ when they hold work. Never a force delete.
+    # #2325: `base` is passed explicitly. The disposition is decided by
+    # counting commits against it, never by asking `git branch -d` -- that
+    # command accepts anything merged to its upstream, and every pipeline
+    # branch has one, so it would delete exactly the branches worth keeping.
     for issue in issues:
-        failures += reset.dispose_pipeline_branches(repo_root, issue)
+        failures += reset.dispose_pipeline_branches(repo_root, issue, base)
     current = attempt.current_branch(repo_root)
     if current != base:
         failures.append(f"expected to end on '{base}', ended on '{current}'")
