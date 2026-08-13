@@ -54,6 +54,13 @@ MAX_FAILURE_SUMMARY_CHARS = 12000
 # command, identical config; at 80 columns every reason is gone, at 200 every
 # reason is present. 200 clears a worktree-length path plus a typical assertion
 # message without making pytest's separator rules absurdly wide.
+#
+# Where this bites, and why CI disagrees: pytest skips the trim entirely when
+# it believes it is on CI (`_pytest/terminal.py`: `running_on_ci() or
+# config.option.verbose >= 2`, keyed off CI / BUILD_NUMBER). GitHub Actions
+# sets CI=true, so the defect does NOT reproduce there -- and the speedrun runs
+# on the operator's workstation, where nothing sets it. The one environment
+# that would have shown a green suite is the one the pipeline never runs in.
 PYTEST_OUTPUT_COLUMNS = "200"
 
 # #2320: how many distinct failure tracebacks to carry back. Tracebacks are the

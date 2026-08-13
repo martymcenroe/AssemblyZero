@@ -68,6 +68,25 @@ def failing_suite(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]
     return root, Path(_DEEP) / "test_generated_scenarios.py"
 
 
+#: pytest disables short-summary trimming entirely when it thinks it is on CI
+#: (`_pytest/terminal.py`: `running_on_ci() or config.option.verbose >= 2`).
+#: These tests must therefore control that signal rather than inherit it: on
+#: GitHub Actions `CI=true` is set, no trimming happens, and a test asserting
+#: the truncation would pass or fail depending on where it ran.
+#:
+#: This is not an artifact of the test. It is why the defect is real WHERE IT
+#: MATTERS: the speedrun executes on the operator's workstation, off CI, so
+#: pytest trims and the reviser loses the reasons. The same pipeline on CI
+#: would not show the bug at all.
+_CI_VARS = ("CI", "BUILD_NUMBER")
+
+
+def _base_env(**overrides: str) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k not in _CI_VARS}
+    env.update(overrides)
+    return env
+
+
 def _run_pytest(suite: tuple[Path, Path], env: dict[str, str] | None) -> str:
     root, rel = suite
     result = subprocess.run(
@@ -87,9 +106,7 @@ def test_default_capture_loses_the_reason(failing_suite: tuple[Path, Path]) -> N
     the fix below may no longer be load-bearing. Failing here is the signal
     to re-check, not a reason to delete the test.
     """
-    env = os.environ.copy()
-    env["COLUMNS"] = "80"
-    output = _run_pytest(failing_suite, env)
+    output = _run_pytest(failing_suite, _base_env(COLUMNS="80"))
 
     summary_lines = [
         line for line in output.splitlines() if line.startswith("FAILED ")
@@ -103,7 +120,7 @@ def test_default_capture_loses_the_reason(failing_suite: tuple[Path, Path]) -> N
 
 def test_pytest_env_restores_the_reason(failing_suite: tuple[Path, Path]) -> None:
     """#2319: the captured summary carries complete reasons again."""
-    output = _run_pytest(failing_suite, _pytest_env())
+    output = _run_pytest(failing_suite, _base_env(COLUMNS=PYTEST_OUTPUT_COLUMNS))
 
     summary_lines = [
         line for line in output.splitlines() if line.startswith("FAILED ")
@@ -127,7 +144,7 @@ def test_pytest_env_inherits_and_only_sets_columns() -> None:
 
 def test_summary_carries_source_line_and_error(failing_suite: tuple[Path, Path]) -> None:
     """#2320: the acceptance for the pair -- reason AND source line, verbatim."""
-    output = _run_pytest(failing_suite, _pytest_env())
+    output = _run_pytest(failing_suite, _base_env(COLUMNS=PYTEST_OUTPUT_COLUMNS))
     summary = _build_failure_summary(output)
 
     assert "assert False, 'TDD RED: test_scenario_alpha not implemented'" in summary, (
@@ -143,9 +160,9 @@ def test_summary_survives_an_80_column_capture(failing_suite: tuple[Path, Path])
     Even if COLUMNS were lost, the traceback half of the repair still
     delivers the diagnosis. The two fixes are independent on purpose.
     """
-    env = os.environ.copy()
-    env["COLUMNS"] = "80"
-    summary = _build_failure_summary(_run_pytest(failing_suite, env))
+    summary = _build_failure_summary(
+        _run_pytest(failing_suite, _base_env(COLUMNS="80"))
+    )
 
     assert "assert False" in summary
     assert "AssertionError" in summary
@@ -153,7 +170,7 @@ def test_summary_survives_an_80_column_capture(failing_suite: tuple[Path, Path])
 
 def test_identical_causes_are_collapsed(failing_suite: tuple[Path, Path]) -> None:
     """#2320: N tests failing on one cause is one fact, stated once."""
-    output = _run_pytest(failing_suite, _pytest_env())
+    output = _run_pytest(failing_suite, _base_env(COLUMNS=PYTEST_OUTPUT_COLUMNS))
     blocks = _extract_traceback_blocks(output)
 
     assert blocks.count("TypeError: unsupported operand") == 1, (
@@ -168,7 +185,7 @@ def test_2058_grouping_revives_once_reasons_arrive(failing_suite: tuple[Path, Pa
     Verified rather than assumed, per the issue: with reasons present the
     two same-cause tests collapse into a single `2 test(s):` group.
     """
-    output = _run_pytest(failing_suite, _pytest_env())
+    output = _run_pytest(failing_suite, _base_env(COLUMNS=PYTEST_OUTPUT_COLUMNS))
     summary = _build_failure_summary(output)
 
     assert "2 test(s): TypeError: unsupported operand" in summary, (
