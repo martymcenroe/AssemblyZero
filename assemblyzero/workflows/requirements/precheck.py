@@ -233,6 +233,10 @@ def run_gate(
         "issue_number": issue_number,
         "target_repo": str(repo),
         "config_drafter": drafter,
+        # #2290: this run's failure is reported by its own exit code and
+        # report. Writing a roll-scoped unverified record here would leave a
+        # line in the ledger that mislabels whichever roll happens to run next.
+        "standalone_precheck": True,
     }
 
     capture = io.StringIO()

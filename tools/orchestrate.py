@@ -209,6 +209,12 @@ Examples:
             )
             print("=" * 58 + "\n")
             sys.exit(2)
+    # #2290: stamped before any stage runs, so the unverified-requirements
+    # banner below reports only what THIS invocation recorded.
+    from datetime import datetime as _dt
+
+    orchestration_started_at = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+
     if args.dry_run:
         print("[ORCHESTRATOR] DRY RUN -- no stages will execute")
     if args.resume_from:
@@ -230,6 +236,24 @@ Examples:
         from assemblyzero.workflows.orchestrator.graph import format_stage_table
         print()
         print(format_stage_table(result["stage_results"]))
+
+        # #2290: the stage table says which stages passed, not whether the
+        # requirements were ever checked. A gate that failed open leaves every
+        # stage green, so without this the summary reads as a fully verified
+        # run. Scoped to this invocation's start so an older record cannot
+        # re-flag a clean run.
+        try:
+            from assemblyzero.speedrun.requirements_status import (
+                format_banner,
+                read_unverified,
+            )
+
+            for line in format_banner(
+                read_unverified(target_repo, since=orchestration_started_at)
+            ):
+                print(line)
+        except Exception:  # noqa: BLE001 - the summary always prints
+            pass
 
         if result["success"]:
             print(f"\n[ORCHESTRATOR] All stages passed.")
