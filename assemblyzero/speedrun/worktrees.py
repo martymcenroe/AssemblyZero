@@ -29,7 +29,9 @@ to surface, not to overpower -- it is reported by name and the roll continues.
 from __future__ import annotations
 
 import re
+import os
 import shutil
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -180,6 +182,81 @@ class SweepResult:
         return f"worktree sweep: {len(self.entries)} handled, {len(self.problems)} reported"
 
 
+#: Windows refuses to delete a directory carrying FILE_ATTRIBUTE_READONLY, and
+#: git reports it as `Permission denied` from `worktree remove`. Measured
+#: 2026-08-09 against boostgauge: all 8 registered clean worktrees failed that
+#: way, every directory in each tree carrying the attribute -- the worktree
+#: root, `src`, `.venv`, and the `logs`/`refs` dirs under
+#: `.git/worktrees/<name>`.
+#:
+#: #2136 asked what in the pipeline sets it. Measured 2026-08-12: nothing does.
+#: The attribute is ambient across the whole Projects tree -- 100% of top-level
+#: directories in boostgauge, AssemblyZero, Aletheia and Talos carry it,
+#: including `.mypy_cache`, `.ruff_cache` and `.github`, which no pipeline code
+#: has ever touched -- while a fresh `mkdir` does not. So the pipeline cannot
+#: stop producing these trees, which makes clearing-and-retrying the fix rather
+#: than a mask.
+_READONLY = 0x1
+
+
+def _is_permission_error(stderr: str) -> bool:
+    lowered = (stderr or "").lower()
+    return "permission denied" in lowered or "access is denied" in lowered
+
+
+def clear_readonly(root: Path) -> int:
+    """Clear the ReadOnly attribute across a tree. Returns dirs+files changed.
+
+    Walks bottom-up so a directory is cleared after its children, and never
+    raises: this runs on the failure path of a removal that has already gone
+    wrong, and an unreadable corner must not turn a retry into a crash.
+    """
+    changed = 0
+    if not root.exists():
+        return 0
+
+    targets: list[Path] = [root]
+    try:
+        targets.extend(root.rglob("*"))
+    except OSError:
+        pass
+
+    for target in targets:
+        try:
+            attrs = os.stat(target).st_file_attributes
+        except (OSError, AttributeError):
+            continue
+        if not attrs & _READONLY:
+            continue
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+            changed += 1
+        except OSError:
+            continue
+    return changed
+
+
+def _remove_worktree(repo: Path, path: Path, log) -> subprocess.CompletedProcess:
+    """Plain `git worktree remove`, retried once after clearing ReadOnly.
+
+    NEVER `--force`, here or anywhere in this module. Clearing the attribute
+    makes the PLAIN path work rather than bypassing the check that refuses a
+    dirty tree -- the module's no-force invariant is intact, and its source
+    test still passes.
+    """
+    removed = _run(["git", "-C", str(repo), "worktree", "remove", str(path)])
+    if removed.returncode == 0 or not _is_permission_error(removed.stderr):
+        return removed
+
+    admin = repo / ".git" / "worktrees" / path.name
+    cleared = clear_readonly(path) + clear_readonly(admin)
+    if not cleared:
+        return removed
+
+    log(f"    cleared ReadOnly on {cleared} path(s) under {path.name}; retrying")
+    return _run(["git", "-C", str(repo), "worktree", "remove", str(path)])
+
+
 def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
     """Commit a dirty worktree's content to a graveyard branch, then remove it."""
     branch = current_branch(path) or "detached"
@@ -210,7 +287,7 @@ def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
         # strand the worktree again for a reason unrelated to its content.
         log(f"    push of {grave} failed (content is safe on the local branch)")
 
-    removed = _run(["git", "-C", str(repo), "worktree", "remove", str(path)])
+    removed = _remove_worktree(repo, path, log)
     if removed.returncode != 0:
         return SweepEntry(
             path, "dirty", "reported", ok=False, branch=grave,
@@ -254,7 +331,7 @@ def sweep_pipeline_worktrees(repo: Path | str, *, log=None) -> SweepResult:
             elif is_dirty(resolved):
                 entry = _preserve_dirty(repo, resolved, log)
             else:
-                removed = _run(["git", "-C", str(repo), "worktree", "remove", str(resolved)])
+                removed = _remove_worktree(repo, resolved, log)
                 if removed.returncode == 0:
                     entry = SweepEntry(resolved, "clean", "removed")
                 else:
