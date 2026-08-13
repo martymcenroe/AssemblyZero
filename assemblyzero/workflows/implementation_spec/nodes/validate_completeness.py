@@ -501,11 +501,63 @@ def check_data_structures_have_examples(spec: str) -> CompletenessCheck:
     )
 
 
-def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
-    """Every function must have input/output examples.
+#: Words that mark a region as stating a function's inputs or outputs.
+#:
+#: `expected` is here because it is what drafters actually write (#2302). Draft
+#: 008 of the 2026-08-13 boostgauge #7 roll documented every test stub as
+#: `-- expected: File contains "position": {"x": 250, "y": 350}` -- a concrete
+#: input and a concrete output, three characters from the signature, invisible
+#: to a vocabulary that did not include the word.
+_IO_WORDS = re.compile(
+    r"(?:input|output|returns?|result|example|usage|call|expected|asserts?)",
+    re.IGNORECASE,
+)
 
-    Scans the spec for function signatures and verifies each has at least
-    one concrete input/output example showing actual values.
+_CONCRETE_VALUES = re.compile(r'(?:\d+|"[^"]+"|True|False|None|\[.*\]|\{.*\})')
+
+#: How far either side of a definition to look for its example.
+_WINDOW = 2000
+
+
+def _is_inside_code_fence(spec: str, offset: int) -> bool:
+    """Is `offset` inside a fenced code block?
+
+    Counted by fence parity up to the offset, which is the question the check
+    is actually asking. The previous implementation searched FORWARD for a
+    fence, which answers "is there a fence later in the document" -- a
+    different question that diverges exactly when the block is long, and long
+    blocks are what specs with many functions have (#2302).
+    """
+    return spec.count("```", 0, offset) % 2 == 1
+
+
+def _is_test_function(name: str) -> bool:
+    """Test stubs are documented by their own body, not by example blocks.
+
+    `check_criteria_have_tests` (#2239) requires one test function per LLD pass
+    criterion, and the drafter duly writes them. Template 0701 specifies tests
+    as a TABLE (its section 8), never as functions carrying the
+    `**Input Example:**` / `**Output Example:**` blocks section 5 demands of API
+    functions -- so grading a test stub by section 5's rule fails the drafter
+    for following its instructions (#2303).
+
+    A test's body IS its input and its assertion IS its expected output, which
+    is the documentation this check exists to require. They are exempt, and the
+    report says so out loud rather than passing them silently.
+    """
+    return name.startswith("test_") or name.endswith("_test")
+
+
+def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
+    """Every non-test function must have input/output examples.
+
+    Judged at each function's DEFINITION SITE, once per function. The previous
+    implementation scanned a forward-only window from every textual occurrence
+    of the name and passed the function if any one of them looked documented,
+    which made the verdict depend on how often a name happened to be repeated:
+    in draft 008 `save_on_exit` occurred 34 times and passed on the strength of
+    a few lucky windows, while each `test_req_N` occurred exactly once and
+    failed. Same documentation, opposite verdicts (#2302).
 
     Args:
         spec: Implementation Spec markdown content.
@@ -513,67 +565,65 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
     Returns:
         CompletenessCheck with pass/fail result and details.
     """
-    # Find function signatures in the spec (within code blocks or inline)
-    # Match "def function_name(" patterns
-    func_pattern = re.compile(r"(?:async\s+)?def\s+(\w+)\s*\(")
-    all_functions = func_pattern.findall(spec)
+    definitions = [
+        (m.group(1), m.start())
+        for m in re.finditer(r"(?:async\s+)?def\s+(\w+)\s*\(", spec)
+    ]
 
-    # Deduplicate and filter private/dunder methods
-    public_functions = sorted(set(
-        f for f in all_functions
-        if not f.startswith("_") and f not in ("__init__", "__str__", "__repr__")
-    ))
+    graded: list[tuple[str, int]] = []
+    exempt_tests: set[str] = set()
+    for name, pos in definitions:
+        if name.startswith("_") or name in ("__init__", "__str__", "__repr__"):
+            continue
+        if _is_test_function(name):
+            exempt_tests.add(name)
+            continue
+        graded.append((name, pos))
 
-    if not public_functions:
+    def _exempt_note() -> str:
+        if not exempt_tests:
+            return ""
+        return (
+            f" {len(exempt_tests)} test function(s) were NOT checked: a test's "
+            f"body is its input and its assertion is its expected output "
+            f"(template 0701 section 8 specifies tests as a table, not as "
+            f"functions carrying example blocks)."
+        )
+
+    if not graded:
         return CompletenessCheck(
             check_name="functions_have_io_examples",
             passed=True,
-            details="No public function signatures found in spec — check not applicable.",
+            details=(
+                "No public non-test function signatures found in spec — check "
+                "not applicable." + _exempt_note()
+            ),
         )
 
     missing_examples: list[str] = []
+    seen: set[str] = set()
 
-    for func_name in public_functions:
-        # Find where this function is discussed in the spec
-        # Look for the function name outside of code block definitions
-        positions = [m.start() for m in re.finditer(re.escape(func_name), spec)]
+    for func_name, pos in graded:
+        if func_name in seen:
+            continue
+        seen.add(func_name)
 
-        if not positions:
+        # Both directions: an example placed ABOVE the signature counts, and a
+        # function inside a long fenced block can no longer be judged by
+        # whether the closing fence happens to fall within reach.
+        region = spec[max(0, pos - _WINDOW) : pos + _WINDOW]
+
+        has_values = bool(_CONCRETE_VALUES.search(region))
+        if not has_values:
+            missing_examples.append(func_name)
             continue
 
-        # Check if ANY occurrence has a nearby I/O example
-        has_example = False
+        if _is_inside_code_fence(spec, pos) or "```" in region:
+            continue
+        if _IO_WORDS.search(region):
+            continue
 
-        for pos in positions:
-            search_region = spec[pos : pos + 4000]
-
-            # Check for I/O example indicators
-            has_input_output = bool(
-                re.search(
-                    r"(?:input|output|returns?|result|example|usage|call)",
-                    search_region,
-                    re.IGNORECASE,
-                )
-            )
-            has_code_block = "```" in search_region
-            has_concrete_values = bool(
-                re.search(
-                    r'(?:\d+|"[^"]+"|True|False|None|\[.*\]|\{.*\})',
-                    search_region,
-                )
-            )
-
-            # Must have at least a code block with concrete values,
-            # or an input/output section with values
-            if has_code_block and has_concrete_values:
-                has_example = True
-                break
-            if has_input_output and has_concrete_values:
-                has_example = True
-                break
-
-        if not has_example:
-            missing_examples.append(func_name)
+        missing_examples.append(func_name)
 
     if missing_examples:
         func_list = ", ".join(f"`{f}()`" for f in missing_examples[:5])
@@ -589,6 +639,7 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
                 f"Functions missing input/output examples: "
                 f"{func_list}{suffix}. Each function MUST have at least one "
                 f"example with concrete input values and expected output."
+                + _exempt_note()
             ),
         )
 
@@ -596,7 +647,8 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
         check_name="functions_have_io_examples",
         passed=True,
         details=(
-            f"All {len(public_functions)} public functions have I/O examples."
+            f"All {len(seen)} public non-test functions have I/O examples."
+            + _exempt_note()
         ),
     )
 

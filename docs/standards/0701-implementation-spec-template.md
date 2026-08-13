@@ -132,6 +132,21 @@ class AnotherStructure(TypedDict):
 
 *Every function must include: signature, docstring summary, input example with realistic values, output example with realistic values, and edge cases.*
 
+> **This section governs implementation functions, not test functions (#2303).**
+> Section 10 requires one test function per LLD pass criterion. A test function
+> is exempt from the input/output-example rule above, because its body already
+> carries its input and its assertion already carries its expected output —
+> that is the documentation this rule exists to demand.
+>
+> `validate_completeness`'s `functions_have_io_examples` implements exactly this
+> split: it grades every non-test function at its definition site and reports
+> how many test functions it skipped, rather than passing them silently.
+>
+> Earned 2026-08-13 (boostgauge #7): the drafter added 22 per-criterion test
+> stubs to satisfy the coverage check, each carrying a concrete input and an
+> expected output inline, and the spec stage then failed them for lacking
+> Section 5's example blocks — blocks this template never asked of a test.
+
 ### 5.1 `function_name()`
 
 **File:** `path/to/file.py`
@@ -304,6 +319,27 @@ def similar_function(state: SomeState) -> dict[str, Any]:
 | T020 | `function_name()` | `arg1=""` | Raises `ValueError` |
 | T030 | `another_function()` | `state={...}` | `{"spec_draft": "...", "error_message": ""}` |
 
+### 10.1 Per-criterion test functions
+
+*Required by `criteria_have_tests`: every LLD pass criterion must have a test in
+the spec, joined by criterion ID where the LLD carries them.*
+
+The table above maps tests; this section is where the test functions themselves
+go. Write one per criterion, naming it for the criterion it covers, with the
+concrete input and the expected output stated on the function:
+
+```python
+def test_req_10(tmp_path):
+    # Position persistence — no reset, moved (REQ-10) -- expected: File contains "position": {"x": 250, "y": 350}
+    config = ConfigManager(str(tmp_path / "config.json"))
+    config.initialize(reset=False, cli_args={})
+    ...
+```
+
+These are **not** governed by Section 5's example-block rule — see the note
+there. State the expectation in a comment on the function or in the assertion;
+both are read as the test's output.
+
 ## 11. Implementation Notes
 
 *Any additional context that helps implementation but doesn't fit above sections.*
@@ -333,7 +369,8 @@ def similar_function(state: SomeState) -> dict[str, Any]:
 
 - [ ] Every "Modify" file has a current state excerpt (Section 3)
 - [ ] Every data structure has a concrete JSON/YAML example (Section 4)
-- [ ] Every function has input/output examples with realistic values (Section 5)
+- [ ] Every **non-test** function has input/output examples with realistic values (Section 5)
+- [ ] Every LLD pass criterion has a test function (Section 10.1) — these are exempt from the rule above
 - [ ] Change instructions are diff-level specific (Section 6)
 - [ ] Pattern references include file:line and are verified to exist (Section 7)
 - [ ] All imports are listed and verified (Section 8)
