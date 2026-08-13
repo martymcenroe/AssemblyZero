@@ -84,6 +84,12 @@ from assemblyzero.core.provider_storm import (  # noqa: E402
     STORM_EXIT_CODE,
 )
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
+from assemblyzero.speedrun.successes import (  # noqa: E402  (#2191)
+    completed_on,
+    describe,
+    record_success,
+    redraw_phrase,
+)
 from assemblyzero.workflows.requirements.form_gate import (  # noqa: E402  (#2227)
     check_form_at_preflight,
 )
@@ -990,6 +996,11 @@ def detached_argv(
     # the detached run re-refuses on the very gate the operator waived.
     if getattr(args, "override_prereqs", False):
         argv.append("--override-prereqs")
+    # #2191: a confirmed redraw must ride too, or the detached run re-refuses
+    # on the gate the operator just typed a phrase to clear -- and refuses
+    # non-interactively, where nothing can answer it.
+    if getattr(args, "redraw_completed", False):
+        argv.append("--redraw-completed")
     # #2193: same for a demanded full redraw -- the detached run must not
     # resume the very state the operator asked to discard.
     if getattr(args, "fresh", False):
@@ -1944,6 +1955,100 @@ def write_prereqs(repo_root: Path, blocking: list[dict], note: str) -> bool:
     return True
 
 
+def _latest_run_tag(log_dir: Path, issue: int) -> str:
+    """This issue's newest run tag, read off the log triplet it just wrote.
+
+    roll_issue mints the tag internally and returns only an exit code -- its
+    call shape is pinned by test stubs (bare *args lambdas and fixed five-arg
+    defs), so the tag is recovered here rather than threaded back. Absence is
+    reported as absence, never guessed: a wrong tag sends a human to read the
+    wrong log.
+    """
+    try:
+        logs = sorted(Path(log_dir).glob(f"run-issue{issue}-*.log"))
+    except OSError:
+        return ""
+    return logs[-1].stem if logs else ""
+
+
+def check_already_completed(
+    repo_root: Path, issues: list[int], override: bool, *, stream=None
+) -> int | None:
+    """Refuse to redraw what this arc already finished (#2191).
+
+    Returns None to proceed, 91 to refuse.
+
+    The 2026-08-10 near-miss: issue #4 completed end to end, its LLD and
+    implementation PRs merged into `hardening-run-17`, and the operator's next
+    launch included `--issue 4` again out of habit. Nothing objected -- the
+    launcher would have reset #4's branches and redrawn an issue whose
+    implementation was already on the arc. An agent reading the log caught it.
+
+    Arc-scoped: a success on one arc must not nag a deliberate re-run campaign
+    on the next one. A gate that fires on a new arc is a false alarm, and this
+    one has to be believed the day it fires for real.
+    """
+    arc = resolve_attempt_branch(repo_root)
+    if not arc:
+        # No arc resolved means no scope to check against. The ledger is a
+        # cache; its absence of opinion must never refuse a launch.
+        return None
+
+    hits = [
+        entry for entry in (
+            completed_on(repo_root, issue, arc) for issue in issues or []
+        ) if entry
+    ]
+    if not hits:
+        return None
+
+    print()
+    print("=" * 70)
+    print("ALREADY ROLLED TO SUCCESS ON THIS ARC")
+    print("=" * 70)
+    for entry in hits:
+        print(f"  {describe(entry)}")
+    print(
+        "\n  Rolling these again resets their branches and redraws work this "
+        "arc has\n  already finished and merged. That is occasionally what you "
+        "want, and it is\n  never what you want by accident."
+    )
+
+    if override:
+        print("\n  --redraw-completed given: redrawing deliberately.")
+        return None
+
+    # A phrase, never y/n (standard 0017 Danger Zone): a single keypress is
+    # what an auto-answering wrapper blows through.
+    if len(hits) == 1:
+        expected = redraw_phrase(hits[0]["issue"])
+    else:
+        expected = " ".join(redraw_phrase(e["issue"]) for e in hits)
+
+    print("\n  To redraw anyway, type this EXACTLY:")
+    print(f"    {expected}")
+    print("  Anything else refuses. Non-interactive callers pass "
+          "--redraw-completed.")
+
+    try:
+        got = (stream.readline() if stream is not None else input("> ")).strip()
+    except (EOFError, OSError):
+        # Non-TTY without the flag: refuse rather than hang forever waiting
+        # for input that is never coming.
+        print(
+            "\nBLOCKED: no console to confirm on. Pass --redraw-completed to "
+            "redraw deliberately."
+        )
+        return 91
+
+    if got != expected:
+        print("\nBLOCKED: that is not the confirmation phrase. Nothing was spent.")
+        return 91
+
+    print("\n  Confirmed. Redrawing.")
+    return None
+
+
 def check_prereqs(repo_root: Path, override: bool) -> int | None:
     """The previous run's unresolved questions gate this launch (#2167).
 
@@ -2234,6 +2339,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--redraw-completed", action="store_true",
+        help=(
+            "Redraw an issue this arc has already rolled to success (#2191). "
+            "Without it an interactive launch demands a typed 'REDRAW <N>' and "
+            "a non-interactive one refuses, so a habit-typed issue number "
+            "cannot silently redo finished work."
+        ),
+    )
+    parser.add_argument(
         "--fresh", action="store_true",
         help=(
             "Redraw every stage from scratch, ignoring any resumable state "
@@ -2390,6 +2504,14 @@ def main(argv: list[str] | None = None) -> int:
         print(form_text)
     if form_refuses:
         return 91
+
+    # #2191: refuse to redraw an issue this arc has already rolled to success.
+    # Here, before the detach, while the operator's console can still answer.
+    completed_refusal = check_already_completed(
+        repo_root, args.issue or [], args.redraw_completed,
+    )
+    if completed_refusal is not None:
+        return completed_refusal
 
     if args.detach:
         code = launch_detached(args, extra, repo_root, az_root, log_dir)
@@ -2566,6 +2688,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return code
             rolled.append(issue)
+            # #2191: rc=0 is the authoritative local outcome, so record it
+            # where the next launch's gate can read it before anything is
+            # spent. Never raises: the roll has already succeeded.
+            record_success(
+                repo_root, issue=issue,
+                base_branch=resolve_attempt_branch(repo_root) or "",
+                run_tag=_latest_run_tag(log_dir, issue),
+            )
             time.sleep(1)
 
         if blocked:

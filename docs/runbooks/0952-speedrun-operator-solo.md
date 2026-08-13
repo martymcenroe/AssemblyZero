@@ -47,6 +47,7 @@ than transcribed:
 | `--assemblyzero-root` | checkout that owns `orchestrate.py`. Default: the tool's own repo |
 | `--detach-stop` | stop a detached roll and everything it spawned |
 | `--override-prereqs` | launch even though the previous run's unresolved questions are still open (#2167) — runs anyway once; the next launch re-checks |
+| `--redraw-completed` | redraw an issue this arc has **already rolled to success** (#2191). Without it, an interactive launch demands a typed `REDRAW <N>` and a non-interactive one refuses — so an issue number typed out of habit cannot silently redo work already merged into the arc. Scoped to the current arc: a new base branch starts with an empty slate |
 | `--fresh` | redraw every stage from scratch (#2193). Without it, a launch that finds a prior non-conflict failure with the LLD already passed resumes from the failed stage — the passed stages are reused, not paid for again. A conflict-blocked issue always redraws fresh: the ruling edited the issue text, and the preserved draft embeds the pre-ruling wording |
 | `--narration` | starting view level: `terse`, `verbose`, `tutorial`, or `quiz` (#2159/#2160/#2161 — tutorial annotates each node and gate; quiz pauses the DISPLAY at transitions for multiple choice generated from the graph, roll unaffected). Press `v` in the console to toggle live; the log on disk is always complete |
 
