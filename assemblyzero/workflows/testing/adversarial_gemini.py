@@ -10,6 +10,8 @@ provider infrastructure.
 import logging
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
+
 from assemblyzero.core.errors import (
     RateLimitError,
     TimeoutError_ as TypedTimeoutError,
@@ -203,6 +205,16 @@ class AdversarialGeminiClient:
             ) from e
         except TypeError:
             raise  # Unsupported provider type — propagate as-is
+        except PydanticValidationError:
+            # A validation error is raised locally, before anything is sent, so
+            # it can only mean this repo built the request wrong. Classifying it
+            # below would rename it to a timeout with `status=None` -- and both
+            # consumers treat a timeout as "Gemini was unavailable": the
+            # integration test skips, and the adversarial node records a benign
+            # skip reason and proceeds. That is a false all-clear, and it hid
+            # #2281 (an invalid `timeout` kwarg) through every roll that ran
+            # this node. Propagate as-is, like the TypeError above (#2282).
+            raise
         except Exception as e:
             # Issue #546: Classify through the typed error hierarchy
             classified = classify_gemini_error(e)
@@ -255,7 +267,16 @@ class AdversarialGeminiClient:
                 config={
                     "system_instruction": system_prompt,
                     "response_mime_type": "application/json",
-                    "timeout": timeout,
+                    # `timeout` is NOT a GenerateContentConfig field -- the model
+                    # forbids extras, so passing it there raised a pydantic
+                    # ValidationError before any request was sent, and every
+                    # adversarial invocation failed locally (#2281). The
+                    # per-request timeout lives in http_options, in
+                    # MILLISECONDS: the SDK documents the field as "Timeout for
+                    # the request in milliseconds." A test pins the unit,
+                    # because a version bump that changed it to seconds would
+                    # otherwise silently make this a 2-minute-to-120ms cut.
+                    "http_options": {"timeout": timeout * 1000},
                 },
             )
             text = response.text if hasattr(response, "text") else str(response)
