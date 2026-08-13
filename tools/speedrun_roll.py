@@ -2205,8 +2205,31 @@ def _blocking_questions(repo_root, since: str) -> tuple[list[dict], str | None]:
     return merge_questions(live or [], recorded), gh_error
 
 
+def _requirements_unverified_lines(repo_root, since: str) -> list[str]:
+    """The REQUIREMENTS UNVERIFIED banner for this batch, or no lines (#2290).
+
+    Read from the ledger rather than from run state: the gate executes inside a
+    child process, so its warning cannot otherwise reach this block. Never
+    raises -- the verdict must print even if the ledger cannot be read.
+    """
+    try:
+        from assemblyzero.speedrun.requirements_status import (
+            format_banner,
+            read_unverified,
+        )
+
+        return format_banner(read_unverified(repo_root, since=since))
+    except Exception:  # noqa: BLE001 - the verdict always prints
+        return []
+
+
 def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, since=""):
     names = ", ".join(f"#{i}" for i in rolled) or "none"
+    # #2290: computed before the branches so no verdict path can omit it. The
+    # SUCCEEDED branch is the one that matters -- a roll whose requirements were
+    # never checked used to print an unqualified success and read exactly like
+    # a roll that had been checked and was clean.
+    unverified = _requirements_unverified_lines(repo_root, since)
     print()
     if blocked:
         blocked_names = ", ".join(f"#{i}" for i in blocked)
@@ -2286,6 +2309,12 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, sin
             "  Next step: hand an agent runbook 0952 section Inspect; the "
             "events logs say where it died."
         )
+
+    # #2290: last, so it is the final thing on screen -- the operator's eye
+    # lands at the bottom, which is the same reason the verdict itself moved
+    # here (#2165). Prints on every branch, success included.
+    for line in unverified:
+        print(line)
 
 
 def main(argv: list[str] | None = None) -> int:

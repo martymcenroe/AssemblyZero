@@ -9,9 +9,14 @@ defect in an edit is found while the editor still holds the context.
     poetry run python tools/check_requirements.py \\
         --repo /c/Users/mcwiz/Projects/boostgauge --issue 7
 
-The call costs one drafter-class model request (roughly 200 seconds). What it
-saves is the launch around it: the codebase-analysis node, the blocked
-launcher, the filed issues, and the operator round-trip.
+The call costs one drafter-class model request. Measured on boostgauge #7 --
+two decision tables, 21 acceptance criteria -- it took 294 seconds; the budget
+is 600 with one retry on a timeout, so allow up to about twenty minutes in the
+worst case before concluding it has hung (#2290). It runs the SAME node the
+roll runs, with the same bound, so a clean pass here means what it means there.
+
+What the call saves is the launch around it: the codebase-analysis node, the
+blocked launcher, the filed issues, and the operator round-trip.
 
 Exit codes:
     0  clean    -- the gate ran and found no contradictions

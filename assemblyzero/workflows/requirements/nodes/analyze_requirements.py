@@ -28,6 +28,12 @@ Fail-open by design: this gate is protective, not load-bearing. If the
 analysis call itself fails (provider storm, parse noise), the workflow
 proceeds to drafting with a printed warning rather than dying in a
 pre-flight check.
+
+Failing open is not the same as failing silently (#2290). Every path that
+proceeds without a verdict records that fact where the roll's verdict block
+and the operator summary will print it, because "requirements were not
+checked" and "requirements were checked and were clean" are different roll
+outcomes that used to look identical from the outside.
 """
 
 from __future__ import annotations
@@ -36,6 +42,20 @@ import json
 from typing import Any
 
 REQUIREMENTS_CONFLICT_MARKER = "REQUIREMENTS CONFLICT:"
+
+#: Wall-clock budget for the single analysis call.
+#:
+#: #2290, operator ruling. The previous bound was the provider default of 300s.
+#: Measured on boostgauge #7 -- two decision tables, 21 acceptance criteria,
+#: near the top of the size distribution this gate sees -- the same call timed
+#: out at 300s on one attempt and returned a real CONFLICT verdict in 294s on
+#: the next. Six seconds of margin, on opposite sides of the bound, minutes
+#: apart, with a healthy transport throughout.
+#:
+#: 600s is sized to clear that measurement with room for a longer issue rather
+#: than to sit just above it. Duration scales with issue size and the bound is a
+#: constant, so the next issue with three tables must not re-open this.
+REQUIREMENTS_GATE_TIMEOUT_SECONDS = 600
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a requirements analyst performing a pre-flight consistency check \
@@ -125,6 +145,66 @@ def _parse_analysis(raw: str) -> dict | None:
     return parsed
 
 
+def _is_timeout(result: Any) -> bool:
+    """Did this call fail by exceeding its budget, as opposed to any other way?
+
+    Keyed off the message the provider layer writes ("claude -p timed out after
+    Ns", "agy spawn timed out") rather than an exception type, because the
+    provider returns a result object instead of raising.
+    """
+    if getattr(result, "success", False):
+        return False
+    return "timed out" in (getattr(result, "error_message", "") or "").lower()
+
+
+def _provider_storm_active() -> bool:
+    """Is the provider in a storm right now? False if the counter is unavailable.
+
+    Unavailable means we cannot prove a storm, and the retry is the cheaper
+    error in that direction: one extra call, versus never retrying because a
+    telemetry import failed.
+    """
+    try:
+        from assemblyzero.core import provider_storm
+
+        return bool(provider_storm.is_storm())
+    except Exception:  # noqa: BLE001 - a storm probe must not break the gate
+        return False
+
+
+def _record_unverified(state: dict, reason: str) -> None:
+    """Record a fail-open so the roll can say so. Never raises (#2290).
+
+    Recorded on EVERY path that proceeds without a verdict, not only on the
+    exhausted retry: an unparseable response and an invalid provider leave the
+    requirements exactly as unchecked as a timeout does, and the operator's
+    question is "were they checked", not "which way did the check fail".
+
+    Not recorded for the standalone pre-check, which is not a roll: it reports
+    its own failure with a non-zero exit and its own report, and a record
+    written there would sit in the ledger waiting to mislabel some later roll.
+    """
+    if state.get("standalone_precheck"):
+        return
+
+    try:
+        from assemblyzero.speedrun.must_resolve import run_context
+        from assemblyzero.speedrun.requirements_status import record_unverified
+
+        try:
+            run_id, _ = run_context()
+        except Exception:  # noqa: BLE001
+            run_id = ""
+        record_unverified(
+            state.get("target_repo") or ".",
+            issue=int(state.get("issue_number") or 0) or None,
+            reason=reason,
+            run_id=run_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - never costs the run
+        print(f"  [N0c] WARNING: could not record the unverified state: {exc}")
+
+
 def analyze_requirements(state: dict) -> dict[str, Any]:
     """N0c node body. Returns {} to proceed, or error_message to halt."""
     if state.get("config_mock_mode"):
@@ -145,6 +225,7 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         provider = get_provider(drafter_spec)
     except ValueError as e:
         print(f"  [N0c] WARNING: analysis skipped (invalid provider: {e})")
+        _record_unverified(state, f"invalid provider '{drafter_spec}': {e}")
         return {}
 
     schema_kwargs: dict[str, Any] = {}
@@ -154,23 +235,40 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         schema_kwargs["json_schema"] = ANALYSIS_SCHEMA
 
     content = f"# Issue: {issue_title}\n\n{issue_body}"
-    result = provider.invoke(
-        system_prompt=ANALYSIS_SYSTEM_PROMPT,
-        content=content,
-        **schema_kwargs,
-    )
+
+    def _invoke():
+        return provider.invoke(
+            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            content=content,
+            timeout_seconds=REQUIREMENTS_GATE_TIMEOUT_SECONDS,
+            **schema_kwargs,
+        )
+
+    result = _invoke()
+
+    # One retry, and only for a timeout on a healthy transport (#2290). A
+    # storm is the condition fail-open exists for -- retrying into it burns
+    # another full budget to reach the same wall, which is what the storm
+    # counter was built to stop (#2086). A non-timeout failure is not retried
+    # either: it failed for a reason a second identical call will not change.
+    if _is_timeout(result) and not _provider_storm_active():
+        print(
+            f"  [N0c] analysis timed out at {REQUIREMENTS_GATE_TIMEOUT_SECONDS}s "
+            "and the transport is healthy -- retrying once."
+        )
+        result = _invoke()
 
     # Fail-open: a dead analysis call must not kill the roll (#1899).
     if not result.success or not result.response:
-        print(
-            f"  [N0c] WARNING: analysis unavailable "
-            f"({result.error_message or 'empty response'}); proceeding."
-        )
+        reason = result.error_message or "empty response"
+        print(f"  [N0c] WARNING: analysis unavailable ({reason}); proceeding.")
+        _record_unverified(state, f"analysis unavailable: {reason}")
         return {}
 
     parsed = _parse_analysis(result.response)
     if parsed is None:
         print("  [N0c] WARNING: analysis response unparseable; proceeding.")
+        _record_unverified(state, "analysis response was unparseable")
         return {}
 
     conflicts = parsed.get("conflicts") or []
