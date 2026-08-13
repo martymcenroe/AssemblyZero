@@ -8,9 +8,17 @@ No API credentials are required.
 
 Note: The mock:draft provider returns a minimal document that does NOT
 pass the LLD mechanical validation (N1.5). This is expected — the tests
-verify that the graph correctly loops (N1 → N1.5 → N1) and eventually
-hits the recursion limit. This exercises the real graph wiring, error
-handling, and routing logic.
+verify that the graph correctly loops (N1 → N_ponder → N1.5 → N1) until
+the iteration cap, then terminates through HALT. This exercises the real
+graph wiring, error handling, and routing logic.
+
+The terminal state is a NAMED HALT, not a bare recursion error (#2280).
+Under #2245 the step budget is derived from the loop caps, and under #2197
+a loop that reaches its cap halts with a message naming the document and
+the unfixed errors. A `GraphRecursionError` here means the budget is wrong,
+not that the loop worked — this file previously asserted the opposite, and
+the harness capped the run at five super-steps so N1.5 was never reached at
+all.
 
 Run with:
     poetry run pytest tests/e2e/test_lld_workflow_mock.py -v -m e2e
@@ -28,7 +36,7 @@ from tests.e2e.conftest import API_KEY_ENV_VARS, run_workflow_to_completion
 
 # ------------------------------------------------------------------
 # Expected nodes in the LLD workflow graph path.
-# Mock mode: N0 → N1 → N1.5 (fail) → N1 → N1.5 (fail) → ... recursion limit
+# Mock mode: N0 → N0b → N0c → N1 → N_ponder → N1.5 (fail) → N1 → ... → HALT
 # ------------------------------------------------------------------
 
 
@@ -38,25 +46,39 @@ def test_lld_workflow_mock_graph_executes(
     mock_workspace: Path,
     mock_workflow_config: dict,
 ) -> None:
-    """E2E: LLD workflow graph starts execution and visits nodes. (REQ-1)
+    """E2E: LLD workflow graph runs the whole mock path and terminates. (REQ-1)
 
-    T010: Verifies the graph invokes nodes and returns a result.
-    The mock draft fails mechanical validation, so the graph loops
-    until recursion limit — this is expected behavior.
+    T010: Verifies the graph invokes nodes and returns a result. The mock
+    draft fails mechanical validation, so the graph loops to the iteration
+    cap and then HALTs.
+
+    This test asserted only that N0 and N1 were reached until #2280. Those
+    two assertions were satisfied by a truncated five-node run that died of
+    GraphRecursionError before validation, so the test passed for two years
+    of graph changes without noticing that the path it names was never taken.
+    It now asserts the terminal node, which is what makes it non-vacuous.
     """
     result = run_workflow_to_completion(
         config=mock_workflow_config,
         workspace=mock_workspace,
     )
 
-    # The graph executes but hits recursion limit because mock draft
-    # doesn't pass mechanical validation — this is expected
-    assert len(result["nodes_visited"]) > 0, "No nodes were visited"
-    assert "N0_load_input" in result["nodes_visited"], (
-        f"N0_load_input not visited. Nodes: {result['nodes_visited']}"
+    nodes = result["nodes_visited"]
+
+    assert len(nodes) > 0, "No nodes were visited"
+    for expected in ("N0_load_input", "N1_generate_draft", "N1_5_validate_mechanical"):
+        assert expected in nodes, f"{expected} not visited. Nodes: {nodes}"
+
+    # The run must reach a stop condition the graph itself names. A budget
+    # too small to reach one is the #2280 defect, and it presents as a
+    # truncated node list with no terminal node rather than as an error here.
+    assert nodes[-1] == "HALT", (
+        f"the run did not terminate through HALT — last node was {nodes[-1]!r}. "
+        f"A GraphRecursionError means the derived step budget is too small, "
+        f"not that the loop behaved. Nodes: {nodes}"
     )
-    assert "N1_generate_draft" in result["nodes_visited"], (
-        f"N1_generate_draft not visited. Nodes: {result['nodes_visited']}"
+    assert "Recursion limit" not in str(result["final_state"].get("error_message", "")), (
+        f"the run died on the step budget instead of halting: {result['final_state']}"
     )
 
 
