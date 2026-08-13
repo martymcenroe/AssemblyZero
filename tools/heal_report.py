@@ -23,7 +23,11 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from assemblyzero.speedrun.healing import heals_path, read_heals  # noqa: E402
+from assemblyzero.speedrun.healing import (  # noqa: E402
+    heals_path,
+    is_per_roll,
+    read_heals,
+)
 
 
 def render_report(records: list[dict], recurrence: int) -> str:
@@ -52,17 +56,34 @@ def render_report(records: list[dict], recurrence: int) -> str:
 
     # Cross-run recurrence: the same category+target healed again and again
     # is a defect wearing a bandage.
+    #
+    # ...unless the target is merely a stable LABEL for an object each roll
+    # re-creates, which is the ordinary condition of a hardening campaign that
+    # rolls one issue repeatedly (#2269). `is_per_roll` carries that rule and
+    # states its evidence; the two tiers are instance-first, category-second.
+    # Groups it sets aside are reported below rather than dropped, so the
+    # reader can see what was judged and disagree.
     runs_by_key: dict[tuple, set] = defaultdict(set)
     detail_by_key: dict[tuple, str] = {}
+    instances_by_key: dict[tuple, list[str]] = defaultdict(list)
     for r in records:
         key = (r.get("category"), r.get("target"))
         runs_by_key[key].add(r.get("run_tag") or r.get("ts"))
         detail_by_key[key] = r.get("detail", "")
+        instances_by_key[key].append(r.get("instance", "") or "")
 
-    stubs = [
+    recurring = [
         (key, runs)
         for key, runs in runs_by_key.items()
         if len(runs) >= recurrence
+    ]
+    stubs = [
+        (key, runs) for key, runs in recurring
+        if not is_per_roll(key[0], instances_by_key[key])
+    ]
+    set_aside = [
+        (key, runs) for key, runs in recurring
+        if is_per_roll(key[0], instances_by_key[key])
     ]
     if stubs:
         lines.append(
@@ -88,6 +109,26 @@ def render_report(records: list[dict], recurrence: int) -> str:
             f"No heal recurs across {recurrence}+ runs -- nothing proposes "
             "an issue."
         )
+
+    # Never a silent cap: a group held back is named, with the reason, so the
+    # judgement is auditable and a wrong call is visible rather than absent.
+    if set_aside:
+        lines.append("")
+        lines.append(
+            f"Set aside as per-roll artifacts (recurred across >= {recurrence} "
+            "runs, but each firing addressed a fresh object -- see is_per_roll "
+            "in assemblyzero/speedrun/healing.py):"
+        )
+        for (category, target), runs in sorted(set_aside, key=lambda s: -len(s[1])):
+            known = [i for i in instances_by_key[(category, target)] if i]
+            basis = (
+                f"{len(set(known))} distinct recorded instances"
+                if len(known) >= 2
+                else f"category '{category}' heals the previous roll's leavings"
+            )
+            lines.append(
+                f"  {category}: '{target}' in {len(runs)} runs -- {basis}"
+            )
     return "\n".join(lines)
 
 

@@ -20,6 +20,7 @@ import speedrun_roll as sr  # noqa: E402
 
 from assemblyzero.speedrun.healing import (  # noqa: E402
     heals_path,
+    is_per_roll,
     read_heals,
     record_heal,
 )
@@ -92,7 +93,15 @@ class TestReport:
     def test_recurrence_across_three_runs_proposes_an_issue_stub(
         self, tmp_path, capsys
     ):
-        self._seed(tmp_path, ["run-a", "run-b", "run-c"])
+        # A category that can genuinely keep finding the same stale object.
+        # This fixture used to use `reset`, which #2269 reclassified as
+        # per-roll -- that exact fixture is the #2242 false alarm, and it now
+        # has its own test below.
+        for tag in ("run-a", "run-b", "run-c"):
+            record_heal(
+                tmp_path, "janitor", "stale-lockfile.json", "partial",
+                detail="could not remove", run_tag=tag,
+            )
 
         heal_report.main(["--repo", str(tmp_path)])
 
@@ -203,3 +212,142 @@ class TestEvidenceExemption:
         machinery, operator = classify_dirt(repo)
         assert machinery == [] and operator == []
         assert untracked_files(repo) == []
+
+
+class TestPerRollArtifactVsRecurringDefect:
+    """A stable target string is not a recurring object (#2269).
+
+    The two worked examples are the boostgauge signatures that were root-caused
+    to correct-by-design behaviour in #2242 and #2243. Both must stop proposing
+    an issue, and a genuine recurrence must keep proposing one -- suppressing a
+    real defect would be a worse failure than the noise it replaces.
+    """
+
+    def _run(self, tmp_path, capsys, recurrence=3):
+        heal_report.main(["--repo", str(tmp_path), "--recurrence", str(recurrence)])
+        return capsys.readouterr().out
+
+    # -- the two worked examples ------------------------------------------
+    def test_the_2242_signature_proposes_nothing(self, tmp_path, capsys):
+        """reset healed '#1' in 9 distinct runs -- nine DIFFERENT LLD PRs."""
+        for n in range(9):
+            record_heal(tmp_path, "reset", "#1", "healed",
+                        detail="base clean after self-heal", run_tag=f"run-{n}")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "TITLE:" not in out, (
+            "the #2242 signature still proposes an issue -- this is the false "
+            "alarm #2269 exists to remove"
+        )
+        assert "Set aside as per-roll artifacts" in out
+        assert "reset: '#1' in 9 runs" in out
+
+    def test_the_2243_signature_proposes_nothing(self, tmp_path, capsys):
+        """restore-reconcile healed a per-issue LLD path in 5 distinct runs."""
+        for n in range(5):
+            record_heal(
+                tmp_path, "restore-reconcile", "docs/lld/active/LLD-001.md",
+                "healed", detail="preserved-and-cleared", run_tag=f"run-{n}",
+            )
+
+        out = self._run(tmp_path, capsys)
+
+        assert "TITLE:" not in out
+        assert "restore-reconcile: 'docs/lld/active/LLD-001.md' in 5 runs" in out
+
+    # -- the case the report was built for, which must survive -------------
+    def test_a_genuine_recurrence_still_proposes_an_issue(self, tmp_path, capsys):
+        for n in range(4):
+            record_heal(tmp_path, "sweep", "orphaned-worktree", "partial",
+                        detail="could not remove", run_tag=f"run-{n}")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "TITLE: fix: the machinery keeps healing" in out
+        assert "'orphaned-worktree' (sweep)" in out
+
+    # -- instance beats category, in both directions -----------------------
+    def test_a_repeated_instance_fires_even_for_a_per_roll_category(
+        self, tmp_path, capsys
+    ):
+        """The same object healed run after run IS a defect, whatever the
+        category says. Recorded fact outranks the heuristic."""
+        for n in range(4):
+            record_heal(tmp_path, "reset", "#1", "partial",
+                        detail="same PR again", run_tag=f"run-{n}",
+                        instance="PR-244")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "TITLE: fix: the machinery keeps healing" in out, (
+            "a reset that keeps failing on the SAME pull request is a real "
+            "recurrence and must not be set aside by its category"
+        )
+
+    def test_distinct_instances_are_per_roll_even_for_a_recurring_category(
+        self, tmp_path, capsys
+    ):
+        for n in range(4):
+            record_heal(tmp_path, "janitor", "docs/lld/active/LLD-001.md",
+                        "healed", run_tag=f"run-{n}", instance=f"emission-{n}")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "TITLE:" not in out
+        assert "4 distinct recorded instances" in out
+
+    # -- nothing is hidden -------------------------------------------------
+    def test_a_set_aside_group_is_still_named_with_its_reason(
+        self, tmp_path, capsys
+    ):
+        for n in range(3):
+            record_heal(tmp_path, "reset", "#7", "healed", run_tag=f"run-{n}")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "Set aside as per-roll artifacts" in out
+        assert "heals the previous roll's leavings" in out
+        assert "is_per_roll" in out, (
+            "the report must point at where the rule lives, so a reader who "
+            "disagrees knows what to argue with"
+        )
+
+    def test_below_threshold_is_not_reported_as_set_aside(self, tmp_path, capsys):
+        """Set-aside is about groups that DID recur. A group under the
+        threshold was never a candidate and must not appear."""
+        for n in range(2):
+            record_heal(tmp_path, "reset", "#9", "healed", run_tag=f"run-{n}")
+
+        out = self._run(tmp_path, capsys)
+
+        assert "Set aside" not in out
+        assert "nothing proposes an issue" in out
+
+
+class TestIsPerRollDirectly:
+    """The rule itself, away from the report's rendering."""
+
+    def test_no_instances_falls_back_to_category(self):
+        assert is_per_roll("reset", []) is True
+        assert is_per_roll("restore-reconcile", []) is True
+        assert is_per_roll("janitor", []) is False
+        assert is_per_roll("sweep", []) is False
+
+    def test_one_known_instance_is_not_enough_to_compare(self):
+        # A single data point cannot show sameness or difference.
+        assert is_per_roll("janitor", ["only-one"]) is False
+        assert is_per_roll("reset", ["only-one"]) is True
+
+    def test_blank_instances_are_not_treated_as_a_shared_object(self):
+        """"Not recorded" is not evidence of sameness -- otherwise every
+        legacy record would collapse into one instance and read as a
+        recurrence."""
+        assert is_per_roll("reset", ["", "", ""]) is True
+        assert is_per_roll("janitor", ["", "", ""]) is False
+
+    def test_all_distinct_is_per_roll(self):
+        assert is_per_roll("janitor", ["a", "b", "c"]) is True
+
+    def test_any_repeat_is_a_recurrence(self):
+        assert is_per_roll("reset", ["a", "b", "a"]) is False
