@@ -100,9 +100,11 @@ def test_spec_functions_are_extracted_with_bodies(spec: str) -> None:
 
 def test_scaffold_emits_23_not_36(spec: str, lld: str) -> None:
     """The relaunch gate: the emitted suite is the spec's, not the tables'."""
-    # What the table path yields, for contrast -- this is the 36 that shipped.
+    # What the table path yields, for contrast. 36 shipped; it is 35 since
+    # #2318 stopped the heading row leaking in as `test_id`. Either way the
+    # table path cannot reach the spec's 23.
     table_scenarios = parse_test_scenarios(extract_test_plan_section(lld))
-    assert len(table_scenarios) == 36
+    assert len(table_scenarios) == 35
 
     suite = extract_spec_test_functions(spec)
     content = generate_spec_test_file_content(
