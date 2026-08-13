@@ -142,6 +142,10 @@ def run_workflow_to_completion(
     """
     from assemblyzero.workflows.requirements.graph import create_requirements_graph
     from assemblyzero.workflows.requirements.state import create_initial_state
+    from assemblyzero.workflows.requirements.step_budget import (
+        DEFAULT_MAX_ITERATIONS,
+        recursion_limit,
+    )
 
     nodes_visited: list[str] = []
     start_time = time.monotonic()
@@ -154,9 +158,20 @@ def run_workflow_to_completion(
         # Create initial state using the proper factory function
         initial_state = create_initial_state(**config)
 
-        # Execute with streaming to capture node visit order
+        # Execute with streaming to capture node visit order.
+        #
+        # The step budget is DERIVED, never hand-rolled (#2280). `max_iterations`
+        # is a loop cap -- how many revise rounds a loop may take -- while
+        # `recursion_limit` is the super-step budget for the whole run. Setting
+        # the second from the first capped this harness at five node executions,
+        # which is fewer than the nine a clean pass costs, so every e2e mock run
+        # died of GraphRecursionError before mechanical validation was reached.
+        # `recursion_limit()` is the same single source the production callers
+        # use (#2245), so a node added to the graph re-sizes this automatically.
         thread_config = {
-            "recursion_limit": config.get("max_iterations", 20),
+            "recursion_limit": recursion_limit(
+                max_iterations=config.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+            ),
         }
 
         final_state = {}
