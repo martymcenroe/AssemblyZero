@@ -146,6 +146,11 @@ class TestingWorkflowState(TypedDict, total=False):
     lld_content: str
     test_plan_section: str
     test_scenarios: list[TestScenario]
+    #: #2316: executable test functions lifted verbatim from the spec's
+    #: Section 10 code block: {"imports": str, "functions": [{name, source}]}.
+    #: Empty when the spec ships none, which routes the scaffolder back to
+    #: generating from scenario metadata.
+    spec_test_suite: dict
     detected_test_types: list[str]
     coverage_target: int
     requirements: list[str]

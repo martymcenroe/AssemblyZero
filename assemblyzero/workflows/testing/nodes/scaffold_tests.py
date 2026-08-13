@@ -618,6 +618,60 @@ def generate_test_file_content(
     return content
 
 
+def generate_spec_test_file_content(
+    spec_test_suite: dict,
+    issue_number: int,
+    files_to_modify: list[dict] | None = None,
+) -> str:
+    """Emit the spec's executable test functions verbatim (#2316).
+
+    The spec author already wrote runnable tests with real assertions. The
+    scaffolder's job here is transcription, not generation: anything it
+    "improves" is a place the emitted suite can drift from the contract the
+    spec set.
+
+    The only additions are a provenance docstring and, when the spec's own
+    import block does not already import the implementation module, the TDD
+    red-phase import that makes the suite fail before implementation exists.
+    """
+    impl_module = _extract_impl_module(files_to_modify)
+    imports = (spec_test_suite.get("imports") or "").strip()
+    functions = spec_test_suite.get("functions") or []
+
+    lines = [
+        f'"""Test file for Issue #{issue_number}.',
+        "",
+        "Emitted by AssemblyZero from the implementation spec's Section 10",
+        "test functions. Bodies are the spec's own, verbatim (#2316).",
+        '"""',
+        "",
+    ]
+
+    if imports:
+        lines.append(imports)
+        lines.append("")
+
+    # The red-phase trigger, only when the spec's imports do not already
+    # reach the implementation module. A duplicate import is harmless but
+    # noisy, and a missing one costs the RED signal entirely.
+    if impl_module and f"import {impl_module}" not in imports and (
+        f"from {impl_module}" not in imports
+    ):
+        lines.extend([
+            "# TDD: this import fails until the implementation exists (RED phase)",
+            f"from {impl_module} import *  # noqa: F401, F403",
+            "",
+        ])
+
+    lines.append("")
+    for fn in functions:
+        lines.append(fn["source"].rstrip())
+        lines.append("")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _generate_test_function(
     scenario: TestScenario,
     issue_number: int,
@@ -919,7 +973,20 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
         }
     # --------------------------------------------------------------------------
 
-    print(f"    Scaffolding {len(test_scenarios)} test scenarios")
+    # #2316: when the spec ships executable test functions they ARE the
+    # suite. Emitting them verbatim is what makes the TDD loop able to
+    # converge at all — the generated-stub path below produces
+    # `assert False` bodies that no implementation can satisfy.
+    spec_test_suite = state.get("spec_test_suite") or {}
+    use_spec_bodies = bool(spec_test_suite.get("functions"))
+
+    if use_spec_bodies:
+        print(
+            f"    Emitting {len(spec_test_suite['functions'])} executable test "
+            f"functions from the spec, verbatim"
+        )
+    else:
+        print(f"    Scaffolding {len(test_scenarios)} test scenarios")
 
     # Determine test file path
     test_file_path = determine_test_file_path(issue_number, test_scenarios, repo_root)
@@ -927,13 +994,20 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Generate test file content
     module_name = f"issue_{issue_number}"
-    content = generate_test_file_content(
-        test_scenarios, module_name, issue_number, files_to_modify
-    )
+    if use_spec_bodies:
+        content = generate_spec_test_file_content(
+            spec_test_suite, issue_number, files_to_modify
+        )
+        emitted = len(spec_test_suite["functions"])
+    else:
+        content = generate_test_file_content(
+            test_scenarios, module_name, issue_number, files_to_modify
+        )
+        emitted = len(test_scenarios)
 
     # Write test file
     test_file_path.write_text(content, encoding="utf-8")
-    print(f"    Generated {len(test_scenarios)} tests")
+    print(f"    Generated {emitted} tests")
 
     # Save to audit trail
     audit_dir = Path(state.get("audit_dir", ""))
@@ -951,7 +1025,7 @@ def scaffold_tests(state: TestingWorkflowState) -> dict[str, Any]:
         event="tests_scaffolded",
         details={
             "test_file": str(test_file_path),
-            "test_count": len(test_scenarios),
+            "test_count": emitted,
         },
     )
 

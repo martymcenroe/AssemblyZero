@@ -136,6 +136,101 @@ def extract_test_plan_section(lld_content: str) -> str:
     raise WorkflowParsingError("Expected: ## 10. Test Mapping")
 
 
+def extract_spec_test_functions(spec_content: str) -> dict[str, Any]:
+    """Extract EXECUTABLE test functions from the spec's Section 10 code block.
+
+    #2316: the implementation spec routinely ships complete, runnable pytest
+    functions under a Section 10 subsection (`### 10.1 Per-criterion test
+    functions`). Nothing read them. Scenarios were parsed from the LLD's
+    Section 10 TABLES instead, and the scaffolder emitted one
+    `assert False, 'TDD RED: ...'` stub per table row -- so the suite could
+    not pass no matter what the implementation did, and the TDD loop was
+    grading against a constant.
+
+    Measured on boostgauge #7 (`run-issue7-153937`): the LLD's two tables
+    yielded 36 scenarios (12 summary rows + 23 detail rows + 1 header row
+    that leaked, see #2318), while the spec carried 23 complete functions
+    with 28 real assertions. Those 23, run verbatim against the
+    implementation the pipeline discarded, pass in full.
+
+    Returns a dict with:
+        imports:   the shared import block preceding the first function
+        functions: [{"name": str, "source": str}] in file order
+
+    Returns empty lists when the spec carries no executable functions, which
+    is the signal for the caller to fall back to table-derived scenarios.
+    """
+    empty: dict[str, Any] = {"imports": "", "functions": []}
+    if not spec_content:
+        return empty
+
+    # Only look inside Section 10. A spec's other sections legitimately show
+    # example test code (Pattern References, Implementation Notes), and those
+    # are illustrations rather than the suite.
+    try:
+        section = extract_test_plan_section(spec_content)
+    except WorkflowParsingError:
+        return empty
+
+    # The suite lives in a python fence. Take the first fence that actually
+    # defines test functions -- a fence showing a config snippet is not it.
+    for fence in re.finditer(r"```(?:python|py)?\s*\n(.*?)```", section, re.DOTALL):
+        code = fence.group(1)
+        starts = [
+            m.start() for m in re.finditer(r"^def\s+test_\w+\s*\(", code, re.MULTILINE)
+        ]
+        if not starts:
+            continue
+
+        imports = code[: starts[0]].strip()
+        functions: list[dict[str, str]] = []
+        for i, start in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else len(code)
+            source = code[start:end].rstrip()
+            name_match = re.match(r"def\s+(test_\w+)\s*\(", source)
+            if not name_match:
+                continue
+            functions.append({"name": name_match.group(1), "source": source})
+
+        if functions:
+            return {"imports": imports, "functions": functions}
+
+    return empty
+
+
+def scenarios_from_spec_functions(
+    functions: list[dict[str, str]],
+) -> list[TestScenario]:
+    """Build scenario records from executable spec test functions (#2316).
+
+    The function IS the scenario -- name and body both come from the spec, so
+    nothing has to be inferred and nothing can drift between the two. The
+    description is the function's first comment or docstring line, which is
+    what the spec writes there.
+    """
+    scenarios: list[TestScenario] = []
+    for fn in functions:
+        source = fn["source"]
+        description = ""
+        doc = re.search(r'"""(.+?)"""', source, re.DOTALL)
+        if doc:
+            description = doc.group(1).strip().split("\n")[0].strip()
+        else:
+            comment = re.search(r"^\s*#\s*(.+)$", source, re.MULTILINE)
+            if comment:
+                description = comment.group(1).strip()
+
+        scenarios.append({
+            "name": fn["name"],
+            "description": description[:200],
+            "requirement_ref": _extract_requirement_ref(source),
+            "test_type": _infer_test_type(fn["name"], description),
+            "mock_needed": False,
+            "assertions": [],
+        })
+    return scenarios
+
+
 def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
     """Find the LLD file for an issue number.
 
@@ -921,9 +1016,37 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     if not test_plan_section:
         print("    [GUARD] WARNING: No Section 10 test plan found in LLD or spec")
 
-    # Parse test scenarios
-    test_scenarios = parse_test_scenarios(test_plan_section)
-    print(f"    Found {len(test_scenarios)} test scenarios")
+    # Parse test scenarios.
+    #
+    # #2316: prefer the spec's EXECUTABLE Section 10 test functions over
+    # scenarios inferred from the LLD's tables. When the spec ships runnable
+    # functions they are the contract -- names, bodies and assertions all
+    # decided by the spec author -- and the scaffolder emits them verbatim
+    # instead of one `assert False` stub per table row.
+    #
+    # The table path remains for specs that carry no executable functions,
+    # which is why this is a preference and not a replacement.
+    spec_test_suite = extract_spec_test_functions(lld_content)
+    if spec_test_suite["functions"]:
+        test_scenarios = scenarios_from_spec_functions(spec_test_suite["functions"])
+        print(
+            f"    Found {len(test_scenarios)} executable test functions in the "
+            f"spec's Section 10 — using them as the contract"
+        )
+        table_scenarios = parse_test_scenarios(test_plan_section)
+        if len(table_scenarios) != len(test_scenarios):
+            # Not an error: the tables summarise as well as enumerate, so a
+            # count above the function count is the normal shape. Printed so
+            # a reader can see WHY the scaffolded count differs from the
+            # table row count they can see in the LLD.
+            print(
+                f"    (the test-plan tables would have yielded "
+                f"{len(table_scenarios)} scenarios; the executable functions win)"
+            )
+    else:
+        spec_test_suite = {"imports": "", "functions": []}
+        test_scenarios = parse_test_scenarios(test_plan_section)
+        print(f"    Found {len(test_scenarios)} test scenarios")
 
     # Detect test types
     detected_types = detect_test_types(lld_content)
@@ -998,6 +1121,10 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "lld_content": lld_content,
         "test_plan_section": test_plan_section,
         "test_scenarios": test_scenarios,
+        # #2316: the spec's executable test bodies, for the scaffolder to emit
+        # verbatim. Empty when the spec carries none, which is the scaffolder's
+        # signal to fall back to generating from scenario metadata.
+        "spec_test_suite": spec_test_suite,
         "detected_test_types": detected_types,
         "coverage_target": coverage_target,
         "requirements": requirements,
