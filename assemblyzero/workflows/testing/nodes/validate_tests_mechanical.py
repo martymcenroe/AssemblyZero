@@ -66,6 +66,67 @@ def detect_stub_patterns(test_content: str) -> list[str]:
     return errors
 
 
+def count_stub_tests(test_content: str) -> tuple[int, int, list[str]]:
+    """Count test functions whose BODY can never pass. (#2317)
+
+    Returns (total_tests, stub_tests, stub_names).
+
+    A stub here is a test whose body does nothing but fail: an unconditional
+    `assert False`, a bare `raise NotImplementedError`, or nothing at all
+    beyond a docstring, comments and `pass`. Such a function is not a weak
+    test -- it is a test no implementation can satisfy, so a suite made
+    entirely of them cannot converge no matter what the coder writes.
+
+    Decided on the AST rather than by regex, because the line-based
+    STUB_PATTERNS above cannot tell a placeholder body from a genuine test
+    that merely mentions one of those strings (a test asserting on the text
+    "not implemented", for instance). That imprecision is part of why the
+    detection was blanket-disabled by #386 rather than made accurate.
+    """
+    try:
+        tree = ast.parse(test_content)
+    except SyntaxError:
+        return 0, 0, []
+
+    total = 0
+    stub_names: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("test_"):
+            continue
+        total += 1
+
+        meaningful = []
+        for stmt in node.body:
+            # Docstrings and bare constants carry no behaviour.
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+                continue
+            if isinstance(stmt, ast.Pass):
+                continue
+            meaningful.append(stmt)
+
+        if not meaningful:
+            stub_names.append(node.name)
+            continue
+
+        def _is_dead_end(stmt: ast.stmt) -> bool:
+            if isinstance(stmt, ast.Assert):
+                test = stmt.test
+                return isinstance(test, ast.Constant) and not test.value
+            if isinstance(stmt, ast.Raise) and stmt.exc is not None:
+                exc = stmt.exc
+                name = exc.func if isinstance(exc, ast.Call) else exc
+                return isinstance(name, ast.Name) and name.id == "NotImplementedError"
+            return False
+
+        if all(_is_dead_end(stmt) for stmt in meaningful):
+            stub_names.append(node.name)
+
+    return total, len(stub_names), stub_names
+
+
 # =============================================================================
 # AST Validation
 # =============================================================================
@@ -251,14 +312,57 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
             )
 
     all_errors = []
-    stub_count = 0
 
-    # Issue #386: Skip stub pattern detection for TDD scaffold validation.
-    # The TDD workflow intentionally generates `assert False, 'TDD RED: ...'`
-    # as failing test placeholders. Flagging these as "stubs" creates a
-    # circular rejection loop (scaffold → validate → reject → scaffold).
-    # Stub detection is only useful for non-TDD generated tests.
-    # The red/green phases (N3/N5) validate test behavior instead.
+    # Issue #386 exempted `assert False, 'TDD RED: ...'` from stub detection,
+    # because the TDD scaffold emits such placeholders on purpose and flagging
+    # them created a scaffold -> validate -> reject -> scaffold loop.
+    #
+    # #2317: that exemption was total, so this node could no longer tell a few
+    # placeholders among real tests from a suite that is ENTIRELY placeholders.
+    # It blessed the second case as "36 real tests" on boostgauge #7, and the
+    # implementation stage then spent two iterations against a suite no code
+    # could satisfy.
+    #
+    # The distinction restored here is proportional, not a revert. Individual
+    # placeholders remain acceptable -- that is #386's case and it still
+    # passes. A wholly hollow suite is always NAMED, and is rejected only when
+    # rejecting can actually help.
+    #
+    # That condition is deliberate. `should_regenerate` escalates a
+    # deterministic scaffolder on its hash check, and "escalate" routes to
+    # N4_implement_code (graph.py) -- so for a spec that supplies no test
+    # bodies, failing here reaches implementation anyway, just with the red
+    # phase skipped as well. Rejecting is worth it precisely when regeneration
+    # can produce something better, which since #2316 means: the spec ships
+    # executable Section 10 test functions and the scaffold ignored them.
+    # Where it cannot help, the suite is reported loudly instead of being
+    # bounced around a loop that ends in the same place.
+    total_tests, stub_count, stub_names = count_stub_tests(generated_tests)
+    hollow = total_tests > 0 and stub_count == total_tests
+    spec_has_bodies = bool(
+        (state.get("spec_test_suite") or {}).get("functions")
+    )
+    if hollow:
+        shown = ", ".join(stub_names[:3])
+        more = f" (and {stub_count - 3} more)" if stub_count > 3 else ""
+        # ASCII only: this string is printed, and per #1493 a non-ASCII
+        # character raises UnicodeEncodeError mid-stream on Windows cp1252.
+        description = (
+            f"all {total_tests} generated test(s) fail unconditionally "
+            f"({shown}{more}) -- no implementation can make this suite green"
+        )
+        if spec_has_bodies:
+            all_errors.append(
+                f"{description}. The spec supplies executable Section 10 test "
+                f"functions that were not used; regenerate from those."
+            )
+        else:
+            print(f"    [HOLLOW SCAFFOLD] {description}")
+            print(
+                "    The spec supplies no executable test bodies, so "
+                "re-scaffolding cannot improve on this. Proceeding, but the "
+                "implementation loop cannot converge against these tests."
+            )
 
     # Step 2: Validate structure with AST (imports, test functions exist)
     structure_errors = validate_test_structure(generated_tests, scenarios)
@@ -271,17 +375,10 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # Build validation result
     is_valid = len(all_errors) == 0
 
-    # Count real tests (functions without stub patterns)
-    try:
-        tree = ast.parse(generated_tests)
-        total_tests = sum(
-            1 for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name.startswith('test_')
-        )
-        real_test_count = total_tests - stub_count
-    except SyntaxError:
-        total_tests = 0
-        real_test_count = 0
+    # #2317: `real` now excludes placeholders. It previously could not --
+    # stub_count was pinned at 0, so every stub was reported as a real test
+    # and the number the operator reads was the opposite of the truth.
+    real_test_count = total_tests - stub_count
 
     validation_result = {
         "is_valid": is_valid,
@@ -292,7 +389,16 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     }
 
     if is_valid:
-        print(f"    Validation PASSED: {real_test_count} real tests")
+        # #2317: name the placeholders when there are any. A bare count of
+        # "real tests" that silently included every stub is what let the
+        # hollow suite through looking healthy.
+        if stub_count:
+            print(
+                f"    Validation PASSED: {real_test_count} real tests "
+                f"({stub_count} placeholder(s) among {total_tests})"
+            )
+        else:
+            print(f"    Validation PASSED: {real_test_count} real tests")
     else:
         print(f"    Validation FAILED: {len(all_errors)} errors")
         for error in all_errors[:5]:

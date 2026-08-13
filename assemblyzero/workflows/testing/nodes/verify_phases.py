@@ -34,6 +34,9 @@ from assemblyzero.workflows.testing.exit_code_router import (
     route_by_exit_code,
 )
 from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
+from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+    count_stub_tests,
+)
 from assemblyzero.workflows.testing.runner_registry import get_runner
 from assemblyzero.workflows.testing.state import TestingWorkflowState
 
@@ -524,6 +527,44 @@ def run_pytest(
         }
 
 
+def _describe_hollow_suite(state: TestingWorkflowState) -> str:
+    """Describe a scaffold that cannot pass, or '' when it might (#2322).
+
+    The red phase's job is to confirm the tests fail for the RIGHT reason.
+    An ImportError says only that the module under test is missing; every
+    test body is still unexecuted, so a suite made entirely of unconditional
+    failures is indistinguishable from a healthy red phase at that moment.
+
+    Reads the scaffold's source rather than its behaviour, which is what
+    makes the distinction available at all while the implementation does not
+    yet exist. Anything it cannot parse or find returns '' -- an unreadable
+    suite is not evidence of a hollow one, and this must never invent a
+    failure.
+    """
+    source = state.get("generated_tests", "") or ""
+    if not source:
+        for path in state.get("test_files", []) or []:
+            try:
+                source += Path(path).read_text(encoding="utf-8") + "\n"
+            except OSError:
+                continue
+    if not source.strip():
+        return ""
+
+    total, stubs, names = count_stub_tests(source)
+    if total == 0 or stubs != total:
+        return ""
+
+    shown = ", ".join(names[:3])
+    more = f" (and {stubs - 3} more)" if stubs > 3 else ""
+    # ASCII only: printed to a Windows console, where #1493 showed a non-ASCII
+    # character raises UnicodeEncodeError mid-stream.
+    return (
+        f"all {total} test(s) fail unconditionally ({shown}{more}) -- no "
+        f"implementation can make this suite green"
+    )
+
+
 def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N3: Verify all tests fail (TDD red phase).
 
@@ -629,6 +670,44 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             output, expected_modules_for_red
         )
         if exp_count_red > 0 and unexp_count_red == 0:
+            # #2322: an ImportError proves the module is ABSENT. It does not
+            # prove the tests discriminate. Collection died before a single
+            # body ran, so a suite of unconditional `assert False` stubs
+            # produces exactly this signal -- and on boostgauge #7 it did,
+            # which is how a suite no implementation could pass reached the
+            # implementation stage and spent two iterations there.
+            #
+            # The bodies are visible statically even while the module is
+            # missing, so the check that collection cannot make is made here.
+            hollow = _describe_hollow_suite(state)
+            if hollow:
+                print(
+                    f"    [EXIT CODE {exit_code}] ImportError on expected "
+                    f"module(s), but the suite cannot pass either: {hollow}"
+                )
+                # Re-scaffold only where it can produce something better --
+                # since #2316 that means the spec ships executable Section 10
+                # functions the scaffold did not use. Otherwise a reroute just
+                # regenerates the same stubs, so the finding is stated and the
+                # run continues rather than circling.
+                if (state.get("spec_test_suite") or {}).get("functions"):
+                    print(
+                        "    the spec supplies executable test functions "
+                        "-> routing to re-scaffold, not to implementation"
+                    )
+                    return {
+                        "red_phase_output": output,
+                        "file_counter": file_num,
+                        "pytest_exit_code": exit_code,
+                        "next_node": "N2_scaffold_tests",
+                        "scaffold_validation_errors": [hollow],
+                        "error_message": "",
+                    }
+                print(
+                    "    the spec supplies no test bodies, so re-scaffolding "
+                    "cannot improve on this -- continuing, but the "
+                    "implementation loop cannot converge against these tests"
+                )
             print(
                 f"    [EXIT CODE {exit_code}] ImportError on expected module(s) "
                 f"-> valid red signal, routing to implementation"
