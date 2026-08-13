@@ -156,6 +156,17 @@ def _classify_halt_transience(sub_result: dict) -> bool | None:
         message = str(sub_result.get("error_message", "")).lower()
         if any(m in message for m in ("stagnant", "stagnation")):
             return False
+        # #2298: a missing required input is deterministic — the file an
+        # upstream stage should have produced is absent, and running this stage
+        # again cannot conjure it. It was retried three times 0.1s apart on the
+        # 2026-08-13 roll, each attempt printing a full banner about a failure
+        # the operator had already been told about.
+        from assemblyzero.workflows.testing.nodes.load_lld import (
+            MISSING_REQUIRED_INPUT,
+        )
+
+        if MISSING_REQUIRED_INPUT.lower() in message:
+            return False
         return None
     try:
         plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
@@ -549,6 +560,23 @@ def _ride_spec_on_lld_pr(
     try:
         rel = src.relative_to(Path(target_repo))
     except ValueError:
+        return False
+
+    # #2301: ask the TARGET repo whether it wants this path tracked before
+    # trying to add it. boostgauge gitignores docs/lineage, so every roll
+    # printed "git add failed (non-fatal)" — a failure line for a repo doing
+    # exactly what it configured. Whether lineage is tracked differs by repo,
+    # and the repo's own ignore rules are the authority; log noise is what
+    # buries real failures.
+    ignored = run_command(
+        ["git", "check-ignore", "-q", str(rel)], cwd=str(worktree),
+        capture_output=True, text=True,
+    )
+    if ignored.returncode == 0:
+        print(
+            f"    [spec] {rel.as_posix()} is gitignored in this repo — not "
+            f"riding it on the LLD PR. The spec stays on the working tree."
+        )
         return False
 
     try:

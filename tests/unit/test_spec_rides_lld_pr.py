@@ -15,7 +15,14 @@ from assemblyzero.workflows.orchestrator.state import create_initial_state
 
 def _ok_run(cmd, **kw):
     out = MagicMock()
-    out.returncode = 0
+    # #2301: `git check-ignore` inverts the usual convention -- it exits 0 when
+    # the path IS ignored and 1 when it is not. A blanket returncode=0 stub
+    # therefore claims every path is gitignored, and the ride correctly
+    # declines. Model git's real contract: these fixtures use tracked paths.
+    if len(cmd) > 1 and cmd[1] == "check-ignore":
+        out.returncode = 1
+    else:
+        out.returncode = 0
     out.stdout = ""
     out.stderr = ""
     return out
