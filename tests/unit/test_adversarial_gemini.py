@@ -6,6 +6,7 @@ Issue #352: Multi-Model Adversarial Testing Node (Gemini vs Claude)
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 
 from assemblyzero.workflows.testing.adversarial_gemini import (
     AdversarialGeminiClient,
@@ -287,3 +288,146 @@ class TestIsQuotaError:
         """'quota' in response text is detected."""
         client = AdversarialGeminiClient(provider=MagicMock())
         assert client._is_quota_error("quota exceeded for project", {}) is True
+
+
+# ---------------------------------------------------------------------------
+# The request we build must be one the SDK accepts (#2281)
+# ---------------------------------------------------------------------------
+
+_VALID_RESPONSE = (
+    '{"uncovered_edge_cases": [], "false_claims": [], '
+    '"missing_error_handling": [], "implicit_assumptions": [], "test_cases": []}'
+)
+
+
+def _capturing_genai_provider() -> tuple[MagicMock, dict]:
+    """A stand-in for a google.genai Client that records the kwargs it is given.
+
+    Shaped to take strategy 1 in `_invoke_provider` (`provider.models.generate_content`),
+    which is the path a real google.genai Client takes.
+    """
+    captured: dict = {}
+
+    def generate_content(*, model, contents, config):
+        captured["model"] = model
+        captured["contents"] = contents
+        captured["config"] = config
+        response = MagicMock()
+        response.text = _VALID_RESPONSE
+        response.model = "gemini-2.5-pro"
+        return response
+
+    provider = MagicMock()
+    provider.models.generate_content = generate_content
+    return provider, captured
+
+
+def _invoke(provider, **kwargs) -> str:
+    return AdversarialGeminiClient(provider=provider).generate_adversarial_tests(
+        implementation_code="def foo(): pass",
+        lld_content="# LLD",
+        existing_tests="",
+        **kwargs,
+    )
+
+
+class TestGenerateContentConfigIsAcceptedBySdk:
+    """The config dict this module builds is validated by the real SDK type.
+
+    Before #2281 the call site put `timeout` inside the config dict.
+    `GenerateContentConfig` forbids extra fields, so every adversarial
+    invocation raised a pydantic ValidationError locally, before any request
+    was sent. The integration test could not catch it -- it skips on the very
+    exception the defect raises -- so this offline check is the one that must.
+    """
+
+    def test_config_validates_against_the_real_sdk_type(self):
+        from google.genai.types import GenerateContentConfig
+
+        provider, captured = _capturing_genai_provider()
+        _invoke(provider, timeout=120)
+
+        # Must not raise. This is the whole defect: the dict below was rejected.
+        GenerateContentConfig(**captured["config"])
+
+    def test_timeout_is_not_passed_as_a_config_field(self):
+        provider, captured = _capturing_genai_provider()
+        _invoke(provider, timeout=120)
+
+        assert "timeout" not in captured["config"], (
+            "`timeout` is not a GenerateContentConfig field and the model forbids "
+            "extras -- putting it back here breaks every adversarial call (#2281)."
+        )
+
+    def test_timeout_reaches_http_options_in_milliseconds(self):
+        provider, captured = _capturing_genai_provider()
+        _invoke(provider, timeout=120)
+
+        assert captured["config"]["http_options"]["timeout"] == 120_000
+
+    def test_sdk_still_documents_http_options_timeout_in_milliseconds(self):
+        """Pin the UNIT, not just the field.
+
+        A version bump that redefined `http_options.timeout` as seconds would
+        turn our 120-second budget into 120000 seconds, or a 120ms one if the
+        conversion were dropped. Neither would fail any other test here, and
+        both would present as a Gemini problem rather than ours.
+        """
+        from google.genai.types import HttpOptions
+
+        description = (HttpOptions.model_fields["timeout"].description or "").lower()
+        assert "millisecond" in description, (
+            f"google-genai no longer documents http_options.timeout in "
+            f"milliseconds (got: {description!r}). The `* 1000` conversion in "
+            f"adversarial_gemini.py must be re-derived before this ships."
+        )
+
+
+class TestClientSideErrorsAreNotReportedAsOutages:
+    """A local validation error is our bug, and must not read as a Gemini outage.
+
+    Before #2282 any non-rate-limit exception became a GeminiTimeoutError with
+    `status=None`. Both consumers treat a timeout as "Gemini was unavailable":
+    the integration test skips and the adversarial node records a benign skip
+    reason and proceeds. That false all-clear is what hid #2281.
+    """
+
+    @staticmethod
+    def _real_validation_error() -> PydanticValidationError:
+        class _Forbidding(BaseModel):
+            model_config = {"extra": "forbid"}
+            a: int
+
+        try:
+            _Forbidding(a=1, b=2)
+        except PydanticValidationError as exc:
+            return exc
+        raise AssertionError("expected a ValidationError from the probe model")
+
+    def test_validation_error_propagates_unconverted(self):
+        provider = MagicMock(spec=[])
+        provider.side_effect = self._real_validation_error()
+
+        with pytest.raises(PydanticValidationError):
+            _invoke(provider, timeout=120)
+
+    def test_validation_error_is_not_a_timeout_or_quota_error(self):
+        provider = MagicMock(spec=[])
+        provider.side_effect = self._real_validation_error()
+
+        with pytest.raises(Exception) as excinfo:
+            _invoke(provider, timeout=120)
+
+        assert not isinstance(excinfo.value, GeminiTimeoutError), (
+            "a locally-raised validation error was renamed to a timeout -- the "
+            "misclassification that made a broken call site look like an outage"
+        )
+        assert not isinstance(excinfo.value, GeminiQuotaExhaustedError)
+
+    def test_genuine_transport_errors_still_classify_as_before(self):
+        """The narrowing must not swallow the behaviour #546 built."""
+        provider = MagicMock(spec=[])
+        provider.side_effect = RuntimeError("503 backend unavailable")
+
+        with pytest.raises(GeminiTimeoutError):
+            _invoke(provider, timeout=120)
