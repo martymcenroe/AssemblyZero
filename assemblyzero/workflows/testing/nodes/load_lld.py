@@ -506,7 +506,12 @@ def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no co
 
         # Detect header row (contains common header words)
         header_words = {"id", "test", "name", "scenario", "type", "description", "input", "output", "criteria"}
-        if any(c.lower() in header_words for c in cols[:3]):
+        # #2318: the exact-match test below misses multi-word headings. The
+        # boostgauge #7 LLD leads with `| Test ID | ...`, and "test id" is in
+        # neither this set nor the tuple further down, so the heading row was
+        # parsed as a scenario and shipped as a test named `test_id` whose
+        # docstring was the remaining column names.
+        if _is_header_cell(cols[0]) or any(c.lower() in header_words for c in cols[:3]):
             # Skip separator rows (----)
             if all("-" in c or not c for c in cols):
                 continue
@@ -526,8 +531,11 @@ def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no co
             # Third column is typically Type
             type_col = cols[2] if len(cols) > 2 else ""
 
-            # Skip if name looks like a header
-            if name_col.lower() in ("id", "test", "name", "scenario", "test name"):
+            # Skip if name looks like a header (#2318: token-aware, so
+            # multi-word headings like "Test ID" are caught too)
+            if _is_header_cell(name_col) or name_col.lower() in (
+                "id", "test", "name", "scenario", "test name"
+            ):
                 continue
 
             # Clean up the name to be a valid test function name
@@ -574,6 +582,40 @@ def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no co
         scenarios.append(scenario)
 
     return scenarios
+
+
+#: Words that appear in test-table COLUMN HEADINGS and never in a scenario id.
+#: Used token-wise so multi-word headings are recognised without enumerating
+#: every phrasing (#2318).
+_HEADER_TOKENS = frozenset({
+    "id", "ids", "test", "tests", "name", "scenario", "scenarios", "type",
+    "description", "input", "inputs", "output", "outputs", "expected",
+    "criteria", "criterion", "behavior", "behaviour", "status", "req",
+    "requirement", "requirements", "pass", "notes", "no", "num", "number",
+})
+
+
+def _is_header_cell(cell: str) -> bool:
+    """True when a table cell is a column HEADING rather than a scenario id.
+
+    #2318: a heading row leaked through as a test. The checks it evaded both
+    compared the whole cell against a fixed list, so `Test ID` -- two header
+    words with a space between them -- matched nothing and became a test
+    function named `test_id`, carrying the remaining column names as its
+    docstring. It was one of the 36 scenarios the boostgauge #7 run planned,
+    scaffolded, reviewed and graded against, and it never existed.
+
+    Deciding token-wise rather than by phrase means `Test ID`, `Test Name`,
+    `Req ID`, `Expected Output` and any other combination are all recognised
+    without a list of phrasings that the next LLD format can slip past.
+
+    A cell qualifies only when it is non-empty and EVERY alphanumeric token
+    in it is a heading word, so `T010` and `First run no config` stay data.
+    """
+    tokens = re.findall(r"[A-Za-z0-9]+", cell.lower())
+    if not tokens:
+        return False
+    return all(token in _HEADER_TOKENS for token in tokens)
 
 
 def _extract_requirement_ref(content: str) -> str:  # pragma: no cover
