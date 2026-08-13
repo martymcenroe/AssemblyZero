@@ -480,6 +480,17 @@
 
 ---
 
+### 2026-08-13
+
+---
+
+**15:44** — *On vacuous checks*
+> "A god can keep his temple, his rituals, his processions — and be a one-eyed tortoise in the desert, because the forms kept running after the belief stopped. A test suite can do the same thing."
+
+**Context:** Mid-campaign, between a roll that died of a conflict and the repair that cleared it, [The Great God Om](The-Great-God-Om) stopped on a single word: *vacuous*. He knew it only as a word for a person who has become a shell, and asked if that was truly the meaning. It was — the same metaphor exactly: the outward form of the thing with nothing inside doing the work. The week had supplied four masks of it: twelve row tests whose absence was silence, a "green" run that had verified nothing, e2e tests satisfied by a run that died before reaching them, and CI tiers green by virtue of never having run at all. The defense that emerged is now doctrine — demand presence instead of rewarding absence, prove every check can fail, and make green state what it does *not* mean — because the danger was never the empty check; it is the reader who fills the emptiness with assurance. In Small Gods the belief drains away and the processions keep marching while the god crawls the desert as a one-eyed tortoise. Om liked the word once he saw through it. Then he asked the only question that matters about hollow forms: isn't it a problem? It is. It always was.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
