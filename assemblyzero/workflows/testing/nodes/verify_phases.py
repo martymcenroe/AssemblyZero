@@ -47,6 +47,27 @@ PYTEST_TIMEOUT_SECONDS = 300
 # DISTINCT cause of even a large generated test plan.
 MAX_FAILURE_SUMMARY_CHARS = 12000
 
+# #2319: pytest truncates each `short test summary info` line to the terminal
+# width. Captured through a pipe there is no terminal, so it assumes 80 columns
+# and the ` - AssertionError: ...` half is cut off -- leaving the reviser a list
+# of test names with no reason attached. Measured on boostgauge #7: identical
+# command, identical config; at 80 columns every reason is gone, at 200 every
+# reason is present. 200 clears a worktree-length path plus a typical assertion
+# message without making pytest's separator rules absurdly wide.
+#
+# Where this bites, and why CI disagrees: pytest skips the trim entirely when
+# it believes it is on CI (`_pytest/terminal.py`: `running_on_ci() or
+# config.option.verbose >= 2`, keyed off CI / BUILD_NUMBER). GitHub Actions
+# sets CI=true, so the defect does NOT reproduce there -- and the speedrun runs
+# on the operator's workstation, where nothing sets it. The one environment
+# that would have shown a green suite is the one the pipeline never runs in.
+PYTEST_OUTPUT_COLUMNS = "200"
+
+# #2320: how many distinct failure tracebacks to carry back. Tracebacks are the
+# only part of pytest's output that states WHY a test failed in full -- they are
+# not width-truncated -- and they were being captured and discarded.
+MAX_TRACEBACK_BLOCKS = 8
+
 # Issue #562: Critical skip keywords (aligned with tools/test-gate.py)
 _CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
 
@@ -160,9 +181,103 @@ def _build_failure_summary(output: str) -> str:
     else:
         result = "\n".join(summary_lines)
 
+    # #2320: the short summary says WHICH tests failed. The tracebacks say WHY,
+    # and run_pytest already asks for them with --tb=short. Reading only the
+    # summary section threw the diagnosis away: on boostgauge #7 the discarded
+    # block held `assert False` on the source line, which identified the tests
+    # as unconditional stubs. The reviser instead saw 36 bare names and made a
+    # six-line cosmetic edit, because nothing it was shown was actionable.
+    tracebacks = _extract_traceback_blocks(output)
+    if tracebacks:
+        result = f"{result}\n\nFailure detail (source line and error):\n{tracebacks}"
+
     if len(result) > MAX_FAILURE_SUMMARY_CHARS:
         result = result[:MAX_FAILURE_SUMMARY_CHARS] + "\n... (truncated)"
     return result
+
+
+def _extract_traceback_blocks(output: str) -> str:
+    """Pull distinct failure tracebacks out of pytest's FAILURES section.
+
+    #2320: returns the failing source line and the `E ...` error lines for up
+    to MAX_TRACEBACK_BLOCKS DISTINCT failures. Blocks whose error lines are
+    identical are collapsed with a count, because N tests failing on one cause
+    is one fact and repeating it N times only spends the budget.
+
+    Unlike the short-summary line, traceback content is not truncated to the
+    terminal width, so this is informative regardless of #2319's environment
+    fix -- the two repairs are independent on purpose.
+    """
+    import re
+
+    failures_match = re.search(
+        r"^=+ FAILURES =+$(.*?)(?=^=+ (?:short test summary|warnings summary|"
+        r"ERRORS|[\w ]*coverage)|\Z)",
+        output,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not failures_match:
+        return ""
+
+    section = failures_match.group(1)
+    # Blocks are introduced by a centred `____ test_name ____` rule.
+    parts = re.split(r"^_+ (.+?) _+$", section, flags=re.MULTILINE)
+    if len(parts) < 3:
+        return ""
+
+    seen: dict[str, dict[str, Any]] = {}
+    # parts alternates: [preamble, name, body, name, body, ...]
+    for i in range(1, len(parts) - 1, 2):
+        name = parts[i].strip()
+        body = parts[i + 1]
+
+        error_lines = [
+            line.rstrip() for line in body.splitlines()
+            if line.startswith("E ")
+        ]
+        if not error_lines:
+            continue
+
+        # The last non-E, non-blank line before the errors is the source line
+        # that raised -- the single most useful line in the block.
+        source_line = ""
+        for line in body.splitlines():
+            if line.startswith("E "):
+                break
+            if line.strip():
+                source_line = line.strip()
+
+        signature = "\n".join(error_lines)
+        if signature in seen:
+            seen[signature]["tests"].append(name)
+            continue
+        seen[signature] = {
+            "tests": [name],
+            "source": source_line,
+            "errors": error_lines,
+        }
+
+    if not seen:
+        return ""
+
+    blocks: list[str] = []
+    for entry in list(seen.values())[:MAX_TRACEBACK_BLOCKS]:
+        tests = entry["tests"]
+        header = tests[0]
+        if len(tests) > 1:
+            header = f"{tests[0]} (and {len(tests) - 1} more with the same error)"
+        lines = [header]
+        if entry["source"]:
+            lines.append(f"    {entry['source']}")
+        lines.extend(f"    {e}" for e in entry["errors"])
+        blocks.append("\n".join(lines))
+
+    if len(seen) > MAX_TRACEBACK_BLOCKS:
+        blocks.append(
+            f"... {len(seen) - MAX_TRACEBACK_BLOCKS} further distinct "
+            f"failure cause(s) not shown"
+        )
+    return "\n\n".join(blocks)
 
 
 def _classify_import_errors(
@@ -320,6 +435,25 @@ def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     return str(rel).replace("\\", "/")
 
 
+def _pytest_env() -> dict[str, str]:
+    """Environment for a captured pytest run (#2319).
+
+    Sets COLUMNS so pytest does not truncate its short-summary lines to the
+    80-column default it assumes when stdout is a pipe. Without this the
+    ` - AssertionError: ...` half of every FAILED line is cut, the reviser
+    receives test names with no reasons, and the #2058 root-cause grouping
+    cannot fire because its regex needs the reason it never receives.
+
+    Inherits the rest of the environment unchanged -- the venv, PATH and any
+    repo-specific variables the run needs are all still required.
+    """
+    import os
+
+    env = os.environ.copy()
+    env["COLUMNS"] = PYTEST_OUTPUT_COLUMNS
+    return env
+
+
 def run_pytest(
     test_files: list[str],
     coverage_module: str | None = None,
@@ -362,6 +496,7 @@ def run_pytest(
             errors="replace",
             timeout=PYTEST_TIMEOUT_SECONDS,
             cwd=str(repo_root) if repo_root else None,
+            env=_pytest_env(),
         )
 
         parsed = parse_pytest_output(result.stdout + result.stderr)
