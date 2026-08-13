@@ -63,6 +63,24 @@ class RecoveryPlan:
             json.dump(asdict(self), f, indent=2)
         return plan_path
 
+    #: How much of the reason the halt block shows before pointing at the plan.
+    ERROR_LINE_LIMIT = 400
+
+    def _error_line(self) -> str:
+        """The real reason, first line first, bounded so the block stays a block.
+
+        Falls back to the classification only when there is genuinely no
+        message -- and says so in words, because a bare "unknown" is what
+        #2299 was filed about.
+        """
+        message = (self.error_message or "").strip()
+        if not message:
+            return f"(no reason recorded; classified as '{self.error_type}')"
+        head = message.splitlines()[0].strip()
+        if len(head) > self.ERROR_LINE_LIMIT:
+            head = head[: self.ERROR_LINE_LIMIT].rstrip() + "..."
+        return head
+
     def print_summary(self) -> None:
         """Print a human-readable summary to stdout."""
         border = "=" * 60
@@ -72,7 +90,15 @@ class RecoveryPlan:
         print(f"  Issue:     #{self.issue_number}")
         print(f"  Workflow:  {self.workflow}")
         print(f"  Stage:     {self.stage}")
-        print(f"  Error:     {self.error_type}")
+        # #2299: this line printed `error_type` -- the CLASSIFIER's bucket --
+        # under a label that reads as the error itself. `classify_error`
+        # returns "unknown" for anything it has no bucket for, and an
+        # iteration-cap message is exactly that, so every cap halt announced
+        # "Error: unknown" while the real reason sat two lines below in the
+        # recommendation. The message was never missing; the field was showing
+        # a different quantity than its label promised.
+        print(f"  Error:     {self._error_line()}")
+        print(f"  Class:     {self.error_type}")
         print(f"  Transient: {'Yes' if self.is_transient else 'No'}")
         if self.cost_spent_usd > 0:
             print(f"  Cost:      ${self.cost_spent_usd:.2f} / ${self.cost_budget_usd:.2f}")
