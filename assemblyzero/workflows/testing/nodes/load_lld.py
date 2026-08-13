@@ -44,6 +44,17 @@ class WorkflowParsingError(ValueError):
 # LLD directory relative to repo root (kept for backward-compatible helpers)
 LLD_ACTIVE_DIR = Path("docs/lld/active")
 
+#: Marks a failure caused by an input an UPSTREAM stage should have produced
+#: (#2298). Deterministic by construction: the file is absent, and running the
+#: same stage again cannot conjure it. The orchestrator's transience classifier
+#: keys off this token, so retry behaviour follows from the failure's kind
+#: rather than from prose that a later reword could silently change.
+#:
+#: Earned 2026-08-13 (boostgauge #7): the impl stage retried a missing spec
+#: three times, 0.1s apart, each printing a full banner about an upstream
+#: failure it had already reported.
+MISSING_REQUIRED_INPUT = "MISSING REQUIRED INPUT"
+
 # Implementation Spec directories (Issue #384, #525)
 SPEC_DRAFTS_DIR = Path("docs/lld/drafts")
 LINEAGE_ACTIVE_DIR = Path("docs/lineage/active")
@@ -827,22 +838,35 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     # Issue #384: No spec found — exit with specific command to generate one
     if not lld_path_obj or not lld_path_obj.exists():
-        cmd = build_spec_command(issue_number, repo_root)
+        # #2298: point at the DURABLE repo, not the worktree. The worktree is
+        # torn down by RESTORE seconds after this prints, so a command naming
+        # it is already stale by the time the operator reads the log.
+        durable_root = Path(state.get("original_repo_root") or repo_root)
+        cmd = build_spec_command(issue_number, durable_root)
         error_msg = (
             f"\n"
             f"    +==============================================================+\n"
             f"    |  No Implementation Spec found for issue #{issue_number:<20}|\n"
             f"    |                                                              |\n"
-            f"    |  The TDD workflow requires an implementation spec.           |\n"
-            f"    |  Generate one first by running:                              |\n"
+            f"    |  This is a MISSING REQUIRED INPUT, not a transient fault.    |\n"
+            f"    |  The spec stage should have produced it and did not, so      |\n"
+            f"    |  retrying this stage cannot change the outcome.              |\n"
+            f"    |                                                              |\n"
+            f"    |  Fix the SPEC stage first, then relaunch.                    |\n"
             f"    +==============================================================+\n"
             f"\n"
             f"    {cmd}\n"
         )
         print(error_msg)
         return {
-            "error_message": f"No implementation spec found for issue #{issue_number}. "
-            f"Run: {cmd}"
+            # The marker is what the orchestrator's transience classifier keys
+            # off (#2298). Kept as a constant rather than matched by prose so
+            # a reworded banner cannot silently make this retryable again.
+            "error_message": (
+                f"{MISSING_REQUIRED_INPUT}: no implementation spec found for "
+                f"issue #{issue_number}. The spec stage should have produced "
+                f"it. Run: {cmd}"
+            )
         }
 
     print(f"    Spec path: {lld_path_obj}")
