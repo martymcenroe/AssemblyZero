@@ -1851,6 +1851,15 @@ def restore_repo(
         return [f"could not check out {base}: {(checkout.stderr or '').strip()}"]
 
     failures: list[str] = []
+
+    # #2310: a removed worktree leaves its branch standing. Dispose of it here
+    # -- AFTER the checkout has moved to the base, so the branch being freed is
+    # never the one HEAD is on. Left alone, `issue-{N}` squats on the SHA the
+    # relaunch wants to branch from and `worktree add -b` dies on it.
+    # Branch names are freed by safe delete when they hold nothing unique, and
+    # preserved under graveyard/ when they hold work. Never a force delete.
+    for issue in issues:
+        failures += reset.dispose_pipeline_branches(repo_root, issue)
     current = attempt.current_branch(repo_root)
     if current != base:
         failures.append(f"expected to end on '{base}', ended on '{current}'")

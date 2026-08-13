@@ -45,6 +45,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Branch namespace for preserved work. Matches speedrun_new_attempt and the
+# `speedrun_clean_check` exemption, so a parked branch is not later reported
+# as debris.
+GRAVEYARD_PREFIX = "graveyard/"
+
 
 def _rmtree_clearing_readonly(path: Path) -> None:
     """rmtree that survives the ReadOnly attribute (#2162).
@@ -272,6 +277,101 @@ def delete_local_branches(repo_root: Path, issue: int) -> int:
                 f"left in place for review)."
             )
     return deleted
+
+
+def dispose_pipeline_branches(repo_root: Path, issue: int) -> list[str]:
+    """
+    Free the pipeline branch names for one issue. Returns failure descriptions.
+
+    #2310: removing a worktree does not remove the branch it carried, so a
+    failed roll left `issue-{N}` standing on the exact SHA the relaunch
+    wanted to branch from, and `git worktree add -b issue-{N}` died with a
+    bare `fatal: a branch named 'issue-7' already exists`. A name squatting
+    on the base killed a roll whose spec stage had just passed for the first
+    time in campaign history.
+
+    Two dispositions, decided by what the branch actually holds:
+
+    - No commits beyond the base: `git branch -d` accepts it, and the name
+      is freed. This is the measured case from #2310 -- the stranded branch
+      was pointer-identical to `origin/hardening-run-17`'s tip.
+    - Commits of its own: the safe delete refuses, and that refusal is the
+      safety net working. The branch is RENAMED under `graveyard/`, which
+      keeps every commit and still frees the name. Never `-D`, never a
+      force delete, per the banned-commands rule and ADR-0217.
+
+    A rename rather than a delete is what makes this safe to run
+    unconditionally from RESTORE: the worst case is a preserved branch under
+    a new name, never lost work.
+    """
+    result = _run(
+        [
+            "git", "branch", "--list", "--format=%(refname:short)",
+            f"{issue}-*", f"issue-{issue}",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        return [f"could not list branches for #{issue}"]
+
+    active = current_branch(repo_root)
+    failures: list[str] = []
+    for branch in (line.strip() for line in result.stdout.splitlines()):
+        if not branch or branch.startswith(GRAVEYARD_PREFIX):
+            continue
+        if branch == active:
+            # Never dispose of the branch the checkout is standing on (#1762).
+            print(f"  Skipped branch {branch} (currently checked out).")
+            continue
+
+        deleted = _run(["git", "branch", "-d", branch], cwd=repo_root)
+        if deleted.returncode == 0:
+            print(f"  Freed branch name: {branch} (no unique commits)")
+            continue
+
+        # Safe-delete refused -- the branch carries commits reachable from
+        # nowhere else. Preserve them under a name no relaunch will collide
+        # with. `-m` (not `-M`) so an existing graveyard name is never
+        # clobbered; the collision is reported instead.
+        parked = f"{GRAVEYARD_PREFIX}{branch}-{_disposal_stamp()}"
+        renamed = _run(["git", "branch", "-m", branch, parked], cwd=repo_root)
+        if renamed.returncode == 0:
+            unique = _unique_commit_count(repo_root, parked)
+            detail = f"{unique} commit(s)" if unique is not None else "commits"
+            print(f"  Preserved branch {branch} -> {parked} ({detail} kept)")
+        else:
+            failures.append(
+                f"branch '{branch}' holds unique commits and could not be "
+                f"renamed to '{parked}': "
+                f"{(renamed.stderr or '').strip()[:200]}"
+            )
+    return failures
+
+
+def _disposal_stamp() -> str:
+    """UTC stamp for a graveyard branch name. Sorts, and never collides."""
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _unique_commit_count(repo_root: Path, branch: str) -> int | None:
+    """Commits on `branch` not reachable from the default branch, or None."""
+    base = _run(
+        ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"], cwd=repo_root
+    )
+    if base.returncode != 0 or not base.stdout.strip():
+        return None
+    counted = _run(
+        ["git", "rev-list", "--count", f"{base.stdout.strip()}..{branch}"],
+        cwd=repo_root,
+    )
+    if counted.returncode != 0:
+        return None
+    try:
+        return int(counted.stdout.strip())
+    except ValueError:
+        return None
 
 
 def delete_remote_branches(repo_root: Path, issue: int) -> int:
