@@ -109,6 +109,82 @@ def test_checked_out_branch_is_never_disposed(repo: Path) -> None:
     assert "issue-7" in _branches(repo)
 
 
+def test_branch_with_upstream_and_unique_work_is_preserved(
+    tmp_path: Path,
+) -> None:
+    """#2325: an upstream must not make unique work deletable.
+
+    `git branch -d` accepts any branch merged into its UPSTREAM, and every
+    pipeline branch gets one at creation (`push -u`, #1780). Delegating the
+    decision to `-d` therefore deleted exactly the branches worth keeping --
+    observed against the boostgauge #7 branches, which held 3 and 2 commits
+    and were both reported as "no unique commits".
+
+    The upstream is the whole point of this test: without a real remote the
+    bug is invisible, which is why the earlier tests did not catch it.
+    """
+    origin = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-b", "main", str(origin)],
+        capture_output=True, text=True,
+    )
+    root = tmp_path / "clone"
+    root.mkdir()
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "T")
+    (root / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _git(root, "add", "seed.txt")
+    _git(root, "commit", "-m", "seed")
+    _git(root, "remote", "add", "origin", str(origin))
+    _git(root, "push", "-u", "origin", "main")
+
+    # A pipeline branch with real work, pushed with an upstream.
+    _git(root, "checkout", "-b", "issue-7")
+    (root / "work.txt").write_text("unique work\n", encoding="utf-8")
+    _git(root, "add", "work.txt")
+    _git(root, "commit", "-m", "work only on issue-7")
+    tip = _git(root, "rev-parse", "issue-7").stdout.strip()
+    _git(root, "push", "-u", "origin", "issue-7")
+    _git(root, "checkout", "main")
+
+    # Precondition: bare `-d` WOULD accept it. If this ever stops being
+    # true the test below is no longer proving anything.
+    probe = _git(root, "branch", "-d", "issue-7")
+    assert probe.returncode == 0, (
+        "expected `branch -d` to accept an upstream-merged branch; "
+        f"got: {probe.stderr}"
+    )
+    _git(root, "branch", "issue-7", tip)
+
+    failures = reset.dispose_pipeline_branches(root, 7, "main")
+
+    assert failures == []
+    names = _branches(root)
+    assert "issue-7" not in names, "the name must still be freed"
+    parked = [n for n in names if n.startswith("graveyard/issue-7")]
+    assert len(parked) == 1, f"work must be preserved, got {names}"
+    assert _git(root, "rev-parse", parked[0]).stdout.strip() == tip
+
+
+def test_unmeasurable_comparison_preserves(repo: Path) -> None:
+    """#2325: an unknown count preserves rather than deletes.
+
+    A base that cannot be resolved makes the count unknowable. Preserving
+    costs a less tidy graveyard; deleting could cost the work.
+    """
+    _git(repo, "branch", "issue-7")
+
+    failures = reset.dispose_pipeline_branches(
+        repo, 7, "no-such-base-ref-exists",
+    )
+
+    assert failures == []
+    names = _branches(repo)
+    assert "issue-7" not in names
+    assert any(n.startswith("graveyard/issue-7") for n in names)
+
+
 def test_disposal_never_force_deletes() -> None:
     """The banned-commands rule, asserted against the source.
 
