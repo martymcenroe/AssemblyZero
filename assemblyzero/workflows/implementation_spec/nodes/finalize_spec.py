@@ -225,6 +225,10 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     return {
         "spec_path": str(spec_path),
+        # #2297: the only place this is set to "completed". The orchestrator
+        # requires it, so a run that never reached finalize cannot be recorded
+        # as a passed stage however many draft files it left on disk.
+        "workflow_status": "completed",
         "error_message": "",
     }
 

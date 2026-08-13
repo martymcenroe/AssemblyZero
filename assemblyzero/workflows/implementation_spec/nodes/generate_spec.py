@@ -210,7 +210,10 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                         print(f"\n[N2] Recovered existing draft from {drafts[0].name} ({lines} lines) — skipping LLM call")
                         return {
                             "spec_draft": recovered,
-                            "spec_path": str(drafts[0]),
+                            # #2297: a DRAFT path, so it goes in the draft
+                            # field. `spec_path` means "the finalized spec"
+                            # (state.py) and only finalize_spec may set it.
+                            "spec_draft_path": str(drafts[0]),
                             "review_iteration": review_iteration,
                             "completeness_issues": [],
                             "error_message": "",
@@ -434,7 +437,14 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
 
     return {
         "spec_draft": spec_content,
-        "spec_path": str(spec_path) if spec_path else "",
+        # #2297: the audit-trail DRAFT, not the finalized spec. Writing this to
+        # `spec_path` made a cap-halted run indistinguishable from a successful
+        # one at the stage boundary: run_spec_stage accepts the stage when
+        # `spec_path` names an existing file, and after #2250 gave orchestrated
+        # runs an audit_dir this draft is always an existing file. Before #2250
+        # there was no audit_dir, so this was "" and a halt correctly failed --
+        # the lineage repair turned a correct failure into a false success.
+        "spec_draft_path": str(spec_path) if spec_path else "",
         "review_iteration": review_iteration,
         "completeness_issues": [],  # Clear after use
         "previous_review_feedback": review_feedback,  # Issue #486: Save for two-strike

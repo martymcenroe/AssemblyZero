@@ -228,6 +228,15 @@ def create_halt_node(workflow_name: str):
         return {
             "recovery_plan_path": str(plan_path),
             "state_snapshot_path": str(state_path),
+            # #2297: an explicit terminal verdict every caller can read. A
+            # halted workflow used to be distinguishable from a successful one
+            # only by inspecting artifacts, and after #2250 made drafts persist
+            # a cap-halt left the same evidence a success does.
+            "workflow_status": "halted",
+            # Carry the synthesized reason out of the halt as well, so a caller
+            # that only reads error_message sees what the block printed rather
+            # than the empty string routing left behind (#2299).
+            "error_message": error_message,
         }
 
     return halt_with_plan

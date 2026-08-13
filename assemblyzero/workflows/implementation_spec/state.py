@@ -145,7 +145,17 @@ class ImplementationSpecState(TypedDict, total=False):
 
     # Generated spec (N2)
     spec_draft: str
+    #: Audit-trail path of the LATEST DRAFT. Written by generate_spec on every
+    #: iteration; a draft existing says nothing about the run succeeding (#2297).
+    spec_draft_path: str
+    #: The FINALIZED spec. Set by finalize_spec alone, and empty unless the
+    #: review approved the draft -- which is what makes it safe for the
+    #: orchestrator to treat as the stage's artifact.
     spec_path: str
+    #: Explicit terminal verdict: "" while running, "completed" when finalize
+    #: approved, "halted" when the workflow stopped. The orchestrator reads
+    #: this rather than inferring success from an artifact's existence (#2297).
+    workflow_status: str
 
     # Validation (N3)
     completeness_issues: list[str]

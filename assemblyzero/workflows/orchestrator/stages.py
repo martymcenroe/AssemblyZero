@@ -760,7 +760,16 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         })
 
         spec_path = sub_result.get("spec_path", "")
-        if spec_path and Path(spec_path).is_file():
+        # #2297: the stage verdict is the workflow's OWN explicit status, not an
+        # inference from an artifact existing. A cap-halted run was recorded as
+        # `passed` because generate_spec wrote each draft's audit path into
+        # `spec_path` and the file was really there -- so the roll proceeded to
+        # impl on a spec that was never finalized, and the true failure was
+        # buried five screens up. `halted` is authoritative and refuses the
+        # stage even if an artifact is present.
+        workflow_status = str(sub_result.get("workflow_status", ""))
+        halted = workflow_status == "halted"
+        if not halted and spec_path and Path(spec_path).is_file():
             # Closes #1625: the spec is a permanent artifact paired with the LLD;
             # ride it on the LLD PR so it lands on target main (ADR 0221). The
             # working-tree copy stays for the impl stage to read; the terminal
@@ -777,7 +786,13 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                 attempts=1,
             )
         else:
-            error_msg = sub_result.get("error_message", "Spec workflow completed but no artifact produced")
+            error_msg = sub_result.get("error_message", "")
+            if not error_msg:
+                error_msg = (
+                    "Spec workflow halted before finalizing"
+                    if halted
+                    else "Spec workflow completed but no artifact produced"
+                )
             elapsed = time.monotonic() - start_time
             _record_spec_convergence_failure(
                 target_repo, issue_number, sub_result, elapsed, stage_cfg,
