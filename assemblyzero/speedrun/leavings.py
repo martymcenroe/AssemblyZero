@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.speedrun.preserved import record_preserved
+
 #: Where the pipeline writes files into a target repo's main checkout.
 #: Grounded in the actual write sites: `workflows/requirements/audit.py`
 #: saves approved LLDs to docs/lld/active/; draft specs land in
@@ -232,6 +234,12 @@ def preserve_and_clear(
             return _fail_all("push", pushed.stderr.strip())
     finally:
         index.unlink(missing_ok=True)
+
+    # #2355: the archiver reads this record. `graveyard/leavings-<stamp>`
+    # carries no run prefix, so the old bundle rule could never find it.
+    record_preserved(
+        repo, branch, source="leavings", detail=f"{len(files)} file(s)"
+    )
 
     result.branch = branch
     for f in files:

@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.speedrun.preserved import record_preserved
+
 WORKTREES_REL = Path("data/worktrees")
 ORPHANED_DIRNAME = "orphaned"
 
@@ -286,6 +288,13 @@ def _preserve_dirty(repo: Path, path: Path, log) -> SweepEntry:
         # push failure is reported and the sweep proceeds; refusing here would
         # strand the worktree again for a reason unrelated to its content.
         log(f"    push of {grave} failed (content is safe on the local branch)")
+
+    # #2355: write down what was preserved, as it is preserved. The archiver
+    # used to infer the set from a `graveyard/<run>*` prefix this line has
+    # never produced, so it bundled none of them.
+    record_preserved(
+        repo, grave, source="sweep", detail=f"stranded worktree {path.name}"
+    )
 
     removed = _remove_worktree(repo, path, log)
     if removed.returncode != 0:

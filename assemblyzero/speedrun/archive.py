@@ -45,6 +45,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from assemblyzero.speedrun.preserved import (
+    claimed_by_other_run,
+    recorded_for,
+)
+
 ARCHIVES_REL = Path("data/speedrun/archives")
 DEFAULT_LOG_REL = Path("data/speedrun/runs")
 RESET_ARTIFACTS_REL = Path("data/speedrun/reset-artifacts")
@@ -159,19 +164,47 @@ def local_branches(repo: Path) -> list[str]:
 
 
 def graveyard_branches_for(repo: Path, run: str) -> list[str]:
-    """Graveyard branches belonging to `run`, by documented prefix rule.
+    """Graveyard branches to bundle with `run`. Recorded fact, then measurement.
 
-    Attempt branches are parked as `graveyard/<run>`, `graveyard/<run>-<suffix>`
-    or `graveyard/<run><separator><suffix>`. The rule is recorded in
-    `index.json` so a human can audit what was and was not swept in; anything
-    outside it must be passed explicitly via `extra_branches`.
+    This matched ``graveyard/<run>*`` until #2355. The pipeline never writes
+    that name. It writes ``graveyard/issue-7-<stamp>`` from the worktree
+    preserve step, ``graveyard/7-lld-<stamp>``, and
+    ``graveyard/leavings-<stamp>`` from the leavings sweep, none of which
+    carry the run prefix. Archiving hardening-run-17 on 2026-08-14 reported
+    ``graveyard 0`` against a campaign holding sixty-four of them, and still
+    called the archive complete.
+
+    Two sources now, in this order:
+
+    1. **The ledger** (`preserved.py`), written by the preserve steps as they
+       preserve. A recorded fact about what this pipeline actually did, which
+       a naming convention never was.
+    2. **Measured discovery** of every ``graveyard/*`` branch the ledger does
+       not attribute to a DIFFERENT run. The sixty-four branches that already
+       exist predate the ledger, and losing them is the failure being
+       repaired. Only a positive attribution elsewhere excludes a branch:
+       over-inclusion costs disk in a tool that only ever writes, while
+       under-inclusion costs the evidence record.
+
+    `index.json` records which source produced each branch, so an audit can
+    tell a recorded preservation from a discovered one.
     """
-    prefix = f"graveyard/{run}"
-    matched = []
-    for branch in local_branches(repo):
-        if branch == prefix or branch.startswith(prefix + "-"):
-            matched.append(branch)
+    recorded = recorded_for(repo, run)
+    claimed = claimed_by_other_run(repo, run)
+
+    matched = {
+        branch
+        for branch in local_branches(repo)
+        if branch.startswith("graveyard/") and branch not in claimed
+    }
+    matched |= {b for b in recorded if b in set(local_branches(repo))}
     return sorted(matched)
+
+
+def graveyard_sources(repo: Path, run: str, branches: list[str]) -> dict[str, str]:
+    """Where each bundled branch came from, for the index's audit trail."""
+    recorded = recorded_for(repo, run)
+    return {b: ("ledger" if b in recorded else "discovered") for b in branches}
 
 
 # ---------------------------------------------------------------------------
@@ -359,9 +392,11 @@ def archive_run(
     # --- branches + bundle ------------------------------------------------
     integration_sha = _rev(repo, run) if _ref_exists(repo, run) else None
     graveyard = graveyard_branches_for(repo, run)
+    graveyard_source = graveyard_sources(repo, run, graveyard)
     for extra in extra_branches or []:
         if extra not in graveyard and extra != run:
             graveyard.append(extra)
+            graveyard_source[extra] = "explicit"
     graveyard = sorted(set(graveyard))
 
     refs = ([run] if integration_sha else []) + graveyard
@@ -474,8 +509,21 @@ def archive_run(
         "components": [c.as_dict() for c in components],
         "branches": {
             "integration": {"name": run, "sha": integration_sha},
-            "graveyard": [{"name": b, "sha": _rev(repo, b)} for b in graveyard],
-            "graveyard_match_rule": f"refs/heads/graveyard/{run} and graveyard/{run}-*",
+            "graveyard": [
+                {
+                    "name": b,
+                    "sha": _rev(repo, b),
+                    "source": graveyard_source.get(b, "explicit"),
+                }
+                for b in graveyard
+            ],
+            # #2355: the rule used to be a prefix the pipeline never writes.
+            # It is now what was recorded plus what was measured, and each
+            # branch above says which of the two produced it.
+            "graveyard_match_rule": (
+                "the preserved-branch ledger for this run, plus every "
+                "refs/heads/graveyard/* not attributed to another run"
+            ),
         },
         "bundle": bundle_rel if bundle_path.exists() else None,
         "rolls": [r.as_dict() for r in rolls],
