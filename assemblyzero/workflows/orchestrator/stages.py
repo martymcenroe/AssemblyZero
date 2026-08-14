@@ -168,6 +168,15 @@ def _classify_halt_transience(sub_result: dict) -> bool | None:
 
         if MISSING_REQUIRED_INPUT.lower() in message:
             return False
+        # #2337: same rule, different cause. Green-at-red on an unchanged
+        # worktree is deterministic -- attempts 2 and 3 of run-issue7-192332
+        # reproduced attempt 2's outcome exactly, twelve seconds apart.
+        from assemblyzero.workflows.testing.nodes.verify_phases import (
+            DETERMINISTIC_FAILURE,
+        )
+
+        if DETERMINISTIC_FAILURE.lower() in message:
+            return False
         return None
     try:
         plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))

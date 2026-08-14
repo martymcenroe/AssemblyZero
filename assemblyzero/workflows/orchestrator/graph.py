@@ -150,10 +150,16 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
             # says which happened without anyone reading transcripts.
             mode = retry_mode_for(stage_result)
             stage_result["retry_mode"] = mode
+            # #2337: this used to say REGENERATED "discards the previous
+            # attempt's generated files". It discards nothing. The mode's only
+            # effect is to stop N4 SKIPPING files that already exist
+            # (implementation/orchestrator.py), and on run-issue7-192332 N4 was
+            # never reached -- the red phase saw the surviving implementation
+            # and ended the stage first. A reader diagnosing that run would
+            # have believed the files were gone.
             print(
                 f"[ORCHESTRATOR] Next attempt will be {mode.lower()} "
-                f"({'reusing' if mode == RESUMED else 'discarding'} "
-                f"the previous attempt's generated files)."
+                f"({'reusing generated files where they exist' if mode == RESUMED else 'rewriting generated files rather than skipping them'})."
             )
             time.sleep(delay)
             last_state = dict(new_state)
