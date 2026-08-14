@@ -311,13 +311,70 @@ def analyze_dead_cli_flags(
     return issues
 
 
+def _statement_blocks(tree: ast.AST) -> list[list[ast.stmt]]:
+    """Every block of statements in the tree, so a statement's siblings are known.
+
+    `ast.walk` yields nodes without their context. Telling a guard clause from
+    an empty branch needs to know whether anything FOLLOWS the `if`, which is
+    a fact about its block and not about the node (#2340).
+    """
+    blocks: list[list[ast.stmt]] = []
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(node, field, None)
+            if isinstance(block, list) and block and isinstance(block[0], ast.stmt):
+                blocks.append(block)
+    return blocks
+
+
+def _is_guard_clause(body: list[ast.stmt]) -> bool:
+    """Whether a branch's only real statement transfers control out of the block.
+
+    `_is_trivial_body` cannot make this call, and must not be taught to: it
+    also judges FUNCTION bodies, where a bare `return` genuinely is a stub.
+    The difference is the context, so the context is where it is decided.
+    """
+    meaningful = [
+        stmt
+        for stmt in body
+        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+    ]
+    return len(meaningful) == 1 and isinstance(meaningful[0], ast.Return)
+
+
 def analyze_empty_branches(
     source_code: str, file_path: str
 ) -> list[CompletenessIssue]:
-    """Detect if/elif/else branches with only pass, return None, or trivial bodies.
+    """Detect if/elif/else branches that do nothing.
 
-    Issue #147, Requirement 3: Detects conditional branches that contain
-    only trivial statements, indicating unfinished implementation.
+    Issue #147, Requirement 3: conditional branches containing only trivial
+    statements, which indicate unfinished implementation.
+
+    #2340: a guard clause is not one of them. N4b reported
+
+        empty_branch: Empty 'if' branch at line 83 -- body contains only
+        pass/return None
+
+    against this, in the config.py the pipeline generated for
+    run-issue7-192332:
+
+        if not hand_changed_keys:
+            return
+
+    That is an idiomatic early return, and it is exactly what the spec's
+    "no hand changes leaves the file byte-identical" requirement asks for.
+    Most generated files carry one, so the check fired on ordinary code and
+    the warning came to mean nothing. A check that fires on idiomatic code is
+    worse than no check: it trains the reader to skim past the line where a
+    real finding would appear.
+
+    The distinction is `pass` against `return`, plus position. `pass` alone is
+    an empty branch wherever it sits. A bare `return` guards the code that
+    FOLLOWS the if, so it is a guard clause when something does follow, and a
+    branch that really does nothing when nothing does.
+
+    WARN-and-route is unchanged. This issue does not touch the fail-open
+    policy; the defect was the warning being false, not the routing.
 
     Args:
         source_code: Python source code to analyze.
@@ -333,33 +390,40 @@ def analyze_empty_branches(
     except SyntaxError:
         return issues
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
+    for block in _statement_blocks(tree):
+        for index, node in enumerate(block):
+            if not isinstance(node, ast.If):
+                continue
 
-        # Check the if body
-        if _is_trivial_body(node.body):
-            issues.append(
-                CompletenessIssue(
-                    category=CompletenessCategory.EMPTY_BRANCH,
-                    file_path=file_path,
-                    line_number=node.lineno,
-                    description=(
-                        f"Empty 'if' branch at line {node.lineno} — body contains "
-                        f"only pass/return None"
-                    ),
-                    severity="WARNING",
+            followed = index + 1 < len(block)
+
+            if _is_trivial_body(node.body) and not (
+                followed and _is_guard_clause(node.body)
+            ):
+                issues.append(
+                    CompletenessIssue(
+                        category=CompletenessCategory.EMPTY_BRANCH,
+                        file_path=file_path,
+                        line_number=node.lineno,
+                        description=(
+                            f"Empty 'if' branch at line {node.lineno} — body contains "
+                            f"only pass/return None"
+                        ),
+                        severity="WARNING",
+                    )
                 )
-            )
 
-        # Check elif/else branches (stored in node.orelse)
-        if node.orelse:
-            # If orelse is a single If node, it's an elif — we'll catch it
-            # when we walk to that If node. Only check non-If orelse (else blocks).
-            if not (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If)):
-                if _is_trivial_body(node.orelse):
+            # Check elif/else branches (stored in node.orelse)
+            if node.orelse:
+                # If orelse is a single If node, it's an elif — we'll catch it
+                # when we reach that If node. Only check non-If orelse.
+                if len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+                    continue
+                if _is_trivial_body(node.orelse) and not (
+                    followed and _is_guard_clause(node.orelse)
+                ):
                     # else block line number: use the first statement in orelse
-                    else_line = node.orelse[0].lineno if node.orelse else node.lineno
+                    else_line = node.orelse[0].lineno
                     issues.append(
                         CompletenessIssue(
                             category=CompletenessCategory.EMPTY_BRANCH,
