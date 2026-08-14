@@ -109,7 +109,7 @@ def _capture_impl_payload(state):
     captured: dict = {}
 
     class _StubApp:
-        def invoke(self, payload):
+        def invoke(self, payload, *args, **kwargs):
             captured["payload"] = payload
             return {"error_message": ""}
 

@@ -189,7 +189,7 @@ class TestImplCompletenessGateHonesty:
         (tmp_path / "spec.md").write_text("# spec")
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 return sub_result
 
         class _StubGraph:
@@ -286,7 +286,7 @@ class TestImplWorktreeDoesNotPush:
         (tmp_path / "spec.md").write_text("# spec")
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 return {"error_message": ""}
 
         class _StubGraph:
@@ -404,7 +404,7 @@ class TestRunImplStageRepoRoot:
         captured: dict[str, dict] = {}
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 captured["payload"] = payload
                 # Pretend the testing workflow succeeded.
                 return {"error_message": ""}

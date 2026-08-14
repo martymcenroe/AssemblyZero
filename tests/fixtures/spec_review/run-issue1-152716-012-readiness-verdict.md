@@ -1,0 +1,9 @@
+Verdict: REVISE
+
+Rationale: The spec requires revision due to a platform-level test execution failure (violating Assertion Traceability Issue #1866), missing core implementations for the gauge's static elements, and a literal translation trap in the file instructions that would cause an agent to omit the test suite entirely.
+
+## Feedback Items
+- ASSERTION TRACEABILITY (Issue #1866): The execution of `test_req_120_visual` and the command `pytest ... --generate-baselines` cannot hold on the platform the tests run on. Pytest natively rejects unregistered CLI arguments and will crash the test suite before it even starts. You must specify a `conftest.py` modification using `pytest_addoption` to register the custom flag.
+- Completeness (REQ-4): The 'Complete file contents' provided for `src/boostgauge/skins/stingray.py` draws the redline band, telltales, and main needle, but completely omits the housing, dial, ticks, numerals, and wordmark. An AI agent will build exactly what is provided, resulting in a gauge missing most of its static elements.
+- Concreteness (Literal Translation Trap): Sections 6.4 and 6.5 provide 'Complete file contents' that only contain imports and a comment (`# Stubs for per-criterion tests defined in Section 10.1`). An autonomous agent will follow this literally and drop the actual tests. You must either embed the tests directly into the Section 6 blocks or explicitly instruct the agent to append the functions from Section 10.1.
+- Assertion Traceability / Test Strength: In `test_req_040()`, the assertion `assert diff.getbbox()` only proves that the value=0 and value=100 images are not perfectly identical. It fails to assert the REQ-4 constraint that they 'differ ONLY in pixels occupied by the candy-apple #F73923 needle'. Update the assertion to verify the difference is restricted to the expected needle areas.

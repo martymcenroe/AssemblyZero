@@ -165,6 +165,15 @@ class ImplementationSpecState(TypedDict, total=False):
     review_verdict: Literal["APPROVED", "REVISE", "BLOCKED"]
     review_feedback: str
     review_iteration: int
+    #: #2382: every round's feedback, oldest first. Convergence is judged
+    #: against all of them rather than only the last, because a loop that
+    #: alternates between two objections repeats without ever repeating
+    #: consecutively.
+    review_feedback_history: list[str]
+    #: #2382: which exit the review loop took, decided in N5 and read by the
+    #: router. A router's state writes are discarded at the graph boundary
+    #: (#2018), so the decision cannot live there.
+    review_exit: str
 
     # Workflow control
     max_iterations: int

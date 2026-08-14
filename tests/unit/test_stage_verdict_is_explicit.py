@@ -104,7 +104,7 @@ class _FakeApp:
     def __init__(self, result):
         self._result = result
 
-    def invoke(self, state):
+    def invoke(self, state, *args, **kwargs):
         return self._result
 
 

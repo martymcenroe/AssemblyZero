@@ -238,15 +238,25 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # complete final spec unreviewed and synthesized a BLOCKED verdict
     # no reviewer issued (boostgauge#96 hardening run 4).
     # -------------------------------------------------------------------------
-    if review_iteration > max_iterations:
-        print(f"    [GUARD] Iteration {review_iteration} exceeds budget ({max_iterations})")
+    # #2382: the bound is the hard ceiling, not the base cap. A converging loop
+    # is now allowed past the base, so comparing against the base here would
+    # BLOCK the very rounds the convergence exit exists to grant -- and would
+    # do it by synthesizing a verdict no reviewer issued, which is the defect
+    # #1775 removed from this same guard.
+    from assemblyzero.workflows.implementation_spec.review_progress import (
+        hard_ceiling,
+    )
+
+    ceiling = hard_ceiling(max_iterations)
+    if review_iteration > ceiling:
+        print(f"    [GUARD] Iteration {review_iteration} exceeds ceiling ({ceiling})")
         return {
             "review_verdict": "BLOCKED",
             "review_feedback": (
-                f"Review iteration {review_iteration} exceeds the maximum "
-                f"({max_iterations}); the regeneration routing should have "
-                "halted earlier — treating as BLOCKED. The last generated "
-                "spec was NOT reviewed."
+                f"Review iteration {review_iteration} exceeds the hard ceiling "
+                f"({ceiling}); the regeneration routing should have halted "
+                "earlier — treating as BLOCKED. The last generated spec was "
+                "NOT reviewed."
             ),
             "error_message": "",
         }
@@ -397,26 +407,56 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # to report nothing because error_message stayed empty — the rationale
     # and feedback sat unused in state while the operator saw a blank. Carry
     # the reason so the stage that stopped says why it stopped.
+    # #2382: the continue/stop decision is made HERE, once, and the router
+    # reads it. It cannot be made in the router: a router's state writes are
+    # discarded at the graph boundary (#2018), which is the whole reason #2197
+    # had to move the cap MESSAGE here. Deciding in one place and routing in
+    # another is how the node came to write a cap message while the router
+    # applied a different rule.
+    from assemblyzero.workflows.implementation_spec.review_progress import (
+        CONTINUE,
+        decide,
+        describe_exit,
+    )
+
+    prior_feedbacks = list(state.get("review_feedback_history") or [])
+    review_exit = CONTINUE
     blocked_reason = ""
+
     if verdict_status == "BLOCKED":
         blocked_reason = (
             f"Spec review BLOCKED: {feedback or spec_result['rationale'] or 'no reason given'}"
         )
         _file_conflict_if_any(state, spec_result.get("rationale", "") or feedback)
-    elif verdict_status == "REVISE" and review_iteration >= max_iterations:
-        # Closes #2197: this is the halt, and it recorded nothing. The router
-        # sends a capped REVISE to HALT, but a router's state writes are
-        # discarded at the graph boundary (#2018), so error_message stayed
-        # empty and the banner read "Error: unknown" at both the workflow and
-        # the orchestrator level -- a failure the operator had to diagnose by
-        # scrolling the raw log. The reason was in the transcript all along.
-        blocked_reason = describe_iteration_cap(
-            max_iterations, verdict_status, feedback
+    elif verdict_status == "REVISE":
+        decision = decide(
+            review_iteration=review_iteration,
+            max_iterations=max_iterations,
+            current_feedback=feedback,
+            prior_feedbacks=prior_feedbacks,
         )
+        review_exit = decision.exit_name
+        print(f"    [REVIEW] {describe_exit(decision, max_iterations)}")
+        if not decision.should_continue:
+            # Closes #2197: this is the halt, and it used to record nothing, so
+            # the banner read "Error: unknown" at both the workflow and the
+            # orchestrator level. #2382 adds which exit fired, because a loop
+            # stopped while still converging and a loop stopped for repeating
+            # itself want opposite responses from the operator.
+            blocked_reason = (
+                f"{describe_iteration_cap(max_iterations, verdict_status, feedback)}\n"
+                f"  exit: {decision.exit_name}\n"
+                f"  {decision.detail}"
+            )
 
     return {
         "review_verdict": verdict_status,
         "review_feedback": feedback,
+        # Every round's feedback, so convergence is judged against all of them
+        # rather than only the last -- a loop alternating between two objections
+        # repeats without ever repeating consecutively.
+        "review_feedback_history": prior_feedbacks + [feedback],
+        "review_exit": review_exit,
         "error_message": blocked_reason,
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511

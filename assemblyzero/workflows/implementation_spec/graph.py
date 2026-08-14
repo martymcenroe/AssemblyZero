@@ -234,31 +234,50 @@ def route_after_review(
     if verdict == "APPROVED":
         return "N6_finalize_spec"
 
-    if verdict == "REVISE" and review_iteration < max_iterations:
-        # Issue #486: Two-strike stagnation detection
-        current_feedback = state.get("review_feedback", "")
-        previous_feedback = state.get("previous_review_feedback", "")
-        if previous_feedback and current_feedback:
-            # Issue #503: Structured two-strike comparison
-            from assemblyzero.core.verdict_schema import same_blocking_issues
-            if same_blocking_issues(current_feedback, previous_feedback):
-                print("    [HALT] Two consecutive REVISE verdicts with same feedback. Halting.")
-                return "HALT"
-
-        print(
-            f"    [ROUTING] Gemini verdict REVISE "
-            f"(iteration {review_iteration}/{max_iterations}) - regenerating spec"
+    if verdict == "REVISE":
+        # #2382: N5 already decided, against every prior round's feedback and
+        # the hard ceiling. Re-deciding here would be a second rule that can
+        # disagree with the message N5 wrote -- and this router's state writes
+        # are discarded at the graph boundary (#2018), so it could not record
+        # its own reasoning even if it were the right place to reason.
+        from assemblyzero.workflows.implementation_spec.review_progress import (
+            CONTINUE,
+            hard_ceiling,
         )
-        return "N2_generate_spec"
 
-    # BLOCKED or max iterations exceeded
-    if review_iteration >= max_iterations:
-        print(
-            f"    [ROUTING] Max iterations ({max_iterations}) reached "
-            f"with verdict {verdict} - halting"
-        )
-    else:
-        print(f"    [ROUTING] Gemini verdict BLOCKED - halting workflow")
+        review_exit = state.get("review_exit")
+        if review_exit is None:
+            # No N5 decision on this state, so it never went through N5 -- a
+            # hand-built state, or a caller driving the router directly. Fall
+            # back to the base-cap rule rather than assuming CONTINUE: treating
+            # a missing key as permission to loop would turn any future state
+            # that forgets to set it into an unbounded loop, bounded only by the
+            # step budget and reported as a recursion error.
+            if review_iteration < max_iterations:
+                print(
+                    f"    [ROUTING] Gemini verdict REVISE "
+                    f"(iteration {review_iteration}/{max_iterations}) - "
+                    "regenerating spec"
+                )
+                return "N2_generate_spec"
+            print(
+                f"    [ROUTING] Max iterations ({max_iterations}) reached "
+                f"with verdict {verdict} - halting"
+            )
+            return "HALT"
+
+        if review_exit == CONTINUE:
+            print(
+                f"    [ROUTING] Gemini verdict REVISE "
+                f"(round {review_iteration + 1}, base cap {max_iterations}, "
+                f"ceiling {hard_ceiling(max_iterations)}) - regenerating spec"
+            )
+            return "N2_generate_spec"
+
+        print(f"    [HALT] Spec review stopped [{review_exit}].")
+        return "HALT"
+
+    print("    [ROUTING] Gemini verdict BLOCKED - halting workflow")
     return "HALT"
 
 
