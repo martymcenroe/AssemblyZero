@@ -542,6 +542,38 @@ def create_project_json(project_path: Path, name: str, github_user: str) -> None
 
 PROJECT_TYPES = ("minimal", "python", "chrome-extension", "pypi", "cf-worker", "web")
 
+# ---------------------------------------------------------------------------
+# Python versions the fleet actually runs (#2274)
+# ---------------------------------------------------------------------------
+#
+# The scaffolder stamped `^3.10` into every new repo's pyproject and `"3.10"`
+# into its release workflow. That is the #2185 defect class built into the
+# generator: a floor nothing in the fleet runs pushes the resolver toward
+# package versions with no cp314 wheels, and on a machine with no C compiler
+# the source build fails, so `poetry install` exits nonzero forever.
+#
+# These are TWO values on purpose, and the difference is not drift.
+#
+# The FLOOR is a claim about compatibility: the oldest interpreter the project
+# says it supports. It bounds what the resolver may choose.
+#
+# The CI version is what a workflow actually installs and runs on. Testing and
+# building on the version the fleet really uses is what catches the breakage
+# operators hit; a workflow pinned to the floor would go green on an
+# interpreter nobody runs, which is the same blindness #2185 was about, only
+# pointed the other way.
+#
+# Both track AssemblyZero's own configuration, and `tests/unit/test_new_repo_python_version.py`
+# asserts that rather than trusting this comment -- if the parent repo's floor
+# or CI version moves, the scaffolder is failed until it follows.
+FLEET_PYTHON_FLOOR = "3.12"
+FLEET_PYTHON_CI = "3.14"
+
+#: Substituted into the release workflow template. A sentinel rather than an
+#: f-string because GitHub Actions templates carry `${{ }}`, which an f-string
+#: would force every future editor to double.
+_PYTHON_CI_SENTINEL = "__FLEET_PYTHON_CI__"
+
 
 def _project_specific_context(project_type: str, name: str) -> str:
     """Return the "## Project-Specific Context" section for the given project type.
@@ -1372,8 +1404,9 @@ _REQUIRES_PYTHON_CARET = re.compile(
 def _normalize_requires_python(pyproject_text: str) -> str:
     """Rewrite a Poetry-style caret requires-python to valid PEP 440 (#1573).
 
-    `poetry init` writes `requires-python = "^3.10"` into the PEP 621 [project]
-    table. The caret is valid Poetry dependency syntax but INVALID PEP 440 for
+    `poetry init` writes `requires-python = "^X.Y"` into the PEP 621 [project]
+    table -- `^` plus whatever floor it was handed, `FLEET_PYTHON_FLOOR` here
+    (#2274). The caret is valid Poetry dependency syntax but INVALID PEP 440 for
     this field, so ruff and other strict PEP 621 consumers refuse to parse
     pyproject.toml at all. `^X.Y` means `>=X.Y,<(X+1).0`, so rewrite to that
     faithful, valid form. An already-valid specifier is returned unchanged.
@@ -1450,7 +1483,9 @@ def create_python_project(
         "--no-interaction",
         "--name", package_name,
         "--description", "",
-        "--python", "^3.10",
+        # #2274: the ruled fleet floor, not a literal. `_normalize_requires_python`
+        # below rewrites the caret to valid PEP 440.
+        "--python", f"^{FLEET_PYTHON_FLOOR}",
         "--license", poetry_license,
     ]
     try:
@@ -1688,7 +1723,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "__FLEET_PYTHON_CI__"
 
       - name: Install Poetry
         run: pipx install poetry
@@ -1700,8 +1735,12 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         # No password / token — OIDC Trusted Publisher handles auth.
 '''
+        # #2274: the workflow builds on the version the fleet runs, not on a
+        # floor no machine has.
         (workflows_dir / "release.yml").write_text(
-            release_yml, encoding="utf-8", newline="",
+            release_yml.replace(_PYTHON_CI_SENTINEL, FLEET_PYTHON_CI),
+            encoding="utf-8",
+            newline="",
         )
 
 
