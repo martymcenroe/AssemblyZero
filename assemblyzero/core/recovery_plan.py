@@ -11,9 +11,11 @@ budget exceeded), this module generates a structured recovery plan that:
 """
 
 import json
+import re
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 
 # Error types classified as transient (will resolve on their own)
@@ -155,7 +157,9 @@ def generate_recovery_plan(
         earliest_retry = retry_at.isoformat()
 
     # Generate recommendation
-    recommendation = _build_recommendation(error_type, error_message, workflow)
+    recommendation = _build_recommendation(
+        error_type, error_message, workflow, state,
+    )
 
     return RecoveryPlan(
         issue_number=issue_number,
@@ -174,7 +178,23 @@ def generate_recovery_plan(
     )
 
 
-def _build_recommendation(error_type: str, error_message: str, workflow: str) -> str:
+def _never_passed(error_message: str) -> bool:
+    """True when the halt message reports 0 tests passing out of N (#2321).
+
+    Mechanically derived from the message the stagnation guard already
+    writes, so this needs no new plumbing and cannot disagree with the
+    number the operator is reading two lines above it.
+    """
+    match = re.search(r"\b0\s*/\s*(\d+)\s+passed", error_message)
+    return bool(match) and int(match.group(1)) > 0
+
+
+def _build_recommendation(
+    error_type: str,
+    error_message: str,
+    workflow: str,
+    state: dict[str, Any] | None = None,
+) -> str:
     """Generate human-readable advice based on error type."""
     if error_type == "capacity_exhausted":
         return (
@@ -187,6 +207,32 @@ def _build_recommendation(error_type: str, error_message: str, workflow: str) ->
             "Check ~/.assemblyzero/gemini-rotation-state.json for reset times."
         )
     elif error_type == "stagnation":
+        # #2321: this is the pipeline's last word before a human picks the run
+        # up, and it used to aim at the two most expensive artifacts to
+        # regenerate. On boostgauge #7 the LLD (282s) and spec (699s) were both
+        # correct -- the spec's own tests pass against the implementation the
+        # run discarded -- while the broken artifact was the 2s generated test
+        # file, which the message never mentioned. Acting on it as written
+        # would have burned another 16 minutes regenerating good documents.
+        #
+        # When no test has EVER passed, the suite is the first suspect: a suite
+        # that cannot pass makes the loop unable to converge whatever the
+        # implementation does. A partial-pass stagnation is a genuinely
+        # different situation and keeps the original advice.
+        if _never_passed(error_message):
+            test_file = ""
+            for candidate in (state or {}).get("test_files", []) or []:
+                test_file = str(candidate)
+                break
+            where = f" Inspect {test_file}." if test_file else ""
+            return (
+                "Non-transient: no test has passed in any iteration. When the "
+                "pass count never leaves zero, suspect the GENERATED TEST FILE "
+                "before the LLD or spec — a suite that cannot pass makes the "
+                f"implementation loop unable to converge.{where} Check whether "
+                "its tests have real bodies, or are placeholders that fail "
+                "unconditionally."
+            )
         return (
             "Non-transient: Two consecutive iterations with same blocking issues. "
             "The LLD or spec likely needs manual editing before retry."
