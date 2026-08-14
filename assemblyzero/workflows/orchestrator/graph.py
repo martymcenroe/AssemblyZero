@@ -477,6 +477,10 @@ def orchestrate(
             resume_stage = determine_resume_stage(state, resume_from)
             state_dict = dict(state)
             state_dict["current_stage"] = resume_stage
+            # #2383: set from THIS invocation, never inherited from the loaded
+            # state -- a stale marker would make an ordinary later run believe
+            # it was resuming and adopt a previous run's lineage.
+            state_dict["resumed_from"] = resume_stage
             state_dict["config"] = effective_config
             # Repo targeting on resume: explicit arg wins, else keep what was
             # persisted, else fall back to the default (Issue #1374).
@@ -497,6 +501,9 @@ def orchestrate(
                 issue_number, effective_config, resolved_target, resolved_root
             )
             state["base_branch"] = resolved_base
+            # #2383: explicit on the fresh path too, so the field is never
+            # merely absent and a reader cannot mistake missing for "unknown".
+            state["resumed_from"] = ""
             # Detect existing artifacts and skip completed stages
             existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
             for stage in STAGE_ORDER:

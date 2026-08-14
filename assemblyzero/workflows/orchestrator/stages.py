@@ -840,8 +840,50 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
 
         spec_max_iterations = int(stage_cfg.get("max_revisions", 3) or 3)
 
+        # #2383: a resume used to restart at iteration 0 with a fresh draft,
+        # discarding every round already paid for -- because each run claims a
+        # NEW run-scoped lineage dir and generate_spec recovers a draft by
+        # globbing the dir it was handed, which is empty. Seed the loop from the
+        # last run instead: its final draft, its final verdict's outstanding
+        # items, and every verdict it produced so #2382's convergence check is
+        # not blind on the resumed round.
+        #
+        # Keyed on an actual resume. Whether resuming is appropriate was already
+        # decided upstream -- resume_plan refuses a resume whose draft predates
+        # an issue edit or binding-doc change, and --fresh skips planning
+        # entirely; both express themselves as no --resume-from arriving here.
+        seed = None
+        if state.get("resumed_from") == "spec" and audit_dir_str:
+            from assemblyzero.workflows.implementation_spec.lineage_seed import (
+                describe as describe_seed,
+                seed_from_lineage,
+            )
+
+            seed = seed_from_lineage(
+                Path(audit_dir_str).parent, exclude=Path(audit_dir_str)
+            )
+            if seed:
+                print(describe_seed(seed))
+            else:
+                print(
+                    "    [spec] resume found no prior draft-and-verdict pair "
+                    "in lineage; drawing fresh."
+                )
+
+        resumed_payload = (
+            {
+                "spec_draft": seed.draft,
+                "review_feedback": seed.feedback,
+                "review_feedback_history": list(seed.prior_feedbacks),
+                "review_iteration": seed.rounds_completed,
+            }
+            if seed
+            else {}
+        )
+
         app = create_spec_graph()
         sub_result = app.invoke({
+            **resumed_payload,
             "issue_number": issue_number,
             "lld_path": lld_path,
             "repo_root": target_repo,
