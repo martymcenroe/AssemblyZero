@@ -83,6 +83,10 @@ from assemblyzero.core.provider_storm import (  # noqa: E402
     # provider_storm for a future deliberate wait, but nothing here waits.
     STORM_EXIT_CODE,
 )
+from assemblyzero.speedrun.archive import (  # noqa: E402  (#2353)
+    archive_run,
+    verify_manifest,
+)
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
 from assemblyzero.speedrun.successes import (  # noqa: E402  (#2191)
     completed_on,
@@ -2236,6 +2240,69 @@ def _requirements_unverified_lines(repo_root, since: str) -> list[str]:
         return []
 
 
+def _archive_successful_run(repo_root) -> list[str]:
+    """Archive and verify the run that just succeeded (#2353).
+
+    Operator, 2026-08-14, on reading "Next step: archive the run": "why am I
+    being the monkey here anyway. the roll succeeded. why isn't the archive
+    step automatic?" There was no good answer. The tool is deterministic,
+    exit-coded, and only ever writes; the launcher already knew the roll had
+    succeeded, because it had just printed the instruction. A step the
+    runbook itself calls unrecoverable if skipped should not depend on a
+    human remembering it.
+
+    Never raises. The roll succeeded, and a failed archive is its own
+    problem: named here, loudly, and never allowed to alter the verdict
+    above it.
+    """
+    lines: list[str] = []
+    try:
+        run = resolve_attempt_branch(repo_root)
+        if not run:
+            return [
+                "  ARCHIVE SKIPPED: no attempt branch could be resolved, so "
+                "there is no run name to archive under. Archive by hand per "
+                "runbook 0952 section Inspect, step 6.",
+            ]
+
+        result = archive_run(Path(repo_root), run)
+        graves = len(result.index["branches"]["graveyard"])
+        integration = 1 if result.index["branches"]["integration"]["sha"] else 0
+
+        lines.append(f"  Archive: {result.path}")
+        lines.append(
+            f"    rolls {len(result.index['rolls'])} | branches "
+            f"{integration} integration + {graves} graveyard | "
+            f"files {len(result.index['manifest'])}"
+        )
+
+        if result.complete:
+            lines.append("    complete yes")
+        else:
+            lines.append(
+                "    complete NO -- this archive does not authorize deleting "
+                "anything"
+            )
+            for name in result.missing:
+                lines.append(f"      missing: {name}")
+
+        mismatched = verify_manifest(result.path)
+        if mismatched:
+            lines.append(
+                f"    manifest MISMATCH on {len(mismatched)} file(s): "
+                f"{', '.join(mismatched[:3])}"
+            )
+        else:
+            lines.append("    manifest OK")
+
+    except Exception as exc:  # noqa: BLE001 - an archive failure is not a verdict
+        lines.append(
+            f"  ARCHIVE FAILED: {exc}. The roll still succeeded. Archive by "
+            f"hand per runbook 0952 section Inspect, step 6."
+        )
+    return lines
+
+
 def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, since=""):
     names = ", ".join(f"#{i}" for i in rolled) or "none"
     # #2290: computed before the branches so no verdict path can omit it. The
@@ -2309,10 +2376,9 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, sin
         )
     elif rolled == requested and code == 0:
         print(f"ROLL SUCCEEDED: all {len(rolled)} issue(s) rolled ({names}).")
-        print(
-            "  Next step: archive the run (runbook 0952 section Inspect, "
-            "step 6), then roll the next batch."
-        )
+        for line in _archive_successful_run(repo_root):
+            print(line)
+        print("  Next step: roll the next batch.")
     else:
         print(
             f"ROLL DID NOT COMPLETE (exit {code}) -- interrupted or errored "
