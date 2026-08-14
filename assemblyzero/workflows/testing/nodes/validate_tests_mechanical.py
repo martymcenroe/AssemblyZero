@@ -21,6 +21,17 @@ from assemblyzero.workflows.testing.runner_registry import get_runner
 
 logger = logging.getLogger(__name__)
 
+#: How many times the scaffolder may fail validation before the run stops
+#: trying to generate its way out.
+MAX_SCAFFOLD_ATTEMPTS = 3
+
+#: #2337 defined this token, and #2331 moved it here. The orchestrator's
+#: transience classifier keys off it, so a halt carrying it is not retried.
+#: It lives in this module because `verify_phases` already imports from here
+#: and the reverse import would be a cycle; `verify_phases` re-exports it, so
+#: every existing import keeps working.
+DETERMINISTIC_FAILURE = "DETERMINISTIC FAILURE"
+
 
 # =============================================================================
 # Stub Pattern Detection
@@ -328,15 +339,24 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # passes. A wholly hollow suite is always NAMED, and is rejected only when
     # rejecting can actually help.
     #
-    # That condition is deliberate. `should_regenerate` escalates a
-    # deterministic scaffolder on its hash check, and "escalate" routes to
-    # N4_implement_code (graph.py) -- so for a spec that supplies no test
-    # bodies, failing here reaches implementation anyway, just with the red
-    # phase skipped as well. Rejecting is worth it precisely when regeneration
-    # can produce something better, which since #2316 means: the spec ships
-    # executable Section 10 test functions and the scaffold ignored them.
-    # Where it cannot help, the suite is reported loudly instead of being
-    # bounced around a loop that ends in the same place.
+    # #2331 reconsidered this condition, as that issue's acceptance asked, and
+    # kept it. The routing reason IS gone: "escalate" now halts instead of
+    # entering implementation with the red phase skipped, so rejecting would
+    # change the destination and not merely the path.
+    #
+    # The condition survives on its other reason, which #2331 does not touch.
+    # A scaffold of nothing but `assert False, "TDD RED: ..."` is what the TDD
+    # scaffolder is SUPPOSED to emit before any implementation exists, and
+    # #386 closed the reject -> scaffold -> reject loop that rejecting it
+    # created. That case is wholly hollow by count, so a blanket "hollow is
+    # invalid" rule reopens #386 exactly. Two tests pin it, and they are
+    # right to.
+    #
+    # So the split stands on what regeneration can achieve. The spec ships
+    # executable Section 10 functions and the scaffold ignored them: fixable,
+    # reject and say so. The spec ships none: this is the best the scaffolder
+    # can do, name it loudly and let the red phase judge it, which it now
+    # does, because nothing skips that phase any more.
     total_tests, stub_count, stub_names = count_stub_tests(generated_tests)
     hollow = total_tests > 0 and stub_count == total_tests
     spec_has_bodies = bool(
@@ -360,8 +380,9 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
             print(f"    [HOLLOW SCAFFOLD] {description}")
             print(
                 "    The spec supplies no executable test bodies, so "
-                "re-scaffolding cannot improve on this. Proceeding, but the "
-                "implementation loop cannot converge against these tests."
+                "re-scaffolding cannot improve on this. Proceeding to the red "
+                "phase, which is no longer skipped (#2331), so this suite gets "
+                "the same checks as any other."
             )
 
     # Step 2: Validate structure with AST (imports, test functions exist)
@@ -418,6 +439,14 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
         result_dict["scaffold_validation_errors"] = all_errors
     else:
         result_dict["scaffold_validation_errors"] = []  # Clear on success
+
+    # #2331: name the halt BEFORE the hash is overwritten. `exhausted_reason`
+    # compares this attempt against the previous one, and the line below
+    # replaces the previous with this one.
+    if not is_valid:
+        _halt_if_exhausted(
+            state, result_dict, generated_tests, new_attempts, all_errors
+        )
 
     # Issue #502: Store hash for stagnation detection
     if generated_tests:
@@ -483,7 +512,7 @@ def _validate_non_pytest(
 
     new_attempts = scaffold_attempts + 1 if not is_valid else scaffold_attempts
 
-    return {
+    result: dict[str, Any] = {
         "validation_result": {
             "is_valid": is_valid,
             "errors": all_errors,
@@ -494,6 +523,12 @@ def _validate_non_pytest(
         "scaffold_attempts": new_attempts,
         "scaffold_validation_errors": all_errors if not is_valid else [],  # Issue #500
     }
+    # #2331: the non-pytest path escalates through the same routing, so it
+    # owes the same named halt. Leaving it out would make the defect a
+    # property of the framework the run happens to use.
+    if not is_valid:
+        _halt_if_exhausted(state, result, generated_tests, new_attempts, all_errors)
+    return result
 
 
 # =============================================================================
@@ -501,17 +536,81 @@ def _validate_non_pytest(
 # =============================================================================
 
 
+def exhausted_reason(
+    state: dict[str, Any], generated_tests: str, attempts: int
+) -> str:
+    """Why mechanical generation is out of moves, or "" while it is not.
+
+    #2331 gave this its own function because two callers need the same answer.
+    `should_regenerate` decides the route from it, and the validation node
+    writes the halt message from it. When the two computed it separately they
+    could disagree, and a route that ends a run whose state says nothing went
+    wrong is the silent degradation this issue is about.
+    """
+    if generated_tests:
+        current = hashlib.sha256(generated_tests.encode()).hexdigest()
+        previous = state.get("previous_scaffold_hash", "")
+        if previous and current == previous:
+            return (
+                "the scaffolder reproduced its previous output byte for byte, "
+                "so regenerating again produces the same suite"
+            )
+
+    if attempts >= MAX_SCAFFOLD_ATTEMPTS:
+        return (
+            f"the scaffold failed validation {attempts} times, which is the "
+            f"limit of {MAX_SCAFFOLD_ATTEMPTS}"
+        )
+
+    return ""
+
+
+def _halt_if_exhausted(
+    state: dict[str, Any],
+    result: dict[str, Any],
+    generated_tests: str,
+    attempts: int,
+    errors: list[str],
+) -> None:
+    """Name the halt in state when regeneration cannot help, per #2331.
+
+    Before this, an unusable suite routed to N4_implement_code and skipped the
+    red phase on the way, so a suite the validator had just called unusable
+    reached implementation with one fewer check than a suite that passed. The
+    run then burned its implementation budget against tests no code could
+    satisfy. Now it stops, and says which side is wrong.
+    """
+    reason = exhausted_reason(state, generated_tests, attempts)
+    if not reason:
+        return
+
+    shown = "; ".join(errors[:3]) if errors else "no specific error was recorded"
+    result["error_message"] = (
+        f"{DETERMINISTIC_FAILURE}: the generated test suite cannot be "
+        f"validated and {reason}. The tests are the wrong side here, not the "
+        f"implementation: {shown}. Repair the spec's Section 10 test "
+        f"functions, then resume."
+    )
+    result["next_node"] = "end"
+    print(f"    [HALT] {result['error_message']}")
+
+
 def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue", "escalate"]:
     """Conditional edge: return routing decision based on validation.
 
     Issue #335: Routes the workflow based on validation results:
-    - "regenerate": Validation failed, attempts < 3, retry scaffold
+    - "regenerate": Validation failed, attempts remain, retry scaffold
     - "continue": Validation passed, proceed to verify_red
-    - "escalate": Validation failed, attempts >= 3, use Claude
+    - "escalate": Validation failed and regeneration is exhausted
 
     Issue #502: Hash-based stagnation detection. If scaffold output is
     identical to the previous attempt, escalate immediately instead of
     wasting another generation cycle.
+
+    #2331: "escalate" no longer means "hand this to Claude". It means
+    mechanical generation is out of moves, and the run halts. The condition
+    lives in `exhausted_reason` so this function and the node that writes the
+    halt message cannot disagree about when it holds.
 
     Args:
         state: Workflow state with validation_result and scaffold_attempts.
@@ -521,24 +620,19 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
     """
     validation_result = state.get("validation_result", {})
     is_valid = validation_result.get("is_valid", False)
-    scaffold_attempts = state.get("scaffold_attempts", 0)
 
     if is_valid:
         return "continue"
 
-    # Issue #502: Hash-based stagnation detection
-    generated_tests = state.get("generated_tests", "")
-    if generated_tests:
-        current_hash = hashlib.sha256(generated_tests.encode()).hexdigest()
-        previous_hash = state.get("previous_scaffold_hash", "")
-        if previous_hash and current_hash == previous_hash:
-            print("    [STAGNANT] Scaffold produced identical output. Escalating immediately.")
-            return "escalate"
-
-    # Max 3 attempts before escalation
-    if scaffold_attempts >= 3:
-        print(f"    [ESCALATE] Max attempts ({scaffold_attempts}) reached, escalating to Claude")
+    reason = exhausted_reason(
+        state,
+        state.get("generated_tests", ""),
+        state.get("scaffold_attempts", 0),
+    )
+    if reason:
+        print(f"    [EXHAUSTED] {reason}")
         return "escalate"
 
-    print(f"    [REGENERATE] Attempt {scaffold_attempts}/3, returning to scaffold")
+    attempts = state.get("scaffold_attempts", 0)
+    print(f"    [REGENERATE] Attempt {attempts}/{MAX_SCAFFOLD_ATTEMPTS}, returning to scaffold")
     return "regenerate"
