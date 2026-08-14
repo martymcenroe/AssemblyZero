@@ -252,6 +252,7 @@ class TestEveryReportRendererInstallsIt:
             "prompt_failure_report.py",
             "prompt_revision_rank.py",
             "speedrun_overlay.py",
+            "stash_audit.py",
         }
 
     @pytest.mark.parametrize(
@@ -263,6 +264,7 @@ class TestEveryReportRendererInstallsIt:
             "prompt_failure_report.py",
             "prompt_revision_rank.py",
             "speedrun_overlay.py",
+            "stash_audit.py",
         ],
     )
     def test_each_renderer_installs_the_widening(self, name):
