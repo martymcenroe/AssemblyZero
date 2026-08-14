@@ -32,10 +32,17 @@ from assemblyzero.workflows.testing.nodes.implementation.parsers import (
     extract_code_block,
 )
 from assemblyzero.workflows.testing.state import TestingWorkflowState
+from assemblyzero.workflows.testing.symbol_validator import validate_test_imports
 
 #: Cap on how many uncovered lines to name in one request. Beyond this the
 #: prompt stops being a specific instruction and becomes a wish.
 MAX_TARGET_LINES = 40
+
+#: #2336: how many times to ask, counting the first. A hallucinated symbol is
+#: a near-miss an explicit correction usually fixes; a model that cannot
+#: produce an importable file in two tries is not going to on the third, and
+#: the passing suite is worth more than another 194-second call.
+MAX_GENERATION_ATTEMPTS = 2
 
 
 def parse_uncovered_lines(output: str) -> dict[str, list[str]]:
@@ -134,6 +141,33 @@ def build_augment_prompt(
     return "\n".join(sections)
 
 
+def build_revision_prompt(
+    original_prompt: str, rejected: str, problems: list[str],
+) -> str:
+    """Re-ask, naming exactly what was wrong (#2336).
+
+    The rejected code is included because the failure is nearly always a
+    single wrong name in an otherwise usable file -- asking for a fresh start
+    would discard work that was substantially correct.
+    """
+    return "\n".join([
+        original_prompt,
+        "",
+        "=" * 60,
+        "Your previous attempt was REJECTED before it ran. Problems:",
+        *(f"  - {problem}" for problem in problems),
+        "",
+        "Fix exactly those problems. Import only names that exist in the "
+        "module. Keep everything else about the tests the same -- the rest of "
+        "the previous attempt was accepted.",
+        "",
+        "Previous attempt:",
+        "```python",
+        rejected[:6000],
+        "```",
+    ])
+
+
 def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     """N4c: append tests targeting uncovered lines (#2327).
 
@@ -186,24 +220,65 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
     prompt = build_augment_prompt(
         str(test_path), existing, targets, coverage_achieved, coverage_target,
     )
-    response, error = call_claude_for_file(prompt, file_path=str(test_path))
-    if error or not response:
-        print(f"    [N4c] no new tests generated: {error or 'empty response'}")
-        return {"next_node": "N5_verify_green", "error_message": ""}
 
-    addition = extract_code_block(response, str(test_path))
-    if not addition or not addition.strip():
-        print("    [N4c] response contained no code block; suite unchanged")
-        return {"next_node": "N5_verify_green", "error_message": ""}
+    # #2336: validate BEFORE writing, and revise in place.
+    #
+    # The first live N4c run spent 194s producing 12 good tests whose import
+    # block asked for `default_config_path` when the module exports
+    # `get_default_config_path`. One name in one shared import statement, so
+    # collection died for the whole file: the 23 tests already passing were
+    # destroyed along with the 12 new ones, and the stage ended. Correcting
+    # only that name gives 34 passed and 100% coverage on the target module.
+    #
+    # Validating before the write is what makes "tests already passing are
+    # never destroyed by a later addition" absolute rather than likely: a
+    # file that does not import cleanly is never written at all.
+    merged = ""
+    addition = ""
+    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+        response, error = call_claude_for_file(prompt, file_path=str(test_path))
+        if error or not response:
+            print(f"    [N4c] no new tests generated: {error or 'empty response'}")
+            return {"next_node": "N5_verify_green", "error_message": ""}
 
-    # Append. Never rewrite: the existing tests are proven to pass, and a
-    # regeneration that loses one trades a coverage point for a real test.
-    merged = existing.rstrip() + "\n\n\n" + addition.strip() + "\n"
-    try:
-        compile(merged, str(test_path), "exec")
-    except SyntaxError as err:
-        print(f"    [N4c] generated tests do not parse ({err}); suite unchanged")
-        return {"next_node": "N5_verify_green", "error_message": ""}
+        addition = extract_code_block(response, str(test_path)) or ""
+        if not addition.strip():
+            print("    [N4c] response contained no code block; suite unchanged")
+            return {"next_node": "N5_verify_green", "error_message": ""}
+
+        # Append. Never rewrite: the existing tests are proven to pass, and a
+        # regeneration that loses one trades a coverage point for a real test.
+        candidate = existing.rstrip() + "\n\n\n" + addition.strip() + "\n"
+
+        try:
+            compile(candidate, str(test_path), "exec")
+        except SyntaxError as err:
+            problems = [f"the file does not parse: {err}"]
+        else:
+            problems = validate_test_imports(candidate, repo_root)
+
+        if not problems:
+            merged = candidate
+            break
+
+        for problem in problems:
+            print(f"    [N4c] rejected: {problem}")
+        if attempt >= MAX_GENERATION_ATTEMPTS:
+            print(
+                f"    [N4c] {MAX_GENERATION_ATTEMPTS} attempt(s) did not "
+                f"produce importable tests; suite left unchanged so the "
+                f"passing tests survive"
+            )
+            return {
+                "coverage_augment_attempts": int(
+                    state.get("coverage_augment_attempts", 0) or 0
+                ) + 1,
+                "next_node": "N5_verify_green",
+                "error_message": "",
+            }
+
+        print(f"    [N4c] revising (attempt {attempt + 1}/{MAX_GENERATION_ATTEMPTS})")
+        prompt = build_revision_prompt(prompt, addition, problems)
 
     test_path.write_text(merged, encoding="utf-8")
     added = len(re.findall(r"^def\s+test_\w+", addition, re.MULTILINE))
