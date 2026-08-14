@@ -57,6 +57,34 @@ REQUIREMENTS_CONFLICT_MARKER = "REQUIREMENTS CONFLICT:"
 #: constant, so the next issue with three tables must not re-open this.
 REQUIREMENTS_GATE_TIMEOUT_SECONDS = 600
 
+#: Where a timed-out gate call goes on its one retry (#2375).
+#:
+#: #2290 added a retry for a timeout on a healthy transport, and it re-asked the
+#: SAME model. Measured 2026-08-14 on boostgauge #1's converted body: claude
+#: sonnet timed out at 600s three consecutive times (13:0x, 13:4x, 14:2x
+#: Central), and claude opus returned a CLEAN verdict inside the bound on the
+#: first attempt immediately afterwards. Transport healthy throughout -- a
+#: trivial `claude -p` round-tripped in 5.0s between attempts. The same sonnet
+#: call had completed boostgauge #7, a comparable-size comparably-tabled
+#: document, in about five minutes that morning.
+#:
+#: So on this content class the model is the variable, and a same-model retry
+#: spends a second full 600s budget to reach the same wall. Escalating instead
+#: costs the same one retry and has a measured chance of returning a verdict.
+#:
+#: Deliberately narrow. A spec is escalated only where a measurement says the
+#: escalation helps; everything else keeps #2290's same-model retry, because no
+#: measurement says otherwise for it and inventing a ladder here would be the
+#: guessing this issue's acceptance forbids.
+GATE_DRAFTER_ESCALATION: dict[str, str] = {
+    "claude:sonnet": "claude:opus",
+}
+
+
+def escalated_drafter(spec: str) -> str | None:
+    """The stronger drafter to retry a timeout on, or None to re-ask this one."""
+    return GATE_DRAFTER_ESCALATION.get((spec or "").strip().lower())
+
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a requirements analyst performing a pre-flight consistency check \
 on a GitHub issue before an autonomous pipeline builds from it.
@@ -228,41 +256,72 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         _record_unverified(state, f"invalid provider '{drafter_spec}': {e}")
         return {}
 
-    schema_kwargs: dict[str, Any] = {}
-    if isinstance(provider, GeminiProvider):
-        schema_kwargs["response_schema"] = ANALYSIS_SCHEMA
-    else:
-        schema_kwargs["json_schema"] = ANALYSIS_SCHEMA
-
     content = f"# Issue: {issue_title}\n\n{issue_body}"
 
-    def _invoke():
-        return provider.invoke(
+    def _invoke(active_provider):
+        schema_kwargs: dict[str, Any] = {}
+        if isinstance(active_provider, GeminiProvider):
+            schema_kwargs["response_schema"] = ANALYSIS_SCHEMA
+        else:
+            schema_kwargs["json_schema"] = ANALYSIS_SCHEMA
+        return active_provider.invoke(
             system_prompt=ANALYSIS_SYSTEM_PROMPT,
             content=content,
             timeout_seconds=REQUIREMENTS_GATE_TIMEOUT_SECONDS,
             **schema_kwargs,
         )
 
-    result = _invoke()
+    answered_by = drafter_spec
+    result = _invoke(provider)
 
     # One retry, and only for a timeout on a healthy transport (#2290). A
     # storm is the condition fail-open exists for -- retrying into it burns
     # another full budget to reach the same wall, which is what the storm
     # counter was built to stop (#2086). A non-timeout failure is not retried
     # either: it failed for a reason a second identical call will not change.
+    #
+    # #2375: the retry escalates where a measurement says escalating helps.
+    # Re-asking the model that just spent the full budget is the same call
+    # again; on boostgauge #1's body sonnet did that three times for three
+    # timeouts while opus answered inside the bound on its first attempt.
     if _is_timeout(result) and not _provider_storm_active():
-        print(
-            f"  [N0c] analysis timed out at {REQUIREMENTS_GATE_TIMEOUT_SECONDS}s "
-            "and the transport is healthy -- retrying once."
-        )
-        result = _invoke()
+        stronger = escalated_drafter(drafter_spec)
+        if stronger:
+            print(
+                f"  [N0c] analysis timed out at {REQUIREMENTS_GATE_TIMEOUT_SECONDS}s "
+                f"on {drafter_spec} and the transport is healthy -- "
+                f"escalating to {stronger} for the one retry (#2375)."
+            )
+            try:
+                provider = get_provider(stronger)
+                answered_by = stronger
+            except ValueError as e:
+                # Keep the retry rather than lose it: a bad escalation entry
+                # must not cost the run the attempt #2290 gave it.
+                print(
+                    f"  [N0c] WARNING: escalation target '{stronger}' is not a "
+                    f"valid provider ({e}); retrying on {drafter_spec}."
+                )
+        else:
+            print(
+                f"  [N0c] analysis timed out at {REQUIREMENTS_GATE_TIMEOUT_SECONDS}s "
+                "and the transport is healthy -- retrying once."
+            )
+        result = _invoke(provider)
 
     # Fail-open: a dead analysis call must not kill the roll (#1899).
     if not result.success or not result.response:
         reason = result.error_message or "empty response"
-        print(f"  [N0c] WARNING: analysis unavailable ({reason}); proceeding.")
-        _record_unverified(state, f"analysis unavailable: {reason}")
+        # #2375: name the model. "The gate did not answer" and "the gate did
+        # not answer ON SONNET" are different facts, and only the second one
+        # tells the next reader whether escalating is worth trying.
+        print(
+            f"  [N0c] WARNING: analysis unavailable on {answered_by} "
+            f"({reason}); proceeding."
+        )
+        _record_unverified(
+            state, f"analysis unavailable on {answered_by}: {reason}"
+        )
         return {}
 
     parsed = _parse_analysis(result.response)
@@ -273,7 +332,10 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
 
     conflicts = parsed.get("conflicts") or []
     if parsed.get("is_consistent", True) or not conflicts:
+        # CLEAN_MARKER is asserted verbatim by the pre-check's tests, so the
+        # drafter goes on its own line rather than into that sentence.
         print("  [N0c] Requirements internally consistent.")
+        print(f"  [N0c] Verdict from {answered_by}.")
         return {}
 
     message = _format_conflict_message(conflicts)
