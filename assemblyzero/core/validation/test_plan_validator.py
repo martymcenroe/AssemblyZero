@@ -561,8 +561,17 @@ def validate_test_plan(
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     # Build summary
+    #
+    # #2333: this line used to read "Coverage: 100.0% (22/22 requirements
+    # mapped)". Every word of it was true, and run-issue7-153937 read it as a
+    # forecast of the 95 percent statement gate two stages later, where the
+    # same spec measured 80 percent. Nothing reconciles the two numbers, so the
+    # label now says which one this is and states plainly that it does not
+    # predict the other.
     summary_parts = [
-        f"Coverage: {cov_pct}% ({mapped_count}/{len(requirements)} requirements mapped)",
+        f"Requirement coverage: {cov_pct}% ({mapped_count}/{len(requirements)} "
+        f"requirements mapped; statement coverage is a separate number and is "
+        f"not measured here)",
         f"Tests: {len(tests)}",
         f"Errors: {error_count}",
         f"Warnings: {sum(1 for v in all_violations if v['severity'] == 'warning')}",

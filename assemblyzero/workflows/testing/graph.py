@@ -239,16 +239,27 @@ def route_after_scaffold(
 
 def route_after_validate(
     state: TestingWorkflowState,
-) -> Literal["N3_verify_red", "N2_scaffold_tests", "N4_implement_code", "end"]:
+) -> Literal["N3_verify_red", "N2_scaffold_tests", "end"]:
     """Route after N2.5 (validate_tests_mechanical).
 
     Issue #335: Routes based on test validation results.
 
     Routes to:
     - N3_verify_red: Validation passed, continue normal flow
-    - N2_scaffold_tests: Validation failed, attempts < 3, retry
-    - N4_implement_code: Validation failed, attempts >= 3, escalate to Claude
-    - END: Error
+    - N2_scaffold_tests: Validation failed, attempts remain, retry
+    - END: Validation failed and regeneration is exhausted, or an error
+
+    #2331: this used to route an exhausted scaffold to N4_implement_code, and
+    the comment there said "escalate to Claude". It escalated to nothing. A
+    suite the validator had just judged unusable entered implementation
+    HAVING SKIPPED verify_red, so it arrived with one fewer check than a suite
+    that passed, and the implementation loop then spent its budget against
+    tests no code could satisfy.
+
+    The name promised a stronger test generator and the graph has none, so the
+    honest route is to stop. The node writes a DETERMINISTIC FAILURE naming
+    the tests as the wrong side, which is also what keeps the orchestrator
+    from retrying a deterministic scaffolder.
 
     Args:
         state: Current workflow state.
@@ -267,10 +278,6 @@ def route_after_validate(
         return "N3_verify_red"
     elif decision == "regenerate":
         return "N2_scaffold_tests"
-    elif decision == "escalate":
-        # Escalate to Claude - skip verify_red and go to implement
-        print("    [ESCALATE] Skipping verify_red, escalating to Claude implementation")
-        return "N4_implement_code"
 
     return "end"
 

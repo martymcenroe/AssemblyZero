@@ -37,6 +37,10 @@ from assemblyzero.workflows.implementation_spec.criteria_coverage import (
     criteria_coverage,
     format_report as format_coverage_report,
 )
+from assemblyzero.workflows.implementation_spec.error_path_coverage import (
+    error_path_coverage,
+    format_report as format_error_path_report,
+)
 from assemblyzero.workflows.telemetry import (
     build_hallucination_event,
     record_hallucination_event,
@@ -178,6 +182,11 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     check_criteria = check_criteria_have_tests(spec_draft, state.get("lld_content", ""))
     checks.append(check_criteria)
     _log_check(check_criteria)
+
+    # Check 10: Error paths the spec mandates must have tests (Issue #2333)
+    check_error_paths = check_error_paths_have_tests(spec_draft)
+    checks.append(check_error_paths)
+    _log_check(check_error_paths)
 
     # Telemetry (#1812): record detector outcomes for the spec draft (every
     # pass) and the LLD (first pass only). Record-only — the try/except
@@ -1061,6 +1070,27 @@ def check_criteria_have_tests(spec: str, lld_content: str) -> CompletenessCheck:
         check_name="criteria_have_tests",
         passed=report.ok,
         details=format_coverage_report(report),
+    )
+
+
+def check_error_paths_have_tests(spec: str) -> CompletenessCheck:
+    """Error paths the spec mandates must have tests (Issue #2333).
+
+    A spec can pass every check above, report full requirement coverage, and
+    still be unable to clear the 95 percent statement gate it is graded
+    against two stages later. run-issue7-153937 did exactly that: twenty-three
+    tests, all green, 80 percent statements, and every missed statement an
+    error path or a platform branch its Section 11.1 conventions had mandated.
+
+    The failure surfaced at N5, in a loop that can add tests but cannot add
+    the requirement that justifies them. Here it surfaces at iteration zero,
+    where the drafter is still writing Section 10.
+    """
+    report = error_path_coverage(spec)
+    return CompletenessCheck(
+        check_name="error_paths_have_tests",
+        passed=report.ok,
+        details=format_error_path_report(report),
     )
 
 

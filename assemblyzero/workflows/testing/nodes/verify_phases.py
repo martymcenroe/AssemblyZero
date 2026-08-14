@@ -35,6 +35,7 @@ from assemblyzero.workflows.testing.exit_code_router import (
 )
 from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+    DETERMINISTIC_FAILURE,
     count_stub_tests,
 )
 from assemblyzero.workflows.testing.runner_registry import get_runner
@@ -80,7 +81,12 @@ MAX_TRACEBACK_BLOCKS = 8
 #: times in twelve seconds. The orchestrator's transience classifier keys off
 #: this token, so retry behaviour follows from the failure's kind rather than
 #: from prose a later reword could silently change.
-DETERMINISTIC_FAILURE = "DETERMINISTIC FAILURE"
+#:
+#: #2331 moved the definition down to validate_tests_mechanical, which now
+#: writes a halt of the same kind and cannot import from here without a cycle.
+#: It is imported at the top of this module and named here so every existing
+#: import of it from verify_phases keeps working.
+_ = DETERMINISTIC_FAILURE
 
 # Issue #562: Critical skip keywords (aligned with tools/test-gate.py)
 _CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
