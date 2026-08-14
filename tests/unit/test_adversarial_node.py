@@ -651,3 +651,67 @@ class TestCollectContext:
         assert impl == ""
         assert lld == ""
         assert tests == ""
+
+class TestARefusedModelDoesNotHaltThePipeline:
+    """#2286 added a pre-request model check, and this node is non-blocking.
+
+    The handlers around the generate call name specific Gemini errors rather
+    than catching broadly, which is deliberate -- but it means a NEW exception
+    type escapes and halts a pipeline that is meant to continue without
+    adversarial coverage. The check and its handler ship together for that
+    reason.
+    """
+
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
+    )
+    def test_it_skips_rather_than_raising(self, mock_client_cls):
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            ForbiddenModelError,
+        )
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.generate_adversarial_tests.side_effect = ForbiddenModelError(
+            "alias '3.1-flash-preview' resolves to a flash tier"
+        )
+
+        state = {
+            "implementation_files": ["/fake/module.py"],
+            "lld_content": "# LLD",
+            "test_files": [],
+            "issue_id": 2286,
+        }
+
+        result = run_adversarial_node(state)
+
+        assert result["adversarial_verdict"] == "error"
+        assert result["adversarial_test_count"] == 0
+        assert "not permitted" in result["adversarial_skipped_reason"]
+
+    @patch(
+        "assemblyzero.workflows.testing.nodes.adversarial_node.AdversarialGeminiClient"
+    )
+    def test_the_reason_is_distinct_from_a_downgrade(self, mock_client_cls):
+        """A refused REQUEST and a downgraded RESPONSE are different failures
+        and must not be reported with each other's wording."""
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            ForbiddenModelError,
+        )
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.generate_adversarial_tests.side_effect = ForbiddenModelError(
+            "nope"
+        )
+
+        result = run_adversarial_node(
+            {
+                "implementation_files": ["/fake/module.py"],
+                "lld_content": "# LLD",
+                "test_files": [],
+                "issue_id": 2286,
+            }
+        )
+
+        assert "downgraded to Flash" not in result["adversarial_skipped_reason"]

@@ -431,3 +431,123 @@ class TestClientSideErrorsAreNotReportedAsOutages:
 
         with pytest.raises(GeminiTimeoutError):
             _invoke(provider, timeout=120)
+
+class TestTheRequestedModelIsChosenNotSpelled:
+    """#2286: three call sites spelled out `gemini-2.5-pro-preview-05-06`.
+
+    That identifier's validity was never established -- before #2281 the call
+    died in local validation, after it the request was rejected at
+    authentication (#2285), so Google never resolved it once. A dated preview
+    is exactly the kind of identifier that gets retired, and this call site
+    consulted neither the alias map that would have remapped it nor the
+    forbidden list that would have caught a bad tier.
+    """
+
+    def test_the_alias_is_in_the_selection_map(self):
+        from assemblyzero.core.llm_provider import GeminiProvider
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            ADVERSARIAL_MODEL_ALIAS,
+        )
+
+        assert ADVERSARIAL_MODEL_ALIAS in GeminiProvider.MODEL_MAP, (
+            "the alias must resolve through the map, or supersession notes and "
+            "fleet migrations cannot reach this call"
+        )
+
+    def test_it_resolves_to_a_pro_identifier(self):
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            resolve_adversarial_model,
+        )
+
+        model_id = resolve_adversarial_model()
+        assert "pro" in model_id
+        assert "flash" not in model_id
+        assert "preview" not in model_id, (
+            "a path that fails open should not run on a dated preview"
+        )
+
+    def test_the_requested_model_is_not_forbidden(self):
+        """The check #2286 asked for: the REQUEST is validated, where
+        verify_model_is_pro only ever inspected the reply."""
+        from assemblyzero.core.config import FORBIDDEN_MODELS
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            resolve_adversarial_model,
+        )
+
+        assert resolve_adversarial_model() not in FORBIDDEN_MODELS
+
+    @pytest.mark.parametrize("alias", ["flash", "2.5-flash", "3.1-flash-preview"])
+    def test_a_forbidden_tier_is_refused_before_any_request(self, alias):
+        """Including 3.1-flash-preview, which FORBIDDEN_MODELS does not catch
+        (#2374) but which verify_model_is_pro would reject in the response.
+        The two ends of one call have to agree."""
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
+
+        with patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", alias):
+            with pytest.raises(ag.ForbiddenModelError):
+                ag.resolve_adversarial_model()
+
+    def test_an_unknown_alias_is_refused_rather_than_passed_through(self):
+        from assemblyzero.workflows.testing import adversarial_gemini as ag
+
+        with patch.object(ag, "ADVERSARIAL_MODEL_ALIAS", "gemini-9.9-imaginary"):
+            with pytest.raises(ag.ForbiddenModelError):
+                ag.resolve_adversarial_model()
+
+    def test_the_dated_preview_is_gone_from_every_call_site(self):
+        """It appeared three times: the model argument and two metadata
+        fallbacks. Changing only the first would have left the fallbacks
+        reporting a model that was never requested."""
+        from pathlib import Path
+
+        import assemblyzero.workflows.testing.adversarial_gemini as ag
+
+        source = Path(ag.__file__).read_text(encoding="utf-8")
+        code = [
+            line
+            for line in source.splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+        assert not [line for line in code if "gemini-2.5-pro-preview" in line]
+
+
+class TestTheResolvedModelReachesTheWireAndTheMetadata:
+    def _client_with_fake_genai(self, response):
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            AdversarialGeminiClient,
+        )
+
+        provider = MagicMock()
+        provider.models.generate_content.return_value = response
+        return AdversarialGeminiClient(provider=provider), provider
+
+    def test_the_request_carries_the_resolved_identifier(self):
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            resolve_adversarial_model,
+        )
+
+        response = MagicMock()
+        response.text = "{}"
+        response.model = resolve_adversarial_model()
+        client, provider = self._client_with_fake_genai(response)
+
+        client._invoke_provider("sys", "user", 120)
+
+        kwargs = provider.models.generate_content.call_args.kwargs
+        assert kwargs["model"] == resolve_adversarial_model()
+
+    def test_the_metadata_fallback_reports_the_model_actually_requested(self):
+        """The old fallbacks repeated the literal, so after a change at the
+        call site they would have named a model nobody asked for."""
+        from assemblyzero.workflows.testing.adversarial_gemini import (
+            resolve_adversarial_model,
+        )
+
+        response = MagicMock(spec=["text", "candidates"])
+        response.text = "{}"
+        response.candidates = []
+        client, _ = self._client_with_fake_genai(response)
+
+        _, metadata = client._invoke_provider("sys", "user", 120)
+
+        assert metadata["model"] == resolve_adversarial_model()

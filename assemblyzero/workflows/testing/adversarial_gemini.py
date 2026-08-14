@@ -43,6 +43,76 @@ class GeminiModelDowngradeError(Exception):
     pass
 
 
+class ForbiddenModelError(Exception):
+    """Raised when the model this call would REQUEST is not permitted.
+
+    Distinct from GeminiModelDowngradeError, which is about what came back.
+    Both checks are needed and neither substitutes for the other: a call can
+    request a forbidden model and a call can be answered by one.
+    """
+
+
+#: #2286: the alias, not an identifier. Three call sites previously spelled out
+#: `gemini-2.5-pro-preview-05-06` -- a dated preview whose validity was never
+#: established, because the call died in local validation before #2281 and at
+#: authentication after it. Naming a tier instead means `MODEL_MAP` supersession
+#: notes and `FORBIDDEN_MODELS` both reach this path, and a fleet-wide migration
+#: cannot miss it.
+ADVERSARIAL_MODEL_ALIAS = "3.1-pro"
+
+
+def resolve_adversarial_model() -> str:
+    """The model this call will request, resolved and checked.
+
+    Two things the old call site did not do. The alias goes through the same
+    map every other Gemini caller uses, so a retired preview remaps rather than
+    404s. And the result is checked against FORBIDDEN_MODELS *before* the
+    request, where the existing `verify_model_is_pro` only inspects the reply.
+
+    Raises:
+        ForbiddenModelError: if the resolved identifier is forbidden.
+    """
+    from assemblyzero.core.config import FORBIDDEN_MODELS
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    alias = ADVERSARIAL_MODEL_ALIAS.lower()
+    model_id = GeminiProvider.MODEL_MAP.get(alias)
+    if model_id is None:
+        valid = ", ".join(sorted(GeminiProvider.MODEL_MAP))
+        raise ForbiddenModelError(
+            f"Adversarial model alias {alias!r} is not in the selection map. "
+            f"Valid aliases: {valid}"
+        )
+
+    # Exact match, then family. FORBIDDEN_MODELS carries both specific ids
+    # ("gemini-3-pro") and family names ("gemini-flash", "gemini-lite"), and a
+    # family entry is only meaningful as a substring.
+    lowered = model_id.lower()
+    for forbidden in FORBIDDEN_MODELS:
+        entry = forbidden.lower()
+        if lowered == entry or entry in lowered:
+            raise ForbiddenModelError(
+                f"Adversarial alias {alias!r} resolves to {model_id!r}, which "
+                f"is forbidden by FORBIDDEN_MODELS entry {forbidden!r}"
+            )
+
+    # FORBIDDEN_MODELS does not catch every Flash: its entries are
+    # `gemini-flash` and `gemini-2.5-flash`, and neither is a substring of
+    # `gemini-3.1-flash-preview`, so a 3.1-line Flash passes the list (#2374).
+    # `verify_model_is_pro` right below rejects any "flash" in the RESPONSE, so
+    # without this the request gate would be looser than the response gate and
+    # this call could ask for a model its own reply check would then refuse.
+    # The two ends of one call must agree; the list's gap is #2374's to close.
+    for tier in ("flash", "lite"):
+        if tier in lowered:
+            raise ForbiddenModelError(
+                f"Adversarial alias {alias!r} resolves to {model_id!r}, a "
+                f"{tier} tier. Governance calls run on Pro; verify_model_is_pro "
+                f"would reject this model's own response."
+            )
+    return model_id
+
+
 class AdversarialGeminiClient:
     """Wrapper around the project's existing GeminiProvider for adversarial test generation.
 
@@ -261,8 +331,12 @@ class AdversarialGeminiClient:
         if hasattr(provider, "models") and hasattr(
             getattr(provider, "models", None), "generate_content"
         ):
+            # #2286: resolved once, then reused for the metadata fallbacks
+            # below. They previously repeated the literal, so a change here
+            # alone would have left them reporting a model never requested.
+            model_id = resolve_adversarial_model()
             response = provider.models.generate_content(
-                model="gemini-2.5-pro-preview-05-06",
+                model=model_id,
                 contents=user_prompt,
                 config={
                     "system_instruction": system_prompt,
@@ -286,11 +360,9 @@ class AdversarialGeminiClient:
             if hasattr(response, "model"):
                 metadata["model"] = response.model
             elif hasattr(response, "candidates") and response.candidates:
-                metadata["model"] = getattr(
-                    response, "model_version", "gemini-2.5-pro-preview-05-06"
-                )
+                metadata["model"] = getattr(response, "model_version", model_id)
             else:
-                metadata["model"] = "gemini-2.5-pro-preview-05-06"
+                metadata["model"] = model_id
             return text, metadata
 
         # Strategy 2: LangChain-style provider with invoke()
