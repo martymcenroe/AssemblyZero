@@ -1126,6 +1126,46 @@ _DIFF_MARKER_RE = re.compile(r"(?m)^[+-](?![+-])")
 # names are exempt receivers whether or not any fence shows the import.
 _STDLIB_MODULE_NAMES: frozenset[str] = frozenset(sys.stdlib_module_names)
 
+# ---- framework-injected parameters: a fourth wrong universe (#2391) ---------
+#
+# #1948 named three universes the target repo's symbol table has no authority
+# over — imports, stdlib, spec-defined names. This is the fourth: a parameter
+# the FRAMEWORK supplies, whose type the target repo does not own and never
+# will.
+#
+# The founding case is pytest's own plugin API. boostgauge ruling #271 mandates
+# registering custom flags via `pytest_addoption`, and the spec reviewer duly
+# demanded it; the symbol check then rejected `parser.addoption(` because
+# `parser` — injected by pytest, of type `_pytest.config.argparsing.Parser` —
+# resolves to nothing in the target repo's 21 gathered symbols. One gate
+# demanded the line and the other forbade it, so no draft could satisfy both
+# and the stage died at the iteration cap three times over.
+#
+# The exemption is deliberately narrow. It does NOT say "parameters are
+# unresolvable", which is true but useless: every true positive this check has
+# ever caught arrives as a bare parameter receiver — #1527's founding
+# `state.model_dump()`, and `win.model_dump()` in #1952's regression set.
+# Exempting all of them would widen the check into uselessness. What is exempt
+# is the parameter of a function whose NAME declares the framework owns the
+# call: pluggy's `pytest_*` hook convention, and pytest's builtin fixture names
+# wherever they appear as parameters.
+_PYTEST_HOOK_PREFIX = "pytest_"
+
+#: Fixtures pytest injects by parameter name. A test taking `tmp_path` is
+#: handed a `pathlib.Path` by pytest; the target repo has no say in its API.
+_PYTEST_BUILTIN_FIXTURES: frozenset[str] = frozenset({
+    "request", "monkeypatch", "pytestconfig", "cache",
+    "tmp_path", "tmp_path_factory", "tmpdir", "tmpdir_factory",
+    "capsys", "capsysbinary", "capfd", "capfdbinary",
+    "caplog", "recwarn", "doctest_namespace",
+    "record_property", "record_testsuite_property", "record_xml_attribute",
+})
+
+#: Never treated as receivers carrying an exemption. `self` is the spec's own
+#: object — exempting it would hand the whole target-repo surface a free pass,
+#: which is precisely the check's jurisdiction.
+_NON_RECEIVER_PARAMS: frozenset[str] = frozenset({"self", "cls"})
+
 # ---- regex fallback collectors: pre-#1956 behaviour, unchanged --------------
 _IMPORT_RE = re.compile(
     r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
@@ -1155,6 +1195,9 @@ class _FenceFacts(NamedTuple):
     # exemption once every fence has been read.
     assignments: tuple[tuple[frozenset[str], frozenset[str]], ...]
     calls: tuple[_CallSite, ...]
+    # Parameters a framework injects, whose type the target repo does not own
+    # (#2391) — `parser` in `def pytest_addoption(parser)`, `tmp_path` in a test.
+    framework_params: frozenset[str]
     parsed: bool  # False when this fence fell back to the regex collectors
 
 
@@ -1268,6 +1311,7 @@ class _FenceVisitor(ast.NodeVisitor):
         self.defined: set[str] = set()
         self.assignments: list[tuple[frozenset[str], frozenset[str]]] = []
         self.calls: list[_CallSite] = []
+        self.framework_params: set[str] = set()
 
     # ---- imports: receivers the target repo has no authority over (#1948) ----
 
@@ -1288,11 +1332,42 @@ class _FenceVisitor(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.defined.add(node.name)
+        self._record_framework_params(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self.defined.add(node.name)
+        self._record_framework_params(node)
         self.generic_visit(node)
+
+    def _record_framework_params(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        """Parameters this function receives from a framework, not the repo (#2391).
+
+        Two sources, both declared by naming convention rather than inferred:
+
+        * a pluggy hook (``pytest_addoption``, ``pytest_collection_modifyitems``)
+          receives every one of its parameters from pytest;
+        * a pytest builtin fixture name (``tmp_path``, ``monkeypatch``) is
+          framework-supplied in whatever function requests it.
+
+        An ordinary function's ordinary parameter is NOT recorded. ``state`` in
+        ``def apply(state)`` stays judged, which is what keeps #1527's founding
+        true positive — pydantic methods on a plain dataclass — catchable.
+        """
+        args = node.args
+        collected = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+        if args.vararg is not None:
+            collected.append(args.vararg)
+        if args.kwarg is not None:
+            collected.append(args.kwarg)
+        names = {a.arg for a in collected} - _NON_RECEIVER_PARAMS
+
+        if node.name.startswith(_PYTEST_HOOK_PREFIX):
+            self.framework_params |= names
+        else:
+            self.framework_params |= names & _PYTEST_BUILTIN_FIXTURES
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.defined.add(node.name)
@@ -1370,6 +1445,7 @@ def _fence_facts_ast(block: str) -> _FenceFacts | None:
         defined=frozenset(visitor.defined),
         assignments=tuple(visitor.assignments),
         calls=tuple(visitor.calls),
+        framework_params=frozenset(visitor.framework_params),
         parsed=True,
     )
 
@@ -1414,6 +1490,9 @@ def _fence_facts_regex(block: str) -> _FenceFacts:
         defined=frozenset(defined),
         assignments=assignments,
         calls=tuple(calls),
+        # The regex collectors cannot see a function signature's parameters,
+        # so they contribute no framework exemptions. #2392 retires this path.
+        framework_params=frozenset(),
         parsed=False,
     )
 
@@ -1441,10 +1520,14 @@ def _flag_calls(
     # over — the phase-5 kill was this check rejecting Pillow's documented API
     # (ImageDraw.Draw, alpha_composite), pathlib, and a method the spec itself
     # defined. Same wrong-universe disease #1901 fixed for imports.
+    # #2391 adds the fourth: parameters a framework injects. `parser` inside
+    # `def pytest_addoption(parser)` is pytest's object, so `parser.addoption(`
+    # is pytest's API to be right or wrong about — not the target repo's.
     exempt: set[str] = set(_STDLIB_MODULE_NAMES)
     spec_defined: set[str] = set()
     for fence in facts:
         exempt |= fence.imported
+        exempt |= fence.framework_params
         spec_defined |= fence.defined
 
     # Exemption propagates through bindings to a fixed point rather than the
