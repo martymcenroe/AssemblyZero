@@ -118,6 +118,13 @@ def build_augment_prompt(
         "- Do NOT rewrite or restate the existing tests. Emit only NEW functions.",
         "- Every new test must assert real behaviour. Never `assert True`, "
         "never a test that passes without exercising the target line.",
+        "- Every test must be able to PASS on the machine running it. #2347: "
+        "patching `os.name` or `sys.platform` does not change which `Path` "
+        "flavour pathlib builds, so a test that forces a foreign-platform "
+        "branch and then touches `Path.home()` raises UnsupportedOperation "
+        "and can never pass. To cover a platform branch, patch the thing the "
+        "branch actually calls, or skip the test on the wrong platform with "
+        "`pytest.mark.skipif` — never write a test the host cannot satisfy.",
         "- Use the same fixtures and import style as the existing tests.",
         "- Give each test a name that says which condition it covers.",
         "",
