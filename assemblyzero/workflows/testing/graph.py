@@ -88,7 +88,10 @@ from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     validate_tests_mechanical_node,
     should_regenerate,
 )
-from assemblyzero.workflows.testing.state import TestingWorkflowState
+from assemblyzero.workflows.testing.state import (
+    DEFAULT_MAX_ITERATIONS,
+    TestingWorkflowState,
+)
 
 from assemblyzero.workflows.testing.nodes.revise_test_plan import revise_test_plan  # Issue #1072
 
@@ -367,7 +370,7 @@ def route_after_green(
     # -- an LLM that cannot reach the target will not be asked forever.
     if next_node == "N4c_augment_tests":
         iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 3)
+        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
         if iteration >= max_iterations:
             return "end"
         if state.get("coverage_augment_attempts", 0) >= MAX_COVERAGE_AUGMENT_ATTEMPTS:
@@ -389,8 +392,19 @@ def route_after_green(
     if next_node == "N4_implement_code":
         # Check max iterations
         iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 3)
+        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
         if iteration >= max_iterations:
+            # #2344: N5 asked for another revision and cannot have one. That
+            # is a failure of the loop, not a quiet finish -- returning "end"
+            # silently left an empty error_message, and the stage read empty
+            # as passed while holding a failing test. Say what happened, so
+            # the verdict downstream is built on a stated fact.
+            print(
+                f"    [ITERATION CAP] N5 asked for another implementation "
+                f"revision at iteration {iteration}/{max_iterations}. The cap "
+                f"is reached, so the loop stops here with its last result "
+                f"standing -- this is not a pass."
+            )
             return "end"
         # Issue #640: Budget check before looping back
         budget = state.get("cost_budget_usd", 0.0)
@@ -431,7 +445,7 @@ def route_after_e2e(
     # E2E failure may loop back to implement
     if next_node == "N4_implement_code":
         iteration = state.get("iteration_count", 0)
-        max_iterations = state.get("max_iterations", 3)
+        max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
         if iteration >= max_iterations:
             return "end"
         return "N4_implement_code"
