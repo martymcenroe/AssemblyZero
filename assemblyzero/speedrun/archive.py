@@ -593,3 +593,73 @@ def verify_manifest(archive_dir: Path) -> list[str]:
         if not path.is_file() or _sha256(path) != expected:
             mismatched.append(rel)
     return mismatched
+
+
+@dataclass
+class VerifyResult:
+    """Both dimensions of "is this archive trustworthy", in one answer."""
+
+    complete: bool
+    missing: list[str] = field(default_factory=list)
+    mismatched: list[str] = field(default_factory=list)
+    file_count: int = 0
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return self.complete and not self.mismatched and not self.error
+
+
+def verify_archive(archive_dir: Path) -> VerifyResult:
+    """Whether an archive is complete AND intact (#2354).
+
+    `verify_manifest` answers only "the files I did capture have not rotted".
+    An archive marked incomplete at archive time -- a named component that
+    could not be read -- passed with "manifest OK" if its captured files
+    hashed correctly. That is the vacuous-pass class: the one command whose
+    name promises the archive is trustworthy answered a narrower question
+    than the one being asked.
+
+    Completeness used to live only in the archive-time exit code, which is
+    gone by the time anyone re-verifies. It is recorded in index.json, so it
+    is read here.
+
+    Both dimensions are reported. They fail independently and the caller gets
+    one exit code, because an operator asking "can I trust this box" wants an
+    answer, not two.
+    """
+    archive_dir = Path(archive_dir)
+    index_path = archive_dir / INDEX_NAME
+
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # No index is not an intact archive with a missing extra. It is an
+        # archive that cannot state anything about itself, and reporting that
+        # as a pass would be the same vacuous answer one level up.
+        return VerifyResult(
+            complete=False,
+            error=f"{INDEX_NAME} could not be read: {exc}",
+        )
+
+    complete = index.get("complete") is True
+    missing = [
+        entry.get("name", "(unnamed)")
+        for entry in index.get("incomplete_components", [])
+    ]
+    if not complete and not missing:
+        missing = ["(the index records no component detail)"]
+
+    mismatched = []
+    manifest = index.get("manifest", {})
+    for rel, expected in manifest.items():
+        path = archive_dir / rel
+        if not path.is_file() or _sha256(path) != expected:
+            mismatched.append(rel)
+
+    return VerifyResult(
+        complete=complete,
+        missing=missing,
+        mismatched=mismatched,
+        file_count=len(manifest),
+    )
