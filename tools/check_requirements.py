@@ -37,6 +37,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# #2367: before anything prints. The verdict quotes the issue body and the
+# model's prose, either of which can carry characters cp1252 cannot encode.
+from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
+
+_install_utf8_console()
+
 from assemblyzero.workflows.requirements.precheck import (  # noqa: E402
     DEFAULT_DRAFTER,
     EXIT_ERROR,

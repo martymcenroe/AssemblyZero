@@ -23,6 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# #2367: before anything prints. Failure rows quote model output verbatim.
+from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
+
+_install_utf8_console()
+
 from assemblyzero.speedrun.prompt_telemetry import (  # noqa: E402
     read_failures,
     render_report,

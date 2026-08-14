@@ -37,6 +37,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# #2367: before anything prints. This checker reads arbitrary prose and its
+# report quotes it back, so a character outside the console's encoding -- a true
+# minus sign in a binding formula, say -- would otherwise kill the check.
+from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
+
+_install_utf8_console()
+
 from assemblyzero.workflows.requirements.form_check import (  # noqa: E402
     check_form,
     render_report,
