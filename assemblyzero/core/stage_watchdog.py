@@ -23,16 +23,32 @@ import threading
 import time
 from typing import Optional
 
-# Observed durations from the boostgauge hardening campaign run records
-# (2026-07-28/29). These are starting points for the ratio, not SLAs — a
-# stage legitimately slower than its nominal only earns a louder log line.
+# Derived, not typed. Each value is the MEDIAN duration of PASSED runs of that
+# stage across the boostgauge speedrun corpus, produced by
+# `tools/derive_stage_nominals.py` and re-derivable with one command:
+#
+#   poetry run python tools/derive_stage_nominals.py --runs <repo>/data/speedrun/runs
+#
+# Derived 2026-08-13 (#2323). Sample sizes: lld 65, spec 51, impl 19, pr 19,
+# cleanup 19. These are starting points for the ratio, not SLAs -- a stage
+# legitimately slower than its nominal only earns a louder log line.
+#
+# The previous table was hand-typed from the 2026-07-28/29 records and went
+# stale silently as the campaign ran on. Most of it survived re-measurement;
+# impl did not. Its nominal was 240s against a measured median of 718.9s, so a
+# TYPICAL impl run sat at 3x nominal and earned SLOW immediately -- the stage
+# most likely to genuinely hang was the one whose warnings meant least. That
+# is the failure mode a derived table prevents.
+#
+# `triage` has no passed samples in the corpus (it is skipped on these runs),
+# so its value is carried forward unmeasured rather than invented.
 STAGE_NOMINAL_SECONDS: dict[str, float] = {
     "triage": 20.0,
-    "lld": 60.0,
-    "spec": 90.0,
-    "impl": 240.0,
-    "pr": 15.0,
-    "cleanup": 90.0,
+    "lld": 75.7,
+    "spec": 84.2,
+    "impl": 718.9,
+    "pr": 2.5,
+    "cleanup": 81.9,
 }
 
 # Ratio at which the line changes tone. 3x is the operator's own threshold:
