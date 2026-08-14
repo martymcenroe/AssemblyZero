@@ -40,7 +40,7 @@ from assemblyzero.speedrun.archive import (  # noqa: E402
     find_orphan_worktrees,
     graveyard_branches_for,
     restore_archive,
-    verify_manifest,
+    verify_archive,
 )
 
 
@@ -122,13 +122,41 @@ def cmd_restore(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    mismatched = verify_manifest(Path(args.verify))
-    if not mismatched:
-        _log("manifest OK -- every recorded file matches its sha256")
+    """Both dimensions, one exit code (#2354).
+
+    This used to re-hash the manifest and return 0 on intact hashes, never
+    reading `complete`. An archive marked incomplete whose captured files
+    were hash-intact passed with "manifest OK" -- the one command whose name
+    promises the archive is trustworthy answering only "the files I did
+    capture have not rotted".
+    """
+    result = verify_archive(Path(args.verify))
+
+    if result.error:
+        _log(f"CANNOT VERIFY: {result.error}")
+        return 1
+
+    if result.complete:
+        _log("complete  yes -- every named component was captured")
+    else:
+        _log("complete  NO -- this archive is missing named component(s):")
+        for name in result.missing:
+            _log(f"  {name}")
+
+    if result.mismatched:
+        _log(f"manifest  MISMATCH on {len(result.mismatched)} of "
+             f"{result.file_count} file(s):")
+        for rel in result.mismatched:
+            _log(f"  {rel}")
+    else:
+        _log(f"manifest  OK -- all {result.file_count} recorded file(s) match "
+             f"their sha256")
+
+    if result.ok:
         return 0
-    _log(f"MANIFEST MISMATCH on {len(mismatched)} file(s):")
-    for rel in mismatched:
-        _log(f"  {rel}")
+
+    _log("")
+    _log("This archive does not authorize deleting anything.")
     return 1
 
 
@@ -148,7 +176,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="report what would be captured")
     parser.add_argument("--restore", nargs=2, metavar=("ARCHIVE", "DEST"))
     parser.add_argument("--force", action="store_true", help="restore an incomplete archive anyway")
-    parser.add_argument("--verify", metavar="ARCHIVE", help="re-hash an archive against its manifest")
+    parser.add_argument(
+        "--verify",
+        metavar="ARCHIVE",
+        help=(
+            "assert an archive is trustworthy: complete per its index AND "
+            "every recorded file still matching its sha256"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.restore:
