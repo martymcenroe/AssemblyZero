@@ -165,6 +165,17 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
     if not created_files:
         return state
 
+    # #2288: mock mode swaps the model providers, and until now swapped nothing
+    # else -- a rehearsal would still cut a branch and open a real LLD PR. A
+    # rehearsal that leaves a PR behind is not one, so the outward half stops
+    # here. The files are still written, which is what the rehearsal exercises.
+    if state.get("config_mock_mode"):
+        print(
+            f"    [mock] {len(created_files)} file(s) written; no branch cut, "
+            f"no PR opened."
+        )
+        return state
+
     workflow_type = state.get("workflow_type", "lld")
     target_repo = state.get("target_repo", ".")
     issue_number = state.get("issue_number")

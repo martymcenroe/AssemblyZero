@@ -31,8 +31,10 @@ from assemblyzero.workflows.orchestrator.resume import (
     save_orchestration_state,
 )
 from assemblyzero.workflows.orchestrator.stages import (
+    MOCK_FORBIDDEN_STAGES,
     STAGE_RUNNERS,
     check_human_gate,
+    mock_mode,
     should_skip_stage,
 )
 from assemblyzero.workflows.orchestrator.state import (
@@ -59,6 +61,10 @@ class OrchestrationResult(TypedDict):
     total_duration_seconds: float
     stage_results: dict[str, StageResult]
     error_summary: str
+    #: #2289: a dry run reports success for having rehearsed, which is not the
+    #: same claim as a pipeline that passed. The caller must be able to tell
+    #: them apart before printing a banner, because the sentences differ.
+    dry_run: bool
 
 
 class ConcurrentOrchestrationError(RuntimeError):
@@ -82,6 +88,28 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
     config = state.get("config", {})
     max_retries = config.get("max_stage_retries", 3)
     retry_delay = config.get("retry_delay_seconds", 10)
+
+    # #2288: refused at the dispatch point rather than inside each runner, so
+    # the guard holds for a stage nobody remembers to check. These stages exist
+    # to reach outward and have no mock form.
+    if mock_mode(state) and current_stage in MOCK_FORBIDDEN_STAGES:
+        print(
+            f"[ORCHESTRATOR] Mock run: stage '{current_stage}' not entered. "
+            f"It opens or merges pull requests, which a rehearsal must not do."
+        )
+        refused = StageResult(
+            status="skipped",
+            artifact_path="",
+            error_message=(
+                f"mock mode: '{current_stage}' performs outward effects "
+                f"(branch push, PR creation, PR merge) and is never rehearsed"
+            ),
+            duration_seconds=0.0,
+            attempts=0,
+        )
+        new_state = update_stage_result(state, current_stage, refused)
+        save_orchestration_state(new_state)
+        return dict(new_state)
 
     # Check human gate
     if not check_human_gate(state, current_stage):
@@ -251,6 +279,74 @@ def create_orchestration_graph() -> StateGraph:
     return workflow
 
 
+#: What a dry run can say about one stage. NOT_REACHED is a fact -- the graph
+#: enters at `current_stage` and walks forward, so an earlier stage is never
+#: entered. RUNS is also a fact, but a narrower one than it looks: see
+#: format_dry_run_plan's closing note.
+NOT_REACHED = "not reached"
+RUNS = "RUNS"
+
+
+def dry_run_plan(state: OrchestrationState) -> list[dict]:
+    """What a launch would actually do, stage by stage (#2289).
+
+    The previous display mapped every status that was not the literal string
+    ``"skipped"`` onto ``EXECUTE``, so a resumed run whose LLD had passed
+    announced that the LLD would be redrawn -- the single most expensive stage,
+    and the one the operator runs a dry run to confirm is being reused. The
+    same command's second table said ``lld passed 327.4s`` directly underneath.
+
+    The graph enters at ``current_stage`` and routes forward from there, so
+    position relative to that stage is what decides whether a stage is entered
+    at all. The recorded status is reported as itself rather than translated,
+    because a status is what the operator is asking about.
+    """
+    start = state.get("current_stage") or STAGE_ORDER[0]
+    start_index = STAGE_ORDER.index(start) if start in STAGE_ORDER else 0
+    results = state.get("stage_results", {}) or {}
+
+    plan = []
+    for index, stage in enumerate(STAGE_ORDER):
+        result = results.get(stage) or {}
+        plan.append(
+            {
+                "stage": stage,
+                "recorded": result.get("status", "pending"),
+                "action": NOT_REACHED if index < start_index else RUNS,
+                "artifact": result.get("artifact_path", ""),
+            }
+        )
+    return plan
+
+
+def format_dry_run_plan(state: OrchestrationState, issue_number: int) -> str:
+    """Render the plan, including what a dry run cannot settle."""
+    start = state.get("current_stage") or STAGE_ORDER[0]
+    plan = dry_run_plan(state)
+
+    lines = [
+        f"\n[ORCHESTRATOR] Dry run for issue #{issue_number}",
+        f"[ORCHESTRATOR] Execution begins at: {start}",
+        "",
+        f"{'Stage':<10} {'Recorded':<12} {'Plan':<12} Artifact",
+        "-" * 70,
+    ]
+    for row in plan:
+        lines.append(
+            f"{row['stage']:<10} {row['recorded']:<12} "
+            f"{row['action']:<12} {row['artifact'] or '-'}"
+        )
+
+    lines += [
+        "",
+        "A stage marked RUNS is entered. Whether it repeats work already done",
+        "depends on artifact detection at the time it runs, which a dry run",
+        "cannot settle. A stage marked 'not reached' is never entered at all.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def format_stage_table(stage_results: dict) -> str:
     """#1785: per-stage run record — the summary IS the evidence.
 
@@ -344,6 +440,7 @@ def orchestrate(
             total_duration_seconds=0.0,
             stage_results={},
             error_summary=f"Base-branch resolution failed: {e}",
+            dry_run=False,
         )
 
     # Load configuration
@@ -358,6 +455,7 @@ def orchestrate(
             total_duration_seconds=0.0,
             stage_results={},
             error_summary=f"Configuration errors: {'; '.join(errors)}",
+            dry_run=False,
         )
 
     # Acquire lock
@@ -417,19 +515,7 @@ def orchestrate(
 
         # Dry run
         if dry_run:
-            print(f"\n[ORCHESTRATOR] Dry run for issue #{issue_number}")
-            print(f"{'Stage':<10} {'Status':<12} {'Artifact'}")
-            print("-" * 60)
-            existing = detect_existing_artifacts(issue_number, state.get("target_repo", ""))
-            for stage in STAGE_ORDER:
-                stage_result = state.get("stage_results", {}).get(stage, {})
-                status = stage_result.get("status", "pending")
-                artifact = stage_result.get("artifact_path", "")
-                if status == "skipped":
-                    print(f"{stage:<10} {'SKIP':<12} {artifact}")
-                else:
-                    print(f"{stage:<10} {'EXECUTE':<12} -")
-            print()
+            print(format_dry_run_plan(state, issue_number), end="")
 
             release_orchestration_lock(issue_number)
             return OrchestrationResult(
@@ -440,6 +526,7 @@ def orchestrate(
                 total_duration_seconds=time.monotonic() - start_time,
                 stage_results=state.get("stage_results", {}),
                 error_summary="",
+                dry_run=True,
             )
 
         # Run the graph
@@ -478,6 +565,7 @@ def orchestrate(
             total_duration_seconds=time.monotonic() - start_time,
             stage_results=stage_results,
             error_summary=error_summary,
+            dry_run=False,
         )
 
     finally:

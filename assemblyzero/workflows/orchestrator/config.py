@@ -27,6 +27,9 @@ class OrchestratorConfig(TypedDict, total=False):
     max_stage_retries: int
     retry_delay_seconds: int
     capacity_retry_delays: list[int]
+    #: #2288: rehearsal. Mock providers for the sub-workflow stages, and no
+    #: outward effect anywhere -- no branch, no PR, no merge.
+    mock_mode: bool
 
 
 VALID_STAGES = ["triage", "lld", "spec", "impl", "pr"]
