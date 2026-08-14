@@ -119,6 +119,36 @@ def _make_stage_result(
     return result
 
 
+def _unresolved_test_failures(sub_result: dict) -> int:
+    """Failing tests the implementation loop ended holding (#2344).
+
+    Reads the last green-phase measurement the sub-workflow recorded. Returns
+    0 when the run finished clean, when it never measured, or when the state
+    cannot answer -- this must never invent a failure and turn a genuine pass
+    into a spurious halt.
+
+    Two keys, because a clean targeted run is not the same as a clean repo:
+
+    - `previous_green_failures` -- the identity set from the last N5. Preferred
+      over a parsed count because it is what the loop's own stagnation and
+      freeze decisions are made from, so the verdict follows the set the loop
+      actually acted on.
+    - `full_suite_regressions` -- the #842 full-suite gate. Its return sets
+      `previous_green_failures` to `[]` while carrying regression names and an
+      empty error_message, so checking only the first would let a regressed
+      repo through the same cap-and-report-passed hole this closes.
+
+    Both are reset to empty on every genuine success path, so a passing run
+    still reports passed.
+    """
+    total = 0
+    for key in ("previous_green_failures", "full_suite_regressions"):
+        value = sub_result.get(key)
+        if isinstance(value, (list, tuple, set)):
+            total += len(value)
+    return total
+
+
 def _is_non_transient_halt(sub_result: dict) -> bool:
     """Sub-workflow halts write a recovery_plan_path. Non-transient by default
     since the resume command — not a 10-second retry — is the recovery path.
@@ -1137,6 +1167,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
 
         # Run implementation workflow
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
+        from assemblyzero.workflows.testing.state import DEFAULT_MAX_ITERATIONS
 
         spec_path = state.get("spec_path", "")
         # #1440: Plumb orchestrator config into the sub-workflow state.
@@ -1166,6 +1197,12 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # REGENERATED forbids it. Absent on a first attempt, which reuses
             # nothing because there is nothing to reuse.
             "retry_mode": state.get("retry_mode", ""),
+            # #2344: seed the iteration cap explicitly. Left absent, each
+            # reader fell back to its own inline default -- 5 in N5's progress
+            # message, 3 in the router's decision -- so the run announced a
+            # budget it did not have and a freeze's loop-back was dropped at 3
+            # without a word.
+            "max_iterations": DEFAULT_MAX_ITERATIONS,
         })
 
         error_msg = sub_result.get("error_message", "")
@@ -1186,6 +1223,29 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 "Completeness gate BLOCK — implementation halted with "
                 f"unresolved issues: {issue_lines or 'see implementation report'}"
             )
+        # #2344: a verdict must be MEASURED, not inferred from silence.
+        #
+        # run-issue7-231606 ended with `31 passed, 1 failed` as its last N5
+        # result and recorded impl as PASSED. Nothing lied: N5's freeze branch
+        # correctly returned an empty error_message because it was routing to
+        # another revision, not failing. The router then hit the iteration cap
+        # and returned "end" without a word, so the empty error survived to
+        # here and "no error" was read as "tests pass".
+        #
+        # This is the #2297 verdict-integrity class, and #1779's shape: a
+        # stage reporting success without checking the thing it exists to
+        # check. The pr stage would have pushed and opened a PR on a branch
+        # whose suite fails.
+        if not error_msg:
+            unresolved = _unresolved_test_failures(sub_result)
+            if unresolved:
+                error_msg = (
+                    f"Implementation stage ended with {unresolved} failing "
+                    f"test(s) and no further revision available. The last "
+                    f"green-phase measurement did not pass, so the stage did "
+                    f"not pass."
+                )
+
         if not error_msg:
             result = _make_stage_result(
                 status="passed",

@@ -38,7 +38,10 @@ from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
     count_stub_tests,
 )
 from assemblyzero.workflows.testing.runner_registry import get_runner
-from assemblyzero.workflows.testing.state import TestingWorkflowState
+from assemblyzero.workflows.testing.state import (
+    DEFAULT_MAX_ITERATIONS,
+    TestingWorkflowState,
+)
 
 
 # Timeout for pytest execution
@@ -1434,7 +1437,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Stagnation detection: coverage must improve by >=1% each iteration
     previous_coverage = state.get("previous_coverage", -1.0)
-    max_iterations = state.get("max_iterations", 5)
+    max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
 
     # Issue #498: Build concise failure summary for N4 feedback
     failure_summary = _build_failure_summary(output)
@@ -2065,7 +2068,7 @@ def _verify_green_non_pytest(
     repo_root_str = state.get("repo_root", "")
     repo_root = Path(repo_root_str) if repo_root_str else get_repo_root()
     iteration_count = state.get("iteration_count", 0)
-    max_iterations = state.get("max_iterations", 5)
+    max_iterations = state.get("max_iterations", DEFAULT_MAX_ITERATIONS)
     total_scenarios = state.get("total_scenarios", 0)
 
     print(f"    Running {framework.value} with coverage target: {coverage_target}%")

@@ -57,8 +57,22 @@ def _extract_failed_test_names(output: str) -> list[str]:
     """
     # Match patterns like "FAILED tests/test_foo.py::test_bar - AssertionError"
     # or "FAILED tests/test_foo.py::TestClass::test_bar"
-    failures = re.findall(r"FAILED\s+(\S+)", output)
-    return sorted(set(failures))
+    #
+    # #2345: anchored to line start. run_pytest passes -v, so pytest reports
+    # each failure TWICE in different shapes:
+    #
+    #   tests/test_x.py::test_a FAILED                              [ 96%]
+    #   FAILED tests/test_x.py::test_a - pathlib.UnsupportedOperation
+    #
+    # The unanchored pattern matched both, and on the progress line the token
+    # after FAILED is the progress bracket -- so one real failure was counted
+    # as two, one of them named "[". run-issue7-231606 printed "1 failed" and
+    # "same 2 test(s) failing again" in adjacent lines from that.
+    #
+    # The `::` requirement is the second guard: a captured token that is not a
+    # test id is not a test, whatever produced it.
+    failures = re.findall(r"^FAILED\s+(\S+)", output, re.MULTILINE)
+    return sorted({f for f in failures if "::" in f})
 
 
 # Issue #498: Max chars for E2E failure summary

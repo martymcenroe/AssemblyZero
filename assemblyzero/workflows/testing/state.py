@@ -17,6 +17,17 @@ documentation generation, and post-implementation cleanup.
 from enum import Enum
 from typing import Literal, TypedDict
 
+#: #2344: the single source of truth for the implementation loop's iteration
+#: cap. Every reader imports this rather than inlining a fallback.
+#:
+#: It existed as two inline defaults -- 5 where N5 built its progress message,
+#: 3 where the router decided whether to loop -- with the key itself never
+#: seeded into state. run-issue7-231606 therefore printed "Iteration 2/5"
+#: while being capped at 3: the freeze branch's instruction to revise was
+#: discarded, the run ended with an empty error_message, and the stage
+#: reported passed while holding 31 passed / 1 failed.
+DEFAULT_MAX_ITERATIONS = 5
+
 
 class HumanDecision(str, Enum):
     """User choices at human gate nodes."""
@@ -170,6 +181,12 @@ class TestingWorkflowState(TypedDict, total=False):
     red_phase_output: str
     green_phase_output: str
     coverage_achieved: float
+    #: #2344: how many N5 measurement rounds the implementation loop may take.
+    #: MUST be seeded into state at invoke time. It used to be absent, and the
+    #: two readers guessed differently -- N5 printed "Iteration 2/5" while the
+    #: router capped at 3 -- so a freeze branch's loop-back was silently
+    #: dropped and the stage reported passed holding a failing test.
+    max_iterations: int
     #: #2327: how many rounds of coverage-targeting test additions have run.
     #: Bounds N4c so an LLM that cannot reach the gate is not asked forever,
     #: and so the shortfall never falls through to implementation revision.
