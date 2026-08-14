@@ -73,10 +73,10 @@ The table names the state the requirement governs, before any criterion asserts 
 
 | Variable | Extension | Owner |
 |---|---|---|
-| `position` | the `position` object's `x` and `y` keys | the exit-write criteria |
-| `thresholds` | every key under the `thresholds` object | the hot-reload criteria |
-| `telltale_windows` | the `short`, `medium` and `long` keys under `telltale_windows` | the hot-reload criteria |
-| `theme` | the `theme` key | the exit-write criteria |
+| `position` | the `x` and `y` keys under `position` | `E` (the exit-write criteria) |
+| `thresholds` | every key under `thresholds` | `R` (the live re-read criteria) |
+| `telltale_windows` | the `short`, `medium` and `long` keys under `telltale_windows` | `R` (the live re-read criteria) |
+| `theme` | the `theme` key | `E` (the exit-write criteria) |
 
 Three columns, and each does a separate job.
 
@@ -85,6 +85,10 @@ Three columns, and each does a separate job.
 **The extension** states which keys the name covers. A name without an extension is where #291 lived. Its sentence promised that the app "re-reads it during the session," and the reader cannot tell whether "it" is the whole file or the thresholds section. The two readings own different key sets and produce different programs.
 
 **The owner** is one criteria group. Not one criterion, because a decision table projects into several. Not two groups, because two owners is the defect this ADR exists to remove.
+
+The owner cell names its group by the criterion ID prefix that group's criteria carry, followed by a gloss in parentheses. ADR 0226 section 3.2 already gives every table row an ID whose letters name its subject, and every criterion opens with its row's ID. A group is therefore the set of criteria sharing a prefix, and `E` names it exactly. The gloss is for the reader.
+
+The prefix is what makes the join mechanical. An owner given only as prose names a group a checker cannot find, so clause 1's "exactly one criteria group" would be unverifiable. A non-owner criterion may cite its owner by either the prefix or the gloss, since the table supplies both.
 
 The extension column is what makes clause 4 checkable. A term such as "threshold" partitions the config, so it owes the table a membership test. Once `telltale_windows` has a row, #292 cannot be written.
 
@@ -106,9 +110,9 @@ This clause is what makes the citation form worth writing. A reader who follows 
 
 A universal is a claim over every case, so it collides with any rule that carves out a case. The repair is not to delete the universal. A universal is often the clearest statement available, and #277's "exactly three things write to the config file" is genuinely useful to an implementer. The repair is to write the scope in the same sentence.
 
-"Exactly three things write to the config file: launch read, exit write, and the live threshold re-read. Nothing else touches it."
+"Nothing other than the launch read, the exit write and the live threshold re-read touches the config file."
 
-The exception is now inside the blanket rather than in a different section, so the sentence is true as written and the collision cannot occur.
+The exception is now inside the blanket rather than in a different section, so the sentence is true as written and the collision cannot occur. The repair also has to survive the check that catches the original. A universal followed by a separate sentence naming its exceptions still reads as unscoped, because nothing binds the two sentences together. "Other than" binds them.
 
 ### 3.4 Boundary terms resolve mechanically
 
