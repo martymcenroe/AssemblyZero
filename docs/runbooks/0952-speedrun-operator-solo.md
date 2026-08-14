@@ -351,20 +351,50 @@ Empty output means none are open. Anything listed is answered by working
 § Rule above — decide, edit, pre-check, close — and the pre-check is what keeps
 the answer from costing a launch to verify.
 
-**6. Archive the run.** Last, because it is the only step that is unrecoverable
-if skipped — arcs are never merged to main, so a run's product lives only on
-branches and in logs.
+**6. Confirm the archive.** A successful roll archives itself and verifies the
+result (#2353), so on that path this step is a read, not a run. The launcher
+prints the verdict under `ROLL SUCCEEDED`:
+
+```
+  Archive: C:\Users\mcwiz\Projects\<repo>\data\speedrun\archives\<run>
+    rolls 6 | branches 1 integration + 64 graveyard | files 542
+    complete yes
+    manifest OK
+```
+
+Confirm two lines: `complete yes` and `manifest OK`. Anything else is named in
+the same block, and an archive failure never changes the roll's own verdict —
+the roll succeeded; a failed archive is its own problem.
+
+Archive by hand when there is no launcher verdict to read: a failed or
+interrupted roll, an archive that reported a problem, or a re-archive after
+adding branches.
 
 ```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/speedrun_archive.py \
     --repo /c/Users/mcwiz/Projects/<repo> --run <integration-branch> --dry-run
+```
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/speedrun_archive.py \
     --repo /c/Users/mcwiz/Projects/<repo> --run <integration-branch>
 ```
 
-**Verify `"complete": true` in the archive's `index.json`.** The command exits
-nonzero and names the missing component when it is not. A partial archive never
-authorizes deleting anything.
+Then assert the archive is sound. `--verify` checks both dimensions in one
+exit code: that the archive records itself complete, naming any missing
+component, and that every captured file still matches its recorded sha256.
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/speedrun_archive.py \
+    --verify /c/Users/mcwiz/Projects/<repo>/data/speedrun/archives/<run>
+```
+
+A partial archive never authorizes deleting anything. Archiving is the only
+step that is unrecoverable if skipped — arcs are never merged to main, so a
+run's product lives only on branches and in logs.
 
 ### The paste block
 
@@ -386,7 +416,7 @@ delete any branch or worktree. Work steps 1 through 6 in order and report:
      plus the healing ledger's recurring-heal issue stubs, or "no recurrences"
   5. run time vs diagnose+fix time for the run's dates
   6. any must-resolve issues now open
-  7. the archive path and whether index.json says complete: true
+  7. the archive path, and the `--verify` exit status for it
 
 Finish with the single highest-value change to make before the next run, and
 the evidence for it.
