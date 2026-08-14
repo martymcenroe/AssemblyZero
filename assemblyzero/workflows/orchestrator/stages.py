@@ -37,6 +37,24 @@ import logging
 
 _stages_logger = logging.getLogger(__name__)
 
+#: Stages a mock run must never enter (#2288). They exist to reach outward --
+#: pushing a branch, opening a PR, merging the LLD PR per ADR 0221 -- and none
+#: of that has a mock form. The value of a rehearsal is in exercising the graph
+#: wiring, not in producing artifacts, and an artifact produced by a rehearsal
+#: is worse than none because someone has to work out where it came from.
+MOCK_FORBIDDEN_STAGES = ("pr", "cleanup")
+
+
+def mock_mode(state: OrchestrationState) -> bool:
+    """Whether this run is a rehearsal.
+
+    Read from config rather than passed down, because all three sub-workflow
+    stages build their sub-state independently and a parameter would have to be
+    remembered at each one. It was forgotten at exactly one of them before, and
+    that hardcoded ``False`` is what made the spec stage unrehearsable.
+    """
+    return bool((state.get("config", {}) or {}).get("mock_mode", False))
+
 
 def should_skip_stage(
     state: OrchestrationState,
@@ -480,6 +498,7 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
             "config_effort": stage_cfg.get("effort", ""),
             "config_gates_draft": gate_enabled,
             "config_gates_verdict": gate_enabled,
+            "config_mock_mode": mock_mode(state),
             "previous_draft_path": previous_draft_path,
             "previous_verdict_text": previous_verdict_text,
         }, stage="lld")
@@ -823,7 +842,10 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             "config_drafter": stage_cfg.get("drafter", ""),
             "config_reviewer": stage_cfg.get("reviewer", ""),
             "config_effort": stage_cfg.get("effort", ""),
-            "config_mock_mode": False,
+            # #2288: was a hardcoded False, so the spec stage could not be
+            # rehearsed and every change to it was first executed by the roll
+            # it was meant to protect.
+            "config_mock_mode": mock_mode(state),
             "human_gate_enabled": gate_enabled,
         })
 
@@ -842,11 +864,20 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             # ride it on the LLD PR so it lands on target main (ADR 0221). The
             # working-tree copy stays for the impl stage to read; the terminal
             # cleanup removes it after the LLD PR merges.
-            _ride_spec_on_lld_pr(
-                spec_path=spec_path,
-                target_repo=state.get("target_repo", ""),
-                issue_number=issue_number,
-            )
+            # #2288: the spec is written either way -- that is the part a
+            # rehearsal exercises. Riding it onto the LLD PR is a commit and a
+            # push, so a mock run stops short of it.
+            if mock_mode(state):
+                print(
+                    f"    [mock] spec written to {spec_path}; not committed "
+                    f"and not pushed to the LLD PR."
+                )
+            else:
+                _ride_spec_on_lld_pr(
+                    spec_path=spec_path,
+                    target_repo=state.get("target_repo", ""),
+                    issue_number=issue_number,
+                )
             result = _make_stage_result(
                 status="passed",
                 artifact_path=spec_path,
@@ -1209,6 +1240,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # budget it did not have and a freeze's loop-back was dropped at 3
             # without a word.
             "max_iterations": DEFAULT_MAX_ITERATIONS,
+            "config_mock_mode": mock_mode(state),
         })
 
         error_msg = sub_result.get("error_message", "")

@@ -130,6 +130,15 @@ Examples:
     parser.add_argument("--issue", type=int, required=True, help="GitHub issue number")
     parser.add_argument("--repo", type=str, default=None, help="Target repository path to build (default: AssemblyZero)")
     parser.add_argument("--dry-run", action="store_true", help="Show planned stages without execution")
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help=(
+            "Rehearse: mock model providers for the lld, spec and impl stages, "
+            "no branch cut, no PR opened or merged. Exercises the graph wiring "
+            "without spending a roll"
+        ),
+    )
     parser.add_argument("--resume-from", type=str, default=None, choices=STAGE_ORDER, help="Stage to resume from")
     parser.add_argument("--skip-lld", action="store_true", help="Skip LLD stage if artifact exists")
     parser.add_argument("--no-skip-lld", action="store_true", help="Force LLD regeneration")
@@ -173,6 +182,10 @@ Examples:
         overrides.setdefault("gates", {})["pr"] = False
     elif args.gate_pr:
         overrides.setdefault("gates", {})["pr"] = True
+    # #2288: reaches all three sub-workflow stages, since each reads it from
+    # config rather than being handed it separately.
+    if args.mock:
+        overrides["mock_mode"] = True
 
     config = overrides if overrides else None
 
@@ -189,7 +202,9 @@ Examples:
     # implements. Starting one while either is exhausted spends the healthy
     # provider's quota just to discover the dry one, and on a recorded take
     # that is a dead run. Read-only, zero API calls.
-    if not args.dry_run and not args.ignore_capacity:
+    # #2288: a mock run makes no provider call, so provider capacity cannot
+    # block it. Gating it would refuse the one run that costs nothing.
+    if not args.dry_run and not args.mock and not args.ignore_capacity:
         from assemblyzero.core.capacity import blocked_providers
 
         blocked = blocked_providers()
@@ -217,6 +232,11 @@ Examples:
 
     if args.dry_run:
         print("[ORCHESTRATOR] DRY RUN -- no stages will execute")
+    if args.mock:
+        print(
+            "[ORCHESTRATOR] MOCK RUN -- mock model providers; no branch cut, "
+            "no PR opened or merged"
+        )
     if args.resume_from:
         print(f"[ORCHESTRATOR] Resuming from stage: {args.resume_from}")
 
@@ -255,8 +275,17 @@ Examples:
         except Exception:  # noqa: BLE001 - the summary always prints
             pass
 
-        if result["success"]:
-            print(f"\n[ORCHESTRATOR] All stages passed.")
+        if result.get("dry_run"):
+            # #2289: a dry run ran nothing, so it has no stage outcomes to
+            # report. Printing a completed pipeline's banner over a state whose
+            # spec is recorded failed is how a rehearsal reads as an all-clear.
+            print("\n[ORCHESTRATOR] Dry run complete. No stage was executed.")
+            print(
+                "[ORCHESTRATOR] The plan above is what a launch would do; "
+                "no claim is made about whether it would pass."
+            )
+        elif result["success"]:
+            print("\n[ORCHESTRATOR] All stages passed.")
             if result["pr_url"]:
                 print(f"[ORCHESTRATOR] PR: {result['pr_url']}")
             print(f"[ORCHESTRATOR] Duration: {result['total_duration_seconds']:.1f}s")
