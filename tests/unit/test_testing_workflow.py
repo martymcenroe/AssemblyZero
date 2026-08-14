@@ -1940,7 +1940,11 @@ class TestVerifyPhasesModule:
 
             result = verify_green_phase(state)
 
-        assert result.get("next_node") == "N4_implement_code"
+        # #2327: all 3 tests pass and coverage is under target, so the
+        # shortfall is a TEST gap. It iterates to test additions rather than
+        # implementation revision -- routing it to the implementation would
+        # reward deleting the uncovered code.
+        assert result.get("next_node") == "N4c_augment_tests"
 
 
 class TestReviewTestPlanModule:

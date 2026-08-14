@@ -77,6 +77,9 @@ from assemblyzero.workflows.testing.nodes import (
 )
 
 
+from assemblyzero.workflows.testing.nodes.augment_tests import (
+    augment_tests_for_coverage,
+)
 from assemblyzero.workflows.testing.nodes.completeness_gate import (
     completeness_gate,
     route_after_completeness_gate,
@@ -317,9 +320,19 @@ def route_after_implement(
     return "N4b_completeness_gate"
 
 
+#: #2327: how many times to ask for coverage-targeting test additions before
+#: halting. Each attempt is an LLM call; if two rounds of tests aimed at named
+#: uncovered lines have not reached the gate, a third is unlikely to, and the
+#: honest outcome is a halt that says so rather than a route to implementation.
+MAX_COVERAGE_AUGMENT_ATTEMPTS = 2
+
+
 def route_after_green(
     state: TestingWorkflowState,
-) -> Literal["N6_e2e_validation", "N7_finalize", "N4_implement_code", "N2_scaffold_tests", "end"]:
+) -> Literal[
+    "N6_e2e_validation", "N7_finalize", "N4_implement_code",
+    "N4c_augment_tests", "N2_scaffold_tests", "end",
+]:
     """Route after N5 (verify_green_phase).
 
     Issue #292: Added N2_scaffold_tests route for exit codes 4/5.
@@ -339,6 +352,30 @@ def route_after_green(
     # Issue #292: Exit code 4/5 routes back to scaffold
     if next_node == "N2_scaffold_tests":
         return "N2_scaffold_tests"
+
+    # #2327: a green-but-under-covered result routes to test additions, never
+    # to implementation revision. Bounded by the same iteration and budget
+    # limits as the implement loop, and additionally by its own attempt count
+    # -- an LLM that cannot reach the target will not be asked forever.
+    if next_node == "N4c_augment_tests":
+        iteration = state.get("iteration_count", 0)
+        max_iterations = state.get("max_iterations", 3)
+        if iteration >= max_iterations:
+            return "end"
+        if state.get("coverage_augment_attempts", 0) >= MAX_COVERAGE_AUGMENT_ATTEMPTS:
+            print(
+                f"    [COVERAGE] {MAX_COVERAGE_AUGMENT_ATTEMPTS} test-addition "
+                f"attempt(s) did not reach the target. Halting rather than "
+                f"routing to implementation -- the uncovered lines are a test "
+                f"gap, and revising the implementation to close it would "
+                f"reward deleting the code that is not covered."
+            )
+            return "end"
+        budget = state.get("cost_budget_usd", 0.0)
+        if budget > 0 and get_cumulative_cost() > budget:
+            print("    [BUDGET] exceeded. Halting.")
+            return "end"
+        return "N4c_augment_tests"
 
     # Check for iteration loop back to implement
     if next_node == "N4_implement_code":
@@ -459,6 +496,7 @@ def build_testing_workflow() -> StateGraph:
     workflow.add_node("N3_verify_red", verify_red_phase)
     workflow.add_node("N4_implement_code", _wrap_with_checkpoint(implement_code, "post-impl"))
     workflow.add_node("N4b_completeness_gate", completeness_gate)  # Issue #147
+    workflow.add_node("N4c_augment_tests", augment_tests_for_coverage)  # #2327
     workflow.add_node("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
     workflow.add_node("N6_e2e_validation", e2e_validation)
     # Issue #1626: checkpoint after N7 so the test/implementation reports written
@@ -565,10 +603,16 @@ def build_testing_workflow() -> StateGraph:
             "N6_e2e_validation": "N6_e2e_validation",
             "N7_finalize": "N7_finalize",
             "N4_implement_code": "N4_implement_code",
+            "N4c_augment_tests": "N4c_augment_tests",  # #2327
             "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
         },
     )
+
+    # #2327: test additions always return to verification. The node never
+    # routes to implementation, so a coverage shortfall cannot become an
+    # implementation edit by any path.
+    workflow.add_edge("N4c_augment_tests", "N5_verify_green")
 
     # N6 -> N7 or N4 (iteration loop)
     workflow.add_conditional_edges(
