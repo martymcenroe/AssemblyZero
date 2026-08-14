@@ -46,6 +46,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from assemblyzero.workflows.requirements.ownership_check import (
+    OwnershipReport,
+    check_ownership,
+    render_ownership,
+)
+
 # ---------------------------------------------------------------------------
 # EARS (ADR 0226 section 3.1)
 # ---------------------------------------------------------------------------
@@ -147,6 +153,7 @@ class FormReport:
     tables: list[TableReport] = field(default_factory=list)
     non_decision_tables: int = 0
     violations: list[Violation] = field(default_factory=list)
+    ownership: OwnershipReport = field(default_factory=OwnershipReport)
 
     @property
     def ok(self) -> bool:
@@ -526,13 +533,24 @@ def _check_rows_by_count_and_outcome(
             )
 
 
+def acceptance_criteria(body: str) -> tuple[list[str], bool]:
+    """(the criteria list items, whether the section exists at all).
+
+    Both the table checks and the ADR 0228 ownership checks read this list, so
+    it is parsed once and handed to each. An absent section is a different fact
+    from an empty one and stays distinguishable.
+    """
+    lines = section_lines(body, CRITERIA_HEADING)
+    if lines is None:
+        return [], False
+    items, _ = list_items(lines)
+    return items, True
+
+
 def check_tables(body: str, report: FormReport) -> None:
     """Completeness, disjointness and row coverage for every decision table."""
-    criteria_lines = section_lines(body, CRITERIA_HEADING)
-    report.criteria_section_found = criteria_lines is not None
-    criteria: list[str] = []
-    if criteria_lines is not None:
-        criteria, _ = list_items(criteria_lines)
+    criteria, found = acceptance_criteria(body)
+    report.criteria_section_found = found
     report.criteria_examined = len(criteria)
 
     all_tables = parse_tables(body)
@@ -598,10 +616,24 @@ def check_tables(body: str, report: FormReport) -> None:
 
 
 def check_form(body: str) -> FormReport:
-    """Run every form check over one issue body."""
+    """Run every form check over one issue body.
+
+    ADR 0226's three rules bind conditions; ADR 0228's five bind outcomes. An
+    issue owes both, and one report carries both so a single revision can
+    address the whole set.
+    """
     report = FormReport()
     check_ears(body, report)
     check_tables(body, report)
+
+    criteria, _ = acceptance_criteria(body)
+    report.ownership = check_ownership(
+        parse_tables(body), criteria, report, Violation, body
+    )
+    if report.ownership.table_found:
+        # The variable table is checked on its own account, so counting it
+        # among the tables nothing looked at would be false.
+        report.non_decision_tables = max(0, report.non_decision_tables - 1)
     return report
 
 
@@ -655,12 +687,21 @@ def render_report(report: FormReport, label: str) -> str:
     else:
         out.append(f"Acceptance criteria: no '## {CRITERIA_HEADING}' section found.")
 
+    out.append("")
+    out += render_ownership(report.ownership, report.violations)
+
     out += ["", "Not verified"]
     out += [
         "  - Whether any requirement, row or criterion states the CORRECT",
         "    behavior. Completeness is a property of form. A table can",
         "    enumerate every combination and be wrong in every row.",
     ]
+    if report.ownership.ran:
+        out += [
+            "  - Whether each variable's owner is the RIGHT owner. One owner per",
+            "    variable is a property of form; a table can name the wrong group",
+            "    in every row.",
+        ]
     if any(not t.exact_join for t in report.tables):
         weak = ", ".join(t.subject for t in report.tables if not t.exact_join)
         out += [
