@@ -27,6 +27,14 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# #2367: before anything prints. Splits carry stage labels and failure text
+# lifted from the roll's own JSON.
+from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
+
+_install_utf8_console()
+
 
 def _latest_attempt(speedrun_dir: Path, issue: int) -> int | None:
     """Find the highest attempt number for this issue."""
