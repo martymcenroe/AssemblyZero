@@ -1600,7 +1600,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             },
         )
 
-        # Loop back to implementation for more coverage
+        # #2327: every test passes and the shortfall is in lines no test
+        # reaches, so this is a TEST gap, not an implementation gap. It used
+        # to route to N4_implement_code, which is worse than useless: the
+        # cheapest edit that raises statement coverage is to DELETE the
+        # uncovered code, and the uncovered code is characteristically the
+        # error handling the spec mandates. The loop was pointed at removing
+        # it, and nothing downstream would have noticed.
+        #
+        # Route to test-side additions instead. The implementation is not
+        # touched on this path at all.
+        print(
+            f"    [N5] all {passed_count} test(s) pass; coverage "
+            f"{coverage_achieved:.1f}% < {coverage_target}% target -- this is "
+            f"a test gap, routing to test additions (never to implementation)"
+        )
         updates = {
             "green_phase_output": output,
             "coverage_achieved": coverage_achieved,
@@ -1611,7 +1625,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
             "iteration_count": iteration_count + 1,
-            "next_node": "N4_implement_code",
+            "next_node": "N4c_augment_tests",
             "error_message": "",
             # All tests pass here; a count plateau is a failing-branch concept.
             "count_plateau_strikes": 0,

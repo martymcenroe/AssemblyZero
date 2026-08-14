@@ -62,7 +62,11 @@ class TestProgressTheGuardCouldNotSee:
                    previous_green_failures=["test_decay"])
         )
 
-        assert result["next_node"] == "N4_implement_code", result.get("error_message")
+        # #2327: all tests pass and coverage is under target, so the loop
+        # continues to TEST additions rather than implementation revision.
+        # What this test guards is that it continues at all -- that the
+        # stagnation check does not fire on a run that is making progress.
+        assert result["next_node"] == "N4c_augment_tests", result.get("error_message")
         assert "stagnant" not in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
@@ -72,7 +76,8 @@ class TestProgressTheGuardCouldNotSee:
         result = verify_green_phase(
             _state(previous_passed=12, previous_coverage=94.0)
         )
-        assert result["next_node"] == "N4_implement_code", result.get("error_message")
+        # #2327: green-but-under-covered continues to test additions.
+        assert result["next_node"] == "N4c_augment_tests", result.get("error_message")
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_it_says_why_it_kept_going(self, mock_pytest, capsys):

@@ -170,6 +170,10 @@ class TestingWorkflowState(TypedDict, total=False):
     red_phase_output: str
     green_phase_output: str
     coverage_achieved: float
+    #: #2327: how many rounds of coverage-targeting test additions have run.
+    #: Bounds N4c so an LLM that cannot reach the gate is not asked forever,
+    #: and so the shortfall never falls through to implementation revision.
+    coverage_augment_attempts: int
     previous_coverage: float  # Previous iteration coverage for stagnation detection
     previous_passed: int  # Previous iteration pass count for stagnation detection
     e2e_output: str
