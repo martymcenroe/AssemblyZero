@@ -535,6 +535,58 @@ def run_pytest(
         }
 
 
+def restore_best_on_failure(state: TestingWorkflowState) -> str:
+    """Put the best measured state back before the stage ends (#2338).
+
+    `_hill_climb` (#2050) is a WITHIN-loop ratchet: a worse iteration restores
+    the best files so the next revision starts from there. No terminal path
+    consulted it, so a stage that died ended holding the wreckage while a
+    coherent best state sat in the snapshot directory unused.
+
+    On run-issue7-192332 that meant ending on a test file that could not be
+    collected, thirteen seconds after logging "best iteration so far: 23
+    passing at 78.0% — snapshotted 3 file(s)". The worktree is what a resume
+    picks up and what the operator inspects; leaving it at the worst point
+    the run reached is the opposite of what the snapshot exists for.
+
+    Returns a description of what was restored, or '' when there was nothing
+    to restore. Best-effort by design: restoration trouble is reported and
+    must never mask the original failure, which is the thing the operator
+    actually needs to read.
+    """
+    import shutil
+
+    best = state.get("best_iteration") or None
+    if not best:
+        return ""
+    files = best.get("files") or {}
+    if not files:
+        return ""
+
+    restored = 0
+    for src_str, snap_str in files.items():
+        try:
+            if Path(snap_str).is_file():
+                shutil.copy2(snap_str, src_str)
+                restored += 1
+        except OSError as exc:
+            print(f"    [N5] could not restore {src_str} (non-fatal): {exc}")
+
+    if not restored:
+        return ""
+
+    description = (
+        f"{best.get('passed', '?')} passing at "
+        f"{float(best.get('coverage', 0.0)):.1f}% coverage"
+    )
+    print(
+        f"    [N5] restored the best measured state ({description}) from "
+        f"{restored} snapshotted file(s) — the worktree holds that, not the "
+        f"failed attempt"
+    )
+    return description
+
+
 def _implementation_already_exists(state: TestingWorkflowState) -> bool:
     """True when a previous attempt's implementation is present (#2337).
 
@@ -1351,6 +1403,15 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         detail = f" {broken}" if broken else ""
         if broken:
             print(f"    [EXIT CODE {exit_code}] {broken}")
+
+        # #2338: end AT the best measured state rather than on the wreckage.
+        # The snapshot existed and nothing consulted it, so the worktree a
+        # resume picks up was the worst point the run reached.
+        restored = restore_best_on_failure(state)
+        if restored:
+            detail += (
+                f" Worktree restored to the best measured state: {restored}."
+            )
 
         return {
             "green_phase_output": output,
