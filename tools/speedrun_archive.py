@@ -160,7 +160,15 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The archive tool's flag surface, separated from running it (#2295).
+
+    Same reason as the launcher's: runbook 0952 documents these commands, and
+    a test that parses the runbook's examples needs the real parser rather than
+    a regex over this file. A regex reading of `add_argument` already produced
+    a wrong answer once while investigating #2295 -- it missed `--issue`,
+    because the flag sits on the line after the call.
+    """
     parser = argparse.ArgumentParser(
         description="Archive a completed speedrun into one restorable record."
     )
@@ -184,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
             "every recorded file still matching its sha256"
         ),
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.restore:

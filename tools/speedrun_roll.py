@@ -2396,7 +2396,16 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, sin
         print(line)
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The launcher's flag surface, separated from running it (#2295).
+
+    Extracted so a test can compare the operator-facing flags against runbook
+    0952's table and parse the runbook's own examples. The runbook claimed to be
+    verified against `--help` and its canonical launch example still carried the
+    retired `--attempts 3`, so an operator copying it got a preflight refusal
+    from the document that was supposed to prevent one. A claim of verification
+    that nothing re-checks decays into a claim.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Roll speedrun issues end to end: resolve and heal the base, gate "
@@ -2491,6 +2500,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Set by --detach on the relaunch; not something anyone types.
     parser.add_argument("--detached-stdout", default=None, help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args, extra = parser.parse_known_args(argv)
 
     if args.detached_stdout:
