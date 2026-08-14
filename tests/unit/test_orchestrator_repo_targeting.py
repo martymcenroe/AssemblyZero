@@ -120,7 +120,7 @@ def test_spec_threads_repo_root(mock_detect, mock_create_graph):
     # calling .compile() on it. Mock the factory to return an "app" mock
     # whose .invoke captures the payload — matching production shape.
     app = MagicMock()
-    def _invoke(payload):
+    def _invoke(payload, *args, **kwargs):
         captured.update(payload)
         return {"spec_path": ""}
     app.invoke.side_effect = _invoke

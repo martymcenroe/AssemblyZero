@@ -2083,10 +2083,20 @@ class TestReviewSpec:
     @patch("assemblyzero.workflows.implementation_spec.nodes.review_spec.get_provider")
     def test_over_budget_iteration_guard(self, mock_provider, base_state):
         """Iterations BEYOND the budget (routing failure) still guard
-        BLOCKED without calling the provider (#1775)."""
+        BLOCKED without calling the provider (#1775).
+
+        #2382: the budget is now the hard ceiling rather than the base cap --
+        a converging loop is allowed past the base, so iteration 4 of a base-3
+        run is legitimate and must reach the reviewer. The guard's intent is
+        unchanged: past the REAL bound, block without spending a call.
+        """
+        from assemblyzero.workflows.implementation_spec.review_progress import (
+            hard_ceiling,
+        )
+
         base_state["spec_draft"] = SAMPLE_SPEC_COMPLETE
-        base_state["review_iteration"] = 4
         base_state["max_iterations"] = 3
+        base_state["review_iteration"] = hard_ceiling(3) + 1
 
         from assemblyzero.workflows.implementation_spec.nodes.review_spec import review_spec
 

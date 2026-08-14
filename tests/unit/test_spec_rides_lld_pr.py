@@ -105,7 +105,7 @@ def test_spec_stage_rides_spec_on_lld_pr(tmp_path):
     spec_file.write_text("# spec")
 
     class _StubApp:
-        def invoke(self, payload):
+        def invoke(self, payload, *args, **kwargs):
             return {"spec_path": str(spec_file), "error_message": ""}
 
     rode: dict = {}

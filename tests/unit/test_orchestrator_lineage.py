@@ -116,7 +116,7 @@ class TestSpecStageHandsDownAnAuditDir:
         captured: dict[str, dict] = {}
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 captured["payload"] = payload
                 return {"spec_path": "", "error_message": "stub"}
 
@@ -158,7 +158,7 @@ class TestSpecStageHandsDownAnAuditDir:
         captured: dict[str, dict] = {}
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 captured["payload"] = payload
                 return {"spec_path": "", "error_message": "stub"}
 
@@ -200,7 +200,7 @@ class TestSpecStageHandsDownAnAuditDir:
         seen: list[str] = []
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 seen.append(payload.get("audit_dir", ""))
                 return {"spec_path": "", "error_message": "stub"}
 
@@ -239,7 +239,7 @@ class TestDraftsSurviveAFailedStage:
             """Stands in for a spec graph that drafts three times, is told to
             revise each time, and dies at the cap without a final spec."""
 
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 audit = Path(payload["audit_dir"])
                 for i in (1, 2, 3):
                     (audit / f"{i:03d}-spec-draft.md").write_text(
@@ -300,7 +300,7 @@ class TestLineageNeverTakesTheStageDown:
         ran: dict[str, dict] = {}
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 ran["payload"] = payload
                 return {"spec_path": "", "error_message": "stub"}
 
@@ -331,7 +331,7 @@ class TestLineageNeverTakesTheStageDown:
         ran: dict[str, dict] = {}
 
         class _StubApp:
-            def invoke(self, payload: dict) -> dict:
+            def invoke(self, payload: dict, *args, **kwargs) -> dict:
                 ran["payload"] = payload
                 return {"spec_path": "", "error_message": "stub"}
 

@@ -828,6 +828,18 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
         # graph directly. Requirements + testing graph factories return the
         # uncompiled StateGraph and still need .compile() — those stages are
         # unchanged.
+        # #2382: this stage passed no config at all, so it silently took
+        # LangGraph's default of 25 super-steps. A converging review loop may
+        # now run past the base cap, and without a derived budget it would hit
+        # GraphRecursionError -- an error naming no stage, no loop and no
+        # document -- instead of the halt that says which exit fired. Same
+        # failure #2245 removed from the requirements graph.
+        from assemblyzero.workflows.implementation_spec.spec_step_budget import (
+            recursion_limit as spec_recursion_limit,
+        )
+
+        spec_max_iterations = int(stage_cfg.get("max_revisions", 3) or 3)
+
         app = create_spec_graph()
         sub_result = app.invoke({
             "issue_number": issue_number,
@@ -847,7 +859,8 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
             # it was meant to protect.
             "config_mock_mode": mock_mode(state),
             "human_gate_enabled": gate_enabled,
-        })
+            "max_iterations": spec_max_iterations,
+        }, config={"recursion_limit": spec_recursion_limit(spec_max_iterations)})
 
         spec_path = sub_result.get("spec_path", "")
         # #2297: the stage verdict is the workflow's OWN explicit status, not an
