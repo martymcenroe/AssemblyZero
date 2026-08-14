@@ -6,7 +6,30 @@ premature cleanup at any point loses everything since the last human commit.
 
 The 2026-01-31 incident lost 6,114 lines of working code via worktree
 deletion before commit. This module provides `commit_checkpoint()`, called
-at the end of N2, N4, and N5 to stage + commit + push the current state.
+at the end of N2, N4, and N5 to stage and commit the current state.
+
+Checkpoints are LOCAL (#2339)
+-----------------------------
+
+They do not push, and the worktree is no longer given an upstream at
+creation for their benefit. Both halves of that were removed together.
+
+run-issue7-192332 settled it. `origin/issue-7` was a stale remote branch
+from an earlier run, so the upstream push at worktree creation was rejected
+as non-fast-forward, so every checkpoint push failed with "no upstream
+branch" and printed git's four-line advice into the run log. Four
+checkpoints, four identical failures, and one operator reading a log that
+looked like a broken run.
+
+The same incident is the evidence for going local rather than repairing the
+remote. Every checkpoint commit survived without ever reaching origin. The
+chain was preserved on ``graveyard/issue-7-20260814T002812Z`` by the #2310
+disposal discipline, and it is the only reason the post-mortem behind
+#2337, #2338, #2339 and #2340 had anything to measure. A remote copy would
+have added nothing that mattered on the one day it was tested.
+
+Pushing the branch is the pr stage's job. That push is the run's product,
+it is untouched here, and its own stale-remote reconcile landed in #2349.
 
 Design rules:
 1. **Best-effort.** Checkpoint failures must NOT fail the node they were
@@ -17,9 +40,10 @@ Design rules:
    commits represent ONLY the work the human cares about.
 3. **Squashable.** Commit message prefix `[CP:NAME]` is recognizable so
    the post-merge squash collapses them cleanly.
-4. **Network-tolerant.** `git push` failures are warned but ignored --
-   the local commit is the primary recovery artifact; remote backup is
-   nice-to-have.
+4. **Local only.** No network call, so no network failure to tolerate and
+   no advice text to print. A run with no remote at all behaves the same as
+   one with a healthy remote, which is what makes the checkpoint's outcome
+   readable.
 5. **Idempotent on empty.** If `git diff --cached` is empty after staging,
    skips the commit (no empty-commit pollution).
 """
@@ -36,13 +60,12 @@ _EXCLUDE_PATHSPECS = (
 )
 
 _GIT_TIMEOUT_S = 30
-_PUSH_TIMEOUT_S = 60
 
 
 def commit_checkpoint(worktree_path: str | Path | None,
                        issue_number: int | str | None,
                        name: str) -> bool:
-    """Stage + commit + push the current state of `worktree_path`.
+    """Stage and commit the current state of `worktree_path`. Local only.
 
     Args:
         worktree_path: Path to the git worktree to checkpoint. If None or
@@ -92,15 +115,9 @@ def commit_checkpoint(worktree_path: str | Path | None,
                   f"{(commit.stderr or commit.stdout).strip()[:200]}")
             return False
 
-        # Push -- non-fatal if offline / no upstream / rejected
-        push = _run(
-            ["git", "-C", str(wt), "push"],
-            timeout=_PUSH_TIMEOUT_S,
-        )
-        if push.returncode != 0:
-            print(f"  [CP:{name}] commit OK, push failed (non-fatal): "
-                  f"{(push.stderr or '').strip()[:200]}")
-
+        # No push. See the module docstring (#2339): the local commit IS the
+        # recovery artifact, and the push that used to follow could only ever
+        # fail loudly or succeed silently.
         return True
 
     except (subprocess.TimeoutExpired, OSError) as e:

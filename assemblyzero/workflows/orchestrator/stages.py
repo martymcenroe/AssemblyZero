@@ -1110,21 +1110,27 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                 capture_output=True,
                 text=True,
             )
-            # #1780: set upstream at creation so checkpoint pushes work.
-            # Without it every [CP:*] push fails until the pr stage's
-            # --set-upstream, losing the crash-resilience checkpoints
-            # exist for. Non-fatal (offline runs stay possible).
-            push_result = run_command(
-                ["git", "-C", str(worktree_path), "push", "-u", "origin", branch_name],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if push_result.returncode != 0:
-                print(
-                    f"    [WARN] could not push {branch_name} upstream: "
-                    f"{(push_result.stderr or '').strip()[:200]}"
-                )
+            # #1780 pushed the branch here to set an upstream, so that
+            # checkpoint pushes would work. #2339 removed it, because
+            # checkpoints no longer push.
+            #
+            # The push was the first line of run-issue7-192332 and it was
+            # rejected: origin/issue-7 was a stale remote branch from an
+            # earlier run, diverged from the new local one. No upstream was
+            # set, so all four [[CP:*]] checkpoints then failed the same way
+            # and each printed git's four-line set-upstream advice into the
+            # run log.
+            #
+            # The operator's ruling: checkpoints are local crash resilience
+            # and do not push. The evidence for it is in that same incident.
+            # Every checkpoint commit survived without ever reaching origin,
+            # preserved on graveyard/issue-7-20260814T002812Z by the #2310
+            # disposal discipline, and that local chain is the only reason
+            # the post-mortem had anything to measure.
+            #
+            # Nothing here needs a remote, so nothing here reconciles one.
+            # The pr stage pushes the branch, and that push is the run's
+            # product; its own stale-remote reconcile landed in #2349.
 
             # #1904: provision the worktree's environment. Without this,
             # `poetry run` silently falls through to PATH for missing

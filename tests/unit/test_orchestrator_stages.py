@@ -251,12 +251,22 @@ class TestFormatStageTable:
         assert "cleanup" in table
 
 
-class TestImplWorktreeUpstreamPush:
-    """#1780: the impl worktree branch is pushed -u at creation so
-    checkpoint pushes work (crash-resilience)."""
+class TestImplWorktreeDoesNotPush:
+    """#2339: worktree creation touches no remote.
+
+    #1780 pushed the branch here to give checkpoint pushes an upstream. The
+    operator ruled that checkpoints are local, so nothing before the pr stage
+    needs an upstream, and this push goes with them.
+
+    It is also the line that failed first in run-issue7-192332. A stale
+    `origin/issue-7` rejected it non-fast-forward, no upstream was set, and
+    every one of the four later checkpoint pushes failed with git's
+    four-line set-upstream advice in the log. One rejected push, four
+    misleading failures.
+    """
 
     @patch("assemblyzero.workflows.orchestrator.stages.run_command")
-    def test_worktree_creation_pushes_upstream(self, mock_run, tmp_path):
+    def test_worktree_creation_pushes_nothing(self, mock_run, tmp_path):
         from assemblyzero.workflows.orchestrator.stages import run_impl_stage
 
         out = MagicMock()
@@ -289,14 +299,12 @@ class TestImplWorktreeUpstreamPush:
         ):
             run_impl_stage(state)
 
-        push_calls = [
-            c for c in mock_run.call_args_list
-            if len(c.args[0]) >= 4 and c.args[0][3:4] == ["push"]
-            or ("push" in c.args[0] and "-u" in c.args[0])
+        pushes = [
+            c.args[0] for c in mock_run.call_args_list if "push" in c.args[0]
         ]
-        assert any(
-            "-u" in c.args[0] and "issue-4" in c.args[0] for c in push_calls
-        ), f"expected a push -u origin issue-4 at worktree creation; calls: {[c.args[0] for c in mock_run.call_args_list]}"
+        assert pushes == [], (
+            f"the impl stage must reach no remote; pushes: {pushes}"
+        )
 
 
 class TestWorktreeRemovalRetry:
