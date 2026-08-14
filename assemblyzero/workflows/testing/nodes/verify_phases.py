@@ -590,6 +590,45 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
     return description
 
 
+#: #2347: exception types that mean the TEST is wrong, not the code. Each one
+#: names a condition no implementation choice can satisfy on the host running
+#: it -- a platform-specific pathlib operation, a module that is not
+#: installed, a fixture that could not be built. An AssertionError is
+#: deliberately absent: that is the freeze protocol's proper domain.
+_UNSATISFIABLE_ERRORS = (
+    "pathlib.UnsupportedOperation",
+    "UnsupportedOperation",
+    "ModuleNotFoundError",
+    "ImportError",
+    "NotImplementedError",
+)
+
+
+def _unsatisfiable_test_failures(output: str) -> set[str]:
+    """Tests failing for a reason no implementation can fix (#2347).
+
+    Reads pytest's short summary, where each failure carries its exception
+    type. Returns the test ids whose reason is an environment or platform
+    error rather than an assertion.
+
+    Conservative on purpose: a line whose reason cannot be read contributes
+    nothing. Mistaking a real assertion failure for an unsatisfiable one would
+    disable the freeze protocol, which is load-bearing when the tests are
+    right and the implementation is not.
+    """
+    import re
+
+    found: set[str] = set()
+    for line in output.splitlines():
+        match = re.match(r"^FAILED\s+(\S+::\S+)\s+-\s+(.*)$", line.strip())
+        if not match:
+            continue
+        test_id, reason = match.group(1), match.group(2)
+        if any(err in reason for err in _UNSATISFIABLE_ERRORS):
+            found.add(test_id)
+    return found
+
+
 def _implementation_already_exists(state: TestingWorkflowState) -> bool:
     """True when a previous attempt's implementation is present (#2337).
 
@@ -1527,6 +1566,42 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             identity_strikes += 1
         else:
             identity_strikes = 0
+
+        # #2347: freezing the tests as the contract is right when the tests
+        # are correct and the implementation is not. It is exactly inverted
+        # when a test cannot pass on this platform under ANY implementation --
+        # then "rewrite the implementation until it does" is a loop with no
+        # bottom, and the strike counter is a timer on it rather than an exit.
+        #
+        # Measured twice independently (run-issue7-192332, run-issue7-231606):
+        # N4c generated a test patching os.name to "posix" and calling code
+        # that reaches Path.home(), which raises UnsupportedOperation on
+        # Windows. The second run had 100% coverage and was one unsatisfiable
+        # test away from a clean pass.
+        unsatisfiable = _unsatisfiable_test_failures(output)
+        if identity_stagnant and unsatisfiable:
+            names = ", ".join(sorted(unsatisfiable)[:3])
+            message = (
+                f"Test(s) failing for a reason no implementation can fix: "
+                f"{names}. These fail on an environment or platform error "
+                f"rather than an assertion, so freezing them as the contract "
+                f"would point the loop at rewriting correct code. The TEST is "
+                f"the wrong side here -- fix or remove it, then resume."
+            )
+            print(f"    [N5] {message}")
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": coverage_achieved,
+                "previous_coverage": coverage_achieved,
+                "previous_passed": passed_count,
+                "previous_green_failures": current_green_failures,
+                "test_failure_summary": failure_summary,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": f"{DETERMINISTIC_FAILURE}: {message}",
+            }
         if identity_stagnant and identity_strikes >= 2:
             stagnant_msg = (
                 f"Test identity stagnant: same {len(current_green_failures)} test(s) failing "
