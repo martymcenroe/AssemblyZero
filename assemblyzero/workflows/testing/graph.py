@@ -274,7 +274,9 @@ def route_after_validate(
 
 def route_after_red(
     state: TestingWorkflowState,
-) -> Literal["N4_implement_code", "N2_scaffold_tests", "end"]:
+) -> Literal[
+    "N4_implement_code", "N2_scaffold_tests", "N5_verify_green", "end",
+]:
     """Route after N3 (verify_red_phase).
 
     Issue #292: Added N2_scaffold_tests route for exit codes 4/5.
@@ -293,6 +295,12 @@ def route_after_red(
 
     if next_node == "N4_implement_code":
         return "N4_implement_code"
+
+    # #2337: a retry whose implementation survived is not a failed red phase.
+    # The tests and the implementation agree, which is the state N4 exists to
+    # reach, so the coverage gate judges it rather than the stage ending.
+    if next_node == "N5_verify_green":
+        return "N5_verify_green"
 
     # Issue #292: Exit code 4/5 routes back to scaffold
     if next_node == "N2_scaffold_tests":
@@ -569,6 +577,7 @@ def build_testing_workflow() -> StateGraph:
         route_after_red,
         {
             "N4_implement_code": "N4_implement_code",
+            "N5_verify_green": "N5_verify_green",  # #2337
             "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
         },

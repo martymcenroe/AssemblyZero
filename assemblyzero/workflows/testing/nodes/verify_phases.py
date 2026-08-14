@@ -71,6 +71,14 @@ PYTEST_OUTPUT_COLUMNS = "200"
 # not width-truncated -- and they were being captured and discarded.
 MAX_TRACEBACK_BLOCKS = 8
 
+#: #2337: marks a failure the same stage cannot fix by running again. Same
+#: rule as #2298's MISSING_REQUIRED_INPUT, different cause: green-at-red on an
+#: unchanged worktree is deterministic, and run-issue7-192332 retried it three
+#: times in twelve seconds. The orchestrator's transience classifier keys off
+#: this token, so retry behaviour follows from the failure's kind rather than
+#: from prose a later reword could silently change.
+DETERMINISTIC_FAILURE = "DETERMINISTIC FAILURE"
+
 # Issue #562: Critical skip keywords (aligned with tools/test-gate.py)
 _CRITICAL_SKIP_KEYWORDS = ["security", "auth", "payment", "critical"]
 
@@ -527,6 +535,32 @@ def run_pytest(
         }
 
 
+def _implementation_already_exists(state: TestingWorkflowState) -> bool:
+    """True when a previous attempt's implementation is present (#2337).
+
+    Two conditions, both required. This is NOT a first attempt -- a retry sets
+    retry_mode, and a resume carries an iteration count -- AND the files the
+    spec says to write are actually on disk. Either alone is too weak: a first
+    attempt against a repo that happens to have the file is the pre-existing
+    implementation the guard was built for, and a retry whose files were
+    cleared genuinely needs the red phase.
+    """
+    is_later_attempt = bool(state.get("retry_mode")) or int(
+        state.get("iteration_count", 0) or 0
+    ) > 0
+    if not is_later_attempt:
+        return False
+
+    repo_root = Path(state.get("repo_root", "") or ".")
+    targets = [
+        f.get("path", "") for f in (state.get("files_to_modify") or [])
+        if f.get("path", "").endswith(".py")
+    ]
+    if not targets:
+        return False
+    return all((repo_root / path).is_file() for path in targets)
+
+
 def _describe_hollow_suite(state: TestingWorkflowState) -> str:
     """Describe a scaffold that cannot pass, or '' when it might (#2322).
 
@@ -785,6 +819,41 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Red phase success = ALL tests fail or error (none pass)
     if passed_count > 0:
+        # #2337: green-at-red is fatal on a FIRST attempt -- tests that pass
+        # before any code exists are not testing anything. It is the wrong
+        # reading whenever implementation legitimately exists: a retry after
+        # an N4c failure, or a resume into a worktree carrying prior work.
+        #
+        # On run-issue7-192332 attempt 1 died at N5, and attempts 2 and 3 both
+        # scaffolded, found the surviving implementation, went green here and
+        # ended the stage -- roughly two seconds of work each. The correct
+        # reading of "23 passed" there is: the previous attempt's
+        # implementation is still present and still works, which is the state
+        # N4 is trying to reach.
+        if _implementation_already_exists(state):
+            print(
+                f"    [N3] {passed_count} test(s) already pass, and the "
+                f"implementation from a previous attempt is present."
+            )
+            print(
+                "    Not a failed red phase: the tests and the implementation "
+                "agree. Verifying against the coverage gate instead."
+            )
+            log_workflow_execution(
+                target_repo=repo_root,
+                issue_number=state.get("issue_number", 0),
+                workflow_type="testing",
+                event="red_phase_implementation_present",
+                details={"passed": passed_count, "retry": True},
+            )
+            return {
+                "red_phase_output": output,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "error_message": "",
+                "next_node": "N5_verify_green",
+            }
+
         print(f"    [GUARD] WARNING: {passed_count} tests passed unexpectedly!")
         print("    This may indicate pre-existing implementation.")
 
@@ -800,8 +869,15 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "red_phase_output": output,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
-            "error_message": f"Red phase failed: {passed_count} tests passed unexpectedly. "
-                           "Tests should fail before implementation.",
+            # #2337: deterministic on an unchanged worktree -- running the same
+            # stage again reproduces it exactly, which is the #2298 rule. The
+            # token keeps it out of the retry loop that spent three attempts
+            # on it in twelve seconds.
+            "error_message": (
+                f"{DETERMINISTIC_FAILURE}: Red phase failed: {passed_count} "
+                f"tests passed unexpectedly. Tests should fail before "
+                f"implementation exists."
+            ),
             "next_node": "END",
         }
 
