@@ -16,6 +16,7 @@ import logging
 import os
 from assemblyzero.workflows.testing.adversarial_gemini import (
     AdversarialGeminiClient,
+    ForbiddenModelError,
     GeminiModelDowngradeError,
     GeminiQuotaExhaustedError,
     GeminiTimeoutError,
@@ -120,6 +121,21 @@ def run_adversarial_node(state: AdversarialNodeState) -> AdversarialNodeState:
         return {
             **state,
             "adversarial_skipped_reason": "Gemini quota exhausted",
+            "adversarial_verdict": "error",
+            "adversarial_test_count": 0,
+            "adversarial_error": None,
+            "generated_test_files": {},
+        }
+    except ForbiddenModelError as e:
+        # #2286: the requested model is checked before the call now. This node
+        # is non-blocking by design, and the surrounding handlers name specific
+        # Gemini errors rather than catching broadly, so a new exception type
+        # would otherwise escape and halt a pipeline that is supposed to
+        # continue without adversarial coverage.
+        logger.warning("[ADV] Adversarial model not permitted — skipping: %s", e)
+        return {
+            **state,
+            "adversarial_skipped_reason": f"adversarial model not permitted: {e}",
             "adversarial_verdict": "error",
             "adversarial_test_count": 0,
             "adversarial_error": None,
