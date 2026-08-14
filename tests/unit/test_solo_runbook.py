@@ -120,14 +120,63 @@ def test_the_inspect_section_covers_all_six_steps():
     assert "campaign_timing_dashboard.py" in lowered
     assert "must-resolve" in lowered
     assert "speedrun_archive.py" in lowered
-    assert "complete" in lowered and "index.json" in lowered
+    assert "complete" in lowered and "--verify" in lowered
+
+
+def _step_six() -> str:
+    section = _text()[_text().index("## § Inspect"):]
+    start = section.index("**6.")
+    return section[start:section.index("### The paste block")]
 
 
 def test_the_archive_step_requires_verifying_completeness():
-    section = _text()[_text().index("## § Inspect"):]
-    assert '"complete": true' in section, (
+    """#2353 changed HOW completeness is asserted, not whether it is.
+
+    This asserted `"complete": true` appeared in the section, which was the
+    old instruction to open index.json and read a value. The step now
+    prescribes `--verify`, which checks the same thing and cannot be skimmed
+    past. Audits are programs.
+    """
+    step = _step_six().lower()
+    assert "--verify" in step, "completeness must be asserted by a command"
+    assert "partial archive" in step and "deleting anything" in step, (
         "a partial archive must never be reported as done"
     )
+
+
+def test_no_step_prescribes_reading_a_value_out_of_a_file():
+    """The operator's second complaint, as an acceptance criterion (#2353).
+
+    No step may tell a human to open a file and eyeball a value that a
+    command can assert.
+    """
+    step = _step_six()
+    assert "index.json" not in step, (
+        "step 6 must not send the operator digging in a file for a value"
+    )
+
+
+def test_every_command_block_in_step_six_states_its_working_directory():
+    """The operator's first complaint, as an acceptance criterion (#2353).
+
+    Step 6's block was the only one in the section with no `cd`, so an
+    operator arriving at it fresh had no stated cwd. Operator hit this
+    2026-08-14.
+    """
+    blocks = re.findall(r"```bash\n(.*?)```", _step_six(), re.DOTALL)
+    assert blocks, "step 6 should still document the manual invocation"
+    for block in blocks:
+        assert block.lstrip().startswith("cd "), (
+            f"command block does not state its working directory:\n{block}"
+        )
+
+
+def test_step_six_reads_the_launcher_verdict_first():
+    """A successful roll archives itself (#2353), so the step is a read."""
+    step = _step_six().lower()
+    assert "roll succeeded" in step or "launcher" in step
+    assert "complete yes" in step
+    assert "manifest ok" in step
 
 
 # --- "babysit-protocol.md gains the pointer" ----------------------------
