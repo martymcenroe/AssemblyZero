@@ -32,6 +32,11 @@ class OrchestrationState(TypedDict, total=False):
 
     issue_number: int
     current_stage: str  # "triage", "lld", "spec", "impl", "pr", "cleanup", "done"
+    #: #2383: the stage this invocation was RESUMED into, empty on a fresh run.
+    #: Distinct from `current_stage`, which reaches every stage in the normal
+    #: course and so cannot tell a resume from a pipeline arriving there.
+    #: A stage reads it to decide whether prior lineage is its own to continue.
+    resumed_from: str
 
     # Repo targeting (Issue #1374)
     target_repo: str  # Where the work happens (outputs, worktree, gh CLI)
@@ -132,6 +137,7 @@ def create_initial_state(
     return OrchestrationState(
         issue_number=issue_number,
         current_stage="triage",
+        resumed_from="",
         target_repo=resolved_target,
         assemblyzero_root=resolved_root,
         issue_brief_path="",
