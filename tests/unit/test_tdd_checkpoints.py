@@ -55,7 +55,15 @@ def test_creates_commit_when_diff_has_staged_changes(tmp_path):
     assert any("#123" in arg for c in commit_calls for arg in c), commit_calls
 
 
-def test_pushes_after_successful_commit(tmp_path):
+def test_never_pushes(tmp_path):
+    """#2339: checkpoints are local crash resilience and do not push.
+
+    This test asserted the opposite until 2026-08-14. The operator's ruling
+    reversed it on the evidence of run-issue7-192332, where the push could
+    only ever fail: a stale `origin/issue-7` rejected the upstream push at
+    worktree creation, so all four checkpoints failed with "no upstream
+    branch" and each printed git's four-line advice into the run log.
+    """
     wt = tmp_path / "wt"
     wt.mkdir()
 
@@ -68,14 +76,19 @@ def test_pushes_after_successful_commit(tmp_path):
         return _mk_completed(returncode=0)
 
     with patch.object(checkpoints.subprocess, "run", side_effect=fake_run):
-        checkpoints.commit_checkpoint(wt, 123, "post-scaffold")
+        assert checkpoints.commit_checkpoint(wt, 123, "post-scaffold") is True
 
     pushes = [c for c in cmds if "push" in c]
-    assert len(pushes) == 1, f"expected exactly one push, got {pushes}"
+    assert pushes == [], f"checkpoints must not push, got {pushes}"
 
 
-def test_returns_true_even_when_push_fails(tmp_path):
-    """commit succeeded -> True. Push failure is logged but not propagated."""
+def test_a_stale_remote_cannot_affect_a_checkpoint(tmp_path, capsys):
+    """The #2339 case, with the network hostile in every way it was.
+
+    Any push here would be rejected non-fast-forward and any upstream lookup
+    would fail. The checkpoint must still commit, still return True, and
+    still print no git advice, because it makes no network call at all.
+    """
     wt = tmp_path / "wt"
     wt.mkdir()
 
@@ -83,11 +96,41 @@ def test_returns_true_even_when_push_fails(tmp_path):
         if "diff" in cmd and "--quiet" in cmd:
             return _mk_completed(returncode=1)
         if "push" in cmd:
-            return _mk_completed(returncode=128, stderr="fatal: could not resolve host")
+            return _mk_completed(
+                returncode=128,
+                stderr=(
+                    "! [rejected] issue-7 -> issue-7 (non-fast-forward)\n"
+                    "fatal: The current branch issue-7 has no upstream branch.\n"
+                    "To push the current branch and set the remote as upstream, use\n"
+                    "    git push --set-upstream origin issue-7\n"
+                ),
+            )
         return _mk_completed(returncode=0)
 
     with patch.object(checkpoints.subprocess, "run", side_effect=fake_run):
-        assert checkpoints.commit_checkpoint(wt, 123, "post-scaffold") is True
+        assert checkpoints.commit_checkpoint(wt, 7, "post-impl") is True
+
+    out = capsys.readouterr().out
+    assert "set-upstream" not in out
+    assert "non-fast-forward" not in out
+    assert "push" not in out
+
+
+def test_the_worktree_is_not_given_an_upstream_at_creation(tmp_path):
+    """The other half of #2339, and the line that actually failed first.
+
+    #1780 added a `push -u origin <branch>` at worktree creation so that
+    checkpoint pushes would work. With checkpoints local, nothing in the run
+    needs an upstream before the pr stage sets one, and that push was the
+    single rejection every later failure descended from.
+    """
+    import inspect
+
+    from assemblyzero.workflows.orchestrator import stages
+
+    source = inspect.getsource(stages)
+    assert '"push", "-u", "origin", branch_name' not in source
+    assert "could not push" not in source
 
 
 def test_returns_false_when_commit_itself_fails(tmp_path):
