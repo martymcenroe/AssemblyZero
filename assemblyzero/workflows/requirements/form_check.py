@@ -83,6 +83,14 @@ _LIST_ITEM = re.compile(r"^(\s*)[-*+]\s+(?:\[[ xX]\]\s*)?(.*)$")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
 _LEADING_ID = re.compile(r"^([A-Z][A-Za-z]*[0-9]+)[.):]?\s+")
 
+#: A criterion ID worn by a requirement sentence (#2368). Detection only: it is
+#: never stripped before EARS matching, because ADR 0226 section 3.1 gives a
+#: requirement sentence no ID to strip. Its separators are wider than
+#: ``_LEADING_ID``'s deliberately -- this pattern exists to recognise what an
+#: author mistakenly wrote, so it must cover the dashes they reach for, while
+#: ``_LEADING_ID`` parses the one authored form the ADR actually defines.
+_WORN_ID = re.compile(r"^([A-Z][A-Za-z]*[0-9]+)\s*[-.):–—]?\s+(.*)$")
+
 
 def _norm(text: str) -> str:
     """Compare text the way a reader does: no code ticks, no case, one space."""
@@ -321,6 +329,25 @@ def _max_matching(candidates: list[list[int]], right_size: int) -> list[int | No
 # ---------------------------------------------------------------------------
 
 
+def worn_criterion_id(sentence: str) -> str | None:
+    """The ID, if this is a well-formed EARS sentence wearing a criterion ID.
+
+    Returns None both for an untagged sentence and for a tagged one that is
+    malformed underneath, because the two failures need different advice. An
+    author who tagged a good sentence should delete four characters; an author
+    whose sentence matches nothing should rewrite it. A single message telling
+    both of them "matches no EARS pattern" is what sent boostgauge #1's
+    conversion looking for a collision between two ADRs that do not disagree.
+    """
+    match = _WORN_ID.match(sentence)
+    if not match:
+        return None
+    remainder = match.group(2).strip()
+    if remainder and any(p.match(remainder) for _, p in EARS_PATTERNS):
+        return match.group(1)
+    return None
+
+
 def check_ears(body: str, report: FormReport) -> None:
     """Validate the marked requirements section. Absence is a vacuous pass."""
     lines = section_lines(body, REQUIREMENTS_HEADING)
@@ -338,14 +365,24 @@ def check_ears(body: str, report: FormReport) -> None:
         sentence = re.sub(r"\s+", " ", item.replace("`", "")).strip()
         if any(pattern.match(sentence) for _, pattern in EARS_PATTERNS):
             continue
+        worn = worn_criterion_id(sentence)
+        if worn:
+            detail = (
+                f"opens with {worn!r}, which is a criterion ID. Requirement "
+                f"sentences carry none (ADR 0226 section 3.1): an ID is a join "
+                f"key, and a requirement sentence joins to nothing. Well-formed "
+                f"EARS underneath -- drop the prefix: {sentence!r}"
+            )
+        else:
+            detail = (
+                f"matches no EARS pattern: {sentence!r}. "
+                f"Expected one of: {EARS_FORMS}"
+            )
         report.violations.append(
             Violation(
                 kind="ears",
                 where=f"Requirements bullet {index}",
-                detail=(
-                    f"matches no EARS pattern: {sentence!r}. "
-                    f"Expected one of: {EARS_FORMS}"
-                ),
+                detail=detail,
             )
         )
 

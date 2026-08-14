@@ -553,3 +553,108 @@ class TestCli:
 
         assert code == 0
         assert "RESULT: PASS" in capsys.readouterr().out
+
+
+class TestARequirementSentenceCarriesNoId:
+    """The #2368 ruling.
+
+    Converting boostgauge #1 read section 3.2's row-ID convention and ADR 0228's
+    group prefix as a general tagging rule, tagged the requirement sentences,
+    and read the rejections as the two ADRs contradicting each other. They do
+    not: an ID is a join key, and a requirement sentence joins to nothing.
+
+    The matcher therefore does not strip the prefix. What it must do is tell the
+    two failures apart, because a tagged-but-good sentence and a malformed one
+    need different repairs.
+    """
+
+    WORN = [
+        "R1 — The renderer shall place the needle at the value's angle.",
+        "R2. WHEN the value changes the renderer shall redraw the needle.",
+        "R3: WHILE a redraw is in flight the renderer shall drop further updates.",
+        "R4) IF the value is out of range THEN the renderer shall clamp it.",
+        "R5 WHERE the telltale is enabled the renderer shall draw it behind it.",
+    ]
+
+    @pytest.mark.parametrize("sentence", WORN)
+    def test_a_worn_id_is_detected(self, sentence):
+        assert fc.worn_criterion_id(sentence) == sentence[:2]
+
+    @pytest.mark.parametrize("sentence", WORN)
+    def test_the_same_sentence_passes_once_the_prefix_goes(self, sentence):
+        """The falsifier. If these did not pass unprefixed, the fixture would be
+        testing bad sentences and the ID would be beside the point."""
+        bare = fc._WORN_ID.match(sentence).group(2)
+        report = fc.check_form(f"## Requirements\n\n- {bare}\n")
+        assert kinds(report) == [], f"{bare!r} should be valid EARS on its own"
+
+    def test_an_untagged_sentence_is_not_read_as_tagged(self):
+        assert fc.worn_criterion_id("The renderer shall draw.") is None
+
+    def test_a_malformed_sentence_is_not_read_as_tagged(self):
+        """No modal verb, so there is no good sentence hiding under a prefix."""
+        assert fc.worn_criterion_id("R1 — the needle moves sometimes.") is None
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "IPv4 addresses shall be accepted.",  # letters+digits, but not an ID
+            "R2D2 shall respond to its name.",
+            "WHEN1 the value changes the system shall redraw.",
+        ],
+    )
+    def test_an_id_shaped_word_that_is_part_of_the_sentence_is_not_stripped(
+        self, sentence
+    ):
+        assert fc.worn_criterion_id(sentence) is None
+
+
+class TestTheTwoFailuresReadDifferently:
+    def test_a_worn_id_says_so(self):
+        report = fc.check_form(
+            "## Requirements\n\n- R1 — The renderer shall draw the needle.\n"
+        )
+        (violation,) = report.violations
+        assert violation.kind == "ears"
+        assert "'R1'" in violation.detail
+        assert "criterion ID" in violation.detail
+        assert "drop the prefix" in violation.detail
+
+    def test_a_malformed_sentence_still_gets_the_pattern_list(self):
+        report = fc.check_form("## Requirements\n\n- The needle moves.\n")
+        (violation,) = report.violations
+        assert violation.kind == "ears"
+        assert "matches no EARS pattern" in violation.detail
+        assert "criterion ID" not in violation.detail
+
+    def test_a_tagged_malformed_sentence_is_reported_as_malformed(self):
+        """A prefix does not excuse the sentence under it, and the advice to
+        drop four characters would be wrong here -- there is nothing beneath."""
+        report = fc.check_form("## Requirements\n\n- R1 — The needle moves.\n")
+        (violation,) = report.violations
+        assert "matches no EARS pattern" in violation.detail
+        assert "criterion ID" not in violation.detail
+
+
+class TestTheRulingLeavesTheJoinAlone:
+    """An ID still means what it meant everywhere it is actually a join key."""
+
+    @pytest.fixture(scope="class")
+    def worn_body(self) -> str:
+        return (FIXTURES / "ears-worn-id.md").read_text(encoding="utf-8")
+
+    def test_every_requirement_sentence_is_flagged_as_wearing_an_id(
+        self, worn_body
+    ):
+        report = fc.check_form(worn_body)
+        ears = [v for v in report.violations if v.kind == "ears"]
+        assert len(ears) == 5
+        assert all("criterion ID" in v.detail for v in ears)
+
+    def test_the_row_to_criterion_join_still_succeeds(self, worn_body):
+        """The criteria in that same fixture are correctly tagged, and the join
+        they exist for is untouched by the ruling above."""
+        report = fc.check_form(worn_body)
+        assert [v for v in report.violations if v.kind == "row-criterion"] == []
+        assert [v for v in report.violations if v.kind.startswith("table-")] == []
+        assert report.tables and all(t.exact_join for t in report.tables)
