@@ -28,12 +28,13 @@ cd /c/Users/mcwiz/Projects/AssemblyZero
 poetry run python tools/speedrun_roll.py \
     --repo /c/Users/mcwiz/Projects/boostgauge \
     --issue 1 --issue 4 --issue 7 \
-    --attempts 3 \
     --detach
 ```
 
 Flags, verified against `poetry run python tools/speedrun_roll.py --help` rather
-than transcribed:
+than transcribed. `tests/unit/test_runbook_0952_flags.py` re-checks that claim
+against the launcher's own argparse and parses every example on this page, so
+the verification is re-run rather than asserted (#2295):
 
 | Flag | Meaning |
 |---|---|
