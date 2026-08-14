@@ -1289,6 +1289,77 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
     return update_stage_result(state, stage, result)
 
 
+#: #2346: a non-fast-forward rejection cannot change between attempts. Same
+#: rule as #2298/#2337, pr-stage edition -- the remote's divergence is not
+#: something re-running the push can resolve.
+NON_FAST_FORWARD = "non-fast-forward"
+
+
+def _reconcile_stale_remote_branch(worktree_path, branch: str) -> str:
+    """Clear a same-name remote branch out of the push's way (#2346).
+
+    Returns a description of what was done, or '' when nothing was needed.
+
+    Three cases, decided by measurement rather than assumption:
+
+    - the remote branch does not exist -> nothing to do
+    - it is an ANCESTOR of what we are about to push -> the push
+      fast-forwards, so leave it alone
+    - it has DIVERGED -> preserve it under `graveyard/<branch>-<stamp>` on the
+      remote and delete the old name, so the push is clean
+
+    Preserve-and-rename, never force-push: the same discipline #2310/#2324
+    settled for local branches, which exists because a name in the way is not
+    a reason to destroy whatever is standing on it. A remote rename is a push
+    of the same commit under a new ref followed by a delete of the old ref, so
+    nothing is ever unreachable in between.
+
+    Best-effort by design. Every git failure returns '' and lets the push
+    proceed to fail on its own terms -- a reconcile that cannot read the
+    remote must not invent a destructive action, and the push's own error is
+    a better diagnosis than anything guessed here.
+    """
+    from datetime import datetime, timezone
+
+    def _git(*args: str):
+        return run_command(
+            ["git", *args], check=False, capture_output=True, text=True,
+            cwd=worktree_path,
+        )
+
+    fetched = _git("fetch", "origin", branch)
+    if fetched.returncode != 0:
+        # No such branch on origin (or the remote is unreachable). Either way
+        # there is nothing to reconcile; the push will say so if it matters.
+        return ""
+
+    remote_tip = _git("rev-parse", "FETCH_HEAD")
+    local_tip = _git("rev-parse", "HEAD")
+    if remote_tip.returncode != 0 or local_tip.returncode != 0:
+        return ""
+    remote_sha = remote_tip.stdout.strip()
+    if not remote_sha or remote_sha == local_tip.stdout.strip():
+        return ""
+
+    if _git("merge-base", "--is-ancestor", remote_sha, "HEAD").returncode == 0:
+        return ""  # fast-forwardable; the ordinary push handles it
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    parked = f"graveyard/{branch}-{stamp}"
+    if _git("push", "origin", f"{remote_sha}:refs/heads/{parked}").returncode != 0:
+        return ""  # could not preserve it, so do not delete it
+
+    if _git("push", "origin", f":refs/heads/{branch}").returncode != 0:
+        return (
+            f"stale origin/{branch} preserved as {parked}, but the old name "
+            f"could not be removed; the push may still be rejected"
+        )
+    return (
+        f"stale origin/{branch} ({remote_sha[:8]}) had diverged — preserved "
+        f"as {parked} and cleared; nothing was force-pushed"
+    )
+
+
 def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
     """Create and submit the PR via the gh CLI.
 
@@ -1326,6 +1397,15 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
             cwd=worktree_path,
         )
         branch = branch_result.stdout.strip()
+
+        # #2346: a same-name branch left on origin by an earlier run makes this
+        # push fail non-fast-forward, and run-issue7-231606 died there on the
+        # first pr stage the campaign ever reached. #2310/#2324/#2325 taught
+        # RESTORE this discipline for the LOCAL branch; origin never learned
+        # it, so leftovers outlive every run and collide with the next.
+        reconcile_note = _reconcile_stale_remote_branch(worktree_path, branch)
+        if reconcile_note:
+            print(f"    {reconcile_note}")
 
         # Push branch
         run_command(
@@ -1378,11 +1458,19 @@ def run_pr_stage(state: OrchestrationState) -> OrchestrationState:
             attempts=1,
         )
     except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr or ""
+        # #2346: a rejected push is deterministic -- the remote's divergence
+        # is not something another attempt can resolve. run-issue7-231606
+        # spent three attempts on one, ten seconds apart. Reconciliation above
+        # should now prevent it; this is the guard for when it cannot (a
+        # protected ref, a permissions failure, a race with another push).
+        deterministic = NON_FAST_FORWARD in stderr.lower()
         result = _make_stage_result(
             status="failed",
-            error_message=f"PR creation error: {exc.stderr}",
+            error_message=f"PR creation error: {stderr}",
             duration_seconds=time.monotonic() - start_time,
             attempts=1,
+            transient=False if deterministic else None,
         )
     except Exception as exc:
         result = _make_stage_result(

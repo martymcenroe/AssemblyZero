@@ -157,9 +157,20 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
             # never reached -- the red phase saw the surviving implementation
             # and ended the stage first. A reader diagnosing that run would
             # have believed the files were gone.
+            # #2346: and it described the IMPLEMENTATION stage's semantics
+            # whatever stage had failed. On run-issue7-231606's pr failure it
+            # announced "rewriting generated files" for a retry that rewrites
+            # nothing -- a pr retry re-attempts a push and a PR creation. Only
+            # the stages that actually generate files get that wording.
+            if current_stage in ("impl", "lld", "spec"):
+                detail = (
+                    "reusing generated files where they exist" if mode == RESUMED
+                    else "rewriting generated files rather than skipping them"
+                )
+            else:
+                detail = f"re-running the {current_stage} stage"
             print(
-                f"[ORCHESTRATOR] Next attempt will be {mode.lower()} "
-                f"({'reusing generated files where they exist' if mode == RESUMED else 'rewriting generated files rather than skipping them'})."
+                f"[ORCHESTRATOR] Next attempt will be {mode.lower()} ({detail})."
             )
             time.sleep(delay)
             last_state = dict(new_state)
