@@ -54,6 +54,8 @@ _SILENT = "import time, sys; time.sleep(float(sys.argv[1]))"
 
 
 def _spawn(script: str, *args: str) -> subprocess.Popen:
+    # start_new_session: off Windows, kill_process_tree signals the process
+    # GROUP, and a child without its own session shares this script's group.
     return subprocess.Popen(
         [sys.executable, "-u", "-c", script, *args],
         stdin=subprocess.PIPE,
@@ -61,6 +63,7 @@ def _spawn(script: str, *args: str) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        start_new_session=sys.platform != "win32",
     )
 
 

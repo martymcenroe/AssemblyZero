@@ -58,6 +58,15 @@ _SILENT = "import time, sys; time.sleep(float(sys.argv[1]))"
 
 
 def _spawn(script: str, *args: str) -> subprocess.Popen:
+    """Spawn a stand-in child, isolated from this process's process group.
+
+    `start_new_session` is not optional here. `kill_process_tree` does
+    `os.killpg(os.getpgid(pid), 9)` off Windows, and a child that inherited
+    pytest's process group would take the whole test session down with it the
+    first time an idle timeout fired for real. That is exactly what happened on
+    Linux CI, while Windows passed throughout because its path shells out to
+    `taskkill /T /PID`, scoped to the one tree.
+    """
     return subprocess.Popen(
         [sys.executable, "-u", "-c", script, *args],
         stdin=subprocess.PIPE,
@@ -65,6 +74,7 @@ def _spawn(script: str, *args: str) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        start_new_session=sys.platform != "win32",
     )
 
 
@@ -231,6 +241,41 @@ def test_the_idle_threshold_is_overridable_too(monkeypatch):
 
 
 # --- the flag the whole mechanism rests on --------------------------------
+
+
+def test_the_child_is_spawned_into_its_own_process_group_off_windows():
+    """A tree-kill must not reach the process that ordered it (#2405).
+
+    `kill_process_tree` signals `os.getpgid(pid)` off Windows. Without
+    `start_new_session`, the child inherits our group, so killing an idle call
+    SIGKILLs AssemblyZero itself. Windows hid this completely: that path shells
+    out to `taskkill /F /T /PID`, which is scoped to the single tree, so the
+    defect was invisible until Linux CI hung on the first real idle kill.
+
+    The idle timeout makes this far easier to reach than the old wall-clock
+    ceiling did, because idle kills fire on hangs rather than only on very long
+    calls.
+    """
+    from unittest.mock import Mock, patch
+
+    from assemblyzero.core.llm_provider import ClaudeCLIProvider
+
+    proc = Mock()
+    proc.pid = 1
+    proc.stdout = iter(['{"type": "result", "result": "ok"}'])
+    proc.stderr = Mock()
+    proc.stderr.read.return_value = ""
+    proc.stdin = Mock()
+    proc.poll.return_value = 0
+    proc.returncode = 0
+
+    with patch("subprocess.Popen", return_value=proc) as popen, patch.object(
+        ClaudeCLIProvider, "_find_cli", return_value="/usr/local/bin/claude"
+    ):
+        ClaudeCLIProvider().invoke("system", "content")
+
+    expected = sys.platform != "win32"
+    assert popen.call_args.kwargs.get("start_new_session") is expected
 
 
 def test_the_streaming_flags_are_passed_to_the_cli():

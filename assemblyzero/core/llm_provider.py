@@ -688,6 +688,9 @@ class ClaudeCLIProvider(LLMProvider):
                 text=True,
                 encoding="utf-8",
                 creationflags=creation_flags,
+                # See the note in invoke(): off Windows this keeps a tree-kill
+                # from taking down the calling process's own group.
+                start_new_session=sys.platform != "win32",
                 env=env,
             )
         except OSError:
@@ -825,6 +828,16 @@ class ClaudeCLIProvider(LLMProvider):
                     subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
                 )
 
+            # #2405: the POSIX counterpart of CREATE_NEW_PROCESS_GROUP, and it is
+            # not cosmetic. kill_process_tree() does
+            # `os.killpg(os.getpgid(pid), 9)` off Windows, and a child spawned
+            # without a new session INHERITS this process's group — so the kill
+            # lands on us as well as on the child. Windows never showed it
+            # because that path shells out to `taskkill /T /PID`, which is
+            # scoped to the one tree. Caught when CI (Linux) hung on the first
+            # test that let a real idle timeout fire against a real subprocess.
+            start_new_session = sys.platform != "win32"
+
             # Issue #787: When using temp dir, wrap in TemporaryDirectory
             # context manager so cleanup is guaranteed.
             if use_tempdir_prompt:
@@ -857,6 +870,7 @@ class ClaudeCLIProvider(LLMProvider):
                     encoding="utf-8",
                     cwd=temp_path,  # None when not using temp dir (= inherit)
                     creationflags=creation_flags,
+                    start_new_session=start_new_session,
                     env=env,
                 )
                 # #2405: the idle threshold is the operative limit; the caller's
