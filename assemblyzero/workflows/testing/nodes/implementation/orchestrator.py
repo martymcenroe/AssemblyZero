@@ -10,6 +10,15 @@ from typing import Any
 from assemblyzero.core import retry_gate
 from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.core.retry_mode import is_regeneration
+from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import (
+    EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
+    EditScriptOutcome,
+    apply_code_edit_script,
+    build_code_edit_script_prompt,
+    failures_for_file,
+    response_is_a_regeneration,
+    should_use_edit_script,
+)
 from assemblyzero.hooks.file_write_validator import validate_file_write
 from assemblyzero.telemetry import emit
 from assemblyzero.utils.cost_tracker import accumulate_node_cost
@@ -55,6 +64,72 @@ CODE_GEN_PROMPT_CAP = 60_000
 
 # Issue #647: Maximum files per batch call
 BATCH_SIZE = 5
+
+
+def try_edit_script_fix(
+    filepath: str,
+    existing_content: str,
+    failure_context: str,
+    model: str = "",
+    system_prompt: str = "",
+    audit_dir: Path | None = None,
+    spec_excerpt: str = "",
+) -> EditScriptOutcome:
+    """One attempt to fix `filepath` with an edit script instead of a rewrite.
+
+    Deliberately makes ONE call and never retries. A malformed edit script is
+    not a transport failure, and the fallback -- full regeneration, with its
+    own retry budget -- is right there. Retrying the patch first would spend
+    twice to reach the same place, which is the habit #2423 exists to break.
+
+    Any failure at any step returns an outcome whose `code` is None, and the
+    caller regenerates.
+    """
+    scoped = failures_for_file(failure_context, filepath)
+    prompt = build_code_edit_script_prompt(
+        filepath=filepath,
+        existing_content=existing_content,
+        failure_context=scoped,
+        spec_excerpt=spec_excerpt,
+    )
+
+    if audit_dir is not None and audit_dir.exists():
+        save_audit_file(
+            audit_dir, next_file_number(audit_dir),
+            f"prompt-editscript-{filepath.replace('/', '-')}.md", prompt,
+        )
+
+    try:
+        with ProgressReporter("Calling Claude (edit script)", interval=15):
+            result = call_claude_for_file(
+                prompt, file_path=filepath, model=model,
+                # The stable system prompt describes whole-file output; a
+                # patch engine needs the opposite instruction, and mixing them
+                # is how a model ends up sending a file back.
+                system_prompt=EDIT_SCRIPT_CODE_SYSTEM_PROMPT,
+            )
+    except Exception as exc:  # noqa: BLE001 - a patch attempt never costs the roll
+        return EditScriptOutcome(None, failures=[f"edit-script call failed: {exc}"])
+
+    if isinstance(result, tuple) and len(result) == 2:
+        response, api_error_raw = result
+    else:
+        response, api_error_raw = result, ""
+    if isinstance(api_error_raw, str) and api_error_raw:
+        return EditScriptOutcome(None, failures=[f"API error: {api_error_raw}"])
+
+    if audit_dir is not None and audit_dir.exists():
+        save_audit_file(
+            audit_dir, next_file_number(audit_dir),
+            f"response-editscript-{filepath.replace('/', '-')}.md", response or "",
+        )
+
+    if response_is_a_regeneration(response or ""):
+        return EditScriptOutcome(
+            None, failures=["model returned a whole file instead of edit blocks"]
+        )
+
+    return apply_code_edit_script(response or "", existing_content)
 
 
 def generate_file_with_retry(
@@ -770,21 +845,45 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             print(f"        [PRUNE] Prompt {len(prompt):,} -> {len(pruned_prompt):,} chars (cap: {CODE_GEN_PROMPT_CAP:,})")
             prompt = pruned_prompt
 
-        # Call Claude with retry logic (Issue #309)
-        # Issue #267: Progress feedback during long API calls
-        with ProgressReporter("Calling Claude", interval=15):
-            code, success = generate_file_with_retry(
+        # #2407: a fix asks for EDITS, not a rebirth. Measured in
+        # run-issue1-090001: stingray.py drafted from nothing in 15.9s, then
+        # its fix calls ran 602s and were killed, three times -- a factor of
+        # thirty-eight on the same file, because a regeneration re-derives
+        # everything including the parts that already pass. The spec stage
+        # learned this in #1528; this is the implementation stage inheriting
+        # it. Any failure returns None and falls through to the full-file path
+        # below, so this is never worse than the behavior it replaces.
+        code = None
+        if should_use_edit_script(
+            change_type, existing_content, revision_error_context
+        ):
+            outcome = try_edit_script_fix(
                 filepath=filepath,
-                base_prompt=prompt,
-                audit_dir=audit_dir if audit_dir.exists() else None,
-                max_retries=MAX_FILE_RETRIES,
-                pruned_prompt=pruned_prompt,
                 existing_content=existing_content,
+                failure_context=revision_error_context,
+                model=select_model_for_file(filepath, 0, False),
                 system_prompt=stable_system_prompt,
-                repo_root=repo_root,
+                audit_dir=audit_dir if audit_dir.exists() else None,
             )
-        # Note: generate_file_with_retry raises ImplementationError on failure,
-        # so if we get here, code is valid
+            print(f"        {outcome.describe()}")
+            code = outcome.code
+
+        if code is None:
+            # Call Claude with retry logic (Issue #309)
+            # Issue #267: Progress feedback during long API calls
+            with ProgressReporter("Calling Claude", interval=15):
+                code, success = generate_file_with_retry(
+                    filepath=filepath,
+                    base_prompt=prompt,
+                    audit_dir=audit_dir if audit_dir.exists() else None,
+                    max_retries=MAX_FILE_RETRIES,
+                    pruned_prompt=pruned_prompt,
+                    existing_content=existing_content,
+                    system_prompt=stable_system_prompt,
+                    repo_root=repo_root,
+                )
+            # Note: generate_file_with_retry raises ImplementationError on
+            # failure, so if we get here, code is valid
 
         # Write file (atomic: write to temp, then rename)
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
