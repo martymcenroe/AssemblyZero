@@ -155,7 +155,21 @@ def route_after_validation(
             return "N4_human_gate"
         return "N5_review_spec"
 
-    # Validation failed
+    # Validation failed.
+    #
+    # #2304: a check that has never been shown to the drafter grants one extra
+    # revision past the cap. N3 computes the grant -- a router's state writes
+    # are discarded at the graph boundary (#2018), so the bookkeeping that
+    # stops a grace being claimed twice cannot live here.
+    grace_for = state.get("grace_revision_for", [])
+    if review_iteration >= max_iterations and grace_for:
+        print(
+            f"    [ROUTING] Cap reached ({max_iterations}), but "
+            f"{', '.join(grace_for)} has never reached a revision prompt - "
+            f"granting one revision (#2304)"
+        )
+        return "N2_generate_spec"
+
     if review_iteration < max_iterations:
         completeness_issues = state.get("completeness_issues", [])
         if completeness_issues:
