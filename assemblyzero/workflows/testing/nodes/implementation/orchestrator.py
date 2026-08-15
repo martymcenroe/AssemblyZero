@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core import retry_gate
 from assemblyzero.core.llm_provider import get_cumulative_cost
 from assemblyzero.core.retry_mode import is_regeneration
 from assemblyzero.hooks.file_write_validator import validate_file_write
@@ -146,16 +147,44 @@ def generate_file_with_retry(
                     reason=f"Non-retryable API error: {api_error}",
                     response_preview=None
                 )
-            if attempt < max_retries - 1:
-                print(f"        [RETRY {attempt_num}/{max_retries}] {last_error}")
+            # #2423: classify the TRANSPORT failure before paying again. This
+            # loop is where the 2026-08-15 cost came from, and it came doubled:
+            # it sits INSIDE the orchestrator's stage-retry loop, so its
+            # attempts multiply rather than add. Counted from
+            # run-issue1-090001: 7 payments of ~602s, 70.2 minutes, zero
+            # artifacts. A ceiling kill halts here on the first one.
+            #
+            # Content failures below (a summary, no code block) are NOT gated:
+            # the model answered and answered wrongly, which a retry can
+            # genuinely fix. Only the transport class is deterministic.
+            decision = retry_gate.should_retry(
+                retry_gate.classify_failure(api_error),
+                attempts_made=attempt_num,
+                max_attempts=max_retries,
+            )
+            if decision.retry:
+                print(retry_gate.retry_spend_line(
+                    filepath, attempts_made=attempt_num, budget=max_retries,
+                    failure_class=decision.failure_class,
+                    cumulative_cost=get_cumulative_cost(),
+                ))
                 continue
-            else:
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
-                raise ImplementationError(
-                    filepath=filepath,
-                    reason=f"API error after {max_retries} attempts: {api_error}",
-                    response_preview=None
-                )
+            print(retry_gate.halt_line(
+                filepath, decision, get_cumulative_cost(),
+            ))
+            emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
+            raise ImplementationError(
+                filepath=filepath,
+                # "API error after N attempts" is kept verbatim: two existing
+                # tests pin that prefix, and it is the phrase a reader greps
+                # for. The class and the reason are appended, not substituted.
+                reason=(
+                    f"API error after {attempt_num} attempts "
+                    f"[{decision.failure_class}]: {api_error}. "
+                    f"{decision.reason}"
+                ),
+                response_preview=None
+            )
 
         # Save response to audit
         if audit_dir and audit_dir.exists():

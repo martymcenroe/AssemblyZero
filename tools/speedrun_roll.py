@@ -73,6 +73,7 @@ except ImportError:  # pragma: no cover - tool copied outside the package
 
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
+from assemblyzero.core import retry_gate  # noqa: E402  (#2423)
 from assemblyzero.core.exit_codes import (  # noqa: E402
     CONFLICT_EXIT_CODE,
     is_requirements_conflict,
@@ -1063,6 +1064,14 @@ def _child_env(tag: str = "", start: str = "") -> dict[str, str]:
     env = dict(os.environ)
     env["CLAUDECODE"] = ""         # nested Claude sessions fail without this
     env["PYTHONUNBUFFERED"] = "1"  # Python buffers stdout when not on a TTY
+    # #2423: --fail-fast rides the environment rather than argv. The pipeline
+    # is three processes deep and has several independent retry gates; a flag
+    # would have to be threaded through every one of them, which is exactly how
+    # a mode ends up honoured in some transports and silently ignored in
+    # others. `dict(os.environ)` above already carries it -- this is the
+    # explicit statement that it is meant to travel.
+    if retry_gate.fail_fast_enabled():
+        env[retry_gate.ENV_FAIL_FAST] = "1"
     # #2072: only the launcher knows the tag its events/heartbeat/stdout triplet
     # is named after, and that name is what a human needs to go read the logs.
     # The workflow's own run id identifies a run within the lineage, which is a
@@ -2734,6 +2743,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop a detached roll and every process it spawned (#2016)",
     )
     parser.add_argument(
+        "--fail-fast", action="store_true",
+        help=(
+            "Diagnosis posture (#2423): every transport gets ONE attempt, so "
+            "each defect is paid for exactly once. When the campaign is in "
+            "diagnose-and-fix mode, forcing a doomed call through three times "
+            "is spend without information. Travels to the pipeline by "
+            "environment variable, so it reaches every transport in every "
+            "child process rather than only the ones a flag was threaded to."
+        ),
+    )
+    parser.add_argument(
         "--kill", action="store_true",
         help=(
             "EMERGENCY STOP: kill the running roll and its whole process "
@@ -2826,6 +2846,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.log_dir
         else repo_root / "data" / "speedrun" / "runs"
     )
+
+    # #2423: set before anything can spend, and before the detach hand-off so
+    # the scheduled task's environment carries it too.
+    if getattr(args, "fail_fast", False):
+        retry_gate.set_fail_fast(True)
+        print(
+            "FAIL-FAST: every transport gets one attempt. Each defect is paid "
+            "for exactly once."
+        )
 
     # Stopping is about processes, not code: it must work even from a stale or
     # dirty tree, so it comes before the staleness gate. #2422 adds --kill for
