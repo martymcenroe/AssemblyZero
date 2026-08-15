@@ -1201,6 +1201,12 @@ class _CallSite(NamedTuple):
     receiver: str
     method: str
     site: str
+    #: Leftmost name the receiver chain is rooted in (#2396). For
+    #: ``request.config.getoption(...)`` the receiver key is ``config`` but the
+    #: root is ``request`` — and ownership travels with the root, not the last
+    #: attribute. None when the chain bottoms out in a call, subscript, or
+    #: literal rather than a name.
+    root: str | None
 
 
 class _FenceFacts(NamedTuple):
@@ -1462,7 +1468,12 @@ class _FenceVisitor(ast.NodeVisitor):
             receiver = _receiver_key(node.func.value)
             if receiver is not None:
                 self.calls.append(
-                    _CallSite(receiver, node.func.attr, self._site(node))
+                    _CallSite(
+                        receiver,
+                        node.func.attr,
+                        self._site(node),
+                        _leftmost_name(node.func.value),
+                    )
                 )
         self.generic_visit(node)
 
@@ -1558,9 +1569,11 @@ def _flag_calls(
     # is pytest's API to be right or wrong about — not the target repo's.
     exempt: set[str] = set(_STDLIB_MODULE_NAMES)
     spec_defined: set[str] = set()
+    framework_roots: set[str] = set()
     for fence in facts:
         exempt |= fence.imported
         exempt |= fence.framework_params
+        framework_roots |= fence.framework_params
         spec_defined |= fence.defined
 
     # Exemption propagates through bindings to a fixed point rather than the
@@ -1584,6 +1597,23 @@ def _flag_calls(
     for fence in facts:
         for call in fence.calls:
             if call.receiver in exempt:
+                continue
+            # #2396: ownership travels with the ROOT of the receiver chain, not
+            # its last attribute. `_receiver_key` returns the last attribute by
+            # design — `self.root.attributes(...)` must key on `root`, which is
+            # what `self.root = tk.Tk()` exempts (#1952) — but that same rule
+            # loses a framework exemption at the first hop:
+            # `request.config.getoption(...)` keys on `config` while the
+            # exemption holds `request`. pytest owns `request.config` exactly as
+            # it owns `request`, and it owns everything further down that chain.
+            #
+            # Deliberately keyed on framework roots ONLY, not the full `exempt`
+            # set. Rooting the test in `exempt` would also clear
+            # `boostgauge.gauge.nonexistent()` whenever the target repo's own
+            # package is imported in a fence — a real false-clearance surface,
+            # since a first-party import is the one case where the target
+            # repo's symbol table DOES have authority.
+            if call.root is not None and call.root in framework_roots:
                 continue
             if call.method in symbol_set or call.method in spec_defined:
                 continue
