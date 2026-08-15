@@ -397,7 +397,24 @@ class TestTruePositivesSurvive:
         assert "_mystery_hook" in _flag(spec)
 
     def test_handle_from_an_unexempt_root_still_judged(self):
-        """Provenance exempts only what descends from an exempt universe."""
+        """Provenance exempts only what descends from an exempt universe.
+
+        BEHAVIOUR CHANGED BY #2399, deliberately, and narrowed rather than lost.
+
+        This used to assert that BOTH `make` and `invented_method` were named.
+        `widget` is bound from `factory.make()`, where `factory` is a bare
+        parameter of unknown type — so `factory.make()` returns an unknown type,
+        and `widget` holds a value the checker cannot place. Naming
+        `invented_method` as a hallucinated API was the checker asserting
+        something it had no basis for, which is the exact error #2391 was titled
+        against and #2399 ruled on for the third time: unresolved is not
+        hallucinated.
+
+        What matters is preserved and is asserted below: the spec STILL FAILS
+        the gate. The hallucination is caught one hop earlier, at `make` on the
+        unresolvable parameter, so a bad spec is still blocked and still gets a
+        named reason. Only the second-hop guess is gone.
+        """
         spec = (
             "# S\n\n```python\n"
             "def build(factory):\n"
@@ -406,8 +423,13 @@ class TestTruePositivesSurvive:
             "```\n"
         )
         flagged = _flag(spec)
-        assert "invented_method" in flagged
         assert "make" in flagged
+        # The gate's job is to block the spec, and it still does.
+        result = check_api_symbols_exist(spec, TARGET_SYMBOLS)
+        assert result["passed"] is False
+        assert "make" in result["details"]
+        # No longer claimed, on purpose — widget's type is unresolvable.
+        assert "invented_method" not in flagged
 
     def test_call_site_names_the_method(self):
         spec = (
