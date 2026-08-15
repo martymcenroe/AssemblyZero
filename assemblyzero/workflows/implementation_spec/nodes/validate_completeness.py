@@ -2213,6 +2213,45 @@ def _import_resolves(
 
 
 # Common stdlib top-level module names (subset for fast rejection)
+def _pyproject_declared_package(repo_root: Path) -> set[str]:
+    """Package names the repo DECLARES it ships (#2412).
+
+    The authoritative signal, and the one that needs no filesystem heuristic:
+    `[tool.poetry.packages].include`, `[project].name` and `[tool.poetry].name`
+    all name the package the repo is. A distribution name uses dashes where the
+    import name uses underscores, so both spellings are returned.
+    """
+    pyproject = repo_root / "pyproject.toml"
+    if not pyproject.is_file():
+        return set()
+    try:
+        import tomllib
+
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, ValueError, ImportError):
+        return set()
+
+    names: set[str] = set()
+
+    def _add(value: object) -> None:
+        if isinstance(value, str) and value:
+            names.add(value)
+            names.add(value.replace("-", "_"))
+
+    tool = data.get("tool", {}) if isinstance(data.get("tool"), dict) else {}
+    poetry = tool.get("poetry", {}) if isinstance(tool.get("poetry"), dict) else {}
+    _add(poetry.get("name"))
+    project = data.get("project", {}) if isinstance(data.get("project"), dict) else {}
+    _add(project.get("name"))
+
+    packages = poetry.get("packages", [])
+    if isinstance(packages, list):
+        for pkg in packages:
+            if isinstance(pkg, dict):
+                _add(pkg.get("include"))
+    return names
+
+
 def _first_party_tops(repo_root: Path) -> set[str]:
     """Top-level package names that belong to the target repo itself (#1901).
 
@@ -2220,6 +2259,29 @@ def _first_party_tops(repo_root: Path) -> set[str]:
     exists-or-created-by-this-spec rule (#842); anything else is
     third-party and validates against the target environment instead.
     Covers flat layout (pkg at repo root) and src layout.
+
+    #2412: recognising a package ONLY by `__init__.py` made a mid-build repo
+    blind to itself. Measured on boostgauge 2026-08-15: `src/boostgauge/`
+    existed, `src/boostgauge/__init__.py` did not, and this returned the empty
+    set -- so `boostgauge.gauge.nonexistent()` cleared instead of flagging,
+    which is the #1527 founding true positive. Greenfield repos are the
+    population this campaign runs against, so "no `__init__.py` yet" is the
+    normal early state rather than an anomaly.
+
+    Widening is not free in the other direction: a first-party top gets the
+    STRICTER exists-or-created-by-this-spec rule, and over-strictness is what
+    killed five rolls of the receiver-resolution class. So each signal is
+    narrow on its own terms rather than "any directory with a .py in it":
+
+      1. `__init__.py` present -- the original, unchanged;
+      2. the name the repo DECLARES in pyproject.toml -- authoritative, no
+         heuristic;
+      3. a directory under `src/` -- in a src layout its children ARE the
+         packages by definition, which is not true of the repo root, where
+         `tests/`, `scripts/` and `docs/` all sit beside the package.
+
+    Signal 3 is deliberately not applied at the repo root. A flat-layout
+    mid-build repo is covered by signal 2 instead.
     """
     tops: set[str] = set()
     for base in (repo_root, repo_root / "src"):
@@ -2227,10 +2289,19 @@ def _first_party_tops(repo_root: Path) -> set[str]:
             if not base.is_dir():
                 continue
             for child in base.iterdir():
-                if child.is_dir() and (child / "__init__.py").is_file():
+                if not child.is_dir():
+                    continue
+                if (child / "__init__.py").is_file():
+                    tops.add(child.name)
+                elif base.name == "src" and any(child.glob("*.py")):
                     tops.add(child.name)
         except OSError:
             continue
+
+    try:
+        tops |= _pyproject_declared_package(repo_root)
+    except OSError:
+        pass
     return tops
 
 
