@@ -166,7 +166,9 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
 
     # Check 7: Spec must not call methods absent from target repo (Issue #1527)
     gathered_symbols: list[str] = state.get("gathered_symbols", [])  # type: ignore[assignment]
-    check_symbols = check_api_symbols_exist(spec_draft, gathered_symbols)
+    check_symbols = check_api_symbols_exist(
+        spec_draft, gathered_symbols, repo_root_str
+    )
     checks.append(check_symbols)
     _log_check(check_symbols)
 
@@ -316,7 +318,11 @@ def _record_hallucination_telemetry(
                 skipped=True,
             )
         else:
-            flagged = detect_unknown_method_calls(text, symbol_set)
+            # #2411: the same repo root the gate uses. The docstring's promise
+            # that both consumers "measure with the identical yardstick" stops
+            # being true the moment one of them can tell first-party from
+            # foreign and the other cannot.
+            flagged = detect_unknown_method_calls(text, symbol_set, repo)
             event = build_hallucination_event(
                 repo=repo,
                 issue=issue,
@@ -1592,11 +1598,21 @@ def _scan_fences(text: str) -> _ScanResult:
 def _flag_calls(
     facts: list[_FenceFacts],
     symbol_set: set[str],
+    first_party_tops: frozenset[str] = frozenset(),
 ) -> dict[str, list[str]]:
     """Judge every collected call against the target repo's symbol table.
 
     Facts are pooled across ALL fences before anything is judged: a spec
     routinely shows its imports in one snippet and the usage in another.
+
+    Args:
+        facts: Pooled per-fence facts from :func:`_scan_fences`.
+        symbol_set: Identifier names gathered from the target repo.
+        first_party_tops: Top-level package names the target repo itself owns
+            (#2411). A chain rooted in one of these is the repo's to be right
+            or wrong about; a chain rooted in any other imported name is not.
+            Empty means "cannot tell", which deliberately treats every imported
+            root as foreign — see the note on the foreign-root set below.
     """
     # #1948: three universes the target repo's symbol table has no authority
     # over — the phase-5 kill was this check rejecting Pillow's documented API
@@ -1605,14 +1621,48 @@ def _flag_calls(
     # #2391 adds the fourth: parameters a framework injects. `parser` inside
     # `def pytest_addoption(parser)` is pytest's object, so `parser.addoption(`
     # is pytest's API to be right or wrong about — not the target repo's.
-    exempt: set[str] = set(_STDLIB_MODULE_NAMES)
+    exempt: set[str] = set(_STDLIB_MODULE_NAMES) - first_party_tops
     spec_defined: set[str] = set()
     framework_roots: set[str] = set()
+    imported_roots: set[str] = set()
     for fence in facts:
-        exempt |= fence.imported
+        # #2411: `- first_party_tops` is the same discrimination the root test
+        # below makes, applied one level up. The blanket import exemption was
+        # written for #1948's third-party universes; it was never meant to
+        # exempt the target repo's OWN package, and doing so blinded the check
+        # to `import gauge; gauge.no_such_marker()` — a one-hop first-party
+        # chain, which is the founding true positive of #1527 wearing an import.
+        exempt |= fence.imported - first_party_tops
         exempt |= fence.framework_params
         framework_roots |= fence.framework_params
+        imported_roots |= fence.imported
         spec_defined |= fence.defined
+
+    # #2411: the fifth kill of this class, and the first that was not positional.
+    # `@pytest.mark.parametrize(...)` flagged `parametrize` because ownership was
+    # only ever rooted for framework-INJECTED PARAMETERS. `_receiver_key` returns
+    # the last attribute by design, so a two-hop chain keys on `mark`, which is
+    # exempt in nobody's book, while the root `pytest` sits in `exempt` as an
+    # import and was never consulted. Any call rooted in an imported name and
+    # reached through more than one hop fell through to the symbol test.
+    #
+    # It was never about decorators: measured 16 of 16 AST positions collecting
+    # the call and 16 of 16 flagging it. One hop had always cleared because the
+    # receiver IS the import (`pytest.raises`), and the obvious stdlib instance
+    # `os.path.join` was masked only by `join` sitting in the allowlist.
+    #
+    # The line 1717 objection below stands and is why this is not simply
+    # `call.root in exempt`: a chain rooted in the target repo's OWN package is
+    # the one case where its symbol table has authority, so first-party roots
+    # stay judged and `boostgauge.gauge.nonexistent()` remains a true positive.
+    #
+    # An empty `first_party_tops` means the caller could not tell us (the #1812
+    # telemetry consumer has no repo root). That treats every imported root as
+    # foreign, which fails OPEN — the direction this class's governing principle
+    # has ruled correct four times: unresolved is not hallucinated.
+    foreign_roots: set[str] = set(framework_roots)
+    foreign_roots |= imported_roots - first_party_tops
+    foreign_roots |= set(_STDLIB_MODULE_NAMES) - first_party_tops
 
     # Exemption propagates through bindings to a fixed point rather than the
     # single level the old regex managed: `self.root = tk.Tk()` exempts `root`,
@@ -1712,13 +1762,18 @@ def _flag_calls(
             # exemption holds `request`. pytest owns `request.config` exactly as
             # it owns `request`, and it owns everything further down that chain.
             #
-            # Deliberately keyed on framework roots ONLY, not the full `exempt`
-            # set. Rooting the test in `exempt` would also clear
-            # `boostgauge.gauge.nonexistent()` whenever the target repo's own
-            # package is imported in a fence — a real false-clearance surface,
-            # since a first-party import is the one case where the target
-            # repo's symbol table DOES have authority.
-            if call.root is not None and call.root in framework_roots:
+            # Deliberately NOT the full `exempt` set. Rooting the test in
+            # `exempt` would also clear `boostgauge.gauge.nonexistent()`
+            # whenever the target repo's own package is imported in a fence — a
+            # real false-clearance surface, since a first-party import is the
+            # one case where the target repo's symbol table DOES have authority.
+            #
+            # #2411 widened this from framework parameters to every FOREIGN
+            # root: framework injections, plus imported names the target repo
+            # does not own, plus stdlib. First-party roots are excluded from the
+            # set above, so the false-clearance surface this comment names stays
+            # closed while `pytest.mark.parametrize` clears.
+            if call.root is not None and call.root in foreign_roots:
                 continue
             # #2399: the receiver holds a value of unknown type. Unresolved is a
             # distinct, honest category from wrong, and only wrong is a finding.
@@ -1737,6 +1792,7 @@ def _flag_calls(
 def detect_unknown_method_calls(
     text: str,
     symbol_set: set[str],
+    repo_root_str: str = "",
 ) -> dict[str, list[str]]:
     """Scan code fences in ``text`` for method calls absent from ``symbol_set``.
 
@@ -1748,17 +1804,38 @@ def detect_unknown_method_calls(
     Args:
         text: Markdown to scan. Only content inside ``` fences is examined.
         symbol_set: Real symbol names extracted from the target repo.
+        repo_root_str: Target repo root, used to tell the repo's own packages
+            from foreign ones (#2411). Optional because the telemetry consumer
+            has no repo root; omitting it treats every imported root as foreign,
+            which fails open rather than manufacturing findings.
 
     Returns:
         Mapping of unknown method name -> truncated example call sites.
         Empty when every call resolves to a known or allowlisted symbol.
     """
-    return _flag_calls(_scan_fences(text).facts, symbol_set)
+    return _flag_calls(
+        _scan_fences(text).facts, symbol_set, _first_party_tops_for(repo_root_str)
+    )
+
+
+def _first_party_tops_for(repo_root_str: str) -> frozenset[str]:
+    """First-party package names for a repo root string, empty when unknown.
+
+    Never raises: a symbol check must not fail because a path was unreadable,
+    and an empty answer is the fail-open direction (#2411).
+    """
+    if not repo_root_str:
+        return frozenset()
+    try:
+        return frozenset(_first_party_tops(Path(repo_root_str)))
+    except OSError:
+        return frozenset()
 
 
 def check_api_symbols_exist(
     spec: str,
     gathered_symbols: list[str],
+    repo_root_str: str = "",
 ) -> CompletenessCheck:
     """Spec must not call methods absent from the target project's gathered symbols.
 
@@ -1786,6 +1863,9 @@ def check_api_symbols_exist(
         spec: Implementation Spec markdown content.
         gathered_symbols: Sorted list of identifier names extracted by N1 from
             the target repo's gathered .py files.
+        repo_root_str: Target repo root. Used to tell the repo's own top-level
+            packages from foreign ones, so a chain rooted in an import the repo
+            does not own is not judged against the repo's symbols (#2411).
 
     Returns:
         CompletenessCheck with pass/fail result and details.
@@ -1828,7 +1908,9 @@ def check_api_symbols_exist(
             ),
         )
 
-    flagged = _flag_calls(scan.facts, symbol_set)
+    flagged = _flag_calls(
+        scan.facts, symbol_set, _first_party_tops_for(repo_root_str)
+    )
 
     # #1870's honesty rule applied to the scan itself: say what was NOT read,
     # so "checked" never overstates what was verified.
