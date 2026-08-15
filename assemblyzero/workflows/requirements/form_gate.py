@@ -51,6 +51,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from assemblyzero.workflows.requirements.discrimination_check import (  # noqa: E402  (#2387)
+    DiscriminationReport,
+    check_discrimination,
+)
 from assemblyzero.workflows.requirements.form_check import (
     FormReport,
     check_form,
@@ -77,6 +81,10 @@ class IssueForm:
     error: str = ""            # the check could not run at all
     refusing: list = field(default_factory=list)   # violations that refuse
     reporting: list = field(default_factory=list)  # violations that only report
+    #: #2387: the discrimination-coverage extension. Report-only, like the rest
+    #: of the non-counting findings -- it reads intent from prose, so a refusal
+    #: on it would block a roll over a phrasing choice.
+    discrimination: DiscriminationReport | None = None
 
     @property
     def has_tables(self) -> bool:
@@ -128,6 +136,11 @@ def check_issue(repo_root, issue: int, fetch) -> IssueForm:
 
     result.report = check_form(body)
     result.refusing, result.reporting = classify(result.report)
+    # #2387: never allowed to cost the form check its verdict.
+    try:
+        result.discrimination = check_discrimination(body)
+    except Exception:  # noqa: BLE001 - an extension is not the gate
+        result.discrimination = None
     return result
 
 
@@ -179,6 +192,14 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
 
         for note in notes:
             lines.append(f"      note: {note}")
+
+        # #2387: printed on EVERY issue, pass or fail. A check that speaks only
+        # when it complains leaves silence to mean two different things, which
+        # is the same complaint #2381 makes about box health.
+        if item.discrimination is not None:
+            lines.append(f"      {item.discrimination.disclosure()}")
+            for violation in item.discrimination.violations:
+                lines.append(f"        {violation}")
 
         if item.reporting and item.refusing:
             lines.append(
