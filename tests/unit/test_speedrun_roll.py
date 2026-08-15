@@ -160,9 +160,12 @@ class TestEnsureBaseDecides:
         with _no_network():
             assert sr.ensure_base(repo, 4, log) == "hardening-run-11"
 
-    def test_recoverable_debris_is_self_healed_not_reported(self, repo, log):
+    def test_recoverable_debris_is_reset_under_fresh(self, repo, log):
         """The old wrapper printed 'run speedrun_reset.py, verify clean,
-        relaunch' and quit. That instruction is now a code path."""
+        relaunch' and quit. That instruction became a code path, and #2409
+        put it back behind a flag: the reset closes a PR, deletes a remote
+        branch and removes a worktree, so it is chosen rather than inferred.
+        The mechanics are unchanged; only the authorization moved."""
         _git(repo, "branch", "issue-4")
         healed = {}
 
@@ -173,10 +176,28 @@ class TestEnsureBaseDecides:
         with _no_network(), \
              patch.object(sr.reset, "reset_one_issue", fake_reset), \
              patch.object(sr.reset, "_gh_repo", lambda p: "o/r"):
-            base = sr.ensure_base(repo, 4, log)
+            base = sr.ensure_base(repo, 4, log, True)
 
         assert healed["called"] == 4
         assert base == "hardening-run-11"
+
+    def test_recoverable_debris_without_fresh_refuses(self, repo, log):
+        """#2409: the same debris, no flag. Nothing is reset and the roll stops.
+
+        This is the 2026-08-15 shape: findings that are an in-flight issue's own
+        products, which the gate used to treat as authority to destroy them.
+        """
+        _git(repo, "branch", "issue-4")
+        called = []
+
+        with _no_network(), \
+             patch.object(sr.reset, "reset_one_issue",
+                          lambda *a: called.append("reset")), \
+             patch.object(sr.reset, "_gh_repo", lambda p: "o/r"):
+            base = sr.ensure_base(repo, 4, log)
+
+        assert base is None, "a refusal must abort, not proceed"
+        assert not called, "a plain launch must not reset"
 
     def test_debris_that_survives_reset_escalates_to_a_fresh_attempt(
         self, repo, log
@@ -186,7 +207,7 @@ class TestEnsureBaseDecides:
         with _no_network(), \
              patch.object(sr.reset, "reset_one_issue", lambda *a: None), \
              patch.object(sr.reset, "_gh_repo", lambda p: "o/r"):
-            base = sr.ensure_base(repo, 4, log)
+            base = sr.ensure_base(repo, 4, log, True)
 
         assert base == "hardening-run-12"
 
