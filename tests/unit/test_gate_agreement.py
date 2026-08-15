@@ -23,7 +23,6 @@ roll, at the cap, after the operator has spent the launch.
 import sys
 from pathlib import Path
 
-import pytest
 
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
     check_api_symbols_exist,
@@ -133,23 +132,15 @@ class TestTheContractCanActuallyFail:
 
 
 class TestKnownGaps:
-    """Disagreements the corpus has found but that are not repaired yet.
+    """Disagreements the corpus found. #2399's is closed; the class is pinned.
 
-    Recorded as xfail rather than as a comment, so the gap is in the suite and
-    flips to green on the day it is closed — instead of being rediscovered by a
-    roll.
+    This class was added carrying one strict xfail — `img.getpixel(...)` on an
+    object returned by a repo function, which cleared only when the draft
+    happened to import the producing function. #2399 closed it and the xfail was
+    flipped to a live assertion rather than deleted, because the shape is what
+    keeps costing rolls and it should stay named in the suite.
     """
 
-    @pytest.mark.xfail(
-        reason=(
-            "#2399: a third-party object returned by a REPO function is flagged. "
-            "`img = render(...)` then `img.getpixel(...)` clears today only "
-            "because draft 013 happens to import `render`, which exempts `img` "
-            "by assignment propagation. Specs legitimately omit import headers "
-            "(#1952's own words), and the import-less form deadlocks."
-        ),
-        strict=True,
-    )
     def test_third_party_object_from_a_repo_call_without_the_import(self):
         spec = _spec_around(
             "def test_req_070():\n"

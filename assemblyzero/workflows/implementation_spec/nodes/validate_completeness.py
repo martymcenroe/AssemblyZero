@@ -1221,6 +1221,14 @@ class _FenceFacts(NamedTuple):
     # Parameters a framework injects, whose type the target repo does not own
     # (#2391) — `parser` in `def pytest_addoption(parser)`, `tmp_path` in a test.
     framework_params: frozenset[str]
+    # (function name, root name of its return annotation) for functions the SPEC
+    # itself defines (#2399). `def render(...) -> Image.Image` yields
+    # ("render", "Image"), which is how a binding from render() learns it holds
+    # a Pillow object rather than one of the target repo's.
+    returns: tuple[tuple[str, str], ...]
+    # Classes the spec defines (#2399). A class is the one callee whose return
+    # type is known without an annotation: `Gauge()` is a Gauge.
+    classes: frozenset[str]
 
 
 class _FenceParseFailure(NamedTuple):
@@ -1360,6 +1368,8 @@ class _FenceVisitor(ast.NodeVisitor):
         self.assignments: list[tuple[frozenset[str], frozenset[str]]] = []
         self.calls: list[_CallSite] = []
         self.framework_params: set[str] = set()
+        self.returns: dict[str, str] = {}
+        self.classes: set[str] = set()
 
     # ---- imports: receivers the target repo has no authority over (#1948) ----
 
@@ -1381,12 +1391,34 @@ class _FenceVisitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.defined.add(node.name)
         self._record_framework_params(node)
+        self._record_return(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self.defined.add(node.name)
         self._record_framework_params(node)
+        self._record_return(node)
         self.generic_visit(node)
+
+    def _record_return(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        """What a spec-defined function declares it returns (#2399).
+
+        `def render(...) -> Image.Image` records ("render", "Image"). The root
+        of the annotation is what matters: whoever owns `Image` owns what
+        `render()` hands back, which is the question a binding from that call
+        needs answered.
+
+        Only spec-declared annotations are read. Nothing is inferred from a
+        function body, and an unannotated function records nothing — it is left
+        unresolved rather than guessed at.
+        """
+        if node.returns is None:
+            return
+        root = _leftmost_name(node.returns)
+        if root is not None:
+            self.returns[node.name] = root
 
     def _record_framework_params(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef
@@ -1419,6 +1451,10 @@ class _FenceVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.defined.add(node.name)
+        # #2399: a class is the one callee whose return type is known without an
+        # annotation — `Gauge()` is a Gauge. Recorded separately from `defined`,
+        # which mixes classes, functions and self-attributes.
+        self.classes.add(node.name)
         self.generic_visit(node)
 
     # ---- bindings: what each name actually holds ----
@@ -1501,6 +1537,8 @@ def _fence_facts_ast(block: str) -> _FenceFacts:
         assignments=tuple(visitor.assignments),
         calls=tuple(visitor.calls),
         framework_params=frozenset(visitor.framework_params),
+        returns=tuple(sorted(visitor.returns.items())),
+        classes=frozenset(visitor.classes),
     )
 
 
@@ -1585,12 +1623,79 @@ def _flag_calls(
     assignments = [
         (bound, source) for fence in facts for bound, source in fence.assignments
     ]
+    # #2399: a spec-defined function's DECLARED return type answers what a
+    # binding from it holds. `def render(...) -> Image.Image` means
+    # `img = render(...)` holds a Pillow object, so `img.getpixel(...)` is
+    # Pillow's API to be right or wrong about — even though `render` itself is
+    # the target repo's. Only declared annotations are read; nothing is inferred
+    # from a body, and an unannotated function resolves to nothing.
+    return_root: dict[str, str] = {}
+    for fence in facts:
+        for func_name, annotation_root in fence.returns:
+            return_root[func_name] = annotation_root
+
     changed = True
     while changed:
         changed = False
         for bound, source in assignments:
-            if source & exempt and not bound <= exempt:
+            if bound <= exempt:
+                continue
+            if source & exempt:
                 exempt |= bound
+                changed = True
+                continue
+            # The value came from calling a spec-defined function that declares
+            # it returns something the target repo does not own.
+            if any(return_root.get(name) in exempt for name in source):
+                exempt |= bound
+                changed = True
+
+    # #2399, the honest default. `unresolved is not hallucinated` is the
+    # principle #2391 was titled for; this is its third shape. A binding whose
+    # provenance the checker cannot place AT ALL — not an import, not stdlib,
+    # not a framework injection, not a gathered symbol, not something the spec
+    # defines — holds a value of unknown type, and a method on an unknown type
+    # cannot be called absent from anything.
+    #
+    # Note what stays JUDGED. `gauge = GaugeWindow()` where `GaugeWindow` is a
+    # gathered symbol resolves to the target repo, so `gauge.model_dump()` is
+    # still #1527's founding true positive. So does `g = Gauge()` for a class
+    # the spec itself defines. The rule removes guesses, not jurisdiction.
+    # What "resolvable" means for a binding from a call. The target repo owning
+    # the CALLEE is not the test — it owns `render`, and `render` returns a
+    # Pillow image. What resolves a binding is knowing the TYPE it holds:
+    #
+    #   * a constructor: `Gauge()` is a Gauge, no annotation needed;
+    #   * a declared return: `def render(...) -> Image.Image`, handled above.
+    #
+    # Classes the spec defines are known exactly. For the gathered surface the
+    # symbols are bare strings carrying no kind, so class-hood is read from the
+    # PEP 8 CapWords convention — which holds across the whole of the live run's
+    # 21 (`AppConfig`, `SessionState`, `WindowsCollector` against `load_config`,
+    # `start`, `stop`). A lowercase class would be missed and its instances left
+    # unresolved, which fails OPEN — the direction this issue's own title rules
+    # correct, since unresolved is not hallucinated.
+    spec_classes: set[str] = set()
+    for fence in facts:
+        spec_classes |= fence.classes
+    constructor_like = spec_classes | {s for s in symbol_set if s[:1].isupper()}
+
+    unresolved: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for bound, source in assignments:
+            if bound <= unresolved or bound <= exempt or not source:
+                continue
+            # Resolved, so judged: a constructor names its own type, and a
+            # declared return names some type. WHICH type decides the verdict,
+            # and the exemption loop above already applied it — an annotation
+            # rooted in an import exempts the binding, one rooted in a gathered
+            # symbol leaves it in jurisdiction. Either way it is not a guess.
+            if source & constructor_like or any(n in return_root for n in source):
+                continue
+            if not (source & exempt) or source <= unresolved:
+                unresolved |= bound
                 changed = True
 
     flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
@@ -1614,6 +1719,12 @@ def _flag_calls(
             # since a first-party import is the one case where the target
             # repo's symbol table DOES have authority.
             if call.root is not None and call.root in framework_roots:
+                continue
+            # #2399: the receiver holds a value of unknown type. Unresolved is a
+            # distinct, honest category from wrong, and only wrong is a finding.
+            if call.receiver in unresolved or (
+                call.root is not None and call.root in unresolved
+            ):
                 continue
             if call.method in symbol_set or call.method in spec_defined:
                 continue
