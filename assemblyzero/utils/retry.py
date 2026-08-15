@@ -49,7 +49,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from assemblyzero.core.llm_provider import LLMCallResult
+from assemblyzero.core import retry_gate
+from assemblyzero.core.llm_provider import LLMCallResult, get_cumulative_cost
 
 logger = logging.getLogger(__name__)
 
@@ -202,20 +203,26 @@ def with_retry(
                 )
             return result
 
-        # Permanent failure — don't retry.
-        if not result.retryable:
+        # #2423: classify BEFORE deciding, not after failing. `retryable` is a
+        # property of the error TYPE and cannot tell a provider outage from our
+        # own timeout ceiling saturating -- and those two want opposite
+        # decisions. The gate answers "is this failure shape worth a second
+        # attempt" before the second attempt is spent.
+        failure_class = result.failure_class or retry_gate.classify_failure(
+            result.error_message, retryable=result.retryable,
+        )
+        decision = retry_gate.should_retry(
+            failure_class,
+            attempts_made=attempt + 1,
+            max_attempts=policy.max_retries + 1,
+        )
+        if not decision.retry:
+            print(retry_gate.halt_line(
+                description, decision, get_cumulative_cost(),
+            ))
             logger.info(
-                "%s failed permanently (non-retryable, status=%s): %s",
-                description, result.status_code, result.error_message,
-            )
-            return result
-
-        # Transient failure — decide whether to retry.
-        is_final_attempt = attempt >= policy.max_retries
-        if is_final_attempt:
-            logger.warning(
-                "%s retries exhausted after %d attempt(s); last error: %s",
-                description, attempt + 1, result.error_message,
+                "%s halted after %d attempt(s) [%s]: %s",
+                description, attempt + 1, failure_class, decision.reason,
             )
             return result
 
@@ -230,10 +237,21 @@ def with_retry(
                 policy.max_backoff_s,
             )
 
+        # #2423 requirement 3: the price of the retry policy is reported where
+        # the operator is watching, not discovered on a bill afterwards.
+        print(retry_gate.retry_spend_line(
+            description,
+            attempts_made=attempt + 1,
+            budget=policy.max_retries + 1,
+            failure_class=failure_class,
+            cumulative_cost=get_cumulative_cost(),
+            sleeping=sleep_for,
+        ))
         logger.info(
-            "%s transient failure (attempt %d/%d, status=%s); "
+            "%s %s failure (attempt %d/%d, status=%s); "
             "sleeping %.1fs then retrying: %s",
             description,
+            failure_class,
             attempt + 1,
             policy.max_retries + 1,
             result.status_code,

@@ -11,6 +11,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
+from assemblyzero.core import retry_gate
 from assemblyzero.core.retry_mode import RESUMED, retry_mode_for
 from assemblyzero.utils.git import (
     GitBranchError,
@@ -151,6 +152,28 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
         # failed — retry only when the failure is transient or unmarked
         # (preserve current behavior for non-halt failures). Closes #1463.
         transient = stage_result.get("transient", True)
+
+        # #2423: the OUTER half of the nested-retry cost. This loop's attempts
+        # multiply the per-file loop's rather than adding to them, which is how
+        # run-issue1-090001 paid 7 times (70.2 minutes) for a failure whose
+        # outcome was knowable after the first. A deterministic transport
+        # failure -- our own timeout ceiling firing while the provider was
+        # still answering -- halts the stage instead of buying the same
+        # result again.
+        gate = retry_gate.should_retry(
+            retry_gate.classify_failure(stage_result.get("error_message", "")),
+            attempts_made=attempt,
+            max_attempts=max_retries,
+        )
+        if not gate.retry and attempt < max_retries and transient:
+            print(
+                f"[ORCHESTRATOR] Stage '{current_stage}' will NOT be retried "
+                f"({gate.failure_class}): {gate.reason}"
+            )
+            stage_result["attempts"] = attempt
+            save_orchestration_state(new_state)
+            return dict(new_state)
+
         if attempt < max_retries and transient:
             # #1909: capacity storms outlast a flat delay — the 2026-07-29
             # phase-4 run burned attempts 1-3 inside ~2 minutes while the

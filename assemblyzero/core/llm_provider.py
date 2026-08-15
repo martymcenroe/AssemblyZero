@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from assemblyzero.core import provider_storm
+from assemblyzero.core import provider_storm, retry_gate
 from assemblyzero.core.errors import (
     APIError,
     AuthenticationError,
@@ -163,6 +163,12 @@ class LLMCallResult:
     status_code: Optional[int] = None
     retry_after: Optional[float] = None
     retryable: bool = True
+    #: #2423: WHICH failure this was, not merely whether the type is
+    #: retryable. `retryable` cannot tell a provider outage from our own
+    #: timeout ceiling, and those two want opposite decisions -- back off and
+    #: try again, versus halt without a second payment. Empty means the
+    #: producer did not classify; consumers fall back to the message.
+    failure_class: str = ""
 
 
 # =============================================================================
@@ -260,6 +266,10 @@ def log_llm_call(result: LLMCallResult) -> None:
         parts.append(f"retry_after={result.retry_after:.1f}")
     if not result.retryable:
         parts.append("retryable=false")
+    # #2423: the class is what decides whether this call is paid for again, so
+    # it belongs on the line the operator is already watching.
+    if result.failure_class:
+        parts.append(f"class={result.failure_class}")
 
     print("    " + " ".join(parts))
 
@@ -918,6 +928,11 @@ class ClaudeCLIProvider(LLMProvider):
                         consecutive = provider_storm.record_timeout(idle_limit)
                         if provider_storm.is_storm():
                             message = self._classify_storm(message, consecutive)
+                    # #2423: the transport is the only place that KNOWS which
+                    # wall was hit, so it says so structurally rather than
+                    # leaving every retry gate to re-derive it from prose. A
+                    # wall-clock kill with the stream alive is deterministic:
+                    # the same call runs just as long next time.
                     call_result = LLMCallResult(
                         success=False,
                         response=None,
@@ -927,6 +942,9 @@ class ClaudeCLIProvider(LLMProvider):
                         model_used=self._model,
                         duration_ms=duration_ms,
                         attempts=1,
+                        failure_class=retry_gate.classify_failure(
+                            message, timeout_kind=outcome.timeout_kind
+                        ),
                     )
                     log_llm_call(call_result)
                     return call_result
@@ -966,6 +984,9 @@ class ClaudeCLIProvider(LLMProvider):
                         duration_ms=duration_ms,
                         attempts=1,
                         retryable=retryable,
+                        failure_class=retry_gate.classify_failure(
+                            error_msg, retryable=retryable
+                        ),
                     )
                     log_llm_call(call_result)
                     return call_result
