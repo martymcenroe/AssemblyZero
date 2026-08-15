@@ -10,6 +10,13 @@ first spec-stage failure in campaign history with its drafts on disk (#2250):
 * ``boostgauge-7-spec-draft-006.md`` -- the revision before it. 7 functions,
   no test stubs, and it PASSED this check. Kept so a repair cannot be shown
   green merely by passing everything.
+* ``boostgauge-7-run2-spec-draft-008.md`` and ``...-run2-final-spec.md`` --
+  the SECOND 2026-08-13 run (lineage ``done/7-implspec/2026-08-13T20-44-22Z/``),
+  added while settling #2300. A different document of the same class: 845 lines
+  against 805, a different objective and LLD, and 23 exempt test stubs rather
+  than 22. The repair holds on both, which the single-document fixture could
+  not show. The final spec is included because it is the artifact the stage
+  ships, and nothing else pinned it.
 
 Two defects are pinned here. The detection was forward-only from every textual
 occurrence of a name, so a function inside a long fenced block could not see
@@ -62,6 +69,41 @@ class TestTheDraftTheStageDiedOn:
         """006 passed before this repair and must still pass -- otherwise the
         change is a rewrite whose agreement with the old behaviour is unknown."""
         assert check(_fixture("boostgauge-7-spec-draft-006.md"))["passed"]
+
+
+class TestTheSecondRunOfTheSameStage:
+    """#2300's evidence: the repair holds on a DIFFERENT document.
+
+    The 2026-08-13 #7 spec stage ran twice. The fixture above is the 805-line
+    draft the issue cites; lineage `done/7-implspec/2026-08-13T20-44-22Z/` holds
+    a second, later run whose draft 008 is 845 lines with a different objective,
+    a different LLD, and 23 exempt stubs instead of 22.
+
+    One document passing is a weaker claim than it reads as -- it can be
+    satisfied by an exemption that happens to cover that document's shape. Two
+    independent documents of the same class is the claim #2300 actually needs.
+    """
+
+    def test_the_second_runs_draft_passes(self):
+        result = check(_fixture("boostgauge-7-run2-spec-draft-008.md"))
+        assert result["passed"], result["details"]
+
+    def test_the_second_runs_final_spec_passes(self):
+        """The artifact the stage ships, which nothing else pinned."""
+        result = check(_fixture("boostgauge-7-run2-final-spec.md"))
+        assert result["passed"], result["details"]
+
+    def test_its_exempt_count_differs_from_the_other_run(self):
+        """Proves these are genuinely different documents rather than a copy --
+        a duplicated fixture would prove nothing twice."""
+        details = check(_fixture("boostgauge-7-run2-spec-draft-008.md"))["details"]
+        assert "23 test function(s) were NOT checked" in details
+
+    def test_the_graded_functions_are_still_graded(self):
+        """The exemption must not have swallowed the real API surface: ten
+        non-test functions are checked and pass on their own merits."""
+        details = check(_fixture("boostgauge-7-run2-spec-draft-008.md"))["details"]
+        assert "All 10 public non-test functions have I/O examples" in details
 
 
 class TestItStillFailsUndocumentedFunctions:
