@@ -4,6 +4,7 @@ Uses the unified provider gate (get_provider) for all LLM calls.
 Issue #783: Sealed API gate — no more direct CLI/SDK fallback.
 """
 
+import os
 import threading
 import time
 
@@ -12,14 +13,48 @@ from assemblyzero.core.llm_provider import get_provider
 
 # Issue #321: Timeout constants
 # Issue #373: Increased from 300s — large test file prompts need more time
-CLI_TIMEOUT = 600  # 10 minutes base (used by compute_dynamic_timeout)
+CLI_TIMEOUT = 600  # 10 minutes base (historical; no longer the floor)
 
 # #2026: what a file generation gets at minimum, and at most. The floor is what
 # matters: generation time tracks the RESPONSE, and a compact prompt can ask for
 # a very large file. The costs are asymmetric — an over-long timeout waits out
 # one slow call, while an under-long one kills the stage and stalls the arc.
-FILE_TIMEOUT_FLOOR = CLI_TIMEOUT
+#
+# #2405: the floor was CLI_TIMEOUT (600) and boostgauge #1 died against it five
+# times, four of them reading "timed out after 602s". That 602 is the whole
+# story of why this moved. The scaling below grants one second per 1000
+# characters, so a 2.5 KB fix-loop prompt bought two seconds over the floor;
+# reaching the 1200 cap from a 600 floor needs a 600,000-character prompt, which
+# nothing here produces. The cap had therefore never once bound, and the floor
+# had silently been the entire timeout since #373 introduced the scaling. The
+# floor now starts where the cap was, and both are environment-overridable so
+# that the next time the distribution outgrows a constant, the remedy is a
+# variable rather than a merge.
+FILE_TIMEOUT_FLOOR = 1200
 FILE_TIMEOUT_CAP = 1200
+
+#: Override names. Values are whole seconds. A missing, unparseable, or
+#: non-positive value falls back to the default rather than failing the call:
+#: an operator reaching for these is usually unblocking a stalled run, and a
+#: typo must not turn a slow call into a dead one.
+ENV_TIMEOUT_FLOOR = "AZ_FILE_TIMEOUT_FLOOR"
+ENV_TIMEOUT_CAP = "AZ_FILE_TIMEOUT_CAP"
+
+
+def _env_seconds(name: str, default: int) -> int:
+    """Read a positive whole-second count from the environment."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"    [TIMEOUT] {name}={raw!r} is not an integer; using {default}s")
+        return default
+    if value <= 0:
+        print(f"    [TIMEOUT] {name}={value} is not positive; using {default}s")
+        return default
+    return value
 
 
 class ProgressReporter:
@@ -94,15 +129,32 @@ def compute_dynamic_timeout(prompt: str) -> int:
     genuinely large prompts. A too-long timeout costs waiting on one slow call;
     a too-short one costs the stage.
 
+    #2405: this is now the outer wall-clock backstop, not the operative limit.
+    A call is killed for going quiet (see the idle timeout in
+    ``ClaudeCLIProvider.invoke``), and reaching this value at all means the
+    process stayed silent for the whole window. The floor and cap are
+    environment-overridable via ``AZ_FILE_TIMEOUT_FLOOR`` / ``AZ_FILE_TIMEOUT_CAP``.
+
+    That also retires the "bonus for genuinely large prompts" above: the floor
+    now starts at the cap, so the scaling term can no longer change the result.
+    It was never doing the work anyway. The prompt that killed boostgauge #1 was
+    about 2.5 KB, which bought two seconds, and the run's log records the limit
+    as 602s for exactly that reason.
+
     Args:
         prompt: The prompt string.
 
     Returns:
-        Timeout in seconds (FILE_TIMEOUT_FLOOR–FILE_TIMEOUT_CAP range).
+        Timeout in seconds (floor–cap range, both overridable).
     """
+    floor = _env_seconds(ENV_TIMEOUT_FLOOR, FILE_TIMEOUT_FLOOR)
+    # A cap below the floor would silently undo an operator's floor override,
+    # which is the opposite of what they reached for the variable to do.
+    cap = max(_env_seconds(ENV_TIMEOUT_CAP, FILE_TIMEOUT_CAP), floor)
+
     # Add 1 second per 1000 characters of prompt
-    scaled = FILE_TIMEOUT_FLOOR + len(prompt) // 1000
-    return min(scaled, FILE_TIMEOUT_CAP)
+    scaled = floor + len(prompt) // 1000
+    return min(scaled, cap)
 
 
 def build_system_prompt(file_path: str) -> str:

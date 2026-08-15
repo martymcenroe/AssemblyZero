@@ -19,7 +19,6 @@ Tests for:
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 import json
-import subprocess
 from pathlib import Path
 
 from assemblyzero.core.llm_provider import (
@@ -43,6 +42,52 @@ from assemblyzero.core.llm_provider import (
     set_api_policy,
     _load_anthropic_api_key,
 )
+
+
+def _stream_proc(payload: str = "", stderr: str = "", returncode: int = 0, pid: int = 12345):
+    """Shape a mock Popen the way the #2405 streaming transport reads it.
+
+    Before #2405 the transport called ``proc.communicate()`` and parsed one
+    buffered JSON object. It now reads NDJSON events off ``proc.stdout`` so it
+    can tell a working call from a hung one, and takes its payload from the
+    final ``result`` event. `payload` is the same JSON object the old mocks
+    handed to ``communicate``, delivered where the new transport looks for it.
+
+    Pass ``payload=""`` for a call that produced no usable output, which is what
+    an error path looks like.
+    """
+    proc = Mock()
+    proc.pid = pid
+    lines = []
+    if payload:
+        event = json.loads(payload)
+        event.setdefault("type", "result")
+        lines.append(json.dumps(event))
+    proc.stdout = iter(lines)
+    proc.stderr = Mock()
+    proc.stderr.read.return_value = stderr
+    proc.stdin = Mock()
+    proc.poll.return_value = returncode
+    proc.returncode = returncode
+    return proc
+
+
+def _hanging_proc(pid: int = 12345):
+    """A mock Popen that never exits and never produces output.
+
+    ``poll()`` returning None forever is what a hung `claude -p` looks like to
+    the watchdog. Tests using this must shrink the idle threshold, or they wait
+    the full production two minutes.
+    """
+    proc = Mock()
+    proc.pid = pid
+    proc.stdout = iter(())
+    proc.stderr = Mock()
+    proc.stderr.read.return_value = ""
+    proc.stdin = Mock()
+    proc.poll.return_value = None
+    proc.returncode = None
+    return proc
 
 
 class TestLLMCallResult:
@@ -295,9 +340,7 @@ class TestClaudeCLIProvider:
     def test_invoke_success(self, mock_find_cli, mock_popen):
         """Test successful invocation."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "Generated content"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "Generated content"}')
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
@@ -315,9 +358,7 @@ class TestClaudeCLIProvider:
     def test_invoke_failure(self, mock_find_cli, mock_popen):
         """Test invocation failure."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ("", "Authentication failed")
-        mock_proc.returncode = 1
+        mock_proc = _stream_proc("", stderr="Authentication failed", returncode=1)
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
@@ -332,15 +373,16 @@ class TestClaudeCLIProvider:
     @patch("assemblyzero.core.llm_provider._kill_process_tree")
     @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
-    def test_invoke_timeout(self, mock_find_cli, mock_popen, mock_kill):
-        """Test invocation timeout — process tree killed on Windows."""
+    def test_invoke_timeout(self, mock_find_cli, mock_popen, mock_kill, monkeypatch):
+        """A hung call is killed process-tree-wise on Windows.
+
+        #2405: the kill now fires on silence rather than on elapsed time, so the
+        process is one that never exits and never speaks. The threshold is
+        shrunk to a second so the test does not wait the production two minutes.
+        """
+        monkeypatch.setenv("AZ_LLM_IDLE_TIMEOUT", "1")
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.pid = 12345
-        mock_proc.communicate.side_effect = [
-            subprocess.TimeoutExpired(cmd="claude", timeout=300),
-            ("", ""),  # drain call after kill
-        ]
+        mock_proc = _hanging_proc(pid=12345)
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
@@ -351,17 +393,43 @@ class TestClaudeCLIProvider:
         )
 
         assert result.success is False
+        # The literal substring is a contract: analyze_requirements._is_timeout
+        # classifies timeouts by matching it.
         assert "timed out" in result.error_message.lower()
+        assert "no output" in result.error_message.lower()
         mock_kill.assert_called_once_with(12345)
+
+    @patch("assemblyzero.core.llm_provider._kill_process_tree")
+    @patch("subprocess.Popen")
+    @patch.object(ClaudeCLIProvider, "_find_cli")
+    def test_timeout_messages_keep_the_substring_other_code_matches_on(
+        self, mock_find_cli, mock_popen, mock_kill, monkeypatch
+    ):
+        """#2405: `_is_timeout` keys off "timed out", so both branches must say it.
+
+        This coupling is invisible from either side. The provider returns a
+        result object rather than raising, so the requirements gate classifies
+        by substring; a reworded message would silently stop being recognised
+        as a timeout and would be retried as though it were a content failure.
+        """
+        from assemblyzero.workflows.requirements.nodes.analyze_requirements import (
+            _is_timeout,
+        )
+
+        monkeypatch.setenv("AZ_LLM_IDLE_TIMEOUT", "1")
+        mock_find_cli.return_value = "/usr/local/bin/claude"
+        mock_popen.return_value = _hanging_proc()
+
+        provider = ClaudeCLIProvider()
+        idle_result = provider.invoke("Test", "Test", timeout_seconds=300)
+        assert _is_timeout(idle_result), idle_result.error_message
 
     @patch("subprocess.Popen")
     @patch.object(ClaudeCLIProvider, "_find_cli")
     def test_small_system_prompt_uses_cli_arg(self, mock_find_cli, mock_popen):
         """Issue #787: System prompt under limit uses --system-prompt CLI arg."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "OK"}')
         mock_popen.return_value = mock_proc
 
         small_prompt = "You are a helpful assistant"
@@ -379,9 +447,7 @@ class TestClaudeCLIProvider:
     def test_large_system_prompt_uses_tempdir(self, mock_find_cli, mock_popen):
         """Issue #787: System prompt over limit writes CLAUDE.md to temp dir."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "OK"}')
         mock_popen.return_value = mock_proc
 
         large_prompt = "x" * (ClaudeCLIProvider.SYSTEM_PROMPT_CLI_LIMIT + 1)
@@ -403,9 +469,7 @@ class TestClaudeCLIProvider:
     def test_tempdir_cleanup_after_invoke(self, mock_find_cli, mock_popen):
         """Issue #787: Temp dir is cleaned up after invoke returns."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "OK"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "OK"}')
         mock_popen.return_value = mock_proc
 
         large_prompt = "x" * (ClaudeCLIProvider.SYSTEM_PROMPT_CLI_LIMIT + 1)
@@ -1074,9 +1138,7 @@ class TestTokenLogging:
                 "cache_creation_input_tokens": 3000,
             },
         })
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = (json_stdout, "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc(json_stdout)
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
@@ -1094,9 +1156,7 @@ class TestTokenLogging:
     def test_claude_handles_missing_usage(self, mock_find_cli, mock_popen):
         """Claude provider handles JSON without usage field."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "content"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "content"}')
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider()
@@ -1555,9 +1615,7 @@ class TestEffortFlag:
     def test_effort_max_in_command(self, mock_find_cli, mock_popen):
         """--effort max appears in subprocess command."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "ok"}')
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider(model="opus", effort="max")
@@ -1573,9 +1631,7 @@ class TestEffortFlag:
     def test_effort_none_omits_flag(self, mock_find_cli, mock_popen):
         """effort=None omits --effort from command."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "ok"}')
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider(model="opus")
@@ -1599,9 +1655,7 @@ class TestResponseSchema:
     def test_json_schema_in_command_when_provided(self, mock_find_cli, mock_popen):
         """--json-schema appears in subprocess command when schema provided."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "ok"}')
         mock_popen.return_value = mock_proc
 
         schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
@@ -1619,9 +1673,7 @@ class TestResponseSchema:
     def test_json_schema_omitted_when_none(self, mock_find_cli, mock_popen):
         """--json-schema omitted when response_schema is None."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = ('{"result": "ok"}', "")
-        mock_proc.returncode = 0
+        mock_proc = _stream_proc('{"result": "ok"}')
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider(model="opus")
@@ -1635,19 +1687,16 @@ class TestResponseSchema:
     def test_structured_output_extracted_when_schema_provided(self, mock_find_cli, mock_popen):
         """Issue #781: When --json-schema is used, response comes from structured_output, not result."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
         # Real claude -p output when --json-schema is used:
         # result is empty, structured_output has the actual response
-        mock_proc.communicate.return_value = (
+        mock_proc = _stream_proc(
             json.dumps({
                 "result": "",
                 "structured_output": {"verdict": "APPROVED", "feedback": []},
                 "usage": {"input_tokens": 100, "output_tokens": 50},
                 "total_cost_usd": 0.01,
-            }),
-            "",
+            })
         )
-        mock_proc.returncode = 0
         mock_popen.return_value = mock_proc
 
         schema = {"type": "object", "properties": {"verdict": {"type": "string"}}}
@@ -1663,16 +1712,13 @@ class TestResponseSchema:
     def test_result_used_when_no_schema(self, mock_find_cli, mock_popen):
         """Without response_schema, response comes from result field as before."""
         mock_find_cli.return_value = "/usr/local/bin/claude"
-        mock_proc = Mock()
-        mock_proc.communicate.return_value = (
+        mock_proc = _stream_proc(
             json.dumps({
                 "result": "Hello world",
                 "usage": {"input_tokens": 10, "output_tokens": 5},
                 "total_cost_usd": 0.001,
-            }),
-            "",
+            })
         )
-        mock_proc.returncode = 0
         mock_popen.return_value = mock_proc
 
         provider = ClaudeCLIProvider(model="opus")
