@@ -140,7 +140,75 @@ When an in-process classic-PAT tool that creates and merges a PR is interrupted 
 
 **Constraint:** this is operational discipline, not architecture. Either finish the original run, or delete the remote branch + PR before re-running the modified script. Runbook `docs/runbooks/0930-gpg-and-classic-pat-rotation.md` documents the recovery procedure; this ADR records the constraint because at least one silent partial deployment has resulted from forgetting it.
 
-## 7. References
+## 7. Scope: which credentials this pattern is for (2026-08-15)
+
+This ADR was read for eighteen months as "how secrets are handled", and applied
+to every credential in the fleet. That is wider than it was written for, and the
+cost of the over-application is real, so the boundary is recorded here.
+
+### The distinction
+
+**Everything above is about a credential that can DESTROY.** A classic PAT
+rewrites history, disables branch protection, edits the workflow that governs
+it, and deletes repositories. The damage is unbounded, often irreversible, and
+frequently silent. Ceremony is proportionate: a passphrase per use, no caching,
+heap-only, never in argv or the environment.
+
+**A metered API key can only SPEND.** It calls one vendor's inference endpoint
+and produces a bill. It cannot delete anything, cannot reach another service,
+and cannot alter infrastructure. The damage is bounded, visible on a statement,
+and arguable with a vendor.
+
+Those are different risk classes, and treating them identically is a category
+error in one direction — never the other.
+
+### What each class actually needs
+
+| | destruction-capable | metered API key |
+|---|---|---|
+| at rest | encrypted, decrypted per use | outside every git working tree, restrictive file permissions |
+| primary control | the passphrase | **a hard spend cap on the account** |
+| secondary | no agent-parented process | key restricted to the single API it needs |
+| revocation | rotate | rotate |
+
+**For a metered key the spend cap is the stronger control and it is not
+optional.** Encryption protects against disclosure; the cap protects against the
+consequence, and it works whether or not the key ever leaks. A cap without
+encryption bounds the loss. Encryption without a cap does not.
+
+### The cost the over-application was paying
+
+Encryption is not free, and the price is not merely typing a passphrase:
+
+- **A prompt on every single run**, since caching must stay disabled for this
+  ADR's guarantee to hold. Mistypes cost a retry each.
+- **No agent may run the tool**, by section 6.1 — a process an agent spawns is a
+  process an agent parents. For a destructive credential that is exactly right.
+  For an inference key it means every generation, every retry and every
+  measurement waits for a human at a keyboard, and a loop that could run
+  unattended does not.
+
+That second cost is the one that goes unnoticed, because it shows up as a
+workflow that is slow rather than as a control that is expensive.
+
+### The decision
+
+**This ADR governs credentials that can destroy. It does not govern metered API
+keys.** Applying it to one is a deliberate choice to accept a per-run prompt and
+forbid unattended use, not the default.
+
+Dropping encryption for a metered key is conditional on **both** controls being
+in place first: a hard spend cap, and the key restricted to the API it needs. A
+plaintext key is still never committed, never inside a git working tree, and
+never in a repository's ignore file — an ignore rule protects until somebody
+force-adds, edits the rule, or copies the tree.
+
+**Storage locations are documented separately, in the operator's private tooling
+notes.** They are not recorded here: this repository is public, and where a
+particular secret lives is not something a public artifact should say. An agent
+finds the pointer in its auto-loaded instructions.
+
+## 8. References
 
 - PR #966 (issue #959) — the `_pat_session.py` module
 - PR #967 (issue #960) — `sentinel_migrate.py`, the first production caller
