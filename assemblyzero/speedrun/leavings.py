@@ -99,7 +99,19 @@ class LeavingsResult:
 #: exempt from dirt classification structurally, not just by gitignore
 #: convention -- in a repo that does not ignore data/, the healing ledger
 #: itself blocked the branch-cutter's preconditions.
-_EVIDENCE_PREFIXES = ("data/speedrun/",)
+#:
+#: #2311 adds docs/lineage/ for the same reason, and the reason is worth
+#: stating because the issue argued the opposite. It observed that boostgauge
+#: gitignores docs/lineage/ (`.gitignore:145`) while docs/lld/drafts/ is not
+#: ignored, and concluded the lineage location is therefore "janitor-immune by
+#: the janitor's own selection rule". That is true only in boostgauge. The
+#: selection rule is `?? ` lines from `git status`, so the immunity comes
+#: entirely from that repo's .gitignore -- a convention the next target repo
+#: may not have, and precisely the dependency #2164 already removed for
+#: data/speedrun/ after it bit. Lineage is evidence (#2250 exists to make
+#: failures diagnosable after the fact) and now carries the resume handoff, so
+#: it is exempt here, structurally, in every repo.
+_EVIDENCE_PREFIXES = ("data/speedrun/", "docs/lineage/")
 
 
 def _is_evidence(rel_path: str) -> bool:
