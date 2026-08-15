@@ -61,22 +61,59 @@ class TestClearingRmtree:
         assert not target.exists()
 
 
-class TestLineageDeletion:
+class TestLineageArchival:
+    """#2409 turned deletion into archival. The ReadOnly hazard #2162 found is
+    unchanged by that: a dir that would not delete will not move either."""
+
     def test_todays_incident_replayed(self, tmp_path, capsys):
-        """A ReadOnly lineage dir left by a prior attempt deletes cleanly,
+        """A ReadOnly lineage dir left by a prior attempt archives cleanly,
         with no WARNING line."""
         repo = _lineage_tree(tmp_path)
         target = repo / "docs" / "lineage" / "active" / "1-lld"
         _protect(target)
         _protect(target / "phase")
 
-        count = reset.delete_lineage_dirs(repo, 1)
+        count = reset.archive_lineage_dirs(repo, 1)
 
         out = capsys.readouterr().out
         assert count == 1
         assert not target.exists()
         assert "WARNING" not in out
-        assert "Deleted lineage dir" in out
+        assert "Archived lineage dir" in out
+
+    def test_the_content_survives_the_reset(self, tmp_path):
+        """The whole point of #2409: displaced, never destroyed.
+
+        The 2026-08-15 reset deleted a passed spec stage carrying five review
+        iterations, which the fresh redraw then paid for again without them.
+        """
+        repo = _lineage_tree(tmp_path)
+        target = repo / "docs" / "lineage" / "active" / "1-lld"
+        (target / "verdict.md").write_text("iteration 5 verdict\n", encoding="utf-8")
+
+        reset.archive_lineage_dirs(repo, 1)
+
+        archived = (
+            repo / "data" / "speedrun" / "reset-artifacts" / "issue-1"
+            / "lineage" / "1-lld" / "verdict.md"
+        )
+        assert archived.is_file(), "lineage content did not survive the reset"
+        assert archived.read_text(encoding="utf-8") == "iteration 5 verdict\n"
+
+    def test_a_second_reset_does_not_clobber_the_first(self, tmp_path):
+        """Two resets produce two archives, not one overwritten one."""
+        repo = _lineage_tree(tmp_path)
+        reset.archive_lineage_dirs(repo, 1)
+
+        again = repo / "docs" / "lineage" / "active" / "1-lld"
+        again.mkdir(parents=True)
+        (again / "second.md").write_text("second attempt\n", encoding="utf-8")
+        reset.archive_lineage_dirs(repo, 1)
+
+        holder = (
+            repo / "data" / "speedrun" / "reset-artifacts" / "issue-1" / "lineage"
+        )
+        assert len(list(holder.iterdir())) == 2
 
     def test_only_the_issues_dirs_are_touched(self, tmp_path):
         repo = _lineage_tree(tmp_path)
@@ -84,6 +121,6 @@ class TestLineageDeletion:
         other.mkdir()
         (other / "keep.md").write_text("other issue\n", encoding="utf-8")
 
-        reset.delete_lineage_dirs(repo, 1)
+        reset.archive_lineage_dirs(repo, 1)
 
-        assert other.exists(), "issue 41's lineage is not issue 1's to delete"
+        assert other.exists(), "issue 41's lineage is not issue 1's to archive"

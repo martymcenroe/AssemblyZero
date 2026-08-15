@@ -299,7 +299,70 @@ def base_is_structurally_sound(repo_root: Path, base: str) -> list[str]:
     return problems
 
 
-def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
+def find_checkpoint(repo_root: Path, issue: int) -> str | None:
+    """The newest `[CP:*]` commit for this issue, or None (#2409).
+
+    A checkpoint is the workflow's own statement that a stage completed and its
+    work is worth keeping: `[CP:post-impl] issue #1: workflow checkpoint`. It is
+    an ordinary commit on the issue's pipeline branches, so it survives the
+    worktree being removed but NOT the branches being deleted, which is exactly
+    how `d1e9269` became unreferenced on 2026-08-15.
+
+    This is the fact the resume-versus-residue decision turns on. An open LLD
+    PR, its branch and an untracked LLD are all normal mid-issue state and say
+    nothing either way; a checkpoint says work exists that a reset would
+    destroy. Cosmetics do not get a vote.
+
+    Every ref that could carry one is searched, including the worktree's own
+    branch, because the checkpointing commit lands wherever the stage ran.
+    """
+    refs = [
+        f"{issue}-impl", f"origin/{issue}-impl",
+        f"{issue}-lld", f"origin/{issue}-lld",
+        f"{issue}-spec", f"origin/{issue}-spec",
+        f"{issue}-fix", f"origin/{issue}-fix",
+    ]
+    for ref in refs:
+        found = _run(
+            ["git", "log", "-1", "--format=%h", "--grep=^\\[CP:", ref],
+            cwd=repo_root,
+        )
+        if found.returncode == 0 and found.stdout.strip():
+            return found.stdout.strip()
+    return None
+
+
+def refuse_with_exits(
+    repo_root: Path, issue: int, debris: list[str], log: EventLog,
+    checkpoint: str | None,
+) -> None:
+    """Name the findings and both exits, then let the caller abort (#2409).
+
+    A plain launch that would otherwise reset says what it found and what the
+    operator can do about it. The destructive path is chosen, never inferred:
+    the reset closes a PR, deletes a remote branch and removes a worktree, and
+    on 2026-08-15 it did all three to an in-flight issue as a silent side
+    effect of an ordinary launch command.
+    """
+    log.write(
+        f"GATE {len(debris)} finding(s) for #{issue} -- REFUSING to reset"
+    )
+    for d in debris:
+        log.write(f"  {d}")
+    if checkpoint:
+        log.write(
+            f"  a checkpoint exists ({checkpoint}); a reset would destroy it"
+        )
+    log.write("  exit 1: repair the findings above, then relaunch to resume")
+    log.write(
+        "  exit 2: relaunch with --fresh to reset this issue and redraw "
+        "(archives, never deletes)"
+    )
+
+
+def ensure_base(
+    repo_root: Path, issue: int, log: EventLog, fresh: bool = False
+) -> str | None:
     """A base this issue can actually be rolled on. Heals what it can.
 
     Order matters: structure first (a base that cannot receive PRs is useless
@@ -343,11 +406,55 @@ def ensure_base(repo_root: Path, issue: int, log: EventLog) -> str | None:
         )
         return fresh
 
-    # Recoverable debris. The old wrapper printed "run speedrun_reset.py,
-    # verify clean, relaunch" and quit; that instruction is now the code path.
-    log.write(f"GATE {len(debris)} finding(s) for #{issue} -- self-healing")
+    # #2409: recoverable debris is NOT authority to reset. On 2026-08-15 this
+    # branch read an in-flight issue's own products -- the open LLD PR the
+    # requirements workflow keeps open by design, that PR's branch, and an
+    # untracked LLD the halt path left behind -- as contamination, and its
+    # remedy destroyed a passed spec stage, impl iteration 0, and the resume
+    # seeds. The same command had resumed the same issue two and a half hours
+    # earlier, so the gate was inconsistent on nearly identical state.
+    #
+    # The deciding fact is the checkpoint, not the findings. A checkpoint means
+    # work exists that a reset would destroy, so heal around it and let the
+    # roll resume. Without one, a plain launch still refuses rather than
+    # inferring the destructive path: fleet doctrine is that destructive
+    # operations default to dry-run and mutate only under an explicit flag, and
+    # a reset that closes a PR and deletes a remote branch as a side effect of
+    # `speedrun_roll --issue N` is the opposite of that.
+    checkpoint = find_checkpoint(repo_root, issue)
+    if checkpoint and not fresh:
+        log.write(
+            f"GATE {len(debris)} finding(s) for #{issue}, but checkpoint "
+            f"{checkpoint} exists -- preserving, no reset"
+        )
+        for d in debris:
+            log.write(f"  {d}")
+        log.write(
+            f"BASE '{base}' accepted for #{issue} with its work preserved "
+            "(--fresh to reset and redraw)"
+        )
+        record_heal(
+            repo_root, "reset-declined", f"#{issue}", "healed",
+            detail=f"checkpoint {checkpoint} present; {len(debris)} finding(s) left in place",
+        )
+        return base
+
+    if not fresh:
+        refuse_with_exits(repo_root, issue, debris, log, checkpoint)
+        record_heal(
+            repo_root, "reset-refused", f"#{issue}", "refused",
+            detail=f"{len(debris)} finding(s); --fresh not given",
+        )
+        return None
+
+    # --fresh: the operator chose this explicitly. The reset preserves rather
+    # than deletes (see speedrun_reset.archive_lineage_dirs) and stamps a
+    # rescue ref over any checkpoint before the branches go.
+    log.write(f"GATE {len(debris)} finding(s) for #{issue} -- --fresh, resetting")
     for d in debris:
         log.write(f"  {d}")
+    if checkpoint:
+        log.write(f"  checkpoint {checkpoint} will be pinned before the reset")
     try:
         repo_slug = reset._gh_repo(repo_root)
     except RuntimeError as err:
@@ -812,8 +919,12 @@ def ensure_base_for_resume(
 
 def roll_issue(
     repo_root: Path, issue: int, log_dir: Path, az_root: Path, extra: list[str],
-    resume_from: str | None = None,
+    resume_from: str | None = None, *, fresh: bool = False,
 ) -> int:
+    # #2409: `fresh` is keyword-only and passed by the caller ONLY when true,
+    # for the same reason resume_from travels only when a resume fires -- test
+    # stubs replace this function with bare *args lambdas and fixed five-arg
+    # defs, so the ordinary path must keep its exact historical call shape.
     tag = f"run-issue{issue}-{datetime.now().strftime('%H%M%S')}"
     run_start = _stamp()
     log = EventLog(log_dir / f"{tag}-events.log")
@@ -830,7 +941,15 @@ def roll_issue(
                 log.write(f"RESUME fell back to a fresh draw for #{issue}")
                 resume_from = None
         if base is None:
-            base = ensure_base(repo_root, issue, log)
+            # The fourth argument travels ONLY when --fresh was given, and
+            # positionally, for the reason stated above: test stubs replace
+            # ensure_base with bare *args lambdas, which take any number of
+            # positional arguments and no keyword ones.
+            base = (
+                ensure_base(repo_root, issue, log, True)
+                if fresh
+                else ensure_base(repo_root, issue, log)
+            )
         if base is None:
             log.write("ABORT could not establish a usable base")
             return 91
@@ -2468,9 +2587,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--fresh", action="store_true",
         help=(
             "Redraw every stage from scratch, ignoring any resumable state "
-            "(#2193). Without it, a launch that finds a prior non-conflict "
-            "failure with the lld already passed resumes from the failed "
-            "stage instead of paying for the passed stages again."
+            "(#2193), AND authorize the destructive reset of this issue "
+            "(#2409): closing its open PRs, deleting its branches, removing "
+            "its worktree. Displaced artifacts are archived to "
+            "data/speedrun/reset-artifacts/, never deleted, and any checkpoint "
+            "is pinned to a rescue ref first. Without this flag a launch that "
+            "finds gate findings REFUSES and names both exits rather than "
+            "resetting on its own initiative."
         ),
     )
     parser.add_argument(
@@ -2771,12 +2894,21 @@ def main(argv: list[str] | None = None) -> int:
             # five-arg defs, so the non-resume path must keep the exact
             # pre-#2193 call shape (same convention as the positional
             # restore_repo call below).
+            #
+            # #2409: `fresh` travels the same way and for the same reason. It
+            # is what authorizes the destructive reset, so it is passed only
+            # when the operator actually typed --fresh; every other launch
+            # reaches ensure_base with fresh=False and gets the refusal.
+            fresh_kw = {"fresh": True} if getattr(args, "fresh", False) else {}
             if resume_from:
                 code = roll_issue(
                     repo_root, issue, log_dir, az_root, extra, resume_from,
+                    **fresh_kw,
                 )
             else:
-                code = roll_issue(repo_root, issue, log_dir, az_root, extra)
+                code = roll_issue(
+                    repo_root, issue, log_dir, az_root, extra, **fresh_kw
+                )
 
             # #2166: a requirements conflict means the ISSUE needs an operator
             # ruling. The auto-filer (#2072) has already raised the questions.

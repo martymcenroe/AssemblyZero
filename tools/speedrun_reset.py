@@ -478,22 +478,87 @@ def delete_remote_branches(repo_root: Path, issue: int) -> int:
     return deleted
 
 
-def delete_lineage_dirs(repo_root: Path, issue: int) -> int:
-    """Delete docs/lineage/active/{issue}-* directories. Returns count deleted."""
+def archive_lineage_dirs(repo_root: Path, issue: int) -> int:
+    """Move docs/lineage/active/{issue}-* into reset-artifacts. Returns count.
+
+    #2409: this deleted outright, in the same reset that RELOCATED the LLD two
+    steps later. The remedy was internally inconsistent -- preservation was the
+    principle for one artifact and destruction for another -- and what it
+    destroyed was the most expensive thing the campaign produces: on
+    2026-08-15 a passed spec stage carrying five review iterations of verdict
+    history, which the fresh redraw then had to pay for again without it.
+
+    If preservation is the principle for one artifact it is the principle for
+    all of them. Same destination as `relocate_lld_artifacts`, so everything a
+    reset displaces lands in one place the operator can find.
+    """
     lineage_active = repo_root / "docs" / "lineage" / "active"
     if not lineage_active.exists():
         return 0
-    deleted = 0
-    for d in lineage_active.glob(f"{issue}-*"):
+
+    destination = (
+        repo_root / "data" / "speedrun" / "reset-artifacts"
+        / f"issue-{issue}" / "lineage"
+    )
+    archived = 0
+    for d in sorted(lineage_active.glob(f"{issue}-*")):
         if not d.is_dir():
             continue
         try:
-            _rmtree_clearing_readonly(d)
-            print(f"  Deleted lineage dir: {d.relative_to(repo_root)}")
-            deleted += 1
+            destination.mkdir(parents=True, exist_ok=True)
+            target = destination / d.name
+            if target.exists():
+                # A second reset must not clobber the first one's evidence.
+                target = destination / f"{d.name}-{_disposal_stamp()}"
+            try:
+                shutil.move(str(d), str(target))
+            except OSError:
+                # #2162: lineage dirs can carry the ReadOnly attribute, and
+                # shutil.move falls back to copy-then-rmtree across
+                # filesystems, where a plain rmtree dies on them. Copy, then
+                # remove with the attribute-clearing variant.
+                shutil.copytree(str(d), str(target), dirs_exist_ok=True)
+                _rmtree_clearing_readonly(d)
+            print(f"  Archived lineage dir: {d.relative_to(repo_root)} -> "
+                  f"{target.relative_to(repo_root)}")
+            archived += 1
         except OSError as e:
-            print(f"  WARNING: could not delete {d}: {e}")
-    return deleted
+            print(f"  WARNING: could not archive {d}: {e}")
+    return archived
+
+
+def pin_checkpoint(repo_root: Path, issue: int) -> str | None:
+    """Stamp a rescue ref over this issue's newest checkpoint, before branches go.
+
+    #2409: `d1e9269 [CP:post-impl]` survived the 2026-08-15 reset only as an
+    unreferenced object, recoverable because nothing had garbage-collected it
+    yet. That is luck, not design. A checkpoint is reachable from the issue's
+    pipeline branches and from nothing else, so deleting those branches orphans
+    it; pinning first makes the survival deliberate.
+
+    Returns the rescue ref name, or None when there was no checkpoint to pin.
+    """
+    for ref in (
+        f"{issue}-impl", f"origin/{issue}-impl",
+        f"{issue}-lld", f"origin/{issue}-lld",
+        f"{issue}-spec", f"origin/{issue}-spec",
+        f"{issue}-fix", f"origin/{issue}-fix",
+    ):
+        found = _run(
+            ["git", "log", "-1", "--format=%H", "--grep=^\\[CP:", ref],
+            cwd=repo_root,
+        )
+        sha = found.stdout.strip() if found.returncode == 0 else ""
+        if not sha:
+            continue
+        rescue = f"refs/rescue/issue-{issue}-{_disposal_stamp()}"
+        made = _run(["git", "update-ref", rescue, sha], cwd=repo_root)
+        if made.returncode == 0:
+            print(f"  Pinned checkpoint {sha[:7]} at {rescue}")
+            return rescue
+        print(f"  WARNING: could not pin checkpoint {sha[:7]}: {made.stderr.strip()}")
+        return None
+    return None
 
 
 def _is_git_tracked(repo_root: Path, file_path: Path) -> bool:
@@ -590,13 +655,19 @@ def reopen_issue(repo: str, issue: int) -> bool:
 
 
 def reset_one_issue(repo_root: Path, repo: str, issue: int) -> None:
-    """Run all reset steps for one issue."""
+    """Run all reset steps for one issue.
+
+    #2409: the checkpoint is pinned FIRST, before anything that could orphan
+    it. Branch deletion is what unreferences a checkpoint commit, so the pin
+    has to precede it or the ordering is the bug.
+    """
     print(f"\nResetting issue #{issue}:")
+    pin_checkpoint(repo_root, issue)
     close_open_prs(repo, issue)
     remove_worktree(repo_root, issue)
     delete_local_branches(repo_root, issue)
     delete_remote_branches(repo_root, issue)
-    delete_lineage_dirs(repo_root, issue)
+    archive_lineage_dirs(repo_root, issue)
     relocate_lld_artifacts(repo_root, issue)
     reopen_issue(repo, issue)
 
