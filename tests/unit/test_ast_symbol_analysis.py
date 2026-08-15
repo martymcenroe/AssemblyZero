@@ -13,8 +13,9 @@ shapes regex got wrong now resolve correctly, and the true positives #1527 was
 built to catch still block the gate.
 """
 
+import re
+
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
-    _fence_facts_regex,
     _normalize_fence,
     _scan_fences,
     check_api_symbols_exist,
@@ -28,22 +29,57 @@ def _flag(spec: str) -> dict[str, list[str]]:
     return detect_unknown_method_calls(spec, set(TARGET_SYMBOLS))
 
 
-def _regex_flagged_methods(spec: str) -> set[str]:
-    """Method names the pre-#1956 collectors would have reported for one fence.
+# =============================================================================
+# Historical replica — NOT production code (#2392)
+# =============================================================================
+#
+# The pre-#1956 regex collectors lived in validate_completeness as the fallback
+# for unparseable fences until #2392 deleted them: standard 0028 is absolute
+# that regex is not a safety fallback, and the fallback was feeding the symbol
+# check confident, wrong call lists.
+#
+# They are reproduced here, and ONLY here, so the contrast tests below keep
+# working. Their entire job is to show that a shape the AST path now handles
+# correctly was genuinely mishandled before — an improvement no test could
+# otherwise see. Nothing in the pipeline calls this.
 
-    Used to show that a shape now handled correctly was genuinely mishandled
-    before, rather than asserting an improvement no test can see.
-    """
+_H_IMPORT_RE = re.compile(
+    r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
+    re.MULTILINE,
+)
+_H_DEF_RE = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
+_H_SELF_ASSIGN_RE = re.compile(r"^\s*self\.(\w+)\s*=", re.MULTILINE)
+_H_METHOD_CALL_RE = re.compile(r"\b(\w+)\.(\w+)\s*\(")
+_H_DOCSTRING_RE = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
+
+
+def _regex_flagged_methods(spec: str) -> set[str]:
+    """Method names the pre-#1956 collectors would have reported for one fence."""
     fence = spec.split("```")[1]
-    body = fence.split("\n", 1)[1]
-    facts = _fence_facts_regex(_normalize_fence(body))
+    body = _normalize_fence(fence.split("\n", 1)[1])
+    body = _H_DOCSTRING_RE.sub("", body)
+
+    imported: set[str] = set()
+    for imp in _H_IMPORT_RE.finditer(body):
+        if imp.group(1):
+            imported.add(imp.group(1).split(".")[0])
+            for raw_name in imp.group(2).split(","):
+                name = raw_name.strip().split(" as ")[-1].strip()
+                if name:
+                    imported.add(name)
+        elif imp.group(3):
+            imported.add(imp.group(4) or imp.group(3).split(".")[0])
+
+    defined = {m.group(1) for m in _H_DEF_RE.finditer(body)}
+    defined |= {m.group(1) for m in _H_SELF_ASSIGN_RE.finditer(body)}
+
     known = set(TARGET_SYMBOLS)
     return {
-        call.method
-        for call in facts.calls
-        if call.receiver not in facts.imported
-        and call.method not in known
-        and call.method not in facts.defined
+        call.group(2)
+        for call in _H_METHOD_CALL_RE.finditer(body)
+        if call.group(1) not in imported
+        and call.group(2) not in known
+        and call.group(2) not in defined
     }
 
 
@@ -53,12 +89,13 @@ def _regex_flagged_methods(spec: str) -> set[str]:
 
 
 class TestParsePathIsTaken:
-    """If every fence quietly fell back, the redesign would be inert."""
+    """If every fence were skipped or unread, the redesign would be inert."""
 
     def test_plain_python_fence_parses(self):
         spec = "# S\n\n```python\ndef f(win):\n    win.render()\n```\n"
-        facts = _scan_fences(spec)
-        assert [fence.parsed for fence in facts] == [True]
+        scan = _scan_fences(spec)
+        assert len(scan.facts) == 1
+        assert scan.failures == []
 
     def test_diff_fence_parses_after_normalization(self):
         spec = (
@@ -70,8 +107,9 @@ class TestParsePathIsTaken:
             "+    root.after(10, None)\n"
             "```\n"
         )
-        facts = _scan_fences(spec)
-        assert [fence.parsed for fence in facts] == [True]
+        scan = _scan_fences(spec)
+        assert len(scan.facts) == 1
+        assert scan.failures == []
 
     def test_indented_fence_body_parses(self):
         """A fence holding only an indented method body dedents into valid code."""
@@ -81,30 +119,100 @@ class TestParsePathIsTaken:
             "        win.render()\n"
             "```\n"
         )
-        assert [fence.parsed for fence in _scan_fences(spec)] == [True]
+        scan = _scan_fences(spec)
+        assert len(scan.facts) == 1
+        assert scan.failures == []
 
-    def test_unparseable_fence_falls_back(self):
-        """Broken Python degrades to the regex collectors, never to no scan."""
+    def test_unparseable_python_fence_is_a_named_failure(self):
+        """#2392: broken Python is named, never scraped into a guess."""
         spec = "# S\n\n```python\nclass Broken\n    win.model_dump()\n```\n"
-        facts = _scan_fences(spec)
-        assert [fence.parsed for fence in facts] == [False]
+        scan = _scan_fences(spec)
+        assert scan.facts == []
+        assert len(scan.failures) == 1
+        failure = scan.failures[0]
+        assert failure.tag == "python"
+        assert "SyntaxError" in failure.error
 
-    def test_fallback_still_flags_the_hallucination(self):
+    def test_unparseable_python_fence_blocks_the_check_by_name(self):
         spec = "# S\n\n```python\nclass Broken\n    win.model_dump()\n```\n"
-        assert "model_dump" in _flag(spec)
+        result = check_api_symbols_exist(spec, TARGET_SYMBOLS)
+        assert result["passed"] is False
+        assert "do not parse as Python" in result["details"]
+        assert "SyntaxError" in result["details"]
 
-    def test_fallback_is_reported_in_the_details(self):
-        """#1870's honesty rule: say when a fence was read with the weaker tool."""
-        spec = "# S\n\n```python\nclass Broken\n    win.render()\n```\n"
+    def test_the_broken_fence_is_no_longer_scraped(self):
+        """The old fallback reported `model_dump` from this fence. It cannot now."""
+        assert "model_dump" in _regex_flagged_methods(
+            "# S\n\n```python\nclass Broken\n    win.model_dump()\n```\n"
+        )
+        spec = "# S\n\n```python\nclass Broken\n    win.model_dump()\n```\n"
+        assert _flag(spec) == {}
+
+    def test_non_python_tags_are_skipped_not_parsed(self):
+        """A ```text fence is not an unparseable Python fence."""
+        spec = (
+            "# S\n\n```text\n"
+            "class PositionConfig(TypedDict):\n"
+            "\n"
+            "class Thresholds(TypedDict):\n"
+            "```\n"
+        )
+        scan = _scan_fences(spec)
+        assert scan.failures == []
+        assert scan.facts == []
+        assert scan.skipped_by_tag == 1
+
+    def test_skipped_tags_are_reported_in_the_details(self):
+        """#1870's honesty rule: say what was NOT read."""
+        spec = (
+            "# S\n\n```python\ndef f(win):\n    win.render()\n```\n"
+            "\n```text\nclass A(TypedDict):\n```\n"
+        )
         result = check_api_symbols_exist(spec, TARGET_SYMBOLS)
         assert result["passed"] is True, result["details"]
-        assert "regex fallback" in result["details"]
+        assert "skipped by language tag" in result["details"]
 
-    def test_clean_scan_says_nothing_about_fallback(self):
+    def test_clean_scan_says_nothing_about_skips(self):
         spec = "# S\n\n```python\ndef f(win):\n    win.render()\n```\n"
         result = check_api_symbols_exist(spec, TARGET_SYMBOLS)
         assert result["passed"] is True
-        assert "fallback" not in result["details"]
+        assert "skipped" not in result["details"]
+
+    def test_no_regex_fallback_survives_in_production(self):
+        """Acceptance: the code path is deleted, not gated.
+
+        The module must be reached through ``importlib``. ``nodes/__init__.py``
+        re-exports the FUNCTION ``validate_completeness``, which shadows the
+        module of the same name — so the obvious
+        ``from ...nodes import validate_completeness as vc`` binds a function,
+        every ``hasattr`` below is False for it whatever the module contains,
+        and this test passes while proving nothing. The type assertion keeps it
+        from silently going vacuous again.
+        """
+        import importlib
+        import types
+
+        vc = importlib.import_module(
+            "assemblyzero.workflows.implementation_spec.nodes"
+            ".validate_completeness"
+        )
+        assert isinstance(vc, types.ModuleType), (
+            "resolved a non-module; the hasattr assertions would be vacuous"
+        )
+        # Positive control: a symbol that DOES exist, so the assertions below
+        # are known to be capable of failing.
+        assert hasattr(vc, "_scan_fences")
+
+        for retired in (
+            "_fence_facts_regex",
+            "_METHOD_CALL_RE",
+            "_IMPORT_RE",
+            "_DEF_RE",
+            "_SELF_ASSIGN_RE",
+            "_ASSIGN_RE",
+            "_DOCSTRING_RE",
+        ):
+            assert not hasattr(vc, retired), f"{retired} still exists"
 
 
 # =============================================================================

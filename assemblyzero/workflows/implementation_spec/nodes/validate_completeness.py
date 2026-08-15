@@ -1108,12 +1108,41 @@ def check_error_paths_have_tests(spec: str) -> CompletenessCheck:
 # content carries no nodes at all, which is why docstring stripping stops being
 # a special case here.
 #
-# A fence that will not parse (a genuinely malformed snippet, or a diff whose
-# context lines cannot be reconciled into valid Python) falls back to the
-# original regex collectors below, so it degrades to the previous behaviour
-# instead of going unscanned.
+# A fence that will not parse used to fall back to regex collectors. #2392
+# retired that: standard 0028 is absolute that "regex is not a safety fallback",
+# and §4 that no function "returns ... a silent downgrade because it could not
+# read its input". The fallback did not provide resilience, it provided silence —
+# it fed the symbol check a confident, wrong call list and converted "this spec
+# contains code that does not parse", a first-class defect in an implementation
+# spec, into a footnote.
+#
+# What replaces it is the fence's own LANGUAGE TAG, which is a declaration:
+#
+#   python/py/python3  the fence CLAIMS to be Python. It must parse. A parse
+#                      failure is a named completeness failure carrying the
+#                      fence's line span and the parse error.
+#   text/json/bash/... the fence declares it is something else. Skipped by tag,
+#                      never parsed, never a failure.
+#   diff, untagged     undeclared. Parsed opportunistically for facts; a parse
+#                      failure is counted and reported, never a hard failure,
+#                      because nothing claimed it was Python.
+#
+# The tag filter is load-bearing and must come FIRST. The rejected boostgauge #1
+# draft carries three correctly-authored ```text fences (lines 75-77, 134-136,
+# 347-359) holding bodyless class declarations. They are not malformed Python;
+# they were never Python. Killing the fallback without filtering on the tag
+# would convert an otherwise clean draft into a hard failure — replacing a
+# silent wrong answer with a loud one.
 
-_CODE_FENCE_RE = re.compile(r"```[\w]*\s*\n(.*?)```", re.DOTALL)
+_CODE_FENCE_RE = re.compile(r"```([\w]*)\s*\n(.*?)```", re.DOTALL)
+
+#: Tags whose fence CLAIMS to be Python. Parse failure here is a named failure.
+_PYTHON_FENCE_TAGS: frozenset[str] = frozenset({"python", "py", "python3"})
+
+#: Tags that declare a fence is Python-adjacent but not a Python claim. A diff
+#: fence normalizes into parseable Python often enough to be worth reading
+#: (#1954), and legitimately does not when it diffs a non-Python file.
+_UNDECLARED_FENCE_TAGS: frozenset[str] = frozenset({"", "diff"})
 
 # Diff decoration has to come off before a fence can parse: the spec template
 # REQUIRES before/after snippets (#1954). Drop the ---/+++ file headers, DELETE
@@ -1166,18 +1195,6 @@ _PYTEST_BUILTIN_FIXTURES: frozenset[str] = frozenset({
 #: which is precisely the check's jurisdiction.
 _NON_RECEIVER_PARAMS: frozenset[str] = frozenset({"self", "cls"})
 
-# ---- regex fallback collectors: pre-#1956 behaviour, unchanged --------------
-_IMPORT_RE = re.compile(
-    r"^\s*(?:from\s+([\w.]+)\s+import\s+([\w ,]+)|import\s+([\w.]+)(?:\s+as\s+(\w+))?)",
-    re.MULTILINE,
-)
-_DEF_RE = re.compile(r"^\s*(?:def|class)\s+(\w+)", re.MULTILINE)
-_SELF_ASSIGN_RE = re.compile(r"^\s*self\.(\w+)\s*=", re.MULTILINE)
-_ASSIGN_RE = re.compile(r"^\s*(?:self\.)?(\w+)\s*=\s*(\w+)[.(]", re.MULTILINE)
-_METHOD_CALL_RE = re.compile(r"\b(\w+)\.(\w+)\s*\(")
-_DOCSTRING_RE = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'', re.DOTALL)
-
-
 class _CallSite(NamedTuple):
     """One ``<receiver>.<method>(...)`` call found inside a fence."""
 
@@ -1198,7 +1215,32 @@ class _FenceFacts(NamedTuple):
     # Parameters a framework injects, whose type the target repo does not own
     # (#2391) — `parser` in `def pytest_addoption(parser)`, `tmp_path` in a test.
     framework_params: frozenset[str]
-    parsed: bool  # False when this fence fell back to the regex collectors
+
+
+class _FenceParseFailure(NamedTuple):
+    """A fence that CLAIMED to be Python and would not parse (#2392).
+
+    Carries what a revision needs to act: which fence, and why the parser
+    refused. There is no third option where the content gets read anyway.
+    """
+
+    start_line: int
+    end_line: int
+    tag: str
+    error: str
+
+
+class _ScanResult(NamedTuple):
+    """Everything one pass over a document's fences established."""
+
+    facts: list[_FenceFacts]
+    #: Declared-Python fences that would not parse — named failures.
+    failures: list[_FenceParseFailure]
+    #: Fences skipped because their tag declares a non-Python language.
+    skipped_by_tag: int
+    #: Undeclared fences (untagged, diff) that would not parse. Counted and
+    #: reported, never a failure: nothing claimed they were Python.
+    undeclared_unparsed: int
 
 
 def _normalize_fence(block: str) -> str:
@@ -1432,12 +1474,14 @@ class _FenceVisitor(ast.NodeVisitor):
         return ""
 
 
-def _fence_facts_ast(block: str) -> _FenceFacts | None:
-    """Facts from a parsed fence, or None when the snippet will not parse."""
-    try:
-        tree = ast.parse(block)
-    except (SyntaxError, ValueError, RecursionError):
-        return None
+def _fence_facts_ast(block: str) -> _FenceFacts:
+    """Facts from a parsed fence.
+
+    Raises whatever ``ast.parse`` raises. #2392: a parse failure is not a value —
+    the caller decides whether this fence claimed to be Python, and names the
+    failure if it did. It never degrades to a guess.
+    """
+    tree = ast.parse(block)
     visitor = _FenceVisitor(block)
     visitor.visit(tree)
     return _FenceFacts(
@@ -1446,65 +1490,54 @@ def _fence_facts_ast(block: str) -> _FenceFacts | None:
         assignments=tuple(visitor.assignments),
         calls=tuple(visitor.calls),
         framework_params=frozenset(visitor.framework_params),
-        parsed=True,
     )
 
 
-def _fence_facts_regex(block: str) -> _FenceFacts:
-    """The pre-#1956 collectors, kept as the fallback for unparseable fences."""
-    # #1950: docstrings inside fences quote code ('No tkinter.Tk() instantiated'
-    # — the test-strategy rule itself). The AST path never needs this; a string
-    # holds no call nodes.
-    block = _DOCSTRING_RE.sub("", block)
+def _scan_fences(text: str) -> _ScanResult:
+    """Read every code fence in ``text``, routed by its language tag (#2392).
 
-    imported: set[str] = set()
-    for imp in _IMPORT_RE.finditer(block):
-        if imp.group(1):  # from X import a, b — names land in scope
-            imported.add(imp.group(1).split(".")[0])
-            for raw_name in imp.group(2).split(","):
-                name = raw_name.strip().split(" as ")[-1].strip()
-                if name:
-                    imported.add(name)
-        elif imp.group(3):  # import X [as y]
-            imported.add(imp.group(4) or imp.group(3).split(".")[0])
-
-    defined = {m.group(1) for m in _DEF_RE.finditer(block)}
-    defined |= {m.group(1) for m in _SELF_ASSIGN_RE.finditer(block)}
-
-    assignments = tuple(
-        (frozenset({m.group(1)}), frozenset({m.group(2)}))
-        for m in _ASSIGN_RE.finditer(block)
-    )
-
-    calls: list[_CallSite] = []
-    for call in _METHOD_CALL_RE.finditer(block):
-        site = (
-            block[max(0, call.start() - 10) : call.end() + 20]
-            .strip()
-            .replace("\n", " ")[:80]
-        )
-        calls.append(_CallSite(call.group(1), call.group(2), site))
-
-    return _FenceFacts(
-        imported=frozenset(imported),
-        defined=frozenset(defined),
-        assignments=assignments,
-        calls=tuple(calls),
-        # The regex collectors cannot see a function signature's parameters,
-        # so they contribute no framework exemptions. #2392 retires this path.
-        framework_params=frozenset(),
-        parsed=False,
-    )
-
-
-def _scan_fences(text: str) -> list[_FenceFacts]:
-    """Read every code fence in ``text`` — AST where it parses, regex where not."""
+    There is no fallback. A fence is parsed as Python, skipped because its tag
+    says it is not Python, or named as a failure — never pattern-scraped into a
+    confident guess.
+    """
     facts: list[_FenceFacts] = []
+    failures: list[_FenceParseFailure] = []
+    skipped_by_tag = 0
+    undeclared_unparsed = 0
+
     for match in _CODE_FENCE_RE.finditer(text):
-        block = _normalize_fence(match.group(1))
-        parsed = _fence_facts_ast(block)
-        facts.append(parsed if parsed is not None else _fence_facts_regex(block))
-    return facts
+        tag = (match.group(1) or "").lower()
+        declares_python = tag in _PYTHON_FENCE_TAGS
+        undeclared = tag in _UNDECLARED_FENCE_TAGS
+
+        if not declares_python and not undeclared:
+            # ```text, ```json, ```bash — the tag is the author telling us this
+            # is not Python. Believe it.
+            skipped_by_tag += 1
+            continue
+
+        block = _normalize_fence(match.group(2))
+        try:
+            facts.append(_fence_facts_ast(block))
+        except (SyntaxError, ValueError, RecursionError) as e:
+            if declares_python:
+                failures.append(
+                    _FenceParseFailure(
+                        start_line=text.count("\n", 0, match.start()) + 1,
+                        end_line=text.count("\n", 0, match.end()) + 1,
+                        tag=tag,
+                        error=f"{type(e).__name__}: {e}",
+                    )
+                )
+            else:
+                undeclared_unparsed += 1
+
+    return _ScanResult(
+        facts=facts,
+        failures=failures,
+        skipped_by_tag=skipped_by_tag,
+        undeclared_unparsed=undeclared_unparsed,
+    )
 
 
 def _flag_calls(
@@ -1579,7 +1612,7 @@ def detect_unknown_method_calls(
         Mapping of unknown method name -> truncated example call sites.
         Empty when every call resolves to a known or allowlisted symbol.
     """
-    return _flag_calls(_scan_fences(text), symbol_set)
+    return _flag_calls(_scan_fences(text).facts, symbol_set)
 
 
 def check_api_symbols_exist(
@@ -1627,19 +1660,50 @@ def check_api_symbols_exist(
         )
 
     symbol_set: set[str] = set(gathered_symbols)
-    facts = _scan_fences(spec)
-    flagged = _flag_calls(facts, symbol_set)
+    scan = _scan_fences(spec)
 
-    # #1870's honesty rule applied to the scan itself: a fence that fell back
-    # to the regex collectors was read with the weaker instrument, and saying
-    # so keeps "checked" from overstating what was verified.
-    fell_back = sum(1 for fence in facts if not fence.parsed)
-    scan_note = (
-        f" {fell_back} of {len(facts)} fence(s) would not parse as Python and "
-        f"were read with the regex fallback."
-        if fell_back
-        else ""
-    )
+    # #2392: a fence that CLAIMED to be Python and would not parse is a
+    # first-class defect in an implementation spec, and it is reported before
+    # anything else. It used to be scraped with regex and mentioned in a
+    # footnote, which fed this very check a confident, wrong call list.
+    if scan.failures:
+        listed = "; ".join(
+            f"lines {f.start_line}-{f.end_line} (```{f.tag}) — {f.error}"
+            for f in scan.failures[:5]
+        )
+        suffix = (
+            f" (and {len(scan.failures) - 5} more)"
+            if len(scan.failures) > 5
+            else ""
+        )
+        return CompletenessCheck(
+            check_name="api_symbols_exist",
+            passed=False,
+            details=(
+                f"{len(scan.failures)} code fence(s) tagged as Python do not "
+                f"parse as Python: {listed}{suffix}. Fix the snippet, or tag "
+                f"the fence with the language it actually contains (```text, "
+                f"```json, ```bash) if it was never meant to be Python."
+            ),
+        )
+
+    flagged = _flag_calls(scan.facts, symbol_set)
+
+    # #1870's honesty rule applied to the scan itself: say what was NOT read,
+    # so "checked" never overstates what was verified.
+    notes: list[str] = []
+    if scan.skipped_by_tag:
+        notes.append(
+            f"{scan.skipped_by_tag} fence(s) skipped by language tag "
+            f"(not Python)"
+        )
+    if scan.undeclared_unparsed:
+        notes.append(
+            f"{scan.undeclared_unparsed} untagged/diff fence(s) did not parse "
+            f"and were not read (no Python was claimed, so this is not a "
+            f"failure)"
+        )
+    scan_note = f" {'; '.join(notes)}." if notes else ""
 
     if not flagged:
         return CompletenessCheck(
