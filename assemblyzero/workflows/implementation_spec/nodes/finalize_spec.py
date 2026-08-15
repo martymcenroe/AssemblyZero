@@ -39,8 +39,47 @@ from assemblyzero.workflows.implementation_spec.state import ImplementationSpecS
 # Output directory relative to repo root (LLD Section 2.5 step 9)
 SPEC_OUTPUT_DIR = Path("docs/lld/drafts")
 
+# #2311: where the DURABLE handoff copy lands. The drafts copy above is swept
+# by the file janitor -- measured twice, and on boostgauge #1 the janitor
+# cleared it two seconds before the resume gate looked for it, in the same
+# launch:
+#
+#   16:18:48  docs/lld/drafts/spec-0001-...md: preserved-and-cleared
+#   16:18:50  RESUME abandoned for #1: spec artifact missing and not restorable
+#
+# A passed stage whose output no longer exists is not resumable, so the
+# relaunch was a guaranteed loss.
+#
+# Two properties make this location the handoff rather than a second copy:
+# `find_spec_path` already searches it FIRST, and it is evidence, which
+# standard 0027 exempts from every janitor.
+#
+# The write is FLAT, deliberately. `move_lineage_to_done` runs at the end of
+# this very node and relocates the run-scoped subdirectory
+# (`{N}-implspec/<UTC>/`) into done/; a file written beside that subdirectory
+# is untouched by the move and stays where the loader looks. `find_spec_path`
+# also globs this directory flat, so a file inside the run subdir would not be
+# found even before the move.
+LINEAGE_ACTIVE_DIR = Path("docs/lineage/active")
+
 # Minimum spec size to be considered valid for finalization
 MIN_SPEC_SIZE = 100
+
+
+def durable_spec_path(repo_root: Path, issue_number: int) -> Path:
+    """Where the spec must live for a relaunch's impl stage to find it (#2311).
+
+    Named `*-final-spec.md` because that is `find_spec_path`'s first pattern.
+    A later run overwrites it, which is correct for a handoff: the loader wants
+    the current spec, and every draft is preserved in the run-scoped lineage
+    beside it.
+    """
+    return (
+        repo_root
+        / LINEAGE_ACTIVE_DIR
+        / f"{issue_number}-implspec"
+        / f"spec-{issue_number:04d}-final-spec.md"
+    )
 
 
 # =============================================================================
@@ -204,6 +243,26 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     print(f"    Review iterations: {review_iteration}")
 
     # -------------------------------------------------------------------------
+    # #2311: the durable handoff copy, written before the lineage move below
+    # -------------------------------------------------------------------------
+    # This is the copy the next launch's impl stage loads. If it cannot be
+    # written the stage still passes -- the drafts copy exists and this run's
+    # impl reads it from memory -- but the RESUME contract is broken for the
+    # relaunch, so the failure is loud rather than swallowed.
+    handoff_path = durable_spec_path(repo_root, issue_number)
+    try:
+        handoff_path.parent.mkdir(parents=True, exist_ok=True)
+        handoff_path.write_text(finalized_content, encoding="utf-8")
+        print(f"    Handoff copy (janitor-immune): {handoff_path}")
+    except OSError as e:
+        handoff_path = None
+        print(
+            f"    WARNING: could not write the durable handoff copy ({e}). "
+            f"This run is unaffected, but a relaunch will not find the spec "
+            f"and will redraw it (#2311)."
+        )
+
+    # -------------------------------------------------------------------------
     # Save to audit trail
     # -------------------------------------------------------------------------
     audit_dir_str = state.get("audit_dir", "")
@@ -224,7 +283,13 @@ def finalize_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # Return state updates
     # -------------------------------------------------------------------------
     return {
-        "spec_path": str(spec_path),
+        # #2311: record the DURABLE location, not the drafts one. `resume_plan`
+        # reads this field first (`_resolve_stage_artifact` source 1), so
+        # recording the swept path is what made the recorded value a real path
+        # to a file the same run had already deleted -- which is why the #2414
+        # artifact lookup could not rescue it. Finalize must record wherever it
+        # writes, and it now writes somewhere that survives.
+        "spec_path": str(handoff_path or spec_path),
         # #2297: the only place this is set to "completed". The orchestrator
         # requires it, so a run that never reached finalize cannot be recorded
         # as a passed stage however many draft files it left on disk.
