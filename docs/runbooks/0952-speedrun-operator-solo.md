@@ -46,6 +46,7 @@ the verification is re-run rather than asserted (#2295):
 | `--follow` | re-attach to a roll already running and stream its output here. Takes no `--issue` |
 | `--log-dir` | where the triplets land. Default `<repo>/data/speedrun/runs` |
 | `--assemblyzero-root` | checkout that owns `orchestrate.py`. Default: the tool's own repo |
+| `--kill` | **emergency stop** (#2422) — kill the running roll and its whole process tree, stamping `KILLED BY OPERATOR` into the run's own events log so the stop is recorded as ordered rather than as a crash. Takes an optional `--issue`. Runs before every gate, so a stale or dirty tree cannot refuse it. When this console has no free prompt, create `data/speedrun/KILL` instead — the launcher watches for it **while a call is in flight**, not only between stages |
 | `--detach-stop` | stop a detached roll and everything it spawned |
 | `--override-prereqs` | launch even though the previous run's unresolved questions are still open (#2167) — runs anyway once; the next launch re-checks |
 | `--redraw-completed` | redraw an issue this arc has **already rolled to success** (#2191). Without it, an interactive launch demands a typed `REDRAW <N>` and a non-interactive one refuses — so an issue number typed out of habit cannot silently redo work already merged into the arc. Scoped to the current arc: a new base branch starts with an empty slate |
@@ -252,6 +253,39 @@ AZ-SpeedrunRoll                          N/A                    Ready
 ## § Stop
 
 **Operator.**
+
+### The emergency stop (#2422)
+
+```bash
+cd /c/Users/mcwiz/Projects/AssemblyZero
+poetry run python tools/speedrun_roll.py \
+    --repo /c/Users/mcwiz/Projects/boostgauge --kill --issue 1
+```
+
+This is the one to reach for. It kills the tree, stamps `KILLED BY OPERATOR`
+into the run's own events log so the postmortem reads an ordered stop rather
+than a crash, clears any stop file, and exits 0. It runs **before every gate**,
+so a stale or dirty tree cannot refuse it.
+
+**When this console has no free prompt** — which was the actual situation on
+2026-08-15, because the launching console was streaming the roll — create the
+stop file from any other window, or any file manager:
+
+```bash
+touch /c/Users/mcwiz/Projects/boostgauge/data/speedrun/KILL
+```
+
+The launcher watches for that file **while a model call is in flight**, not
+only at stage boundaries. A stop that waited for a boundary would not have
+touched the call that produced this issue, which had thirteen minutes left to
+run. `KILL-<issue>` stops one issue; the bare `KILL` stops whatever is running,
+because under stress you should not have to remember which issue is rolling.
+
+The roll exits **94**, which is a verdict and not a failure: the stages that
+passed are preserved, and the next launch resumes from the stage that was
+interrupted rather than redrawing what was already paid for.
+
+### The older detach-only stop
 
 ```bash
 cd /c/Users/mcwiz/Projects/AssemblyZero
