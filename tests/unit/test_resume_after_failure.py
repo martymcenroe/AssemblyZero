@@ -255,14 +255,34 @@ def test_resume_base_accepts_sound_base_without_reset(repo, log, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+class _FakeChild:
+    """Stands in for the orchestrator child.
+
+    #2422 moved `roll_issue` from `subprocess.run` to `Popen` so the kill
+    watch has a live process to stop while a call is in flight. The subject of
+    these tests is the child's argv, not the transport, so the stub follows.
+    """
+
+    def __init__(self, cmd, returncode=0):
+        self.args = list(cmd)
+        self.pid = -1
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
 def _capture_child(monkeypatch):
     captured: list[list[str]] = []
 
-    def fake_run(cmd, **_kw):
+    def fake_popen(cmd, **_kw):
         captured.append(list(cmd))
-        return subprocess.CompletedProcess(cmd, 0)
+        return _FakeChild(cmd)
 
-    monkeypatch.setattr(speedrun_roll.subprocess, "run", fake_run)
+    monkeypatch.setattr(speedrun_roll.subprocess, "Popen", fake_popen)
     return captured
 
 

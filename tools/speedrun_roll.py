@@ -88,6 +88,16 @@ from assemblyzero.speedrun.archive import (  # noqa: E402  (#2353)
     verify_manifest,
 )
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
+from assemblyzero.speedrun.emergency_stop import (  # noqa: E402  (#2422)
+    KILL_EXIT_CODE,
+    KILLED_MARKER,
+    KillWatch,
+    banner_lines,
+    clear_kill_files,
+    find_kill_file,
+    killed_verdict_lines,
+    tree_kill,
+)
 from assemblyzero.speedrun.successes import (  # noqa: E402  (#2191)
     completed_on,
     describe,
@@ -806,6 +816,36 @@ def draft_is_stale(
     return False
 
 
+def _halted_stage(data: dict, results: dict) -> str | None:
+    """The stage a killed run was in the middle of when it was stopped (#2422).
+
+    An ordered stop never gets to record a result. `stage_results` holds the
+    stages that FINISHED; `current_stage` names the one that was in flight; and
+    nothing is marked failed, because nothing failed. `resume_plan` chose the
+    stage to resume by scanning for a failed status, so a killed run matched
+    nothing, resumed from nowhere, and redrew every passed stage -- which is
+    the opposite of what an ordered stop is supposed to guarantee.
+
+    Measured on boostgauge #1 after the 2026-08-15 kill: `spec` passed, `impl`
+    had no entry at all, and `current_stage` read `impl`.
+
+    Two guards keep this from inventing a resume over a gap: a run that
+    recorded `completed_at` is finished rather than halted, and every stage
+    before the in-flight one must have passed or been skipped.
+    """
+    if data.get("completed_at"):
+        return None
+    current = data.get("current_stage", "")
+    if current not in STAGE_ORDER:
+        return None
+    if results.get(current, {}).get("status") in ("passed", "skipped"):
+        return None  # it finished; nothing was in flight
+    for earlier in STAGE_ORDER[: STAGE_ORDER.index(current)]:
+        if results.get(earlier, {}).get("status") not in ("passed", "skipped"):
+            return None
+    return current
+
+
 def resume_plan(
     az_root: Path, repo_root: Path, issue: int, log: EventLog
 ) -> str | None:
@@ -853,6 +893,13 @@ def resume_plan(
          if results.get(s, {}).get("status") in ("failed", "blocked")),
         None,
     )
+    # #2422: no failed stage does not mean nothing to resume. A run stopped on
+    # the operator's order was in the MIDDLE of a stage, which records no
+    # result at all -- so the stage in flight is the stage to resume from.
+    halted = False
+    if failed is None:
+        failed = _halted_stage(data, results)
+        halted = failed is not None
     if failed not in RESUMABLE_STAGES:
         return None
 
@@ -880,7 +927,9 @@ def resume_plan(
             return None
 
     log.write(
-        f"RESUME planned for #{issue}: from '{failed}' (state {state_path.name})"
+        f"RESUME planned for #{issue}: from '{failed}' "
+        f"({'stopped mid-stage' if halted else 'failed stage'}, "
+        f"state {state_path.name})"
     )
     return failed
 
@@ -970,11 +1019,18 @@ def roll_issue(
             )
         log.write(f"LAUNCH base={base} -> {out_path.name}")
 
+        # #2422: the stop the operator can reach without a prompt. The watch
+        # runs CONCURRENTLY with the child, not around it -- the call that
+        # produced this issue had thirteen minutes left to run, and a check
+        # that only fires at a stage boundary would not have touched it.
+        watch = KillWatch(repo_root, issue, on_kill=log.write)
+
         # Direct redirect: the child's stdout goes straight to the file with no
         # pipe in the path. Restoring a pipe here reintroduces the teardown that
-        # killed campaign runs.
+        # killed campaign runs. Popen rather than run() so the watch has the
+        # child to kill while it is still running; the redirect is unchanged.
         with out_path.open("w", encoding="utf-8", errors="replace") as fh:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd, cwd=str(az_root), stdout=fh, stderr=subprocess.STDOUT,
                 env=_child_env(tag, run_start),
                 # #2037: no console for the pipeline either. Under Task
@@ -984,10 +1040,23 @@ def roll_issue(
                     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 ),
             )
-        log.write(f"CHILD EXITED rc={proc.returncode}")
+            with watch.watch(proc):
+                returncode = proc.wait()
+        log.write(f"CHILD EXITED rc={returncode}")
 
-    log.write(f"EXIT rc={proc.returncode}")
-    return proc.returncode
+        if watch.fired:
+            # The child's own rc after a tree-kill is whatever Windows chose;
+            # it says nothing. The verdict is the operator's order.
+            log.write(
+                f"{KILLED_MARKER}: #{issue} stopped by operator "
+                f"(child rc={returncode} discarded)"
+            )
+            clear_kill_files(repo_root, issue)
+            log.write(f"EXIT rc={KILL_EXIT_CODE}")
+            return KILL_EXIT_CODE
+
+    log.write(f"EXIT rc={returncode}")
+    return returncode
 
 
 def _child_env(tag: str = "", start: str = "") -> dict[str, str]:
@@ -1294,6 +1363,89 @@ def stop_detached(log_dir: Path) -> int:
     if ended.returncode != 0 and not killed:
         log.write("DETACH-STOP nothing was running")
         print(f"Task '{TASK_NAME}' was not running.")
+    return 0
+
+
+def _active_run_event_logs(log_dir: Path, issue: int | None) -> list[Path]:
+    """The run's OWN events logs, newest last.
+
+    `stop_detached` stamps `detach-events.log`, which is the wrapper's record,
+    not the run's. A postmortem reads `run-issue<N>-<time>-events.log`, and an
+    ordered stop that never appears there is indistinguishable from a crash --
+    which is exactly what the 2026-08-15 kill looked like afterwards (#2422).
+    """
+    pattern = f"run-issue{issue}-*-events.log" if issue is not None else "run-*-events.log"
+    try:
+        return sorted(Path(log_dir).glob(pattern), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return []
+
+
+def kill_roll(repo_root: Path, log_dir: Path, issue: int | None) -> int:
+    """Stop a running roll on the operator's order, and say so in the record.
+
+    The difference from `--detach-stop` is not the killing -- it is that this
+    stamps `KILLED BY OPERATOR` into the run's own events log, so the
+    postmortem and the healing ledger read an ordered stop rather than a
+    corpse, and clears any stop file so the next launch is not stopped by a
+    leftover.
+    """
+    log_dir = Path(log_dir)
+    stamped: list[Path] = []
+
+    def _stamp_run_logs(message: str) -> None:
+        for path in _active_run_event_logs(log_dir, issue):
+            try:
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(f"{_stamp()} {message}\n")
+                stamped.append(path)
+            except OSError:
+                continue
+
+    who = f"#{issue}" if issue is not None else "all issues"
+    path = pid_file(log_dir)
+    killed = False
+    pid = ""
+    if path.exists():
+        pid = path.read_text(encoding="utf-8").strip()
+        if not is_live_python(pid):
+            # Windows recycles pids; a stale file plus an unlucky reuse would
+            # tree-kill somebody else's work on a shared machine.
+            print(f"Recorded pid {pid} is not a running python process.")
+            print("Nothing to stop -- the roll is already gone.")
+            path.unlink(missing_ok=True)
+        else:
+            ok, detail = tree_kill(pid)
+            killed = ok
+            if ok:
+                print(f"Stopped the roll and its process tree (pid {pid}).")
+            else:
+                print(f"No live tree for pid {pid} ({detail or 'no detail'}).")
+            path.unlink(missing_ok=True)
+    else:
+        print(f"No roll is recorded as running here ({path}).")
+
+    if killed:
+        _stamp_run_logs(
+            f"{KILLED_MARKER}: --kill for {who} tree-killed pid {pid}"
+        )
+    # The stop file is cleared whether or not a tree was found: the operator's
+    # order has been carried out either way, and a surviving file would stop
+    # the NEXT launch for a reason nobody would connect to today.
+    for removed in clear_kill_files(repo_root, issue):
+        print(f"Cleared stop file {removed}.")
+
+    if sys.platform == "win32":
+        # Return the scheduled task to Ready when one was used. Absence is
+        # normal -- a foreground roll never registered one.
+        _run(["schtasks", "/End", "/TN", TASK_NAME])
+
+    if stamped:
+        print(f"Stamped '{KILLED_MARKER}' into {len(stamped)} run log(s).")
+    print(
+        "\n  This was an ordered stop, not a failure. The stages that passed "
+        "are preserved;\n  the next launch resumes from where this one stopped."
+    )
     return 0
 
 
@@ -2480,6 +2632,21 @@ def _render_verdict(repo_root, requested, rolled, blocked, stopped_at, code, sin
             "  Do not re-roll without resolution -- the next launch will "
             "refuse while these stay open (--override-prereqs to run anyway)."
         )
+    elif code == KILL_EXIT_CODE:
+        # #2422: an ordered stop reads as a decision, never as a failure. The
+        # branch below would have called it "FAILED ... after exhausting its
+        # attempts", which is untrue in both halves.
+        who = f"#{stopped_at}" if stopped_at is not None else "the batch"
+        print(f"ROLL STOPPED BY OPERATOR at {who}.")
+        remaining = [i for i in requested if i not in rolled and i != stopped_at]
+        if remaining:
+            print(f"  Not rolled: {', '.join(f'#{i}' for i in remaining)}.")
+        print(f"  Rolled successfully before the stop: {names}.")
+        print(
+            "  The stages that passed are preserved. Next step: relaunch when "
+            "ready -- it resumes\n  from where this stopped rather than "
+            "redrawing what was already paid for."
+        )
     elif stopped_at is not None:
         print(
             f"ROLL FAILED at #{stopped_at} (exit {code}) after exhausting "
@@ -2567,6 +2734,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop a detached roll and every process it spawned (#2016)",
     )
     parser.add_argument(
+        "--kill", action="store_true",
+        help=(
+            "EMERGENCY STOP: kill the running roll and its whole process "
+            "tree, stamping KILLED BY OPERATOR into the run's events log so "
+            "the stop is recorded as ordered rather than as a crash (#2422). "
+            "Takes an optional --issue. When this console has no free prompt, "
+            "create data/speedrun/KILL instead -- the launcher watches for it "
+            "while a call is in flight."
+        ),
+    )
+    parser.add_argument(
         "--override-prereqs", action="store_true",
         help=(
             "Launch even though a previous run's questions are still open "
@@ -2650,7 +2828,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Stopping is about processes, not code: it must work even from a stale or
-    # dirty tree, so it comes before the staleness gate.
+    # dirty tree, so it comes before the staleness gate. #2422 adds --kill for
+    # the same reason and one more: an emergency stop that a gate could refuse
+    # is not an emergency stop.
+    if getattr(args, "kill", False):
+        return kill_roll(repo_root, log_dir, args.issue[0] if args.issue else None)
+
     if args.detach_stop:
         return stop_detached(log_dir)
 
@@ -2757,6 +2940,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     if completed_refusal is not None:
         return completed_refusal
+
+    # #2422: a stop file left by a previous kill would silently stop this roll
+    # seconds after it started. Clear it here, in the console the operator is
+    # standing in, and say so -- rather than in the detached task where the
+    # explanation is invisible.
+    leftover = find_kill_file(repo_root, args.issue[0] if args.issue else None)
+    if leftover is not None:
+        for removed in clear_kill_files(
+            repo_root, args.issue[0] if args.issue else None
+        ):
+            print(f"Cleared a leftover stop file from an earlier kill: {removed}")
+
+    # #2422: the emergency stop is taught at the moment of launch, beside the
+    # log path. An emergency control the operator cannot remember under stress
+    # does not exist, and the 2026-08-15 kill needed an agent to perform.
+    for line in banner_lines(
+        repo_root, args.issue[0] if args.issue else None, log_dir
+    ):
+        print(line)
 
     if args.detach:
         code = launch_detached(args, extra, repo_root, az_root, log_dir)
@@ -2926,6 +3128,19 @@ def main(argv: list[str] | None = None) -> int:
                     f"STORM ended #{issue} -- the provider stopped answering; "
                     "nothing was redrawn (#2206). Relaunch when it recovers."
                 )
+            # #2422: an ordered stop is a verdict, not a failure. It gets its
+            # own branch BEFORE the generic halt below, so the operator is
+            # never told to diagnose a cause they created on purpose.
+            elif code == KILL_EXIT_CODE:
+                session.write(
+                    f"{KILLED_MARKER}: #{issue} stopped on the operator's "
+                    "order. Passed stages preserved; the next launch resumes "
+                    "from where this stopped."
+                )
+                for line in killed_verdict_lines(issue, None):
+                    print(line)
+                stopped_at = issue
+                return code
             elif code not in (0, 91):
                 session.write(
                     f"HALT #{issue} exited {code} -- no redraw (#2206). "
