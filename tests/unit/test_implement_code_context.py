@@ -193,27 +193,42 @@ class TestComputeDynamicTimeout:
         assert timeout > 301
         assert timeout >= FILE_TIMEOUT_FLOOR
 
-    def test_large_prompt_gets_higher_timeout(self):
-        large_prompt = "x" * 88000
-        timeout = compute_dynamic_timeout(large_prompt)
-        assert timeout > FILE_TIMEOUT_FLOOR
-        assert timeout == min(FILE_TIMEOUT_FLOOR + 88, FILE_TIMEOUT_CAP)
-
     def test_timeout_is_capped(self):
         huge_prompt = "x" * 10_000_000
         timeout = compute_dynamic_timeout(huge_prompt)
         assert timeout == FILE_TIMEOUT_CAP
 
-    def test_medium_prompt_scales_linearly(self):
-        medium_prompt = "x" * 50000
-        timeout = compute_dynamic_timeout(medium_prompt)
-        assert timeout == FILE_TIMEOUT_FLOOR + 50
+    def test_the_scaling_no_longer_carries_weight(self):
+        """#2405: the per-character scaling is retired, and this records why.
+
+        It granted one second per 1000 characters. The fix-loop prompt that
+        killed boostgauge #1 was about 2.5 KB, so it bought two seconds over the
+        floor -- the run's own log shows the resulting limit as "timed out after
+        602s", which is 600 plus those two. Reaching the 1200 cap from a 600
+        floor required 600,000 characters, so the cap had never once bound in
+        the life of the function.
+
+        These two tests previously asserted the scaling arithmetic
+        (`FILE_TIMEOUT_FLOOR + 50`, `+ 88`) and passed throughout, because they
+        asserted the formula rather than what the formula was for. That is the
+        same failure the class docstring above describes for the 300s base.
+
+        The floor now starts at the cap, so the computed value is constant. What
+        makes a long call survive is the idle timeout in the transport, not this
+        number, which is only an outer backstop.
+        """
+        assert compute_dynamic_timeout("x" * 50_000) == FILE_TIMEOUT_FLOOR
+        assert compute_dynamic_timeout("x" * 88_000) == FILE_TIMEOUT_FLOOR
+        assert compute_dynamic_timeout("tiny") == FILE_TIMEOUT_FLOOR
 
     def test_the_floor_never_drops_back(self):
-        """Guard against a later edit quietly lowering the floor toward the
-        value that produced 15 timeouts in a single stage."""
+        """Guard against a later edit quietly lowering the floor toward either
+        value that has already killed a stage: 300 (#2026) or 600 (#2405)."""
         assert FILE_TIMEOUT_FLOOR >= CLI_TIMEOUT
-        assert FILE_TIMEOUT_CAP > FILE_TIMEOUT_FLOOR
+        assert FILE_TIMEOUT_FLOOR >= 1200, (
+            "600 is the wall boostgauge #1 died against five times in one run"
+        )
+        assert FILE_TIMEOUT_CAP >= FILE_TIMEOUT_FLOOR
 
 
 # =============================================================================

@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 # Closes #1495: llm_provider.py uses logger.warning at line 593 for the
@@ -352,6 +353,202 @@ def _kill_process_tree(pid: int) -> None:
     kill_process_tree(pid)
 
 
+# --- #2405: streaming transport with an idle timeout -------------------------
+#
+# Every timeout in this file used to be wall-clock: `proc.communicate(timeout=N)`
+# blocks until the child closes its pipes, so the only question it can answer is
+# "has N seconds passed", never "is anything still happening". A wall-clock
+# ceiling keyed to nothing observable gets overtaken every time the work grows —
+# #373 raised it, #2026 raised it, #2405 is the third occurrence — because the
+# quantity it bounds is not the quantity that matters.
+#
+# A call that is emitting tokens is alive by definition. `claude -p
+# --output-format stream-json --include-partial-messages` emits a
+# content_block_delta per chunk; measured on 2026-08-15 the gaps ran 0.28-0.86s
+# with a ~0.65s median across a 150-line generation. So silence is a signal with
+# an enormous margin: two minutes of it is roughly 180 missed events, which no
+# live generation produces, while a hung process produces nothing but silence.
+
+#: Seconds of total silence before a call is killed. Sits ~180x above the
+#: measured inter-event gap, so it separates "stopped" from "slow" without
+#: needing to know how long the work legitimately takes.
+IDLE_TIMEOUT_SECONDS = 120
+
+#: Override so a pathological-but-real workload never needs a merge to survive.
+ENV_IDLE_TIMEOUT = "AZ_LLM_IDLE_TIMEOUT"
+
+#: How often the watchdog checks. Small enough to be precise, large enough to
+#: cost nothing over a call measured in minutes.
+_IDLE_POLL_SECONDS = 0.5
+
+#: Event types retained for parsing. `stream_event` deltas are the liveness
+#: signal and arrive in the thousands, so they are counted and discarded rather
+#: than accumulated — the final `result` event carries the complete text anyway.
+_DELTA_EVENT_TYPE = "stream_event"
+
+
+def idle_timeout_seconds() -> int:
+    """Idle threshold in seconds, environment-overridable.
+
+    A missing, unparseable, or non-positive override falls back to the default:
+    an operator setting this is usually rescuing a stalled run, and a typo must
+    not make every call immortal or instantly fatal.
+    """
+    raw = os.environ.get(ENV_IDLE_TIMEOUT, "").strip()
+    if not raw:
+        return IDLE_TIMEOUT_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "%s=%r is not an integer; using %ss",
+            ENV_IDLE_TIMEOUT, raw, IDLE_TIMEOUT_SECONDS,
+        )
+        return IDLE_TIMEOUT_SECONDS
+    if value <= 0:
+        logger.warning(
+            "%s=%s is not positive; using %ss",
+            ENV_IDLE_TIMEOUT, value, IDLE_TIMEOUT_SECONDS,
+        )
+        return IDLE_TIMEOUT_SECONDS
+    return value
+
+
+@dataclass
+class _StreamOutcome:
+    """What a streamed child process produced, and how it ended."""
+
+    events: list = field(default_factory=list)
+    stderr: str = ""
+    returncode: int | None = None
+    timeout_kind: str = ""  # "" | "idle" | "wall"
+    silent_seconds: float = 0.0
+    total_events: int = 0
+
+    @property
+    def timed_out(self) -> bool:
+        return bool(self.timeout_kind)
+
+    def result_payload(self) -> str:
+        """The bytes the existing parser expects.
+
+        The final ``result`` event carries the same keys the old
+        ``--output-format json`` dict did (``result``, ``usage``,
+        ``total_cost_usd``, ``structured_output``), so handing it back as a
+        JSON object leaves every downstream branch untouched. Without one —
+        an error path, or a kill mid-stream — the retained events go back as
+        an array, which the #1498 list branch already knows how to read.
+        """
+        for event in reversed(self.events):
+            if isinstance(event, dict) and event.get("type") == "result":
+                return json.dumps(event)
+        return json.dumps(self.events)
+
+
+def _stream_with_idle_timeout(
+    proc: subprocess.Popen,
+    content: str,
+    idle_timeout: int,
+    wall_timeout: int | None,
+) -> _StreamOutcome:
+    """Feed `content` to `proc` and read its stream, killing it when it goes quiet.
+
+    The child is killed when it has produced no output for `idle_timeout`
+    seconds. `wall_timeout` remains as an outer backstop for a process that
+    streams forever; reaching it is pathological rather than routine, which is
+    the inversion this function exists to perform.
+    """
+    outcome = _StreamOutcome()
+    state = {"last": time.monotonic()}
+    lock = threading.Lock()
+
+    def _touch() -> None:
+        with lock:
+            state["last"] = time.monotonic()
+
+    def _last_activity() -> float:
+        with lock:
+            return state["last"]
+
+    def _pump_stdin() -> None:
+        try:
+            if proc.stdin:
+                proc.stdin.write(content)
+                proc.stdin.close()
+        except (OSError, ValueError):
+            # Child died before consuming stdin; the watchdog reports why.
+            pass
+
+    def _pump_stdout() -> None:
+        try:
+            if not proc.stdout:
+                return
+            for line in proc.stdout:
+                # Liveness is per LINE, before any parsing: a line we cannot
+                # decode is still proof the process is running.
+                _touch()
+                outcome.total_events += 1
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    event = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict) and event.get("type") == _DELTA_EVENT_TYPE:
+                    continue
+                outcome.events.append(event)
+        except (OSError, ValueError):
+            pass
+
+    def _pump_stderr() -> None:
+        try:
+            if proc.stderr:
+                outcome.stderr = proc.stderr.read() or ""
+        except (OSError, ValueError):
+            pass
+
+    threads = [
+        threading.Thread(target=_pump_stdin, daemon=True),
+        threading.Thread(target=_pump_stdout, daemon=True),
+        threading.Thread(target=_pump_stderr, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+
+    started = time.monotonic()
+    while True:
+        returncode = proc.poll()
+        if returncode is not None:
+            outcome.returncode = returncode
+            break
+
+        now = time.monotonic()
+        silent_for = now - _last_activity()
+        if silent_for >= idle_timeout:
+            outcome.timeout_kind = "idle"
+            outcome.silent_seconds = silent_for
+            _kill_process_tree(proc.pid)
+            break
+        if wall_timeout is not None and (now - started) >= wall_timeout:
+            outcome.timeout_kind = "wall"
+            outcome.silent_seconds = silent_for
+            _kill_process_tree(proc.pid)
+            break
+
+        time.sleep(_IDLE_POLL_SECONDS)
+
+    # Let the readers drain what is already buffered. They are daemons on
+    # pipes that are closing, so a bounded join cannot hang the caller.
+    for thread in threads:
+        thread.join(timeout=5)
+
+    if outcome.returncode is None:
+        outcome.returncode = proc.poll()
+
+    return outcome
+
+
 class ClaudeCLIProvider(LLMProvider):
     """Claude provider using claude -p CLI (Max subscription).
 
@@ -451,6 +648,89 @@ class ClaudeCLIProvider(LLMProvider):
             "Install with: npm install -g @anthropic-ai/claude-code"
         )
 
+    def _probe_alive(self) -> bool:
+        """Ask the provider one trivial question. True if it answered (#2405).
+
+        Deliberately uses the plain buffered path with a wall-clock timeout
+        rather than the streaming transport it is diagnosing: the probe must be
+        able to indict that transport, so it cannot depend on it. A trivial
+        prompt answers in seconds, which is the one case where wall-clock is
+        the right instrument.
+        """
+        try:
+            cli_path = self._find_cli()
+        except RuntimeError:
+            return False
+
+        cmd = [
+            cli_path,
+            "-p",
+            "--output-format", "json",
+            "--setting-sources", "user",
+            "--tools", "",
+            "--strict-mcp-config",
+            "--model", self._model_id,
+        ]
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            )
+        env = os.environ.copy()
+        env["PYTHONWARNINGS"] = "ignore"
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                creationflags=creation_flags,
+                env=env,
+            )
+        except OSError:
+            return False
+
+        try:
+            stdout, _ = proc.communicate(
+                input=provider_storm.PROBE_PROMPT,
+                timeout=provider_storm.PROBE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            _kill_process_tree(proc.pid)
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+            return False
+        except OSError:
+            return False
+
+        return proc.returncode == 0 and bool(stdout and stdout.strip())
+
+    def _classify_storm(self, message: str, consecutive: int) -> str:
+        """Append the right verdict to a timeout message (#2405).
+
+        Counting consecutive timeouts cannot distinguish a provider that
+        stopped answering from a ceiling sitting inside the call's duration.
+        One probe can, and it costs seconds against a storm branch that
+        otherwise halts the roll for fifteen minutes or more.
+        """
+        verdict = provider_storm.diagnose(self._probe_alive)
+        if verdict == "ceiling":
+            # ASCII only: this reaches a cp1252 console, where a dash renders
+            # as a literal "?" (the exposure #2367/#2369 are about).
+            return (
+                f"{message} ({consecutive} consecutive, but a probe was "
+                f"answered: {provider_storm.CEILING_MARKER})"
+            )
+        return (
+            f"{message} ({consecutive} consecutive — "
+            f"{provider_storm.STORM_MARKER})"
+        )
+
     def invoke(
         self,
         system_prompt: str,
@@ -489,10 +769,17 @@ class ClaudeCLIProvider(LLMProvider):
             )
 
         # Build command - prompt passed via stdin
+        # #2405: stream-json instead of json, so the transport can see progress
+        # rather than only elapsed time. --include-partial-messages is what makes
+        # the stream continuous: without it the assistant event does not arrive
+        # until the message is complete, and a long generation would look
+        # identical to a hang. --verbose is required for stream-json under -p.
         cmd = [
             cli_path,
             "-p",
-            "--output-format", "json",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--include-partial-messages",
             "--setting-sources", "user",  # Skip project CLAUDE.md context
             "--tools", "",  # Disable built-in tools
             "--strict-mcp-config",  # Disable MCP tools (issue #157)
@@ -572,35 +859,55 @@ class ClaudeCLIProvider(LLMProvider):
                     creationflags=creation_flags,
                     env=env,
                 )
-                try:
-                    stdout, stderr = proc.communicate(
-                        input=content, timeout=timeout_seconds
-                    )
-                except subprocess.TimeoutExpired:
-                    # Kill the entire process tree so pipes close immediately
-                    _kill_process_tree(proc.pid)
-                    # Drain any remaining pipe data
-                    try:
-                        proc.communicate(timeout=5)
-                    except (subprocess.TimeoutExpired, OSError):
-                        pass
+                # #2405: the idle threshold is the operative limit; the caller's
+                # timeout_seconds survives only as an outer backstop against a
+                # process that streams forever.
+                idle_limit = idle_timeout_seconds()
+                outcome = _stream_with_idle_timeout(
+                    proc,
+                    content=content,
+                    idle_timeout=idle_limit,
+                    wall_timeout=timeout_seconds,
+                )
+                stdout = outcome.result_payload()
+                stderr = outcome.stderr
+
+                if outcome.timed_out:
                     duration_ms = int((time.time() - start_time) * 1000)
+                    # The literal "timed out" is a contract, not prose:
+                    # analyze_requirements._is_timeout classifies by substring
+                    # because the provider returns a result rather than raising.
+                    # Both branches keep it; only what follows differs.
+                    if outcome.timeout_kind == "idle":
+                        message = (
+                            f"claude -p timed out after "
+                            f"{int(outcome.silent_seconds)}s with no output "
+                            f"(idle limit {idle_limit}s, {outcome.total_events} "
+                            f"events received before it went quiet)"
+                        )
+                    else:
+                        message = (
+                            f"claude -p timed out after {timeout_seconds}s while "
+                            f"still producing output ({outcome.total_events} "
+                            f"events); raise AZ_FILE_TIMEOUT_FLOOR rather than "
+                            f"treating this as a provider failure"
+                        )
                     # #2086: consecutive timeouts are a provider storm, not a
                     # run of bad luck. Eighteen in one roll on 2026-08-01 killed
                     # two rolls; the counter is what lets the launcher wait
                     # instead of redrawing straight into the same wall.
-                    consecutive = provider_storm.record_timeout(timeout_seconds)
-                    message = f"claude -p timed out after {timeout_seconds}s"
-                    if provider_storm.is_storm():
-                        message = (
-                            f"{message} "
-                            f"({consecutive} consecutive — "
-                            f"{provider_storm.STORM_MARKER})"
-                        )
+                    #
+                    # #2405: a wall-clock backstop hit by a call that was still
+                    # streaming says nothing about provider health, so it must
+                    # not feed the storm counter at all. Only silence counts.
+                    if outcome.timeout_kind == "idle":
+                        consecutive = provider_storm.record_timeout(idle_limit)
+                        if provider_storm.is_storm():
+                            message = self._classify_storm(message, consecutive)
                     call_result = LLMCallResult(
                         success=False,
                         response=None,
-                        raw_response=None,
+                        raw_response=stdout,
                         error_message=message,
                         provider=self.provider_name,
                         model_used=self._model,

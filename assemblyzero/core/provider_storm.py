@@ -31,6 +31,8 @@ target repo's fault and must not be classified as one.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 #: Consecutive timeouts before the roll is declared storm-bound.
 STORM_THRESHOLD = 3
 
@@ -45,8 +47,28 @@ BACKOFF_MINUTES = (15, 30, 60)
 
 STORM_MARKER = "PROVIDER STORM"
 
+#: #2405: the other diagnosis. Consecutive timeouts can mean the provider
+#: stopped answering, or they can mean our own limit sits inside the call's
+#: duration. Counting timeouts cannot tell these apart, because a timeout is
+#: the one failure the caller times rather than the provider reports.
+CEILING_MARKER = "TIMEOUT CEILING"
+
+#: What the probe asks. Trivial by design: it is testing whether anyone is
+#: home, not whether the model is any good.
+PROBE_PROMPT = "Reply with the single word ok."
+
+#: Probe budget. The measurement this was built from answered in 5.867s, and
+#: the in-band evidence on #2405 showed a 16.9s success immediately after a
+#: storm was declared, so a minute is generous without being a second wall.
+PROBE_TIMEOUT_SECONDS = 60
+
 _consecutive_timeouts = 0
 _last_timeout_seconds = 0
+
+#: What the last "ceiling" verdict was about. Deliberately NOT cleared by
+#: reset(), because diagnose() calls reset() as part of reaching that verdict.
+_last_ceiling_count = 0
+_last_ceiling_seconds = 0
 
 
 def reset() -> None:
@@ -91,6 +113,67 @@ def backoff_minutes(storm_attempt: int) -> int:
         return 0
     index = min(storm_attempt, len(BACKOFF_MINUTES)) - 1
     return BACKOFF_MINUTES[index]
+
+
+def diagnose(probe: Callable[[], bool]) -> str:
+    """Decide whether a run of timeouts is weather or a wall (#2405).
+
+    `probe` makes one trivial provider call and returns True if it answered.
+
+    Returns ``"none"`` when no storm is pending, ``"ceiling"`` when the provider
+    answered and the timeouts are therefore our own limit saturating, and
+    ``"storm"`` when the provider did not answer.
+
+    A ``"ceiling"`` verdict CLEARS the counter, and that is the point rather than
+    a side effect: a provider that just answered has proven it is up, which is
+    the same thing ``record_success`` means. Leaving the counter set would halt
+    the roll as storm-bound on the strength of evidence we just refuted, and the
+    launcher reads ``is_storm()`` rather than this return value.
+
+    A probe that raises counts as a failed probe. If we cannot reach the
+    provider to ask, we are not entitled to overturn the storm reading.
+
+    The evidence this exists for: boostgauge #1's run declared PROVIDER STORM on
+    three consecutive timeouts, and the very next call succeeded in 16.9s, with
+    ten Claude calls completing in 6.3-31.6s interleaved through the same
+    window. The provider was answering the entire time.
+    """
+    global _last_ceiling_count, _last_ceiling_seconds
+
+    if not is_storm():
+        return "none"
+    try:
+        answered = bool(probe())
+    except Exception:
+        answered = False
+    if answered:
+        # Preserve what the verdict was about before clearing it. reset() wipes
+        # both counters, so a ceiling_message() called afterwards would
+        # otherwise report "0 requests in a row", which is worse than useless
+        # in the one message whose job is to explain what just happened.
+        _last_ceiling_count = _consecutive_timeouts
+        _last_ceiling_seconds = _last_timeout_seconds
+        reset()
+        return "ceiling"
+    return "storm"
+
+
+def ceiling_message(count: int | None = None, timeout_seconds: int | None = None) -> str:
+    """Plain English for the cap-saturation verdict. No jargon, no exit codes.
+
+    Defaults describe the most recent ``diagnose`` ceiling verdict, because by
+    the time anyone asks for this message the live counter has been cleared.
+    """
+    count = _last_ceiling_count if count is None else count
+    seconds = _last_ceiling_seconds if timeout_seconds is None else timeout_seconds
+    duration = f"{seconds} seconds" if seconds else "its time limit"
+    return (
+        f"{CEILING_MARKER}: {count} requests in a row each ran past {duration}, "
+        f"but a test request sent straight afterwards was answered normally. "
+        f"The model provider is up, so this is our own time limit being too "
+        f"short for the work rather than a provider outage. Raising "
+        f"AZ_FILE_TIMEOUT_FLOOR is the lever; waiting will not help."
+    )
 
 
 def storm_message(count: int | None = None, timeout_seconds: int | None = None) -> str:
