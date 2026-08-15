@@ -36,6 +36,7 @@ a corpse, and the next launch resumes instead of refusing or resetting.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -171,10 +172,28 @@ def tree_kill(pid: int | str) -> tuple[bool, str]:
         )
         detail = ((result.stdout or "") + (result.stderr or "")).strip()
         return result.returncode == 0, detail
+
+    # POSIX. Kill the child's process GROUP only when it has one of its own,
+    # and never otherwise.
+    #
+    # A child spawned without `start_new_session` INHERITS our process group,
+    # so `killpg(getpgid(child))` names the group this process is in and takes
+    # us down with the target. Caught on CI: ubuntu-latest ran the mid-call
+    # fixtures, the group kill reached pytest, and the job hung at three times
+    # its normal duration. An emergency stop whose blast radius includes its
+    # own caller is not a stop.
     try:
-        os.killpg(os.getpgid(int(pid)), 9)
-        return True, ""
+        target = int(pid)
+        group = os.getpgid(target)
     except (OSError, ValueError) as exc:
+        return False, str(exc)
+    try:
+        if group != os.getpgid(0):
+            os.killpg(group, signal.SIGKILL)
+        else:
+            os.kill(target, signal.SIGKILL)
+        return True, ""
+    except OSError as exc:
         return False, str(exc)
 
 

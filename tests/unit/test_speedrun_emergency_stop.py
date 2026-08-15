@@ -14,6 +14,7 @@ the call that produced this issue, which had thirteen minutes left to run.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -98,11 +99,22 @@ class TestKillWatchMidCall:
     """
 
     def _sleeper(self, seconds: float = 30) -> subprocess.Popen:
-        """A real child that will outlive the test unless something kills it."""
+        """A real child that will outlive the test unless something kills it.
+
+        `start_new_session` on POSIX is not incidental: it gives the child its
+        OWN process group, which is both what the launcher does for the real
+        pipeline and what makes the group-kill path safe to exercise. Without
+        it the child shares this process's group, and a group kill would take
+        the test runner down -- see `test_tree_kill_never_kills_its_own_group`.
+        """
+        kwargs = {}
+        if sys.platform != "win32":
+            kwargs["start_new_session"] = True
         return subprocess.Popen(
             [sys.executable, "-c", f"import time; time.sleep({seconds})"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            **kwargs,
         )
 
     def test_child_is_killed_while_still_running(self, repo):
@@ -168,6 +180,65 @@ class TestKillWatchMidCall:
         (repo / "data" / "speedrun" / "KILL-1").write_text("", encoding="utf-8")
         assert watch.check_now() is True
         assert watch.fired is True
+
+
+class TestTreeKillBlastRadius:
+    """A stop whose blast radius includes its own caller is not a stop.
+
+    Caught on CI rather than reasoned about in advance: the first version of
+    `tree_kill` called `os.killpg(os.getpgid(pid), SIGKILL)` unconditionally.
+    A child spawned without `start_new_session` INHERITS the caller's process
+    group, so on ubuntu-latest that named the group pytest was running in and
+    SIGKILLed the test runner. The job hung at three times its usual duration.
+    """
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    def test_tree_kill_never_kills_its_own_group(self):
+        """A child sharing our group is killed ALONE, never by group."""
+        from assemblyzero.speedrun import emergency_stop as es
+
+        # No start_new_session: this child shares the test runner's group,
+        # which is precisely the dangerous shape.
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        assert os.getpgid(proc.pid) == os.getpgid(0), "fixture assumes a shared group"
+        try:
+            ok, _detail = es.tree_kill(proc.pid)
+            assert ok is True
+            assert proc.wait(timeout=15) is not None
+            # The whole point: we are still here to make this assertion.
+            assert os.getpid() == os.getpid()
+        finally:
+            if proc.poll() is None:  # pragma: no cover
+                proc.kill()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    def test_a_child_in_its_own_group_is_killed_by_group(self):
+        """The real launcher's shape: the whole tree goes, not just the top."""
+        from assemblyzero.speedrun import emergency_stop as es
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        assert os.getpgid(proc.pid) != os.getpgid(0)
+        try:
+            ok, _detail = es.tree_kill(proc.pid)
+            assert ok is True
+            assert proc.wait(timeout=15) is not None
+        finally:
+            if proc.poll() is None:  # pragma: no cover
+                proc.kill()
+
+    def test_a_pid_that_does_not_exist_is_reported_not_raised(self):
+        from assemblyzero.speedrun import emergency_stop as es
+
+        ok, detail = es.tree_kill(999999999)
+        assert ok is False
+        assert detail
 
 
 # ---------------------------------------------------------------------------
