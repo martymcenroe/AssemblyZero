@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import json
 import os
 import re
@@ -593,6 +594,75 @@ def _open_lld_pr_exists(repo_root: Path, issue: int) -> bool:
         return False
 
 
+#: Where a resumable stage's artifact lives on the issue's lld branch, for the
+#: case where the orchestrator recorded no path at all (#2414). The branch is
+#: issue-scoped, so anything matching under it belongs to this issue.
+_STAGE_ARTIFACT_GLOBS = {
+    "lld": ("docs/lld/active/LLD-*.md",),
+    "spec": ("docs/lld/drafts/spec-*.md", "docs/lld/active/spec-*.md"),
+}
+
+
+def _find_on_lld_branch(repo_root: Path, issue: int, pattern: str) -> str:
+    """The repo-relative path of a file matching `pattern` on the lld branch.
+
+    The last match in sort order wins, so a repo carrying spec-0001 and
+    spec-0002 resolves to the newer one rather than to whichever git listed
+    first.
+    """
+    for ref in (f"{issue}-lld", f"origin/{issue}-lld"):
+        result = _run(["git", "ls-tree", "-r", "--name-only", ref], cwd=repo_root)
+        if result.returncode != 0:
+            continue
+        matches = sorted(
+            line.strip() for line in (result.stdout or "").splitlines()
+            if fnmatch.fnmatch(line.strip(), pattern)
+        )
+        if matches:
+            return matches[-1]
+    return ""
+
+
+def _resolve_stage_artifact(
+    repo_root: Path, issue: int, data: dict, stage: str
+) -> str:
+    """Where `stage`'s artifact actually is -- an artifact lookup, not a path
+    string lookup (#2414).
+
+    `resume_plan` used to read one field and abandon the resume when it was the
+    empty string, so a resume was declined on a MISSING PATH rather than on a
+    missing artifact. The artifact may well exist on disk or on the branch;
+    nothing checked. The distinction is the whole issue.
+
+    Three places are consulted, cheapest first:
+
+      1. the top-level `<stage>_path`, which `finalize_spec` populates when the
+         stage passes;
+      2. the stage result's own `artifact_path`, which is recorded per stage
+         and survives cases where the top-level field was never set;
+      3. the issue's lld branch, listed and matched by glob -- the same source
+         `_restore_artifact` already restores from.
+
+    Returns "" only when the artifact cannot be found anywhere, which is the
+    case that SHOULD decline: resuming into a missing input is worse than
+    redrawing.
+    """
+    recorded = (data.get(f"{stage}_path", "") or "").strip()
+    if recorded:
+        return recorded
+
+    results = data.get("stage_results", {}) or {}
+    from_result = ((results.get(stage) or {}).get("artifact_path", "") or "").strip()
+    if from_result:
+        return from_result
+
+    for pattern in _STAGE_ARTIFACT_GLOBS.get(stage, ()):
+        found = _find_on_lld_branch(repo_root, issue, pattern)
+        if found:
+            return str(repo_root / found)
+    return ""
+
+
 def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
     """Materialize a passed stage's file from the issue's lld branch when the
     working tree no longer has it -- the exit janitor clears pipeline-authored
@@ -916,14 +986,26 @@ def resume_plan(
     if draft_is_stale(repo_root, issue, data.get("started_at", ""), base, log):
         return None
 
-    needed = [data.get("lld_path", "")]
+    # #2414: an artifact lookup, not a path-string lookup. The old form read
+    # one field and abandoned on the empty string, so a resume was declined
+    # because no PATH was recorded rather than because no ARTIFACT existed --
+    # and the artifact is usually sitting on the lld branch, restorable. The
+    # decline still happens, but now only when the file genuinely cannot be
+    # found: resuming into a missing input is worse than redrawing.
+    needed = [("lld", _resolve_stage_artifact(repo_root, issue, data, "lld"))]
     if failed == "impl":
-        needed.append(data.get("spec_path", ""))
-    for artifact in needed:
-        if not artifact or not _restore_artifact(repo_root, issue, artifact):
+        needed.append(("spec", _resolve_stage_artifact(repo_root, issue, data, "spec")))
+    for stage, artifact in needed:
+        if not artifact:
             log.write(
-                f"RESUME abandoned for #{issue}: artifact missing and not "
-                f"restorable: {artifact or '<unset>'}"
+                f"RESUME abandoned for #{issue}: no {stage} artifact recorded, "
+                f"and none found on the {issue}-lld branch"
+            )
+            return None
+        if not _restore_artifact(repo_root, issue, artifact):
+            log.write(
+                f"RESUME abandoned for #{issue}: {stage} artifact missing and "
+                f"not restorable: {artifact}"
             )
             return None
 
