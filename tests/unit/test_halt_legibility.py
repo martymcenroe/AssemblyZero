@@ -189,7 +189,7 @@ class TestTheHaltNodeUsesIt:
 class TestTheCompletenessCap:
     """The other iteration-cap halt in the same workflow."""
 
-    def _state(self, iteration, max_iterations=3):
+    def _state(self, iteration, max_iterations=3, shown=()):
         return {
             "spec_draft": "# Spec\n\n" + ("body line\n" * 40),
             "files_to_modify": [],
@@ -198,15 +198,36 @@ class TestTheCompletenessCap:
             "lld_content": "",
             "review_iteration": iteration,
             "max_iterations": max_iterations,
+            # #2304: a check that has never reached a revision prompt now earns
+            # one grace instead of halting, so the halt-with-reason case is
+            # specifically the one where every failing check HAS been tried.
+            "checks_shown_to_drafter": list(shown),
         }
 
-    def test_a_failure_at_the_cap_records_a_reason(self, capsys):
+    def _at_the_cap_with_everything_tried(self, patched):
+        """Run once to discover what this spec fails, then again with those
+        marked as already shown.
+
+        Derived rather than hardcoded: naming the failing checks would couple
+        this test to which ones happen to trip on a minimal spec, and the next
+        check added would break it for a reason unrelated to the halt.
+        """
         with patch(
             "assemblyzero.workflows.implementation_spec.nodes."
             "validate_completeness.check_modify_files_have_excerpts",
-            return_value={"check_name": "x", "passed": False, "details": "missing excerpt for a.py"},
+            return_value=patched,
         ):
-            out = validate_completeness(self._state(iteration=3))
+            first = validate_completeness(self._state(iteration=3))
+            tried = first["checks_shown_to_drafter"]
+            return validate_completeness(
+                self._state(iteration=3, shown=tried)
+            )
+
+    def test_a_failure_at_the_cap_records_a_reason(self, capsys):
+        out = self._at_the_cap_with_everything_tried(
+            {"check_name": "x", "passed": False,
+             "details": "missing excerpt for a.py"},
+        )
         capsys.readouterr()
 
         assert out["error_message"], (
@@ -215,6 +236,32 @@ class TestTheCompletenessCap:
         )
         assert "Iteration cap" in out["error_message"]
         assert "missing excerpt" in out["error_message"]
+
+    def test_an_untried_check_at_the_cap_gets_a_grace_instead_of_a_halt(self, capsys):
+        """#2304: the same scenario with the check NOT yet shown is a grace,
+        not a halt. Pinned beside its sibling so the two cannot be confused."""
+        with patch(
+            "assemblyzero.workflows.implementation_spec.nodes."
+            "validate_completeness.check_modify_files_have_excerpts",
+            return_value={"check_name": "x", "passed": False, "details": "missing excerpt for a.py"},
+        ):
+            out = validate_completeness(self._state(iteration=3, shown=()))
+        capsys.readouterr()
+
+        assert out["error_message"] == ""
+        assert "x" in out["grace_revision_for"]
+
+    def test_the_halt_message_says_the_checks_were_actually_tried(self, capsys):
+        """'the halt message must distinguish the two cases' -- otherwise
+        'N revisions ended with 1 unresolved check' reads as a stubborn
+        drafter when the truth may be that it was never asked."""
+        out = self._at_the_cap_with_everything_tried(
+            {"check_name": "x", "passed": False,
+             "details": "missing excerpt for a.py"},
+        )
+        capsys.readouterr()
+
+        assert "shown to the drafter and survived a revision" in out["error_message"]
 
     def test_a_failure_below_the_cap_records_nothing(self, capsys):
         """The run is still going. A pending revision is not a failure, and a

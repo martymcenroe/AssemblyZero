@@ -250,22 +250,70 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     # the graph boundary (#2018), so the halt recorded nothing and the banner
     # read "Error: unknown". Below the cap the message stays empty: the run is
     # still going, and a pending revision is not a failure.
+    # Closes #2304: a check that first fails on the FINAL revision receives
+    # zero revisions, and the stage dies on a failure the drafter was never
+    # asked to fix. Measured on boostgauge #7 -- three iterations on
+    # `criteria_have_tests`, and satisfying it surfaced
+    # `functions_have_io_examples` with the budget already spent.
+    #
+    # That loop was CONVERGING. A cap exists to stop a loop repeating itself;
+    # killing one at the moment it made progress is the opposite of its
+    # purpose. Raising the cap only moves the cliff -- the same run would then
+    # die on whatever the next fix surfaces.
+    #
+    # So the distinction is encoded rather than the number raised: a check that
+    # has never been shown to the drafter has not been tried once, and is not
+    # evidence of non-convergence. It grants exactly one extra revision, once.
+    failing_names = [c["check_name"] for c in checks if not c["passed"]]
+    shown = list(state.get("checks_shown_to_drafter", []))
+    grace_used = list(state.get("grace_revisions_used", []))
+
+    grace_for: list[str] = []
     cap_message = ""
     if not validation_passed:
         iteration = state.get("review_iteration", 0)
         max_iterations = state.get("max_iterations", 3)
         if iteration >= max_iterations:
-            listed = "; ".join(completeness_issues[:3])
-            cap_message = (
-                f"Iteration cap: {max_iterations} revision(s) ended with "
-                f"{len(completeness_issues)} unresolved completeness check(s). "
-                f"Unfixed: {listed}"
-            )
+            grace_for = grant_grace(failing_names, shown, grace_used)
+            if grace_for:
+                grace_used.extend(grace_for)
+                print(
+                    f"    [CAP] {max_iterations} revision(s) spent, but "
+                    f"{', '.join(grace_for)} has never been shown to the "
+                    f"drafter. Granting one revision for it (#2304)."
+                )
+            else:
+                listed = "; ".join(completeness_issues[:3])
+                # The two halts read differently on purpose. "N revisions ended
+                # with 1 unresolved check" reads as a stubborn drafter; when
+                # every failing check HAS been tried, that is the true reading.
+                tried = ", ".join(sorted(set(failing_names) & set(shown + grace_used)))
+                detail = (
+                    f" Each unresolved check was shown to the drafter and "
+                    f"survived a revision: {tried}."
+                    if tried else ""
+                )
+                cap_message = (
+                    f"Iteration cap: {max_iterations} revision(s) ended with "
+                    f"{len(completeness_issues)} unresolved completeness "
+                    f"check(s).{detail} Unfixed: {listed}"
+                )
+
+    # A failing set that is about to become a revision prompt has, by
+    # definition, been shown to the drafter. Recorded whether the revision is
+    # the ordinary kind or a grace, so a grace cannot be claimed twice.
+    if not validation_passed and (grace_for or not cap_message):
+        for name in failing_names:
+            if name not in shown:
+                shown.append(name)
 
     return {
         "completeness_issues": completeness_issues,
         "validation_passed": validation_passed,
         "prior_completeness_breakdown": prior_breakdown,
+        "checks_shown_to_drafter": shown,
+        "grace_revisions_used": grace_used,
+        "grace_revision_for": grace_for,
         "error_message": cap_message,
     }
 
@@ -561,6 +609,27 @@ def _is_test_function(name: str) -> bool:
     report says so out loud rather than passing them silently.
     """
     return name.startswith("test_") or name.endswith("_test")
+
+
+def grant_grace(
+    failing_names: list[str], shown: list[str], grace_used: list[str]
+) -> list[str]:
+    """Which failing checks earn one extra revision past the cap (#2304).
+
+    A pure function per ADR 0224, and deliberately not inlined: a test that
+    re-expresses this rule instead of calling it would agree with itself
+    forever, which is the #2264 class of green-while-asserting-nothing.
+
+    A check qualifies when it has never reached a revision prompt (`shown`) and
+    has never claimed a grace before (`grace_used`). The first condition is the
+    whole point -- a check that has not been tried once is not evidence of
+    non-convergence. The second bounds it, so a check that alternates pass and
+    fail spends its one grace and then meets the wall like anything else.
+    """
+    return [
+        name for name in failing_names
+        if name not in shown and name not in grace_used
+    ]
 
 
 def check_functions_have_io_examples(spec: str) -> CompletenessCheck:

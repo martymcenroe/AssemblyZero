@@ -212,6 +212,25 @@ class ImplementationSpecState(TypedDict, total=False):
     # Each entry: {"iteration": int, "failures": list[str]}.
     prior_completeness_breakdown: list[dict]
 
+    # Closes #2304: the cap must distinguish a loop repeating itself from a
+    # loop making progress. Measured on boostgauge #7: three iterations went to
+    # `criteria_have_tests`, and the act of satisfying it surfaced
+    # `functions_have_io_examples` on the final revision -- with the budget
+    # already spent, so no revision prompt naming it was ever built. The
+    # drafter was never once told about the check that killed the stage.
+    #
+    # checks_shown_to_drafter: names that have appeared in a failing set which
+    #   became a revision prompt. A check in here has been TRIED.
+    # grace_revisions_used: names that have already claimed their one extra
+    #   revision. Bounds the grace so an oscillating check cannot claim it
+    #   twice -- it spends its grace, then meets the wall like anything else.
+    # grace_revision_for: the names granting a grace on THIS iteration. The
+    #   router reads it; the node writes it, because a router's state writes
+    #   are discarded at the graph boundary (#2018).
+    checks_shown_to_drafter: list[str]
+    grace_revisions_used: list[str]
+    grace_revision_for: list[str]
+
     # Closes #1527: Symbol names (class names + function/method names) extracted
     # from all gathered .py files by N1. Used by N3 to detect hallucinated API
     # calls that reference methods not defined in the target project.
