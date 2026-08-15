@@ -322,13 +322,24 @@ class TestTruePositivesSurvive:
         )
         assert "model_dump" in _flag(spec)
 
-    def test_chain_off_a_first_party_import_still_flagged(self):
-        """The reason the root rule is keyed on framework roots, not `exempt`.
+    def test_chain_off_a_first_party_import_still_flagged(self, tmp_path):
+        """The reason the root rule is not simply keyed on `exempt`.
 
         A first-party import is the one case where the target repo's symbol
         table DOES have authority. Rooting the exemption in the full exempt set
         would clear this, which is a real false-clearance surface.
+
+        #2411 widened the root rule from framework parameters to every FOREIGN
+        root, and this surface stays closed because first-party tops are
+        excluded from that set. That requires knowing which tops are
+        first-party, so the repo root is now supplied. Without it the checker
+        cannot tell `boostgauge` from `pytest`, and the honest answer to a
+        question it cannot answer is to fail open, which is asserted separately
+        in test_call_provenance_positions.py::TestTheFailOpenDirection.
         """
+        (tmp_path / "boostgauge").mkdir()
+        (tmp_path / "boostgauge" / "__init__.py").write_text("")
+
         spec = (
             "# S\n\n```python\n"
             "import boostgauge\n"
@@ -337,7 +348,10 @@ class TestTruePositivesSurvive:
             "    boostgauge.gauge.model_dump()\n"
             "```\n"
         )
-        assert "model_dump" in _flag(spec), _flag(spec)
+        flagged = detect_unknown_method_calls(
+            spec, set(TARGET_SYMBOLS), str(tmp_path)
+        )
+        assert "model_dump" in flagged, flagged
 
     def test_config_is_not_on_a_whitelist(self):
         """`config` is an ordinary attribute name and must stay judged.

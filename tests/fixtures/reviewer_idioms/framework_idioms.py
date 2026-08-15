@@ -142,4 +142,103 @@ FRAMEWORK_IDIOMS: list[tuple[str, str, str]] = [
         'def pytest_configure(config):\n'
         '    config.addinivalue_line("markers", "visual: visual regression")\n',
     ),
+
+    # ---- STANDARD, seeded rather than harvested (#2411) -------------------
+    #
+    # Harvesting from readiness verdicts has a structural blind spot: an idiom
+    # too standard for any reviewer to bother demanding never appears in a
+    # verdict, so it never enters this corpus, so nothing covers it, so it kills
+    # a roll. `@pytest.mark.parametrize` did exactly that, on the fifth kill of
+    # the receiver-resolution class. These entries are seeded from pytest's
+    # documented surface independent of the harvest, and the parametrize shape
+    # is carried in BOTH decorator and expression position, because the defect
+    # turned out to be about attribute-chain depth rather than AST position.
+    (
+        "pytest.mark.parametrize, decorator position",
+        "STANDARD — the #2411 kill. run-issue1-114223 flagged `parametrize`, "
+        'exemplar `@pytest.mark.parametrize("value,expected_angle", '
+        "[(0, 225.0), (50, 90.0), (100, ...`. Two hops from an imported root.",
+        'import pytest\n'
+        '\n'
+        '@pytest.mark.parametrize("value,expected_angle", [(0, 225.0), (50, 90.0)])\n'
+        'def test_val_to_angle(value, expected_angle):\n'
+        '    assert value >= 0\n',
+    ),
+    (
+        "pytest.mark.parametrize, expression position",
+        "STANDARD — the same chain outside a decorator. Proves the exemption "
+        "is about provenance, not position.",
+        'import pytest\n'
+        '\n'
+        'def test_builds_marks():\n'
+        '    marker = pytest.mark.parametrize("value", [1, 2])\n'
+        '    return marker\n',
+    ),
+    (
+        "pytest.mark custom marker chains",
+        "STANDARD — `@pytest.mark.<anything>` is open-ended by design; a "
+        "marker name is never a repo symbol and can be arbitrary.",
+        'import pytest\n'
+        '\n'
+        '@pytest.mark.slow\n'
+        '@pytest.mark.visual\n'
+        '@pytest.mark.usefixtures("tmp_path")\n'
+        'def test_marked():\n'
+        '    pass\n',
+    ),
+    (
+        "pytest.fixture, bare and parameterised",
+        "STANDARD — one hop, so it already cleared; carried so that a future "
+        "refactor cannot lose it silently.",
+        'import pytest\n'
+        '\n'
+        '@pytest.fixture\n'
+        'def plain():\n'
+        '    return 1\n'
+        '\n'
+        '@pytest.fixture(scope="module", params=[1, 2])\n'
+        'def parameterised(request):\n'
+        '    return request.param\n',
+    ),
+    (
+        "pytest.raises / warns / approx",
+        "STANDARD — the assertion surface essentially every test file uses.",
+        'import pytest\n'
+        '\n'
+        'def test_assertions():\n'
+        '    with pytest.raises(ValueError):\n'
+        '        raise ValueError("x")\n'
+        '    with pytest.warns(UserWarning):\n'
+        '        pass\n'
+        '    assert 0.1 + 0.2 == pytest.approx(0.3)\n',
+    ),
+    (
+        "pytest.mark.skip / skipif / xfail",
+        "STANDARD — two hops from an imported root, the #2411 shape exactly.",
+        'import sys\n'
+        'import pytest\n'
+        '\n'
+        '@pytest.mark.skip(reason="not ready")\n'
+        'def test_skipped():\n'
+        '    pass\n'
+        '\n'
+        '@pytest.mark.skipif(sys.platform == "win32", reason="posix only")\n'
+        'def test_conditional():\n'
+        '    pass\n'
+        '\n'
+        '@pytest.mark.xfail(strict=True)\n'
+        'def test_expected_failure():\n'
+        '    pass\n',
+    ),
+    (
+        "pytest.skip / xfail / fail called in a body",
+        "STANDARD — the imperative forms, one hop, expression position.",
+        'import pytest\n'
+        '\n'
+        'def test_imperative(flag):\n'
+        '    if flag:\n'
+        '        pytest.skip("nope")\n'
+        '        pytest.xfail("known")\n'
+        '        pytest.fail("boom")\n',
+    ),
 ]
