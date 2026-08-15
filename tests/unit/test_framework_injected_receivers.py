@@ -31,12 +31,16 @@ from assemblyzero.workflows.implementation_spec.nodes.validate_completeness impo
 #: the one the live run had: `addoption` is not in it, and never could be.
 TARGET_SYMBOLS = ["GaugeWindow", "render", "to_dict", "update", "SkinConfig"]
 
-FIXTURE = (
-    Path(__file__).parent.parent
-    / "fixtures"
-    / "boostgauge1_spec_deadlock"
-    / "001-spec-draft.md"
+_FIXTURE_DIR = (
+    Path(__file__).parent.parent / "fixtures" / "boostgauge1_spec_deadlock"
 )
+
+#: run-issue1-173403, iteration 4 — died on `parser.addoption(` (#2391).
+FIXTURE = _FIXTURE_DIR / "001-spec-draft.md"
+
+#: run-issue1-193349, iteration 8 — died on `request.config.getoption(` (#2396).
+#: Same class as FIXTURE, one attribute hop deeper.
+FIXTURE_013 = _FIXTURE_DIR / "013-spec-draft.md"
 
 
 def _flag(spec: str) -> dict[str, list[str]]:
@@ -66,6 +70,137 @@ class TestTheDeadlockedDraftClears:
             FIXTURE.read_text(encoding="utf-8"), TARGET_SYMBOLS
         )
         assert result["passed"] is True, result["details"]
+
+
+class TestTheAttributeHopDraftClears:
+    """run-issue1-193349, iteration 8 — the same class one hop deeper (#2396)."""
+
+    def test_fixture_still_contains_the_call_that_deadlocked(self):
+        assert "request.config.getoption(" in FIXTURE_013.read_text(
+            encoding="utf-8"
+        )
+
+    def test_getoption_no_longer_flagged(self):
+        flagged = _flag(FIXTURE_013.read_text(encoding="utf-8"))
+        assert "getoption" not in flagged, (
+            f"the deadlock survives; flagged={flagged}"
+        )
+
+    def test_the_draft_passes_the_check(self):
+        result = check_api_symbols_exist(
+            FIXTURE_013.read_text(encoding="utf-8"), TARGET_SYMBOLS
+        )
+        assert result["passed"] is True, result["details"]
+
+
+class TestEveryInjectionShape:
+    """Cover the shape, not the sighting (#2396).
+
+    Two rolls died on this class one attribute-hop apart, because #2391's
+    repair was keyed on the receiver NAME and the defect is a receiver the
+    target repo does not OWN — which propagates through attribute access. One
+    fixture per depth, so the next hop fails here rather than in a roll.
+    """
+
+    def test_depth_0_bare_parameter(self):
+        """`parser` in a pytest_* hook — the #2391 sighting."""
+        spec = (
+            "# S\n\n```python\n"
+            "def pytest_addoption(parser):\n"
+            '    parser.addoption("--x")\n'
+            "```\n"
+        )
+        assert "addoption" not in _flag(spec)
+
+    def test_depth_1_attribute_of_a_parameter(self):
+        """`request.config` — the #2396 sighting."""
+        spec = (
+            "# S\n\n```python\n"
+            "def test_v(request, tmp_path):\n"
+            '    flag = request.config.getoption("--generate-baselines")\n'
+            "```\n"
+        )
+        assert "getoption" not in _flag(spec)
+
+    def test_depth_2_attribute_two_hops_deep(self):
+        """The hop that has not been sighted yet, and must not need to be."""
+        spec = (
+            "# S\n\n```python\n"
+            "def test_v(request):\n"
+            "    request.config.option.verbose_level()\n"
+            "```\n"
+        )
+        assert "verbose_level" not in _flag(spec)
+
+    def test_depth_3_and_beyond(self):
+        spec = (
+            "# S\n\n```python\n"
+            "def test_v(request):\n"
+            "    request.config.option.plugins.getfirst()\n"
+            "```\n"
+        )
+        assert "getfirst" not in _flag(spec)
+
+    def test_hook_parameter_chains_are_covered_too(self):
+        """Depth is independent of which injection source supplied the root."""
+        spec = (
+            "# S\n\n```python\n"
+            "def pytest_collection_modifyitems(config, items):\n"
+            '    config.option.markexpr.strip()\n'
+            "```\n"
+        )
+        assert "markexpr" not in _flag(spec)
+
+    def test_the_calls_are_actually_collected_not_merely_unseen(self):
+        """Positive control: `X not in flagged` must mean cleared, not unread.
+
+        Every assertion in this class is a negative. A fence that failed to
+        parse, or a call the visitor never recorded, would satisfy all of them
+        while proving nothing — which is exactly how a PASS from an empty
+        universe reads as evidence. This asserts the scan genuinely saw each
+        call and resolved its root to the framework name, so the negatives above
+        are cleared calls rather than absent ones.
+        """
+        import importlib
+
+        vc = importlib.import_module(
+            "assemblyzero.workflows.implementation_spec.nodes"
+            ".validate_completeness"
+        )
+        spec = (
+            "# S\n\n```python\n"
+            "def test_v(request):\n"
+            '    request.config.getoption("--x")\n'
+            "    request.config.option.plugins.getfirst()\n"
+            "```\n"
+        )
+        scan = vc._scan_fences(spec)
+        assert scan.failures == [], scan.failures
+        assert len(scan.facts) == 1
+        calls = {c.method: c for c in scan.facts[0].calls}
+        assert "getoption" in calls, "the depth-1 call was never collected"
+        assert "getfirst" in calls, "the depth-3 call was never collected"
+        # The receiver key is the LAST attribute — the thing that lost the
+        # exemption — while the root is the framework name that restores it.
+        assert calls["getoption"].receiver == "config"
+        assert calls["getoption"].root == "request"
+        assert calls["getfirst"].receiver == "plugins"
+        assert calls["getfirst"].root == "request"
+
+    def test_binding_the_chain_midway_still_clears(self):
+        """`cfg = request.config` then `cfg.getoption(...)`.
+
+        Covered by assignment propagation rather than the root rule, so this
+        pins that the two mechanisms compose instead of one shadowing the other.
+        """
+        spec = (
+            "# S\n\n```python\n"
+            "def test_v(request):\n"
+            "    cfg = request.config\n"
+            '    cfg.getoption("--x")\n'
+            "```\n"
+        )
+        assert "getoption" not in _flag(spec)
 
 
 class TestFrameworkInjectionIsExempt:
@@ -161,6 +296,64 @@ class TestTruePositivesSurvive:
             "```\n"
         )
         assert "model_dump" in _flag(spec)
+
+    def test_chain_off_an_owned_object_still_flagged(self):
+        """#2396's second half: the root resolves to a target-repo class.
+
+        `gauge` is bound from `GaugeWindow()`, which the target repo owns, so
+        every attribute down that chain is the target repo's business.
+        """
+        spec = (
+            "# S\n\n```python\n"
+            "def build():\n"
+            "    gauge = GaugeWindow()\n"
+            "    return gauge.config.model_dump()\n"
+            "```\n"
+        )
+        assert "model_dump" in _flag(spec), _flag(spec)
+
+    def test_chain_off_an_ordinary_parameter_still_flagged(self):
+        """An ordinary parameter is not a framework root, at any depth."""
+        spec = (
+            "# S\n\n```python\n"
+            "def apply(state):\n"
+            "    state.config.model_dump()\n"
+            "```\n"
+        )
+        assert "model_dump" in _flag(spec)
+
+    def test_chain_off_a_first_party_import_still_flagged(self):
+        """The reason the root rule is keyed on framework roots, not `exempt`.
+
+        A first-party import is the one case where the target repo's symbol
+        table DOES have authority. Rooting the exemption in the full exempt set
+        would clear this, which is a real false-clearance surface.
+        """
+        spec = (
+            "# S\n\n```python\n"
+            "import boostgauge\n"
+            "\n"
+            "def build():\n"
+            "    boostgauge.gauge.model_dump()\n"
+            "```\n"
+        )
+        assert "model_dump" in _flag(spec), _flag(spec)
+
+    def test_config_is_not_on_a_whitelist(self):
+        """`config` is an ordinary attribute name and must stay judged.
+
+        Whitelisting the observed name would be the instance-not-class error a
+        third time. Here `config` is reached from a repo-owned root, so a
+        nonexistent method on it is still a finding.
+        """
+        spec = (
+            "# S\n\n```python\n"
+            "def build():\n"
+            "    w = GaugeWindow()\n"
+            "    w.config.nonexistent_method()\n"
+            "```\n"
+        )
+        assert "nonexistent_method" in _flag(spec)
 
     def test_a_hook_does_not_exempt_names_beyond_its_own_parameters(self):
         """The exemption is scoped to what pytest actually injects."""
