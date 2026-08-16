@@ -1375,14 +1375,14 @@ uuid-utils = ">=0.12.0,<1.0"
 
 [[package]]
 name = "langchain-google-genai"
-version = "4.2.0"
+version = "4.2.1"
 description = "An integration package connecting Google's genai package and LangChain"
 optional = false
 python-versions = "<4.0.0,>=3.10.0"
 groups = ["main"]
 files = [
-    {file = "langchain_google_genai-4.2.0-py3-none-any.whl", hash = "sha256:856041aaafceff65a4ef0d5acf5731f2db95229ff041132af011aec51e8279d9"},
-    {file = "langchain_google_genai-4.2.0.tar.gz", hash = "sha256:9a8d9bfc35354983ed29079cefff53c3e7c9c2a44b6ba75cc8f13a0cf8b55c33"},
+    {file = "langchain_google_genai-4.2.1-py3-none-any.whl", hash = "sha256:a7735289cf94ca3a684d830e09196aac8f6e75e647e3a0a1c3c9dc534ceb985e"},
+    {file = "langchain_google_genai-4.2.1.tar.gz", hash = "sha256:7f44487a0337535897e3bba9a1d6605d722629e034f757ffa8755af0aa85daa8"},
 ]
 
 [package.dependencies]
@@ -3631,4 +3631,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "0b1bdd37ad003a5eee0453a17200ae6ac7676809b5f8a4a91de01f25b7116728"
+content-hash = "8637e70b5d1a56e90d7f2dd9f0cffa5e6bfd67a8dac77d3a24db3f29b66ee9bf"
