@@ -3188,11 +3188,20 @@ class TestExtractSymbolsFromFiles:
         symbols = _extract_symbols_from_files(files)
         assert symbols == []
 
-    def test_fallback_regex_on_syntax_error(self):
-        """Broken Python falls back to regex, still extracts def/class names."""
+    def test_unparseable_python_is_excluded_not_scraped(self):
+        """#2393 retired the regex fallback this test used to pin.
+
+        It asserted that a file which will not parse still yields `my_method`
+        via `^\\s*def (\\w+)` scraping. That scraping fed the YARDSTICK the
+        spec is judged against, so its errors were the hardest kind to see --
+        an invented name is a false clearance, a missed one a false
+        hallucination flag. The behaviour it pinned is the behaviour being
+        retired, so this test is evidence of the old contract rather than an
+        obstacle to changing it, and it now pins the new one.
+        """
         from assemblyzero.workflows.implementation_spec.state import FileToModify
         from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
-            _extract_symbols_from_files,
+            gather_symbols,
         )
 
         # Deliberately broken Python (missing colon on class)
@@ -3211,9 +3220,10 @@ class TestExtractSymbolsFromFiles:
             )
         ]
 
-        symbols = _extract_symbols_from_files(files)
-        # At minimum the method should be found via regex fallback
-        assert "my_method" in symbols
+        gather = gather_symbols(files)
+        assert "my_method" not in gather.symbols
+        assert "BrokenClass" not in gather.symbols
+        assert [path for path, _err in gather.unreadable] == ["broken.py"]
 
     def test_gathered_symbols_stored_in_state(self, tmp_path):
         """N1 analyze_codebase populates gathered_symbols in returned state."""
