@@ -40,12 +40,24 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 # =============================================================================
 
 CREDENTIALS_FILE = Path.home() / ".assemblyzero" / "gemini-credentials.json"
+
+#: State for the API-key credential rotation that the agy migration retired
+#: (#1595/#1605). Nothing in the pipeline's transport writes it any more, so on
+#: a current machine it is stale or absent. It survives because `GeminiClient`
+#: and `preflight` still read it, and a file that is absent reads as "nothing
+#: exhausted", which is the harmless answer.
+#:
+#: Do NOT reintroduce it into operator-facing text (#2441). Two messages used to
+#: send a human here for quota reset times at the moment something had already
+#: failed; under the subscription transport there are no credentials to rotate
+#: and no per-key reset to look up.
 ROTATION_STATE_FILE = Path.home() / ".assemblyzero" / "gemini-rotation-state.json"
 GEMINI_API_LOG_FILE = Path.home() / ".assemblyzero" / "gemini-api.jsonl"
 
-# Issue #1883: cross-provider capacity state. Gemini's exhaustion already
-# lives in ROTATION_STATE_FILE; Claude's was detected and then forgotten, so
-# a run could start with Claude dry and burn Gemini quota finding out.
+# Issue #1883: cross-provider capacity state. Gemini's exhaustion state lives in
+# ROTATION_STATE_FILE (above, and retired with the API-key path); Claude's was
+# detected and then forgotten, so a run could start with Claude dry and burn
+# Gemini quota finding out.
 CAPACITY_STATE_FILE = Path.home() / ".assemblyzero" / "provider-capacity.json"
 
 # =============================================================================

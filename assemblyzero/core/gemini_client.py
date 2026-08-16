@@ -1,12 +1,20 @@
-"""Custom Gemini client with credential rotation and model enforcement.
+"""The governance model's transport, plus the retired rotation client (#2441).
 
-This module encapsulates ALL Gemini API interaction for LLD reviews,
-ensuring:
-1. Model hierarchy enforcement - Never downgrades from Pro
-2. Credential rotation - Automatic failover on quota exhaustion
-3. Differentiated error handling - 529 vs 429 vs other errors
+What this module does TODAY: it invokes the governance model through the
+Antigravity CLI (`agy`), the subscription transport that replaced the retired
+Gemini CLI (#1335, ADR 0220). `_invoke_via_stdin` is that path -- prompt on
+stdin, plain pipes, output stripped of the pseudo-console's control sequences.
+Model hierarchy is still enforced: a model on `FORBIDDEN_MODELS` is refused
+rather than silently downgraded.
 
-Ported from tools/gemini-rotate.py for programmatic use.
+What is still here but no longer drives anything: `GeminiClient`, the API-key
+rotation client ported from `tools/gemini-rotate.py`. It rotates credentials on
+quota exhaustion and reads a rotation-state file, both of which belong to the
+paid-API path the agy migration retired (#1595/#1605). It is left in place
+rather than deleted here because #2441 is scoped to the operator-facing residue
+it left behind -- messages that sent a human to a file that no longer exists.
+Read anything about "credential rotation" below as describing that client, not
+the transport the pipeline uses.
 """
 
 import json
@@ -151,7 +159,14 @@ class CredentialPoolExhaustedException(Exception):
         """Generate a user-friendly message about when to resume."""
         if self.earliest_reset:
             return f"Earliest quota reset: {self.earliest_reset}"
-        return "Check ~/.assemblyzero/gemini-rotation-state.json for reset times"
+        # #2441: the fallback used to name the rotation-state file, which the
+        # agy migration retired along with the credentials it tracked. With no
+        # reset timestamp to report, say so rather than send the reader to a
+        # file that is stale or absent.
+        return (
+            "No reset time was reported; wait for the subscription limit to "
+            "reset, or review on the other provider"
+        )
 
 
 @dataclass
