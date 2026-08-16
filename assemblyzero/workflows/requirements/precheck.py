@@ -65,20 +65,42 @@ EXIT_ERROR = 2
 #: silently turning every clean result into an error.
 CLEAN_MARKER = "Requirements internally consistent."
 
-#: Matches ``--drafter`` in ``tools/run_requirements_workflow.py``.
+def _roll_gate_drafter() -> str:
+    """The model a ROLL's requirements gate actually asks (#2384).
+
+    Read from the orchestrator's own config rather than restated here. The
+    previous arrangement stated `claude:sonnet` beside a comment claiming it
+    matched the roll; it did not, and nobody re-checked because the comment
+    said there was nothing to check. A constant that is DERIVED cannot drift
+    from the thing it claims to mirror -- there is no second copy to update.
+
+    `orchestrator.config` imports only stdlib, so this cannot cycle.
+    """
+    from assemblyzero.workflows.orchestrator.config import get_default_config
+
+    return get_default_config()["stages"]["lld"]["drafter"]
+
+
+#: The model this pre-check asks, which is by construction the model a roll's
+#: N0c will ask.
 #:
-#: It does NOT match what a roll's gate asks, despite what this comment claimed
-#: until #2375. A roll reaches the requirements graph through the orchestrator's
-#: lld stage, whose ``StageConfig`` has carried ``drafter="gemini:3.1-pro"``
-#: since #1434, and nothing on the roll path overrides it -- ``load_config``
-#: merges only ``skip_existing_*``, ``gates`` and ``mock_mode``. Measured
-#: 2026-08-14.
+#: The decision this settles (#2384): a roll reaches the requirements graph
+#: through the orchestrator's lld stage, whose `StageConfig` has carried
+#: `drafter="gemini:3.1-pro"` since #1434, and nothing on the roll path
+#: overrides it -- `load_config` merges only `skip_existing_*`, `gates` and
+#: `mock_mode`. The pre-check exists to tell an operator what the roll's gate
+#: will do BEFORE paying for a roll, so its value is entirely predictive and
+#: the roll is the thing being predicted. Aligning the roll to the pre-check
+#: instead would change what every stage drafts with and reopen #1431, the
+#: Claude `json_schema` crash that is the documented reason the roll defaults
+#: to Gemini at all.
 #:
-#: So this pre-check predicts the roll's gate on every dimension except the
-#: model, and the model is the dimension #2375 found mattered most: sonnet timed
-#: out three consecutive times on a document opus answered on its first attempt.
-#: Which model the two paths should share is a decision, tracked in #2384.
-DEFAULT_DRAFTER = "claude:sonnet"
+#: One consequence, stated because it invalidates evidence rather than because
+#: it is convenient: #2375's measurements -- sonnet timing out three
+#: consecutive times on boostgauge #1's body where opus answered inside the
+#: bound -- were measurements of the PRE-CHECK's old model. They no longer
+#: predict roll behaviour on the drafter dimension.
+DEFAULT_DRAFTER = _roll_gate_drafter()
 
 _GATE_PATH = "assemblyzero/workflows/requirements/nodes/analyze_requirements.py"
 _FILING_FAILED_MARKER = "must-resolve filing failed"
