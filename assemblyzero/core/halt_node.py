@@ -57,6 +57,14 @@ def classify_error(error_message: str) -> str:
     # situation. The fix is an operator ruling on the issue text.
     if "requirements conflict" in msg_lower:
         return "requirements_conflict"
+    # #2474: the gate could not RUN. Checked before the capacity and auth
+    # patterns below because the reason text quotes the transport failure
+    # verbatim ("All credentials failed ... 503/529"), and classifying on that
+    # would produce "wait 15 minutes and retry the run" — advice that skips the
+    # part the operator has to know, which is that requirements were never
+    # checked. Transient or not is the second question here, not the first.
+    if "requirements unverified" in msg_lower:
+        return "requirements_unverified"
     # #1939: 'stagnant' is what the live guards actually print
     # ("[STAGNANT] Coverage stagnant: 87.0% -> 86.0%") — the old
     # 'stagnation'-only pattern never matched a real halt message.

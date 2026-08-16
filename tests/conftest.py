@@ -1,5 +1,6 @@
 """Pytest configuration for test suite."""
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -62,6 +63,32 @@ def _restore_review_test_plan_module():
             sys.modules.pop(key, None)
         else:
             sys.modules[key] = mod
+
+
+@pytest.fixture(autouse=True)
+def gate_backoff_waits(monkeypatch):
+    """Record the N0c backoff waits suite-wide instead of serving them (#2474).
+
+    The requirements gate now waits out a transient outage before halting, on a
+    schedule measured in minutes. Any test that drives the gate to a no-verdict
+    outcome would otherwise pay that schedule in real seconds -- four minutes
+    per case, in a suite whose whole point is being run often. Several such
+    tests already exist in files that know nothing about the backoff, so the
+    seam belongs here rather than in the one file that introduced it.
+
+    Yields the list of waits requested, so a test that cares about the schedule
+    can assert on it without enduring it.
+    """
+    waits: list[float] = []
+    try:
+        module = importlib.import_module(
+            "assemblyzero.workflows.requirements.nodes.analyze_requirements"
+        )
+    except Exception:  # noqa: BLE001 - a test run must not need this module
+        yield waits
+        return
+    monkeypatch.setattr(module, "_sleep", waits.append)
+    yield waits
 
 
 @pytest.fixture

@@ -62,11 +62,17 @@ ATLAS: dict[str, dict] = {
             "No spec can satisfy two contradictory sentences, so a conflict "
             "halts the run and files a question for the operator instead of "
             "drafting the wrong reading. A halt here is the system working: "
-            "the cheapest possible failure, before generation."
+            "the cheapest possible failure, before generation. The gate also "
+            "halts when it could not RUN — an unreachable governance model "
+            "stops the run rather than letting it draft against requirements "
+            "nobody checked (#2474)."
         ),
         "successors": {
             "N1_generate_draft": "the requirements are consistent",
-            "HALT": "a requirements conflict needs an operator ruling",
+            "HALT": (
+                "a requirements conflict needs an operator ruling, or the "
+                "gate reached no verdict and the run must not draft unchecked"
+            ),
         },
     },
     "N1_generate_draft": {

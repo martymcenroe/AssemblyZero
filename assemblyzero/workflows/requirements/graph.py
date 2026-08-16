@@ -107,12 +107,26 @@ HALT = "HALT"
 def route_after_analyze_requirements(
     state: RequirementsWorkflowState,
 ) -> Literal["N1_generate_draft", "HALT"]:
-    """Route after the requirements-ambiguity gate (Issue #1899).
+    """Route after the requirements-ambiguity gate (Issue #1899, #2474).
 
     A REQUIREMENTS CONFLICT halts before any generation spends tokens —
     no spec can satisfy contradictory criteria, so the ISSUE needs an
-    operator ruling, not a roll. Anything else proceeds to drafting.
+    operator ruling, not a roll.
+
+    #2474: a gate that could not REACH a verdict halts too. The node used to
+    return the same empty dict for "checked, and clean" and "could not check",
+    so both arrived here as the same event and both proceeded to drafting —
+    the run then spent drafter budget with the pipeline's highest-value gate
+    skipped. ``requirements_unverified`` is the distinction the node now
+    carries, and this is the edge that acts on it.
+
+    The check is explicit rather than leaning on ``error_message`` being set
+    alongside it. The two keys mean different things, and a halt that depends
+    on a second field happening to be populated is the same implicit coupling
+    that produced the defect.
     """
+    if state.get("requirements_unverified"):
+        return "HALT"
     if state.get("error_message"):
         return "HALT"
     return "N1_generate_draft"

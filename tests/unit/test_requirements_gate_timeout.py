@@ -13,6 +13,7 @@ throughout.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -31,9 +32,15 @@ from assemblyzero.speedrun.requirements_status import (  # noqa: E402
     unverified_path,
 )
 from assemblyzero.workflows.requirements.nodes.analyze_requirements import (  # noqa: E402
+    GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS,
     REQUIREMENTS_GATE_TIMEOUT_SECONDS,
     analyze_requirements,
 )
+
+#: Attempts before the gate gives up: the first call plus one per backoff entry.
+#: Written as an expression rather than a literal so retuning the schedule
+#: retunes the tests with it (#2474).
+ATTEMPTS_BEFORE_HALT = 1 + len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)
 
 #: What the gate's own call actually took on boostgauge #7, wall clock.
 MEASURED_ISSUE_7_SECONDS = 294
@@ -88,6 +95,18 @@ def calm(monkeypatch):
 @pytest.fixture
 def storm(monkeypatch):
     monkeypatch.setattr("assemblyzero.core.provider_storm.is_storm", lambda: True)
+
+
+@pytest.fixture
+def slept(gate_backoff_waits):
+    """The backoff waits this case requested, recorded rather than served.
+
+    The seam itself is autouse in tests/conftest.py, because tests in files
+    that know nothing about the backoff drive the gate to a no-verdict outcome
+    too and would otherwise sleep the real schedule. This is the local name for
+    reading it.
+    """
+    return gate_backoff_waits
 
 
 def _state(tmp_path, **over):
@@ -152,7 +171,7 @@ class TestTheBudget:
 
 class TestTheRetry:
     def test_a_timeout_on_a_healthy_transport_retries_once(
-        self, tmp_path, provider, calm
+        self, tmp_path, provider, calm, slept
     ):
         p = provider(TIMEOUT, OK)
 
@@ -160,31 +179,192 @@ class TestTheRetry:
 
         assert len(p.calls) == 2, "a healthy-transport timeout must be retried once"
         assert result == {}, "the retry succeeded, so the gate proceeds normally"
+        assert slept == [], "the immediate #2375 retry does not wait"
 
-    def test_it_retries_only_once(self, tmp_path, provider, calm):
+    def test_the_immediate_retry_is_still_only_once(self, tmp_path, provider, calm):
+        """#2375's retry is one extra call, not a loop.
+
+        Measured as the difference from the no-immediate-retry cases below:
+        a healthy-transport timeout costs exactly one call more than a failure
+        that never earns the immediate retry.
+        """
         p = provider(TIMEOUT)
 
         analyze_requirements(_state(tmp_path))
 
-        assert len(p.calls) == 2, "one retry, not a loop"
+        assert len(p.calls) == ATTEMPTS_BEFORE_HALT + 1, (
+            "one immediate retry on top of the backoff schedule, not a loop"
+        )
 
-    def test_a_storm_is_not_retried_into(self, tmp_path, provider, storm):
-        """The storm is the condition fail-open exists for. Retrying burns
-        another full budget to reach the same wall (#2086)."""
+    def test_a_storm_is_not_retried_into_immediately(self, tmp_path, provider, storm):
+        """#2086: re-asking during a storm burns a second budget against the
+        same wall, so the IMMEDIATE retry stays suppressed.
+
+        #2474's waited retries are a different thing and deliberately DO run
+        here -- waiting is the remedy for a storm, not an instance of what
+        #2086 forbids. So the storm case costs exactly one call fewer than the
+        calm case above, and that one call is the suppressed immediate retry.
+        """
         p = provider(TIMEOUT)
 
         analyze_requirements(_state(tmp_path))
 
-        assert len(p.calls) == 1
+        assert len(p.calls) == ATTEMPTS_BEFORE_HALT
 
-    def test_a_non_timeout_failure_is_not_retried(self, tmp_path, provider, calm):
+    def test_a_non_timeout_failure_gets_no_immediate_retry(
+        self, tmp_path, provider, calm
+    ):
+        """Unchanged from #2290: an identical IMMEDIATE second call will not
+        change why it failed. #2474's waited retries are what follow."""
         p = provider(OTHER_FAILURE)
 
         analyze_requirements(_state(tmp_path))
 
-        assert len(p.calls) == 1, (
-            "it failed for a reason an identical second call will not change"
+        assert len(p.calls) == ATTEMPTS_BEFORE_HALT
+
+
+# ---------------------------------------------------------------------------
+# Failing closed (#2474)
+# ---------------------------------------------------------------------------
+
+
+class TestItHaltsWhenItCannotRun:
+    """The operator ruling of 2026-08-16.
+
+    Before this, a gate that could not reach the governance model returned the
+    same empty dict as a gate that checked and found the requirements clean.
+    LangGraph routes on the return value, so both went to the drafter and the
+    run kept spending with the pipeline's highest-value gate skipped.
+    """
+
+    def test_an_unreachable_gate_halts_instead_of_proceeding(
+        self, tmp_path, provider, calm
+    ):
+        provider(_result(False, None, "All credentials failed: 503/529 storm"))
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert update.get("requirements_unverified"), (
+            "the run must carry WHY it could not check, not an empty dict"
         )
+        assert "503/529" in update["requirements_unverified"]
+
+    def test_the_halt_is_distinguishable_from_a_clean_check(
+        self, tmp_path, provider, calm
+    ):
+        """The whole defect in one assertion.
+
+        'I checked and it is fine' and 'I could not check' must not be the same
+        value, because the graph has nothing else to route on.
+        """
+        provider(OTHER_FAILURE)
+        unreachable = analyze_requirements(_state(tmp_path))
+
+        provider(OK)
+        clean = analyze_requirements(_state(tmp_path))
+
+        assert clean == {}
+        assert unreachable != clean
+
+    def test_the_halt_is_distinguishable_from_a_conflict(
+        self, tmp_path, provider, calm
+    ):
+        """A conflict needs an operator ruling on the issue text; an
+        unreachable gate needs a re-run. Sharing a signal sends the operator
+        to rewrite requirements that were never read."""
+        provider(OTHER_FAILURE)
+        update = analyze_requirements(_state(tmp_path))
+
+        assert "REQUIREMENTS CONFLICT:" not in update["error_message"]
+        assert "REQUIREMENTS UNVERIFIED:" in update["error_message"]
+
+    def test_an_unparseable_response_halts_too(self, tmp_path, provider, calm):
+        provider(_result(True, "not json at all"))
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert "unparseable" in update.get("requirements_unverified", "")
+
+    def test_an_invalid_provider_halts_without_waiting(
+        self, tmp_path, monkeypatch, slept
+    ):
+        """No backoff outlasts a provider spec that names nothing real."""
+        def _raise(spec, *a, **k):
+            raise ValueError(f"unknown provider: {spec}")
+
+        monkeypatch.setattr(
+            "assemblyzero.core.llm_provider.get_provider", _raise
+        )
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert "invalid provider" in update.get("requirements_unverified", "")
+        assert slept == [], "a bad spec is not transient; waiting cannot fix it"
+
+    def test_it_backs_off_on_the_declared_schedule_before_halting(
+        self, tmp_path, provider, calm, slept
+    ):
+        """The observed outage cleared in minutes, so halting on the first
+        storm would be brittle in the other direction."""
+        p = provider(OTHER_FAILURE)
+
+        analyze_requirements(_state(tmp_path))
+
+        assert slept == list(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)
+        assert len(p.calls) == ATTEMPTS_BEFORE_HALT
+
+    def test_a_verdict_on_a_backoff_retry_proceeds_normally(
+        self, tmp_path, provider, calm, slept
+    ):
+        """The point of the backoff: a storm that clears must not cost a halt."""
+        p = provider(OTHER_FAILURE, OK)
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert update == {}, "the retry got a verdict, so the run proceeds"
+        assert len(p.calls) == 2, "it stops retrying the moment it has an answer"
+        assert slept == [GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS[0]], (
+            "it waits once, not through the whole schedule"
+        )
+
+    def test_a_conflict_still_halts_the_old_way(self, tmp_path, provider, calm):
+        """#1899's halt is untouched: it is a verdict, not a failure to reach
+        one, and it must not acquire the unverified marker."""
+        provider(_result(True, json.dumps({
+            "is_consistent": False,
+            "conflicts": [{
+                "criterion_a": "the floor is the highest value in the window",
+                "criterion_b": "the floor drifts toward the most recent value",
+                "diverging_situation": "when the window max is not the latest sample",
+            }],
+        })))
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert "REQUIREMENTS CONFLICT:" in update["error_message"]
+        assert not update.get("requirements_unverified")
+
+    def test_the_halt_message_says_the_gate_did_not_run(
+        self, tmp_path, provider, calm
+    ):
+        provider(OTHER_FAILURE)
+
+        message = analyze_requirements(_state(tmp_path))["error_message"]
+
+        assert "did not run" in message
+        assert "NOT a clean requirements check" in message
+
+    def test_the_halt_message_carries_the_resume_command(
+        self, tmp_path, provider, calm
+    ):
+        """Read at the moment something has already failed, so the next action
+        has to be in the message rather than in a runbook."""
+        provider(OTHER_FAILURE)
+
+        message = analyze_requirements(_state(tmp_path))["error_message"]
+
+        assert "tools/check_requirements.py" in message
+        assert str(tmp_path) in message and "--issue 7" in message
 
 
 # ---------------------------------------------------------------------------
@@ -193,25 +373,56 @@ class TestTheRetry:
 
 
 class TestItSaysSoWhenItDidNotRun:
-    def test_an_exhausted_retry_records_the_unverified_state(
+    """The ledger behind the end-of-run banner (#2290).
+
+    #2474 narrowed what feeds it. The banner's own sentence is "the run
+    proceeded anyway", so it may only carry paths where the run DID proceed.
+    A halted run is reported by its halt message and recovery plan; writing it
+    here as well would put a false sentence in front of the operator.
+    """
+
+    def test_an_exhausted_retry_records_nothing_because_it_halts(
         self, tmp_path, provider, calm
     ):
         provider(TIMEOUT)
 
-        analyze_requirements(_state(tmp_path))
+        update = analyze_requirements(_state(tmp_path))
 
-        records = read_unverified(tmp_path)
-        assert len(records) == 1
-        assert records[0]["issue"] == 7
-        assert "timed out" in records[0]["reason"]
+        assert update.get("requirements_unverified"), "it halted"
+        assert read_unverified(tmp_path) == [], (
+            "the banner says the run proceeded anyway, which this run did not"
+        )
 
-    def test_an_unparseable_response_records_it_too(self, tmp_path, provider, calm):
+    def test_an_unparseable_response_records_nothing_either(
+        self, tmp_path, provider, calm
+    ):
         provider(_result(True, "not json at all"))
 
-        analyze_requirements(_state(tmp_path))
+        update = analyze_requirements(_state(tmp_path))
 
+        assert update.get("requirements_unverified"), "it halted"
+        assert read_unverified(tmp_path) == []
+
+    def test_the_surviving_fail_open_path_still_records(self, tmp_path, provider, calm):
+        """#2462: the model answered, but every conflict it reported lacked a
+        divergence condition. That path still PROCEEDS -- halting there would
+        stop the roll on a finding the check itself could not state -- so it is
+        exactly the case the banner exists for, and it must keep feeding it.
+        """
+        provider(_result(True, json.dumps({
+            "is_consistent": False,
+            "conflicts": [{
+                "criterion_a": "A",
+                "criterion_b": "B",
+                "diverging_situation": "?",
+            }],
+        })))
+
+        update = analyze_requirements(_state(tmp_path))
+
+        assert update == {}, "this one proceeds, by the decision recorded in #2462"
         records = read_unverified(tmp_path)
-        assert len(records) == 1 and "unparseable" in records[0]["reason"]
+        assert len(records) == 1 and records[0]["issue"] == 7
 
     def test_a_verdict_records_nothing(self, tmp_path, provider, calm):
         provider(OK)
@@ -232,6 +443,21 @@ class TestItSaysSoWhenItDidNotRun:
         precheck.run_gate(tmp_path, 7, "t", "The app shall persist state.")
 
         assert read_unverified(tmp_path) == []
+
+    def test_the_precheck_reports_no_verdict_as_error_not_conflict(
+        self, tmp_path, provider, calm
+    ):
+        """#2474: the node now sets error_message on the unreachable path so
+        the HALT node has something to classify. The pre-check reads
+        requirements_unverified first, or it would tell the operator to rule on
+        a contradiction in requirements nothing ever read."""
+        from assemblyzero.workflows.requirements import precheck
+
+        provider(OTHER_FAILURE)
+        result = precheck.run_gate(tmp_path, 7, "t", "The app shall persist state.")
+
+        assert result.status == "error"
+        assert "no verdict" in result.detail
 
     def test_recording_never_raises(self, tmp_path):
         blocker = tmp_path / "data"

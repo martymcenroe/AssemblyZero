@@ -144,6 +144,11 @@ class RequirementsWorkflowState(TypedDict, total=False):
 
         # Error handling (common)
         error_message: Last error message if any.
+        requirements_unverified: Why N0c reached no verdict, when it reached
+            none (#2474). Set only on the halt path, so its presence — not its
+            value — is what routing keys on. Distinct from error_message
+            because "the requirements contradict each other" and "I could not
+            check the requirements" need opposite operator responses.
 
         # Git commit tracking (Issue #162)
         created_files: List of files created by workflow for commit.
@@ -232,6 +237,11 @@ class RequirementsWorkflowState(TypedDict, total=False):
 
     # Error handling
     error_message: str
+
+    # #2474: N0c could not reach a verdict, so the run halts rather than draft
+    # against unverified requirements. Carries the reason; routing keys on
+    # presence.
+    requirements_unverified: str
 
     # Mechanical validation (Issue #277)
     validation_errors: list[str]
