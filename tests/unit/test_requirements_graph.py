@@ -180,6 +180,48 @@ class TestGraphRouting:
         assert route_from_human_gate_verdict(state) == "N1_generate_draft"
 
 
+class TestRequirementsGateRouting:
+    """The N0c edge, which is where #2474's defect lived.
+
+    The node has three real outcomes and the graph declared two successors.
+    Until #2474 "checked, and clean" and "could not check" both returned an
+    empty dict, so routing could not tell them apart and both went to the
+    drafter -- the run then spent drafter budget with the pipeline's
+    highest-value-per-dollar gate skipped.
+    """
+
+    def _route(self, state):
+        from assemblyzero.workflows.requirements.graph import (
+            route_after_analyze_requirements,
+        )
+
+        return route_after_analyze_requirements(state)
+
+    def test_a_clean_gate_proceeds_to_drafting(self):
+        assert self._route({}) == "N1_generate_draft"
+
+    def test_a_conflict_halts(self):
+        assert self._route({"error_message": "REQUIREMENTS CONFLICT: ..."}) == "HALT"
+
+    def test_an_unverified_gate_halts(self):
+        assert self._route({"requirements_unverified": "503 storm"}) == "HALT"
+
+    def test_unverified_halts_on_its_own_without_an_error_message(self):
+        """The regression guard.
+
+        The node sets both keys today, so a router keyed only on error_message
+        would pass every other test in this class while the actual distinction
+        went unread. Pinning the marker alone is what makes the halt depend on
+        the fact rather than on a second field happening to be populated.
+        """
+        assert self._route({"requirements_unverified": "503 storm",
+                            "error_message": ""}) == "HALT"
+
+    def test_a_clean_gate_and_an_unverified_gate_route_differently(self):
+        """The whole defect in one assertion."""
+        assert self._route({}) != self._route({"requirements_unverified": "x"})
+
+
 class TestGraphExecution:
     """Tests for full graph execution paths."""
 

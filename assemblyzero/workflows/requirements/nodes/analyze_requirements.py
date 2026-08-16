@@ -24,24 +24,61 @@ emerge mid-pipeline (#1900), so both classify as ``requirements_conflict``
 (non-transient: no retry fixes an ambiguous requirement, the ISSUE needs
 an operator ruling).
 
-Fail-open by design: this gate is protective, not load-bearing. If the
-analysis call itself fails (provider storm, parse noise), the workflow
-proceeds to drafting with a printed warning rather than dying in a
-pre-flight check.
+Fails CLOSED when it cannot reach a verdict (#2474, operator ruling
+2026-08-16). It was fail-open from #1899 through #2290 on the reasoning
+that a provider storm must not brick a launch. Measured against what that
+bought: on boostgauge #331 the governance model was unreachable, the node
+printed ``proceeding``, and the run went on to spend drafter budget with
+the highest-value-per-dollar gate in the pipeline skipped. A storm that
+bricks a launch is cheaper than a launch that drafts against unverified
+requirements, so an unreachable gate is now a halt condition.
 
-Failing open is not the same as failing silently (#2290). Every path that
-proceeds without a verdict records that fact where the roll's verdict block
-and the operator summary will print it, because "requirements were not
-checked" and "requirements were checked and were clean" are different roll
-outcomes that used to look identical from the outside.
+The halt is preceded by a backoff (``GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS``)
+because the observed outage cleared within minutes -- halting on the first
+storm would be brittle in the other direction.
+
+Three outcomes, three destinations. The graph declares two successors for
+this node, and until #2474 the node returned ``{}`` for BOTH "checked, and
+clean" and "could not check" -- LangGraph routes on the return value, so
+those collapsed onto the same edge and the distinction died inside the node
+before routing ever saw it. Now:
+
+- verified consistent      -> ``{}``                         -> drafting
+- conflict found           -> ``error_message``              -> HALT
+- no verdict reached       -> ``requirements_unverified``    -> HALT
+
+The remaining fail-open path is the one from #2462, where the model answers
+but every conflict it reports lacks a divergence condition. That is a
+deliberate decision on record, not an oversight: halting there would stop
+the roll on a finding the check itself could not state. It still records the
+unverified state, so the end-of-run banner still fires for it.
+
+Failing open is not the same as failing silently (#2290). The fail-open path
+that survives records that fact where the roll's verdict block and the
+operator summary will print it, because "requirements were not checked" and
+"requirements were checked and were clean" are different roll outcomes that
+used to look identical from the outside. The paths that now HALT deliberately
+do NOT write that record: the banner says the run "proceeded anyway", which is
+false of a halted run, and the halt's own message and recovery plan are the
+report.
 """
 
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 REQUIREMENTS_CONFLICT_MARKER = "REQUIREMENTS CONFLICT:"
+
+#: Prefix on the halt message when the gate could not reach a verdict (#2474).
+#:
+#: Deliberately NOT the conflict marker. "The requirements contradict each
+#: other" and "I could not check the requirements" call for opposite operator
+#: responses -- one needs a ruling on the issue text, the other needs a re-run --
+#: and sharing a marker is the same collapse at the reporting layer that #2474
+#: fixed at the routing layer.
+REQUIREMENTS_UNVERIFIED_MARKER = "REQUIREMENTS UNVERIFIED:"
 
 #: Wall-clock budget for the single analysis call.
 #:
@@ -79,6 +116,35 @@ REQUIREMENTS_GATE_TIMEOUT_SECONDS = 600
 GATE_DRAFTER_ESCALATION: dict[str, str] = {
     "claude:sonnet": "claude:opus",
 }
+
+#: How long to wait between attempts before halting an unreachable gate (#2474).
+#:
+#: One entry per retry, in seconds of sleep BEFORE that attempt. Measured
+#: against boostgauge #331, where the node saw ``All credentials failed ...
+#: riding 503/529 capacity storms`` and the same run logged ``[PREFLIGHT]
+#: Gemini: 4/4 credentials`` minutes later. Capacity came back on its own, so a
+#: halt on the first storm would trade one failure mode for another.
+#:
+#: Two retries spanning four minutes of waiting. The bound matters because each
+#: attempt can itself burn the full ``REQUIREMENTS_GATE_TIMEOUT_SECONDS``, and
+#: this schedule COMPOSES with the #2375 timeout retry above rather than
+#: replacing it. Counted, not estimated:
+#:
+#:   no escalation: 3 calls x 600s + 240s sleep = 2040s (34 min)
+#:   after a #2375 escalation: 4 calls x 600s + 240s sleep = 2640s (44 min)
+#:
+#: That ceiling is bought deliberately. It buys back rolls that would otherwise
+#: halt on a transient storm, it is only reached when EVERY attempt burns its
+#: full budget (a total outage, not the observed case), and it is gate time
+#: rather than drafter spend -- which is the trade #2474 rules on. A run that
+#: cannot get a verdict across four minutes of waiting is in a real outage, and
+#: halting resumably beats waiting longer.
+#:
+#: Unlike the #2375 timeout retry above, this schedule deliberately DOES run
+#: during a provider storm. #2086's objection is to re-asking immediately, which
+#: burns a second budget against the same wall; waiting is the remedy for a
+#: storm rather than an instance of the thing #2086 forbids.
+GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS: tuple[int, ...] = (60, 180)
 
 
 def escalated_drafter(spec: str) -> str | None:
@@ -219,10 +285,13 @@ def _provider_storm_active() -> bool:
 def _record_unverified(state: dict, reason: str) -> None:
     """Record a fail-open so the roll can say so. Never raises (#2290).
 
-    Recorded on EVERY path that proceeds without a verdict, not only on the
-    exhausted retry: an unparseable response and an invalid provider leave the
-    requirements exactly as unchecked as a timeout does, and the operator's
-    question is "were they checked", not "which way did the check fail".
+    Recorded on every path that PROCEEDS without a verdict. Since #2474 that is
+    one path — the #2462 case where the model answered but could not articulate
+    any of the conflicts it reported. The unreachable, unparseable and
+    invalid-provider paths no longer proceed at all, so they no longer record:
+    the banner this feeds says the run "proceeded anyway", which is false of a
+    halted run, and a halt reports itself through its own message and recovery
+    plan.
 
     Not recorded for the standalone pre-check, which is not a roll: it reports
     its own failure with a non-zero exit and its own report, and a record
@@ -249,8 +318,76 @@ def _record_unverified(state: dict, reason: str) -> None:
         print(f"  [N0c] WARNING: could not record the unverified state: {exc}")
 
 
+def _sleep(seconds: float) -> None:
+    """The backoff wait (#2474), as a seam the tests replace.
+
+    A suite that really slept this schedule would pay four minutes per case,
+    which is how a suite stops being run. Patching ``time.sleep`` globally from
+    a test would reach every other sleeper in the process; one named function
+    here is the narrower thing to replace.
+    """
+    time.sleep(seconds)
+
+
+def _verdict_of(result: Any) -> dict | None:
+    """The parsed verdict from one attempt, or None if it did not reach one.
+
+    Collapses "the call failed", "the call returned nothing" and "the call
+    returned something unparseable" into the single question the retry loop
+    asks: is there a verdict yet?
+    """
+    if not getattr(result, "success", False) or not getattr(result, "response", ""):
+        return None
+    return _parse_analysis(result.response)
+
+
+def _no_verdict_reason(result: Any) -> str:
+    """Why this attempt produced no verdict, in the operator's words.
+
+    One function so the backoff loop, the halt message and the log line cannot
+    disagree about which of the two failures happened.
+    """
+    if not getattr(result, "success", False) or not getattr(result, "response", ""):
+        return getattr(result, "error_message", "") or "empty response"
+    return "the analysis response was unparseable"
+
+
+def _halt_unverified(state: dict, answered_by: str, reason: str) -> dict[str, Any]:
+    """Stop the run because the gate could not run (#2474).
+
+    Returns BOTH keys deliberately. ``requirements_unverified`` is what the
+    router and the standalone pre-check read, because it is the only thing that
+    separates this halt from a conflict halt; ``error_message`` is what the HALT
+    node classifies, prints and writes into the recovery plan.
+    """
+    repo = state.get("target_repo") or "<repo>"
+    issue = state.get("issue_number") or "<N>"
+    message = (
+        f"{REQUIREMENTS_UNVERIFIED_MARKER} the consistency gate did not run, so "
+        f"nothing about this issue's requirements was checked. This is NOT a "
+        f"clean requirements check and NOT a conflict finding -- the gate never "
+        f"reached a verdict.\n"
+        f"  Gate model: {answered_by}\n"
+        f"  Why: {reason}\n"
+        f"  Attempts: 1 + {len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)} retries "
+        f"over {sum(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)}s of backoff.\n"
+        f"  The run stopped here rather than spend drafter budget against "
+        f"unverified requirements (#2474).\n"
+        f"  Resume: poetry run python tools/check_requirements.py --repo {repo} "
+        f"--issue {issue}\n"
+        f"  Then relaunch the roll once the gate returns a verdict."
+    )
+    print(f"  [N0c] {message}")
+    return {"error_message": message, "requirements_unverified": reason}
+
+
 def analyze_requirements(state: dict) -> dict[str, Any]:
-    """N0c node body. Returns {} to proceed, or error_message to halt."""
+    """N0c node body.
+
+    Returns ``{}`` to proceed, ``error_message`` to halt on a conflict, or
+    ``requirements_unverified`` (plus ``error_message``) to halt because no
+    verdict could be reached (#2474).
+    """
     if state.get("config_mock_mode"):
         return {}
 
@@ -268,9 +405,12 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     try:
         provider = get_provider(drafter_spec)
     except ValueError as e:
-        print(f"  [N0c] WARNING: analysis skipped (invalid provider: {e})")
-        _record_unverified(state, f"invalid provider '{drafter_spec}': {e}")
-        return {}
+        # #2474: halts immediately, with no backoff. The backoff exists to
+        # outlast a transient outage; a provider spec that does not name a real
+        # provider is not transient and no amount of waiting resolves it.
+        return _halt_unverified(
+            state, drafter_spec, f"invalid provider '{drafter_spec}': {e}"
+        )
 
     content = f"# Issue: {issue_title}\n\n{issue_body}"
 
@@ -325,26 +465,34 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             )
         result = _invoke(provider)
 
-    # Fail-open: a dead analysis call must not kill the roll (#1899).
-    if not result.success or not result.response:
-        reason = result.error_message or "empty response"
-        # #2375: name the model. "The gate did not answer" and "the gate did
-        # not answer ON SONNET" are different facts, and only the second one
-        # tells the next reader whether escalating is worth trying.
-        print(
-            f"  [N0c] WARNING: analysis unavailable on {answered_by} "
-            f"({reason}); proceeding."
-        )
-        _record_unverified(
-            state, f"analysis unavailable on {answered_by}: {reason}"
-        )
-        return {}
-
-    parsed = _parse_analysis(result.response)
+    # #2474: no verdict is a halt condition, not a warning -- but not before a
+    # backoff, because the outage that prompted this ruling cleared on its own
+    # within minutes. Unreachable and unparseable share this path because they
+    # are the same fact from the graph's side ("no verdict"), and because both
+    # are plausibly transient: one is the transport, the other is a sample. What
+    # they must NOT share is the verified-clean return value, which is the
+    # collapse #2474 is about.
+    parsed = _verdict_of(result)
     if parsed is None:
-        print("  [N0c] WARNING: analysis response unparseable; proceeding.")
-        _record_unverified(state, "analysis response was unparseable")
-        return {}
+        # #2375: every line below names the model. "The gate did not answer" and
+        # "the gate did not answer ON SONNET" are different facts, and only the
+        # second tells the next reader whether escalating is worth trying.
+        reason = _no_verdict_reason(result)
+        for attempt, delay in enumerate(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS, 1):
+            print(
+                f"  [N0c] no verdict on {answered_by} ({reason}); waiting {delay}s "
+                f"before retry {attempt} of "
+                f"{len(GATE_UNAVAILABLE_RETRY_BACKOFF_SECONDS)} (#2474)."
+            )
+            _sleep(delay)
+            result = _invoke(provider)
+            parsed = _verdict_of(result)
+            if parsed is not None:
+                print(f"  [N0c] the retry reached a verdict on {answered_by}.")
+                break
+            reason = _no_verdict_reason(result)
+        if parsed is None:
+            return _halt_unverified(state, answered_by, reason)
 
     conflicts = parsed.get("conflicts") or []
     if parsed.get("is_consistent", True) or not conflicts:

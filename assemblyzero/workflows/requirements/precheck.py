@@ -282,8 +282,23 @@ def run_gate(
         ) from exc
 
     output = capture.getvalue()
-    conflict = str((update or {}).get("error_message") or "")
+    update = update or {}
 
+    # #2474: checked BEFORE error_message, which the node now sets on this path
+    # too so the HALT node has something to classify. Reading error_message
+    # first would report "the requirements contradict each other" for a run
+    # where the gate never answered -- the exact conflation #2474 removed from
+    # routing, re-introduced at the reporting layer. `error` is the honest
+    # status: no verdict was reached.
+    unverified = str(update.get("requirements_unverified") or "")
+    if unverified:
+        return PrecheckResult(
+            "error",
+            f"the gate reached no verdict: {unverified}",
+            output,
+        )
+
+    conflict = str(update.get("error_message") or "")
     if conflict:
         return PrecheckResult("conflict", conflict, output)
     if CLEAN_MARKER in output:

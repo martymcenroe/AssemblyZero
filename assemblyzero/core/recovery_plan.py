@@ -257,6 +257,20 @@ def _build_recommendation(
             "Non-transient: Authentication failed. "
             "Check your Gemini credentials in ~/.assemblyzero/gemini-credentials.json."
         )
+    elif error_type == "requirements_unverified":
+        # #2474: deliberately not filed as transient even though the usual
+        # cause is. A transient classification tells the launcher it may retry
+        # on its own, and the point of this halt is that a human learns the
+        # requirements were never checked before anything spends again.
+        return (
+            "Non-transient: the requirements gate never reached a verdict, so "
+            "NOTHING about the issue text was checked -- this is not a clean "
+            "check and not a conflict (#2474). The usual cause is a transient "
+            "capacity storm, and the gate already waited it out across its "
+            "backoff and still got nothing. Re-run the gate on its own with "
+            "tools/check_requirements.py --repo <repo> --issue <N>; relaunch "
+            "the roll only once that returns a verdict."
+        )
     elif error_type == "requirements_conflict":
         return (
             "Non-transient: the ISSUE's requirements contradict each other — "

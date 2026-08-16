@@ -171,23 +171,29 @@ class TestTheRetryEscalates:
 
 
 class TestWhatEscalationDoesNotChange:
-    """The retry's preconditions are #2290's and stay #2290's."""
+    """The retry's preconditions are #2290's and stay #2290's.
 
-    def test_a_storm_still_suppresses_the_retry(self, tmp_path, specs, storm):
+    These assert on WHICH MODEL was asked, not on how many calls were made:
+    #2474 added waited retries behind the immediate one, and those reuse the
+    provider already selected. Escalation is about model choice, so model
+    choice is what these pin.
+    """
+
+    def test_a_storm_still_suppresses_escalation(self, tmp_path, specs, storm):
         asked, provider = specs(TIMEOUT, OK)
 
         analyze_requirements(_state(tmp_path, "claude:sonnet"))
 
-        assert asked == ["claude:sonnet"]
-        assert len(provider.calls) == 1, "escalating into a storm is still wrong"
+        assert asked == ["claude:sonnet"], "escalating into a storm is still wrong"
 
-    def test_a_non_timeout_failure_is_still_not_retried(self, tmp_path, specs, calm):
+    def test_a_non_timeout_failure_still_does_not_escalate(
+        self, tmp_path, specs, calm
+    ):
         asked, provider = specs(OTHER_FAILURE, OK)
 
         analyze_requirements(_state(tmp_path, "claude:sonnet"))
 
         assert asked == ["claude:sonnet"]
-        assert len(provider.calls) == 1
 
     def test_a_first_attempt_that_succeeds_never_escalates(
         self, tmp_path, specs, calm
@@ -199,14 +205,23 @@ class TestWhatEscalationDoesNotChange:
         assert asked == ["claude:sonnet"]
         assert len(provider.calls) == 1
 
-    def test_the_gate_still_fails_open_when_both_attempts_die(
+    def test_the_gate_now_halts_when_every_attempt_dies(
         self, tmp_path, specs, calm
     ):
-        """Protective, not load-bearing (#1899). Escalation does not make the
-        gate able to kill a roll."""
+        """#2474 reversed #1899's fail-open ruling; escalation is unaffected.
+
+        Escalation was never what decided whether a dead gate kills a roll --
+        it decides which model the retry asks. What changed is the destination
+        when no model answers: the run stops rather than draft against
+        requirements nobody checked.
+        """
         specs(TIMEOUT, TIMEOUT)
 
-        assert analyze_requirements(_state(tmp_path, "claude:sonnet")) == {}
+        update = analyze_requirements(_state(tmp_path, "claude:sonnet"))
+
+        assert update.get("requirements_unverified"), (
+            "every attempt died, so the run must not proceed to the drafter"
+        )
 
 
 class TestTheVerdictNamesItsDrafter:
@@ -242,9 +257,12 @@ class TestTheVerdictNamesItsDrafter:
     def test_an_unavailable_verdict_names_the_model_that_actually_ran(
         self, tmp_path, specs, calm, capsys
     ):
+        """#2474 turned this warning into a halt message. The model name is
+        still the point: it is what tells the next reader whether escalating
+        further is worth trying."""
         specs(TIMEOUT, TIMEOUT)
         analyze_requirements(_state(tmp_path, "claude:sonnet"))
-        assert "analysis unavailable on claude:opus" in capsys.readouterr().out
+        assert "Gate model: claude:opus" in capsys.readouterr().out
 
 
 class TestTheEscalationMap:
