@@ -37,8 +37,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 from dataclasses import dataclass, field
@@ -345,8 +347,92 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+#: Set when the archiver has had to clear a ReadOnly attribute, so recurrence
+#: stays visible rather than silent. Read by `archive_run` for the result note.
+_readonly_cleared: list[str] = []
+
+
+def readonly_clearings() -> list[str]:
+    """Paths whose ReadOnly attribute this process had to clear (#2404)."""
+    return list(_readonly_cleared)
+
+
+def _reset_readonly_clearings() -> None:
+    _readonly_cleared.clear()
+
+
+def _clear_readonly(path: Path) -> bool:
+    """Drop FILE_ATTRIBUTE_READONLY from `path`. True when it was cleared.
+
+    #2404: a successful roll's auto-archive died with `[WinError 5] Access is
+    denied` on an EMPTY directory carrying the Windows ReadOnly attribute --
+    the signature #2277 forensically attributed to Google Drive for Desktop's
+    attribute-setting. A sweep found 62 such directories under
+    `data/speedrun/archives/`.
+
+    The setter has a standing presence, so a one-time manual `attrib -r` sweep
+    is not a durable repair: the tool has to tolerate the attribute rather than
+    assume its absence.
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+    except OSError:
+        return False
+    _readonly_cleared.append(str(path))
+    return True
+
+
+def _on_permission_error(func, path, _exc_info) -> None:
+    """`shutil` error hook: clear ReadOnly, retry once, then let it raise."""
+    if _clear_readonly(Path(path)):
+        func(path)
+
+
 def _copy_tree(src: Path, dest: Path) -> None:
-    shutil.copytree(src, dest, dirs_exist_ok=True)
+    """Copy, tolerating ReadOnly on the source or an existing destination.
+
+    `copytree` copies metadata with `copy2`, so a ReadOnly source file yields a
+    ReadOnly destination -- and a re-archive over it then fails on the write.
+    Both directions are handled: the destination is made writable before the
+    retry, and the source's attribute is cleared only if it is what blocked.
+    """
+    try:
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+        return
+    except (PermissionError, shutil.Error):
+        # `copytree` collects per-file failures and raises `shutil.Error`
+        # wrapping them, so catching PermissionError alone never fires -- the
+        # first cut of this repair did exactly that and the fixture still saw
+        # WinError 5. A non-permission failure is retried once here too and
+        # then raises on its own terms, which is the same outcome it had before.
+        pass
+
+    # Retry with the destination tree made writable. The source is left alone
+    # unless it is itself unreadable -- clearing attributes on the operator's
+    # own files is not the archiver's business.
+    if dest.exists():
+        for path in [dest, *dest.rglob("*")]:
+            _clear_readonly(path)
+    shutil.copytree(src, dest, dirs_exist_ok=True, copy_function=_copy_writable)
+
+
+def _copy_writable(src: str, dst: str) -> None:
+    """`copy2`, then make the copy writable.
+
+    A ReadOnly source produces a ReadOnly archive, which makes the NEXT
+    re-archive fail in exactly the way this repair exists to prevent. The
+    archive is our own artifact, so it is ours to keep writable.
+    """
+    shutil.copy2(src, dst)
+    try:
+        os.chmod(dst, stat.S_IWRITE)
+    except OSError:
+        pass
+
+
+def _rmtree(path: Path) -> None:
+    """Remove a tree, clearing ReadOnly on whatever blocks it."""
+    shutil.rmtree(path, onexc=_on_permission_error)
 
 
 def _build_manifest(root: Path) -> dict[str, str]:
@@ -379,10 +465,14 @@ def archive_run(
     log_dir = Path(log_dir) if log_dir else repo / DEFAULT_LOG_REL
     dest = Path(out_dir) if out_dir else repo / ARCHIVES_REL / run
 
+    _reset_readonly_clearings()
+
     if dest.exists():
         # Re-archiving must be idempotent, and a stale file left from an earlier
         # partial run would otherwise be hashed into the new manifest.
-        shutil.rmtree(dest)
+        # #2404: ReadOnly-attributed directories under the archives tree make
+        # this raise WinError 5, which is how a successful roll's archive died.
+        _rmtree(dest)
     (dest / "logs").mkdir(parents=True, exist_ok=True)
     (dest / "artifacts").mkdir(parents=True, exist_ok=True)
     (dest / "orphans").mkdir(parents=True, exist_ok=True)

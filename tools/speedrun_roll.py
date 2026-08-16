@@ -87,6 +87,7 @@ from assemblyzero.core.provider_storm import (  # noqa: E402
 )
 from assemblyzero.speedrun.archive import (  # noqa: E402  (#2353)
     archive_run,
+    readonly_clearings,
     verify_manifest,
 )
 from assemblyzero.speedrun.box_health import check_box_health  # noqa: E402
@@ -2656,6 +2657,17 @@ def _archive_successful_run(repo_root) -> list[str]:
             )
         else:
             lines.append("    manifest OK")
+
+        # #2404: the ReadOnly-clearing path is reported so recurrence stays
+        # visible. The #2277 setter has a standing presence, so silence here
+        # would turn a durable environmental condition into folklore.
+        cleared = readonly_clearings()
+        if cleared:
+            lines.append(
+                f"    cleared the Windows ReadOnly attribute on "
+                f"{len(cleared)} path(s) to archive (#2404); the setter "
+                f"re-flags them, so this is expected to recur"
+            )
 
     except Exception as exc:  # noqa: BLE001 - an archive failure is not a verdict
         lines.append(
