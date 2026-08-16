@@ -84,6 +84,69 @@ def conflict_fingerprint(criterion_a: str, criterion_b: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Is this filing something an operator can actually rule on? (#2462)
+# ---------------------------------------------------------------------------
+#
+# boostgauge #344 was filed with this conflict block, verbatim:
+#
+#     - A: alpha at distance 2 reads fully opaque; at 2.5 midway within +/-10; at 3 baseline
+#     - B: additive bloom on the body
+#     - Diverge when: ?
+#
+# The `?` is this module's own renderer default showing through: the model
+# returned no `diverging_situation`, `build_body` substituted `?`, and the
+# result was a launch-blocking question with nothing to rule ON.
+#
+# The must-resolve contract is "edit the source issue so only one reading
+# survives", which presupposes the filing names where the two readings part.
+# A filing that does not delegates the gate's own job -- articulating the
+# conflict -- to the operator, at launch-blocking priority. By the fleet's
+# no-false-alarms rule, a check that files what it cannot articulate trains the
+# operator to skim its filings.
+#
+# Deliberately narrow: the DIVERGENCE only. `conflict_from_rationale` emits an
+# empty `criterion_b` on purpose when the reviewer's prose cannot be split in
+# two (#2192, "a slightly coarse issue is worth having; a missing one is the
+# defect"), and rejecting that would re-open the blocked-roll-with-no-question
+# defect this module exists to close.
+
+#: One letter or digit anywhere is enough to be saying something. A condition
+#: made only of punctuation -- `?`, `-`, `...` -- is not.
+_HAS_MEANING = re.compile(r"[^\W_]", re.UNICODE)
+
+#: Words that fill the slot without answering it. Punctuation-only strings are
+#: not listed here -- the check above owns those, and a second list of `?`,
+#: `??`, `???` would be dead the day it was written.
+_PLACEHOLDER_WORDS = frozenset({
+    "n/a", "na", "none", "null", "nil", "unknown", "unclear", "unspecified",
+    "tbd", "todo",
+})
+
+
+def unanswerable_reason(conflict: dict) -> str | None:
+    """Why this conflict cannot be ruled on, or None if it can be (#2462).
+
+    Returns a phrase naming the defect, so a rejection is surfaced by name
+    rather than dropped -- the pairing may sit near a real conflict even when
+    the model could not articulate it, which is exactly what happened on #344.
+    """
+    stated = str(conflict.get("diverging_situation") or "").strip()
+    if not stated:
+        return "the model stated no situation where the two readings diverge"
+    if not _HAS_MEANING.search(stated):
+        return (
+            "the divergence condition is punctuation only "
+            f"({stated!r}), so there is nothing to rule on"
+        )
+    if stated.casefold() in _PLACEHOLDER_WORDS:
+        return (
+            f"the divergence condition is the placeholder {stated!r}, "
+            "so there is nothing to rule on"
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # gh plumbing
 # ---------------------------------------------------------------------------
 
@@ -91,7 +154,7 @@ def conflict_fingerprint(criterion_a: str, criterion_b: str) -> str:
 @dataclass
 class FilingResult:
     ok: bool
-    action: str  # filed | commented | skipped | failed
+    action: str  # filed | commented | skipped | rejected | failed
     issue_number: int | None = None
     fingerprint: str | None = None
     detail: str = ""
@@ -251,9 +314,13 @@ def build_body(
         f"**Source issue:** #{source_issue}",
         "",
         "**Conflict (verbatim):**",
-        f"- A: {conflict.get('criterion_a', '?')}",
-        f"- B: {conflict.get('criterion_b', '?')}",
-        f"- Diverge when: {conflict.get('diverging_situation', '?')}",
+        # `(not stated)` rather than `?`: the bare question mark is what made
+        # #344 unreadable as a question at all. An empty divergence can no
+        # longer reach here (unanswerable_reason rejects it before filing), and
+        # an empty criterion says so in words (#2462).
+        f"- A: {conflict.get('criterion_a') or '(not stated)'}",
+        f"- B: {conflict.get('criterion_b') or '(not stated)'}",
+        f"- Diverge when: {conflict.get('diverging_situation') or '(not stated)'}",
         "",
         "**Ruling needed:** edit the source issue's text so only one reading "
         "survives, then close this issue. The roll will refuse to launch while "
@@ -327,6 +394,21 @@ def file_must_resolve(
         # Brief and idea entry paths carry file input, not an issue number.
         # There is nothing to file against.
         return FilingResult(True, "skipped", detail="entry path has no issue number")
+
+    # #2462: never file a question nothing can answer. Enforced HERE, at the
+    # filing boundary, so both gates that file -- N0c and the spec reviewer --
+    # get the invariant from one predicate rather than each carrying a copy.
+    unanswerable = unanswerable_reason(conflict)
+    if unanswerable:
+        log(
+            f"  [{origin.tag}] NOT FILED: {unanswerable}. The pairing is "
+            "reported here rather than raised as a question, because a "
+            "must-resolve with nothing to rule on blocks every later launch "
+            "and cannot be closed by ruling:"
+        )
+        log(f"      A: {conflict.get('criterion_a', '') or '(not stated)'}")
+        log(f"      B: {conflict.get('criterion_b', '') or '(not stated)'}")
+        return FilingResult(False, "rejected", detail=unanswerable)
 
     env_run_id, env_run_start = run_context()
     run_id = run_id or env_run_id

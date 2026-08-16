@@ -57,6 +57,18 @@ RUN_083155 = [
 ]
 
 
+#: A well-formed conflict. The divergence condition is load-bearing input, not
+#: decoration: #2462 made a filing with an empty one impossible, because a
+#: question with nothing to rule ON blocks every later launch and cannot be
+#: closed by ruling. These tests are about the ledger, so they hand the filer
+#: something it would really file.
+CONFLICT = {
+    "criterion_a": "A",
+    "criterion_b": "B",
+    "diverging_situation": "when the reading is at its stop",
+}
+
+
 class TestTheLedgerRecordsWhatWasFiled:
     def test_a_filed_number_is_recorded_at_filing_time(self, repo):
         def runner(args):
@@ -74,8 +86,7 @@ class TestTheLedgerRecordsWhatWasFiled:
             return subprocess.CompletedProcess(args, 0, stdout="")
 
         result = file_must_resolve(
-            repo, 7, {"criterion_a": "A", "criterion_b": "B"},
-            runner=runner, log=lambda *a: None,
+            repo, 7, CONFLICT, runner=runner, log=lambda *a: None,
         )
 
         assert result.issue_number == 273
@@ -106,8 +117,7 @@ class TestTheLedgerRecordsWhatWasFiled:
             lambda a, b: "deadbeef",
         ):
             result = file_must_resolve(
-                repo, 7, {"criterion_a": "A", "criterion_b": "B"},
-                runner=runner, log=lambda *a: None,
+                repo, 7, CONFLICT, runner=runner, log=lambda *a: None,
             )
 
         assert result.action == "commented"
