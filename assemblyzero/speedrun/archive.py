@@ -373,9 +373,18 @@ def _clear_readonly(path: Path) -> bool:
     The setter has a standing presence, so a one-time manual `attrib -r` sweep
     is not a durable repair: the tool has to tolerate the attribute rather than
     assume its absence.
+
+    The mode is ADDED to, never replaced. `os.chmod(path, stat.S_IWRITE)` --
+    the stdlib idiom, and what this function did first -- REPLACES the mode on
+    POSIX, so a directory becomes 0o200: write-only, no read, no execute, and
+    therefore untraversable. The copy then fails harder than the attribute it
+    was clearing. On Windows `chmod` only toggles the readonly bit, so a local
+    Windows suite passes and Linux CI is what catches it -- the mirror of
+    #2431, where a POSIX-only defect hid behind a Windows-only code path.
     """
     try:
-        os.chmod(path, stat.S_IWRITE)
+        current = os.stat(path).st_mode
+        os.chmod(path, current | stat.S_IWUSR)
     except OSError:
         return False
     _readonly_cleared.append(str(path))
@@ -425,7 +434,9 @@ def _copy_writable(src: str, dst: str) -> None:
     """
     shutil.copy2(src, dst)
     try:
-        os.chmod(dst, stat.S_IWRITE)
+        # Added, not replaced -- see `_clear_readonly` on why the stdlib
+        # `chmod(path, S_IWRITE)` idiom is wrong on POSIX.
+        os.chmod(dst, os.stat(dst).st_mode | stat.S_IWUSR)
     except OSError:
         pass
 

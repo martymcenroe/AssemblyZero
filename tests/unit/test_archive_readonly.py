@@ -141,6 +141,66 @@ class TestRemovingAReadOnlyTree:
         assert not target.exists()
 
 
+class TestClearingAddsToTheModeRatherThanReplacingIt:
+    """The cross-platform bug the first cut shipped, caught by Linux CI.
+
+    `os.chmod(path, stat.S_IWRITE)` is the stdlib idiom and REPLACES the mode
+    on POSIX: a directory becomes 0o200 -- write-only, no read, no execute, and
+    therefore untraversable -- so the copy fails harder than the attribute it
+    was clearing. On Windows `chmod` only toggles the readonly bit, so the
+    local Windows suite passed and CI is what found it.
+
+    That is the mirror of #2431: there, a POSIX defect hid behind a
+    Windows-only path; here, a POSIX defect hid behind a Windows-only chmod
+    semantic.
+    """
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows chmod only toggles the readonly bit; the mode-replacement "
+               "hazard is POSIX-only",
+    )
+    def test_a_directory_stays_traversable_after_clearing(self, tmp_path):
+        target = tmp_path / "dir"
+        target.mkdir()
+        (target / "child.txt").write_text("x", encoding="utf-8")
+        os.chmod(target, 0o500)  # r-x, no write
+
+        assert _clear_readonly(target) is True
+
+        assert os.access(target, os.W_OK), "write was not granted"
+        assert os.access(target, os.R_OK), "read was destroyed"
+        assert os.access(target, os.X_OK), "traversal was destroyed"
+        assert [p.name for p in target.iterdir()] == ["child.txt"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits")
+    def test_existing_permission_bits_survive(self, tmp_path):
+        target = tmp_path / "a.txt"
+        target.write_text("x", encoding="utf-8")
+        os.chmod(target, 0o444)  # r--r--r--
+
+        _clear_readonly(target)
+
+        mode = stat.S_IMODE(os.stat(target).st_mode)
+        assert mode & stat.S_IWUSR, "write was not granted"
+        assert mode & stat.S_IRGRP, "group read was destroyed"
+        assert mode & stat.S_IROTH, "other read was destroyed"
+
+    def test_a_readonly_directory_holding_a_file_copies(self, tmp_path):
+        """End to end on both platforms: the shape CI actually failed on was a
+        read-only DESTINATION DIRECTORY, not a read-only file."""
+        src = tmp_path / "src"
+        (src / "inner").mkdir(parents=True)
+        (src / "inner" / "a.txt").write_text("payload", encoding="utf-8")
+
+        dest = tmp_path / "dest"
+        (dest / "inner").mkdir(parents=True)
+        os.chmod(dest / "inner", 0o500 if sys.platform != "win32" else stat.S_IREAD)
+
+        _copy_tree(src, dest)
+        assert (dest / "inner" / "a.txt").read_text(encoding="utf-8") == "payload"
+
+
 class TestTheClearingIsReported:
     """'the attribute-clearing path is logged so recurrence stays visible
     rather than silent' -- the issue's acceptance. The #2277 setter has a
