@@ -394,7 +394,11 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
     issue_title = state.get("issue_title", "")
     issue_body = state.get("issue_body", "")
     if not issue_body.strip():
-        # Nothing to analyze — some entry paths carry file input instead.
+        # fail-open: an LLD run started from a brief or a file has no issue
+        # body, so there is genuinely nothing for this gate to read. Halting
+        # would stop every file-input run on the absence of a thing those runs
+        # never have. The standalone pre-check, whose input is always an issue,
+        # raises PrecheckError on an empty body instead (#2475).
         return {}
 
     print("  [N0c] Requirements-ambiguity analysis (#1899)...")
@@ -529,6 +533,12 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         print(f"          B: {c.get('criterion_b') or '(not stated)'}")
 
     if not conflicts:
+        # fail-open: #2462. Halting here would stop the roll on a finding the
+        # check itself could not state, and filing these would block every
+        # later launch with a question nobody can close. Kept deliberately when
+        # #2474 made the rest of this node fail closed; it still records, so the
+        # end-of-run banner fires and the outcome is never silent (#2475).
+        #
         # Every pairing it reported was one it could not articulate, so this
         # call produced no usable verdict. That is the fail-open case the node
         # is built around -- and #2290's rule applies: failing open is recorded,

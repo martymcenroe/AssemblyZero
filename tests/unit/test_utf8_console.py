@@ -246,6 +246,7 @@ class TestEveryReportRendererInstallsIt:
         """Pins the scan itself. If a rename drops a tool out of the sweep, this
         fails rather than the guard below silently checking a shorter list."""
         assert {p.name for p in self.renderers()} == {
+            "audit_fail_open.py",
             "check_requirements.py",
             "check_requirements_form.py",
             "heal_report.py",
@@ -258,6 +259,7 @@ class TestEveryReportRendererInstallsIt:
     @pytest.mark.parametrize(
         "name",
         [
+            "audit_fail_open.py",
             "check_requirements.py",
             "check_requirements_form.py",
             "heal_report.py",
