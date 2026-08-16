@@ -1689,7 +1689,16 @@ class GeminiProvider(LLMProvider):
             classified = classify_gemini_error(e)
             is_rate_limit = isinstance(classified, RateLimitError)
             if is_rate_limit:
-                print(f"    [LLM] RATE LIMITED: provider=gemini model={self._model} error={str(e)[:100]}")
+                # #2476: name the transport. This prints when something has
+                # already failed, and "provider=gemini" beside a gemini-* model
+                # id reads as the CLI retired on 2026-06-18 -- which is a
+                # different problem with a different next action.
+                from assemblyzero.core.gemini_client import PROVIDER_LOG_ID
+
+                print(
+                    f"    [LLM] RATE LIMITED: {PROVIDER_LOG_ID} "
+                    f"model={self._model} error={str(e)[:100]}"
+                )
 
             call_result = LLMCallResult(
                 success=False,
