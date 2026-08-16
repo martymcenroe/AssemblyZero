@@ -202,9 +202,19 @@ def _build_recommendation(
             "Wait 15 minutes and retry, or try --reviewer claude:opus."
         )
     elif error_type == "quota_exhausted":
+        # #2441: this used to send the operator to
+        # ~/.assemblyzero/gemini-rotation-state.json for reset times. That file
+        # belonged to the API-key rotation retired in the agy migration
+        # (#1595/#1605), so it is stale or absent -- and this sentence is read
+        # at the moment something has already failed, which is the worst
+        # moment to be sent somewhere useless. The governance model now runs on
+        # the subscription CLI, where there are no credentials to rotate and no
+        # per-key reset to look up: the limit is the subscription's own, and
+        # the two things that actually help are waiting for it or reviewing on
+        # the other provider.
         return (
-            "Transient error: All Gemini credentials are quota-exhausted. "
-            "Check ~/.assemblyzero/gemini-rotation-state.json for reset times."
+            "Transient error: the Gemini subscription is out of quota. "
+            "Wait for its limit to reset, or rerun with --reviewer claude:opus."
         )
     elif error_type == "stagnation":
         # #2321: this is the pipeline's last word before a human picks the run
