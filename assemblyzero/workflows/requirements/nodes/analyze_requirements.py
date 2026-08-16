@@ -136,8 +136,16 @@ ANALYSIS_SCHEMA = {
 }
 
 
-def _format_conflict_message(conflicts: list[dict]) -> str:
-    """Build the halt message: marker + each conflict named verbatim."""
+def _format_conflict_message(
+    conflicts: list[dict], unarticulated: list[tuple[dict, str]] | None = None
+) -> str:
+    """Build the halt message: marker + each conflict named verbatim.
+
+    `unarticulated` are pairings the model reported without saying where the
+    two readings diverge (#2462). They are named here rather than dropped: one
+    of them sat beside a real latent tension on boostgauge #332, and a human
+    found it by reading around the empty filing.
+    """
     lines = [
         f"{REQUIREMENTS_CONFLICT_MARKER} the issue's requirements are "
         f"internally inconsistent — no spec can satisfy both readings. "
@@ -146,9 +154,17 @@ def _format_conflict_message(conflicts: list[dict]) -> str:
     for i, c in enumerate(conflicts, 1):
         lines.append(
             f"\nConflict {i}:\n"
-            f"  A: {c.get('criterion_a', '?')}\n"
-            f"  B: {c.get('criterion_b', '?')}\n"
-            f"  Diverge when: {c.get('diverging_situation', '?')}"
+            f"  A: {c.get('criterion_a') or '(not stated)'}\n"
+            f"  B: {c.get('criterion_b') or '(not stated)'}\n"
+            f"  Diverge when: {c.get('diverging_situation') or '(not stated)'}"
+        )
+    for c, reason in unarticulated or []:
+        lines.append(
+            f"\nAlso reported, NOT raised as a question ({reason}):\n"
+            f"  A: {c.get('criterion_a') or '(not stated)'}\n"
+            f"  B: {c.get('criterion_b') or '(not stated)'}\n"
+            "  Worth a look by eye — the pairing may sit near something real "
+            "even though the check could not say what."
         )
     return "\n".join(lines)
 
@@ -338,7 +354,55 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
         print(f"  [N0c] Verdict from {answered_by}.")
         return {}
 
-    message = _format_conflict_message(conflicts)
+    # #2462: a conflict whose divergence condition is empty or a placeholder is
+    # a malformed response, not a finding. Standard 0028 applied to this gate's
+    # own output: what came back does not satisfy the contract, so it is
+    # rejected by name rather than passed on as if it were a verdict. Observed
+    # on boostgauge #344, whose entire divergence condition was `?` -- a
+    # launch-blocking question no ruling could address.
+    from assemblyzero.speedrun.must_resolve import unanswerable_reason
+
+    articulated: list[dict] = []
+    unarticulated: list[tuple[dict, str]] = []
+    for c in conflicts:
+        reason = unanswerable_reason(c)
+        if reason:
+            unarticulated.append((c, reason))
+        else:
+            articulated.append(c)
+    conflicts = articulated
+
+    for c, reason in unarticulated:
+        print(
+            f"  [N0c] REJECTED a reported conflict: {reason}. "
+            "Not filed as a question."
+        )
+        print(f"          A: {c.get('criterion_a') or '(not stated)'}")
+        print(f"          B: {c.get('criterion_b') or '(not stated)'}")
+
+    if not conflicts:
+        # Every pairing it reported was one it could not articulate, so this
+        # call produced no usable verdict. That is the fail-open case the node
+        # is built around -- and #2290's rule applies: failing open is recorded,
+        # never silent, because "not checked" and "checked and clean" are
+        # different roll outcomes. Filing these would block every later launch
+        # with a question nobody can close; halting on them would stop the roll
+        # on a finding the check itself could not state.
+        count = len(unarticulated)
+        noun = "conflict" if count == 1 else "conflicts"
+        print(
+            f"  [N0c] WARNING: the analysis on {answered_by} reported {count} "
+            f"{noun} it could not articulate and nothing else; requirements "
+            "are unverified. Proceeding."
+        )
+        _record_unverified(
+            state,
+            f"analysis on {answered_by} reported {count} {noun} with no "
+            "divergence condition, so nothing was verifiable",
+        )
+        return {}
+
+    message = _format_conflict_message(conflicts, unarticulated)
     print(f"  [N0c] {message}")
 
     # #2072: the finding used to go to a run log and nowhere else, and N0c is
