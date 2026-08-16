@@ -17,6 +17,7 @@ This node populates:
 
 import ast
 import re
+from dataclasses import dataclass
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -298,7 +299,15 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
     # Closes #1527: Extract symbol names from all gathered Python file content.
     # Runs over the full current_content (before excerpt trimming) so that
     # methods defined deep in a class body are captured.
-    gathered_symbols = _extract_symbols_from_files(updated_files)
+    # #2393: the gather reports what it could NOT read. An unparseable
+    # target-repo file used to be regex-scraped into the symbol universe
+    # silently; now it is named and excluded, and the exclusion is printed
+    # where the operator reads the run rather than discovered downstream as a
+    # mystery hallucination flag.
+    gather = gather_symbols(updated_files)
+    gathered_symbols = gather.symbols
+    if gather.unreadable:
+        print(gather.describe())
 
     # #2052: the plan is not the universe. This gathered only files_to_modify,
     # so a spec CALLING an earlier phase's API without modifying its file was
@@ -1031,27 +1040,63 @@ def _extract_symbols_from_base(repo_root: Path, base_ref_name: str) -> set[str]:
     return symbols
 
 
-def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
-    """Extract class and function/method names from gathered Python files.
+@dataclass
+class SymbolGather:
+    """The symbol universe, and what could not be read into it (#2393)."""
 
-    Closes #1527: Produces the symbol set that N3's API-hallucination check
-    uses to detect method calls on target-repo classes that don't actually
-    exist.
+    symbols: list[str]
+    #: (path, parse error) for every `.py` file that would not parse.
+    unreadable: list[tuple[str, str]]
 
-    Uses Python ``ast`` when the content is valid Python.  Falls back to
-    two simple regexes (``^\\s*def (\\w+)`` / ``^\\s*class (\\w+)``) for
-    content that fails to parse (partial snippets, syntax errors).
+    def describe(self) -> str:
+        """One line naming what was excluded, or "" when nothing was."""
+        if not self.unreadable:
+            return ""
+        listed = "; ".join(f"{path} ({err})" for path, err in self.unreadable[:3])
+        more = (
+            f" (and {len(self.unreadable) - 3} more)"
+            if len(self.unreadable) > 3
+            else ""
+        )
+        return (
+            f"    [SYMBOLS] {len(self.unreadable)} target-repo .py file(s) did "
+            f"NOT parse and were EXCLUDED from the symbol universe: "
+            f"{listed}{more}. The spec is judged against a smaller universe "
+            f"than the repo actually has (#2393)."
+        )
 
-    Args:
-        files: Updated list of FileToModify entries with current_content set.
 
-    Returns:
-        Sorted, deduplicated list of identifier names.
+def gather_symbols(files: list[FileToModify]) -> SymbolGather:
+    """Class and function names from gathered Python files, plus the misses.
+
+    Closes #1527: produces the symbol set N3's API-hallucination check judges
+    every spec against.
+
+    #2393 removed a regex fallback that scraped `^\\s*def (\\w+)` and
+    `^\\s*class (\\w+)` out of files that would not parse. That fallback fed
+    the YARDSTICK rather than the document being measured, so its errors were
+    the hardest kind to see: a name regex invents becomes a false clearance,
+    and a name it misses becomes a false hallucination flag. #2391 is a live
+    example of what a wrong symbol universe costs -- three revision cycles and
+    a dead stage -- and that universe was merely incomplete rather than
+    fabricated.
+
+    Standard 0028 section 3 permits deterministic scans of the pipeline's own
+    documents on the condition that they "cannot mask a contract failure
+    because there is no contract: the document is what it is". A `.py` file in
+    the target repo IS a contract that its content is Python. A file that will
+    not parse is a real finding about the target repo, and section 4 is direct:
+    "No function returns an empty result, an UNKNOWN, or a silent downgrade
+    because it could not read its input."
+
+    So an unparseable file is now named and excluded, and the exclusion is
+    counted and reported. Excluded rather than fatal: a target repo mid-build
+    can hold a broken file, and refusing the whole stage over one would trade a
+    quiet wrong answer for a loud useless one. What must not happen is the
+    third option the code took -- inventing symbols and saying nothing.
     """
     symbols: set[str] = set()
-
-    _def_re = re.compile(r"^\s*def\s+(\w+)", re.MULTILINE)
-    _cls_re = re.compile(r"^\s*class\s+(\w+)", re.MULTILINE)
+    unreadable: list[tuple[str, str]] = []
 
     for file_spec in files:
         content = file_spec.get("current_content")
@@ -1062,17 +1107,21 @@ def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
 
         try:
             tree = ast.parse(content)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                    symbols.add(node.name)
-        except SyntaxError:
-            # Fallback: regex-based extraction for partial/broken files
-            for m in _def_re.finditer(content):
-                symbols.add(m.group(1))
-            for m in _cls_re.finditer(content):
-                symbols.add(m.group(1))
+        except SyntaxError as exc:
+            detail = f"line {exc.lineno}: {exc.msg}" if exc.lineno else exc.msg
+            unreadable.append((path, detail))
+            continue
 
-    return sorted(symbols)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                symbols.add(node.name)
+
+    return SymbolGather(symbols=sorted(symbols), unreadable=unreadable)
+
+
+def _extract_symbols_from_files(files: list[FileToModify]) -> list[str]:
+    """The symbol list alone, for callers that do not report exclusions."""
+    return gather_symbols(files).symbols
 
 
 def _names_similar(name_a: str, name_b: str) -> bool:
