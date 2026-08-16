@@ -77,7 +77,7 @@ tokens are used. All exit **91**.
 | Refusal | What it means | What you do |
 |---|---|---|
 | The AssemblyZero tree is not trustworthy | this checkout is behind or dirty, so the roll would execute pipeline code that `main` does not describe | bring it level with `origin/main`, or point `--assemblyzero-root` at a tree that is |
-| This machine is not healthy enough | a quick self-check ran far slower than normal, or memory is above 90% | wait for the machine to recover, or find what is loading it. Do not override it — a roll on a sick box wastes hours *and* makes every failure look like a target-repo problem |
+| This machine is not healthy enough | a quick self-check ran far slower than normal, or memory is at or above **94%** (operator ruling 2026-08-15, #2296 — raised from 90%) | close a browser or an idle session and relaunch; the 2026-08-13 firing cleared in six seconds that way. Otherwise wait for the machine to recover, or find what is loading it. Do not override it — a roll on a sick box wastes hours *and* makes every failure look like a target-repo problem |
 | The repository has unanswered questions | one or more issues are open asking you to rule on ambiguous issue text | work § Rule below — decide, edit, **pre-check**, then close the question |
 | The arc's binding docs conflict with the default branch | design docs or ADRs were ruled on both branches and the two edits collide (#2205) | merge them by hand, then roll. Nothing was changed — the launcher refuses rather than resolving a ruling on your behalf |
 

@@ -60,7 +60,23 @@ CANARY_CEILING_SECONDS = 120
 #: watchdogs in this pipeline.
 CANARY_MULTIPLIER = 3
 
-MEMORY_ABORT_PERCENT = 90.0
+#: Above this, a launch refuses: a roll on a starved box makes every failure
+#: look like the code's fault.
+#:
+#: Operator ruling 2026-08-15 (#2296), raising it from 90.0. Deliberately NOT
+#: tunable and NOT derived from a measured baseline, both of which were on the
+#: table. The failure being avoided is an interrupted launch, and a ceiling the
+#: operator can predict is worth more than one that adapts -- a moving ceiling
+#: makes "will this launch start" unanswerable in advance, which is the
+#: question the number exists to answer.
+#:
+#: The gate itself was never in question. Both recorded firings were accurate:
+#: 96.1% on 2026-08-13, and the check passed six seconds later once the
+#: operator closed some browser windows. This narrows the band it refuses in;
+#: it does not remove it. Recorded in runbook 0952 beside the preflight's other
+#: refusals, so the next operator learns it from the runbook rather than from a
+#: traceback.
+MEMORY_ABORT_PERCENT = 94.0
 ROLLING_WINDOW = 5
 HEALTH_FILENAME = "box-health.json"
 
