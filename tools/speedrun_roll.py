@@ -567,10 +567,32 @@ def replace_or_refuse(
 # =============================================================================
 
 # Stages a relaunch may resume from. lld failing means nothing expensive
-# passed (a redraw IS the restart), and pr/cleanup resumes are deferred --
-# their preserved state (impl worktree, opened PRs) has more unverified
-# surface than the savings justify today.
-RESUMABLE_STAGES = ("spec", "impl")
+# passed (a redraw IS the restart).
+#
+# #2194 added `pr` on the evidence it asked to wait for: "the first observed
+# relaunch-after-pr-failure that redraws an expensive impl is the evidence to
+# build from". run-issue7-231606 is that observation, and it is the only one in
+# the corpus:
+#
+#     lld     passed    281.9s
+#     spec    passed    699.0s
+#     impl    passed    363.6s
+#     pr      failed      0.7s   ! [rejected] issue-7 -> issue-7 (non-fast-forward)
+#
+# 1344.5 seconds of paid work discarded to retry a git push that failed in
+# under a second, and the failure was a branch-state rejection rather than
+# anything about the content.
+#
+# `cleanup` is NOT added. The corpus holds zero cleanup failures across 21
+# passes, so there is no observed shape to design its integrity checks against
+# -- which is the same standard that kept `pr` out until today. Adding it now
+# would be guessing at what survives, and a resume into missing state costs
+# more than the redraw it saves.
+RESUMABLE_STAGES = ("spec", "impl", "pr")
+
+#: Stages whose inputs include the finalized spec. `pr` reads the impl stage's
+#: worktree, which only exists because spec produced what impl built from.
+_STAGES_NEEDING_SPEC = ("impl", "pr")
 
 
 def _orchestrator_state_path(az_root: Path, issue: int) -> Path:
@@ -994,8 +1016,24 @@ def resume_plan(
     # decline still happens, but now only when the file genuinely cannot be
     # found: resuming into a missing input is worse than redrawing.
     needed = [("lld", _resolve_stage_artifact(repo_root, issue, data, "lld"))]
-    if failed == "impl":
+    if failed in _STAGES_NEEDING_SPEC:
         needed.append(("spec", _resolve_stage_artifact(repo_root, issue, data, "spec")))
+
+    # #2194: the pr stage reads `state["worktree_path"]` and derives its head
+    # branch from whatever is checked out there -- it fails immediately with
+    # "No worktree path available for PR creation" without one. That worktree
+    # is the "unverified surface" #2194 deferred on; it is verified now, both
+    # by run-issue7-231606 and by boostgauge #1's worktree surviving an
+    # operator kill intact. Checked rather than assumed, because a resume into
+    # a missing worktree costs more than the redraw it saves.
+    if failed == "pr":
+        worktree = (data.get("worktree_path", "") or "").strip()
+        if not worktree or not Path(worktree).is_dir():
+            log.write(
+                f"RESUME abandoned for #{issue}: the pr stage needs the impl "
+                f"worktree and it is gone ({worktree or '<unset>'})"
+            )
+            return None
     for stage, artifact in needed:
         if not artifact:
             log.write(
