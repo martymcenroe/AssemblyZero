@@ -96,19 +96,39 @@ def test_state_is_optional() -> None:
 # ----------------------------------------------------------------- #2323
 
 
-def test_impl_nominal_matches_its_measured_median() -> None:
-    """The entry that was 3x wrong. 718.9s is the median of 19 passed runs."""
-    assert STAGE_NOMINAL_SECONDS["impl"] == pytest.approx(718.9)
+#: Corpus medians measured 2026-08-15 alongside the p90s the table now ships.
+#: Kept here so "a typical run is not SLOW" can be asserted against a real
+#: typical duration rather than against the nominal itself.
+_MEASURED_MEDIAN = {
+    "lld": 79.9, "spec": 89.0, "impl": 484.6, "pr": 2.5, "cleanup": 81.9,
+}
+
+
+def test_impl_nominal_matches_its_measured_p90() -> None:
+    """The entry #2323 fixed, re-derived on the statistic #2410 corrected to.
+
+    #2323 set this to 718.9, the median of 19 passed runs, having found the
+    hand-typed 240.0 was 3x below it. #2410 changed the STATISTIC to p90 after
+    measuring the distribution as bimodal; impl's p90 over 22 samples is
+    2122.2.
+    """
+    assert STAGE_NOMINAL_SECONDS["impl"] == pytest.approx(2122.2)
 
 
 def test_a_median_duration_run_is_not_slow() -> None:
-    """#2323 acceptance: impl no longer reports SLOW on a typical run.
+    """#2323 acceptance: a stage does not report SLOW on a typical run.
 
     A nominal below the median means the typical run is always flagged, which
     is how the warning stopped carrying information.
+
+    The previous form of this test asserted `nominal / nominal < SLOW_RATIO`
+    -- a value compared with itself, true for every possible table, including
+    the miscalibrated one it was written to guard. It is now driven by the
+    measured medians, so it can actually fail.
     """
     for stage, nominal in STAGE_NOMINAL_SECONDS.items():
-        assert nominal / nominal < SLOW_RATIO, stage
+        median = _MEASURED_MEDIAN[stage]
+        assert median / nominal < SLOW_RATIO, f"{stage}: {median}/{nominal}"
 
 
 # Measured p90s from the same corpus that produced the nominals.
@@ -137,7 +157,13 @@ def test_a_genuinely_hung_stage_still_stalls() -> None:
         assert hung / nominal >= STALLED_RATIO, stage
 
 
-def test_every_stage_has_a_nominal() -> None:
+def test_every_MEASURED_stage_has_a_nominal() -> None:
+    """#2410 dropped `triage`, which has no passing samples in the corpus.
+
+    Its 20.0 was carried forward unmeasured and would have called a
+    61-second triage STALLED. A stage the fleet cannot measure honestly now
+    reports elapsed time without a verdict.
+    """
     assert set(STAGE_NOMINAL_SECONDS) == {
-        "triage", "lld", "spec", "impl", "pr", "cleanup",
+        "lld", "spec", "impl", "pr", "cleanup",
     }

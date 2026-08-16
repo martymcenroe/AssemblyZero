@@ -53,9 +53,14 @@ class TestStatusLine:
         assert "mystery" in line and "90s" in line
         assert "nominal" not in line
 
-    def test_known_stages_have_nominals(self):
-        for stage in ("triage", "lld", "spec", "impl", "pr", "cleanup"):
+    def test_measured_stages_have_nominals(self):
+        """#2410 dropped `triage`: it has no passing samples in the corpus, so
+        its 20.0 was a guess that would have called a 61-second triage
+        STALLED. A stage the fleet cannot measure now reports elapsed time
+        without a verdict rather than being judged against an invention."""
+        for stage in ("lld", "spec", "impl", "pr", "cleanup"):
             assert STAGE_NOMINAL_SECONDS[stage] > 0
+        assert "triage" not in STAGE_NOMINAL_SECONDS
 
 
 class TestWatchdogLifecycle:

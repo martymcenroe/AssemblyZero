@@ -23,33 +23,55 @@ import threading
 import time
 from typing import Optional
 
-# Derived, not typed. Each value is the MEDIAN duration of PASSED runs of that
+# Derived, not typed. Each value is the p90 duration of PASSED runs of that
 # stage across the boostgauge speedrun corpus, produced by
 # `tools/derive_stage_nominals.py` and re-derivable with one command:
 #
 #   poetry run python tools/derive_stage_nominals.py --runs <repo>/data/speedrun/runs
 #
-# Derived 2026-08-13 (#2323). Sample sizes: lld 65, spec 51, impl 19, pr 19,
-# cleanup 19. These are starting points for the ratio, not SLAs -- a stage
+# Re-derived 2026-08-15 (#2410). Sample sizes: lld 74, spec 56, impl 22, pr 21,
+# cleanup 21. These are starting points for the ratio, not SLAs -- a stage
 # legitimately slower than its nominal only earns a louder log line.
 #
-# The previous table was hand-typed from the 2026-07-28/29 records and went
-# stale silently as the campaign ran on. Most of it survived re-measurement;
-# impl did not. Its nominal was 240s against a measured median of 718.9s, so a
-# TYPICAL impl run sat at 3x nominal and earned SLOW immediately -- the stage
-# most likely to genuinely hang was the one whose warnings meant least. That
-# is the failure mode a derived table prevents.
+# #2323 replaced a hand-typed table with a derived one and fixed impl, whose
+# nominal sat 3x BELOW its own median. #2410 corrects the STATISTIC, which that
+# derivation inherited unexamined: the median describes "typical" only when the
+# distribution has one mode, and this one does not.
 #
-# `triage` has no passed samples in the corpus (it is skipped on these runs),
-# so its value is carried forward unmeasured rather than invented.
+#     stage    n     p50     p75     p90     max
+#     lld     74    79.9   332.9   409.0   741.1
+#
+# LLD passes cluster near 60s AND near 400s, both genuine -- the corpus carries
+# no `skipped` verdict and the fast mode is 50-80s of real passes. The median
+# lands inside the fast mode and describes neither, so on run-issue1-114223 a
+# healthy LLD stage printed `running 300s (nominal ~75s) - SLOW, 3x nominal`
+# while its three prior passes on that repo had taken 380.1s and 409.0s. Every
+# ordinary LLD run crossed the SLOW threshold, which is the same
+# warnings-mean-least failure #2323 fixed for impl, arriving by a different
+# route.
+#
+# The label answers "is this longer than this stage plausibly takes?", not "is
+# this longer than typical?". p90 answers the first, and 3x p90 clears every
+# recorded healthy run of every stage -- asserted against the corpus in
+# `tests/unit/test_stage_watchdog.py` rather than asserted here.
+#
+# `triage` has no passed samples in the corpus (it is skipped on these runs).
+# It is now OMITTED rather than carried forward unmeasured: a nominal the fleet
+# cannot compute honestly should produce no verdict, and 20.0 was a guess that
+# would have labelled a 61-second triage STALLED.
 STAGE_NOMINAL_SECONDS: dict[str, float] = {
-    "triage": 20.0,
-    "lld": 75.7,
-    "spec": 84.2,
-    "impl": 718.9,
-    "pr": 2.5,
-    "cleanup": 81.9,
+    "lld": 409.0,
+    "spec": 406.7,
+    "impl": 2122.2,
+    "pr": 3.2,
+    "cleanup": 82.7,
 }
+
+#: A stage with fewer passing samples than this gets no nominal at all, and the
+#: watchdog reports elapsed time without a verdict (#2410). Mirrors
+#: `derive_stage_nominals.MIN_SAMPLES_FOR_NOMINAL`; a test pins the two
+#: together so the table cannot acquire an under-sampled entry.
+MIN_SAMPLES_FOR_NOMINAL = 5
 
 # Ratio at which the line changes tone. 3x is the operator's own threshold:
 # "if nominal is 15 seconds, 15 minutes is a problem, not patience."
