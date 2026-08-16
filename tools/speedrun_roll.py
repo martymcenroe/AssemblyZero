@@ -101,6 +101,12 @@ from assemblyzero.speedrun.emergency_stop import (  # noqa: E402  (#2422)
     killed_verdict_lines,
     tree_kill,
 )
+from assemblyzero.speedrun.roll_blockers import (  # noqa: E402  (#2436)
+    blocker_refusal_message,
+    blocker_report_lines,
+    blocker_trace_line,
+    scan_roll_blockers,
+)
 from assemblyzero.speedrun.successes import (  # noqa: E402  (#2191)
     completed_on,
     describe,
@@ -1374,6 +1380,11 @@ def detached_argv(
     # the detached run re-refuses on the very gate the operator waived.
     if getattr(args, "override_prereqs", False):
         argv.append("--override-prereqs")
+    # #2436: same reasoning -- the detached run re-runs every preflight, so an
+    # override left behind here would refuse inside a scheduled task where the
+    # refusal is invisible and the operator is told the roll simply died.
+    if getattr(args, "ignore_blockers", False):
+        argv.append("--ignore-blockers")
     # #2191: a confirmed redraw must ride too, or the detached run re-refuses
     # on the gate the operator just typed a phrase to clear -- and refuses
     # non-interactively, where nothing can answer it.
@@ -2961,6 +2972,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--ignore-blockers", action="store_true",
+        help=(
+            "Launch even though an issue marked `roll-blocker` is open in this "
+            "repo or in AssemblyZero (#2436). The launch names every blocker it "
+            "rolled past and records the override, so rolling into known-broken "
+            "ground stays possible but can never happen by accident."
+        ),
+    )
+    parser.add_argument(
         "--redraw-completed", action="store_true",
         help=(
             "Redraw an issue this arc has already rolled to success (#2191). "
@@ -3135,6 +3155,19 @@ def main(argv: list[str] | None = None) -> int:
         print(refusal_message(blocking))
         return 91
 
+    # #2436: the launcher answers "what will stop this roll" instead of relying
+    # on a human having read the board. An open `roll-blocker` in EITHER repo
+    # refuses, because a roll executes both trees; --ignore-blockers overrides
+    # it deliberately. The result prints on every launch, pass or fail: a check
+    # that is silent when it passes cannot be told apart from one that never
+    # ran, which is #2381's complaint about box health.
+    blockers = scan_roll_blockers(repo_root, az_root)
+    for line in blocker_report_lines(blockers, overridden=args.ignore_blockers):
+        print(line)
+    if blockers.refuses and not args.ignore_blockers:
+        print(blocker_refusal_message(blockers))
+        return 91
+
     # #2227: the ADR 0226 form check, report-only by default. Free and instant
     # -- no model calls -- so it runs before anything is spent, like every
     # refusal above it. It refuses ONLY on a malformed decision table: nearly
@@ -3189,6 +3222,12 @@ def main(argv: list[str] | None = None) -> int:
     # see launch_detached on why that separation is load-bearing.
     session = EventLog(log_dir / "session-events.log")
     install_signal_handlers(session)
+
+    # #2436: the launch record carries what the blocker check found and whether
+    # the operator rolled past it. Written by the process that actually rolls,
+    # so the trace lands in the record a postmortem reads rather than only in a
+    # console that has since scrolled away.
+    session.write(blocker_trace_line(blockers, overridden=args.ignore_blockers))
 
     # How --detach-stop finds the tree to kill (#2016). Written by whichever
     # process does the rolling, detached or not.
