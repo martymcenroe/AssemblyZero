@@ -89,6 +89,38 @@ AGY_CALL_TIMEOUT_SECONDS = 300.0
 MAX_TOTAL_INVOKE_SECONDS = 600.0
 MIN_ATTEMPT_SECONDS = 20.0
 
+#: Named in every failure this module hands back to a caller (#2476).
+#:
+#: Three surfaces here all say "gemini" and none of them mean the CLI retired on
+#: 2026-06-18: the module name, ``provider="gemini"`` in capacity.py and
+#: errors.py, and the ``gemini:3.1-pro`` provider spec, which is genuinely
+#: ``provider:model`` format. Each is defensible alone -- the MODEL is Gemini --
+#: and together, inside an error message, they read as the tool the fleet rules
+#: say never to invoke. A real `gemini` binary is still on PATH on the
+#: workstation, so the misreading is plausible rather than paranoid.
+#:
+#: On 2026-08-16 that cost a real diagnosis: ``analysis unavailable on
+#: gemini:3.1-pro (All credentials failed: ...)`` was read as "we regressed to
+#: the banned client", and disproving it took reading `_find_agy_cli`, the
+#: provider-spec format and the model-id table. "The vendor's capacity is
+#: overloaded" and "we regressed to a retired client" call for completely
+#: different next actions.
+#:
+#: Naming the transport in the failure text is the cheap fix, and it lands
+#: exactly where the harm happens -- at failure time, when something else has
+#: already gone wrong and attention is short. The module and provider names are
+#: left alone: renaming them is a wider change for no extra safety, since
+#: `gemini-3.1-pro-high` really is the model's name.
+TRANSPORT_LABEL = "agy (Antigravity CLI)"
+
+#: The same fact in log-line form, for the ``[LLM] ...`` diagnostics this module
+#: prints while a call is going wrong. One constant rather than seven literals,
+#: so the transport cannot fall off one line and leave that line ambiguous
+#: again. ``transport=`` is a separate key from ``provider=`` on purpose: the
+#: provider really is Gemini, and the pair says so without either word standing
+#: alone long enough to be misread.
+PROVIDER_LOG_ID = "provider=gemini transport=agy"
+
 # #1872: Windows process-creation failures. A child that dies with one of
 # these never got to run — desktop-heap / DLL-init pressure on a busy
 # machine, not a credential problem. Twice in 30 minutes on 2026-07-28 these
@@ -768,7 +800,10 @@ class GeminiClient:
                 response=None,
                 raw_response=None,
                 error_type=GeminiErrorType.QUOTA_EXHAUSTED,
-                error_message=f"All credentials exhausted: {', '.join(exhausted_names)}. Wait for quota reset.",
+                error_message=(
+                    f"All credentials exhausted via {TRANSPORT_LABEL}: "
+                    f"{', '.join(exhausted_names)}. Wait for quota reset."
+                ),
                 credential_used="",
                 rotation_occurred=False,
                 attempts=0,
@@ -821,7 +856,7 @@ class GeminiClient:
                         f"{MAX_TOTAL_INVOKE_SECONDS:.0f}s exhausted{flavor}"
                     )
                     print(
-                        f"    [LLM] provider=gemini model={self.model}: "
+                        f"    [LLM] {PROVIDER_LOG_ID} model={self.model}: "
                         f"call budget of {MAX_TOTAL_INVOKE_SECONDS:.0f}s "
                         f"exhausted — halting instead of retrying"
                     )
@@ -888,7 +923,7 @@ class GeminiClient:
                     ):
                         msg = f"{type(e).__name__}: {error_str}"
                         print(
-                            f"    [LLM] provider=gemini: programming error, "
+                            f"    [LLM] {PROVIDER_LOG_ID}: programming error, "
                             f"not retryable — {msg[:160]}"
                         )
                         log_gemini_event(
@@ -939,7 +974,7 @@ class GeminiClient:
                         )
                         # Issue #537: Log retries to stdout so babysitters see progress
                         print(
-                            f"    [LLM] provider=gemini model={self.model} "
+                            f"    [LLM] {PROVIDER_LOG_ID} model={self.model} "
                             f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
                             f"{status_code or 503} capacity exhausted (retrying in {delay:.0f}s)"
                         )
@@ -962,7 +997,7 @@ class GeminiClient:
                         )
                         # Issue #537: Log rotation to stdout
                         print(
-                            f"    [LLM] provider=gemini credential={cred.name}: "
+                            f"    [LLM] {PROVIDER_LOG_ID} credential={cred.name}: "
                             f"429 quota exhausted — rotating to next credential"
                         )
                         errors.append(f"{cred.name}: Quota exhausted")
@@ -979,7 +1014,7 @@ class GeminiClient:
                         )
                         # Issue #537: Log auth errors to stdout
                         print(
-                            f"    [LLM] provider=gemini credential={cred.name}: "
+                            f"    [LLM] {PROVIDER_LOG_ID} credential={cred.name}: "
                             f"auth error (status={status_code}) — skipping credential"
                         )
                         errors.append(f"{cred.name}: Authentication failed")
@@ -997,7 +1032,7 @@ class GeminiClient:
                                 details={"status_code": status_code, "retryable": True, "backoff_seconds": delay},
                             )
                             print(
-                                f"    [LLM] provider=gemini model={self.model} "
+                                f"    [LLM] {PROVIDER_LOG_ID} model={self.model} "
                                 f"attempt={attempt}/{MAX_RETRIES_PER_CREDENTIAL}: "
                                 f"transient error (status={status_code}), retrying in {delay:.0f}s"
                             )
@@ -1022,7 +1057,7 @@ class GeminiClient:
                 # failed with capacity errors. Previously this was silently dropped.
                 # Issue #537: Log exhaustion to stdout
                 print(
-                    f"    [LLM] provider=gemini credential={cred.name}: "
+                    f"    [LLM] {PROVIDER_LOG_ID} credential={cred.name}: "
                     f"capacity exhausted after {MAX_RETRIES_PER_CREDENTIAL} retries"
                 )
                 errors.append(
@@ -1073,7 +1108,10 @@ class GeminiClient:
             response=None,
             raw_response=None,
             error_type=final_error_type,
-            error_message="All credentials failed:\n  - " + "\n  - ".join(errors),
+            error_message=(
+                f"All credentials failed via {TRANSPORT_LABEL}:\n  - "
+                + "\n  - ".join(errors)
+            ),
             credential_used="",
             rotation_occurred=len(available) > 1,
             attempts=total_attempts,

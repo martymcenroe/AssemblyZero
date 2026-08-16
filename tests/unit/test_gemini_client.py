@@ -619,6 +619,113 @@ def test_invoke_via_cli_strips_ansi_and_returns_text():
     assert resp == '{"verdict":"APPROVE"}'
 
 
+class TestTheFailureTextNamesTheTransport:
+    """#2476: no error message may be readable as naming the retired CLI.
+
+    Three surfaces here say "gemini" and none of them mean the CLI retired on
+    2026-06-18 -- the module name, `provider="gemini"`, and the `gemini:3.1-pro`
+    provider spec, which is genuinely provider:model format. Each is defensible
+    alone; together, inside a failure, they read as the tool the fleet rules say
+    never to invoke. On 2026-08-16 that cost a real diagnosis.
+
+    These pin the transport into the text at failure time, which is the moment
+    the harm happens and the moment attention is shortest.
+    """
+
+    def _failing_client(self, creds, state):
+        client = GeminiClient(
+            model="gemini-3.1-pro-preview",
+            credentials_file=creds,
+            state_file=state,
+        )
+        return client
+
+    def test_all_credentials_failed_names_agy(
+        self, temp_credentials_file, temp_state_file
+    ):
+        """The exact message from the boostgauge #331 diagnosis."""
+        client = self._failing_client(temp_credentials_file, temp_state_file)
+
+        with patch.object(
+            client,
+            "_invoke_via_cli",
+            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
+        ):
+            result = client.invoke("system", "content")
+
+        assert result.success is False
+        assert "agy" in result.error_message
+        assert "Antigravity" in result.error_message
+
+    def test_the_message_still_says_what_failed(
+        self, temp_credentials_file, temp_state_file
+    ):
+        """Naming the transport must not push out the reason. The operator
+        needs both: which client ran, and why it did not answer."""
+        client = self._failing_client(temp_credentials_file, temp_state_file)
+
+        with patch.object(
+            client,
+            "_invoke_via_cli",
+            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
+        ):
+            result = client.invoke("system", "content")
+
+        assert "All credentials failed" in result.error_message
+        assert "Quota exhausted" in result.error_message
+        assert "key-1" in result.error_message
+
+    def test_the_live_log_lines_name_it_too(
+        self, temp_credentials_file, temp_state_file, capsys
+    ):
+        """The failure text is not the only thing read at failure time.
+
+        The rotation diagnostics printed while a call is dying carried a bare
+        `provider=gemini` beside a `gemini-*` model id, which is the same
+        ambiguity in the place an operator actually looks first.
+        """
+        client = self._failing_client(temp_credentials_file, temp_state_file)
+
+        with patch.object(
+            client,
+            "_invoke_via_cli",
+            side_effect=lambda *a, **k: (False, "", "429 TerminalQuotaError"),
+        ):
+            client.invoke("system", "content")
+
+        out = capsys.readouterr().out
+        assert "[LLM]" in out, "the fixture must actually print a diagnostic"
+        for line in out.splitlines():
+            if "provider=gemini" in line:
+                assert "transport=agy" in line, (
+                    f"a failure line names the provider but not the "
+                    f"transport, so it reads as the retired CLI: {line!r}"
+                )
+
+    def test_the_transport_label_names_a_cli_that_is_not_retired(self):
+        """The label is the whole point, so it may not drift back.
+
+        `gemini` as a bare word is what the retired CLI was invoked as, and the
+        fleet rules ban invoking it. A label containing it would reintroduce
+        the ambiguity this issue closed.
+        """
+        from assemblyzero.core.gemini_client import TRANSPORT_LABEL
+
+        assert "agy" in TRANSPORT_LABEL
+        assert "gemini" not in TRANSPORT_LABEL.lower()
+
+    def test_the_missing_cli_message_already_named_it(self):
+        """Untouched, and asserted so a future edit cannot quietly widen the
+        gap this issue narrowed."""
+        client = GeminiClient(model="gemini-3.1-pro-preview")
+        client._agy_cli = None
+
+        ok, _, err = client._invoke_via_cli("sys", "content")
+
+        assert ok is False
+        assert "agy" in err
+
+
 def test_invoke_via_cli_empty_output_is_failure():
     client = GeminiClient(model="gemini-3.1-pro-preview")
     client._agy_cli = "agy"
