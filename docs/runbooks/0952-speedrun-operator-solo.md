@@ -50,6 +50,7 @@ the verification is re-run rather than asserted (#2295):
 | `--kill` | **emergency stop** (#2422) — kill the running roll and its whole process tree, stamping `KILLED BY OPERATOR` into the run's own events log so the stop is recorded as ordered rather than as a crash. Takes an optional `--issue`. Runs before every gate, so a stale or dirty tree cannot refuse it. When this console has no free prompt, create `data/speedrun/KILL` instead — the launcher watches for it **while a call is in flight**, not only between stages |
 | `--detach-stop` | stop a detached roll and everything it spawned |
 | `--override-prereqs` | launch even though the previous run's unresolved questions are still open (#2167) — runs anyway once; the next launch re-checks |
+| `--ignore-blockers` | launch even though an issue marked `roll-blocker` is open in this repo or in AssemblyZero (#2436). The launch names every blocker it rolled past and records the override in `session-events.log`, so rolling into known-broken ground stays possible — not every blocker bites every issue — but can never happen by accident. It rides a `--detach` relaunch, so the detached run does not re-refuse |
 | `--redraw-completed` | redraw an issue this arc has **already rolled to success** (#2191). Without it, an interactive launch demands a typed `REDRAW <N>` and a non-interactive one refuses — so an issue number typed out of habit cannot silently redo work already merged into the arc. Scoped to the current arc: a new base branch starts with an empty slate |
 | `--fresh` | redraw every stage from scratch (#2193). Without it, a launch that finds a prior non-conflict failure with the LLD already passed resumes from the failed stage — the passed stages are reused, not paid for again. A conflict-blocked issue always redraws fresh: the ruling edited the issue text, and the preserved draft embeds the pre-ruling wording |
 | `--narration` | starting view level: `terse`, `verbose`, `tutorial`, or `quiz` (#2159/#2160/#2161 — tutorial annotates each node and gate; quiz pauses the DISPLAY at transitions for multiple choice generated from the graph, roll unaffected). Press `v` in the console to toggle live; the log on disk is always complete |
@@ -79,7 +80,35 @@ tokens are used. All exit **91**.
 | The AssemblyZero tree is not trustworthy | this checkout is behind or dirty, so the roll would execute pipeline code that `main` does not describe | bring it level with `origin/main`, or point `--assemblyzero-root` at a tree that is |
 | This machine is not healthy enough | a quick self-check ran far slower than normal, or memory is at or above **94%** (operator ruling 2026-08-15, #2296 — raised from 90%) | close a browser or an idle session and relaunch; the 2026-08-13 firing cleared in six seconds that way. Otherwise wait for the machine to recover, or find what is loading it. Do not override it — a roll on a sick box wastes hours *and* makes every failure look like a target-repo problem |
 | The repository has unanswered questions | one or more issues are open asking you to rule on ambiguous issue text | work § Rule below — decide, edit, **pre-check**, then close the question |
+| A known roll-killer is open | an issue marked `roll-blocker` is open in the target repo **or** in AssemblyZero (operator ruling 2026-08-15, #2436) — the roll executes both trees, so either one kills it | fix and close it, or take the `roll-blocker` mark off it if it does not apply to what you are rolling. To roll into it deliberately, relaunch with `--ignore-blockers` |
 | The arc's binding docs conflict with the default branch | design docs or ADRs were ruled on both branches and the two edits collide (#2205) | merge them by hand, then roll. Nothing was changed — the launcher refuses rather than resolving a ruling on your behalf |
+
+**The roll-blocker check prints on every launch, pass or fail (#2436).** A
+check that is silent when it passes cannot be told apart from one that never
+ran, so the clean case says so out loud and names the boards it read:
+
+```
+ROLL BLOCKERS: checked martymcenroe/boostgauge and martymcenroe/AssemblyZero -- none open.
+```
+
+It costs two `gh` queries and no model call — measured at 1.0s against both
+live boards on 2026-08-16 — which is what lets it run every time. If GitHub
+cannot be reached the launch says which board it could not read and proceeds:
+"could not ask" is not knowledge that something is broken, and an unreachable
+GitHub must never brick a local roll.
+
+`--ignore-blockers` is a deliberate act and is recorded as one. The launch names
+every blocker it rolled past, and the line lands in `session-events.log` as
+well as on your console:
+
+```
+ROLL-BLOCKERS OVERRIDDEN (--ignore-blockers) -- rolled past 1: martymcenroe/boostgauge#341
+```
+
+Rolling into known-broken ground stays possible, because not every blocker
+bites every issue. What the ruling removes is doing it by accident — and,
+because the flag rides the detached relaunch, doing it without the record
+saying who chose to.
 
 **Binding docs sync themselves (#2205).** The roll reads design docs and ADRs
 from the attempt branch, not from `main` — issue text arrives live from
