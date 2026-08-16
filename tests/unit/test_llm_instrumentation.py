@@ -312,29 +312,13 @@ class TestDisabledStore:
 # ── T110: Claude CLI parser ──────────────────────────────────────────
 
 
-class TestClaudeCLIParser:
-    """T110: _parse_usage_from_cli_output fixture."""
-
-    def test_extracts_all_fields(self, claude_cli_fixture: dict):
-        from assemblyzero.core.claude_client import _parse_usage_from_cli_output
-
-        result = _parse_usage_from_cli_output(claude_cli_fixture)
-
-        assert result["model_used"] == "claude-opus-4-5-20250514"
-        assert result["input_tokens"] == 12450
-        assert result["output_tokens"] == 3200
-        assert result["thinking_tokens"] == 8500
-        assert result["cache_read_tokens"] == 4000
-        assert result["cache_write_tokens"] == 1200
-        assert result["stop_reason"] == "end_turn"
-
-    def test_missing_usage_returns_none_fields(self):
-        from assemblyzero.core.claude_client import _parse_usage_from_cli_output
-
-        result = _parse_usage_from_cli_output({"model": "test-model"})
-        assert result["model_used"] == "test-model"
-        assert result.get("input_tokens") is None
-        assert result.get("output_tokens") is None
+# T110's TestClaudeCLIParser exercised `core.claude_client`, the second Claude
+# CLI transport. #2406 deleted that module: it was reachable only through
+# `nodes/fallback_provider.py`, which nothing imported, and it still killed on
+# wall-clock time -- the defect class #373, #2026 and #2405 removed three times
+# from the transport that is actually used.
+#
+# The live transport's usage parsing is covered in `tests/unit/test_llm_provider*`.
 
 
 # ── T120: Anthropic API parser ───────────────────────────────────────
