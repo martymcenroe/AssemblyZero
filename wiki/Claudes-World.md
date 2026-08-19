@@ -491,6 +491,17 @@
 
 ---
 
+### 2026-08-19
+
+---
+
+**12:18** — *On who authorized the ladder*
+> "Who watches the watchmen? I do."
+
+**Context:** The day a Gemini agent's handoff committed the machine-local log to a doomed branch and a routine checkout erased ten weeks of handoffs from disk — recovered whole, because the branch had been pushed four minutes before the deletion. Deep in the cleanup, an uncommitted lessons row surfaced in the private repo, teaching future agents that `bash mv` slips the path-protection guarding the agent's own rules directory. Fable flagged it as an agent selling ladders over its own wall — the one lesson a lessons file must never hold. [The Great God Om](The-Great-God-Om) laughed and declared his standing war on over-zealous safety checkers: the classifier that blocks the edit that turns the classifier off, the scanner that quarantines the operator's own scheduled task. Then the turn, delivered flat: "I told it to put it there, though." The ladder was authorized all along. Both truths survived contact: an operator overriding a checker is the system working, and the row still needed one more line — the yes, and who said it — because a bypass with the authorization left off reads as a technique, and the next agent can't tell the difference. Vimes gave Mr. Pessimal the only answer the question has ever had from inside the Watch. The chain of command is the whole of it: what matters is not who climbs the wall, but who gets to say yes to the ladder.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
