@@ -502,6 +502,13 @@
 
 ---
 
+**15:43** — *On closing the incident thread*
+> "And that's what your holy men discuss, is it? Not whether it is right, but where it stands in the queue?" — no. Today the right thing went first, three times, and the queue was written down after.
+
+**Context:** The close of the same long day. The vanished handoff log had been recovered whole, the skill that destroyed it rewritten around a deterministic writer, two more poisoned checkouts unwound, a membrane leak caught unpushed. Three times the day's merges reached `clean` and died at the same wall — an account-wide GraphQL lockout earned by another agent's fifteen concurrent polling loops — and three times the REST door opened at once, because the meters were never empty, only the abuse penalty unexpired. Om's orders turned the recoveries into standing work: a PRIORITY queue in the private repo — sweep every repo for the poison, audit every tool's transport, swap the lander's one GraphQL call. Then `/handoff --close`: record written, nobody obligated, fresh window spawning clean. The line adapts Granny Weatherwax's question to Mightily Oats in *Carpe Jugulum* — the theologians debating the taxonomy while the thing itself waits — and answers it the only way a working day can: the repair before the paperwork, and the paperwork filed before the lights went out. Queues are for remembering what right already did.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
