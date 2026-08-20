@@ -21,6 +21,7 @@ from audit_gitignore_drift import (  # noqa: E402
     audit_repo,
     backfill,
     ignores_data_g,
+    is_repo,
     patterns,
 )
 
@@ -74,6 +75,32 @@ class TestDriftDetection:
         (repo / ".gitignore").write_text("*.log\n", encoding="utf-8")
         (repo / "untracked.txt").write_text("x", encoding="utf-8")
         assert audit_repo(repo, ["*.log"])["dirty"] is True
+
+
+class TestRepoDetection:
+    def test_a_real_repo_counts(self, repo):
+        assert is_repo(repo) is True
+
+    def test_a_linked_worktree_does_not_count(self, repo, tmp_path):
+        """A worktree checks out the same tracked .gitignore, so counting it as a
+        separate repo reports the parent's drift twice under a different name.
+        Caught on the first live run, which listed this audit's own worktree."""
+        (repo / "seed.txt").write_text("x", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"],
+            cwd=repo, check=True,
+        )
+        wt = tmp_path.parent / (tmp_path.name + "-wt")
+        subprocess.run(["git", "worktree", "add", "-q", str(wt), "-b", "wt"], cwd=repo, check=True)
+        try:
+            assert (wt / ".git").exists(), "fixture is wrong if this fails"
+            assert is_repo(wt) is False
+        finally:
+            subprocess.run(["git", "worktree", "remove", str(wt)], cwd=repo, capture_output=True)
+
+    def test_a_plain_directory_does_not_count(self, tmp_path):
+        assert is_repo(tmp_path) is False
 
 
 class TestDataGTrap:

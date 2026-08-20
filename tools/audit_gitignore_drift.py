@@ -95,7 +95,20 @@ def git(args: list[str], cwd: Path) -> tuple[int, str]:
 
 
 def is_repo(path: Path) -> bool:
-    return (path / ".git").exists()
+    """True for a real repository, False for a linked worktree of one.
+
+    A worktree has `.git` as a FILE containing a `gitdir:` pointer; a repository
+    has it as a directory. Both "exist", so a naive check counts every worktree
+    as another repo -- and since a worktree checks out the same tracked
+    `.gitignore`, it reports the parent's drift a second time under a different
+    name. On this machine that inflated the first run by a double-digit count and
+    listed the audit's own worktree as a drifted repo.
+
+    Duplicate rows are worse than merely untidy here: the whole output is a
+    to-do list, and a to-do list with phantom entries gets worked twice or
+    distrusted.
+    """
+    return (path / ".git").is_dir()
 
 
 def is_dirty(path: Path) -> bool:
