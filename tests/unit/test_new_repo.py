@@ -1642,6 +1642,80 @@ class TestDataGConvention:
         assert "data/" in text and "data-g/" in text
         assert "#1563" in text
 
+    # --- data-dl/ (#2485) ---------------------------------------------------
+    # data-g/ was absorbing downloaded material because there was nowhere else
+    # for it to go. These assert the third directory exists, that it is really
+    # ignored, and -- the part that actually breaks -- that its README survives
+    # the ignore rule.
+
+    def test_create_writes_data_dl_readme(self, tmp_path):
+        from new_repo import create_data_g_readme
+        create_data_g_readme(tmp_path)
+        assert (tmp_path / "data-dl" / "README.md").exists()
+
+    def test_create_removes_data_dl_schema_gitkeep(self, tmp_path):
+        from new_repo import create_data_g_readme
+        data_dl = tmp_path / "data-dl"
+        data_dl.mkdir()
+        (data_dl / ".gitkeep").touch()
+        create_data_g_readme(tmp_path)
+        assert not (data_dl / ".gitkeep").exists()
+
+    def test_both_readmes_carry_the_full_three_way_table(self, tmp_path):
+        """A README that only describes its own directory does not help someone
+        choosing between directories. Both must show all three."""
+        from new_repo import create_data_g_readme
+        create_data_g_readme(tmp_path)
+        for where in ("data-g", "data-dl"):
+            text = (tmp_path / where / "README.md").read_text(encoding="utf-8")
+            assert "`data/`" in text, where
+            assert "`data-dl/`" in text, where
+            assert "`data-g/`" in text, where
+
+    def test_data_dl_readme_cites_issue(self, tmp_path):
+        from new_repo import create_data_g_readme
+        create_data_g_readme(tmp_path)
+        text = (tmp_path / "data-dl" / "README.md").read_text(encoding="utf-8")
+        assert "#2485" in text
+
+    def test_gitignore_template_ignores_data_dl_but_not_its_readme(self, tmp_path):
+        """The bug this guards: a bare `data-dl/` rule would swallow the README,
+        because git cannot re-include a file underneath an ignored directory.
+        Asserted against real git rather than by reading the template."""
+        import subprocess
+        from new_repo import create_gitignore, create_data_g_readme
+
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        create_gitignore(tmp_path)
+        create_data_g_readme(tmp_path)
+        (tmp_path / "data-dl" / "paper.pdf").write_text("x", encoding="utf-8")
+
+        def ignored(rel):
+            return subprocess.run(
+                ["git", "check-ignore", "-q", rel],
+                cwd=tmp_path, capture_output=True,
+            ).returncode == 0
+
+        assert ignored("data-dl/paper.pdf"), "downloaded material must be ignored"
+        assert not ignored("data-dl/README.md"), "the README must stay tracked"
+
+    def test_gitignore_template_does_not_ignore_data_g(self, tmp_path):
+        """A `data-*/` glob would match data-g/ and silently stop tracking the
+        one directory that is meant to be committed."""
+        import subprocess
+        from new_repo import create_gitignore, create_data_g_readme
+
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        create_gitignore(tmp_path)
+        create_data_g_readme(tmp_path)
+        (tmp_path / "data-g" / "roster.json").write_text("{}", encoding="utf-8")
+
+        for rel in ("data-g/README.md", "data-g/roster.json"):
+            assert subprocess.run(
+                ["git", "check-ignore", "-q", rel],
+                cwd=tmp_path, capture_output=True,
+            ).returncode != 0, f"{rel} must remain tracked"
+
     def test_schema_includes_data_g(self):
         from new_repo import load_structure_schema
         schema = load_structure_schema()

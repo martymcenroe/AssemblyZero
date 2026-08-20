@@ -728,8 +728,13 @@ You are a team member on the {name} project, not a tool.
 {context_block}
 ## Data Directories
 
-- `data/`: ephemeral session artifacts (transcripts, run logs, pickup state). Ignored by the fleet-wide global gitignore; not committed.
+Three of them, and only one is committed.
+
+- `data/`: ephemeral session artifacts (transcripts, run logs, pickup state). Not committed.
+- `data-dl/`: downloaded material (papers, drafts, exports, recordings). Not committed -- ignored by this repo's own `.gitignore`, not merely by the machine's global one. See `data-dl/README.md`. (AssemblyZero #2485.)
 - `data-g/`: source-of-truth data the runtime treats as authoritative (rosters, corpora, configs). Git-tracked for durability. See `data-g/README.md`. (AssemblyZero #1563.)
+
+The `-g` is for git-tracked. If a file is here because you downloaded it, it belongs in `data-dl/`.
 
 {overrides_footer}"""
     claude_md_path = project_path / "CLAUDE.md"
@@ -1047,14 +1052,12 @@ SOFTWARE.
     license_path.write_text(content, encoding='utf-8')
 
 
-def create_gitignore(project_path: Path) -> None:
-    """
-    Create the .gitignore file.
-
-    Args:
-        project_path: Path to the project root
-    """
-    content = """# Claude Code local settings (machine-specific)
+# The canonical .gitignore every scaffolded repo receives. Module-level rather
+# than inline in create_gitignore() so tools/audit_gitignore_drift.py can diff an
+# existing repo against it without scaffolding anything (#1618). One definition,
+# two consumers -- a second copy would drift from this one the first time either
+# changed, which is the defect that audit exists to find.
+GITIGNORE_TEMPLATE = """# Claude Code local settings (machine-specific)
 .claude/settings.local.json
 
 # Claude Code temporary files
@@ -1116,6 +1119,21 @@ coverage.xml
 # Unleashed session transcripts (auto-generated, untracked)
 data/unleashed/
 
+# Downloaded material (#2485). Papers, drafts, exports, recordings -- bulk that
+# is usually binary and usually re-fetchable, so git is the wrong store and the
+# cost is permanent. Ignored in THIS file rather than left to the machine's
+# global gitignore, so the rule survives a clone onto any other machine.
+#
+# `data-dl/*` plus the negation, NOT a bare `data-dl/`: git cannot re-include a
+# file underneath an ignored directory, so the bare form would swallow the README
+# that explains the convention.
+data-dl/*
+!data-dl/README.md
+
+# NOT ignored, deliberately: data-g/ is source-of-truth the runtime depends on
+# and is meant to be committed. Do not "tidy" this into a `data-*/` glob -- that
+# would match data-g/ and silently stop tracking the one directory that wants it.
+
 # Agent-parked files (mv $file $file.bak / $file.parked-{timestamp})
 # CLAUDE.md "Destroying uncommitted state" principle: the agent uses
 # mv-to-bak instead of rm to preserve recoverability. Ignored here so
@@ -1133,52 +1151,116 @@ data/unleashed/
 ~$*
 .~lock.*#
 """
+
+
+def create_gitignore(project_path: Path) -> None:
+    """
+    Create the .gitignore file.
+
+    Args:
+        project_path: Path to the project root
+    """
     gitignore_path = project_path / ".gitignore"
-    gitignore_path.write_text(content, encoding='utf-8')
+    gitignore_path.write_text(GITIGNORE_TEMPLATE, encoding='utf-8')
+
+
+DATA_SPLIT_TABLE = """\
+| Path      | Tracked? | Use for |
+|-----------|----------|---------|
+| `data/`   | No       | Ephemeral session artifacts: transcripts, run logs, pickup state |
+| `data-dl/`| No       | Downloaded and fetched material: papers, drafts, exports, recordings |
+| `data-g/` | **Yes**  | Source-of-truth the runtime depends on: rosters, corpora, configs |
+"""
 
 
 def create_data_g_readme(project_path: Path) -> None:
-    """Create data-g/ with a README documenting the tracked-data split (#1563).
+    """Create data-g/ and data-dl/ with READMEs documenting the three-way split.
 
-    The fleet-wide global gitignore ignores `data/` so ephemeral session
-    artifacts (transcripts, run logs, pickup state) never land in git -- the
-    right default for throwaway state. But that ignore silently drops
-    authoritative work product too. Source-of-truth data the runtime reads as
-    canonical (rosters, corpora, recipient lists, configs) goes in `data-g/`
-    (the `-g` reads as "git-tracked"), which the global ignore does NOT match.
+    Three data directories, because two were not enough and the gap was filled
+    by guessing (#1563 established data-g/; #2485 added data-dl/).
 
-    Surfaced in IEEE-LRP-SC5 #19 when a roster JSON under data/ was silently
-    dropped from a durability commit and would have been lost on a machine wipe.
+    - `data/`     ephemeral session artifacts. Never committed.
+    - `data-dl/`  downloaded material. Never committed.
+    - `data-g/`   source-of-truth the runtime depends on. Committed.
 
-    Removes the schema-created .gitkeep -- the README makes the directory
-    non-empty and committable on its own.
+    WHY data-dl/ EXISTS
+    -------------------
+    Until #2485 there was nowhere for downloaded material to go, so it went into
+    `data-g/` -- the tracked one. That is backwards: a paper, an export or a
+    meeting recording is bulk that should never be committed, and it was landing
+    in the directory whose entire purpose is durability.
+
+    The cause was the name. `-g` is one letter, and the only place it was
+    explained was a README *inside the directory it explains*, which nobody
+    reads before deciding where to put a download. The convention was documented
+    and still failed, for months, for the person who commissioned it. So both
+    READMEs now carry the full three-way table rather than each describing only
+    itself.
+
+    WHY data-dl/ IS IGNORED IN THE REPO'S OWN .gitignore
+    ----------------------------------------------------
+    Not left to the machine's global gitignore. A global ignore protects only
+    the machine it is configured on; clone anywhere else and the rule is gone.
+    The repo carries its own rule so it protects itself on any clone.
+
+    Removes the schema-created .gitkeep from both -- each README makes its
+    directory non-empty on its own.
+
+    Note the ignore pattern this pairs with is `data-dl/*` plus a negation for
+    the README, NOT a bare `data-dl/`. Git cannot re-include a file underneath an
+    ignored *directory*, so `data-dl/` alone would ignore the README too and the
+    explanation would never reach the repo.
     """
     data_g = project_path / "data-g"
     data_g.mkdir(parents=True, exist_ok=True)
     gitkeep = data_g / ".gitkeep"
     if gitkeep.exists():
         gitkeep.unlink()
-    readme = '''\
+    readme = f'''\
 # data-g/ -- git-tracked data
 
 Source-of-truth data files that must persist in GitHub live here.
 
-The fleet-wide global gitignore ignores `data/` so ephemeral session artifacts
-(transcripts, run logs, pickup state) never land in git. That is the right
-default for throwaway state -- but it silently drops authoritative work product
-too. Anything the runtime reads as canonical input -- roster files, corpora,
-recipient lists, convergence configs -- belongs in `data-g/`, which the global
-ignore does NOT match.
+This repo has three data directories. Only this one is committed.
 
-| Path | Tracked? | Use for |
-|------|----------|---------|
-| `data/`   | No (global gitignore) | Session transcripts, pickup state, throwaway run output |
-| `data-g/` | Yes                   | Source-of-truth: rosters, corpora, configs the runtime depends on |
+{DATA_SPLIT_TABLE}
+The `-g` is for **git-tracked**. That is the whole distinction, and it is the
+one that gets missed: if you are putting a file here because you downloaded it,
+it belongs in `data-dl/` instead.
 
-Rule of thumb: if losing the file on a machine wipe would hurt, it goes in
-`data-g/`. (Convention established in AssemblyZero #1563.)
+Rule of thumb: if losing the file on a machine wipe would hurt **and** it is
+something this project produces or depends on rather than something you fetched,
+it goes in `data-g/`. (Convention established in AssemblyZero #1563; the
+three-way split in #2485.)
 '''
     (data_g / "README.md").write_text(readme, encoding="utf-8", newline="")
+
+    data_dl = project_path / "data-dl"
+    data_dl.mkdir(parents=True, exist_ok=True)
+    dl_gitkeep = data_dl / ".gitkeep"
+    if dl_gitkeep.exists():
+        dl_gitkeep.unlink()
+    dl_readme = f'''\
+# data-dl/ -- downloaded material, never committed
+
+Anything fetched from somewhere else lives here: papers, report drafts,
+spreadsheets, exports, images, meeting recordings.
+
+**This directory is gitignored.** Nothing in it is committed except this README.
+That is deliberate -- downloaded material is usually bulk, usually binary, and
+usually reproducible by downloading it again. Git is a poor store for it and the
+cost is permanent, because every clone pays for it forever.
+
+{DATA_SPLIT_TABLE}
+If something you downloaded genuinely needs to be durable -- it cannot be fetched
+again, or the project depends on it as canonical input -- move it to `data-g/`
+deliberately, rather than committing it from here. That move should be a decision
+someone made, not a side effect of where a file happened to land.
+
+(Convention established in AssemblyZero #2485, after `data-g/` spent months
+absorbing downloads because this directory did not exist.)
+'''
+    (data_dl / "README.md").write_text(dl_readme, encoding="utf-8", newline="")
 
 
 def create_file_inventory(project_path: Path, name: str) -> None:
@@ -1210,7 +1292,8 @@ This document provides a complete inventory of files in the {name} project, orga
 ```
 {name}/
 ├── .claude/                    # Claude Code configuration
-├── data/                       # Ephemeral data (git-ignored fleet-wide)
+├── data/                       # Ephemeral data (not committed)
+├── data-dl/                    # Downloaded material (not committed; see data-dl/README.md)
 ├── data-g/                     # Git-tracked source-of-truth data (see data-g/README.md)
 ├── docs/                       # All documentation
 │   ├── adrs/                   # Architecture Decision Records
@@ -3193,12 +3276,14 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
     create_file_inventory(project_path, args.name)
     print("  Created file inventory")
 
-    # Step 11a: Create data-g/ (git-tracked source-of-truth data) (#1563).
-    # The global gitignore ignores data/; data-g/ is the durable counterpart
-    # the ignore does not match. README explains the split.
-    print("\n11a. Creating data-g/ (git-tracked data convention)...")
+    # Step 11a: Create the two non-ephemeral data directories (#1563, #2485).
+    # data-g/ is the durable, committed one; data-dl/ is where downloaded bulk
+    # goes so it stops landing in data-g/. Each README carries the full
+    # three-way table, because a README that only describes its own directory
+    # does not help someone deciding which directory to use.
+    print("\n11a. Creating data-g/ and data-dl/ (three-way data convention)...")
     create_data_g_readme(project_path)
-    print("  Created data-g/README.md")
+    print("  Created data-g/README.md and data-dl/README.md")
 
     # Step 11b: Create .unleashed.json (wrapper configuration)
     print("\n11b. Creating .unleashed.json...")
@@ -3354,6 +3439,37 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         checks_passed += 1
     else:
         print("  [FAIL] data-g/README.md missing")
+
+    # Verify data-dl/ present AND actually ignored (#2485). Presence alone is not
+    # the property that matters -- a data-dl/ that git would happily commit is the
+    # bug this directory exists to prevent, so the check asserts the ignore rule
+    # bites and that the README survives it.
+    checks_total += 1
+    data_dl_readme = project_path / "data-dl" / "README.md"
+    probe = project_path / "data-dl" / ".ignore-probe"
+    dl_ok = False
+    if data_dl_readme.exists():
+        try:
+            probe.write_text("", encoding="utf-8")
+            ignored = subprocess.run(
+                ["git", "check-ignore", "-q", "data-dl/.ignore-probe"],
+                cwd=project_path, capture_output=True,
+            ).returncode == 0
+            readme_ignored = subprocess.run(
+                ["git", "check-ignore", "-q", "data-dl/README.md"],
+                cwd=project_path, capture_output=True,
+            ).returncode == 0
+            dl_ok = ignored and not readme_ignored
+        finally:
+            if probe.exists():
+                probe.unlink()
+    if dl_ok:
+        print("  [PASS] data-dl/ present, ignored, README still tracked")
+        checks_passed += 1
+    elif not data_dl_readme.exists():
+        print("  [FAIL] data-dl/README.md missing")
+    else:
+        print("  [FAIL] data-dl/ ignore rule wrong (contents must be ignored, README must not)")
 
     # Verify settings.json has hooks configured
     checks_total += 1
