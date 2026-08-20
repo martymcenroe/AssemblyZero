@@ -60,7 +60,7 @@ if [[ "$filename" == ".env" ]] ||
     echo "To update secrets: tell the user to run the command in their" >&2
     echo "own terminal, or use a deployment script that reads from env." >&2
     echo "" >&2
-    exit 1
+    exit 2
 fi
 
 # ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ if [[ "$file_path_lower" =~ \.aws/(credentials|config) ]]; then
     echo "AWS credential files must never be accessed by Claude." >&2
     echo "Use boto3 or os.environ.get() in Python instead." >&2
     echo "" >&2
-    exit 1
+    exit 2
 fi
 
 # ---------------------------------------------------------------------------
@@ -98,7 +98,7 @@ if [[ "$filename_lower" =~ secret ]] ||
     echo "Files with 'secret', 'credential', or 'private.key' in the name" >&2
     echo "are presumed to contain sensitive material." >&2
     echo "" >&2
-    exit 1
+    exit 2
 fi
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ if [ -n "$grep_glob" ]; then
         echo "" >&2
         echo "Grep glob pattern targets secret files." >&2
         echo "" >&2
-        exit 1
+        exit 2
     fi
 fi
 
