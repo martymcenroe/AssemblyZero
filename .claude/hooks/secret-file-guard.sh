@@ -7,7 +7,7 @@
 # using Read() to inspect secrets or Write() to render them in the permission
 # prompt (the leak happens at prompt-render time, before user approval).
 #
-# Environment: $CLAUDE_TOOL_INPUT_FILE_PATH contains the target file path
+# Input: hook JSON on stdin; field depends on the tool (see below)
 # Matched tools: Read, Write, Edit (via settings.json PreToolUse matchers)
 #
 # Incident: 2026-03-09 — career agent wrote API key via Write(.dev.vars),
@@ -15,10 +15,15 @@
 
 set -e
 
-# Grep uses $CLAUDE_TOOL_INPUT_PATH, Read/Write/Edit use $CLAUDE_TOOL_INPUT_FILE_PATH
-file_path="$CLAUDE_TOOL_INPUT_FILE_PATH"
+# Grep uses .tool_input.path; Read/Write/Edit use .tool_input.file_path
+# Input arrives as JSON on stdin. It used to arrive in CLAUDE_TOOL_INPUT_*, which
+# the harness no longer sets -- so this hook received an empty string, hit the
+# guard below, and exited 0 while the config still read as protected (#301).
+# Read stdin ONCE: a second `cat` in the same process gets nothing.
+_hook_json=$(cat)
+file_path=$(printf '%s' "$_hook_json" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 if [ -z "$file_path" ]; then
-    file_path="$CLAUDE_TOOL_INPUT_PATH"
+    file_path=$(printf '%s' "$_hook_json" | jq -r '.tool_input.path // empty' 2>/dev/null)
 fi
 
 # Skip empty paths
@@ -100,7 +105,7 @@ fi
 # Pattern 4: Grep glob targeting secret files
 # Issue #714 bypass #14: Grep(path=".dev.vars") or Grep(glob=".env*")
 # ---------------------------------------------------------------------------
-grep_glob="$CLAUDE_TOOL_INPUT_GLOB"
+grep_glob=$(printf '%s' "$_hook_json" | jq -r '.tool_input.glob // empty' 2>/dev/null)
 if [ -n "$grep_glob" ]; then
     grep_glob_lower=$(printf '%s' "$grep_glob" | tr '[:upper:]' '[:lower:]')
     if [[ "$grep_glob_lower" =~ \.env ]] ||
