@@ -1505,41 +1505,58 @@ class TestGitHubRepoNameCasePreservation:
 
 
 class TestCerberusPostDeployAdvice:
-    """#1536: the post-deploy success message must distinguish between
-    the plaintext flow (`--cerberus-pem`, .pem deleted, revoke-the-key
-    correct) and the encrypted-reusable flow (`--cerberus-pem-gpg`, blob
-    preserved, revoke-the-key catastrophic — would invalidate the
-    reusable encrypted file).
+    """#134 supersedes #1536. The post-deploy advice must NOT branch.
 
-    Bug pre-fix: a single `print(\"REMEMBER to revoke the key...\")` line
-    fired for both flows. The operator following it under the
-    encrypted-reusable flow would lose the ability to use the encrypted
-    PEM for subsequent new-repo runs.
+    #1536 split the advice by flow: the plaintext flow (`--cerberus-pem`)
+    deletes the .pem, so it was told to revoke as belt-and-braces, while
+    the encrypted-reusable flow (`--cerberus-pem-gpg`) was told not to,
+    because revoking would invalidate the blob it had just kept.
+
+    That split asks the wrong question. Revoking does not retire an
+    on-disk copy — it removes the PUBLIC half registered on the App, so
+    GitHub can no longer validate a JWT signed by that key, and the
+    REVIEWER_APP_PRIVATE_KEY secret the run just deployed becomes dead
+    bytes. No installation token, no approving review, mergeable_state
+    stuck at `blocked` — in the new repo AND in every other repo holding
+    the same key.
+
+    The question is not "did a plaintext file survive this run". It is
+    "is this key deployed anywhere", and after either flow the answer is
+    yes, because deploying it is the point of the run. So the advice is
+    the same on both paths: keep the key active, rotate via runbook 0939.
+
+    These tests previously asserted the presence of the revoke
+    instruction, which is how the defect stayed shipped through a green
+    suite. They now assert its absence.
     """
 
-    def test_revoke_advice_only_present_in_plaintext_branch(self):
-        """The string 'REMEMBER to revoke' should only appear inside a
-        conditional that checks args.cerberus_pem (the plaintext flow)."""
+    def test_no_revoke_instruction_on_any_flow(self):
         from pathlib import Path
         script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
-        # The advisory text must exist (it's correct for the plaintext flow)
-        assert "REMEMBER to revoke the key in the app UI" in content
-        # And the encrypted-flow branch must have the NEGATING advice
-        assert "DO NOT revoke the key in the app UI" in content, (
-            "regression #1536: the encrypted-reusable flow "
-            "(--cerberus-pem-gpg) lost its do-not-revoke guidance. The "
-            "post-deploy success message must distinguish the two flows."
+        assert "REMEMBER to revoke the key in the app UI" not in content, (
+            "#134: deploy-then-revoke instruction is back. Revoking "
+            "invalidates the Actions secret this run just deployed."
         )
+        assert "Revoke the key you just used" not in content
+
+    def test_keep_active_guidance_is_present_on_both_flows(self):
+        """Deleting the bad advice without replacing it would pass the test
+        above and leave the operator at a Revoke button with no guidance."""
+        from pathlib import Path
+        script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
+        content = script.read_text(encoding="utf-8")
+        assert "do NOT revoke" in content or "Do NOT revoke" in content
+        assert "0939" in content, "must point at the rotation runbook"
 
     def test_anchor_comment_naming_issue_present(self):
-        """A comment naming #1536 should sit at the cerberus_status branch
-        so future agents understand why the two flows produce different
-        end-of-run advice."""
+        """A comment naming #134 should sit at the cerberus_status branch so
+        the next reader does not re-derive the on-disk model and
+        re-introduce the split."""
         from pathlib import Path
         script = Path(__file__).resolve().parent.parent.parent / "tools" / "new_repo.py"
         content = script.read_text(encoding="utf-8")
-        assert "#1536" in content
+        assert "#134" in content
         # The #1536 anchor must be near the `elif cerberus_status == \"OK\":`
         # branch (within a few hundred chars BEFORE the branch text — the
         # anchor comment introduces the conditional).

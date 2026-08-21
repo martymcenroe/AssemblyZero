@@ -9,8 +9,9 @@ fine-grained PATs intentionally lack that scope.
 What this script does:
 
   1. Determines the canonical auto-reviewer.yml content. Each repo
-     gets the CALLER pattern (a 6-line YAML that invokes AZ's reusable
-     auto-reviewer workflow via `uses:`).
+     gets the CALLER pattern -- a short YAML that invokes AZ's reusable
+     auto-reviewer workflow via `uses:`, passing the `required_checks`
+     input and the named Cerberus secrets it declares.
   2. For each target repo, PUTs the caller file via Contents API to
      `.github/workflows/auto-reviewer.yml` on the default branch.
   3. Idempotent: skips repos that already have the file.
@@ -42,16 +43,14 @@ updates ... use in-process classic-PAT"). It is NOT the banned
 `--admin` flag (which is the `gh pr merge --admin` shortcut). The
 bypass window is bounded to a single PUT, owner-role-scoped, atomic.
 
-The canonical CALLER file is:
+The canonical CALLER file lives in ONE place: `_CANONICAL_AUTO_REVIEWER_CALLER`
+in `new_repo.py`. It is deliberately not reproduced here (#1193).
 
-    name: auto-reviewer
-    on:
-      pull_request:
-        types: [opened, synchronize, reopened]
-    jobs:
-      review:
-        uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
-        secrets: inherit
+This docstring used to quote it, and the quote went stale alongside the code
+copy it described -- both showing the pre-`workflow_call` format long after the
+reusable workflow started requiring `with:` inputs and named secrets. A
+transcribed example is a third copy that nothing tests and everyone trusts.
+Read the constant.
 
 Usage:
 
@@ -76,26 +75,28 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _pat_session import classic_pat_session  # noqa: E402
+# The caller content is NOT defined here (#1193). It is imported from
+# new_repo.py, the single source of truth that creation-time writing and
+# post-setup verification already share.
+#
+# This file used to carry its own copy, and that copy went stale. It still had
+# the pre-`workflow_call` format -- no `with:` inputs, `secrets: inherit`
+# instead of the named secrets the reusable workflow declares as required. Any
+# repo it touched got a workflow that failed at startup: `auto-reviewer`
+# completing in 0s with conclusion `startup_failure`, Cerberus never posting a
+# review, `mergeable_state` stuck at `blocked`. Seen on two PRs in a scaffolded
+# repo, both blocked indefinitely until unblocked by hand.
+#
+# Copying the current format in here would fix today and leave the mechanism
+# intact. Two definitions of one artifact drift -- that is not a prediction,
+# it is what this defect IS. So the duplicate is deleted rather than corrected,
+# and the test suite asserts the two modules agree by identity.
+from new_repo import _CANONICAL_AUTO_REVIEWER_CALLER as CALLER_WORKFLOW  # noqa: E402
 
 GITHUB_USER = "martymcenroe"
 GH_API = "https://api.github.com"
 HTTP_TIMEOUT_S = 30
 WORKFLOW_PATH = ".github/workflows/auto-reviewer.yml"
-
-# Canonical caller workflow. Mirrors what every other repo in the fleet
-# uses to invoke the AssemblyZero reusable auto-reviewer.yml.
-CALLER_WORKFLOW = """\
-name: auto-reviewer
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-
-jobs:
-  review:
-    uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main
-    secrets: inherit
-"""
 
 
 def _headers(pat: str) -> dict[str, str]:
@@ -446,7 +447,7 @@ def deploy_with_bootstrap(repo: str, branch: str,
 
     # Bootstrap path
     if classic_strict:
-        print(f"  bootstrap: classic protection strict (enforce_admins=True)")
+        print("  bootstrap: classic protection strict (enforce_admins=True)")
     if has_rulesets:
         rs_ids = [rs.get("id") for rs in rulesets]
         print(f"  bootstrap: {len(rulesets)} active ruleset(s) targeting {branch}: {rs_ids}")
