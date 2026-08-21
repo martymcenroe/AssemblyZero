@@ -172,10 +172,22 @@ def test_audit_tsv_row_includes_all_four_dims():
 # =========================================================================
 
 def test_caller_workflow_calls_az_reusable():
-    """The caller content must reference the AZ reusable workflow path."""
+    """The caller must reference the AZ reusable workflow AND satisfy the
+    contract that workflow declares.
+
+    This previously asserted `secrets: inherit`, which is how the stale caller
+    format survived a green suite for months (#1193). The reusable workflow
+    declares `workflow_call` with a `required_checks` input and two REQUIRED
+    secrets; `inherit` does not satisfy a declared-secrets contract, and the
+    mismatch produced `startup_failure` in 0s on every PR of every repo this
+    tool touched.
+    """
     assert "uses: martymcenroe/AssemblyZero/.github/workflows/auto-reviewer.yml@main" \
         in deploy.CALLER_WORKFLOW
-    assert "secrets: inherit" in deploy.CALLER_WORKFLOW
+    assert "secrets: inherit" not in deploy.CALLER_WORKFLOW
+    assert "required_checks" in deploy.CALLER_WORKFLOW
+    assert "REVIEWER_APP_ID" in deploy.CALLER_WORKFLOW
+    assert "REVIEWER_APP_PRIVATE_KEY" in deploy.CALLER_WORKFLOW
     assert "pull_request" in deploy.CALLER_WORKFLOW
 
 

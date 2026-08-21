@@ -2760,9 +2760,13 @@ def _deploy_cerberus(
               "the path you provided; reuse it for additional repos.)")
 
     print()
-    print("  NEXT STEP (browser-only, cannot be automated):")
-    print("    Revoke the key you just used in the GitHub App UI:")
-    print("    https://github.com/settings/apps/cerberus-az > Private keys > Revoke")
+    print("  KEEP THE APP KEY ACTIVE -- do NOT revoke it (#134).")
+    print("    The REVIEWER_APP_PRIVATE_KEY secret this run just deployed is")
+    print("    only usable while its PUBLIC half stays registered on the App.")
+    print("    Revoking removes that registration, so GitHub rejects the JWT,")
+    print("    no installation token is issued, and Cerberus never approves --")
+    print("    in this repo and in every other repo holding the same key.")
+    print("    To rotate: runbook 0939 (deploy new, audit, THEN revoke old).")
 
     return "OK"
 
@@ -3878,31 +3882,38 @@ def _create_repo(project_path: Path, args: argparse.Namespace, github_user: str)
         print("  #   Without secrets, PRs pass pr-sentinel but are never auto-approved.")
         print("  #   1. https://github.com/settings/apps/cerberus-az > Private keys > Generate")
         print("  #   2. poetry run python tools/deploy_cerberus_secrets.py /path/to/downloaded.pem")
-        print("  #   3. Delete the .pem, revoke the key in the app UI")
+        print("  #   3. Delete the .pem. Do NOT revoke the key -- the deployed")
+        print("  #      secret depends on it staying active (#134).")
         print("  #   See runbook 0927 step 4 for full procedure.")
         print("  #   OR re-run this script with --cerberus-pem PATH (single-shot)")
         print("  #   or --cerberus-pem-gpg PATH (reusable, encrypted at rest).")
     elif cerberus_status == "OK":
-        # Closes #1536: the post-deploy advice depends on which Cerberus
-        # flow ran. The plaintext flow (--cerberus-pem) deletes the .pem
-        # after deploy, so revoking the GitHub-side key as belt-and-
-        # suspenders is correct — no on-disk credential survives this run.
-        # The encrypted-reusable flow (--cerberus-pem-gpg) intentionally
-        # keeps the encrypted blob for subsequent new-repo invocations;
-        # revoking the key would invalidate that blob — catastrophic for
-        # the documented design intent of the flag.
+        # #134 supersedes the #1536 split. That split branched on "did a
+        # plaintext .pem survive this run", and told the --cerberus-pem flow to
+        # revoke because none did. Revocation does not retire an on-disk copy.
+        # It removes the PUBLIC half registered on the App, so GitHub can no
+        # longer validate a JWT signed by that key -- and the
+        # REVIEWER_APP_PRIVATE_KEY secret this run just deployed becomes dead
+        # bytes. No installation token, no approving review, mergeable_state
+        # stuck at blocked, in this repo and every other one holding the key.
+        #
+        # The question is not "is a plaintext file left on disk". It is "is
+        # this key deployed anywhere", and after either flow the answer is yes,
+        # because deploying it is the point of the run. So the advice no longer
+        # branches: keep the key active either way. Runbook 0927 reached the
+        # same conclusion (per unleashed#658) and this brings the script into
+        # line with it -- the two had been contradicting each other.
         print()
         print("  # Cerberus secrets deployed and verified.")
         if args.cerberus_pem is not None:
             print("  # The plaintext .pem was deleted by the script.")
-            print("  # REMEMBER to revoke the key in the app UI (browser-only step) —")
-            print("  # there is no on-disk credential to retire otherwise.")
         else:  # args.cerberus_pem_gpg is not None
             print(f"  # Encrypted PEM preserved at {args.cerberus_pem_gpg} for reuse.")
-            print("  # DO NOT revoke the key in the app UI — that would invalidate")
-            print("  # the encrypted blob you just kept. Revoke only when you want")
-            print("  # to retire this credential entirely (e.g., rotation per")
-            print("  # runbook 0930, AZ #1017).")
+        print("  # KEEP THE APP KEY ACTIVE -- do NOT revoke it. The secret just")
+        print("  # deployed works only while the key's public half stays")
+        print("  # registered on the App page; revoking breaks Cerberus here and")
+        print("  # in every other repo holding it.")
+        print("  # To rotate: runbook 0939 -- deploy new, audit, THEN revoke old.")
 
     # The internal function uses `no_pypi` (legacy parameter name); compute
     # it as "did the operator OPT IN via --pypi?" -- false = no_pypi=True =
