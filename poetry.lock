@@ -1335,14 +1335,14 @@ xai = ["langchain-xai"]
 
 [[package]]
 name = "langchain-anthropic"
-version = "1.5.3"
+version = "1.5.4"
 description = "Integration package connecting Claude (Anthropic) APIs and LangChain"
 optional = false
 python-versions = "<4.0.0,>=3.10.0"
 groups = ["main"]
 files = [
-    {file = "langchain_anthropic-1.5.3-py3-none-any.whl", hash = "sha256:b1b72b7c9e4bf5c044660629ebbcb79cef18c140fdc80174750eb86de13ec8bc"},
-    {file = "langchain_anthropic-1.5.3.tar.gz", hash = "sha256:48a7e4fc3856c42f9dcb4396ba112afcdd8dee21b70a402bc43283c970de3941"},
+    {file = "langchain_anthropic-1.5.4-py3-none-any.whl", hash = "sha256:730a9cb1ad384c9f1642840469c1ebbf20237066b1635f5d4fa9876e365fceaf"},
+    {file = "langchain_anthropic-1.5.4.tar.gz", hash = "sha256:113cb9bdac3169f2da65ea395dedb290e30dc6f899d01c205ba88aa88a2a02c2"},
 ]
 
 [package.dependencies]
@@ -3622,4 +3622,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "9402e54f701613836e905c401dc49f9e10cee20bdf47e060c01ce80ceab5438e"
+content-hash = "5b6c2bd4cb3e2042f7eca6f7685ed01d3bfb1e334ffe57a992027f8f8ce547e3"
