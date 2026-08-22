@@ -798,14 +798,14 @@ urllib3 = ["packaging", "urllib3"]
 
 [[package]]
 name = "google-genai"
-version = "1.62.0"
+version = "1.68.0"
 description = "GenAI Python SDK"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "google_genai-1.62.0-py3-none-any.whl", hash = "sha256:4c3daeff3d05fafee4b9a1a31f9c07f01bc22051081aa58b4d61f58d16d1bcc0"},
-    {file = "google_genai-1.62.0.tar.gz", hash = "sha256:709468a14c739a080bc240a4f3191df597bf64485b1ca3728e0fb67517774c18"},
+    {file = "google_genai-1.68.0-py3-none-any.whl", hash = "sha256:a1bc9919c0e2ea2907d1e319b65471d3d6d58c54822039a249fe1323e4178d15"},
+    {file = "google_genai-1.68.0.tar.gz", hash = "sha256:ac30c0b8bc630f9372993a97e4a11dae0e36f2e10d7c55eacdca95a9fa14ca96"},
 ]
 
 [package.dependencies]
@@ -817,11 +817,11 @@ pydantic = ">=2.9.0,<3.0.0"
 requests = ">=2.28.1,<3.0.0"
 sniffio = "*"
 tenacity = ">=8.2.3,<9.2.0"
-typing-extensions = ">=4.11.0,<5.0.0"
-websockets = ">=13.0.0,<15.1.0"
+typing-extensions = ">=4.14.0,<5.0.0"
+websockets = ">=13.0.0,<17.0"
 
 [package.extras]
-aiohttp = ["aiohttp (<3.13.3)"]
+aiohttp = ["aiohttp (>=3.10.11,<4.0.0)"]
 local-tokenizer = ["protobuf", "sentencepiece (>=0.2.0)"]
 
 [[package]]
@@ -3622,4 +3622,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "9402e54f701613836e905c401dc49f9e10cee20bdf47e060c01ce80ceab5438e"
+content-hash = "72e7aa373c2c2aaa2ca03bbda60c2c962e2430a065d284425ffe432a25c9079a"
