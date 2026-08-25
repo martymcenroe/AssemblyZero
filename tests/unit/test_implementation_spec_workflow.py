@@ -934,6 +934,35 @@ class TestExtractImportDependencies:
         result = _extract_import_dependencies(files, tmp_path)
         assert result == ""
 
+    def test_a_bom_carrying_file_is_not_silently_dropped(self, tmp_path):
+        """A UTF-8 BOM must not evict a file from the drafter's context (#2507).
+
+        A plain utf-8 read keeps the BOM as U+FEFF, ast.parse raises
+        SyntaxError on it, and the bare `continue` made the file vanish
+        from the dependency map with nothing said -- a smaller context
+        indistinguishable from a complete one. Python's own importer
+        runs the same file happily. The #2475 audit found and fixed the
+        identical defect in itself; this pins the repair at this site.
+        """
+        from assemblyzero.workflows.implementation_spec.nodes.analyze_codebase import (
+            _extract_import_dependencies,
+        )
+
+        pkg = tmp_path / "assemblyzero" / "workflows"
+        pkg.mkdir(parents=True)
+        (pkg / "graph.py").write_bytes(
+            b"\xef\xbb\xbf"
+            b"from assemblyzero.workflows.state import MyState\n"
+        )
+
+        files = [{"path": "assemblyzero/workflows/graph.py",
+                  "change_type": "Modify", "description": "Update",
+                  "current_content": None}]
+
+        result = _extract_import_dependencies(files, tmp_path)
+        assert "graph.py" in result, "the BOM'd file must appear in the map"
+        assert "assemblyzero.workflows.state" in result
+
 
 class TestExtractRelevantExcerpt:
     """Tests for extract_relevant_excerpt helper."""
