@@ -271,9 +271,49 @@ class TestEars:
         assert report.nested_bullets_skipped == 1
         assert "1 nested bullet(s)" in fc.render_report(report, "x")
 
-    def test_the_section_heading_must_be_exact(self):
-        """'## Requirements (draft)' is not the marked section."""
-        body = "## Requirements (draft)\n\n- Config is saved on exit.\n"
+    def test_a_parenthetical_suffix_is_the_marked_section(self):
+        """'## Requirements (EARS)' is the Requirements section (#2465).
+
+        boostgauge #331 and #332 carried exactly this heading and were
+        reported form-checker PASS with zero sentences examined. The
+        parenthetical names the notation -- a strictly more informative
+        heading must not silently downgrade the check to nothing. (This
+        flips the earlier exact-equality pin, which treated
+        '## Requirements (draft)' as unmarked; examining a draft section
+        is strictly safer than examining nothing.)
+        """
+        body = (
+            "## Requirements (EARS)\n\n"
+            "- The system shall render the bezel.\n"
+            "- The dial is offset from the tick.\n"
+        )
+
+        report = fc.check_form(body)
+
+        assert report.ears_ran is True
+        assert report.requirements_examined == 2
+
+    def test_the_bare_heading_still_matches(self):
+        """boostgauge #2's form: the control that always worked."""
+        body = "## Requirements\n\n- The system shall start.\n"
+
+        report = fc.check_form(body)
+
+        assert report.ears_ran is True
+        assert report.requirements_examined == 1
+
+    def test_a_non_parenthetical_divergence_is_not_the_section(self):
+        """'## Requirements Analysis' is a genuinely different section."""
+        body = "## Requirements Analysis\n\n- Config is saved on exit.\n"
+
+        report = fc.check_form(body)
+
+        assert report.ears_ran is False
+        assert report.ok
+
+    def test_the_parenthetical_must_be_a_suffix_of_the_exact_heading(self):
+        """'## Requirement (EARS)' (singular) is not a match either."""
+        body = "## Requirement (EARS)\n\n- Config is saved on exit.\n"
 
         report = fc.check_form(body)
 

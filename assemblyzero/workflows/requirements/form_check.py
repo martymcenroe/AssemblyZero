@@ -173,8 +173,26 @@ class FormReport:
 # ---------------------------------------------------------------------------
 
 
+def _heading_matches(text: str, heading: str) -> bool:
+    """Exact heading, or the exact heading plus one parenthetical suffix.
+
+    ``Requirements (EARS)`` names its own notation and is a strictly more
+    informative form of ``Requirements`` -- treating it as a different section
+    made the EARS check examine nothing on the real issues that carried it
+    (#2465). A non-parenthetical divergence (``Requirements Analysis``) is a
+    genuinely different section and still does not match.
+    """
+    if text == heading:
+        return True
+    return re.fullmatch(re.escape(heading) + r"\s*\([^)]*\)", text) is not None
+
+
 def section_lines(body: str, heading: str) -> list[str] | None:
-    """Lines under an exact ``## <heading>``, up to the next heading.
+    """Lines under ``## <heading>``, up to the next heading.
+
+    The heading matches exactly, or with a single trailing parenthetical
+    (``Requirements (EARS)`` is the ``Requirements`` section; ``Requirements
+    Analysis`` is not -- see ``_heading_matches``).
 
     Returns None when the section is absent, which is a different fact from
     the section being empty and must not be flattened into one.
@@ -187,7 +205,7 @@ def section_lines(body: str, heading: str) -> list[str] | None:
         if not match:
             continue
         if start is None:
-            if match.group(2).strip() == heading:
+            if _heading_matches(match.group(2).strip(), heading):
                 start = i + 1
                 level = len(match.group(1))
             continue
