@@ -31,7 +31,7 @@ class OrchestrationState(TypedDict, total=False):
     """Full orchestration pipeline state."""
 
     issue_number: int
-    current_stage: str  # "triage", "lld", "spec", "impl", "pr", "cleanup", "done"
+    current_stage: str  # "triage", "lld", "visual", "spec", "impl", "pr", "cleanup", "done"
     #: #2383: the stage this invocation was RESUMED into, empty on a fresh run.
     #: Distinct from `current_stage`, which reaches every stage in the normal
     #: course and so cannot tell a resume from a pipeline arriving there.
@@ -49,6 +49,11 @@ class OrchestrationState(TypedDict, total=False):
     # Artifacts produced at each stage
     issue_brief_path: str
     lld_path: str
+    #: #2518: the operator-approved render the visual gate stamped -- the
+    #: measurement source for downstream expected-colour values. Declared for
+    #: the same #2018 reason as impl_pr_url: an undeclared key never crosses
+    #: the LangGraph node boundary.
+    approved_render_path: str
     spec_path: str
     worktree_path: str
     pr_url: str
@@ -92,12 +97,17 @@ class OrchestrationState(TypedDict, total=False):
 # Issue #1628: a terminal "cleanup" stage runs after "pr" — it merges the LLD PR
 # (#1531), deletes the now-redundant working-tree LLD/spec copies (#1624), and
 # removes the LLD + impl worktrees (#1628). Best-effort housekeeping.
-STAGE_ORDER: list[str] = ["triage", "lld", "spec", "impl", "pr", "cleanup"]
+# #2518: "visual" sits between lld and spec -- the eyeball artifact must
+# exist BEFORE the spec stage spends review rounds arguing about how to test
+# a picture nobody has drawn. Repos without a visual-gate declaration (and
+# issues not declared visual) skip it, so every non-visual roll is unchanged.
+STAGE_ORDER: list[str] = ["triage", "lld", "visual", "spec", "impl", "pr", "cleanup"]
 
 # Maps stage name to the state key that holds its artifact path
 _STAGE_ARTIFACT_KEY: dict[str, str] = {
     "triage": "issue_brief_path",
     "lld": "lld_path",
+    "visual": "approved_render_path",
     "spec": "spec_path",
     "impl": "worktree_path",
     "pr": "pr_url",
@@ -142,6 +152,7 @@ def create_initial_state(
         assemblyzero_root=resolved_root,
         issue_brief_path="",
         lld_path="",
+        approved_render_path="",
         spec_path="",
         worktree_path="",
         pr_url="",
