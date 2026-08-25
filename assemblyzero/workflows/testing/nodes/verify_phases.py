@@ -1193,9 +1193,14 @@ def _preserve_visual_samples(
             cwd=str(repo_root), capture_output=True, text=True,
             encoding="utf-8", errors="replace",
         )
-    except OSError:
+    except OSError as exc:
+        # fail-open: a sample is evidence, not a gate -- losing it must not
+        # cost an otherwise-green run, and the miss is stated on the console.
+        print(f"    [N5] could not probe for visual samples: {exc} -- none preserved")
         return "", []
     if result.returncode != 0:
+        # fail-open: same ruling -- git could not say, so nothing is
+        # preserved, and the empty return reports exactly that.
         return "", []
     images = sorted({
         line[3:].strip().strip('"')
@@ -1218,6 +1223,9 @@ def _preserve_visual_samples(
             shutil.copy2(src, dest)
             copied.append(rel)
         except OSError as exc:
+            # fail-open: preserve every sample that can be preserved -- one
+            # uncopyable file must not forfeit the rest, and the failure is
+            # named on the console per file.
             print(f"    [N5] could not preserve visual sample {rel}: {exc}")
     if not copied:
         return "", []
