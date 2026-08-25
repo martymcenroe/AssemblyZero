@@ -212,7 +212,7 @@ def analyze_codebase(state: ImplementationSpecState) -> dict[str, Any]:
                         f"— will summarize aggressively"
                     )
 
-                content = full_path.read_text(encoding="utf-8")
+                content = full_path.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError) as e:
                 msg = f"Failed to read {file_path}: {e}"
                 print(f"    [WARN] {msg}")
@@ -555,7 +555,7 @@ def _find_node_patterns(
 
         # Read first portion to determine line count
         try:
-            content = node_file.read_text(encoding="utf-8")
+            content = node_file.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -615,7 +615,7 @@ def _find_state_patterns(
             continue
 
         try:
-            content = state_file.read_text(encoding="utf-8")
+            content = state_file.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -664,7 +664,7 @@ def _find_graph_patterns(
             continue
 
         try:
-            content = graph_file.read_text(encoding="utf-8")
+            content = graph_file.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -722,7 +722,7 @@ def _find_test_patterns(
         # Prefer workflow-related tests
         if "workflow" in test_file.name.lower():
             try:
-                content = test_file.read_text(encoding="utf-8")
+                content = test_file.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError):
                 continue
 
@@ -770,7 +770,7 @@ def _find_tool_patterns(
             continue
 
         try:
-            content = tool_file.read_text(encoding="utf-8")
+            content = tool_file.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue
 
@@ -815,7 +815,7 @@ def _build_project_context(repo_root: Path) -> str:
     claude_md_path = repo_root / "CLAUDE.md"
     if claude_md_path.exists():
         try:
-            content = claude_md_path.read_text(encoding="utf-8", errors="replace")
+            content = claude_md_path.read_text(encoding="utf-8-sig", errors="replace")
             # Keep first 2000 chars — enough for key rules
             if len(content) > 2000:
                 content = content[:2000] + "\n... (truncated)"
@@ -827,7 +827,7 @@ def _build_project_context(repo_root: Path) -> str:
     readme_path = repo_root / "README.md"
     if readme_path.exists():
         try:
-            content = readme_path.read_text(encoding="utf-8", errors="replace")
+            content = readme_path.read_text(encoding="utf-8-sig", errors="replace")
             # Just first 1500 chars for project overview
             if len(content) > 1500:
                 content = content[:1500] + "\n... (truncated)"
@@ -839,7 +839,7 @@ def _build_project_context(repo_root: Path) -> str:
     pyproject_path = repo_root / "pyproject.toml"
     if pyproject_path.exists():
         try:
-            content = pyproject_path.read_text(encoding="utf-8", errors="replace")
+            content = pyproject_path.read_text(encoding="utf-8-sig", errors="replace")
             # Extract just [tool.poetry] or [project] section (first 500 chars)
             # Don't include full dependency list
             lines = content.splitlines()
@@ -895,7 +895,13 @@ def _extract_import_dependencies(
             continue
 
         try:
-            content = full_path.read_text(encoding="utf-8")
+            # utf-8-sig, not utf-8 (#2507): a UTF-8 BOM survives a plain
+            # utf-8 read as U+FEFF, which ast.parse rejects -- so a BOM'd
+            # file silently vanished from the drafter's context here while
+            # Python's own importer ran it fine. Identical to the repair
+            # fail_open_audit made to itself; utf-8-sig == utf-8 when no
+            # BOM is present.
+            content = full_path.read_text(encoding="utf-8-sig")
             tree = ast.parse(content)
         except (OSError, SyntaxError):
             continue
@@ -1029,6 +1035,9 @@ def _extract_symbols_from_base(repo_root: Path, base_ref_name: str) -> set[str]:
         content = read_from_base(repo_root, base_ref_name, rel)
         if not content:
             continue
+        # A BOM in the committed blob survives git-show's decode as U+FEFF
+        # and would push a parseable file onto the lossier regex path (#2507).
+        content = content.removeprefix(chr(0xFEFF))
         try:
             tree = ast.parse(content)
             for node in ast.walk(tree):
