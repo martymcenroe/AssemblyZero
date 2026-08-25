@@ -135,6 +135,39 @@ def seed_from_lineage(
     return None
 
 
+def resume_payload(seed: Seed) -> dict:
+    """The graph-state seed for a resumed spec grant (#2516).
+
+    ``spec_draft`` + ``review_feedback`` are the pair that makes the first
+    resumed round a REVISION of the paid draft -- the halted run's final
+    readiness verdict reaches the first regeneration verbatim, so no round
+    is respent rediscovering the reviewer's last word.
+
+    ``review_iteration`` is **0**, not ``seed.rounds_completed``. The #2514
+    ruling: the cap regime is per LAUNCH, not per issue lifetime -- the
+    operator's explicit relaunch is the spend grant, worth exactly one more
+    normal regime (base cap 3, the still-converging continuation rules
+    unchanged, ceiling 3x). Restoring the prior grant's counter made the
+    first resumed round iteration 10 against a ceiling of 9: BLOCKED before
+    any model call, three instant outer attempts, 56.8 seconds
+    (run-issue331-102255) -- and the review guard's "exceeds the hard
+    ceiling" state is unreachable from a resume precisely because nothing
+    seeds an exhausted counter any more.
+
+    ``review_feedback_history`` still carries EVERY prior grant's verdict:
+    #2382's stagnation check stays sighted across grants, so an objection
+    from the old grant coming back halts as a repeat rather than reading as
+    convergence. History is memory; the counter is budget. They separate
+    here deliberately.
+    """
+    return {
+        "spec_draft": seed.draft,
+        "review_feedback": seed.feedback,
+        "review_feedback_history": list(seed.prior_feedbacks),
+        "review_iteration": 0,
+    }
+
+
 def describe(seed: Seed) -> str:
     """What the operator should see when a resume reuses paid work."""
     return (
@@ -142,5 +175,6 @@ def describe(seed: Seed) -> str:
         f"({len(seed.draft.splitlines())} lines) with "
         f"{Path(seed.feedback_path).name}'s items as feedback, after "
         f"{seed.rounds_completed} completed review round(s) in "
-        f"{Path(seed.run_dir).name}."
+        f"{Path(seed.run_dir).name}; the review cap regime starts fresh for "
+        f"this grant (#2514)."
     )

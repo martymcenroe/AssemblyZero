@@ -192,18 +192,23 @@ class TestSeedingIsKeyedOnAnActualResume:
         spec_stage = source.split("def run_spec_stage", 1)[1].split("\ndef ", 1)[0]
         assert 'state.get("resumed_from") == "spec"' in spec_stage
 
-    def test_the_stage_seeds_the_four_fields_the_loop_needs(self):
+    def test_the_stage_seeds_through_the_shared_payload(self):
+        """#2516 moved the payload into lineage_seed.resume_payload so the
+        counter ruling (#2514) has one home; the stage must use it rather
+        than rebuilding the dict inline, where the two could drift."""
         source = (
             ROOT / "assemblyzero" / "workflows" / "orchestrator" / "stages.py"
         ).read_text(encoding="utf-8")
         spec_stage = source.split("def run_spec_stage", 1)[1].split("\ndef ", 1)[0]
-        for field in (
-            '"spec_draft": seed.draft',
-            '"review_feedback": seed.feedback',
-            '"review_feedback_history": list(seed.prior_feedbacks)',
-            '"review_iteration": seed.rounds_completed',
-        ):
-            assert field in spec_stage
+        assert "resumed_payload = resume_payload(seed) if seed else {}" in spec_stage
+
+    def test_the_payload_carries_the_four_fields_the_loop_needs(self, lineage):
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        payload = ls.resume_payload(seed)
+        assert payload["spec_draft"] == seed.draft
+        assert payload["review_feedback"] == seed.feedback
+        assert payload["review_feedback_history"] == seed.prior_feedbacks
+        assert "review_iteration" in payload
 
     def test_the_stage_excludes_its_own_run_directory(self):
         source = (
@@ -221,3 +226,65 @@ class TestItSaysWhatItReused:
         assert "010-spec-draft.md" in text
         assert "012-readiness-verdict.md" in text
         assert "3 completed review round" in text
+
+    def test_the_description_says_the_cap_regime_is_fresh(self, lineage):
+        """#2515's operator followed a resume hint with no way to know what it
+        carried. The narration now states the grant terms."""
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        assert "cap regime starts fresh" in ls.describe(seed)
+
+
+class TestTheResumedGrantStartsFresh:
+    """#2516, implementing the #2514 ruling: per-launch cap regime.
+
+    Restoring the prior grant's counter made the first resumed round
+    iteration 10 against a ceiling of 9 -- BLOCKED before any model call,
+    56.8 seconds, no work (run-issue331-102255).
+    """
+
+    def test_the_counter_is_zero_not_the_prior_grants_count(self, lineage):
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        assert seed.rounds_completed == 3, "precondition: prior rounds exist"
+
+        assert ls.resume_payload(seed)["review_iteration"] == 0
+
+    def test_the_seeded_counter_cannot_trip_the_ceiling_guard(self, lineage):
+        """The 'exceeds the hard ceiling' state must be unreachable from a
+        resume: the guard fires on iteration > ceiling, and the grant's
+        first review arrives at iteration 1 after the revision increment."""
+        from assemblyzero.workflows.implementation_spec.review_progress import (
+            hard_ceiling,
+        )
+
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        first_review_iteration = ls.resume_payload(seed)["review_iteration"] + 1
+
+        assert first_review_iteration <= hard_ceiling(3)
+
+    def test_history_still_carries_every_prior_grant_round(self, lineage):
+        """History is memory, the counter is budget: #2382's stagnation check
+        must stay sighted across grants, so an objection from the old grant
+        coming back halts as a repeat instead of reading as convergence."""
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        payload = ls.resume_payload(seed)
+
+        assert len(payload["review_feedback_history"]) == 3
+        assert payload["review_feedback_history"] == seed.prior_feedbacks
+
+    def test_a_prior_grant_objection_returning_still_stagnates(self, lineage):
+        from assemblyzero.workflows.implementation_spec.review_progress import (
+            EXIT_STAGNATION,
+            decide,
+        )
+
+        seed = ls.seed_from_lineage(lineage, exclude=lineage / "2026-08-14T22-00-00Z")
+        payload = ls.resume_payload(seed)
+
+        decision = decide(
+            review_iteration=payload["review_iteration"] + 1,
+            max_iterations=3,
+            current_feedback=seed.prior_feedbacks[0],
+            prior_feedbacks=payload["review_feedback_history"],
+        )
+        assert decision.should_continue is False
+        assert decision.exit_name == EXIT_STAGNATION
