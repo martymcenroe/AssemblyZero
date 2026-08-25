@@ -124,18 +124,30 @@ def decompose(text: str, manifest: dict, transport) -> list[FeedbackItem]:
     return parse_items(transport(system, content))
 
 
-def default_transport(system: str, content: str) -> str:
-    """The fleet's governance transport (ADR 0220). Imported lazily so the
-    gate's non-Modify paths never touch credentials."""
-    from assemblyzero.core.gemini_client import GeminiClient
+#: Provider spec for the translation pass: top-tier Gemini through the
+#: provider LAYER, which pairs the model id with its transport. The first
+#: live Modify (#2521, run-issue331-172000) constructed GeminiClient bare,
+#: whose default model is core.config.REVIEWER_MODEL -- a Claude id -- and
+#: the Gemini validator rejected it before any call was made. get_provider
+#: is the house pattern every workflow node routes through; the spec is the
+#: reviewer default the spec stage already uses (AZ #1434).
+TRANSLATION_PROVIDER = "gemini:3.1-pro"
 
-    result = GeminiClient().invoke(system, content)
-    if not getattr(result, "success", False):
+
+def default_transport(system: str, content: str) -> str:
+    """The fleet's provider layer (ADR 0220 / #2521). Imported lazily so the
+    gate's non-Modify paths never touch credentials."""
+    from assemblyzero.core.llm_provider import get_provider
+
+    result = get_provider(TRANSLATION_PROVIDER).invoke(system, content)
+    response = (getattr(result, "response", None) or "").strip()
+    if not getattr(result, "success", False) or not response:
         raise RuntimeError(
-            f"visual-gate Modify pass failed via agy: "
-            f"{getattr(result, 'error', 'no detail')}"
+            f"visual-gate Modify translation failed via "
+            f"{TRANSLATION_PROVIDER}: "
+            f"{getattr(result, 'error_message', '') or 'empty response'}"
         )
-    return result.text
+    return response
 
 
 def plan_from_items(

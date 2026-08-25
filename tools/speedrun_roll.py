@@ -1292,6 +1292,58 @@ def ensure_base_for_resume(
 # =============================================================================
 
 
+def _watch_visual_gate_urls(
+    repo_root: Path, stop: "threading.Event", log: "EventLog | None" = None,
+    announce=print, poll_seconds: float = 5.0,
+) -> None:
+    """Announce the visual gate's review URL on the LAUNCHER's surfaces (#2520).
+
+    The gate serves inside the orchestrate child, whose stdout is the run
+    log; the operator's standing habit is the launcher narration -- this
+    process's stdout, which --detached-stdout binds to detached-launcher.log.
+    The first live serve cost 26 operator-minutes because no watched surface
+    said the URL. Each newly served, still-unanswered round is announced
+    exactly once, read from the round's own sentinel so this surface and the
+    child's waiting line can never disagree.
+
+    Never raises: a broken sentinel or a scan error skips a beat, and the
+    next poll tries again -- announcing is a courtesy that must not touch
+    the roll.
+    """
+    seen: set[str] = set()
+    gate_dir = repo_root / "data" / "visual-gate"
+    while not stop.wait(poll_seconds):
+        try:
+            for pending in sorted(gate_dir.glob("*/round-*/feedback-pending.json")):
+                key = str(pending)
+                if key in seen:
+                    continue
+                round_dir = pending.parent
+                if (round_dir / "feedback.json").is_file() or (
+                    round_dir / "feedback-consumed.json"
+                ).is_file():
+                    seen.add(key)
+                    continue
+                try:
+                    url = str(json.loads(
+                        pending.read_text(encoding="utf-8")
+                    ).get("url", ""))
+                except (OSError, ValueError):
+                    continue  # mid-write; the next poll reads it whole
+                if not url:
+                    continue
+                seen.add(key)
+                line = (
+                    f"VISUAL GATE waiting for the operator -- open {url} "
+                    f"(issue {round_dir.parent.name}, {round_dir.name})"
+                )
+                announce(line, flush=True)
+                if log is not None:
+                    log.write(line)
+        except OSError:
+            continue
+
+
 def roll_issue(
     repo_root: Path, issue: int, log_dir: Path, az_root: Path, extra: list[str],
     resume_from: str | None = None, *, fresh: bool = False,
@@ -1366,8 +1418,22 @@ def roll_issue(
                     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 ),
             )
-            with watch.watch(proc):
-                returncode = proc.wait()
+            # #2520: announce the visual gate's URL on the launcher's own
+            # surfaces while the child runs -- concurrent, like the kill
+            # watch, because the gate serves mid-stage and the operator is
+            # watching THIS log.
+            gate_stop = threading.Event()
+            gate_watch = threading.Thread(
+                target=_watch_visual_gate_urls,
+                args=(repo_root, gate_stop, log),
+                daemon=True,
+            )
+            gate_watch.start()
+            try:
+                with watch.watch(proc):
+                    returncode = proc.wait()
+            finally:
+                gate_stop.set()
         log.write(f"CHILD EXITED rc={returncode}")
 
         if watch.fired:

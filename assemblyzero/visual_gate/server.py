@@ -159,10 +159,34 @@ def wait_for_feedback(
         if deadline is not None and now - start > deadline:
             raise TimeoutError(f"no feedback.json in {round_dir} after {deadline}s")
         if now - last_reminder >= reminder_every:
-            pending = round_dir / "feedback-pending.json"
+            # #2520: say the URL, every time. The first live serve printed a
+            # path to the JSON holding the URL, and the operator spent 26
+            # minutes staring at the indirection. In a detached run these
+            # lines are the only surface -- each one must be actionable on
+            # sight, with the file kept as the machine-readable copy.
             log(
-                f"    [visual] still waiting on operator feedback "
-                f"({round_dir.name}; see {pending})"
+                f"    [visual] still waiting on operator feedback -- open "
+                f"{pending_url(round_dir) or 'the review page'} "
+                f"({round_dir.name})"
             )
             last_reminder = now
         time.sleep(poll_seconds)
+
+
+def pending_url(round_dir: Path) -> str:
+    """The served page's URL, from the round's own sentinel; "" if unknowable.
+
+    The sentinel stays the machine-readable home of the URL (#2520) -- this
+    is the one reader, shared by the waiting line and the launcher-side
+    announcement, so the two surfaces can never disagree.
+    """
+    import json
+
+    path = round_dir / "feedback-pending.json"
+    try:
+        return str(json.loads(path.read_text(encoding="utf-8")).get("url", ""))
+    except (OSError, ValueError):
+        # fail-open: "" is this function's documented "unknowable" answer --
+        # the waiting line falls back to naming the review page generically,
+        # and a reminder must never crash the wait it decorates (#2520).
+        return ""

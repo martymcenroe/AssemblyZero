@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 282,
-    "sites_examined": 7385,
-    "findings_total": 469
+    "sites_examined": 7392,
+    "findings_total": 471
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
