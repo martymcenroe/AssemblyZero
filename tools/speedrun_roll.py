@@ -859,6 +859,42 @@ def sync_binding_docs_to_arc(
                 f"could not check out '{base}' to sync binding docs: "
                 f"{(add.stderr or '').strip()}"
             ]
+        # Absorb the arc's own remote movement FIRST (#2473). The local arc
+        # ref goes stale the moment a pipeline PR moves origin/<arc>, and
+        # nothing in the clone updates it. Building the doc merge on the
+        # stale ref made the push below non-fast-forward: the launch died at
+        # SYNC BLOCKED and left a diverged local branch stranded. Same
+        # preserve-then-proceed rule as the doc merge: a no-op when current,
+        # a fast-forward when merely behind, an ordinary merge when a prior
+        # stranding left local-only commits -- nothing discarded, a conflict
+        # refuses loudly.
+        local_sha = _run(["git", "rev-parse", base], cwd=repo_root).stdout.strip()
+        remote_sha = _run(
+            ["git", "rev-parse", f"origin/{base}"], cwd=repo_root
+        ).stdout.strip()
+        if local_sha != remote_sha:
+            log.write(
+                f"SYNC arc '{base}' moved on origin (local {local_sha[:8]}, "
+                f"origin {remote_sha[:8]}) -- absorbing before the doc merge"
+            )
+            absorb = _run(
+                ["git", "merge", f"origin/{base}", "-m",
+                 f"Merge origin/{base} into {base} - absorb the arc's remote "
+                 f"movement before carrying rulings (#2473)"],
+                cwd=sync_tree,
+            )
+            if absorb.returncode != 0:
+                conflicted = _run(
+                    ["git", "diff", "--name-only", "--diff-filter=U"],
+                    cwd=sync_tree,
+                ).stdout.split()
+                _run(["git", "merge", "--abort"], cwd=sync_tree)
+                return [
+                    f"the arc '{base}' moved on origin and its movement "
+                    f"conflicts with the local copy in "
+                    f"{', '.join(conflicted) or 'unknown file(s)'} -- "
+                    "resolve by hand, then roll. Nothing was changed."
+                ]
         merge = _run(
             ["git", "merge", f"origin/{default}", "-m",
              f"Merge {default} into {base} - carry binding-doc rulings onto "
@@ -880,7 +916,10 @@ def sync_binding_docs_to_arc(
             if push.returncode != 0:
                 problems.append(
                     f"synced '{base}' locally but could not push it: "
-                    f"{(push.stderr or '').strip()}"
+                    f"{(push.stderr or '').strip()}. The local '{base}' now "
+                    f"carries the sync merge and origin does not -- the next "
+                    f"launch absorbs origin/{base} and retries; no by-hand "
+                    f"repair is needed unless the refusal repeats."
                 )
             else:
                 log.write(

@@ -371,3 +371,97 @@ def _issue_updated_at(stamp: str, real):
             return subprocess.CompletedProcess(cmd, 0, stdout=stamp, stderr="")
         return real(cmd, cwd=cwd) if env is None else real(cmd, cwd=cwd)
     return _run
+
+
+# ---------------------------------------------------------------------------
+# The arc moved on origin while the local ref slept (#2473)
+#
+# Earned 2026-08-16: boostgauge PR #321 moved origin/hardening-run-17; the
+# next launch built its doc merge on the stale local ref, the push was
+# rejected non-fast-forward, the launch died at SYNC BLOCKED in fifteen
+# seconds, and a diverged local branch was left stranded. The operator,
+# launched detached, believed it was rolling for ninety minutes.
+# ---------------------------------------------------------------------------
+
+
+def move_arc_on_origin(tmp_path: Path, origin: Path, text: str) -> None:
+    """Move origin/<ARC> from a second clone, as a pipeline PR merge would.
+
+    The primary clone's local arc ref goes stale -- it learns nothing until
+    something fetches, which is exactly the state the launch dies in.
+    """
+    other = tmp_path / "other-clone"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(origin), str(other)], capture_output=True
+    )
+    git(other, "config", "user.email", "t@example.com")
+    git(other, "config", "user.name", "Test")
+    git(other, "checkout", "-q", ARC)
+    (other / "README.md").write_text(text, encoding="utf-8")
+    git(other, "add", ".")
+    git(other, "commit", "-qm", "arc: a pipeline PR moved the arc")
+    git(other, "push", "-q", "origin", ARC)
+
+
+def test_an_arc_moved_on_origin_is_absorbed_not_fatal(
+    repo, origin, log, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    move_arc_on_origin(tmp_path, origin, "arc moved remotely\n")
+    rule_on_main(repo, "needle: candy-apple #F73923\n", "docs: the palette ruling")
+
+    problems = speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log)
+
+    assert problems == []
+    assert "F73923" in arc_doc(repo), "the ruling reached the moved arc"
+    assert "arc moved remotely" in git(
+        repo, "show", f"origin/{ARC}:README.md"
+    ).stdout, "the remote movement was kept, not clobbered"
+    written = log.path.read_text(encoding="utf-8")
+    assert "absorbing before the doc merge" in written
+
+
+def test_a_previously_stranded_diverged_arc_reconciles(
+    repo, origin, log, monkeypatch, tmp_path
+):
+    """The leftover of the 2026-08-16 incident: local-only commits on the
+    arc AND independent remote movement. The next launch reconciles by
+    ordinary merge -- all three sides land on origin, nothing discarded."""
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    git(repo, "checkout", "-q", ARC)
+    (repo / "docs" / "design" / "notes.md").write_text(
+        "stranded sync-merge leftovers\n", encoding="utf-8"
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "Merge main into arc - the stranded sync merge")
+    git(repo, "checkout", "-q", "main")
+    move_arc_on_origin(tmp_path, origin, "arc moved remotely\n")
+    rule_on_main(repo, "needle: candy-apple #F73923\n", "docs: the palette ruling")
+
+    problems = speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log)
+
+    assert problems == []
+    assert "F73923" in arc_doc(repo), "the ruling landed"
+    assert "arc moved remotely" in git(
+        repo, "show", f"origin/{ARC}:README.md"
+    ).stdout, "the remote side survived"
+    assert "stranded sync-merge leftovers" in git(
+        repo, "show", f"origin/{ARC}:docs/design/notes.md"
+    ).stdout, "the stranded local side survived"
+
+
+def test_a_blocked_push_names_the_leftover_state(repo, origin, log, monkeypatch):
+    """A push refusal must say what state it left behind and who repairs it,
+    not just relay git's rejection line."""
+    monkeypatch.setattr(speedrun_roll.attempt, "default_branch", lambda _r: "main")
+    rule_on_main(repo, "needle: candy-apple #F73923\n", "docs: the palette ruling")
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho rejected by test hook >&2\nexit 1\n")
+    hook.chmod(0o755)
+
+    problems = speedrun_roll.sync_binding_docs_to_arc(repo, ARC, log)
+
+    assert len(problems) == 1
+    assert "could not push" in problems[0]
+    assert f"local '{ARC}' now carries the sync merge" in problems[0]
+    assert "the next launch absorbs" in problems[0]
