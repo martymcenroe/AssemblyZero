@@ -407,11 +407,40 @@ def run_gate(
             return GateOutcome(status="halted", error=reason, rounds=rounds_run)
 
         # modify
-        items = decompose(words, manifest, transport)
-        plan: ModifyPlan = plan_from_items(
-            items, manifest,
-            separation_floor=config.separation_floor, ruled=config.ruled,
-        )
+        try:
+            # #2521: the declaration's ruled values are contract vocabulary
+            # even when a stale round's manifest predates them -- the live
+            # round-001 was rendered before needle_tip joined the contract,
+            # and without this merge the model would file the operator's
+            # tip-extension ask as a contract gap instead of routing it to
+            # the ruling surface the design demands.
+            prompt_manifest = _with_declared_ruled(manifest, config.ruled)
+            items = decompose(words, prompt_manifest, transport)
+            plan: ModifyPlan = plan_from_items(
+                items, prompt_manifest,
+                separation_floor=config.separation_floor, ruled=config.ruled,
+            )
+        except Exception as exc:  # noqa: BLE001 -- see the ruling below
+            # fail-open: in shape only -- the handler substitutes a HALTED,
+            # resumable outcome, this stage's halt idiom. An infra error in
+            # the model pass is not an operator verdict and not a render
+            # failure (#2521): the bundle and the submitted feedback are
+            # intact, feedback.json is deliberately NOT consumed, and the
+            # resume re-enters this exact dispatch without re-serving the
+            # page or asking the operator to click again. The first live
+            # Modify let this exception kill the whole run and trigger
+            # RESTORE, turning a wiring typo into a dead roll.
+            return GateOutcome(
+                status="halted",
+                error=(
+                    f"the Modify model pass failed before any verdict was "
+                    f"reached: {exc}. This is an infra error, not an operator "
+                    f"verdict -- the submitted feedback in {current} is "
+                    f"preserved unconsumed, and a resume of the visual stage "
+                    f"dispatches it without re-serving the page."
+                ),
+                rounds=rounds_run, deltas=accumulated,
+            )
         _record_round_plan(current, plan)
         _mark_consumed(current)
         if plan.halted_on_ruling:
@@ -430,6 +459,27 @@ def run_gate(
         pending_candidates = plan.candidate_sets
         # Loop: the next iteration renders the accumulated deltas (plus any
         # candidate variants, side by side) and serves the new round.
+
+
+def _with_declared_ruled(manifest: dict, ruled: dict) -> dict:
+    """The manifest, plus any declaration-ruled key it does not carry (#2521).
+
+    A round rendered before a key joined the contract has no entry for it,
+    but the declaration's pinned value is still binding law -- the model
+    pass must see the key (or it invents a gap), and the guardrail must see
+    the pin (or a delta on it slips past the ruling surface).
+    """
+    merged = dict(manifest)
+    values = dict(merged.get("values", {}))
+    for key, value in (ruled or {}).items():
+        if key not in values:
+            values[key] = {
+                "value": value,
+                "source": "visual-gate.json ruled declaration",
+                "ruled": True,
+            }
+    merged["values"] = values
+    return merged
 
 
 def _record_round_plan(round_dir: Path, plan: ModifyPlan) -> None:
