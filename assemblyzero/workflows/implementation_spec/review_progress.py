@@ -120,6 +120,15 @@ def decide(
     ceiling = hard_ceiling(max_iterations)
     progress = classify(current_feedback, prior_feedbacks)
     rounds_seen = len(prior_feedbacks or []) + 1
+    # #2516: on a resumed grant the counter restarts at zero while the
+    # feedback history carries every prior grant's verdict (#2514 -- history
+    # is memory, the counter is budget). The cap clauses must therefore count
+    # in GRANT rounds, or the first resumed round prints "round 10 is within
+    # the base cap of 3". In a single-grant run the two counts are equal, so
+    # nothing changes for the ordinary case. `rounds_seen` stays the total
+    # across grants and keeps naming the stagnation and ceiling rounds, where
+    # the true total is the honest number.
+    round_this_grant = review_iteration + 1
 
     if progress == EMPTY:
         return Decision(
@@ -143,7 +152,8 @@ def decide(
         return Decision(
             True,
             CONTINUE,
-            f"round {rounds_seen} is within the base cap of {max_iterations}.",
+            f"round {round_this_grant} of this grant is within the base cap "
+            f"of {max_iterations}.",
         )
 
     if review_iteration >= ceiling:
@@ -160,9 +170,9 @@ def decide(
     return Decision(
         True,
         CONTINUE,
-        f"round {rounds_seen} resolved the previous round's items and raised "
-        f"distinct ones, so the loop continues past the base cap of "
-        f"{max_iterations} toward the ceiling of {ceiling}.",
+        f"round {round_this_grant} of this grant resolved the previous "
+        f"round's items and raised distinct ones, so the loop continues past "
+        f"the base cap of {max_iterations} toward the ceiling of {ceiling}.",
     )
 
 

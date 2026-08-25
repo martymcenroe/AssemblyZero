@@ -870,16 +870,18 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                     "in lineage; drawing fresh."
                 )
 
-        resumed_payload = (
-            {
-                "spec_draft": seed.draft,
-                "review_feedback": seed.feedback,
-                "review_feedback_history": list(seed.prior_feedbacks),
-                "review_iteration": seed.rounds_completed,
-            }
-            if seed
-            else {}
+        # #2516: the payload seeds the paid draft, the final verdict's items
+        # (so the first regeneration starts from the reviewer's last word),
+        # the full cross-grant feedback history for #2382's stagnation check
+        # -- and a review counter at ZERO, per the #2514 ruling that each
+        # explicit relaunch grants one fresh cap regime. Seeding the prior
+        # grant's counter made the first resumed round illegal by
+        # construction (iteration 10 > ceiling 9, run-issue331-102255).
+        from assemblyzero.workflows.implementation_spec.lineage_seed import (
+            resume_payload,
         )
+
+        resumed_payload = resume_payload(seed) if seed else {}
 
         app = create_spec_graph()
         sub_result = app.invoke({

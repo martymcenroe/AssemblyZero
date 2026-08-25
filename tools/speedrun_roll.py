@@ -638,8 +638,15 @@ def _find_on_lld_branch(repo_root: Path, issue: int, pattern: str) -> str:
     The last match in sort order wins, so a repo carrying spec-0001 and
     spec-0002 resolves to the newer one rather than to whichever git listed
     first.
+
+    #2516: the grafted copies of the lld branch are consulted after the live
+    refs. A HALT's own RESTORE renames `{issue}-lld` to
+    `graveyard/{issue}-lld-<stamp>` -- the machinery archived the branch the
+    next resume needs, so the archive is part of where the resume looks.
     """
-    for ref in (f"{issue}-lld", f"origin/{issue}-lld"):
+    refs = [f"{issue}-lld", f"origin/{issue}-lld"]
+    refs += _graveyard_issue_lld_refs(repo_root, issue)
+    for ref in refs:
         result = _run(["git", "ls-tree", "-r", "--name-only", ref], cwd=repo_root)
         if result.returncode != 0:
             continue
@@ -725,6 +732,34 @@ def _graveyard_leavings_refs(repo_root: Path) -> list[str]:
     return sorted(refs, key=_stamp, reverse=True)
 
 
+def _graveyard_issue_lld_refs(repo_root: Path, issue: int) -> list[str]:
+    """Every grafted copy of this issue's lld branch, newest first (#2516).
+
+    A HALT's RESTORE preserves the attempt branch by renaming it to
+    `graveyard/{issue}-lld-<UTC stamp>` (ADR 0217 keeps the commits; the
+    rename frees the name). The stamp is in the NAME, so name order is time
+    order -- same reasoning as `_graveyard_leavings_refs`, same immunity to
+    history rewrites perturbing committer dates.
+    """
+    result = _run(
+        [
+            "git", "for-each-ref", "--format=%(refname:short)",
+            f"refs/heads/graveyard/{issue}-lld-*",
+            f"refs/remotes/origin/graveyard/{issue}-lld-*",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        return []
+    refs = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+    def _stamp(ref: str) -> str:
+        _, _, tail = ref.rpartition("-lld-")
+        return tail
+
+    return sorted(refs, key=_stamp, reverse=True)
+
+
 def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
     """Materialize a passed stage's file so the next stage can read it.
 
@@ -756,6 +791,10 @@ def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
     except ValueError:
         return False
     refs = [f"{issue}-lld", f"origin/{issue}-lld"]
+    # #2516: the grafted copies of the lld branch rank right behind the live
+    # ones -- a HALT's RESTORE renames the branch to graveyard/{issue}-lld-*,
+    # and what it holds IS the lld branch's content under an archive name.
+    refs += _graveyard_issue_lld_refs(repo_root, issue)
     # Newest leavings first: the last run's copy is the current one, and an
     # older ref may hold a stale draft from a superseded attempt.
     refs += _graveyard_leavings_refs(repo_root)
@@ -1139,13 +1178,16 @@ def resume_plan(
         if not artifact:
             log.write(
                 f"RESUME abandoned for #{issue}: no {stage} artifact recorded, "
-                f"and none found on the {issue}-lld branch"
+                f"and none found on the {issue}-lld branch, its "
+                f"graveyard/{issue}-lld-* grafts, or the leavings refs"
             )
             return None
         if not _restore_artifact(repo_root, issue, artifact):
             log.write(
                 f"RESUME abandoned for #{issue}: {stage} artifact missing and "
-                f"not restorable: {artifact}"
+                f"not restorable from the {issue}-lld branch, its "
+                f"graveyard/{issue}-lld-* grafts, or the leavings refs: "
+                f"{artifact}"
             )
             return None
 
@@ -1155,6 +1197,38 @@ def resume_plan(
         f"state {state_path.name})"
     )
     return failed
+
+
+def _preserved_inventory(repo_root: Path, issue: int) -> list[str]:
+    """What the machinery preserved for #issue, and where, for a refusal to
+    name (#2516). Empty means genuinely nothing was found -- which is itself
+    the honest report.
+    """
+    lines: list[str] = []
+    prefix = attempt_prefix(repo_root)
+    arc_refs = _run(
+        [
+            "git", "for-each-ref", "--format=%(refname:short)",
+            f"refs/heads/graveyard/{prefix}-*",
+            f"refs/remotes/origin/graveyard/{prefix}-*",
+        ],
+        cwd=repo_root,
+    )
+    for ref in (arc_refs.stdout or "").splitlines()[:3]:
+        if ref.strip():
+            lines.append(f"arc branch grafted as '{ref.strip()}'")
+    for ref in _graveyard_issue_lld_refs(repo_root, issue)[:3]:
+        lines.append(f"lld branch grafted as '{ref}' (content restorable from it)")
+    for ref in _graveyard_leavings_refs(repo_root)[:2]:
+        lines.append(f"cleared files preserved on '{ref}'")
+    lineage = repo_root / "docs" / "lineage" / "active" / f"{issue}-implspec"
+    if lineage.is_dir():
+        runs = sum(1 for p in lineage.iterdir() if p.is_dir())
+        lines.append(
+            f"spec lineage intact at '{lineage}' ({runs} run director"
+            f"{'y' if runs == 1 else 'ies'})"
+        )
+    return lines
 
 
 def ensure_base_for_resume(
@@ -1169,7 +1243,18 @@ def ensure_base_for_resume(
     """
     base = resolve_attempt_branch(repo_root)
     if not base:
-        log.write("RESUME abandoned: no attempt branch exists")
+        # #2516: the machinery's own RESTORE archives the surfaces a resume
+        # needs -- branches grafted under graveyard names, files preserved on
+        # leavings refs, lineage left in place. A bare "no attempt branch
+        # exists" after the machinery itself archived that branch reads as
+        # loss when everything is preserved and one rename away. Refuse WITH
+        # the inventory, so the operator's next move needs no excavation.
+        log.write(
+            "RESUME abandoned: no attempt branch exists on origin. "
+            "Preserved state, if any, is listed below; a fresh draw follows."
+        )
+        for line in _preserved_inventory(repo_root, issue):
+            log.write(f"RESUME preserved: {line}")
         return None
     problems = base_is_structurally_sound(repo_root, base)
     if problems:
