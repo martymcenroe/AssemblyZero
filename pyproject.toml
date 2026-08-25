@@ -37,7 +37,8 @@ dependencies = [
     # constraint (>=1.23) is wide open, so the resolver was bounded by THIS
     # project's floor instead. Named explicitly to keep the floor that broke
     # installs from silently reappearing through a transitive path.
-    "numpy (>=2.4.0,<3.0.0)"
+    "numpy (>=2.4.0,<3.0.0)",
+    "pillow (>=12.0)"
 ]
 
 [tool.pytest.ini_options]

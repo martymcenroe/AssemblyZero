@@ -736,6 +736,85 @@ def _record_spec_convergence_failure(
         _stages_logger.warning("Spec convergence telemetry skipped: %s", exc)
 
 
+def run_visual_stage(state: OrchestrationState) -> OrchestrationState:
+    """The visual gate (#2518): the eyeball artifact before the spec spends.
+
+    Applies only when the TARGET repo declares a visual gate
+    (docs/design/visual-gate.json) naming this issue; every other roll skips
+    in milliseconds. When it applies: render the contract, serve the picture
+    on localhost, halt resumably for the operator's Approve / Reject /
+    Modify. The console and the detached launcher log both carry the URL --
+    run_gate prints it through this stage's stdout, which the launcher tees.
+
+    Halts are non-transient by construction: every halt here is either the
+    operator's own verb (Reject), a ruling contradiction awaiting the
+    operator, or an unrenderable contract awaiting a doc fix -- none of which
+    a blind retry can answer, and a retry would re-serve the page to nobody.
+    """
+    stage = "visual"
+    issue_number = state["issue_number"]
+    start_time = time.monotonic()
+    target_repo = Path(state.get("target_repo", ""))
+
+    from assemblyzero.visual_gate.config import gate_applies, load_gate_config
+
+    try:
+        gate_config = load_gate_config(target_repo)
+    except (ValueError, json.JSONDecodeError) as exc:
+        # fail-open: in shape only -- the handler substitutes a FAILED,
+        # non-transient stage result naming the broken declaration, which is
+        # this pipeline's halt idiom (a raise would crash the graph instead
+        # of halting it). A repo that declared a gate and then broke the
+        # declaration must not silently roll ungated (#2518; #2475).
+        result = _make_stage_result(
+            status="failed",
+            error_message=(
+                f"visual-gate declaration unreadable "
+                f"(docs/design/visual-gate.json): {exc}"
+            ),
+            duration_seconds=time.monotonic() - start_time,
+            attempts=1,
+            transient=False,
+        )
+        return update_stage_result(state, stage, result)
+
+    if not gate_applies(gate_config, issue_number):
+        result = _make_stage_result(
+            status="skipped",
+            artifact_path="",
+            error_message=(
+                "no visual deliverable declared for this issue"
+                if gate_config else "repo declares no visual gate"
+            ),
+            duration_seconds=time.monotonic() - start_time,
+            attempts=0,
+        )
+        return update_stage_result(state, stage, result)
+
+    from assemblyzero.visual_gate.gate import run_gate
+
+    outcome = run_gate(
+        target_repo, issue_number, gate_config, mock=mock_mode(state),
+    )
+    if outcome.status == "approved":
+        result = _make_stage_result(
+            status="passed",
+            artifact_path=outcome.artifact_path,
+            duration_seconds=time.monotonic() - start_time,
+            attempts=1,
+        )
+        return update_stage_result(state, stage, result)
+
+    result = _make_stage_result(
+        status="failed",
+        error_message=f"visual gate halted: {outcome.error}",
+        duration_seconds=time.monotonic() - start_time,
+        attempts=1,
+        transient=False,
+    )
+    return update_stage_result(state, stage, result)
+
+
 def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
     """Execute implementation spec workflow.
 
@@ -1807,6 +1886,7 @@ def run_cleanup_stage(state: OrchestrationState) -> OrchestrationState:
 STAGE_RUNNERS: dict[str, callable] = {
     "triage": run_triage_stage,
     "lld": run_lld_stage,
+    "visual": run_visual_stage,
     "spec": run_spec_stage,
     "impl": run_impl_stage,
     "pr": run_pr_stage,

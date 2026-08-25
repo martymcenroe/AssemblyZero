@@ -594,7 +594,17 @@ def replace_or_refuse(
 # -- which is the same standard that kept `pr` out until today. Adding it now
 # would be guessing at what survives, and a resume into missing state costs
 # more than the redraw it saves.
-RESUMABLE_STAGES = ("spec", "impl", "pr")
+# #2518: `visual` is resumable by construction -- its entire state (rounds,
+# overrides, the operator's answer) lives on disk in the target repo's
+# data/visual-gate bundle, and the gate re-enters at the exact round it left:
+# an unanswered round re-serves, an answered one dispatches without re-asking.
+RESUMABLE_STAGES = ("visual", "spec", "impl", "pr")
+
+#: Stages that auto-skip when not applicable and so may legitimately have NO
+#: entry in a state file -- including every state file written before they
+#: joined STAGE_ORDER. `_halted_stage` treats their absence as history rather
+#: than as a gap that declines a killed-run resume (#2518).
+_OPTIONAL_STAGES = frozenset({"visual"})
 
 #: Stages whose inputs include the finalized spec. `pr` reads the impl stage's
 #: worktree, which only exists because spec produced what impl built from.
@@ -1075,8 +1085,16 @@ def _halted_stage(data: dict, results: dict) -> str | None:
     if results.get(current, {}).get("status") in ("passed", "skipped"):
         return None  # it finished; nothing was in flight
     for earlier in STAGE_ORDER[: STAGE_ORDER.index(current)]:
-        if results.get(earlier, {}).get("status") not in ("passed", "skipped"):
-            return None
+        status = results.get(earlier, {}).get("status")
+        if status in ("passed", "skipped"):
+            continue
+        # #2518: an OPTIONAL stage legitimately owes no entry -- a state file
+        # written before the stage joined STAGE_ORDER has none, and that
+        # absence is history, not a gap in the run. A recorded failure on it
+        # is still a real stop and still declines the resume.
+        if earlier in _OPTIONAL_STAGES and status is None:
+            continue
+        return None
     return current
 
 

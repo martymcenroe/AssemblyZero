@@ -59,8 +59,12 @@ class TestGetNextStage:
     def test_triage_to_lld(self):
         assert get_next_stage("triage") == "lld"
 
-    def test_lld_to_spec(self):
-        assert get_next_stage("lld") == "spec"
+    def test_lld_to_visual_to_spec(self):
+        """#2518: the visual gate sits between lld and spec, so the eyeball
+        artifact exists before the spec stage spends review rounds. Repos
+        without a visual declaration skip through it."""
+        assert get_next_stage("lld") == "visual"
+        assert get_next_stage("visual") == "spec"
 
     def test_spec_to_impl(self):
         assert get_next_stage("spec") == "impl"
