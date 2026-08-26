@@ -280,6 +280,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             prior_completeness_breakdown=(
                 state.get("prior_completeness_breakdown", []) if is_revision else []
             ),
+            assertion_manifest=state.get("assertion_manifest", ""),
         )
 
     # -------------------------------------------------------------------------
@@ -476,6 +477,7 @@ def build_drafter_prompt(
     import_dependencies: str = "",
     repo_structure: str = "",
     prior_completeness_breakdown: list[dict] | None = None,
+    assertion_manifest: str = "",
 ) -> str:
     """Build the prompt for Claude spec generation.
 
@@ -531,6 +533,7 @@ def build_drafter_prompt(
             files_to_modify=files_to_modify,
             repo_structure=repo_structure,
             prior_completeness_breakdown=prior_completeness_breakdown,
+            assertion_manifest=assertion_manifest,
         )
     else:
         return _build_initial_prompt(
@@ -542,7 +545,27 @@ def build_drafter_prompt(
             files_to_modify=files_to_modify,
             project_context=project_context,
             import_dependencies=import_dependencies,
+            assertion_manifest=assertion_manifest,
         )
+
+
+def _manifest_section(assertion_manifest: str) -> str:
+    """The BINDING manifest section (#2533): wrap rows, invent nothing."""
+    return (
+        "## ASSERTION MANIFEST (BINDING)\n\n"
+        "The manifest below was compiled deterministically from the LLD's "
+        "decision tables and the target contract (#2533). It is BINDING:\n\n"
+        "1. Every manifest row becomes exactly ONE test's assertion(s). WRAP "
+        "the row's literal expected value in test code — NEVER invent, "
+        "derive, or adjust an assertion value.\n"
+        "2. Every test that asserts a manifest row MUST cite the row id in a "
+        "comment inside the test body, one per line: `# manifest: N4.2`\n"
+        "3. Each row is covered by exactly one test; do not assert a row "
+        "twice.\n"
+        "4. Fixtures, scaffolding, and non-assertion prose remain yours — "
+        "the manifest retires assertion INVENTION, not drafting.\n\n"
+        + assertion_manifest
+    )
 
 
 # =============================================================================
@@ -559,6 +582,7 @@ def _build_initial_prompt(
     files_to_modify: list,
     project_context: str = "",
     import_dependencies: str = "",
+    assertion_manifest: str = "",
 ) -> str:
     """Build prompt for initial spec generation.
 
@@ -584,6 +608,11 @@ def _build_initial_prompt(
 
     # LLD content
     sections.append(f"## LLD Content (Issue #{issue_number})\n\n{lld_content}")
+
+    # #2533: the compiled assertion manifest is BINDING input, placed right
+    # after the LLD so the rows sit beside the criteria they compiled from.
+    if assertion_manifest:
+        sections.append(_manifest_section(assertion_manifest))
 
     # Project context (Issue #409 Gap 1)
     if project_context:
@@ -642,6 +671,7 @@ def _build_revision_prompt(
     files_to_modify: list,
     repo_structure: str = "",
     prior_completeness_breakdown: list[dict] | None = None,
+    assertion_manifest: str = "",
 ) -> str:
     """Build prompt for spec revision based on feedback.
 
@@ -677,6 +707,10 @@ def _build_revision_prompt(
                     "Start with # title. No preamble.",
                     targeted,
                     f"## Original LLD (Issue #{issue_number})\n\n{lld_content}",
+                    *(
+                        [_manifest_section(assertion_manifest)]
+                        if assertion_manifest else []
+                    ),
                     "CRITICAL REVISION INSTRUCTIONS — READ BEFORE WRITING:\n\n"
                     "This is a TARGETED PATCH, not a regeneration. You are "
                     "NOT writing a new spec — you are applying specific fixes "
@@ -706,6 +740,10 @@ def _build_revision_prompt(
         "IMPORTANT: Output ONLY the markdown content. "
         "Start with # title. No preamble."
     )
+
+    # #2533: the manifest binds revisions exactly as it binds first drafts.
+    if assertion_manifest:
+        sections.append(_manifest_section(assertion_manifest))
 
     # Completeness issues (highest priority — from N3 mechanical validation)
     if completeness_issues:

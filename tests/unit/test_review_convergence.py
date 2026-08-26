@@ -232,6 +232,8 @@ class TestTheStepBudgetReachesTheCeiling:
         clean_path = {
             g.N0_LOAD_LLD,
             g.N1_ANALYZE_CODEBASE,
+            g.N1B_COMPILE_MANIFEST,  # #2533: manifest compiles before the drafter
+            g.N1C_MANIFEST_GATE,     # #2533: and gates before any spend
             g.N2_GENERATE_SPEC,
             g.N3_VALIDATE_COMPLETENESS,
             g.N4_HUMAN_GATE,

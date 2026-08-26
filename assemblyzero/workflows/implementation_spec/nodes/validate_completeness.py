@@ -190,6 +190,15 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_error_paths)
     _log_check(check_error_paths)
 
+    # Check 11: Manifest traceability — every manifest row in exactly one
+    # test, every test citing a row id (Issue #2533). A diff, not an LLM
+    # judgment; abstains where it cannot parse (#2526).
+    check_manifest = check_manifest_traceability(
+        spec_draft, state.get("assertion_manifest_rows", [])
+    )
+    checks.append(check_manifest)
+    _log_check(check_manifest)
+
     # Telemetry (#1812): record detector outcomes for the spec draft (every
     # pass) and the LLD (first pass only). Record-only — the try/except
     # guarantees telemetry can never alter validation_passed.
@@ -1197,6 +1206,140 @@ def check_error_paths_have_tests(spec: str) -> CompletenessCheck:
         check_name="error_paths_have_tests",
         passed=report.ok,
         details=format_error_path_report(report),
+    )
+
+
+def check_manifest_traceability(
+    spec: str, manifest_rows: list[dict]
+) -> CompletenessCheck:
+    """Every manifest row in exactly one test; every test cites a row (#2533).
+
+    Rows-to-tests bookkeeping as a mechanical diff — the two minutes of
+    per-round LLM traceability adjudication this check retires. Its whole
+    jurisdiction is the citation comment (``# manifest: N4.2``) or the bare
+    row id appearing inside a test function's source.
+
+    Abstention (#2526: unknown is not guilty): a fence that will not parse is
+    not judged here — it is already a hard failure of the api-symbols check
+    (#2392), and judging text this check could not read would be static
+    analysis of arbitrary code, which is not its job. The details name how
+    many fences went unjudged, so "checked" never overstates what was
+    verified (#1870).
+    """
+    if not manifest_rows:
+        return CompletenessCheck(
+            check_name="manifest_traceability",
+            passed=True,
+            details=(
+                "No assertion manifest for this run — traceability not "
+                "applicable."
+            ),
+        )
+
+    row_ids = [r.get("row_id", "") for r in manifest_rows if r.get("row_id")]
+    id_patterns = {
+        rid: re.compile(rf"(?<![\w.]){re.escape(rid)}(?![\w.])")
+        for rid in row_ids
+    }
+
+    tests: list[tuple[str, str]] = []  # (test name, source segment)
+    unparsed = 0
+    for match in _CODE_FENCE_RE.finditer(spec):
+        tag = (match.group(1) or "").lower()
+        if tag and tag not in _PYTHON_FENCE_TAGS and tag not in _UNDECLARED_FENCE_TAGS:
+            continue
+        block = _normalize_fence(match.group(2))
+        try:
+            tree = ast.parse(block)
+        except (SyntaxError, ValueError, RecursionError):
+            # fail-open: #2533's ruled abstention (#2526: unknown is not
+            # guilty). A fence that will not parse is the api-symbols
+            # check's HARD failure (#2392) — the draft is already blocked
+            # for it — and this check counts what it could not read into
+            # the details line, so the abstention is visible, never silent.
+            unparsed += 1
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                node.name.startswith("test_")
+            ):
+                segment = ast.get_source_segment(block, node) or ""
+                tests.append((node.name, segment))
+
+    abstain_note = (
+        f" ({unparsed} unparseable fence(s) not judged — abstained, not "
+        f"guilty)"
+        if unparsed else ""
+    )
+
+    if not tests:
+        # No parseable test functions at all: with a binding manifest this is
+        # a real gap, not an abstention — every row is untested.
+        return CompletenessCheck(
+            check_name="manifest_traceability",
+            passed=False,
+            details=(
+                f"The assertion manifest binds {len(row_ids)} row(s) but the "
+                f"spec contains no parseable test functions citing them."
+                + abstain_note
+            ),
+        )
+
+    cited_by: dict[str, list[str]] = {rid: [] for rid in row_ids}
+    uncited_tests: list[str] = []
+    for name, segment in tests:
+        hits = [rid for rid, pat in id_patterns.items() if pat.search(segment)]
+        for rid in hits:
+            cited_by[rid].append(name)
+        if not hits:
+            uncited_tests.append(name)
+
+    problems: list[str] = []
+    missing = [rid for rid in row_ids if not cited_by[rid]]
+    if missing:
+        problems.append(
+            f"manifest row(s) cited by NO test: {', '.join(missing[:8])}"
+            + (f" (and {len(missing) - 8} more)" if len(missing) > 8 else "")
+        )
+    duplicated = {
+        rid: names for rid, names in cited_by.items() if len(names) > 1
+    }
+    if duplicated:
+        listed = "; ".join(
+            f"{rid} in {', '.join(names)}"
+            for rid, names in list(duplicated.items())[:4]
+        )
+        problems.append(f"manifest row(s) cited by MORE than one test: {listed}")
+    if uncited_tests:
+        problems.append(
+            f"test(s) citing no manifest row: "
+            f"{', '.join(uncited_tests[:8])}"
+            + (
+                f" (and {len(uncited_tests) - 8} more)"
+                if len(uncited_tests) > 8 else ""
+            )
+        )
+
+    if problems:
+        return CompletenessCheck(
+            check_name="manifest_traceability",
+            passed=False,
+            details=(
+                "Manifest traceability is a mechanical diff (#2533) and it "
+                "does not balance: " + " | ".join(problems)
+                + ". Cite rows with a `# manifest: <row-id>` comment."
+                + abstain_note
+            ),
+        )
+
+    return CompletenessCheck(
+        check_name="manifest_traceability",
+        passed=True,
+        details=(
+            f"All {len(row_ids)} manifest row(s) are each cited by exactly "
+            f"one of {len(tests)} test(s), and every test cites a row."
+            + abstain_note
+        ),
     )
 
 

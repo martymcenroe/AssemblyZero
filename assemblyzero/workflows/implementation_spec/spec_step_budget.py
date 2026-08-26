@@ -35,9 +35,10 @@ from __future__ import annotations
 
 from typing import Any
 
-#: N0 load_lld, N1 analyze_codebase, N2 generate_spec, N3 validate_completeness,
-#: N4 human_gate, N5 review_spec, N6 finalize_spec.
-CLEAN_RUN_STEPS = 7
+#: N0 load_lld, N1 analyze_codebase, N1b compile_manifest, N1c manifest_gate
+#: (#2533), N2 generate_spec, N3 validate_completeness, N4 human_gate,
+#: N5 review_spec, N6 finalize_spec.
+CLEAN_RUN_STEPS = 9
 
 #: One review round: the reviewer sends the draft back to N2, which costs
 #: N2 -> N3 -> [N4] -> N5.

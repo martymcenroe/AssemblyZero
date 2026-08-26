@@ -10,7 +10,7 @@ quiz modes read from here, and the drift guard in
 
 from __future__ import annotations
 
-TOTAL_STEPS = 7
+TOTAL_STEPS = 9
 
 ATLAS: dict[str, dict] = {
     "N0_load_lld": {
@@ -37,13 +37,49 @@ ATLAS: dict[str, dict] = {
             "facts rather than guesses."
         ),
         "successors": {
-            "N2_generate_spec": "analysis complete",
+            "N1b_compile_manifest": "analysis complete",
             "HALT": "analysis failed",
+        },
+    },
+    "N1b_compile_manifest": {
+        "title": "compile assertion manifest",
+        "ordinal": 3,
+        "goal": (
+            "Compile the LLD's decision tables and the contract's tables "
+            "into literal, citable assertion rows — before any draft spend."
+        ),
+        "teach": (
+            "The deterministic truth-producer runs ahead of the stochastic "
+            "spender (#2533): pure Python, no model call. An uncompilable "
+            "criterion is an upstream-document defect, halted with a "
+            "must-resolve filed — caught in seconds for free. An LLD with "
+            "no decision table compiles to 'not applicable' and nothing "
+            "changes."
+        ),
+        "successors": {
+            "N1c_manifest_gate": "the manifest compiled (or is not applicable)",
+            "HALT": "a criterion would not compile; a must-resolve was filed",
+        },
+    },
+    "N1c_manifest_gate": {
+        "title": "manifest gate",
+        "ordinal": 4,
+        "goal": "Inspect the compiled manifest before the drafter spends.",
+        "teach": (
+            "Mechanical invariants over the compiler's own output: every "
+            "criterion covered, every value literal, no placeholder wording, "
+            "no duplicate sample points. A finding here means the manifest "
+            "cannot be trusted, and a draft built on it would inherit the "
+            "defect."
+        ),
+        "successors": {
+            "N2_generate_spec": "the manifest holds (or none applies)",
+            "HALT": "the compiled manifest breaks its own invariants",
         },
     },
     "N2_generate_spec": {
         "title": "generate spec",
-        "ordinal": 3,
+        "ordinal": 5,
         "goal": "The drafter model writes the implementation spec.",
         "teach": (
             "Failed validations and revision verdicts loop back here for a "
@@ -58,7 +94,7 @@ ATLAS: dict[str, dict] = {
     },
     "N3_validate_completeness": {
         "title": "completeness validation",
-        "ordinal": 4,
+        "ordinal": 6,
         "goal": "Check the spec covers everything the LLD requires.",
         "teach": (
             "The mechanical gate of this stage: an incomplete spec loops "
@@ -74,7 +110,7 @@ ATLAS: dict[str, dict] = {
     },
     "N4_human_gate": {
         "title": "human gate",
-        "ordinal": 5,
+        "ordinal": 7,
         "goal": "An optional human checkpoint before review.",
         "teach": (
             "Autonomous rolls run with this gate off. When it is on, a "
@@ -90,7 +126,7 @@ ATLAS: dict[str, dict] = {
     },
     "N5_review_spec": {
         "title": "adversarial review",
-        "ordinal": 6,
+        "ordinal": 8,
         "goal": "A second model judges the spec against the LLD.",
         "teach": (
             "Approval finalizes; a revise verdict loops back to the "
@@ -106,7 +142,7 @@ ATLAS: dict[str, dict] = {
     },
     "N6_finalize_spec": {
         "title": "finalize",
-        "ordinal": 7,
+        "ordinal": 9,
         "goal": "Save the approved spec where implementation will read it.",
         "teach": (
             "The saved spec is the hand-off artifact: the implementation "

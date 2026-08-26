@@ -443,10 +443,12 @@ class TestRouteAfterAnalyze:
     """Tests for route_after_analyze routing function."""
 
     def test_routes_to_generate_on_success(self):
-        """No error → N2."""
+        """No error → N1b: the assertion manifest compiles before the
+        drafter runs (#2533 — the deterministic truth-producer ahead of the
+        stochastic spender)."""
         from assemblyzero.workflows.implementation_spec.graph import route_after_analyze
 
-        assert route_after_analyze({"error_message": ""}) == "N2_generate_spec"
+        assert route_after_analyze({"error_message": ""}) == "N1b_compile_manifest"
 
     def test_routes_to_end_on_error(self):
         """Error → END."""
@@ -2607,7 +2609,15 @@ class TestWorkflowPaths:
 
         base_state["error_message"] = ""
         assert route_after_load(base_state) == "N1_analyze_codebase"
-        assert route_after_analyze(base_state) == "N2_generate_spec"
+        # #2533: the manifest compile and its gate sit between analysis and
+        # the drafter, so the happy path routes through them.
+        assert route_after_analyze(base_state) == "N1b_compile_manifest"
+        from assemblyzero.workflows.implementation_spec.graph import (
+            route_after_compile_manifest,
+            route_after_manifest_gate,
+        )
+        assert route_after_compile_manifest(base_state) == "N1c_manifest_gate"
+        assert route_after_manifest_gate(base_state) == "N2_generate_spec"
 
         base_state["validation_passed"] = True
         base_state["human_gate_enabled"] = False
@@ -2669,7 +2679,7 @@ class TestEdgeCases:
 
         # Empty state should not crash
         assert route_after_load({}) == "N1_analyze_codebase"
-        assert route_after_analyze({}) == "N2_generate_spec"
+        assert route_after_analyze({}) == "N1b_compile_manifest"
         # Default verdict BLOCKED → HALT
         assert route_after_review({}) == "HALT"
 
