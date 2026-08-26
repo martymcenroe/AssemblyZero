@@ -5,6 +5,8 @@ Issue #304: Implementation Readiness Review Workflow (LLD → Implementation Spe
 Creates a LangGraph StateGraph that connects:
 - N0: load_lld (load and parse approved LLD)
 - N1: analyze_codebase (extract current state from files)
+- N1b: compile_manifest (deterministic assertion-manifest compile, #2533)
+- N1c: manifest_gate (mechanical gate over the manifest, before any spend)
 - N2: generate_spec (generate Implementation Spec draft via Claude)
 - N3: validate_completeness (mechanical completeness checks)
 - N4: human_gate (optional human review checkpoint)
@@ -12,10 +14,10 @@ Creates a LangGraph StateGraph that connects:
 - N6: finalize_spec (write final spec to docs/lld/drafts/)
 
 Graph structure:
-    START -> N0 -> N1 -> N2 -> N3 -> N4 -> N5 -> N6 -> END
-                          ^         |              |
-                          |         v              |
-                          +---------+--------------+
+    START -> N0 -> N1 -> N1b -> N1c -> N2 -> N3 -> N4 -> N5 -> N6 -> END
+                                        ^         |              |
+                                        |         v              |
+                                        +---------+--------------+
 
 Routing is controlled by:
 - validation_passed: N3 result determines if spec meets completeness criteria
@@ -53,6 +55,8 @@ from assemblyzero.core.halt_node import create_halt_node
 
 N0_LOAD_LLD = "N0_load_lld"
 N1_ANALYZE_CODEBASE = "N1_analyze_codebase"
+N1B_COMPILE_MANIFEST = "N1b_compile_manifest"
+N1C_MANIFEST_GATE = "N1c_manifest_gate"
 N2_GENERATE_SPEC = "N2_generate_spec"
 N3_VALIDATE_COMPLETENESS = "N3_validate_completeness"
 N4_HUMAN_GATE = "N4_human_gate"
@@ -88,11 +92,12 @@ def route_after_load(
 
 def route_after_analyze(
     state: ImplementationSpecState,
-) -> Literal["N2_generate_spec", "HALT"]:
+) -> Literal["N1b_compile_manifest", "HALT"]:
     """Route after N1: analyze_codebase.
 
     Routes to:
-    - N2_generate_spec: Codebase analysis complete
+    - N1b_compile_manifest: Codebase analysis complete (#2533 — the
+      deterministic truth-producer runs before the stochastic spender)
     - HALT: Error during analysis (Issue #486)
 
     Args:
@@ -100,6 +105,32 @@ def route_after_analyze(
 
     Returns:
         Next node name.
+    """
+    if state.get("error_message"):
+        return "HALT"
+    return "N1b_compile_manifest"
+
+
+def route_after_compile_manifest(
+    state: ImplementationSpecState,
+) -> Literal["N1c_manifest_gate", "HALT"]:
+    """Route after N1b: compile the assertion manifest (#2533).
+
+    Fail closed: an uncompilable criterion is an upstream-document defect,
+    halted with a must-resolve filed — never a fall-through (#2474 lesson).
+    """
+    if state.get("error_message"):
+        return "HALT"
+    return "N1c_manifest_gate"
+
+
+def route_after_manifest_gate(
+    state: ImplementationSpecState,
+) -> Literal["N2_generate_spec", "HALT"]:
+    """Route after N1c: the mechanical gate over the compiled manifest (#2533).
+
+    A gate finding halts BEFORE any drafting spend — the entire point of
+    placing the gate ahead of N2.
     """
     if state.get("error_message"):
         return "HALT"
@@ -330,10 +361,10 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
     """Create the LangGraph workflow for Implementation Spec generation.
 
     Graph structure:
-        START -> N0 -> N1 -> N2 -> N3 -> N4 -> N5 -> N6 -> END
-                              ^         |              |
-                              |         v              |
-                              +---------+--------------+
+        START -> N0 -> N1 -> N1b -> N1c -> N2 -> N3 -> N4 -> N5 -> N6 -> END
+                                            ^         |              |
+                                            |         v              |
+                                            +---------+--------------+
 
     N4 (human gate) is optional and controlled by human_gate_enabled state.
     N3 validation failures loop back to N2 for regeneration.
@@ -357,8 +388,15 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
         graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS))
 
     # Add nodes
+    from assemblyzero.workflows.implementation_spec.nodes.compile_manifest import (
+        compile_assertion_manifest,
+        manifest_gate,
+    )
+
     _add(N0_LOAD_LLD, load_lld)
     _add(N1_ANALYZE_CODEBASE, analyze_codebase)
+    _add(N1B_COMPILE_MANIFEST, compile_assertion_manifest)
+    _add(N1C_MANIFEST_GATE, manifest_gate)
     _add(N2_GENERATE_SPEC, generate_spec)
     _add(N3_VALIDATE_COMPLETENESS, validate_completeness)
     _add(N4_HUMAN_GATE, human_gate)
@@ -382,10 +420,30 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
         },
     )
 
-    # N1 -> N2 or HALT (on error)
+    # N1 -> N1b or HALT (on error)
     graph.add_conditional_edges(
         N1_ANALYZE_CODEBASE,
         route_after_analyze,
+        {
+            "N1b_compile_manifest": N1B_COMPILE_MANIFEST,
+            "HALT": HALT,
+        },
+    )
+
+    # N1b -> N1c or HALT (#2533: uncompilable criterion fails closed)
+    graph.add_conditional_edges(
+        N1B_COMPILE_MANIFEST,
+        route_after_compile_manifest,
+        {
+            "N1c_manifest_gate": N1C_MANIFEST_GATE,
+            "HALT": HALT,
+        },
+    )
+
+    # N1c -> N2 or HALT (#2533: gate findings halt before any draft spend)
+    graph.add_conditional_edges(
+        N1C_MANIFEST_GATE,
+        route_after_manifest_gate,
         {
             "N2_generate_spec": N2_GENERATE_SPEC,
             "HALT": HALT,
