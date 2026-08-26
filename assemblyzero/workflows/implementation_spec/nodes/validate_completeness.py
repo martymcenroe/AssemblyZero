@@ -287,12 +287,43 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                 # The two halts read differently on purpose. "N revisions ended
                 # with 1 unresolved check" reads as a stubborn drafter; when
                 # every failing check HAS been tried, that is the true reading.
-                tried = ", ".join(sorted(set(failing_names) & set(shown + grace_used)))
-                detail = (
-                    f" Each unresolved check was shown to the drafter and "
-                    f"survived a revision: {tried}."
-                    if tried else ""
-                )
+                tried = sorted(set(failing_names) & set(shown + grace_used))
+                # #2526: within "tried", the drafter FAILING to fix a check and
+                # the drafter DECLINING to change the code are different facts,
+                # and the halt says which. When a check's complaint is
+                # byte-identical across every prior revision, the flagged code
+                # survived every round unchanged — the drafter was shown it
+                # repeatedly and repeatedly chose not to break working code,
+                # which is itself evidence of a false positive in the check.
+                # str.isupper died exactly this way: three identical
+                # complaints, three identical declines, one dead run.
+                prior_iters = prior_breakdown[:-1]
+                details_by_name = {
+                    c["check_name"]: c["details"] for c in checks if not c["passed"]
+                }
+                declined = [
+                    name for name in tried
+                    if prior_iters and all(
+                        details_by_name[name] in entry["failures"]
+                        for entry in prior_iters
+                    )
+                ]
+                kept_failing = [name for name in tried if name not in declined]
+                detail = ""
+                if kept_failing:
+                    detail += (
+                        f" Each unresolved check was shown to the drafter and "
+                        f"survived a revision: {', '.join(kept_failing)}."
+                    )
+                if declined:
+                    detail += (
+                        f" NOTE: {', '.join(declined)} drew the IDENTICAL "
+                        f"complaint on every revision — the drafter saw it "
+                        f"{len(prior_iters)} time(s) and left the flagged code "
+                        f"unchanged each time. A drafter declining to change "
+                        f"code it believes correct is evidence of a false "
+                        f"positive in the check, not of an unfixable spec."
+                    )
                 cap_message = (
                     f"Iteration cap: {max_iterations} revision(s) ended with "
                     f"{len(completeness_issues)} unresolved completeness "
@@ -1304,6 +1335,11 @@ class _FenceFacts(NamedTuple):
     # Classes the spec defines (#2399). A class is the one callee whose return
     # type is known without an annotation: `Gauge()` is a Gauge.
     classes: frozenset[str]
+    # Names bound in forms whose type is unknowable by construction (#2526):
+    # lambda parameters, and `except:` targets with no exception class. These
+    # seed the unresolved set directly — a method on one is a method on an
+    # unknown type, and unknown is not guilty.
+    opaque: frozenset[str] = frozenset()
 
 
 class _FenceParseFailure(NamedTuple):
@@ -1445,6 +1481,7 @@ class _FenceVisitor(ast.NodeVisitor):
         self.framework_params: set[str] = set()
         self.returns: dict[str, str] = {}
         self.classes: set[str] = set()
+        self.opaque: set[str] = set()
 
     # ---- imports: receivers the target repo has no authority over (#1948) ----
 
@@ -1556,6 +1593,59 @@ class _FenceVisitor(ast.NodeVisitor):
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
         self._record_with(node)
 
+    # #2526: comprehension targets are bindings exactly as `for` targets are —
+    # `[node.id for node in ast.walk(tree)]` binds `node` from `ast.walk`, so
+    # provenance places it in stdlib territory. The live kill was this binding
+    # form going unrecorded: `node` had no provenance at all, fell into no
+    # category, and its builtin-method call was judged against the target
+    # repo's symbols.
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._record_comprehension(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._record_comprehension(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._record_comprehension(node)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._record_comprehension(node)
+
+    def _record_comprehension(self, node) -> None:
+        # Chained generators resolve through the same fixed point an ordinary
+        # binding chain does: `for row in grid for x in row` records row←grid
+        # and x←row, and whoever owns grid owns both.
+        for gen in node.generators:
+            self._record_binding([gen.target], gen.iter)
+        self.generic_visit(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        # #2526: a lambda parameter's type is unknowable by construction — no
+        # annotation syntax even exists for it. `key=lambda g: g.rank()` says
+        # nothing about what `g` holds, so a method on it abstains.
+        args = node.args
+        collected = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+        if args.vararg is not None:
+            collected.append(args.vararg)
+        if args.kwarg is not None:
+            collected.append(args.kwarg)
+        self.opaque |= {a.arg for a in collected}
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        # #2526: `except ValueError as e` binds `e` from the exception class,
+        # so provenance answers what it holds; a bare `except ... as e` binds a
+        # value of no stated type at all, which is opaque.
+        if node.name:
+            if node.type is not None:
+                self.assignments.append(
+                    (frozenset({node.name}), _value_provenance(node.type))
+                )
+            else:
+                self.opaque.add(node.name)
+        self.generic_visit(node)
+
     def _record_with(self, node: ast.With | ast.AsyncWith) -> None:
         for item in node.items:
             if item.optional_vars is not None:
@@ -1614,6 +1704,7 @@ def _fence_facts_ast(block: str) -> _FenceFacts:
         framework_params=frozenset(visitor.framework_params),
         returns=tuple(sorted(visitor.returns.items())),
         classes=frozenset(visitor.classes),
+        opaque=frozenset(visitor.opaque),
     )
 
 
@@ -1800,6 +1891,12 @@ def _flag_calls(
     constructor_like = spec_classes | {s for s in symbol_set if s[:1].isupper()}
 
     unresolved: set[str] = set()
+    # #2526: names bound in type-unknowable forms (lambda parameters, bare
+    # `except ... as e`) are unresolved by construction — no fixed point can
+    # place them, so they seed the set directly rather than falling through
+    # to judgment as if the checker knew what they hold.
+    for fence in facts:
+        unresolved |= fence.opaque - exempt
     changed = True
     while changed:
         changed = False
@@ -1852,7 +1949,15 @@ def _flag_calls(
                 continue
             if call.method in symbol_set or call.method in spec_defined:
                 continue
-            if call.method in _API_SYMBOL_ALLOWLIST:
+            # #2526: a method every Python object of a builtin type carries is
+            # never a hallucinated PROJECT API, whoever the receiver is.
+            # `str.isupper` on an AST walk killed a run that had passed the
+            # visual gate because the hand-curated allowlist held `upper` but
+            # not `isupper` — so the builtin surface is now derived, not typed.
+            if (
+                call.method in _API_SYMBOL_ALLOWLIST
+                or call.method in _BUILTIN_TYPE_METHODS
+            ):
                 continue
             flagged.setdefault(call.method, []).append(call.site)
     return flagged
@@ -2102,6 +2207,23 @@ _API_SYMBOL_ALLOWLIST: frozenset[str] = frozenset({
     "assert_called", "assert_called_once", "assert_called_with",
     "assert_any_call", "call_count", "called",
 })
+
+
+#: Every method of every Python builtin type, derived by introspection (#2526).
+#: The hand-curated list above held `upper` but not `isupper`, and the gap
+#: killed run-issue331-083839 at the completeness cap on correct, idiomatic
+#: code (`node.id.isupper()` in an AST walk). A typed list lags the language
+#: forever; `dir()` cannot. The curated list stays for the stdlib idioms and
+#: third-party conventions that are not builtin-type methods.
+_BUILTIN_TYPE_METHODS: frozenset[str] = frozenset(
+    name
+    for builtin_type in (
+        object, type, str, bytes, bytearray, memoryview, list, tuple,
+        dict, set, frozenset, int, float, complex, bool, range, slice,
+        BaseException, BaseExceptionGroup,
+    )
+    for name in dir(builtin_type)
+)
 
 
 _SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
