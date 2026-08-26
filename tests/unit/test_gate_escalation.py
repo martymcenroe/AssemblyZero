@@ -111,7 +111,9 @@ class TestTheToast:
 
             return _Done()
 
-        assert show_toast("t", "b", "http://x/", runner=runner) == ""
+        assert show_toast(
+            "t", "b", "http://x/", runner=runner, platform="win32"
+        ) == ""
         assert calls["cmd"][0] == "powershell"
         assert "-NonInteractive" in calls["cmd"]
         import subprocess
@@ -123,8 +125,15 @@ class TestTheToast:
         def runner(cmd, **kwargs):
             raise OSError("powershell missing")
 
-        reason = show_toast("t", "b", runner=runner)
+        reason = show_toast("t", "b", runner=runner, platform="win32")
         assert "toast failed" in reason
+
+    def test_a_non_windows_host_skips_with_a_reason(self):
+        def forbidden(cmd, **kwargs):
+            raise AssertionError("nothing must spawn off Windows")
+
+        reason = show_toast("t", "b", runner=forbidden, platform="linux")
+        assert "not a Windows host" in reason
 
 
 class TestTheEmail:

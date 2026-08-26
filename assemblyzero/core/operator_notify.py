@@ -171,10 +171,16 @@ def toast_script(title: str, body: str, url: str = "") -> str:
 
 
 def show_toast(
-    title: str, body: str, url: str = "", *, runner=subprocess.run
+    title: str, body: str, url: str = "", *,
+    runner=subprocess.run, platform: str | None = None,
 ) -> str:
-    """Show a Windows toast. Returns "" on success, a reason string otherwise."""
-    if sys.platform != "win32":
+    """Show a Windows toast. Returns "" on success, a reason string otherwise.
+
+    ``platform`` is a test seam (defaults to the real ``sys.platform``) so the
+    composition and spawn wiring stay testable on the Linux CI runner, where
+    the real guard below would otherwise short-circuit them.
+    """
+    if (platform or sys.platform) != "win32":
         return "toast skipped: not a Windows host"
     try:
         result = runner(
