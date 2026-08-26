@@ -64,7 +64,13 @@ def build_edit_script_prompt(
         "Touch NOTHING else — content you do not name in a SEARCH block "
         "cannot and must not change.\n"
         "4. No preamble, no explanation, no markdown fences around the "
-        "blocks — edit blocks only."
+        "blocks — edit blocks only.\n"
+        "5. PINNING (#2532): content a completed review round passed "
+        "without objection is LOCKED — an edit touching text the feedback "
+        "below does not name will be refused mechanically and the old text "
+        "kept. If a fix genuinely requires restructuring beyond the named "
+        "items, put a single line `UNLOCK: <one-line reason>` before your "
+        "first edit block; the unlock is logged, never silent."
     )
 
     if completeness_issues:
