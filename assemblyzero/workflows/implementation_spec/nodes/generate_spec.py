@@ -321,6 +321,9 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # -------------------------------------------------------------------------
     edit_script_content: str | None = None
     result = None
+    #: #2532: pinning refusals, regression-class flags, and unlock grants
+    #: from this revision, accumulated across whichever path produced it.
+    pinning_events: list[str] = []
     if is_revision and retry_count < 1 and not drafter_spec.startswith("mock:"):
         cost_before = get_cumulative_cost()
         edit_result = drafter.invoke(
@@ -340,6 +343,17 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
             blocks = parse_edit_blocks(edit_result.response or "")
             if blocks:
                 patched, failures = apply_edit_blocks(existing_draft, blocks)
+                if not failures and patched != existing_draft:
+                    # #2532: pin what passed. Edits touching content the
+                    # verdict did not name are refused mechanically; the
+                    # locked spans carry forward byte-verbatim.
+                    patched, events = _apply_pinning(
+                        state, existing_draft, patched,
+                        response=edit_result.response or "",
+                        review_feedback=review_feedback,
+                        completeness_issues=completeness_issues,
+                    )
+                    pinning_events.extend(events)
                 if not failures and patched != existing_draft:
                     ratio = unchanged_ratio(existing_draft, patched)
                     print(
@@ -404,6 +418,21 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         # ---------------------------------------------------------------------
         spec_content = _strip_preamble(spec_content)
 
+        # #2532: the full-regeneration path is the observed regression vector
+        # — run-issue331-233939's resumed grant reintroduced the S2 fix by
+        # regenerating everything. Pinning applies to the diff exactly as on
+        # the edit path: unnamed content carries forward byte-verbatim.
+        # The UNLOCK line is read from the RAW response, because the
+        # preamble strip above would eat it.
+        if is_revision and existing_draft and spec_content.strip():
+            spec_content, events = _apply_pinning(
+                state, existing_draft, spec_content,
+                response=result.response or "",
+                review_feedback=review_feedback,
+                completeness_issues=completeness_issues,
+            )
+            pinning_events.extend(events)
+
     # -------------------------------------------------------------------------
     # Save to audit trail
     # -------------------------------------------------------------------------
@@ -437,6 +466,10 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     )
 
     return {
+        # #2532: the pinning record travels with the run — refusals,
+        # regression-class flags, unlock grants — so the loop's history
+        # carries who tried to change what no verdict named.
+        "pinning_events": list(state.get("pinning_events", [])) + pinning_events,
         "spec_draft": spec_content,
         # #2297: the audit-trail DRAFT, not the finalized spec. Writing this to
         # `spec_path` made a cap-halted run indistinguishable from a successful
@@ -455,6 +488,75 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
         "node_costs": node_costs,  # Issue #511
         "node_tokens": node_tokens,  # Issue #511
     }
+
+
+def _apply_pinning(
+    state: ImplementationSpecState,
+    previous: str,
+    revised: str,
+    *,
+    response: str,
+    review_feedback: str,
+    completeness_issues: list[str],
+) -> tuple[str, list[str]]:
+    """Enforce #2532's pinning on one revision; returns (text, events).
+
+    Named = the current verdict plus the current completeness failures.
+    Ever-named = those plus every prior round's feedback and every prior
+    completeness breakdown — the union the regression flag is judged
+    against ("content no verdict EVER objected to").
+
+    When the current verdict names nothing extractable, pinning abstains
+    entirely — locking the whole document on an unparseable naming would
+    refuse every legitimate fix, and unknown is not guilty (#2526).
+    """
+    from assemblyzero.workflows.implementation_spec.revision_pinning import (
+        enforce_pinning,
+        named_tokens,
+        unlock_requested,
+    )
+
+    current = named_tokens(review_feedback, completeness_issues)
+    if not current:
+        note = (
+            "[PINNING] the verdict names nothing extractable — pinning not "
+            "applied this round (#2532)"
+        )
+        print(f"    {note}")
+        return revised, [note]
+
+    ever = set(current)
+    for prior in state.get("review_feedback_history", []):
+        ever |= named_tokens(prior)
+    for entry in state.get("prior_completeness_breakdown", []):
+        ever |= named_tokens("", [str(f) for f in entry.get("failures", [])])
+
+    result = enforce_pinning(
+        previous, revised,
+        current_tokens=current,
+        ever_tokens=ever,
+        unlock_reason=unlock_requested(response),
+    )
+
+    events: list[str] = []
+    if result.unlock_reason:
+        events.append(
+            f"[PINNING] UNLOCK granted — drafter's reason: "
+            f"{result.unlock_reason} (#2532)"
+        )
+    for refusal in result.refusals:
+        events.append(
+            f"[PINNING] refused: {refusal} — locked content the verdict "
+            f"did not name (#2532)"
+        )
+    for regression in result.regressions:
+        events.append(
+            f"[PINNING] REGRESSION CLASS: revision modified content no "
+            f"verdict ever objected to: {regression} (#2532)"
+        )
+    for event in events:
+        print(f"    {event}")
+    return result.text, events
 
 
 # =============================================================================
@@ -876,6 +978,14 @@ def _build_revision_prompt(
         "error elsewhere by drifting on unflagged content. If you find "
         "yourself 'tidying up' or 'fixing' something not named in the "
         "feedback above, STOP — that edit is a regression, not a fix.\n\n"
+        "## Pinning is ENFORCED mechanically (#2532)\n"
+        "Content a completed review round passed without objection is "
+        "LOCKED: any change you make to text the feedback does not name "
+        "will be refused and the previous text restored byte-verbatim. If "
+        "a fix genuinely requires restructuring beyond the named items, "
+        "put a single line `UNLOCK: <one-line reason>` as the VERY FIRST "
+        "line of your response (before the # heading); the unlock is "
+        "logged, never silent.\n\n"
         "START YOUR RESPONSE WITH THE # HEADING. NO PREAMBLE."
     )
 

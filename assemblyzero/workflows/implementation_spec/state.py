@@ -254,3 +254,11 @@ class ImplementationSpecState(TypedDict, total=False):
     assertion_manifest: str
     assertion_manifest_rows: list[dict]
     assertion_manifest_criteria: list[str]
+
+    # Closes #2532: the pinning record. Each entry is one revision-time
+    # event — a mechanically refused edit to locked content, a
+    # regression-class flag ("revision modified content no verdict ever
+    # objected to" — the S2 class made visible at the moment it happens),
+    # or an explicit UNLOCK grant with the drafter's stated reason.
+    # Accumulated across the run; iteration 1 never writes here.
+    pinning_events: list[str]
