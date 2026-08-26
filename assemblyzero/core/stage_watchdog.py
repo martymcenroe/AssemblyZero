@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Optional
 
+from assemblyzero.core import operator_wait
+
 # Derived, not typed. Each value is the p90 duration of PASSED runs of that
 # stage across the boostgauge speedrun corpus, produced by
 # `tools/derive_stage_nominals.py` and re-derivable with one command:
@@ -107,8 +109,16 @@ class StageWatchdog:
         self._thread: Optional[threading.Thread] = None
 
     def status_line(self, elapsed: float) -> str:
-        """The line printed at `elapsed` seconds — pure, so tests can read it."""
+        """The line printed at `elapsed` seconds — reads only declared state,
+        so tests can drive it with begin()/end() and a number."""
         line = f"    [STAGE] {self.stage} running {int(elapsed)}s"
+        # #2527: the one state where the MACHINE waits on the HUMAN must not
+        # impersonate a slow model. While a gate has declared an operator
+        # wait, the tick says whose turn it is — and no SLOW/STALLED verdict
+        # is issued, because elapsed time here measures the operator's
+        # attention, not the stage's health.
+        if operator_wait.active() is not None:
+            return line + " - awaiting OPERATOR (this wait is yours)"
         if not self.nominal:
             return line
         line += f" (nominal ~{int(self.nominal)}s)"
@@ -121,7 +131,12 @@ class StageWatchdog:
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval):
-            print(self.status_line(time.monotonic() - self._start), flush=True)
+            line = self.status_line(time.monotonic() - self._start)
+            # #2527: amber on a TTY while awaiting the operator; paint() is a
+            # no-op into files, so logs stay free of escape codes.
+            if operator_wait.active() is not None:
+                line = operator_wait.paint(line)
+            print(line, flush=True)
 
     def __enter__(self) -> "StageWatchdog":
         self._start = time.monotonic()

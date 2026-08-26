@@ -29,12 +29,15 @@ Round lifecycle on disk (what makes the halt resumable):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from assemblyzero.core import operator_wait
+from assemblyzero.core.operator_notify import NotifyConfig
 from assemblyzero.visual_gate import bundle as bundle_mod
 from assemblyzero.visual_gate.config import GateConfig
 from assemblyzero.visual_gate.modify import (
@@ -48,6 +51,45 @@ from assemblyzero.visual_gate.server import serve_bundle, wait_for_feedback
 #: Renderer exit code that means "the contract cannot be drawn from" -- the
 #: adjectival-contract finding, distinct from an ordinary crash.
 TOO_ADJECTIVAL_EXIT = 3
+
+#: #2528: machine-level kill switch for the browser auto-open, for operators
+#: who hate focus-stealing on a box whose repos all default it on. Any of
+#: 0/false/no/off disables; the repo's declaration (`open_browser`) is the
+#: per-repo switch.
+OPEN_BROWSER_ENV = "AZ_VISUAL_GATE_OPEN_BROWSER"
+
+
+def _open_review_page(url: str, config: GateConfig, *, log=print, opener=None) -> None:
+    """Open the review page in the operator's default browser (#2528).
+
+    "the url was clickable thank god but can't the program actually pull the
+    url up?" It can. Default ON by that request; the repo declaration and the
+    environment can each turn it off; failure is one logged line and the
+    printed URL remains the fallback — a browser problem must never become a
+    gate problem. The gate exists to summon the operator, so this tab is an
+    operator-REQUESTED interruption — the opposite of the window-flash class.
+    """
+    if not config.open_browser:
+        return
+    if os.environ.get(OPEN_BROWSER_ENV, "").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        log(f"    [visual] browser auto-open disabled by {OPEN_BROWSER_ENV}")
+        return
+    try:
+        if opener is None:
+            import webbrowser
+
+            opener = webbrowser.open
+        if opener(url):
+            log("    [visual] opened the review page in your browser")
+        else:
+            log("    [visual] no browser would open -- use the URL above")
+    except Exception as exc:  # noqa: BLE001
+        # fail-open: #2528 — a browser problem must never become a gate
+        # problem. The failure is logged in one line and the printed URL
+        # remains the operator's fallback; the wait proceeds either way.
+        log(f"    [visual] browser auto-open failed ({exc}) -- use the URL above")
 
 
 @dataclass
@@ -349,12 +391,29 @@ def run_gate(
 
         answer = bundle_mod.read_feedback(current)
         if answer is None:
+            # #2528: a round's FIRST serve is a fresh request for eyes; a
+            # re-serve (a resume of a round the operator already saw) is not.
+            # The pending sentinel is the on-disk fact that says which.
+            first_serve = not (current / "feedback-pending.json").is_file()
             server, url = serve_bundle(current, issue)
             bundle_mod.write_pending(current, url)
-            log(f"    [visual] review page: {url}")
+            log(operator_wait.paint(
+                f"    [visual] YOUR JUDGMENT IS REQUESTED -- review page: {url}"
+            ))
             log(f"    [visual] bundle: {current}")
+            if first_serve and not mock:
+                _open_review_page(url, config, log=log)
+            # #2529: mock runs get no live escalation; explicit wait_kwargs
+            # (the test seam) always win over the built defaults.
+            waiting: dict = dict(
+                notify_config=(
+                    None if mock else NotifyConfig.from_mapping(config.notify)
+                ),
+                context={"repo": target_repo.name, "issue": issue},
+            )
+            waiting.update(wait_kwargs)
             try:
-                answer = wait_for_feedback(current, log=log, **wait_kwargs)
+                answer = wait_for_feedback(current, log=log, **waiting)
             finally:
                 server.shutdown()
         rounds_run += 1

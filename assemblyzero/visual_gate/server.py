@@ -13,13 +13,18 @@ disk regardless of who was listening when it was given.
 from __future__ import annotations
 
 import html
+import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
 from assemblyzero.visual_gate import bundle as bundle_mod
+
+if TYPE_CHECKING:
+    from assemblyzero.core.operator_notify import NotifyConfig
 
 _PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Visual gate — issue #{issue}</title>
@@ -140,37 +145,130 @@ def serve_bundle(round_dir: Path, issue: int) -> tuple[ThreadingHTTPServer, str]
     return server, f"http://127.0.0.1:{server.server_address[1]}/"
 
 
+#: The on-disk once-ever sentinel for the email backstop (#2529). Beside the
+#: round like every other piece of wait state, so a killed-and-resumed gate
+#: never emails twice about the same round.
+EMAIL_SENT_NAME = "notify-email-sent.json"
+
+
 def wait_for_feedback(
     round_dir: Path, *, poll_seconds: float = 2.0,
     reminder_every: float = 300.0, log=print, deadline: float | None = None,
+    notify_config: "NotifyConfig | None" = None,
+    context: dict | None = None,
+    toaster=None, emailer=None,
 ) -> dict:
     """Block until feedback.json appears, then return it.
 
     No timeout that overrides the human (house rule): the default waits
     forever, reminding every five minutes. ``deadline`` exists for tests.
+
+    #2527: the wait declares itself through ``operator_wait`` — the reminder
+    line renders amber on a TTY (plain in files), and the stage watchdog's
+    tick says "awaiting OPERATOR" instead of impersonating a slow model.
+
+    #2529: the wait asks louder over time — toasts on ``notify_config``'s
+    backoff, then at most ONE backstop email per round, ever, enforced by an
+    on-disk sentinel so a resume cannot re-send it. Escalation never ends the
+    wait; every notification failure is one logged line and the wait goes on.
+    ``toaster`` / ``emailer`` are test seams.
     """
+    from assemblyzero.core import operator_notify, operator_wait
+
+    toaster = toaster or operator_notify.show_toast
+    emailer = emailer or operator_notify.send_email
+    context = context or {}
+    schedule = (
+        operator_notify.EscalationSchedule(notify_config)
+        if notify_config is not None else None
+    )
+
     start = time.monotonic()
     last_reminder = start
-    while True:
-        answer = bundle_mod.read_feedback(round_dir)
-        if answer is not None:
-            return answer
-        now = time.monotonic()
-        if deadline is not None and now - start > deadline:
-            raise TimeoutError(f"no feedback.json in {round_dir} after {deadline}s")
-        if now - last_reminder >= reminder_every:
-            # #2520: say the URL, every time. The first live serve printed a
-            # path to the JSON holding the URL, and the operator spent 26
-            # minutes staring at the indirection. In a detached run these
-            # lines are the only surface -- each one must be actionable on
-            # sight, with the file kept as the machine-readable copy.
-            log(
-                f"    [visual] still waiting on operator feedback -- open "
-                f"{pending_url(round_dir) or 'the review page'} "
-                f"({round_dir.name})"
-            )
-            last_reminder = now
-        time.sleep(poll_seconds)
+    operator_wait.begin(url=pending_url(round_dir), note=round_dir.name)
+    try:
+        while True:
+            answer = bundle_mod.read_feedback(round_dir)
+            if answer is not None:
+                return answer
+            now = time.monotonic()
+            if deadline is not None and now - start > deadline:
+                raise TimeoutError(
+                    f"no feedback.json in {round_dir} after {deadline}s"
+                )
+            if now - last_reminder >= reminder_every:
+                # #2520: say the URL, every time. The first live serve printed
+                # a path to the JSON holding the URL, and the operator spent 26
+                # minutes staring at the indirection. In a detached run these
+                # lines are the only surface -- each one must be actionable on
+                # sight, with the file kept as the machine-readable copy.
+                log(operator_wait.paint(
+                    f"    [visual] AWAITING OPERATOR -- your judgment is "
+                    f"requested: open "
+                    f"{pending_url(round_dir) or 'the review page'} "
+                    f"({round_dir.name})"
+                ))
+                last_reminder = now
+            if schedule is not None:
+                for action in schedule.due(now - start):
+                    _escalate(
+                        action, round_dir, notify_config, context,
+                        elapsed=now - start, log=log,
+                        toaster=toaster, emailer=emailer,
+                    )
+            time.sleep(poll_seconds)
+    finally:
+        operator_wait.end()
+
+
+def _escalate(
+    action: str, round_dir: Path, config, context: dict, *,
+    elapsed: float, log, toaster, emailer,
+) -> None:
+    """One due escalation, delivered non-fatally. Louder asking, never deciding."""
+    url = pending_url(round_dir)
+    repo = context.get("repo", "")
+    issue = context.get("issue", "")
+    where = f"{repo} #{issue}" if repo or issue else round_dir.name
+    minutes = int(elapsed // 60)
+
+    if action == "toast":
+        error = toaster(
+            "Visual gate awaiting your review",
+            f"{where}, {round_dir.name} — waiting {minutes}m. "
+            f"Click to open the review page.",
+            url,
+        )
+        if error:
+            log(f"    [visual] {error}")
+        return
+
+    if action == "email":
+        sentinel = round_dir / EMAIL_SENT_NAME
+        if sentinel.is_file():
+            return  # a prior grant of this wait already sent the one email
+        error = emailer(
+            sender=config.email_from,
+            to=config.email_to,
+            subject=f"[visual gate] {where} awaits your review",
+            text_body=(
+                f"The visual gate has been waiting on your judgment for "
+                f"{minutes} minutes.\n\n"
+                f"Repo:   {repo}\nIssue:  #{issue}\n"
+                f"Round:  {round_dir.name}\nPage:   {url or '(serve URL unknown)'}\n"
+                f"Bundle: {round_dir}\n\n"
+                f"The run holds until you answer or kill it; this is the one "
+                f"email it will ever send about this round.\n"
+            ),
+        )
+        if error:
+            log(f"    [visual] {error}")
+            return
+        sentinel.write_text(
+            json.dumps({"to": config.email_to, "after_seconds": int(elapsed)}),
+            encoding="utf-8",
+        )
+        log(f"    [visual] backstop email sent to {config.email_to}")
 
 
 def pending_url(round_dir: Path) -> str:
@@ -180,8 +278,6 @@ def pending_url(round_dir: Path) -> str:
     is the one reader, shared by the waiting line and the launcher-side
     announcement, so the two surfaces can never disagree.
     """
-    import json
-
     path = round_dir / "feedback-pending.json"
     try:
         return str(json.loads(path.read_text(encoding="utf-8")).get("url", ""))

@@ -13,13 +13,25 @@ Shape::
       "renderer_cmd": ["poetry", "run", "python", "tools/visual_contract_render.py"],
       "contract": "docs/design/0002-aesthetic-v1-stingray.md",
       "separation_floor": 85,
-      "ruled": {"needle_rgb": [247, 57, 35]}
+      "ruled": {"needle_rgb": [247, 57, 35]},
+      "open_browser": true,
+      "notify": {
+        "enabled": true,
+        "toast_backoff_seconds": [600, 1800, 3600],
+        "email_after_seconds": 14400,
+        "email_from": ""
+      }
     }
 
 ``renderer_cmd`` runs with the target repo as cwd, so the repo's own
 environment convention (poetry, house rules) resolves the interpreter and its
 imaging deps. ``ruled`` maps contract keys to the value a landed ruling pinned;
 a Modify delta that would change one halts for the operator (#2518 guardrail).
+``open_browser`` (#2528) and ``notify`` (#2529) are optional; their absence
+means the defaults shown (auto-open on a round's first serve; toast at 10
+minutes, 30 more, then hourly; one backstop email at 4 hours to the operator
+contact — the email needs ``email_from`` set to an SES-verified identity, via
+this file or the ``AZ_OPERATOR_EMAIL_FROM`` environment variable).
 """
 
 from __future__ import annotations
@@ -38,6 +50,15 @@ class GateConfig:
     contract: str
     separation_floor: float
     ruled: dict = field(default_factory=dict)
+    #: #2528: on a round's FIRST serve the gate opens the review page in the
+    #: operator's default browser itself. Default ON by the operator's own
+    #: request; a repo can declare it off, and the environment can too (see
+    #: gate.py) for operators who hate focus-stealing.
+    open_browser: bool = True
+    #: #2529: the escalating-notification declaration (toast backoff, email
+    #: backstop). Raw mapping; the wait parses it via NotifyConfig so the
+    #: intervals and the kill switch live with the repo's other gate law.
+    notify: dict = field(default_factory=dict)
 
 
 def load_gate_config(target_repo: Path | str) -> GateConfig | None:
@@ -57,6 +78,8 @@ def load_gate_config(target_repo: Path | str) -> GateConfig | None:
         contract=str(data.get("contract", "")),
         separation_floor=float(data.get("separation_floor", 0)),
         ruled=dict(data.get("ruled", {})),
+        open_browser=bool(data.get("open_browser", True)),
+        notify=dict(data.get("notify", {})),
     )
 
 
