@@ -102,8 +102,8 @@ def validate_code_response(
             return False, f"Python syntax error: {e}"
 
         # Issue #842: Validate imports resolve to real modules.
-        # Only run when repo_root is provided (skip for batch validation
-        # where repo_root isn't passed through).
+        # #2547: repo_root now travels through the batch path too, so this
+        # runs for every generated .py, not just the individual-retry path.
         if repo_root:
             from .import_validator import validate_imports
             from pathlib import Path
@@ -112,6 +112,116 @@ def validate_code_response(
             if not imports_ok:
                 return False, f"Unresolvable imports: {', '.join(bad_imports)}"
 
+            # #2547: a generated conftest must not re-register a pytest
+            # option an ancestor conftest already registers. This is the
+            # defect that killed run-issue331-235455: the generated
+            # tests/visual/conftest.py re-registered --generate-baselines
+            # (already in tests/conftest.py), pytest died at conftest load
+            # with "ValueError: option names ... already added", the green
+            # phase collected zero tests, and the run halted as a coverage
+            # mystery. Cross-file, mechanical, caught at write time.
+            options_ok, options_error = validate_conftest_options(
+                code, filepath, Path(repo_root)
+            )
+            if not options_ok:
+                return False, options_error
+
+    return True, ""
+
+
+def _addoption_flags(code: str) -> set[str]:
+    """String-literal option names registered via ``parser.addoption(...)``."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        # fail-open: syntax is the syntax check's finding, two lines above
+        # this check's call site — judging options in code that does not
+        # parse would double-report one defect. No flags means no verdict.
+        return set()
+    flags: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "addoption"
+        ):
+            for arg in node.args:
+                if (
+                    isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and arg.value.startswith("-")
+                ):
+                    flags.add(arg.value)
+    return flags
+
+
+def validate_conftest_options(
+    code: str, filepath: str, repo_root
+) -> tuple[bool, str]:
+    """A conftest may not re-register an ancestor conftest's option (#2547).
+
+    pytest loads every conftest on the path from rootdir to the test file and
+    registers their options into ONE parser; a duplicate raises ValueError at
+    load time and collection dies with zero tests. The check walks the
+    ancestor directories the same way pytest will, comparing string-literal
+    ``parser.addoption`` names.
+    """
+    from pathlib import Path
+
+    if Path(filepath).name != "conftest.py":
+        return True, ""
+    new_flags = _addoption_flags(code)
+    if not new_flags:
+        return True, ""
+
+    root = Path(repo_root).resolve()
+    current = ((root / filepath).parent.parent).resolve()
+    # A conftest at the repo root has no in-repo ancestors; never walk
+    # above the repo.
+    if current != root and root not in current.parents:
+        return True, ""
+    conflicts: list[str] = []
+    while True:
+        ancestor = current / "conftest.py"
+        if ancestor.is_file():
+            try:
+                ancestor_flags = _addoption_flags(
+                    ancestor.read_text(encoding="utf-8-sig")
+                )
+            except OSError:
+                # fail-open: an unreadable ancestor conftest cannot be
+                # compared — the check reports what it CAN see rather than
+                # failing the file on a filesystem hiccup, and pytest itself
+                # will name any duplicate this misses at collection time,
+                # which the green gate now surfaces (#2546).
+                ancestor_flags = set()
+            duplicated = sorted(new_flags & ancestor_flags)
+            if duplicated:
+                conflicts.append(
+                    f"{', '.join(duplicated)} already registered in "
+                    f"{ancestor.relative_to(root)}"
+                )
+        try:
+            at_root = current.resolve() == root
+        except OSError:
+            # fail-open: a directory that cannot resolve ends the ancestor
+            # walk early — the check reports what it already compared, and
+            # pytest itself names any duplicate this misses at collection
+            # time, which the green gate now surfaces (#2546).
+            at_root = True
+        if at_root or current.parent == current:
+            break
+        current = current.parent
+
+    if conflicts:
+        return False, (
+            "conftest re-registers pytest option(s) an ancestor conftest "
+            "already registers -- pytest dies at conftest load with "
+            "'ValueError: option names ... already added' and collects zero "
+            "tests: " + "; ".join(conflicts) + ". Drop the duplicate "
+            "registration; the ancestor's option is already available via "
+            "request.config.getoption()."
+        )
     return True, ""
 
 

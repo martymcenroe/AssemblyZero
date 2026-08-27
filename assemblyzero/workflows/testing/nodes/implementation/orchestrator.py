@@ -181,7 +181,19 @@ def generate_file_with_retry(
         # Build retry prompt if this isn't the first attempt
         if attempt > 0:
             prompt = build_retry_prompt(pruned_prompt or base_prompt, last_error, attempt_num)
-            print(f"        [RETRY {attempt_num}/{max_retries}] {last_error[:80]}...")
+            # #2547: causal wording. The old line printed the PREVIOUS
+            # attempt's error under the NEW attempt's number, so
+            # "[RETRY 2/2] Validation failed: ..." followed by silence read
+            # as an exhausted validator the pipeline ignored — a reading the
+            # #2546/#2547 investigation spent real time refuting. The line
+            # now says whose error it is and what happens next; the outcome
+            # is always printed too ([SUCCESS] on recovery, the
+            # ImplementationError halt on exhaustion — never a silent
+            # proceed).
+            print(
+                f"        [RETRY {attempt_num}/{max_retries}] attempt "
+                f"{attempt_num - 1} failed ({last_error[:80]}...) -- retrying"
+            )
             if attempt_num == 2:
                 emit("retry.strike_one", repo=str(audit_dir.parent.parent.parent.parent) if audit_dir else "", metadata={"filepath": filepath, "error": last_error[:200]})
 
@@ -641,10 +653,20 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
                     batch_failed_specs.append(spec)
                     continue
 
-                # Validate
-                valid, val_error = validate_code_response(code, fp)
+                # Validate. #2547: repo_root travels here too — the batch
+                # path used to omit it, which silently skipped import (and
+                # now conftest-option) validation for every batch-written
+                # file. run-issue331-235455's killing conftest was written
+                # exactly this way, validated for syntax alone.
+                valid, val_error = validate_code_response(
+                    code, fp, repo_root=str(repo_root),
+                )
                 if not valid:
-                    print(f"        [BATCH] Validation failed for {fp}: {val_error}")
+                    print(
+                        f"        [BATCH] Validation failed for {fp}: "
+                        f"{val_error} -- falling back to individual "
+                        f"generation with retries"
+                    )
                     batch_failed_specs.append(spec)
                     continue
 
