@@ -23,6 +23,13 @@ This module makes that impossible mechanically:
 * **The regression event**: a revision that modified content NO verdict in
   the whole history ever objected to is the S2-regression class, flagged at
   the moment it happens instead of one round later.
+* **The conservation gate** (#2559): the merge never emits a document that
+  lost a test definition the previous draft held and no verdict named —
+  on violation it emits the revision unenforced or the previous draft
+  entire, loudly, never the stitched result.
+* **Demanded additions** (#2560): when the round's completeness failures
+  demand new tests, a locked region introducing one passes — a demand to
+  add has no line to cite, so the named-content exemptions cannot cover it.
 
 Iteration 1 (the initial draft) is untouched — this governs revisions only.
 Every function here is pure (ADR 0224): text in, text and events out.
@@ -194,10 +201,62 @@ class PinningResult:
     #: Changed regions no verdict EVER named — the S2-regression class,
     #: flagged at the moment it happens (computed before restoration).
     regressions: tuple[str, ...] = ()
+    #: Regions passed through as demanded additions (#2560) — a completeness
+    #: failure demanded new tests, and the region introduces one.
+    additions: tuple[str, ...] = ()
+    #: Non-empty when the conservation gate overrode the merge (#2559):
+    #: the walked output lost tests no verdict named, so ``text`` is the
+    #: revision unenforced (differ misalignment) or the previous draft
+    #: entire (the revision itself removed them).
+    conservation_event: str = ""
     unlock_reason: str = ""
 
 
 _UNLOCK_RE = re.compile(r"^\s*UNLOCK:\s*(.+?)\s*$", re.MULTILINE)
+
+#: A test definition line — the conserved quantity of the merge (#2559) and
+#: the artifact class completeness checks demand added (#2560).
+_TEST_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)\s*\(")
+
+#: The phrases our own completeness checks use when they demand ADDITIONS
+#: ("3 LLD pass criterion(s) have no test in the spec ... Add a test for
+#: each", "... have no test asserting them. Section 10 owes each a test").
+#: A demand to add has no line to cite and no existing content to name —
+#: the #2555/#2558 vocabulary addresses only content that exists (#2560).
+_ADDITION_DEMAND_RE = re.compile(
+    r"\bhave no test\b|\badd a test\b|\bowes each a test\b", re.IGNORECASE
+)
+
+
+def demands_additions(completeness_issues: list[str] | None) -> bool:
+    """True when any current completeness failure demands new tests (#2560)."""
+    return any(
+        _ADDITION_DEMAND_RE.search(str(issue))
+        for issue in completeness_issues or []
+    )
+
+
+def _test_def_names(text: str) -> set[str]:
+    names: set[str] = set()
+    for line in text.splitlines():
+        match = _TEST_DEF_RE.match(line)
+        if match:
+            names.add(match.group(1))
+    return names
+
+
+def _is_expansion(old_region: list[str], new_region: list[str]) -> bool:
+    """Every old line survives, in order, inside the new region.
+
+    Such a replace is an insertion wearing a replace costume — the differ
+    bundled new content with untouched neighbours (a blank line, an anchor
+    comment). No previous byte is lost, so pinning has nothing to protect:
+    insertions pass, and this IS one (#2560 — run-issue331-111729's
+    demanded error-path test landed only because its region happened to
+    diff as a pure insert, while the REQ-8/9/10 additions died bundled).
+    """
+    iterator = iter(new_region)
+    return all(line in iterator for line in old_region)
 
 
 def unlock_requested(response: str) -> str:
@@ -218,6 +277,7 @@ def enforce_pinning(
     current_tokens: set[str],
     ever_tokens: set[str] | None = None,
     current_ranges: tuple[tuple[int, int], ...] = (),
+    additions_demanded: bool = False,
     unlock_reason: str = "",
 ) -> PinningResult:
     """Carry every unnamed span of ``previous`` forward byte-verbatim.
@@ -247,6 +307,26 @@ def enforce_pinning(
     With ``unlock_reason`` the restoration is skipped entirely — the drafter
     asked to restructure and the caller logs it — but the regression events
     still fire, because an unlock explains a change, it does not un-happen it.
+
+    ``additions_demanded`` (#2560): the round's completeness failures demand
+    NEW tests ("have no test in the spec ... Add a test for each"). A demand
+    to add has no line to cite and no existing content to name, so the
+    named-content exemptions cannot cover it; instead, a locked region whose
+    revised side introduces a test definition the previous draft lacks is
+    the demanded compliance and passes. Off by default — an unprompted
+    addition bundled into a locked modification stays refusable.
+
+    The conservation gate (#2559): the walk's region rule is all-or-nothing
+    — a region touching ANY named line passes wholesale — which is sound for
+    targeted diffs and lossy for restructures. run-issue331-111729's
+    iteration 6 diffed an eliding rewrite into giant regions; each touched
+    some named line, so the elisions passed through and 18 test definitions
+    vanished with no refusal and no regression event. So the way out is
+    gated: if the walked output lost any test definition the previous draft
+    held and no verdict named, the merge has malfunctioned — emit the
+    revision unenforced when it still holds those tests (differ
+    misalignment), or the previous draft entire when it does not (the
+    revision itself removed them). Never the stitched result.
     """
     prev_lines = previous.splitlines()
     rev_lines = revised.splitlines()
@@ -255,9 +335,11 @@ def enforce_pinning(
         named_line_flags(previous, ever_tokens, current_ranges)
         if ever_tokens is not None else current_flags
     )
+    prev_test_names = _test_def_names(previous)
 
     refusals: list[str] = []
     regressions: list[str] = []
+    additions: list[str] = []
     out: list[str] = []
 
     matcher = difflib.SequenceMatcher(None, prev_lines, rev_lines, autojunk=False)
@@ -269,6 +351,13 @@ def enforce_pinning(
             out.extend(rev_lines[j1:j2])
             continue
         old_region = prev_lines[i1:i2]
+        new_region = rev_lines[j1:j2]
+        # An expansion is an insertion wearing a replace costume: every old
+        # line survives in order, so nothing pinning protects is touched.
+        # No refusal, no regression — same law as the insert branch (#2560).
+        if old_region and new_region and _is_expansion(old_region, new_region):
+            out.extend(new_region)
+            continue
         # The S2-regression class: this change touches lines NO verdict ever
         # named. Recorded before any restoration decision.
         if old_region and all(not ever_flags[i] for i in range(i1, i2)):
@@ -277,17 +366,137 @@ def enforce_pinning(
             not current_flags[i] for i in range(i1, i2)
         )
         if locked and not unlock_reason:
-            out.extend(old_region)  # byte-verbatim carry-forward
-            refusals.append(_preview(old_region, i2 - i1))
+            if additions_demanded and any(
+                (match := _TEST_DEF_RE.match(line))
+                and match.group(1) not in prev_test_names
+                for line in new_region
+            ):
+                # The demanded compliance: this round's completeness
+                # failures asked for new tests and this region carries one
+                # the previous draft lacks (#2560). The regression event
+                # above still fires — visibility without destruction.
+                out.extend(new_region)
+                additions.append(_preview(new_region, j2 - j1))
+            else:
+                out.extend(old_region)  # byte-verbatim carry-forward
+                refusals.append(_preview(old_region, i2 - i1))
         else:
             out.extend(rev_lines[j1:j2])
 
     text = "\n".join(out)
     if revised.endswith("\n") or previous.endswith("\n"):
         text += "\n"
+
+    # Conservation gate (#2559). Skipped under an explicit unlock — the
+    # drafter asked to restructure and owns the outcome; the grant is
+    # logged, never silent.
+    if not unlock_reason:
+        override = _conservation_override(
+            previous, revised, text,
+            current_tokens=current_tokens,
+            current_flags=current_flags,
+            regressions=tuple(regressions),
+        )
+        if override is not None:
+            return override
+
     return PinningResult(
         text=text,
         refusals=tuple(refusals),
         regressions=tuple(regressions),
+        additions=tuple(additions),
         unlock_reason=unlock_reason,
+    )
+
+
+def _conservation_override(
+    previous: str,
+    revised: str,
+    walked: str,
+    *,
+    current_tokens: set[str],
+    current_flags: list[bool],
+    regressions: tuple[str, ...] = (),
+) -> PinningResult | None:
+    """The way out of the merge is gated (#2559): None when conservation
+    holds; otherwise the result to emit INSTEAD of the stitched text.
+
+    A test definition the previous draft held is lost when it is absent
+    from the walked output and no current verdict named it — neither as a
+    token nor by flagging any of its definition lines. Tier one: the
+    revision still holds every lost test (differ misalignment — a moved
+    block the walk mispaired), emit the revision unenforced. Tier two: the
+    revision lost them too (an eliding rewrite — run-issue331-111729's
+    iteration 6 carried [UNCHANGED] placeholders where 18 definitions had
+    been), emit the previous draft entire; abstaining to the revision
+    there would lose exactly what the gate exists to keep.
+
+    The merge can also MANUFACTURE duplicates — run-issue331-111729's
+    iteration 2 restored a superseded test listing alongside the
+    revision's moved copy, and the duplicate definitions later broke six
+    edit-script SEARCH blocks as ambiguous. A name occurring more times in
+    the walked output than in EITHER input was minted by the merge, never
+    authored: emit the revision unenforced. (A count the revision itself
+    carries is authored content — the fleet's spec template legitimately
+    lists a test in both its change-instruction and test-mapping sections
+    — and is not the merge's to judge.)
+    """
+    prev_lines = previous.splitlines()
+    walked_names = _test_def_names(walked)
+    lost = sorted(
+        name for name in _test_def_names(previous)
+        if name not in walked_names
+        and name.lower() not in current_tokens
+        and not any(
+            current_flags[i]
+            for i, line in enumerate(prev_lines)
+            if (match := _TEST_DEF_RE.match(line))
+            and match.group(1) == name
+        )
+    )
+    if not lost:
+        def _counts(text: str) -> dict[str, int]:
+            counts: dict[str, int] = {}
+            for line in text.splitlines():
+                match = _TEST_DEF_RE.match(line)
+                if match:
+                    counts[match.group(1)] = counts.get(match.group(1), 0) + 1
+            return counts
+
+        prev_counts = _counts(previous)
+        rev_counts = _counts(revised)
+        multiplied = sorted(
+            name for name, count in _counts(walked).items()
+            if count > max(prev_counts.get(name, 0), rev_counts.get(name, 0))
+        )
+        if multiplied:
+            return PinningResult(
+                text=revised,
+                regressions=regressions,
+                conservation_event=(
+                    f"the walked merge multiplied {len(multiplied)} test "
+                    f"definition(s) beyond both inputs "
+                    f"({', '.join(multiplied)}) -- emitting the revision "
+                    f"unenforced instead of the stitched result"
+                ),
+            )
+        return None
+    if all(name in _test_def_names(revised) for name in lost):
+        return PinningResult(
+            text=revised,
+            regressions=regressions,
+            conservation_event=(
+                f"the walked merge lost {len(lost)} test(s) present in "
+                f"both inputs ({', '.join(lost)}) -- emitting the revision "
+                f"unenforced instead of the stitched result"
+            ),
+        )
+    return PinningResult(
+        text=previous,
+        regressions=regressions,
+        conservation_event=(
+            f"the revision removed {len(lost)} test(s) no verdict named "
+            f"({', '.join(lost)}) -- revision refused entire, previous "
+            f"draft kept"
+        ),
     )
