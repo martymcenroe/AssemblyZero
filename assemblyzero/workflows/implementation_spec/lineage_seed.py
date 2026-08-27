@@ -62,6 +62,14 @@ class Seed:
     #: Every verdict the prior run produced, oldest first, so #2382's
     #: convergence check is not blind on the resumed round.
     prior_feedbacks: list[str] = field(default_factory=list)
+    #: #2536: the newest draft POSTDATES the newest verdict — the prior run
+    #: generated it and died before reviewing it (run-issue331-150920: the
+    #: grace draft the over-ceiling guard refused). Its verdict-file items
+    #: were already consumed by the revision that produced it, so seeding
+    #: them as outstanding feedback would spend a regeneration re-applying
+    #: fixes the draft already carries. The resumed grant's first action for
+    #: this shape is REVIEWING the draft, not regenerating it.
+    draft_unreviewed: bool = False
 
     @property
     def rounds_completed(self) -> int:
@@ -131,6 +139,11 @@ def seed_from_lineage(
                 for text in (_read(v) for v in verdicts)
                 if text.strip()
             ],
+            # #2536: lineage files carry zero-padded sequence prefixes
+            # (make_run_id ordering), so name order is generation order —
+            # a draft whose name sorts after the last verdict's was never
+            # reviewed.
+            draft_unreviewed=drafts[-1].name > verdicts[-1].name,
         )
     return None
 
@@ -160,9 +173,17 @@ def resume_payload(seed: Seed) -> dict:
     convergence. History is memory; the counter is budget. They separate
     here deliberately.
     """
+    # #2536: a draft the prior run generated but never reviewed already
+    # CARRIES its last verdict's fixes — that verdict fed the revision that
+    # produced it. Seeding the verdict as outstanding feedback would make the
+    # first resumed round a regeneration re-applying landed fixes (and under
+    # #2532's pinning, one that mostly gets refused). Seed no outstanding
+    # feedback instead: N2 passes the draft through untouched and the grant's
+    # first spend is the REVIEW the draft never got. History still carries
+    # every verdict, so #2382's stagnation check stays sighted either way.
     return {
         "spec_draft": seed.draft,
-        "review_feedback": seed.feedback,
+        "review_feedback": "" if seed.draft_unreviewed else seed.feedback,
         "review_feedback_history": list(seed.prior_feedbacks),
         "review_iteration": 0,
     }
@@ -170,6 +191,15 @@ def resume_payload(seed: Seed) -> dict:
 
 def describe(seed: Seed) -> str:
     """What the operator should see when a resume reuses paid work."""
+    if seed.draft_unreviewed:
+        return (
+            f"    [spec] resuming from lineage: {Path(seed.draft_path).name} "
+            f"({len(seed.draft.splitlines())} lines) was generated but never "
+            f"reviewed — the first action is reviewing it, not regenerating "
+            f"(#2536). {seed.rounds_completed} completed review round(s) in "
+            f"{Path(seed.run_dir).name}; the review cap regime starts fresh "
+            f"for this grant (#2514)."
+        )
     return (
         f"    [spec] resuming from lineage: {Path(seed.draft_path).name} "
         f"({len(seed.draft.splitlines())} lines) with "

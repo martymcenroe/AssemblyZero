@@ -244,21 +244,37 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # do it by synthesizing a verdict no reviewer issued, which is the defect
     # #1775 removed from this same guard.
     from assemblyzero.workflows.implementation_spec.review_progress import (
+        EXIT_CEILING,
         hard_ceiling,
     )
 
     ceiling = hard_ceiling(max_iterations)
     if review_iteration > ceiling:
-        print(f"    [GUARD] Iteration {review_iteration} exceeds ceiling ({ceiling})")
+        # #2536: with every regeneration-granting path consulting
+        # regeneration_allowed — the review loop's decide(), N3's grace
+        # clause, and the validation router's backstop — this state is
+        # unreachable from the graph. It survives as the last line of
+        # defence for a hand-built state, and it speaks the CLEAN ceiling
+        # vocabulary: run-issue331-150920 ended 39m 49s of honest converging
+        # rounds with "the regeneration routing should have halted earlier",
+        # an incoherence that blamed the run for a defect in the grace
+        # clause. A guard's halt must report the ceiling, not assign blame.
+        print(
+            f"    [GUARD] Iteration {review_iteration} is beyond the hard "
+            f"ceiling ({ceiling}) — halting with the ceiling report"
+        )
+        report = (
+            f"Spec review stopped [{EXIT_CEILING}]: iteration "
+            f"{review_iteration} is beyond the grant's hard ceiling "
+            f"({ceiling}), so this draft is preserved in lineage unreviewed "
+            f"and nothing more is spent. An explicit relaunch grants a "
+            f"fresh cap regime (#2514)."
+        )
         return {
             "review_verdict": "BLOCKED",
-            "review_feedback": (
-                f"Review iteration {review_iteration} exceeds the hard ceiling "
-                f"({ceiling}); the regeneration routing should have halted "
-                "earlier — treating as BLOCKED. The last generated spec was "
-                "NOT reviewed."
-            ),
-            "error_message": "",
+            "review_feedback": report,
+            "review_exit": EXIT_CEILING,
+            "error_message": report,
         }
 
     # -------------------------------------------------------------------------

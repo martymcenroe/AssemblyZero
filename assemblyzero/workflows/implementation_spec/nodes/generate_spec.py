@@ -219,6 +219,26 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                             "error_message": "",
                         }
 
+    # #2536: a seeded draft with NO outstanding feedback is one the prior
+    # grant generated but never got reviewed (run-issue331-150920: the guard
+    # refused its final draft, so the run died with paid work unjudged). Its
+    # last verdict's items are already IN it — that verdict fed the revision
+    # that produced it — so redrawing here would overwrite paid work with an
+    # unreviewed re-roll. Pass it through untouched: the grant's first spend
+    # is the review the draft never got, at this grant's iteration counter.
+    if not is_revision and existing_draft:
+        lines = len(existing_draft.splitlines())
+        print(
+            f"\n[N2] Seeded draft ({lines} lines) was never reviewed — "
+            f"passing it to review untouched (#2536)"
+        )
+        return {
+            "spec_draft": existing_draft,
+            "review_iteration": review_iteration,
+            "completeness_issues": [],
+            "error_message": "",
+        }
+
     if is_revision:
         review_iteration += 1
         print(
