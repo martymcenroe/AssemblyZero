@@ -31,6 +31,7 @@ import speedrun_roll as sr  # noqa: E402
 
 from assemblyzero.speedrun.leavings import (  # noqa: E402
     classify_dirt,
+    is_pipeline_input,
     preserve_and_clear,
     untracked_files,
 )
@@ -315,3 +316,99 @@ class TestNewAttemptPosture:
         assert leaving.exists()
         assert _leavings_branches(repo) == []
         assert "pipeline-authored leaving" in capsys.readouterr().out
+
+
+# --- the roll's own inputs are not litter (#2551) ---------------------------
+
+
+class TestPipelineInputClassification:
+    """The classifier gains the concept it lacked: a canonical INPUT path
+    for the issues currently rolling. Patterns mirror the loader's
+    (`find_lld_path` / `find_spec_path`) exactly."""
+
+    def test_the_loaders_patterns_are_inputs(self):
+        assert is_pipeline_input("docs/lld/active/LLD-331.md", [331])
+        assert is_pipeline_input("docs/lld/active/LLD-007.md", [7])
+        assert is_pipeline_input("docs/lld/active/LLD-7.md", [7])
+        assert is_pipeline_input("docs/lld/active/LLD-007-cache.md", [7])
+        assert is_pipeline_input("docs/lld/drafts/spec-0007.md", [7])
+
+    def test_another_issues_file_is_not_an_input(self):
+        """The run-16 droppings this janitor was built to clear (#2144)
+        are still leavings when a different issue rolls."""
+        assert not is_pipeline_input("docs/lld/active/LLD-002.md", [7])
+        assert not is_pipeline_input("docs/lld/active/LLD-016.md", [331])
+
+    def test_no_rolling_issues_protect_nothing(self):
+        assert not is_pipeline_input("docs/lld/active/LLD-007.md", [])
+        assert not is_pipeline_input("docs/lld/active/LLD-007.md", None)
+
+    def test_classify_dirt_keeps_the_input_out_of_both_lists(self, repo):
+        _drop_leaving(repo, "docs/lld/active/LLD-007.md")
+        machinery, operator = classify_dirt(repo, protect_issues=[7])
+        assert machinery == []
+        assert operator == []
+        unprotected, _ = classify_dirt(repo)
+        assert "docs/lld/active/LLD-007.md" in unprotected
+
+
+class TestCanonicalInputsSurviveTheRoll:
+    """#2551's acceptance: a launch-then-teardown cycle leaves the rolling
+    issue's LLD readable at the loader's resolved path, while genuine
+    leavings are still swept and preserved. The observed failure: the
+    13:01:22 launch sweep of run-issue331-130125 cleared the very LLD the
+    run was about to read, and the 13:25:57 teardown sweep cleared the
+    regenerated copy the resume would have needed."""
+
+    def test_the_rolling_issues_lld_survives_launch_and_teardown(self, repo):
+        _drop_leaving(repo, "docs/lld/active/LLD-007.md")
+        seen = {}
+
+        def _roll(repo_root, issue, log_dir, az_root, extra):
+            seen["at_roll"] = (
+                Path(repo_root) / "docs" / "lld" / "active" / "LLD-007.md"
+            ).exists()
+            return 0
+
+        code = _launch(repo, _roll)
+
+        assert code == 0
+        assert seen["at_roll"] is True, "the launch janitor swept the input"
+        from assemblyzero.workflows.testing.nodes.load_lld import find_lld_path
+
+        resolved = find_lld_path(7, repo)
+        assert resolved is not None, "the loader must find the input after teardown"
+        assert resolved.read_text(encoding="utf-8") == "drafted by the pipeline\n"
+
+    def test_an_input_written_during_the_run_survives_the_exit_reconcile(
+        self, repo
+    ):
+        """The teardown half: the lld stage saves the approved LLD during
+        the run; a resume reads it there. The reconcile leaves it."""
+
+        def _roll(repo_root, issue, log_dir, az_root, extra):
+            _drop_leaving(Path(repo_root), "docs/lld/active/LLD-007.md")
+            return 0
+
+        code = _launch(repo, _roll)
+
+        assert code == 0
+        assert (repo / "docs" / "lld" / "active" / "LLD-007.md").exists()
+
+    def test_genuine_leavings_are_still_swept_beside_the_kept_input(
+        self, repo
+    ):
+        """Do not weaken the sweep: another issue's dropping on the same
+        path prefix is preserved-and-cleared exactly as before."""
+        _drop_leaving(repo, "docs/lld/active/LLD-002.md")
+        _drop_leaving(repo, "docs/lld/active/LLD-007.md")
+
+        def _roll(repo_root, issue, log_dir, az_root, extra):
+            return 0
+
+        code = _launch(repo, _roll)
+
+        assert code == 0
+        assert not (repo / "docs" / "lld" / "active" / "LLD-002.md").exists()
+        assert (repo / "docs" / "lld" / "active" / "LLD-007.md").exists()
+        assert _leavings_branches(repo), "the genuine leaving was preserved"
