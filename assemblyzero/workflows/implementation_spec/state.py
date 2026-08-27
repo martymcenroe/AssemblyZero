@@ -259,6 +259,9 @@ class ImplementationSpecState(TypedDict, total=False):
     # event — a mechanically refused edit to locked content, a
     # regression-class flag ("revision modified content no verdict ever
     # objected to" — the S2 class made visible at the moment it happens),
-    # or an explicit UNLOCK grant with the drafter's stated reason.
+    # an explicit UNLOCK grant with the drafter's stated reason, a
+    # demanded-addition pass (#2560), or a conservation override (#2559).
+    # The cap halt consults this record before attributing a recurring
+    # or surviving complaint to the drafter (#2556, #2561).
     # Accumulated across the run; iteration 1 never writes here.
     pinning_events: list[str]

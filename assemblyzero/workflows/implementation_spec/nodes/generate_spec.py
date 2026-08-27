@@ -536,6 +536,7 @@ def _apply_pinning(
     in is named content, never a lock refusal, never the regression class.
     """
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
+        demands_additions,
         enforce_pinning,
         named_line_ranges,
         named_tokens,
@@ -563,6 +564,7 @@ def _apply_pinning(
         current_tokens=current,
         ever_tokens=ever,
         current_ranges=ranges,
+        additions_demanded=demands_additions(completeness_issues),
         unlock_reason=unlock_requested(response),
     )
 
@@ -581,6 +583,15 @@ def _apply_pinning(
         events.append(
             f"[PINNING] REGRESSION CLASS: revision modified content no "
             f"verdict ever objected to: {regression} (#2532)"
+        )
+    for addition in result.additions:
+        events.append(
+            f"[PINNING] demanded addition passed: {addition} — this round's "
+            f"completeness failures demand new tests (#2560)"
+        )
+    if result.conservation_event:
+        events.append(
+            f"[PINNING] CONSERVATION: {result.conservation_event} (#2559)"
         )
     for event in events:
         print(f"    {event}")

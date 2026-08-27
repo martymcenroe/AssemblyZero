@@ -391,9 +391,13 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                         for entry in prior_iters
                     )
                 ]
+                # #2561: a conservation override (#2559) is an enforcement
+                # intervention exactly as a refusal is — either way the
+                # drafter's revision did not reach the check intact.
                 reversions = [
                     event for event in state.get("pinning_events", [])
                     if "[PINNING] refused:" in event
+                    or "[PINNING] CONSERVATION:" in event
                 ]
                 declined = [] if reversions else identical
                 reverted = identical if reversions else []
@@ -427,10 +431,31 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                 ]
                 detail = ""
                 if kept_failing:
-                    detail += (
-                        f" Each unresolved check was shown to the drafter and "
-                        f"survived a revision: {', '.join(kept_failing)}."
-                    )
+                    # #2561: "survived a revision" claims the drafter's
+                    # output reached this check and still failed. With
+                    # enforcement interventions on the record that is
+                    # unprovable — run-issue331-111729's halt asserted
+                    # survival for criteria_have_tests while pinning had
+                    # refused the drafter's demanded addition in the same
+                    # granted revision. The survival claim survives only a
+                    # clean pinning record, because there it is true.
+                    if reversions:
+                        detail += (
+                            f" Each unresolved check was shown to the "
+                            f"drafter, but pinning enforcement refused or "
+                            f"overrode revision content in this run "
+                            f"({len(reversions)} event(s), e.g. "
+                            f"{reversions[0]}) — the drafter's revision may "
+                            f"not have reached the check intact; read the "
+                            f"[PINNING] events before treating these as "
+                            f"drafter failures: {', '.join(kept_failing)}."
+                        )
+                    else:
+                        detail += (
+                            f" Each unresolved check was shown to the drafter "
+                            f"and survived a revision: "
+                            f"{', '.join(kept_failing)}."
+                        )
                 if declined:
                     detail += (
                         f" NOTE: {', '.join(declined)} drew the IDENTICAL "
