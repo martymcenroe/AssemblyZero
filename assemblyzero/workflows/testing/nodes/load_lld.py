@@ -457,6 +457,54 @@ def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
     return requirements
 
 
+#: #2552: the patterns extract_requirements actually searches, named so a
+#: zero-requirements event can say what was looked for without the reader
+#: opening this file. Update alongside the extractor.
+_REQUIREMENTS_SEARCHED = (
+    "'### REQ-x.y:' headers, a '## Requirements'/'## Acceptance Criteria' "
+    "numbered list, and a '## 10. Test Mapping' table"
+)
+
+
+def describe_zero_requirements(
+    issue_number: int,
+    repo_root: Path,
+    spec_path: str,
+    original_lld_path: Path | None,
+    original_lld_readable: bool,
+) -> str:
+    """The empty requirement set as a named fact (#2552).
+
+    A zero needs a denominator here as much as it did for collected tests
+    (#2546): "no requirements declared" and "requirements unreadable" are
+    different events, the second names the path it searched, and neither is
+    a WARN that scrolls past. The 2026-08-27 near-miss: the leavings sweep
+    had cleared the LLD working copy, and a resumed impl stage would have
+    fallen back to the spec — whose Section 3 is "Current State", so every
+    extraction pattern returns empty — and certified against nothing.
+    """
+    if original_lld_path is None:
+        lld_dir = repo_root / LLD_ACTIVE_DIR
+        return (
+            f"requirements unreadable: no LLD found for issue "
+            f"#{issue_number} under {lld_dir} (searched "
+            f"LLD-{issue_number:03d}.md and its dash/unpadded variants), "
+            f"and the spec at {spec_path} declares none "
+            f"(searched: {_REQUIREMENTS_SEARCHED})"
+        )
+    if not original_lld_readable:
+        return (
+            f"requirements unreadable: the LLD at {original_lld_path} "
+            f"exists but could not be read, and the spec at {spec_path} "
+            f"declares none (searched: {_REQUIREMENTS_SEARCHED})"
+        )
+    return (
+        f"no requirements declared: neither the LLD at "
+        f"{original_lld_path} nor the spec at {spec_path} yields any "
+        f"(searched: {_REQUIREMENTS_SEARCHED})"
+    )
+
+
 def parse_test_scenarios(test_plan: str) -> list[TestScenario]:  # pragma: no cover
     """Parse test scenarios from test plan section.
 
@@ -1030,12 +1078,14 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
     # and its Section 10 may use a different format. The original LLD
     # has the canonical Section 3 (Requirements) and Section 10.1 (Test Scenarios).
     original_lld_content = lld_content  # default: use spec content
+    original_lld_readable = False  # #2552: tracked for the zero-req event
     original_lld_path = find_lld_path(issue_number, repo_root)
     if not original_lld_path and state.get("original_repo_root"):
         original_lld_path = find_lld_path(issue_number, Path(state["original_repo_root"]))
     if original_lld_path and original_lld_path.exists():
         try:
             original_lld_content = original_lld_path.read_text(encoding="utf-8")
+            original_lld_readable = True
             print(f"    Original LLD: {original_lld_path}")
         except OSError:
             print("    [WARN] Could not read original LLD, using spec content")
@@ -1096,13 +1146,23 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
 
     # Extract requirements — use original LLD (has Section 3: Requirements)
     requirements = extract_requirements(original_lld_content)
+    requirements_empty_reason = ""
     if not requirements:
         # Diagnostic: try spec content as fallback
         requirements = extract_requirements(lld_content)
         if requirements:
             print(f"    Found {len(requirements)} requirements (from spec)")
         else:
-            print("    [WARN] No requirements found in LLD or spec content")
+            # #2552: a named event, never a WARN that scrolls past. The
+            # reason travels in state so N1's guard and the N4b gate can
+            # say WHY the denominator is zero — declared-none and
+            # unreadable are different repairs, and the second names the
+            # path it searched.
+            requirements_empty_reason = describe_zero_requirements(
+                issue_number, repo_root, str(lld_path_obj),
+                original_lld_path, original_lld_readable,
+            )
+            print(f"    [ZERO-REQUIREMENTS] {requirements_empty_reason}")
     else:
         print(f"    Found {len(requirements)} requirements (from LLD)")
 
@@ -1170,6 +1230,8 @@ def load_lld(state: TestingWorkflowState) -> dict[str, Any]:  # pragma: no cover
         "detected_test_types": detected_types,
         "coverage_target": coverage_target,
         "requirements": requirements,
+        # #2552: why the denominator is zero, when it is. "" otherwise.
+        "requirements_empty_reason": requirements_empty_reason,
         "files_to_modify": files_to_modify,
         "audit_dir": str(audit_dir),
         "file_counter": file_num,

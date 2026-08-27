@@ -338,6 +338,9 @@ class TestCompletenessGateStoresIssueIds:
                 "test_files": [],
                 "audit_dir": "",
                 "iteration_count": 0,
+                # #2552: the gate refuses an empty requirement set before
+                # any analysis; this test exercises the ordinary path.
+                "requirements": ["REQ-1: foo exists"],
             }
             # Create a dummy file so analysis has something
             (tmp_path / "foo.py").write_text("pass")

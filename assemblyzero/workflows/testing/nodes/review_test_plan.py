@@ -299,8 +299,14 @@ def _run_mechanical_gates(state: TestingWorkflowState) -> list[str]:
     # Gate 2: Requirements exist
     requirements = state.get("requirements", [])
     if not requirements:
+        # #2552: the block names WHY the denominator is zero — load_lld's
+        # named event distinguishes "no requirements declared" from
+        # "requirements unreadable" and carries the searched path, so the
+        # operator repairs the right thing instead of hunting.
+        reason = state.get("requirements_empty_reason", "")
         errors.append(
             "No requirements extracted from LLD — cannot verify coverage"
+            + (f" ({reason})" if reason else "")
         )
 
     # Gate 3: Scenario-to-requirement coverage ratio
