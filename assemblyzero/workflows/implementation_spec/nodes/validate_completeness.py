@@ -358,25 +358,45 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                 # every failing check HAS been tried, that is the true reading.
                 tried = sorted(set(failing_names) & set(shown + grace_used))
                 # #2526: within "tried", the drafter FAILING to fix a check and
-                # the drafter DECLINING to change the code are different facts,
+                # the drafter leaving the code untouched are different facts,
                 # and the halt says which. When a check's complaint is
-                # byte-identical across every prior revision, the flagged code
-                # survived every round unchanged — the drafter was shown it
-                # repeatedly and repeatedly chose not to break working code,
-                # which is itself evidence of a false positive in the check.
-                # str.isupper died exactly this way: three identical
-                # complaints, three identical declines, one dead run.
+                # byte-identical across every prior revision, the flagged
+                # content reached the check unchanged every round — evidence
+                # of a false positive in the check. str.isupper died exactly
+                # this way: three identical complaints, one dead run.
+                #
+                # #2556: that inference is only sound when the drafter's
+                # output actually SURVIVED to the next check. Pinning
+                # enforcement (#2532) broke the assumption the day after the
+                # wording landed: a reverted revision re-presents the
+                # previous bytes, indistinguishable — from the complaint
+                # stream alone — from a drafter that changed nothing.
+                # run-issue331-092913 halted claiming "the drafter ... left
+                # the flagged code unchanged each time" with six [PINNING]
+                # refusal lines in the same log; the drafter had made the
+                # mandated fix every round and enforcement restored it. So:
+                # an identical complaint reads as drafter-left-unchanged
+                # ONLY when no pinning reversion happened in this run's
+                # revisions; with reversions on the record, enforcement is
+                # named and the drafter is not accused. Never attribute an
+                # artifact to an actor without proof.
                 prior_iters = prior_breakdown[:-1]
                 details_by_name = {
                     c["check_name"]: c["details"] for c in checks if not c["passed"]
                 }
-                declined = [
+                identical = [
                     name for name in tried
                     if prior_iters and all(
                         details_by_name[name] in entry["failures"]
                         for entry in prior_iters
                     )
                 ]
+                reversions = [
+                    event for event in state.get("pinning_events", [])
+                    if "[PINNING] refused:" in event
+                ]
+                declined = [] if reversions else identical
+                reverted = identical if reversions else []
                 # #2539: the third class. A complaint whose NUMBERS moved
                 # under revision while its verdict never did means the
                 # drafter complied with the instruction and the check's
@@ -393,7 +413,7 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
 
                 complied = [
                     name for name in tried
-                    if name not in declined and prior_iters and all(
+                    if name not in identical and prior_iters and all(
                         any(
                             _shape(details_by_name[name]) == _shape(failure)
                             for failure in entry["failures"]
@@ -403,7 +423,7 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                 ]
                 kept_failing = [
                     name for name in tried
-                    if name not in declined and name not in complied
+                    if name not in identical and name not in complied
                 ]
                 detail = ""
                 if kept_failing:
@@ -414,11 +434,27 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                 if declined:
                     detail += (
                         f" NOTE: {', '.join(declined)} drew the IDENTICAL "
-                        f"complaint on every revision — the drafter saw it "
-                        f"{len(prior_iters)} time(s) and left the flagged code "
-                        f"unchanged each time. A drafter declining to change "
-                        f"code it believes correct is evidence of a false "
-                        f"positive in the check, not of an unfixable spec."
+                        f"complaint on every revision — the drafter was shown "
+                        f"it {len(prior_iters)} time(s), no pinning reversion "
+                        f"intervened, and the flagged content reached the "
+                        f"check unchanged each time. Flagged content "
+                        f"surviving every revision untouched is evidence of "
+                        f"a false positive in the check, not of an unfixable "
+                        f"spec."
+                    )
+                if reverted:
+                    detail += (
+                        f" NOTE: {', '.join(reverted)} drew the IDENTICAL "
+                        f"complaint on every revision while pinning "
+                        f"enforcement reverted revision content in this "
+                        f"run ({len(reversions)} refusal(s), e.g. "
+                        f"{reversions[0]}). A reverted revision re-presents "
+                        f"the previous bytes to the check, so the recurrence "
+                        f"cannot be read as the drafter leaving the flagged "
+                        f"content unchanged — the complaint and the pinning "
+                        f"vocabulary are deadlocked (#2555): the check's "
+                        f"complaint must name its target in terms pinning "
+                        f"reads, or the named span must be unlocked."
                     )
                 if complied:
                     detail += (
@@ -2326,6 +2362,22 @@ def check_api_symbols_exist(
     # first-class defect in an implementation spec, and it is reported before
     # anything else. It used to be scraped with regex and mentioned in a
     # footnote, which fed this very check a confident, wrong call list.
+    #
+    # #2556: it reports under its OWN name. When this precondition failure
+    # shared check_name with the symbol check, the run-issue331-092913 cap
+    # halt sent the operator cross-checking api_symbols_exist against
+    # per-iteration hallucination-check artifacts that all said passed —
+    # the artifacts belong to the symbol half, which never ran.
+    #
+    # #2555: the "lines N-M" citation is load-bearing beyond legibility —
+    # it is the address revision pinning reads (named_line_ranges), so the
+    # span this failure demands a change in is named content a revision may
+    # edit. The advice clause deliberately writes its tag examples WITHOUT
+    # backticks: "(```text, ```json, ```bash)" fed named_tokens the garbage
+    # spans between the fence runs ("text,", "json,"), which defeated
+    # pinning's names-nothing-extractable abstention while naming zero
+    # draft lines — the exact deadlock that produced four byte-identical
+    # drafts on run-issue331-092913.
     if scan.failures:
         listed = "; ".join(
             f"lines {f.start_line}-{f.end_line} (```{f.tag}) — {f.error}"
@@ -2337,13 +2389,13 @@ def check_api_symbols_exist(
             else ""
         )
         return CompletenessCheck(
-            check_name="api_symbols_exist",
+            check_name="python_fences_parse",
             passed=False,
             details=(
                 f"{len(scan.failures)} code fence(s) tagged as Python do not "
-                f"parse as Python: {listed}{suffix}. Fix the snippet, or tag "
-                f"the fence with the language it actually contains (```text, "
-                f"```json, ```bash) if it was never meant to be Python."
+                f"parse as Python: {listed}{suffix}. Fix the snippet, or "
+                f"retag the fence with the language it actually contains "
+                f"(text, json, bash) if it was never meant to be Python."
             ),
         )
 

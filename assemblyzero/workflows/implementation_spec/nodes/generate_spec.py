@@ -529,15 +529,22 @@ def _apply_pinning(
     When the current verdict names nothing extractable, pinning abstains
     entirely — locking the whole document on an unparseable naming would
     refuse every legitimate fix, and unknown is not guilty (#2526).
+
+    Line-range citations from the current completeness failures count as
+    naming (#2555): "lines 81-83" addresses ``previous`` exactly — the
+    checks measured that document — so the span a failure demands a change
+    in is named content, never a lock refusal, never the regression class.
     """
     from assemblyzero.workflows.implementation_spec.revision_pinning import (
         enforce_pinning,
+        named_line_ranges,
         named_tokens,
         unlock_requested,
     )
 
     current = named_tokens(review_feedback, completeness_issues)
-    if not current:
+    ranges = named_line_ranges(completeness_issues)
+    if not current and not ranges:
         note = (
             "[PINNING] the verdict names nothing extractable — pinning not "
             "applied this round (#2532)"
@@ -555,6 +562,7 @@ def _apply_pinning(
         previous, revised,
         current_tokens=current,
         ever_tokens=ever,
+        current_ranges=ranges,
         unlock_reason=unlock_requested(response),
     )
 
