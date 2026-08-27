@@ -194,6 +194,20 @@ def route_after_validation(
     # stops a grace being claimed twice cannot live here.
     grace_for = state.get("grace_revision_for", [])
     if review_iteration >= max_iterations and grace_for:
+        # #2536: N3 already refuses a grace at the hard ceiling; this is the
+        # backstop for a hand-built state carrying one. A regeneration the
+        # review guard would refuse to review must not be granted from any
+        # path -- one authority for the ceiling decision.
+        from assemblyzero.workflows.implementation_spec.review_progress import (
+            regeneration_allowed,
+        )
+
+        if not regeneration_allowed(review_iteration, max_iterations):
+            print(
+                "    [ROUTING] Grace requested at the hard ceiling -- "
+                "suppressed; the revision could never be reviewed (#2536)"
+            )
+            return "HALT"
         print(
             f"    [ROUTING] Cap reached ({max_iterations}), but "
             f"{', '.join(grace_for)} has never reached a revision prompt - "

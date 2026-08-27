@@ -75,6 +75,27 @@ def hard_ceiling(max_iterations: int) -> int:
     return base * CEILING_MULTIPLIER
 
 
+def regeneration_allowed(review_iteration: int, max_iterations: int) -> bool:
+    """May a regeneration be granted at this counter? The ONE authority (#2536).
+
+    The next revision will carry ``review_iteration + 1``, and #1775
+    guarantees the draft generated AT the ceiling still gets its review — so
+    the last grantable regeneration is the one that produces the ceiling
+    itself. Every path that can send the graph back to N2 past the base cap
+    consults this predicate; nothing else compares anything to the ceiling.
+
+    The defect this retires (run-issue331-150920, 2026-08-26): the #2304
+    grace clause checked only the BASE cap, so a completeness failure at
+    iteration 9 — the ceiling, reached by honest converging rounds — was
+    granted a grace revision carrying iteration 10, which the review guard
+    then refused to review. 39m 49s of real work ended in the incoherent
+    "the regeneration routing should have halted earlier" instead of the
+    clean hard-ceiling report, and the grace draft was pure spend with
+    unreviewable output.
+    """
+    return review_iteration < hard_ceiling(max_iterations)
+
+
 @dataclass(frozen=True)
 class Decision:
     """Whether to run another round, and the name of the exit if not."""

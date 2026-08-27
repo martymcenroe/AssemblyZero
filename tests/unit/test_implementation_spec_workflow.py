@@ -2133,7 +2133,12 @@ class TestReviewSpec:
 
         result = review_spec(base_state)
         assert result["review_verdict"] == "BLOCKED"
-        assert "NOT reviewed" in result["review_feedback"]
+        # #2536: the guard now speaks the clean ceiling vocabulary — the
+        # draft is preserved unreviewed and the halt names the exit, never
+        # the "routing should have halted earlier" incoherence.
+        assert "unreviewed" in result["review_feedback"]
+        assert "hard ceiling" in result["review_feedback"]
+        assert "should have halted earlier" not in result["review_feedback"]
         mock_provider.assert_not_called()
 
     @patch("assemblyzero.workflows.implementation_spec.nodes.review_spec.get_provider")

@@ -284,7 +284,43 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
         max_iterations = state.get("max_iterations", 3)
         if iteration >= max_iterations:
             grace_for = grant_grace(failing_names, shown, grace_used)
-            if grace_for:
+            # #2536: the ceiling decision has ONE authority. The grace clause
+            # checked only the base cap, so a completeness failure at the
+            # hard ceiling (run-issue331-150920: iteration 9, reached by
+            # eight honest converging rounds) was granted a revision carrying
+            # iteration 10 — a state the review guard refuses to review. The
+            # grace draft was pure spend with unreviewable output, and the
+            # halt was the incoherent "routing should have halted earlier"
+            # instead of the clean hard-ceiling report.
+            from assemblyzero.workflows.implementation_spec.review_progress import (
+                CEILING_MULTIPLIER,
+                EXIT_CEILING,
+                hard_ceiling,
+                regeneration_allowed,
+            )
+
+            if not regeneration_allowed(iteration, max_iterations):
+                if grace_for:
+                    print(
+                        f"    [CAP] {', '.join(grace_for)} has never been "
+                        f"shown to the drafter, but the grant is at its hard "
+                        f"ceiling — the revision it would earn could never be "
+                        f"reviewed, so it is not granted (#2536)."
+                    )
+                    grace_for = []
+                ceiling = hard_ceiling(max_iterations)
+                listed = "; ".join(completeness_issues[:3])
+                cap_message = (
+                    f"Spec review stopped [{EXIT_CEILING}]: the grant reached "
+                    f"its hard ceiling of {ceiling} ({CEILING_MULTIPLIER}x "
+                    f"the base cap of {max_iterations}) during a completeness "
+                    f"revision — iteration {iteration}'s draft failed "
+                    f"{len(completeness_issues)} completeness check(s) and no "
+                    f"further regeneration may be granted. Unfixed: {listed}. "
+                    f"The draft and every verdict are in lineage; an explicit "
+                    f"relaunch grants a fresh cap regime (#2514)."
+                )
+            elif grace_for:
                 grace_used.extend(grace_for)
                 print(
                     f"    [CAP] {max_iterations} revision(s) spent, but "
