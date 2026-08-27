@@ -196,6 +196,18 @@ def _build_recommendation(
     state: dict[str, Any] | None = None,
 ) -> str:
     """Generate human-readable advice based on error type."""
+    # #2546: a zero-collection halt names its own cause, whatever class the
+    # classifier assigned it — the one wrong reading is the old stagnation
+    # advice pointing at the LLD/spec, which run-issue331-235455 received
+    # while the actual defect was one line in a generated conftest.
+    if "collected 0 tests" in (error_message or ""):
+        return (
+            "Non-transient: pytest collected ZERO tests — the suite fails at "
+            "collection/conftest load, so no coverage or pass count means "
+            "anything. Fix the collection error named in the halt (typically "
+            "an import or a conftest defect in the generated files); the LLD "
+            "and spec are not implicated."
+        )
     if error_type == "capacity_exhausted":
         return (
             "Transient error: Gemini is overloaded (503/529). "

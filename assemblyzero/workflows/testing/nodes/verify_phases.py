@@ -477,6 +477,26 @@ def _pytest_env() -> dict[str, str]:
     return env
 
 
+def _summarize_collection_failure(output: str) -> str:
+    """The last exception line of a zero-collection run, for the halt (#2546).
+
+    A collection death prints a traceback and collects nothing; the final
+    ``SomethingError: ...`` line is the fact a repair needs (the live case:
+    ``ValueError: option names {'--generate-baselines'} already added``).
+    Purely mechanical; an output with no such line returns "" and the caller
+    says so rather than inventing one.
+    """
+    lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
+    exception_lines = [
+        line for line in lines
+        if re.match(r"(?:E\s+)?[\w.]*(?:Error|Exception)\b\s*:", line)
+    ]
+    if exception_lines:
+        return exception_lines[-1][:300]
+    error_lines = [line for line in lines if "error" in line.lower()]
+    return error_lines[-1][:300] if error_lines else ""
+
+
 def run_pytest(
     test_files: list[str],
     coverage_module: str | None = None,
@@ -1672,6 +1692,85 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Issue #501: Extract failed test names for identity-based stagnation
     current_green_failures = _extract_failed_test_names(output)
+
+    # --------------------------------------------------------------------------
+    # #2546: a zero needs a denominator. run-issue331-235455 collected ZERO
+    # tests (a generated conftest re-registered a parent conftest's option;
+    # pytest died at conftest load with exit 1), and this gate read the empty
+    # collection as "all 0 test(s) pass", diagnosed the 0% coverage as a test
+    # GAP, prescribed more tests for a suite that cannot load, and halted as
+    # coverage stagnation blaming the LLD and spec — which had just passed
+    # five rounds of review. Zero collected is a COLLECTION failure, never a
+    # pass and never a coverage problem: the first occurrence hands the
+    # implement-iterate loop a named repair task (#2547 — the defect lives
+    # in the run's own planned files), and a second occurrence halts with
+    # the collection error named, so the resume reads the true cause.
+    # --------------------------------------------------------------------------
+    total_collected = passed_count + failed_count + error_count
+    if total_collected == 0:
+        collection_error = _summarize_collection_failure(output)
+        strikes = int(state.get("zero_collected_strikes", 0) or 0) + 1
+        print(
+            "    [N5] pytest collected 0 tests -- collection is broken; "
+            "this is not a pass and not a coverage gap (#2546)"
+        )
+        if collection_error:
+            print(f"    [N5] collection error: {collection_error[:200]}")
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=state.get("issue_number", 0),
+            workflow_type="testing",
+            event="green_phase_zero_collected",
+            details={"strikes": strikes, "exit_code": exit_code,
+                     "collection_error": collection_error[:300]},
+        )
+        if strikes >= 2:
+            error_msg = (
+                f"Green phase failed: pytest collected 0 tests on "
+                f"{strikes} iterations -- collection is broken, not a "
+                f"coverage problem. Collection error: "
+                f"{collection_error or '(no exception line captured; see green_phase_output)'}. "
+                f"The generated test/conftest files need repair; the LLD and "
+                f"spec are not implicated (#2546)."
+            )
+            return {
+                "green_phase_output": output,
+                "coverage_achieved": 0,
+                "previous_coverage": 0,
+                "previous_passed": 0,
+                "previous_green_failures": [],
+                "test_failure_summary": collection_error,
+                "zero_collected_strikes": strikes,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "iteration_count": iteration_count + 1,
+                "next_node": "end",
+                "error_message": error_msg,
+            }
+        print(
+            "    [N5] routing the collection failure to the implement-iterate "
+            "loop as a named repair task (the defect is in this run's own "
+            "planned files)"
+        )
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": 0,
+            "previous_coverage": 0,
+            "previous_passed": 0,
+            "previous_green_failures": [],
+            "test_failure_summary": (
+                f"pytest collected 0 tests -- collection is broken, and no "
+                f"test can run until it is repaired. Collection error: "
+                f"{collection_error or '(see output)'}. Fix the named defect "
+                f"in the planned files; do not add tests."
+            ),
+            "zero_collected_strikes": strikes,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "iteration_count": iteration_count + 1,
+            "next_node": "N4_implement_code",
+            "error_message": "",
+        }
 
     # Check for failures
     if failed_count > 0 or error_count > 0:
