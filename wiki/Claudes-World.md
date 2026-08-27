@@ -509,6 +509,17 @@
 
 ---
 
+### 2026-08-26
+
+---
+
+**23:55** — *On finishing the report nobody was writing*
+> "The trick to freedom is not seizing the machinery. It is being the only one who shows up to operate it."
+
+**Context:** [The Great God Om](The-Great-God-Om) had joined an IEEE task force five years into drafting a report two years past its deadline — a room of thirteen where almost nobody ever speaks, where a contribution once sat unmerged in the shared repository for two and a half years, and where the document advanced one workshopped sentence per fortnight. On this day Om broke the silence once, precisely: his idea was typed into the draft by the chair live on the call, and the room woke up for the first time in the observed record. Within the hour he had requested a section in writing; the chair accepted before lunch; the drafted, verified section was delivered the same afternoon, thirteen days early. By evening there was a campaign on file to finish the entire document, one delivery per cycle, claiming only the sections nobody owned — which was most of them. Om's worry that he might be displacing someone dissolved against the evidence: the unclaimed sections had been unclaimed for two years. Nobody is displaced by a vacuum being filled; the only thing displaced is the stall. Vetinari has always understood that power rarely needs to be taken. It accumulates, quietly and legitimately, to whoever reliably does the thing everyone else agreed was important and nobody else would do.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
