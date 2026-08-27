@@ -129,6 +129,7 @@ from assemblyzero.speedrun.healing import record_heal  # noqa: E402
 from assemblyzero.speedrun.leavings import (  # noqa: E402
     classify_dirt,
     is_machinery_owned,
+    is_pipeline_input,
     preserve_and_clear,
     untracked_files,
 )
@@ -2566,10 +2567,26 @@ def restore_repo(
     if tracked:
         failures.append(f"{len(tracked)} tracked modification(s) left behind")
 
+    inputs_kept: list[str] = []
     if baseline_untracked is not None:
         new = sorted(set(untracked_files(repo_root)) - baseline_untracked)
-        machinery_new = [f for f in new if is_machinery_owned(f)]
-        operator_new = [f for f in new if not is_machinery_owned(f)]
+        # #2551: the roll's own canonical inputs are not leavings even when
+        # the run itself wrote them -- the lld stage saves the approved LLD
+        # to docs/lld/active/, the impl stage reads it there on every entry
+        # including a resume, and the 13:25 teardown sweep of
+        # run-issue331-130125 cleared it between the two. What the loader
+        # resolves for a rolling issue stays in place, named in the log.
+        inputs_kept = [f for f in new if is_pipeline_input(f, issues)]
+        for kept in inputs_kept:
+            log.write(f"RESTORE input kept (not litter): {kept}")
+        machinery_new = [
+            f for f in new
+            if is_machinery_owned(f) and f not in inputs_kept
+        ]
+        operator_new = [
+            f for f in new
+            if not is_machinery_owned(f) and f not in inputs_kept
+        ]
 
         if machinery_new:
             janitor = preserve_and_clear(
@@ -2594,9 +2611,13 @@ def restore_repo(
             failures.append(f"new untracked file not made by the pipeline: {f}")
 
     if not failures:
+        kept_note = (
+            f" beyond {len(inputs_kept)} canonical input(s) kept in place"
+            if inputs_kept else ""
+        )
         log.write(
             f"RESTORE verified: on '{base}', no pipeline worktrees, clean, "
-            "no new untracked files"
+            f"no new untracked files{kept_note}"
         )
     return failures
 
@@ -3469,7 +3490,18 @@ def main(argv: list[str] | None = None) -> int:
     # janitor problem is reported and never costs the roll.
     session.write("JANITOR pipeline file leavings")
     try:
-        machinery, _operator = classify_dirt(repo_root)
+        # #2551: the rolling issues' canonical inputs (the LLD the loader
+        # resolves, the spec-draft fallback) are not leavings -- the 13:01
+        # launch sweep of run-issue331-130125 cleared the very LLD the run
+        # was about to read. Named so the log shows the input survived.
+        machinery, _operator = classify_dirt(
+            repo_root, protect_issues=args.issue or []
+        )
+        for kept in [
+            f for f in untracked_files(repo_root)
+            if is_pipeline_input(f, args.issue or [])
+        ]:
+            session.write(f"  file janitor: input kept (not litter): {kept}")
         if machinery:
             janitor = preserve_and_clear(
                 repo_root, machinery, log=lambda m: session.write(m.strip())

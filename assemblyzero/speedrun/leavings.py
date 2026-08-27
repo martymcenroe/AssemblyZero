@@ -43,6 +43,54 @@ EMISSION_ALLOWLIST = (
     "docs/lld/drafts/",
 )
 
+#: #2551: the CURRENT roll's canonical inputs are not leavings. The LLD
+#: working copy at docs/lld/active/LLD-{issue}.md is untracked on the main
+#:  checkout (main does not carry it; the arc branch does), so the sweep
+#: classified it as leavings and preserved-and-cleared it three times on
+#: 2026-08-27 -- including once at LAUNCH, before the run had done
+#: anything -- and every later stage (and every resume) then read its own
+#: input's canonical path and found it gone. The patterns mirror the
+#: loader's exactly (`find_lld_path` / `find_spec_path` in
+#: workflows/testing/nodes/load_lld.py): what the loader would resolve for
+#: the rolling issue is an input; every OTHER issue's file at these paths
+#: stays genuine leavings -- the run-16 droppings that this janitor was
+#: built to clear (#2144) are still cleared.
+_INPUT_GLOB_TEMPLATES = (
+    "docs/lld/active/LLD-{padded3}.md",
+    "docs/lld/active/LLD-{padded3}-*.md",
+    "docs/lld/active/LLD-{issue}.md",
+    "docs/lld/active/LLD-{issue}-*.md",
+    "docs/lld/drafts/spec-{padded4}.md",
+    "docs/lld/drafts/spec-{padded4}-*.md",
+    "docs/lld/drafts/spec-{padded3}.md",
+    "docs/lld/drafts/spec-{padded3}-*.md",
+    "docs/lld/drafts/spec-{issue}.md",
+    "docs/lld/drafts/spec-{issue}-*.md",
+)
+
+
+def pipeline_input_globs(issue: int) -> tuple[str, ...]:
+    """The canonical input paths the loader resolves for ``issue``."""
+    return tuple(
+        template.format(
+            issue=issue, padded3=f"{issue:03d}", padded4=f"{issue:04d}"
+        )
+        for template in _INPUT_GLOB_TEMPLATES
+    )
+
+
+def is_pipeline_input(rel_path: str, issues) -> bool:
+    """True when ``rel_path`` is a canonical input for any rolling issue."""
+    from fnmatch import fnmatch
+
+    normalized = rel_path.replace("\\", "/")
+    return any(
+        fnmatch(normalized, glob)
+        for issue in (issues or ())
+        for glob in pipeline_input_globs(int(issue))
+    )
+
+
 GRAVEYARD_LEAVINGS_PREFIX = "graveyard/leavings"
 
 _TS_FMT = "%Y%m%d-%H%M%S"
@@ -144,13 +192,22 @@ def is_machinery_owned(rel_path: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in EMISSION_ALLOWLIST)
 
 
-def classify_dirt(repo: Path | str) -> tuple[list[str], list[str]]:
+def classify_dirt(
+    repo: Path | str, *, protect_issues=()
+) -> tuple[list[str], list[str]]:
     """(machinery-owned untracked, operator-owned dirt) as porcelain lines.
 
     Machinery-owned: untracked AND under the emission allowlist -- ours to
     preserve and clear. Operator-owned: every other dirty entry (tracked
     modifications of any kind, untracked outside the allowlist) -- named,
     never touched.
+
+    ``protect_issues`` (#2551): the issues currently rolling. Their
+    canonical input files (the LLD the loader resolves, the spec-draft
+    fallback) are neither machinery leavings nor operator dirt -- they are
+    the pipeline's own input at the path every stage and every resume
+    reads, and appear in neither list. Every other issue's file at those
+    paths is still leavings.
     """
     result = _run(["git", "-C", str(repo), "status", "--porcelain", "-uall"])
     if result.returncode != 0:
@@ -166,6 +223,9 @@ def classify_dirt(repo: Path | str) -> tuple[list[str], list[str]]:
             # The machinery's own record is never dirt (#2164).
             continue
         if line.startswith("?? ") and is_machinery_owned(path):
+            if is_pipeline_input(path, protect_issues):
+                # The current roll's input is not litter (#2551).
+                continue
             machinery.append(path)
         else:
             operator.append(line.strip())
