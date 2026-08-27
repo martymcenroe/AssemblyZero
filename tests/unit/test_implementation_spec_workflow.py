@@ -1789,7 +1789,15 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             "review_iteration": 0,
             "prior_completeness_breakdown": [],
         }
-        result = validate_completeness(state)
+        # #2539 demoted the density heuristic this fixture used to trip, so
+        # the failure this test needs is now supplied deterministically.
+        with patch(
+            "assemblyzero.workflows.implementation_spec.nodes."
+            "validate_completeness.check_modify_files_have_excerpts",
+            return_value={"check_name": "x", "passed": False,
+                          "details": "missing excerpt for a.py"},
+        ):
+            result = validate_completeness(state)
         breakdown = result.get("prior_completeness_breakdown", [])
         assert result["validation_passed"] is False
         assert len(breakdown) == 1
@@ -1813,7 +1821,14 @@ class TestValidateCompletenessAccumulatesPriorBreakdown:
             "review_iteration": 1,
             "prior_completeness_breakdown": prior,
         }
-        result = validate_completeness(state)
+        # #2539: deterministic failure, as above.
+        with patch(
+            "assemblyzero.workflows.implementation_spec.nodes."
+            "validate_completeness.check_modify_files_have_excerpts",
+            return_value={"check_name": "x", "passed": False,
+                          "details": "missing excerpt for a.py"},
+        ):
+            result = validate_completeness(state)
         breakdown = result.get("prior_completeness_breakdown", [])
         assert len(breakdown) == 2
         assert breakdown[0] == {"iteration": 0, "failures": ["old failure"]}

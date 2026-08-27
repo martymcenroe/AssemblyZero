@@ -145,8 +145,32 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_functions)
     _log_check(check_functions)
 
-    # Check 4: Change instructions should be specific
+    # Check 4: Change instructions should be specific — ADVISORY (#2539).
+    # A fence-count density ratio is a proxy, not a verification: it killed
+    # run-issue331-200815 one or two rounds from approval, at "found 8,
+    # expected 9" on a 454-line spec the adversarial reviewer had certified
+    # concrete and executable for five consecutive rounds — and because the
+    # threshold is derived from line count, the drafter's compliance (adding
+    # a fenced snippet, 7→8) grew the spec and moved the demand with it
+    # (8→9). This graph ALWAYS runs the N5 adversarial review, which judges
+    # concreteness and executability directly, with reasons, every round; a
+    # density heuristic adds no information the reviewer lacks and must not
+    # hold a veto the reviewer cannot override. A mechanical check
+    # hard-blocks only on what it can verify — a symbol exists, a row is
+    # cited — and a ratio is not that. Second instance of the class after
+    # #2526's str.isupper.
     check_instructions = check_change_instructions_specific(spec_draft)
+    if not check_instructions["passed"]:
+        print(f"    [ADVISORY] {check_instructions['details']}")
+        check_instructions = CompletenessCheck(
+            check_name="change_instructions_specific",
+            passed=True,
+            details=(
+                "ADVISORY (density heuristic — not blocking, #2539; the N5 "
+                "reviewer judges concreteness directly): "
+                + check_instructions["details"]
+            ),
+        )
     checks.append(check_instructions)
     _log_check(check_instructions)
 
@@ -353,7 +377,34 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                         for entry in prior_iters
                     )
                 ]
-                kept_failing = [name for name in tried if name not in declined]
+                # #2539: the third class. A complaint whose NUMBERS moved
+                # under revision while its verdict never did means the
+                # drafter complied with the instruction and the check's
+                # counter absorbed the compliance — observed live as "found
+                # 7, expected 8, 441 lines" becoming "found 8, expected 9,
+                # 454 lines": the snippet was added, the spec grew, and the
+                # line-derived threshold moved with it. Three revisions that
+                # cannot move a blind counter are evidence against the
+                # check, not the draft. Detected by digit-normalized
+                # identity: same complaint shape every round, only the
+                # counts changed.
+                def _shape(text: str) -> str:
+                    return re.sub(r"\d+", "N", text)
+
+                complied = [
+                    name for name in tried
+                    if name not in declined and prior_iters and all(
+                        any(
+                            _shape(details_by_name[name]) == _shape(failure)
+                            for failure in entry["failures"]
+                        )
+                        for entry in prior_iters
+                    )
+                ]
+                kept_failing = [
+                    name for name in tried
+                    if name not in declined and name not in complied
+                ]
                 detail = ""
                 if kept_failing:
                     detail += (
@@ -368,6 +419,16 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
                         f"unchanged each time. A drafter declining to change "
                         f"code it believes correct is evidence of a false "
                         f"positive in the check, not of an unfixable spec."
+                    )
+                if complied:
+                    detail += (
+                        f" NOTE: {', '.join(complied)} COMPLIED WITHOUT "
+                        f"EFFECT — the complaint kept its exact shape across "
+                        f"every revision with only its counts moving, so the "
+                        f"drafter did what the check asked and the check's "
+                        f"own threshold absorbed it. That is evidence of a "
+                        f"false positive in the check, not of an unfixable "
+                        f"spec (#2539)."
                     )
                 cap_message = (
                     f"Iteration cap: {max_iterations} revision(s) ended with "
@@ -814,12 +875,22 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
 
 
 def check_change_instructions_specific(spec: str) -> CompletenessCheck:
-    """Change instructions must be diff-level specific.
+    """Change instructions should be diff-level specific — a DENSITY HEURISTIC.
 
-    Verifies that the spec contains specific change instructions rather
-    than vague directives. Looks for indicators of specificity such as
-    code blocks, line references, before/after snippets, and precise
-    modification instructions.
+    #2539: this check is ADVISORY at the node — its failure is printed, never
+    gated on. The measurement is a proxy (fence count per ~50 lines, indicator
+    count per ~30), and because both thresholds derive from line count, a
+    drafter's compliance grows the spec and can move the demand with it —
+    observed live as 7-of-8 at 441 lines becoming 8-of-9 at 454. The N5
+    adversarial reviewer judges concreteness and executability directly; this
+    heuristic only surfaces a hint the operator can read in the log.
+
+    The fence counter counts EVERY fence pair regardless of language tag —
+    python, diff, text — so guidance in any fence form registers (verified
+    against the run-issue331-200815 draft while refuting the hypothesis that
+    non-Python fences were skipped: that scan note belonged to the
+    api-symbols checker). Per-tag counts are included in the details so the
+    composition is visible at a glance.
 
     Args:
         spec: Implementation Spec markdown content.
@@ -838,9 +909,23 @@ def check_change_instructions_specific(spec: str) -> CompletenessCheck:
             indicator_counts[pattern] = count
             total_indicators += count
 
-    # Count code blocks specifically (strong indicator)
+    # Count code blocks specifically (strong indicator). EVERY fence pair
+    # counts, whatever its tag — the check's own advice says "diff-level
+    # guidance", so a diff or text fence satisfying that advice must move
+    # this number (#2539 ask 2).
     code_blocks = re.findall(r"```[\s\S]*?```", spec)
     code_block_count = len(code_blocks)
+
+    # Per-tag composition, so a reader can see at a glance what kinds of
+    # fences the count is made of (#2539: a skip must be visible).
+    tag_counts: dict[str, int] = {}
+    for block in code_blocks:
+        first_line = block.splitlines()[0] if block.splitlines() else "```"
+        tag = first_line[3:].strip() or "(untagged)"
+        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    by_tag = ", ".join(
+        f"{tag}={count}" for tag, count in sorted(tag_counts.items())
+    ) or "none"
 
     # The spec should have substantial code blocks for specificity
     # Minimum thresholds based on spec size
@@ -855,10 +940,11 @@ def check_change_instructions_specific(spec: str) -> CompletenessCheck:
             passed=False,
             details=(
                 f"Insufficient code blocks for specificity: found "
-                f"{code_block_count}, expected at least {min_code_blocks} "
-                f"for a {spec_lines}-line spec. Change instructions MUST "
-                f"include before/after code snippets, line references, or "
-                f"diff-level guidance."
+                f"{code_block_count} (by tag: {by_tag}), expected at least "
+                f"{min_code_blocks} for a {spec_lines}-line spec. Change "
+                f"instructions benefit from before/after code snippets, line "
+                f"references, or diff-level guidance — every fence tag "
+                f"counts."
             ),
         )
 
