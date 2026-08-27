@@ -103,6 +103,42 @@ def completeness_gate(state: TestingWorkflowState) -> dict[str, Any]:
     # Combine implementation and test files for analysis
     all_files = implementation_files + test_files
 
+    # =========================================================================
+    # #2552: a zero needs a denominator here too. This gate's verdict comes
+    # entirely from Layer 1's AST analysis of the implementation files; the
+    # requirement set only ever fed Layer 2's PREPARATION — so with zero
+    # requirements the gate reviewed the implementation against nothing and
+    # returned the same PASS five requirements would earn (#2024 repaired
+    # the path resolution that caused one such run; the requirement-
+    # blindness itself survived it). Certifying completeness against an
+    # empty set is not a verdict, it is the absence of one: refuse, naming
+    # load_lld's recorded reason so the halt says whether the set was
+    # declared empty or unreadable and where it looked.
+    # =========================================================================
+    requirements = state.get("requirements", [])
+    if not requirements:
+        reason = state.get("requirements_empty_reason", "") or (
+            "no requirement set in state and no recorded reason -- "
+            "load_lld did not run, or ran before this field existed"
+        )
+        message = (
+            f"Completeness gate: cannot certify an implementation against "
+            f"zero requirements -- {reason} (#2552)"
+        )
+        print(f"    [N4b] {message}")
+        log_workflow_execution(
+            target_repo=repo_root,
+            issue_number=issue_number,
+            workflow_type="testing",
+            event="completeness_zero_requirements",
+            details={"reason": reason},
+        )
+        return {
+            "completeness_verdict": "BLOCK",
+            "completeness_issues": [],
+            "error_message": message,
+        }
+
     if not all_files:
         print("    [WARN] No implementation files to analyze — passing through")
         return {

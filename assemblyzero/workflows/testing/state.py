@@ -165,6 +165,12 @@ class TestingWorkflowState(TypedDict, total=False):
     detected_test_types: list[str]
     coverage_target: int
     requirements: list[str]
+    # #2552: why `requirements` is empty, when it is — "no requirements
+    # declared" vs "requirements unreadable" naming the searched path. ""
+    # when requirements were found. N1's guard and the N4b gate quote it,
+    # so a zero denominator halts with its cause named instead of
+    # certifying vacuously.
+    requirements_empty_reason: str
     files_to_modify: list[dict]  # Files from LLD Section 2.1
 
     # Workflow tracking
