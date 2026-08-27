@@ -708,6 +708,107 @@ def _carries_a_literal(text: str) -> bool:
     return any(ch.isdigit() for ch in text)
 
 
+#: #2563: numeric tokens inside an extracted literal ("0.12 R" -> "0.12").
+_NUMERIC_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _number_survives(token: str, lld_content: str) -> bool:
+    """The numeric token appears in the LLD as its own number.
+
+    Boundary-guarded so "12" never matches inside "0.12" and "0.12" never
+    matches inside "0.125" -- a conservation check that can be satisfied by
+    a coincidental substring is not a check.
+    """
+    return re.search(
+        rf"(?<![\d.]){re.escape(token)}(?!\d)", lld_content
+    ) is not None
+
+
+def validate_assertion_literal_conservation(
+    issue_body: str, lld_content: str
+) -> list[ValidationError]:
+    """Reject a derivation that shed a source row's literals (#2563).
+
+    The #331 issue's S6 row states its mirror-band check with a ruled
+    sampling window ("sampled ONLY at horizontal offsets 0.12 R-0.25 R
+    either side of the vertical axis" -- the #361 ruling), and the generated
+    LLD restated the check twice with no window; 0.12 appeared nowhere in
+    the document. The spec-stage reviewer then correctly proved the
+    requirement set contradictory from the geometry and halted the roll for
+    an operator ruling made six days earlier. In a ruling-dense requirement
+    the subordinate clause IS the ruling; a derivation that sheds it
+    re-opens settled conflicts.
+
+    Mechanics: for each row of each decision table in the SOURCE issue (the
+    ruled #332 shape -- an ID column and a binding-value column), every
+    literal `extract_literals` finds in the row's cells must survive into
+    the LLD -- hex colours verbatim (case-insensitive), numeric literals as
+    boundary-guarded numbers anywhere in the document. Absence-phrase
+    literals ("renders nothing") are phrasing, not values, and are not
+    conserved. A row whose literals were shed is named with exactly what
+    went missing, so the revision loop hands the drafter the clause to
+    carry rather than a style note.
+
+    An issue with no decision table (most repos, every non-visual issue)
+    yields no checks and no errors -- not applicable is not failure.
+    """
+    from assemblyzero.workflows.implementation_spec.assertion_manifest import (
+        _HEX_RE,
+        extract_literals,
+        is_criteria_table,
+    )
+    from assemblyzero.workflows.requirements.form_check import parse_tables
+
+    errors: list[ValidationError] = []
+    if not issue_body or not lld_content:
+        return errors
+
+    lld_lower = lld_content.lower()
+    for table in parse_tables(issue_body):
+        if not is_criteria_table(table):
+            continue
+        for row in table.rows:
+            if not row:
+                continue
+            row_id = row[0] or "?"
+            source_text = " | ".join(row[1:])
+            missing: list[str] = []
+            for literal in extract_literals(source_text):
+                if _HEX_RE.fullmatch(literal):
+                    if literal.lower() not in lld_lower:
+                        missing.append(literal)
+                    continue
+                tokens = _NUMERIC_TOKEN_RE.findall(literal)
+                if not tokens:
+                    # Absence/identity phrasing ("renders nothing") -- a
+                    # legitimate literal for the manifest, but phrasing is
+                    # the drafter's to restate; only values are conserved.
+                    continue
+                if any(
+                    not _number_survives(token, lld_content)
+                    for token in tokens
+                ):
+                    missing.append(literal)
+            if missing:
+                errors.append(
+                    ValidationError(
+                        severity=ValidationSeverity.ERROR,
+                        section="10 Test Plan",
+                        message=(
+                            f"Critical: source decision-table row {row_id}'s "
+                            f"qualifiers were lost in derivation -- "
+                            f"{', '.join(repr(m) for m in missing[:6])} "
+                            f"appear(s) nowhere in the LLD. Carry the "
+                            f"qualifying clause (sampling window, offset, "
+                            f"threshold) into the derived requirement and "
+                            f"test rows verbatim; the qualifier is the "
+                            f"ruling, not commentary (#2563)"
+                        ),
+                    )
+                )
+    return errors
+
+
 def validate_mandatory_sections(lld_content: str) -> list[ValidationError]:
     """Verify that all mandatory LLD sections exist.
 
@@ -1545,6 +1646,17 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     # stage nothing to assert. Caught here, in the lld stage, rather than
     # after the spec has spent its budget discovering the same thing.
     all_errors.extend(validate_test_plan_pass_criteria(lld_content))
+
+    # Step 6c (#2563): a derivation that sheds a source row's qualifying
+    # literals re-opens ruled conflicts -- the #331 S6 sampling window
+    # vanished and the spec reviewer re-proved a contradiction ruled six
+    # days earlier. Every literal in the issue's decision-table rows must
+    # survive into the LLD, or the row is named lossy.
+    all_errors.extend(
+        validate_assertion_literal_conservation(
+            state.get("issue_body", ""), lld_content
+        )
+    )
 
     # Step 7: Trace risk mitigations (warnings only, with Issue #312 smart filtering)
     mitigations = extract_mitigations_from_risks(lld_content)
