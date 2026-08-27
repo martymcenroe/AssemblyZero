@@ -178,8 +178,11 @@ class TestTheDeliberateBoundaryHolds:
 
 
 class TestTheHaltSaysWhoDeclined:
-    """Ask 3: 'kept failing to fix X' and 'declined to change X' are
-    different facts, and the halt message states which one happened."""
+    """Ask 3: 'kept failing to fix X' and 'the flagged content reached the
+    check unchanged' are different facts, and the halt message states which
+    one happened. (#2556 sharpened the claim: it holds only when no pinning
+    reversion intervened — those cases live in
+    test_completeness_pinning_deadlock.py.)"""
 
     def _state(self, iteration=3, shown=(), breakdown=()):
         return {
@@ -209,7 +212,7 @@ class TestTheHaltSaysWhoDeclined:
                 breakdown=make_breakdown(first["completeness_issues"]),
             ))
 
-    def test_an_identical_complaint_every_round_reads_as_a_decline(self, capsys):
+    def test_an_identical_complaint_with_no_reversions_reads_as_unchanged(self, capsys):
         out = self._at_cap(
             "Spec calls methods not found: `isupper`",
             # Every failing check drew this exact complaint on every prior
@@ -220,8 +223,14 @@ class TestTheHaltSaysWhoDeclined:
         )
         capsys.readouterr()
         assert "IDENTICAL complaint" in out["error_message"]
-        assert "left the flagged code unchanged" in out["error_message"]
+        # #2556: observable facts only — no intent attribution ("declining",
+        # "believes correct"), and the claim is conditioned on enforcement
+        # having stayed out of the loop.
+        assert "reached the check unchanged" in out["error_message"]
+        assert "no pinning reversion intervened" in out["error_message"]
         assert "false positive" in out["error_message"]
+        assert "declining" not in out["error_message"]
+        assert "believes correct" not in out["error_message"]
         assert "survived a revision" not in out["error_message"]
 
     def test_a_changing_complaint_reads_as_kept_failing(self, capsys):
