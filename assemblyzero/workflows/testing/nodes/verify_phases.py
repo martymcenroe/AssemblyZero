@@ -9,9 +9,11 @@ N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 """
 
 from assemblyzero.utils.shell import run_command
+import json
 import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -636,21 +638,92 @@ def _unsatisfiable_test_failures(output: str) -> set[str]:
     return found
 
 
-def _implementation_already_exists(state: TestingWorkflowState) -> bool:
-    """True when a previous attempt's implementation is present (#2337).
+#: #2542: the stage-entry record that red WAS verified, written into the
+#: audit dir (which lives in the worktree, so the marker's scope is exactly
+#: the stage entry's worktree). Red is a property of STAGE ENTRY, not of
+#: every attempt: attempt restarts consult this instead of re-demanding a
+#: precondition their own prior attempt destroyed by design.
+RED_MARKER_NAME = "red-verified.json"
 
-    Two conditions, both required. This is NOT a first attempt -- a retry sets
-    retry_mode, and a resume carries an iteration count -- AND the files the
-    spec says to write are actually on disk. Either alone is too weak: a first
-    attempt against a repo that happens to have the file is the pre-existing
-    implementation the guard was built for, and a retry whose files were
-    cleared genuinely needs the red phase.
+
+def _red_marker_path(state: TestingWorkflowState) -> Path | None:
+    audit_dir = state.get("audit_dir", "")
+    return Path(audit_dir) / RED_MARKER_NAME if audit_dir else None
+
+
+def write_red_marker(
+    state: TestingWorkflowState, *, failing: int, exit_code: int
+) -> None:
+    """Record that THIS stage entry verified red (#2542). Never raises.
+
+    Written on every valid red outcome — the import-error red and the
+    all-tests-failed red — and overwritten by a fresh first attempt, so a
+    stale marker can never suppress a genuine entry's red demand (it is only
+    ever CONSULTED on a later attempt of the same stage entry).
+    """
+    path = _red_marker_path(state)
+    if path is None or not path.parent.is_dir():
+        return
+    try:
+        path.write_text(
+            json.dumps({
+                "issue": state.get("issue_number", 0),
+                "verified_at": datetime.now(tz=timezone.utc).isoformat(),
+                "failing": failing,
+                "exit_code": exit_code,
+            }, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        # fail-open: the marker is loop bookkeeping, not the red verdict —
+        # a marker that cannot persist costs a later attempt its skip (it
+        # falls back to the file-evidence check below), and the failure is
+        # printed here rather than silently swallowed.
+        print(f"    [N3] WARNING: could not persist the red marker ({exc})")
+
+
+def read_red_marker(state: TestingWorkflowState) -> dict | None:
+    path = _red_marker_path(state)
+    if path is None or not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # fail-open: an unreadable marker is treated as no marker — the
+        # later attempt then falls back to the prior-attempt file evidence,
+        # and a genuinely fresh entry still gets its red demand. Losing the
+        # skip is the cheap direction; inventing one is not possible here.
+        return None
+
+
+def _implementation_already_exists(state: TestingWorkflowState) -> bool:
+    """True when THIS RUN's own prior work explains passing tests (#2337, #2542).
+
+    Two signals, either sufficient once this is a later attempt (a retry sets
+    retry_mode, a resume carries an iteration count — a first attempt never
+    consults either signal, so the pre-existing-implementation guard it was
+    built for still fires there):
+
+    * the stage entry's red marker — red was verified against this worktree
+      before anything was written, so passing tests now are the loop's own
+      progress;
+    * ANY planned .py file present on disk. #2542 changed this from ALL:
+      run-issue331-230544's attempt 1 wrote 2 of its 3 planned files and
+      died on the third's LLM call, so attempt 2 found 8 tests passing —
+      explained entirely by the run's own surviving implementation — and the
+      all() predicate refused to recognise it. In the only branch that
+      consults this (tests PASSING), a partial write that leaves tests
+      passing is this run's work; a cleared implementation cannot reach the
+      branch at all, because its tests fail on ImportError.
     """
     is_later_attempt = bool(state.get("retry_mode")) or int(
         state.get("iteration_count", 0) or 0
     ) > 0
     if not is_later_attempt:
         return False
+
+    if read_red_marker(state) is not None:
+        return True
 
     repo_root = Path(state.get("repo_root", "") or ".")
     targets = [
@@ -659,7 +732,7 @@ def _implementation_already_exists(state: TestingWorkflowState) -> bool:
     ]
     if not targets:
         return False
-    return all((repo_root / path).is_file() for path in targets)
+    return any((repo_root / path).is_file() for path in targets)
 
 
 def _describe_hollow_suite(state: TestingWorkflowState) -> str:
@@ -847,6 +920,10 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 f"    [EXIT CODE {exit_code}] ImportError on expected module(s) "
                 f"-> valid red signal, routing to implementation"
             )
+            # #2542: red is a property of STAGE ENTRY. Record it, so an
+            # attempt restart resumes the loop instead of re-demanding a
+            # precondition its own prior attempt destroyed by design.
+            write_red_marker(state, failing=exp_count_red, exit_code=exit_code)
             return {
                 "red_phase_output": output,
                 "file_counter": file_num,
@@ -932,20 +1009,37 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         # implementation is still present and still works, which is the state
         # N4 is trying to reach.
         if _implementation_already_exists(state):
+            # #2542: say WHICH evidence explains the passing tests — the
+            # loop's own state, never an anomaly. Ask 3's distinction.
+            marker = read_red_marker(state)
+            if marker:
+                print(
+                    f"    [N3] {passed_count} test(s) pass — red was verified "
+                    f"at this stage entry ({marker.get('verified_at', '?')}, "
+                    f"{marker.get('failing', '?')} failing then), so the "
+                    f"passing tests are this run's own progress."
+                )
+            else:
+                print(
+                    f"    [N3] {passed_count} test(s) pass, and files this "
+                    f"run's prior attempt wrote are present in the worktree."
+                )
             print(
-                f"    [N3] {passed_count} test(s) already pass, and the "
-                f"implementation from a previous attempt is present."
-            )
-            print(
-                "    Not a failed red phase: the tests and the implementation "
-                "agree. Verifying against the coverage gate instead."
+                f"    Not a failed red phase: resuming the implement-iterate "
+                f"loop against the {failed_count + error_count} current "
+                f"failure(s) via the green/coverage gate."
             )
             log_workflow_execution(
                 target_repo=repo_root,
                 issue_number=state.get("issue_number", 0),
                 workflow_type="testing",
                 event="red_phase_implementation_present",
-                details={"passed": passed_count, "retry": True},
+                details={
+                    "passed": passed_count,
+                    "failed": failed_count + error_count,
+                    "retry": True,
+                    "red_marker": bool(marker),
+                },
             )
             return {
                 "red_phase_output": output,
@@ -956,7 +1050,10 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             }
 
         print(f"    [GUARD] WARNING: {passed_count} tests passed unexpectedly!")
-        print("    This may indicate pre-existing implementation.")
+        print(
+            "    No red-entry marker and no prior-attempt writes explain "
+            "them: the implementation existed BEFORE this stage entered."
+        )
 
         log_workflow_execution(
             target_repo=repo_root,
@@ -976,8 +1073,10 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
             # on it in twelve seconds.
             "error_message": (
                 f"{DETERMINISTIC_FAILURE}: Red phase failed: {passed_count} "
-                f"tests passed unexpectedly. Tests should fail before "
-                f"implementation exists."
+                f"tests passed unexpectedly, and neither a red-entry marker "
+                f"nor this run's own prior writes explain them — the "
+                f"implementation existed before this stage entered. Tests "
+                f"should fail before implementation exists (#2542)."
             ),
             "next_node": "END",
         }
@@ -1005,6 +1104,12 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         workflow_type="testing",
         event="red_phase_complete",
         details={"failed": failed_count, "errors": error_count, "exit_code": exit_code},
+    )
+
+    # #2542: record the stage entry's verified red, so attempt restarts
+    # resume the loop instead of re-demanding it over their own output.
+    write_red_marker(
+        state, failing=failed_count + error_count, exit_code=exit_code
     )
 
     return {

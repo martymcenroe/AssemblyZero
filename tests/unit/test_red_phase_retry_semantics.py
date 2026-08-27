@@ -87,10 +87,17 @@ def test_a_resume_counts_as_a_later_attempt(worktree: Path) -> None:
     assert _implementation_already_exists(state) is True
 
 
-def test_partial_implementation_is_not_enough(worktree: Path) -> None:
-    """One of two files present is not a surviving implementation."""
+def test_partial_implementation_IS_enough_on_a_later_attempt(worktree: Path) -> None:
+    """LAW CHANGED BY #2542, deliberately. This used to assert that one of
+    two files present was "not a surviving implementation" — and
+    run-issue331-230544 refuted it live: attempt 1 wrote 2 of its 3 planned
+    files, died on the third's LLM call, and attempt 2 found 8 tests passing
+    that the all() predicate refused to attribute to the run's own work. In
+    the only branch that consults this (tests PASSING), a partial write that
+    leaves tests passing is this run's work; a cleared implementation cannot
+    reach the branch, because its tests fail on ImportError."""
     (worktree / "src" / "boostgauge" / "app.py").unlink()
-    assert _implementation_already_exists(_state(worktree)) is False
+    assert _implementation_already_exists(_state(worktree)) is True
 
 
 def test_no_declared_targets_is_not_enough(worktree: Path) -> None:
