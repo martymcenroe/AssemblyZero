@@ -260,6 +260,38 @@ def create_halt_node(workflow_name: str):
             # and the resume simply has no contract to verify.
             print(f"  [WARN] resume contract not written: {exc}")
 
+        # 5c. #2574: the halt emits its own evidence bundle — the events
+        # the run recorded, the lineage artifacts hashed with their
+        # byte-identical groups named, the preserved refs, and a DRAFT
+        # issue body, saved beside the plan and into the audit dir. The
+        # same dig was done by hand eight times on 2026-08-27; every input
+        # was in scope right here.
+        try:
+            from assemblyzero.core.halt_evidence import (
+                build_halt_evidence,
+                write_halt_evidence,
+            )
+
+            evidence = build_halt_evidence(
+                state, workflow_name,
+                stage=stage, error_message=error_message,
+            )
+            write_halt_evidence(evidence, state_path.parent)
+            audit_dir_str = str(state.get("audit_dir", "") or "")
+            if audit_dir_str and Path(audit_dir_str).is_dir():
+                write_halt_evidence(evidence, Path(audit_dir_str))
+            groups = len(evidence["artifacts"]["identical_groups"])
+            print(
+                f"  halt evidence written: "
+                f"{len(evidence['artifacts']['files'])} artifact(s), "
+                f"{groups} byte-identical group(s), draft issue body "
+                f"included (#2574)"
+            )
+        except Exception as exc:  # noqa: BLE001
+            # fail-open: the bundle describes the halt; failing to write
+            # it must never mask the halt it describes.
+            print(f"  [WARN] halt evidence not written: {exc}")
+
         # 6. Print human-readable summary
         plan.print_summary()
 
