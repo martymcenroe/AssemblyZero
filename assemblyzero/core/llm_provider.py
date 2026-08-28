@@ -1890,8 +1890,23 @@ def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
         return GeminiProvider(model=model)
     elif provider == "mock":
         return MockProvider(model=model)
+    elif provider == "scripted":
+        # #2567: the end-to-end mock roll. The ACTIVE instance is returned to
+        # every caller in one roll on purpose -- a roll has one drafter and
+        # one reviewer, and fresh instances would reset the call counters the
+        # recorded path and per-rule `on_call` numbering depend on.
+        from assemblyzero.core.scripted_provider import get_active
+
+        active = get_active()
+        if active is None:
+            raise ValueError(
+                "provider spec 'scripted:' requires an active "
+                "ScriptedProvider. Use the scripted_roll fixture, or call "
+                "scripted_provider.set_active(...) first (#2567)."
+            )
+        return active
     else:
         raise ValueError(
             f"Unknown provider '{provider}'. "
-            f"Supported: claude, anthropic, gemini, mock"
+            f"Supported: claude, anthropic, gemini, mock, scripted"
         )
