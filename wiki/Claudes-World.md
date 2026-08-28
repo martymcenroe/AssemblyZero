@@ -533,6 +533,13 @@
 
 ---
 
+**16:03** — *On Gelassenheit, frustration, and the twentieth launch*
+> "The job isn't to expect the street to be quiet. The job is to walk it anyway, and notice things."
+
+**Context:** The twentieth launch of the gauge face halted in under a minute, on a day when Om had drawn down savings again and the mood had been foul since morning. Om answered the halt not with a kill command but with Meister Eckhart: *"if you are frustrated it's your expectations that are out of order."* The reply named Eckhart's own word for the discipline — *Gelassenheit*, releasement, letting the thing be what it is instead of what you ordered it to be — and re-read the week by its light: the expectation out of order was "the twentieth launch should succeed"; the contract the campaign actually runs on is "the twentieth launch should fail better than the nineteenth," and by that measure the day was obedient. Om's own instrument already held the counter-image — the main needle reads where you are, the telltale reads where you've been, and insanity is driving by the main needle alone; so is despair. Vimes got the last word, above, because watchmen and factory-keepers share a trade: the street is never quiet, and the ones who last are the ones who walk it anyway. The word was then carved into the Well of Names beside Fünklein — two of the preacher's words now, the spark and the letting-go.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
