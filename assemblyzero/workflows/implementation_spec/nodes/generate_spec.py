@@ -53,6 +53,26 @@ from assemblyzero.workflows.implementation_spec.nodes.retry_prompt_builder impor
 
 logger = logging.getLogger(__name__)
 
+
+def _spec_injection():
+    """The spec-side table injector, imported lazily (#2611).
+
+    NOT a module-level import. `requirements.table_injection` imports
+    `implementation_spec.assertion_manifest` for `is_criteria_table`, which
+    pulls in this package's `__init__` -> `graph` -> `nodes/__init__` -> this
+    module. A module-level import back into `requirements.table_injection`
+    therefore re-enters it while it is still initialising and dies with a
+    partially-initialised module.
+
+    Do not "tidy" this into a top-level import: the cycle is real, and it is
+    invisible to any test that imports the two modules directly -- it appears
+    only on entry paths that start in the requirements workflow.
+    `test_spec_table_injection.py::TestNoImportCycle` pins both halves.
+    """
+    from assemblyzero.workflows.implementation_spec import table_injection
+
+    return table_injection
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -152,6 +172,34 @@ Do not skip or abbreviate any section."""
 # =============================================================================
 # Helpers
 # =============================================================================
+
+
+def _drafter_system_prompt(lld_content: str) -> str:
+    """The drafter's system prompt, plus the machine-owned notice when one
+    applies (#2611).
+
+    Telling the drafter is not decoration. The derivation injects the LLD's
+    decision table after the call returns; a drafter that restates it anyway
+    produces a second, lossy copy of rows the document already holds
+    correctly, and the reader cannot tell which is binding. The mirror of
+    #2607's notice on the lld side, and the same reasoning.
+    """
+    spec_injection = _spec_injection()
+    if not spec_injection.build_injection(lld_content or ""):
+        return DRAFTER_SYSTEM_PROMPT
+    return DRAFTER_SYSTEM_PROMPT + f"""
+
+DO NOT RESTATE THE LLD'S DECISION TABLE (#2611):
+- The LLD's decision table is carried into this spec VERBATIM by the
+  derivation itself, in a machine-owned block beginning
+  `{spec_injection.BEGIN_MARKER}`. You are not writing those rows and must
+  not reproduce, paraphrase, summarise or "carry forward" their values
+  anywhere.
+- Write AROUND that block. In the test mapping, CITE the row IDs
+  (S1, S2, ...) and the manifest row ids, and state what each test DOES; do
+  not restate the binding values, thresholds, colours or sampling windows the
+  rows already carry. The row is the ruling; your assertion points at it.
+- Anything you write inside the machine-owned markers is discarded."""
 
 
 def _normalize_failure_text(text: str) -> str:
@@ -523,7 +571,7 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     if edit_script_content is None:
         cost_before = get_cumulative_cost()
         result = drafter.invoke(
-            system_prompt=DRAFTER_SYSTEM_PROMPT,
+            system_prompt=_drafter_system_prompt(state.get("lld_content", "")),
             content=prompt,
             timeout_seconds=600,  # 10 min — impl specs are large
         )
@@ -565,6 +613,24 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
                 completeness_issues=completeness_issues,
             )
             pinning_events.extend(events)
+
+    # -------------------------------------------------------------------------
+    # #2611: re-assert the LLD's decision table over whatever the draft holds.
+    #
+    # AFTER pinning, deliberately. Pinning adjudicates a diff and can be argued
+    # with; re-assertion does not adjudicate, so running it last means the
+    # machine-owned region is never something pinning had to reason about --
+    # which is what #2607 asked for on the lld side and this mirrors here.
+    # -------------------------------------------------------------------------
+    if spec_content.strip():
+        spec_content, table_changed = _spec_injection().reassert(
+            spec_content, state.get("lld_content", "")
+        )
+        if table_changed:
+            print(
+                "    [inject] binding decision table re-asserted from the LLD "
+                "(machine-owned; the draft's copy did not match)"
+            )
 
     # -------------------------------------------------------------------------
     # Save to audit trail
