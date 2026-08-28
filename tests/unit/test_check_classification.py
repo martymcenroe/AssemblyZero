@@ -126,23 +126,33 @@ class TestTheRuling:
             "function_spec_sections_have_examples"
         ).kind == FACT
 
-    def test_arguable_classifications_are_flagged_not_demoted(self) -> None:
-        """Conservative where it is arguable: keep gating, record the tension.
+    def test_every_flag_the_sweep_raised_has_been_ruled(self) -> None:
+        """The sweep raised two flags and both are now answered.
 
-        `functions_have_io_examples` left this set when #2620 ruled on it --
-        a flag is for an open question, and that one is answered.
+        `functions_have_io_examples` was ruled a proxy and demoted (#2620);
+        `criteria_have_tests` had its substring fallback removed rather than
+        classified (#2619), which retired the mode-dependence the flag was
+        about. A flag marks an OPEN question, so an answered one must not keep
+        advertising itself -- and an empty flag set is the queue being empty.
         """
         flagged = {e.check for e in CLASSIFICATIONS.values() if e.flagged}
-        assert flagged == {"criteria_have_tests"}
-        for name in flagged:
-            assert classification_of(name).gates, (
-                f"{name} is flagged as arguable and must stay GATING -- a "
-                f"sweep does not demote on its own judgement"
-            )
+        assert flagged == set(), (
+            f"still-flagged, and therefore still-unruled: {sorted(flagged)}"
+        )
 
-    def test_a_demoted_check_carries_no_stale_flag(self) -> None:
-        """A ruled question must not keep advertising itself as open."""
-        assert classification_of("functions_have_io_examples").flagged == ""
+    def test_the_ruled_checks_carry_no_stale_flag(self) -> None:
+        for name in ("functions_have_io_examples", "criteria_have_tests"):
+            assert classification_of(name).flagged == ""
+
+    def test_a_flagged_entry_would_still_have_to_gate(self) -> None:
+        """The rule outlives the current empty set: a sweep never demotes on
+        its own judgement, so anything it flags stays gating until ruled."""
+        for entry in CLASSIFICATIONS.values():
+            if entry.flagged:
+                assert entry.gates, (
+                    f"{entry.check} is flagged as arguable and must stay "
+                    f"GATING until an operator rules on it"
+                )
 
     def test_an_unclassified_name_is_never_demoted(self) -> None:
         """Forgetting to classify a check must not remove its gate."""

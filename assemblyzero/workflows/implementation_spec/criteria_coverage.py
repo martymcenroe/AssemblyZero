@@ -14,22 +14,32 @@ also caught a test feeding malformed JSON to dodge type validation, and an
 exception-handling defect that would crash the app and lose user data; those are
 the catches worth ninety seconds of model time. The twelve-test count was not.
 
-The two join modes
-------------------
+One join mode, and an honest abstention (#2619)
+-----------------------------------------------
 
-**exact** -- the criteria carry ``REQ-N`` tags and the spec's tests cite them, so
-the mapping is a join on identifiers. This is what ADR 0226's exact mode gives
-once boostgauge #284 lands row IDs, and what today's tagged LLDs already permit.
+**exact** -- the criteria carry ``REQ-N`` tags and the spec's tests cite them,
+so the mapping is a join on identifiers. A criterion ID either has a test
+citing it or it does not, which is a fact, so this gates.
 
-**count-and-outcome** -- no usable tags on one side or the other. Criteria are
-matched to tests by outcome text, using the same maximum bipartite matching the
-form checker uses in its no-ID mode (#2219). Greedy assignment is wrong for the
-same reason there: in LLD-007 "unchanged" is a substring of "unchanged; the CLI
-value is not written", so matching in row order can consume the only test a
-later criterion could have used and report a gap that is not there.
+There used to be a **count-and-outcome** fallback: with no usable tags, criteria
+were matched to tests by outcome text under maximum bipartite matching. It
+existed because derived criterion IDs could arrive mangled. **#2607/#2611
+injection now carries the criteria tables byte-verbatim from issue to LLD to
+spec, so the case it served is structurally gone**, and the operator ruled it
+removed rather than classified -- classifying dead code enshrines it.
 
-The report always names which mode ran, because the weaker mode must never be
-mistaken for the stronger one.
+It was also a correlate in both directions, which is why removal rather than
+demotion was right: a test containing a criterion's words is not a test
+covering it, and a test covering a criterion in different words was reported
+missing. A false veto is the #2539 disease.
+
+Where the fallback used to guess, the check now **abstains and says so**: an
+untagged criteria table is reported not-applicable, naming the untagged rows,
+per the #1870 convention that a check which verified nothing must never render
+as a check that passed. Verified before removal against boostgauge's live #331
+state, where exact mode engages on both sides: every row of the LLD's `10.1
+Test Scenarios` table carries a REQ tag, and its spec's thirteen tests cite
+REQ-1 through REQ-13.
 
 What exact mode still cannot see
 --------------------------------
@@ -45,10 +55,14 @@ stays where it already was: with the semantic reviewer.
 Reuse, deliberately
 -------------------
 
-``parse_tables``, ``_max_matching`` and ``_norm`` come from the form checker
-rather than being reimplemented here. One markdown-table parser and one matching
-algorithm, used by both callers: a second copy would drift from the first, which
-is the failure this codebase has already paid for twice (#1586, #1698).
+``parse_tables`` and ``_norm`` come from the form checker rather than being
+reimplemented here. One markdown-table parser, used by both callers: a second
+copy would drift from the first, which is the failure this codebase has already
+paid for twice (#1586, #1698).
+
+``_max_matching`` was imported too, for the outcome fallback's bipartite
+assignment. #2619 removed the fallback, so the import went with it -- an unused
+import is a live reference to a removed mechanism.
 """
 
 from __future__ import annotations
@@ -57,7 +71,6 @@ import re
 from dataclasses import dataclass, field
 
 from assemblyzero.workflows.requirements.form_check import (
-    _max_matching,
     _norm,
     parse_tables,
 )
@@ -81,7 +94,8 @@ _CRITERIA_COLUMN = "pass criteria"
 _ID_COLUMN = "id"
 
 MODE_EXACT = "exact (criterion IDs)"
-MODE_OUTCOME = "count and outcome (no IDs to join on)"
+#: #2619 removed the count-and-outcome fallback. The name is gone with it --
+#: a constant kept "for compatibility" is how a removed mode gets resurrected.
 
 
 @dataclass(frozen=True)
@@ -211,49 +225,51 @@ def criteria_coverage(spec: str, lld: str) -> CoverageReport:
             reason="the LLD states no pass-criteria table to check against",
         )
 
-    tests = spec_tests(spec)
-    if not tests:
+    # #2619: no ID to join on is NOT APPLICABLE, never a weaker join.
+    #
+    # The substring fallback existed because derived criterion IDs could arrive
+    # mangled. #2607/#2611 injection now carries the criteria tables
+    # byte-verbatim from issue to LLD to spec, so the case it served is
+    # structurally gone -- and classifying dead code enshrines it. Removed.
+    #
+    # Reporting not-applicable rather than guessing is the #1870 convention:
+    # a check that verified nothing must never render as a check that passed.
+    if not all(c.tagged for c in criteria):
+        untagged = [c.row_id or "(no id)" for c in criteria if not c.tagged]
         return CoverageReport(
-            ran=True,
-            join_mode=MODE_EXACT if all(c.tagged for c in criteria) else MODE_OUTCOME,
-            criteria=criteria,
-            missing=list(criteria),
-            test_count=0,
+            ran=False,
+            reason=(
+                f"{len(untagged)} of {len(criteria)} pass criteria carry no "
+                f"REQ tag to join on ({', '.join(untagged[:5])}"
+                + (f", and {len(untagged) - 5} more" if len(untagged) > 5 else "")
+                + "), so coverage cannot be established by identity. Tag the "
+                "rows; matching outcome prose was removed in #2619 because a "
+                "test containing a criterion's words is not a test covering it"
+            ),
         )
 
+    tests = spec_tests(spec)
     tagged_in_spec = {
         f"REQ-{n}"
         for _name, body in tests
         for n in REQ_TAG.findall(body)
     }
 
-    if all(c.tagged for c in criteria) and tagged_in_spec:
-        missing = [c for c in criteria if c.key not in tagged_in_spec]
+    if not tests or not tagged_in_spec:
+        # Every criterion is tagged and the spec cites none of them: that is a
+        # real, exact miss -- all of them -- not an absence of information.
         return CoverageReport(
             ran=True,
             join_mode=MODE_EXACT,
             criteria=criteria,
-            missing=missing,
+            missing=list(criteria),
             test_count=len(tests),
         )
 
-    # Fallback: match each criterion's outcome text into a test, one test per
-    # criterion, maximising the number matched.
-    normalised_tests = [_norm(f"{name} {body}") for name, body in tests]
-    candidates = [
-        [
-            index
-            for index, text in enumerate(normalised_tests)
-            if _norm(c.outcome) and _norm(c.outcome) in text
-        ]
-        for c in criteria
-    ]
-    matching = _max_matching(candidates, len(normalised_tests))
-    missing = [c for c, assigned in zip(criteria, matching, strict=False) if assigned is None]
-
+    missing = [c for c in criteria if c.key not in tagged_in_spec]
     return CoverageReport(
         ran=True,
-        join_mode=MODE_OUTCOME,
+        join_mode=MODE_EXACT,
         criteria=criteria,
         missing=missing,
         test_count=len(tests),
@@ -277,8 +293,10 @@ def format_report(report: CoverageReport) -> str:
         f"{len(report.missing)} LLD pass criterion(s) have no test in the spec "
         f"[join {report.join_mode}]. Add a test for each:",
     ]
+    # #2619: a report that RAN has only tagged criteria -- an untagged table
+    # abstains above and never reaches here -- so the untagged label branch
+    # this used to carry was unreachable and went with the fallback.
     for c in report.missing:
-        label = c.key if c.tagged else f"row {c.row_id}"
-        where = f" (row {c.row_id})" if c.tagged and c.row_id else ""
-        lines.append(f"  - {label}{where}: {c.scenario} -- expected: {c.outcome}")
+        where = f" (row {c.row_id})" if c.row_id else ""
+        lines.append(f"  - {c.key}{where}: {c.scenario} -- expected: {c.outcome}")
     return "\n".join(lines)
