@@ -203,21 +203,19 @@ CLASSIFICATIONS: dict[str, Classification] = {
         check="criteria_have_tests",
         kind=FACT,
         reads=(
-            "in EXACT mode, the REQ-N tag set in the LLD against the tag set "
-            "in the spec's tests; in the OUTCOME fallback, each criterion's "
-            "normalised outcome text as a substring of a test's name and body"
+            "the REQ-N tag set in the LLD's pass-criteria table against the "
+            "tag set cited by the spec's test functions"
         ),
         reason=(
-            "EXACT mode is an id-set difference and is a plain fact (#2239)."
-        ),
-        flagged=(
-            "The class is MODE-DEPENDENT, which no other check here is. The "
-            "OUTCOME fallback -- used whenever the criteria are not all tagged "
-            "-- matches normalised substrings, which is a correlate: a test "
-            "can contain a criterion's words without covering it. Left GATING "
-            "in both modes rather than demoting the fallback on the sweep's "
-            "own judgement, because a per-run class is a design change and not "
-            "a classification. Filed for a ruling as #2619."
+            "an id-set difference: a criterion ID either has a test citing it "
+            "or it does not (#2239). The sweep flagged this entry as "
+            "mode-dependent, because a substring fallback ran whenever the "
+            "criteria were not all tagged -- and the operator ruled 2026-08-28 "
+            "(#2619) that the fallback be REMOVED rather than classified, "
+            "since injection (#2607/#2611) carries criterion IDs byte-verbatim "
+            "and the mangled-ID case it served is structurally gone. With one "
+            "mode left, the class is no longer arguable: an untagged table now "
+            "abstains and says so instead of guessing."
         ),
     ),
     # -------------------------------------------------------------- proxies

@@ -28,7 +28,6 @@ import pytest
 
 from assemblyzero.workflows.implementation_spec.criteria_coverage import (
     MODE_EXACT,
-    MODE_OUTCOME,
     criteria_coverage,
     format_report,
     lld_criteria,
@@ -214,13 +213,24 @@ class TestSpecTestExtraction:
 
 
 # ---------------------------------------------------------------------------
-# The fallback mode
+# The fallback mode is REMOVED (#2619)
 # ---------------------------------------------------------------------------
 
 
-class TestCountAndOutcomeFallback:
-    """Used when there are no IDs to join on. #2239 requires the mode be named,
-    and requires matching rather than greedy assignment."""
+class TestTheOutcomeFallbackIsGone:
+    """Operator-ruled 2026-08-28: EXACT stays a hard gate, the substring
+    fallback is removed rather than classified.
+
+    It existed because derived criterion IDs could arrive mangled. #2607/#2611
+    injection carries the criteria tables byte-verbatim from issue to LLD to
+    spec, so the case it served is structurally gone, and classifying dead code
+    enshrines it.
+
+    Verified against boostgauge's live #331 state before removal: every row of
+    that LLD's `10.1 Test Scenarios` table carries a REQ tag, and its spec's
+    thirteen tests cite REQ-1 through REQ-13 -- so exact mode engages on both
+    sides and the issue about to be rolled keeps its gate.
+    """
 
     UNTAGGED_LLD = (
         "### 10.1 Test Scenarios\n\n"
@@ -230,35 +240,97 @@ class TestCountAndOutcomeFallback:
         "| 020 | Size no reset size given | Auto | size unchanged; the CLI value is not written |\n"
     )
 
-    def test_the_mode_is_named(self):
+    SPEC_WITH_MATCHING_PROSE = (
+        "```python\n"
+        "def test_a():\n    \"\"\"size unchanged.\"\"\"\n\n"
+        "def test_b():\n    \"\"\"size unchanged; the CLI value is not written.\"\"\"\n"
+        "```\n"
+    )
+
+    def test_the_constant_is_gone(self):
+        """A constant kept 'for compatibility' is how a removed mode returns."""
+        import assemblyzero.workflows.implementation_spec.criteria_coverage as cc
+
+        assert not hasattr(cc, "MODE_OUTCOME")
+
+    def test_untagged_criteria_abstain_rather_than_guess(self):
+        report = criteria_coverage(self.SPEC_WITH_MATCHING_PROSE, self.UNTAGGED_LLD)
+
+        assert report.ran is False
+        assert report.join_mode == ""
+
+    def test_the_abstention_names_the_untagged_rows(self):
+        """#1870: a check that verified nothing must say so, and say what it
+        would have needed."""
+        report = criteria_coverage(self.SPEC_WITH_MATCHING_PROSE, self.UNTAGGED_LLD)
+
+        assert "010" in report.reason
+        assert "020" in report.reason
+        assert "REQ tag" in report.reason
+        assert "not applicable" in format_report(report).lower()
+
+    def test_substring_prose_no_longer_counts_as_coverage(self):
+        """The removal's point. These test docstrings contain each criterion's
+        outcome text verbatim, which the fallback scored as full coverage. A
+        test containing a criterion's words is not a test covering it."""
+        report = criteria_coverage(self.SPEC_WITH_MATCHING_PROSE, self.UNTAGGED_LLD)
+
+        assert report.ran is False, (
+            "prose matching must no longer produce a coverage verdict"
+        )
+
+    def test_the_matching_helper_is_no_longer_imported(self):
+        """An unused import is a live reference to a removed mechanism."""
+        import assemblyzero.workflows.implementation_spec.criteria_coverage as cc
+
+        assert not hasattr(cc, "_max_matching")
+
+
+class TestExactModeStillGates:
+    """The control. Removing the fallback must not weaken the mode that stays."""
+
+    TAGGED_LLD = (
+        "### 10.1 Test Scenarios\n\n"
+        "| ID | Scenario | Type | Pass Criteria |\n"
+        "|---|---|---|---|\n"
+        "| 010 | Sizes rejected (REQ-1) | Auto | raises ValueError |\n"
+        "| 020 | Face is flat (REQ-2) | Auto | matches #0A0A0C |\n"
+    )
+
+    def test_cited_criteria_pass(self):
         spec = (
             "```python\n"
-            "def test_a():\n    \"\"\"size unchanged.\"\"\"\n\n"
-            "def test_b():\n    \"\"\"size unchanged; the CLI value is not written.\"\"\"\n"
+            "def test_a():\n    \"\"\"REQ-1 covered.\"\"\"\n\n"
+            "def test_b():\n    \"\"\"REQ-2 covered.\"\"\"\n"
             "```\n"
         )
-        report = criteria_coverage(spec, self.UNTAGGED_LLD)
-        assert report.join_mode == MODE_OUTCOME
-        assert "count and outcome" in format_report(report)
+        report = criteria_coverage(spec, self.TAGGED_LLD)
 
-    def test_matching_is_not_greedy(self):
-        """'size unchanged' is a substring of 'size unchanged; the CLI value is
-        not written'. Assigning in row order would consume the only test row 020
-        could use and report a gap that is not there -- the exact hazard
-        _max_matching exists for."""
-        spec = (
-            "```python\n"
-            "def test_b():\n    \"\"\"size unchanged; the CLI value is not written.\"\"\"\n\n"
-            "def test_a():\n    \"\"\"size unchanged.\"\"\"\n"
-            "```\n"
-        )
-        report = criteria_coverage(spec, self.UNTAGGED_LLD)
-        assert report.ok, f"false gap reported: {[c.row_id for c in report.missing]}"
+        assert report.ran is True
+        assert report.join_mode == MODE_EXACT
+        assert report.ok
 
-    def test_a_genuine_gap_is_still_caught(self):
-        spec = "```python\ndef test_a():\n    \"\"\"size unchanged.\"\"\"\n```\n"
-        report = criteria_coverage(spec, self.UNTAGGED_LLD)
-        assert len(report.missing) == 1
+    def test_an_uncited_criterion_is_a_miss(self):
+        spec = "```python\ndef test_a():\n    \"\"\"REQ-1 covered.\"\"\"\n```\n"
+        report = criteria_coverage(spec, self.TAGGED_LLD)
+
+        assert report.ran is True
+        assert [c.key for c in report.missing] == ["REQ-2"]
+
+    def test_a_spec_citing_nothing_misses_everything(self):
+        """Every criterion tagged and the spec citing none is an exact miss --
+        real information, not an absence of it."""
+        spec = "```python\ndef test_a():\n    \"\"\"does something.\"\"\"\n```\n"
+        report = criteria_coverage(spec, self.TAGGED_LLD)
+
+        assert report.ran is True
+        assert len(report.missing) == 2
+
+    def test_a_spec_with_no_tests_misses_everything(self):
+        report = criteria_coverage("# Spec\n\nNo fences.\n", self.TAGGED_LLD)
+
+        assert report.ran is True
+        assert len(report.missing) == 2
 
 
 # ---------------------------------------------------------------------------
