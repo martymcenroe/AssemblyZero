@@ -38,6 +38,29 @@ The manifest keeps its job: it tells the drafter which assertions to write.
 The injected block carries the binding values a reader can check them against.
 They are complementary, and neither subsumes the other.
 
+## Why no conservation gate runs here (#2617)
+
+#2611's acceptance asked for the #2563 gate's firing rate on injected rows to
+be asserted zero. It is -- and #2617 then asked whether the gate should RUN at
+this stage. Measured, twice, and the answer is no:
+
+* **On injected rows it could only ever pass.** `reassert` restores the block
+  byte-for-byte before anything inspects the draft, so a tampered binding value
+  is already repaired by the time a gate would look. Re-assertion is also
+  stronger than the gate: it restores qualifying prose no literal extractor
+  recognises.
+* **Off injected rows its complaint cannot be acted on.** A conservation
+  message names the literals that appear NOWHERE in the derived document, and
+  something absent cannot address a line of it. Run through the #2557
+  classifier it returns UNADDRESSABLE, with a control returning ADDRESSED --
+  the #2555 deadlock class by construction, not by wording.
+
+The gate keeps its home at the lld stage, where prose-to-artifact derivation
+still happens and where a drafter can act on "carry this clause". This stage is
+protected by structure instead of by inspection.
+`tests/unit/test_conservation_gate_placement.py` pins both directions and fails
+if a second call site appears.
+
 ## The same fence, deliberately
 
 The markers are #2607's, imported rather than redefined. The drafter reads the
