@@ -75,9 +75,12 @@ class TestTheSweepIsExhaustive:
     def test_the_sweep_found_the_check_the_issue_did_not_list(self) -> None:
         """#2540 named eleven checks and said the code is authoritative. The
         twelfth is `python_fences_parse`, which reports under its own name
-        since #2556 and appears in no issue list."""
+        since #2556 and appears in no issue list. The thirteenth is
+        `function_spec_sections_have_examples`, built by #2620 as the path
+        back to a hard gate."""
         assert "python_fences_parse" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 12
+        assert "function_spec_sections_have_examples" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 13
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:
@@ -101,26 +104,45 @@ class TestTheRuling:
             "change_instructions_specific",
             "modify_files_have_excerpts",
             "data_structures_have_examples",
+            "functions_have_io_examples",
         }
         for name in proxies:
             assert is_proxy(name)
             assert not classification_of(name).gates
 
     def test_the_boundaries_the_operator_ruled(self) -> None:
-        """#2590/PR #2606 fixed io-examples' addressability, not its authority;
-        #2592 rides on this sweep and is a proxy."""
-        assert classification_of("functions_have_io_examples").kind == FACT
+        """#2620, 2026-08-28: **classification follows the implementation.**
+
+        The earlier ruling on the #2590 work order classified this check's
+        INTENTION and kept it gating; this one classifies the implementation
+        that actually runs, and demotes it. The two disagree, and the
+        implementation is what gates, so the implementation is what gets
+        classified. The gate it held moves to the structural check built with
+        the ruling.
+        """
+        assert classification_of("functions_have_io_examples").kind == PROXY
         assert classification_of("change_instructions_specific").kind == PROXY
+        assert classification_of(
+            "function_spec_sections_have_examples"
+        ).kind == FACT
 
     def test_arguable_classifications_are_flagged_not_demoted(self) -> None:
-        """Conservative where it is arguable: keep gating, record the tension."""
+        """Conservative where it is arguable: keep gating, record the tension.
+
+        `functions_have_io_examples` left this set when #2620 ruled on it --
+        a flag is for an open question, and that one is answered.
+        """
         flagged = {e.check for e in CLASSIFICATIONS.values() if e.flagged}
-        assert flagged == {"functions_have_io_examples", "criteria_have_tests"}
+        assert flagged == {"criteria_have_tests"}
         for name in flagged:
             assert classification_of(name).gates, (
                 f"{name} is flagged as arguable and must stay GATING -- a "
                 f"sweep does not demote on its own judgement"
             )
+
+    def test_a_demoted_check_carries_no_stale_flag(self) -> None:
+        """A ruled question must not keep advertising itself as open."""
+        assert classification_of("functions_have_io_examples").flagged == ""
 
     def test_an_unclassified_name_is_never_demoted(self) -> None:
         """Forgetting to classify a check must not remove its gate."""

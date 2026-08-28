@@ -163,23 +163,40 @@ CLASSIFICATIONS: dict[str, Classification] = {
     # ------------------------------------------- facts, flagged as arguable
     "functions_have_io_examples": Classification(
         check="functions_have_io_examples",
-        kind=FACT,
+        kind=PROXY,
         reads=(
             "a +/-2000-character window around each function definition, for "
             "an I/O vocabulary word AND any concrete-looking value"
         ),
         reason=(
-            "Operator-ruled a fact-verifier and kept gating: #2590 (PR #2606) "
-            "fixed its addressability, not its authority."
+            "Operator-ruled a PROXY 2026-08-28 (#2620), superseding the "
+            "earlier fact-verifier ruling on the #2590 work order. That "
+            "ruling classified the check's INTENTION; this one classifies the "
+            "implementation that actually runs, and the two disagree. A "
+            "window plus a vocabulary plus any number or quoted string does "
+            "not verify that the example is OF that function -- neighbouring "
+            "definitions share the window, and #2302 documents the verdict "
+            "moving on how often a name happened to be repeated. A false veto "
+            "from a well-intentioned check is still the #2539 disease."
         ),
-        flagged=(
-            "This reads like a proxy by the rule above: a window plus a "
-            "vocabulary plus any number or quoted string does not verify that "
-            "the example is OF that function, and #2302 shows the verdict has "
-            "moved on how often a name happened to be repeated. Left GATING "
-            "per the ruling; the tension, and the fair counter-argument for "
-            "it, are recorded on #2620 so the next sweep starts from the "
-            "question rather than rediscovering it."
+    ),
+    "function_spec_sections_have_examples": Classification(
+        check="function_spec_sections_have_examples",
+        kind=FACT,
+        reads=(
+            "each `### 5.N `name()`` subsection of the spec's Function "
+            "Specifications section, for an Input Example and an Output "
+            "Example block INSIDE that subsection's own bounds"
+        ),
+        reason=(
+            "the path back to a hard gate, named by #2620's ruling and built "
+            "with it. Presence within a bounded region is a fact: the section "
+            "either carries the block or it does not, no window is scanned, "
+            "and no neighbour can satisfy it. Template 0701 defines the "
+            "structure, and both preserved boostgauge specs follow it exactly "
+            "-- #331's seven subsections carry seven Input Examples, #1's two "
+            "carry two -- so the gate passes on real work rather than "
+            "blocking it."
         ),
     ),
     "criteria_have_tests": Classification(

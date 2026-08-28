@@ -144,10 +144,19 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_data)
     _log_check(check_data)
 
-    # Check 3: Functions should have I/O examples
+    # Check 3: Functions should have I/O examples — PROXY since #2620, so the
+    # demotion pass below turns its failure into an advisory. Kept because it
+    # grades functions the template's section-5 structure may not cover.
     check_functions = check_functions_have_io_examples(spec_draft)
     checks.append(check_functions)
     _log_check(check_functions)
+
+    # Check 3b (#2620): the structural fact-verifier that carries the gate
+    # check 3 used to hold. Bounded by each subsection's own heading, so a
+    # neighbouring function's example cannot satisfy it.
+    check_func_sections = check_function_spec_sections_have_examples(spec_draft)
+    checks.append(check_func_sections)
+    _log_check(check_func_sections)
 
     # Check 4: Change instructions should be specific.
     #
@@ -823,8 +832,119 @@ def grant_grace(
     ]
 
 
+#: A Function Specifications subsection: `### 5.2 `compute_needle_angle()``.
+#: Template 0701 defines this shape, and both preserved boostgauge specs
+#: follow it exactly -- #331's spec carries seven subsections and seven Input
+#: Examples, #1's carries two and two.
+_FUNC_SPEC_HEADING_RE = re.compile(
+    r"^###\s+5\.\d+\s+(.+?)\s*$", re.MULTILINE
+)
+
+#: The blocks template 0701 requires inside each such subsection.
+_REQUIRED_EXAMPLE_BLOCKS = ("**Input Example:**", "**Output Example:**")
+
+
+def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
+    """Every `### 5.N` subsection as (heading, body, 1-based heading line).
+
+    Bounded by the NEXT heading of any level, so a subsection's body is its
+    own -- which is the whole difference between this and a window scan.
+    """
+    text = spec or ""
+    matches = list(_FUNC_SPEC_HEADING_RE.finditer(text))
+    if not matches:
+        return []
+    next_heading = re.compile(r"^#{1,6}\s", re.MULTILINE)
+    out: list[tuple[str, str, int]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        limit = (
+            matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        )
+        following = next_heading.search(text, start, limit)
+        body_end = following.start() if following else limit
+        line_no = text.count("\n", 0, match.start()) + 1
+        out.append((match.group(0).strip(), text[start:body_end], line_no))
+    return out
+
+
+def check_function_spec_sections_have_examples(spec: str) -> CompletenessCheck:
+    """Every Function Specifications subsection carries its example blocks.
+
+    #2620's path back to a hard gate. `functions_have_io_examples` searches a
+    +/-2000-character window for vocabulary and any concrete-looking value,
+    which cannot tell whether the example belongs to the function it is
+    grading -- neighbouring definitions share the window. That is a correlate,
+    and the operator demoted it to advisory.
+
+    This asks a bounded, structural question instead: does the subsection that
+    documents this function, between its own heading and the next one, contain
+    the `**Input Example:**` and `**Output Example:**` blocks template 0701
+    requires? Presence within a region is a fact. No neighbour can satisfy it,
+    and no repetition of a name can move the verdict.
+
+    Not applicable is not failure: a spec with no `### 5.N` subsections -- a
+    spec that adds no functions, or one written before the template -- yields
+    no checks and passes, per the #1870 convention.
+
+    The complaint names the subsection HEADING, which occurs verbatim in the
+    draft, so revision pinning can read the address (#2555's lesson, swept by
+    `test_completeness_message_addressability.py`).
+    """
+    sections = function_spec_sections(spec)
+    if not sections:
+        return CompletenessCheck(
+            check_name="function_spec_sections_have_examples",
+            passed=True,
+            details=(
+                "No `### 5.N` function-specification subsections found — "
+                "check not applicable."
+            ),
+        )
+
+    missing: list[str] = []
+    for heading, body, line_no in sections:
+        absent = [b for b in _REQUIRED_EXAMPLE_BLOCKS if b not in body]
+        if absent:
+            missing.append(
+                f"{heading} (line {line_no}-{line_no}) lacks "
+                f"{' and '.join(absent)}"
+            )
+
+    if missing:
+        listed = "; ".join(missing[:5])
+        suffix = f" (and {len(missing) - 5} more)" if len(missing) > 5 else ""
+        return CompletenessCheck(
+            check_name="function_spec_sections_have_examples",
+            passed=False,
+            details=(
+                f"{len(missing)} of {len(sections)} function-specification "
+                f"subsection(s) are missing a required example block: "
+                f"{listed}{suffix}. Add the block inside that subsection; "
+                f"template 0701 section 5 requires both."
+            ),
+        )
+
+    return CompletenessCheck(
+        check_name="function_spec_sections_have_examples",
+        passed=True,
+        details=(
+            f"All {len(sections)} function-specification subsection(s) carry "
+            f"an Input Example and an Output Example."
+        ),
+    )
+
+
 def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
     """Every non-test function must have input/output examples.
+
+    **Classified a PROXY-heuristic and demoted to advisory (#2620.)** The
+    window scan below cannot tell whether the example it finds belongs to the
+    function it is grading, so its failure is a correlate rather than a fact.
+    `check_function_spec_sections_have_examples` above is the fact-verifier
+    that replaces its authority; this stays as an advisory second opinion,
+    because it grades functions the template's section-5 structure may not
+    cover.
 
     Judged at each function's DEFINITION SITE, once per function. The previous
     implementation scanned a forward-only window from every textual occurrence

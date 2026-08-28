@@ -162,6 +162,25 @@ class TestAddressableToday:
     is a rewording guard: change the message so it drops its address and this
     fails."""
 
+    def test_function_spec_sections_addresses_its_subsection(self):
+        """#2620's new hard gate, swept BEFORE it ships rather than discovered
+        to deadlock on a live roll (#2617's discipline).
+
+        The complaint names the subsection heading, which occurs verbatim in
+        the draft, and cites its line as a dashed range -- both halves of the
+        enforcement vocabulary, so pinning can read the address either way.
+        """
+        draft = (
+            "# Spec\n\n## 5. Function Specifications\n\n"
+            "### 5.1 `compute_needle_angle()`\n\n"
+            "**Signature:**\n\n```python\ndef compute_needle_angle(v):\n"
+            "    ...\n```\n\nNo examples here.\n"
+        )
+        verdict = _classify(
+            vc.check_function_spec_sections_have_examples(draft), draft
+        )
+        assert verdict.verdict == ADDRESSED
+
     def test_functions_have_io_examples_addresses_a_zero_arg_function(self):
         verdict = _classify(
             vc.check_functions_have_io_examples(FUNCTION_ZERO_ARG),
@@ -245,6 +264,7 @@ class TestTheSweepIsExhaustive:
         }
         swept = {
             "check_functions_have_io_examples",
+            "check_function_spec_sections_have_examples",
             "check_modify_files_have_excerpts",
             "check_change_instructions_specific",
             "check_manifest_traceability",
