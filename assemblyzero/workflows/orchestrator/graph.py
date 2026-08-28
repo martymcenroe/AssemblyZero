@@ -392,6 +392,22 @@ def format_stage_table(stage_results: dict) -> str:
         secs = r.get("duration_seconds", 0.0)
         detail = r.get("error_message") or r.get("artifact_path") or ""
         lines.append(f"{stage:<9} {status:<9} {secs:>6.1f}s  {detail[:60]}")
+
+    # #2608: declared fall-throughs, under the table. A stage that passed
+    # with a protection switched off renders identically to one that ran
+    # every guard, and run-issue331-093613 is the case: "spec passed" with
+    # the #2533 manifest silently absent. Printed only when non-empty, so
+    # the section's presence is itself the signal.
+    notes = [
+        (stage, note)
+        for stage in STAGE_ORDER
+        for note in (stage_results.get(stage) or {}).get("notes", []) or []
+    ]
+    if notes:
+        lines.append("")
+        lines.append("DECLARED FALL-THROUGHS (a protection did not run):")
+        for stage, note in notes:
+            lines.append(f"  {stage:<9} {note}")
     return "\n".join(lines)
 
 

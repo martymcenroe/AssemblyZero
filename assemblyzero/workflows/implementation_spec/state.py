@@ -253,6 +253,15 @@ class ImplementationSpecState(TypedDict, total=False):
     #   DOCUMENT rather than against a list re-derived from the rows.
     assertion_manifest: str
     assertion_manifest_rows: list[dict]
+    # #2608: the abstain, travelling forward. An empty manifest alone cannot
+    # tell a later stage whether the compiler found nothing to protect or
+    # could not see what to protect, and the run-19 misread turned on exactly
+    # that ambiguity. `absence_reason` carries the denominator the compiler
+    # searched; `abstained` is True only for the shape-mismatch case (tables
+    # present, none in the criteria shape), which is the one worth surfacing.
+    assertion_manifest_absent: bool
+    assertion_manifest_absence_reason: str
+    assertion_manifest_abstained: bool
     assertion_manifest_criteria: list[str]
 
     # Closes #2532: the pinning record. Each entry is one revision-time

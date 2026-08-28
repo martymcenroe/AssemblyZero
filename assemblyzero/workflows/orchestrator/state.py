@@ -25,6 +25,11 @@ class StageResult(TypedDict, total=False):
     # non-transient recovery plan). When True or absent, the retry loop runs
     # as today. Closes #1463.
     transient: bool
+    # #2608: declared fall-throughs this stage took -- a protection that sat
+    # out, and why. A passed stage that silently skipped a guard reads in the
+    # table exactly like one that ran every guard, which is how the #2533
+    # manifest switching off produced a green run record nobody questioned.
+    notes: list[str]
 
 
 class OrchestrationState(TypedDict, total=False):

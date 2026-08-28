@@ -201,6 +201,36 @@ class CompileResult:
     criteria_ids: tuple[str, ...] = ()
     #: Hex colours the contract carries, empty when no contract was given.
     contract_hexes: frozenset[str] = field(default_factory=frozenset)
+    #: #2608: the denominator behind `applicable=False`. An abstain that
+    #: does not say what it searched is indistinguishable from an abstain
+    #: that found nothing to search, and the run-19 misread was exactly
+    #: that: 15 tables parsed, none in the criteria shape, reported as
+    #: "not applicable" as though the LLD had no tables at all.
+    tables_seen: int = 0
+
+    @property
+    def abstained(self) -> bool:
+        """Not applicable, with tables present that simply were not criteria.
+
+        Distinct from a document with no tables at all: the first is a
+        shape mismatch worth surfacing, the second is the ordinary
+        non-visual issue this compiler is meant to sit out.
+        """
+        return not self.applicable and self.tables_seen > 0
+
+    def denominator(self) -> str:
+        """What was searched and what was found, for the log and the report."""
+        if self.applicable:
+            return (
+                f"{len(self.criteria_ids)} criterion(s) compiled from "
+                f"{self.tables_seen} table(s)"
+            )
+        if self.tables_seen:
+            return (
+                f"{self.tables_seen} table(s) parsed, 0 in the criteria "
+                f"shape (an ID column and a binding column)"
+            )
+        return "0 tables in the document"
 
 
 def contract_hex_universe(contract_text: str) -> frozenset[str]:
@@ -218,9 +248,15 @@ def compile_manifest(
     must resolve into — a colour in neither the palette nor any other contract
     table is the "sample point resolving to no zone row" defect.
     """
-    tables = [t for t in parse_tables(lld_content or "") if is_criteria_table(t)]
+    all_tables = parse_tables(lld_content or "")
+    tables = [t for t in all_tables if is_criteria_table(t)]
     if not tables:
-        return CompileResult(applicable=False)
+        # #2608: carry the denominator. `tables_seen` is what separates "this
+        # document has no tables, as most issues do" from "this document has
+        # fifteen and none is a criteria table" -- the second is a shape
+        # mismatch the caller must surface, and the run-19 misread was to
+        # report both as a bare "not applicable".
+        return CompileResult(applicable=False, tables_seen=len(all_tables))
 
     contract_hexes = contract_hex_universe(contract_text)
     rows: list[ManifestRow] = []
@@ -333,6 +369,7 @@ def compile_manifest(
         failures=tuple(failures),
         criteria_ids=tuple(criteria_ids),
         contract_hexes=contract_hexes,
+        tables_seen=len(all_tables),
     )
 
 
