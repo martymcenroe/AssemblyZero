@@ -33,6 +33,10 @@ from assemblyzero.workflows.implementation_spec.state import (
     ImplementationSpecState,
     PatternRef,
 )
+from assemblyzero.workflows.implementation_spec.check_classification import (
+    advisory_details,
+    is_proxy,
+)
 from assemblyzero.workflows.implementation_spec.criteria_coverage import (
     criteria_coverage,
     format_report as format_coverage_report,
@@ -145,32 +149,14 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_functions)
     _log_check(check_functions)
 
-    # Check 4: Change instructions should be specific — ADVISORY (#2539).
-    # A fence-count density ratio is a proxy, not a verification: it killed
-    # run-issue331-200815 one or two rounds from approval, at "found 8,
-    # expected 9" on a 454-line spec the adversarial reviewer had certified
-    # concrete and executable for five consecutive rounds — and because the
-    # threshold is derived from line count, the drafter's compliance (adding
-    # a fenced snippet, 7→8) grew the spec and moved the demand with it
-    # (8→9). This graph ALWAYS runs the N5 adversarial review, which judges
-    # concreteness and executability directly, with reasons, every round; a
-    # density heuristic adds no information the reviewer lacks and must not
-    # hold a veto the reviewer cannot override. A mechanical check
-    # hard-blocks only on what it can verify — a symbol exists, a row is
-    # cited — and a ratio is not that. Second instance of the class after
-    # #2526's str.isupper.
+    # Check 4: Change instructions should be specific.
+    #
+    # #2539 demoted this one check inline, here, by rewriting its result. That
+    # hack is gone: #2540 classified every check fact-verifier or
+    # proxy-heuristic in one pass, and the demotion below applies the table to
+    # all of them uniformly. See `check_classification.py` for this check's
+    # entry and the reading that decided it.
     check_instructions = check_change_instructions_specific(spec_draft)
-    if not check_instructions["passed"]:
-        print(f"    [ADVISORY] {check_instructions['details']}")
-        check_instructions = CompletenessCheck(
-            check_name="change_instructions_specific",
-            passed=True,
-            details=(
-                "ADVISORY (density heuristic — not blocking, #2539; the N5 "
-                "reviewer judges concreteness directly): "
-                + check_instructions["details"]
-            ),
-        )
     checks.append(check_instructions)
     _log_check(check_instructions)
 
@@ -230,6 +216,13 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
         _record_hallucination_telemetry(state, spec_draft, gathered_symbols)
     except Exception as e:  # noqa: BLE001 — record-only contract
         print(f"    [telemetry] WARNING: hallucination telemetry failed: {e}")
+
+    # #2540: a proxy-heuristic never outranks an engaged judge examining the
+    # same dimension. Applied here, once, over every check -- so the rule is
+    # the table's, not each check's call site's, and a check added tomorrow
+    # obeys it without anyone remembering to write the demotion again.
+    review_engaged = review_is_engaged(state)
+    checks = [_demote_proxies(check, review_engaged) for check in checks]
 
     # Collect issues from failed checks
     completeness_issues = [
@@ -2865,6 +2858,53 @@ _KNOWN_STDLIB_TOPS: frozenset[str] = frozenset({
 # =============================================================================
 # Utility
 # =============================================================================
+
+
+def review_is_engaged(state: ImplementationSpecState) -> bool:
+    """Is the adversarial reviewer going to judge this draft? (#2540)
+
+    True for this graph, and that is a fact about its routing rather than an
+    assumption: `route_after_validation` sends a passing draft to N5 directly,
+    or to N4's human gate, which routes onward to N5 when the human approves.
+    `test_check_classification.py::TestReviewIsReallyEngaged` reads both
+    routers and pins those paths, so this cannot quietly become a lie.
+
+    The one exit that reaches no reviewer is the human REJECTING the draft at
+    N4, which ends the run. A demoted proxy goes unjudged there and nothing
+    ships either, so the demotion costs nothing on that path.
+
+    A state may say `review_engaged: False` explicitly, for a future graph that
+    runs these checks WITHOUT a reviewer. There, proxies re-arm and gate again,
+    because the demotion's whole justification is that a better judge is about
+    to look at the same dimension. Absent that judge, a weak check is better
+    than none.
+    """
+    declared = state.get("review_engaged")
+    if declared is None:
+        return True
+    return bool(declared)
+
+
+def _demote_proxies(
+    check: CompletenessCheck, review_engaged: bool
+) -> CompletenessCheck:
+    """A failed proxy-heuristic reports instead of blocking (#2540).
+
+    Only a FAILED check is touched, and only a declared proxy. A passing check
+    is returned unchanged so the pass/na accounting downstream is unaffected,
+    and an unclassified check keeps its authority -- the exhaustiveness lint,
+    not a silent demotion, is what catches a check nobody classified.
+    """
+    if check["passed"] or not review_engaged:
+        return check
+    if not is_proxy(check["check_name"]):
+        return check
+    print(f"    [ADVISORY] {check['details']}")
+    return CompletenessCheck(
+        check_name=check["check_name"],
+        passed=True,
+        details=advisory_details(check["details"]),
+    )
 
 
 def _log_check(check: CompletenessCheck) -> None:

@@ -181,6 +181,12 @@ class ImplementationSpecState(TypedDict, total=False):
     error_message: str
     next_node: str
 
+    # #2540: whether the adversarial reviewer will judge this draft. Absent
+    # means True, which is this graph's routing. A future graph that runs the
+    # completeness checks WITHOUT a reviewer sets this False, and proxy-class
+    # checks gate again -- absent a better judge, a weak check beats none.
+    review_engaged: bool
+
     # Issue #476: API cost budget
     cost_budget_usd: float
 
