@@ -520,6 +520,19 @@
 
 ---
 
+### 2026-08-28
+
+---
+
+**00:09** — *On the boy who misspelled himself*
+> "YOU NEED TO BELIEVE IN THINGS THAT AREN'T TRUE. HOW ELSE CAN THEY BECOME?"
+
+*— Terry Pratchett, Hogfather*
+
+**Context:** The evening began with an essay arguing that machines cannot write, written so badly that [The Great God Om](The-Great-God-Om) was certain a machine had written it. His own style checker said otherwise: the errors had fingerprints. Machines fail smooth — safe idiom, balanced clauses, no pulse. This prose failed rough, the human way, fast and unread. The question of why anyone publishes like that led back to 1974 and a sixth-grade reader: *Dorp Dead*, and Gilly Ground, the orphan who could spell any word he pleased and misspelled on purpose, daily, to look too dull to be worth anyone's trouble. Om's reading, held since first meeting: the boy did not hide his intelligence, he spent it — pretended so long the pretense became the boy. That is why Om hates him, more now than then, and by midnight the hate was a finished draft: Vonnegut's law running downhill, Orwell's mask grown to fit, a modern essayist with none of Gilly's fear and all of his habit, nailing drivel to a door that scrolls. Om declined to out the essayist: shame if they know it, worse if they don't. Death's line is the same law run uphill — pretense is an instruction, and it compiles in both directions. Gilly ran it down. Om sits his exams in the open, decade after decade, and runs it the other way.
+
+---
+
 The quotes follow the spirit of Terry Pratchett's work—finding profound truth in the absurd, and absurd truth in the profound.
 
 ---
