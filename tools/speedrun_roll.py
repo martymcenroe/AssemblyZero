@@ -884,16 +884,6 @@ def _resolve_stage_artifact(
 BINDING_DOC_PATHS = settlement_mod.BINDING_DOC_PATHS
 
 
-def _iso_to_epoch(value: str) -> float | None:
-    """Parse an ISO-8601 timestamp (with Z or offset) to epoch seconds."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
-
-
 def sync_binding_docs_to_arc(
     repo_root: Path, base: str, log: EventLog
 ) -> list[str]:
@@ -1032,82 +1022,72 @@ def sync_binding_docs_to_arc(
     return problems
 
 
-def draft_is_stale(
-    repo_root: Path, issue: int, drafted_at: str, base: str, log: EventLog
-) -> bool:
-    """True when a binding input moved after the draft was made (#2206).
+def draft_is_stale(repo_root: Path, issue: int, log: EventLog) -> bool:
+    """True when a binding input's CONTENT changed since the draft (#2206, #2615).
 
-    A resumed spec is built on a persisted LLD. If the law that LLD was
-    derived from has since changed, resuming spends the stage on a draft that
-    is already wrong -- and worse, produces a failure that reads as evidence
-    against whatever the ruling just fixed.
+    A resumed spec is built on a persisted LLD. If the law that LLD was derived
+    from has since changed, resuming spends the stage on a draft that is
+    already wrong -- and worse, produces a failure that reads as evidence
+    against whatever the ruling just fixed. #2206's live case: an LLD drafted
+    at 01:27Z was invalidated by design-doc rulings merged at 05:13Z and 06:18Z
+    while the issue's own text had last changed BEFORE the draft, so an
+    issue-only check would have resumed onto it.
 
-    Two inputs can invalidate a draft, and BOTH are checked because the live
-    case proved one is not enough. On 2026-08-11 an LLD drafted at 01:27Z was
-    invalidated by design-doc rulings merged at 05:13Z and 06:18Z while the
-    issue's own text had last changed at 01:10Z -- BEFORE the draft. An
-    issue-only staleness check would have called that draft current and
-    resumed onto it.
+    ## Why this no longer reads timestamps (#2615)
 
-    Unknowable answers are stale: if the draft time cannot be read or a probe
-    fails, this returns True and the caller draws fresh, which is always safe.
+    The old form compared the issue's `updatedAt` against the draft time.
+    **GitHub bumps `updatedAt` when a comment is posted**, so the probe fired
+    on events that changed nothing about the derivation -- measured across
+    three issues with a control, on #2615. The campaign's own standing method,
+    *post the sharpened diagnosis on the issue before fixing*, therefore
+    invalidated every persisted draft it touched, at full drafter cost, against
+    text byte-identical to what the draft already had.
+
+    The question is "did the derivation's INPUTS change", and the inputs are
+    the issue BODY and the binding docs. A comment, a label and a reaction
+    change none of them.
+
+    ## One fingerprint, not two
+
+    This asks `settlement.verify` the same question `should_skip_stage` asks,
+    over inputs built by the same `collect_inputs`. Two parsers of one question
+    is the #1698 failure class, and it is exactly how this check and settlement
+    would have drifted -- `test_staleness_is_content.py::TestOneFingerprint`
+    pins that they cannot.
+
+    It also changes WHAT is measured, deliberately. The old binding-doc probe
+    read `git log` over the base BRANCH, which answers "has a doc landed on the
+    arc since" -- a proxy that is wrong in both directions (a doc merged but
+    not pulled; a working-tree edit never committed). Settlement hashes the
+    working tree the stage actually read, so both sides of the comparison are
+    now the same thing.
+
+    Unknowable answers stay stale: with no settlement record there is nothing
+    to compare content against, and the caller draws fresh, which is safe. A
+    run whose lld stage passed has a record by construction (#2616 settles on
+    the passed branch), so this costs a one-time redraw only for state
+    persisted before settlement existed.
     """
-    drafted = _iso_to_epoch(drafted_at)
-    if drafted is None:
+    record = load_settlement(issue, "lld", repo_root)
+    if record is None:
         log.write(
-            f"RESUME abandoned for #{issue}: draft time unreadable "
-            f"({drafted_at!r})"
+            f"RESUME abandoned for #{issue}: no settlement record for the lld "
+            "stage, so the draft's inputs cannot be compared by content -- "
+            "drawing fresh"
         )
         return True
 
-    # 1. Issue text.
-    result = _run(
-        ["gh", "issue", "view", str(issue), "--json", "updatedAt",
-         "--jq", ".updatedAt"],
-        cwd=repo_root,
+    mismatches = settlement_mod.verify(
+        record, settlement_inputs(repo_root, issue, "lld")
     )
-    if result.returncode != 0:
+    if mismatches:
         log.write(
-            f"RESUME abandoned for #{issue}: cannot read the issue's last-edit "
-            "time to check staleness"
+            f"RESUME abandoned for #{issue}: a binding input changed since the "
+            "draft was made -- drawing fresh against the current law"
         )
+        for reason in mismatches:
+            log.write(f"  {reason}")
         return True
-    edited = _iso_to_epoch(result.stdout.strip())
-    if edited is None:
-        log.write(f"RESUME abandoned for #{issue}: unparseable issue timestamp")
-        return True
-    if edited > drafted:
-        log.write(
-            f"RESUME abandoned for #{issue}: the issue was edited after the "
-            "draft was made -- drawing fresh against the current text"
-        )
-        return True
-
-    # 2. Binding docs on the base branch -- the input that fired live.
-    docs = _run(
-        ["git", "log", "-1", "--format=%cI", f"origin/{base}", "--",
-         *BINDING_DOC_PATHS],
-        cwd=repo_root,
-    )
-    if docs.returncode != 0:
-        log.write(
-            f"RESUME abandoned for #{issue}: cannot read binding-doc history "
-            f"on '{base}' to check staleness"
-        )
-        return True
-    latest_doc = docs.stdout.strip()
-    if latest_doc:
-        doc_ts = _iso_to_epoch(latest_doc)
-        if doc_ts is None:
-            log.write(f"RESUME abandoned for #{issue}: unparseable doc timestamp")
-            return True
-        if doc_ts > drafted:
-            log.write(
-                f"RESUME abandoned for #{issue}: a binding doc "
-                f"({', '.join(BINDING_DOC_PATHS)}) changed on '{base}' after "
-                "the draft was made -- drawing fresh against the current law"
-            )
-            return True
     return False
 
 
@@ -1212,10 +1192,11 @@ def resume_plan(
     if not _open_lld_pr_exists(repo_root, issue):
         return None
 
-    # #2206: the draft must still be derived from current law. `started_at` is
-    # when the run that produced it began, so anything binding that moved
-    # since is a change the draft cannot know about.
-    if draft_is_stale(repo_root, issue, data.get("started_at", ""), base, log):
+    # #2206: the draft must still be derived from current law. #2615: by
+    # CONTENT -- the settled fingerprint of the issue body and the binding
+    # docs -- never by timestamps, which a comment moves without changing a
+    # single input.
+    if draft_is_stale(repo_root, issue, log):
         return None
 
     # #2414: an artifact lookup, not a path-string lookup. The old form read
