@@ -1054,9 +1054,25 @@ class TestFindPatternReferences:
 class TestValidateCompleteness:
     """Tests for N3: validate_completeness node."""
 
-    def test_t050_catches_missing_excerpts(self, base_state):
-        """T050: Incomplete spec fails validation."""
+    def test_t050_missing_excerpts_now_advises_instead_of_blocking(
+        self, base_state
+    ):
+        """T050, restated for #2540: a spec whose only failures are PROXY-class
+        no longer blocks — it advises, and the N5 reviewer decides.
+
+        This spec has no code fences at all, so it fails
+        `modify_files_have_excerpts` and `change_instructions_specific`. Both
+        are classified proxy-heuristics: the first passes on any fence within
+        3000 characters of a filename, the second on a fence count against a
+        line-count threshold. Neither states a fact about the artifact, and a
+        proxy never outranks an engaged judge examining the same dimension.
+
+        The check still FAILS; what changed is that its failure no longer caps
+        a run. `test_check_classification.py::TestNoProxyCanCapHalt` pins the
+        rule per-check; this pins it through the real node.
+        """
         from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            check_modify_files_have_excerpts,
             validate_completeness,
         )
 
@@ -1064,15 +1080,61 @@ class TestValidateCompleteness:
             "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
             + ("filler content\n" * 20)
         )
-        base_state["files_to_modify"] = [{
+        files = [{
             "path": "assemblyzero/workflows/test/graph.py",
             "change_type": "Modify", "description": "Update graph",
             "current_content": "existing code",
         }]
+        base_state["files_to_modify"] = files
+
+        # The check itself is unchanged and still finds the gap.
+        assert check_modify_files_have_excerpts(
+            base_state["spec_draft"], files
+        )["passed"] is False
 
         result = validate_completeness(base_state)
+
+        assert result["validation_passed"] is True
+        assert result["completeness_issues"] == []
+
+    def test_t050b_a_fact_class_failure_still_blocks(self, base_state):
+        """The control. Without it, the test above passes against a node that
+        had stopped gating on anything at all.
+
+        Which fact-class check catches this spec is not the point and is not
+        asserted -- the point is that whatever still blocks is a FACT, never a
+        proxy. Naming one check here would pin an incidental detail of the
+        fixture rather than the rule.
+        """
+        from assemblyzero.workflows.implementation_spec.check_classification import (
+            CLASSIFICATIONS,
+            PROXY,
+        )
+        from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
+            validate_completeness,
+        )
+
+        base_state["spec_draft"] = (
+            "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
+            "```python\ndef broken(:\n    pass\n```\n"
+            + ("filler content\n" * 20)
+        )
+        base_state["files_to_modify"] = []
+
+        result = validate_completeness(base_state)
+
         assert result["validation_passed"] is False
-        assert len(result["completeness_issues"]) > 0
+        assert result["completeness_issues"]
+
+        proxy_details = {
+            entry.check for entry in CLASSIFICATIONS.values()
+            if entry.kind == PROXY
+        }
+        for issue in result["completeness_issues"]:
+            assert "ADVISORY" not in issue, (
+                f"a demoted proxy reached completeness_issues: {issue}"
+            )
+        assert proxy_details, "the classification table must know some proxies"
 
     def test_t060_passes_complete_spec(self, base_state, sample_spec_complete):
         """T060: Complete spec passes validation."""
