@@ -40,8 +40,16 @@ def build_edit_script_prompt(
     review_feedback: str,
     completeness_issues: list[str],
     prior_completeness_breakdown: list[dict] | None = None,
+    apply_failure: str = "",
 ) -> str:
-    """Build the revision prompt that requests edit blocks, not a rewrite."""
+    """Build the revision prompt that requests edit blocks, not a rewrite.
+
+    ``apply_failure`` (#2569): the exact failure of the previous attempt's
+    edit blocks, when there was one. There is no full-regeneration fallback
+    any more — a failed script re-prompts with its failure, because the
+    drafter can disambiguate a SEARCH far more reliably than enforcement
+    can un-mangle a rewrite.
+    """
     sections: list[str] = []
 
     sections.append(
@@ -72,6 +80,15 @@ def build_edit_script_prompt(
         "items, put a single line `UNLOCK: <one-line reason>` before your "
         "first edit block; the unlock is logged, never silent."
     )
+
+    if apply_failure:
+        sections.append(
+            "## YOUR PREVIOUS ATTEMPT FAILED TO APPLY (#2569)\n\n"
+            f"{apply_failure}\n\n"
+            "This is a correction round, not a restart: emit a fresh, "
+            "complete set of edit blocks for ALL listed deficiencies, "
+            "with the failure above repaired."
+        )
 
     if completeness_issues:
         issues_text = "## DEFICIENCIES TO FIX (mechanical validation)\n\n"

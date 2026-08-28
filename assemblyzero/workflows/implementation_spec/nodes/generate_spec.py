@@ -72,6 +72,31 @@ MAX_SNAPSHOT_CHARS = 10_000
 # Maximum total prompt content chars (to avoid token limits)
 MAX_TOTAL_PROMPT_CHARS = 120_000
 
+#: #2569: total edit-script attempts per revision round — the initial call
+#: plus re-prompts carrying the exact apply failure. Three covers the
+#: observed failure classes: a transport failure (retried on the same
+#: prompt) plus one drafter correction. Counted basis: 192 applied vs 16
+#: fallbacks across every boostgauge run log, seven of the sixteen the
+#: SEARCH-not-found class a single correction recovers.
+EDIT_SCRIPT_MAX_ATTEMPTS = 3
+
+
+def _spec_edit_halt(reason: str) -> str:
+    """Halt message for a revision that could not be applied as edits (#2569).
+
+    Legible on its own in a halt banner (#2197): it names the contract,
+    what broke it, and the fact that nothing was lost. Mirrors the lld
+    stage's #2200 wording — the two stages carry the same law.
+    """
+    return (
+        f"[EDIT-SCRIPT] spec revision rejected after "
+        f"{EDIT_SCRIPT_MAX_ATTEMPTS} attempt(s): {reason}. The prior draft "
+        f"is unchanged and remains the working copy. A revision is applied "
+        f"as SEARCH/REPLACE edit blocks and is never redrawn wholesale "
+        f"(#2569) — the full-regeneration fallback was the vector for every "
+        f"mangled draft on the record. Relaunch to resume from this stage."
+    )
+
 
 # =============================================================================
 # System Prompt
@@ -337,72 +362,160 @@ def generate_spec(state: ImplementationSpecState) -> dict[str, Any]:
     # #1528: Edit-script revision — the model emits SEARCH/REPLACE blocks
     # which are applied mechanically, so unflagged content cannot drift
     # (measured regenerations oscillated 1,149→341→1,407 lines; see #1529).
-    # Any failure falls through to the classic full-revision call below.
+    #
+    # #2569: the full-revision FALLBACK is retired. Counted across every
+    # boostgauge run log: 192 applied edit-scripts vs 16 fallbacks, and
+    # every text disaster (the 458→1296 chimera, the eliding rewrite that
+    # deleted 18 tests) traveled through the wide channel the fallback
+    # opened, while the edit path only ever failed loudly. A failed script
+    # now RE-PROMPTS with its exact failure — the drafter can disambiguate
+    # a SEARCH far more reliably than enforcement can un-mangle a rewrite —
+    # and on exhaustion the stage halts naming the unappliable blocks,
+    # mirroring the lld stage's #2200 contract. The classic path below
+    # remains for the initial draft and for mock drafters only.
+    #
+    # The old `retry_count < 1` gate is dropped: nothing in this workflow
+    # ever sets retry_count (verified by grep — it is only ever read), so
+    # the gate was dead; a revision is a revision.
     # -------------------------------------------------------------------------
     edit_script_content: str | None = None
     result = None
     #: #2532: pinning refusals, regression-class flags, and unlock grants
     #: from this revision, accumulated across whichever path produced it.
     pinning_events: list[str] = []
-    if is_revision and retry_count < 1 and not drafter_spec.startswith("mock:"):
-        cost_before = get_cumulative_cost()
-        edit_result = drafter.invoke(
-            system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT,
-            content=build_edit_script_prompt(
-                existing_draft=existing_draft,
+    node_cost_usd = 0.0
+    if is_revision and not drafter_spec.startswith("mock:"):
+        halt_reason = ""
+        failure_context = ""
+        for attempt in range(1, EDIT_SCRIPT_MAX_ATTEMPTS + 1):
+            cost_before = get_cumulative_cost()
+            edit_result = drafter.invoke(
+                system_prompt=EDIT_SCRIPT_SYSTEM_PROMPT,
+                content=build_edit_script_prompt(
+                    existing_draft=existing_draft,
+                    review_feedback=review_feedback,
+                    completeness_issues=completeness_issues,
+                    prior_completeness_breakdown=state.get(
+                        "prior_completeness_breakdown", []
+                    ),
+                    apply_failure=failure_context,
+                ),
+                timeout_seconds=600,
+            )
+            node_cost_usd += get_cumulative_cost() - cost_before
+            if not edit_result.success:
+                # A transport failure is the provider's, not the drafter's:
+                # the same prompt goes again (failure_context unchanged).
+                halt_reason = (
+                    f"drafter call failed: {edit_result.error_message}"
+                )
+                print(
+                    f"    [EDIT-SCRIPT] attempt {attempt}/"
+                    f"{EDIT_SCRIPT_MAX_ATTEMPTS} failed ({halt_reason})"
+                    + (" -- retrying" if attempt < EDIT_SCRIPT_MAX_ATTEMPTS
+                       else "")
+                )
+                continue
+            blocks = parse_edit_blocks(edit_result.response or "")
+            if not blocks:
+                halt_reason = (
+                    "no well-formed SEARCH/REPLACE blocks in the response"
+                )
+                failure_context = (
+                    "Your previous response contained no well-formed "
+                    "SEARCH/REPLACE blocks. Emit ONLY edit blocks in the "
+                    "exact format specified — no prose, no rewritten "
+                    "document."
+                )
+                print(
+                    f"    [EDIT-SCRIPT] attempt {attempt}/"
+                    f"{EDIT_SCRIPT_MAX_ATTEMPTS}: {halt_reason} -- "
+                    f"re-prompting with the failure"
+                )
+                continue
+            patched, failures = apply_edit_blocks(existing_draft, blocks)
+            if failures:
+                halt_reason = "; ".join(failures)
+                failure_context = (
+                    f"Your previous edit blocks did not apply: "
+                    f"{halt_reason}. Copy each SEARCH character-for-"
+                    f"character from the CURRENT SPEC below. If a SEARCH "
+                    f"matched more than once, extend it with surrounding "
+                    f"lines until it is unique."
+                )
+                print(
+                    f"    [EDIT-SCRIPT] attempt {attempt}/"
+                    f"{EDIT_SCRIPT_MAX_ATTEMPTS}: {halt_reason} -- "
+                    f"re-prompting with the failure"
+                )
+                continue
+            if patched == existing_draft:
+                halt_reason = (
+                    f"{len(blocks)} edit block(s) applied but changed "
+                    f"nothing"
+                )
+                failure_context = (
+                    "Your previous edit blocks applied but changed "
+                    "nothing. Each REPLACE must differ from its SEARCH, "
+                    "and the edits must address the deficiencies listed "
+                    "below."
+                )
+                print(
+                    f"    [EDIT-SCRIPT] attempt {attempt}/"
+                    f"{EDIT_SCRIPT_MAX_ATTEMPTS}: {halt_reason} -- "
+                    f"re-prompting with the failure"
+                )
+                continue
+            # #2532: pin what passed. Edits touching content the verdict
+            # did not name are refused mechanically; the locked spans
+            # carry forward byte-verbatim.
+            pinned, events = _apply_pinning(
+                state, existing_draft, patched,
+                response=edit_result.response or "",
                 review_feedback=review_feedback,
                 completeness_issues=completeness_issues,
-                prior_completeness_breakdown=state.get(
-                    "prior_completeness_breakdown", []
-                ),
-            ),
-            timeout_seconds=600,
-        )
-        node_cost_usd = get_cumulative_cost() - cost_before
-        if edit_result.success:
-            blocks = parse_edit_blocks(edit_result.response or "")
-            if blocks:
-                patched, failures = apply_edit_blocks(existing_draft, blocks)
-                if not failures and patched != existing_draft:
-                    # #2532: pin what passed. Edits touching content the
-                    # verdict did not name are refused mechanically; the
-                    # locked spans carry forward byte-verbatim.
-                    patched, events = _apply_pinning(
-                        state, existing_draft, patched,
-                        response=edit_result.response or "",
-                        review_feedback=review_feedback,
-                        completeness_issues=completeness_issues,
-                    )
-                    pinning_events.extend(events)
-                if not failures and patched != existing_draft:
-                    ratio = unchanged_ratio(existing_draft, patched)
-                    print(
-                        f"    [EDIT-SCRIPT] Applied {len(blocks)} edit(s); "
-                        f"{ratio:.0%} of prior spec preserved byte-identical "
-                        f"(#1528)"
-                    )
-                    edit_script_content = patched
-                    result = edit_result
-                else:
-                    reason = (
-                        "; ".join(failures)
-                        if failures
-                        else "edits produced no change"
-                    )
-                    print(
-                        f"    [EDIT-SCRIPT] Falling back to full revision: "
-                        f"{reason}"
-                    )
-            else:
-                print(
-                    "    [EDIT-SCRIPT] Falling back to full revision: "
-                    "no well-formed edit blocks in response"
-                )
-        else:
-            print(
-                f"    [EDIT-SCRIPT] Falling back to full revision: "
-                f"{edit_result.error_message}"
             )
+            pinning_events.extend(events)
+            if pinned == existing_draft:
+                refusals = [
+                    e for e in events if "[PINNING] refused:" in e
+                ]
+                halt_reason = (
+                    f"every edit touched locked content and was refused "
+                    f"by pinning ({len(refusals)} refusal(s))"
+                )
+                failure_context = (
+                    "Your previous edits were refused by pinning "
+                    "enforcement as locked content the feedback did not "
+                    "name: "
+                    + "; ".join(refusals[:4])
+                    + ". Edit ONLY the content the deficiencies and "
+                    "feedback below name."
+                )
+                print(
+                    f"    [EDIT-SCRIPT] attempt {attempt}/"
+                    f"{EDIT_SCRIPT_MAX_ATTEMPTS}: {halt_reason} -- "
+                    f"re-prompting with the failure"
+                )
+                continue
+            ratio = unchanged_ratio(existing_draft, pinned)
+            print(
+                f"    [EDIT-SCRIPT] Applied {len(blocks)} edit(s); "
+                f"{ratio:.0%} of prior spec preserved byte-identical "
+                f"(#1528)"
+            )
+            edit_script_content = pinned
+            result = edit_result
+            break
+        if edit_script_content is None:
+            message = _spec_edit_halt(halt_reason)
+            print(f"    {message}")
+            return {
+                "error_message": message,
+                "pinning_events": (
+                    list(state.get("pinning_events", [])) + pinning_events
+                ),
+            }
 
     # -------------------------------------------------------------------------
     # Call drafter LLM (classic full draft/revision path)

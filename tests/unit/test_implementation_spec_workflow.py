@@ -1522,11 +1522,20 @@ class TestGenerateSpec:
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.get_provider")
     @patch("assemblyzero.workflows.implementation_spec.nodes.generate_spec.load_template")
     def test_revision_increments_iteration(self, mock_template, mock_provider, base_state):
-        """Revision mode increments review_iteration."""
+        """Revision mode increments review_iteration.
+
+        #2569: a revision travels as an edit-script — there is no
+        full-regeneration fallback — so the stub answers in edit blocks.
+        """
         mock_template.return_value = "# Template"
         drafter = Mock()
         drafter.invoke.return_value = Mock(
-            success=True, response="# Revised Spec\n\n## 1. Overview", error_message=None,
+            success=True,
+            response=(
+                "<<<<<<< SEARCH\n# Old Draft\n=======\n"
+                "# Revised Spec\n\n## 1. Overview\n>>>>>>> REPLACE"
+            ),
+            error_message=None,
             input_tokens=0, output_tokens=0,
         )
         mock_provider.return_value = drafter
