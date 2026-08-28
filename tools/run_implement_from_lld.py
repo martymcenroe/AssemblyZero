@@ -356,6 +356,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=str,
         help="Target repository path (default: current repo)",
     )
+    # #2570: a resume verifies the halt's contract first and refuses by
+    # name when the world changed. Explicit, logged override only.
+    parser.add_argument(
+        "--accept-changed-inputs",
+        action="store_true",
+        help=(
+            "Proceed even when inputs changed since the last halt's resume "
+            "contract (#2570). The acceptance is printed, never silent."
+        ),
+    )
     parser.add_argument(
         "--lld",
         type=str,
@@ -700,6 +710,17 @@ def main():
     # Validate issue number
     if args.issue is None or args.issue <= 0:
         print("Error: --issue must be a positive integer")
+        sys.exit(1)
+
+    # #2570: a resume finds the world the halt described, or refuses by
+    # name -- before the worktree is touched and any token is spent. A
+    # fresh run has no contract and passes silently.
+    from assemblyzero.core.resume_contract import check_and_consume
+
+    if not check_and_consume(
+        "testing", args.issue,
+        accept_changed=args.accept_changed_inputs,
+    ):
         sys.exit(1)
 
     # Track original repo for worktree cleanup later

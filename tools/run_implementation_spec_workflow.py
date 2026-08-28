@@ -231,6 +231,19 @@ Examples:
         help="Allow running in the AssemblyZero root directory (not recommended)",
     )
 
+    # #2570: a resume verifies the halt's contract first and refuses by
+    # name when the world changed. This flag is the explicit, logged
+    # override for a deliberate change (the operator edited the LLD on
+    # purpose); it is never the default.
+    parser.add_argument(
+        "--accept-changed-inputs",
+        action="store_true",
+        help=(
+            "Proceed even when inputs changed since the last halt's resume "
+            "contract (#2570). The acceptance is printed, never silent."
+        ),
+    )
+
     # Issue #517: Global workflow timeout
     from assemblyzero.utils.workflow_timeout import add_timeout_argument
     add_timeout_argument(parser)
@@ -589,6 +602,17 @@ def run_workflow(
     # Handle dry-run
     if args.dry_run:
         return run_dry_run(args, target_repo)
+
+    # #2570: a resume finds the world the halt described, or refuses by
+    # name -- before any state is built and any token is spent. A fresh
+    # run has no contract and passes silently.
+    from assemblyzero.core.resume_contract import check_and_consume
+
+    if not check_and_consume(
+        "implementation_spec", args.issue,
+        accept_changed=args.accept_changed_inputs,
+    ):
+        return 1
 
     # Build initial state
     state = build_initial_state(args, assemblyzero_root, target_repo)
