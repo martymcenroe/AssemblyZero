@@ -499,6 +499,18 @@ Examples:
         help="Maximum revision iterations (default: 20)",
     )
     parser.add_argument(
+        "--draft-candidates",
+        type=int,
+        default=1,
+        help=(
+            "#2573: generate N independent initial LLD drafts, score each by "
+            "the full mechanical gate suite, and take the best forward into "
+            "review. 1 (default) is the serial path exactly. Capped at 5. "
+            "Applies to the lld workflow's initial draft only -- revisions "
+            "remain edit-script based."
+        ),
+    )
+    parser.add_argument(
         "--budget",
         type=float,
         default=3.0,
@@ -691,6 +703,7 @@ def build_initial_state(
             retry_policy=getattr(args, "retry_policy", "default"),
             issue_number=args.issue or 0,
             context_files=args.context or [],
+            draft_candidates=getattr(args, "draft_candidates", 1),
         )
 
     # Issue #476: API cost budget

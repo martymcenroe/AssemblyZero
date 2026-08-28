@@ -176,6 +176,9 @@ class RequirementsWorkflowState(TypedDict, total=False):
     config_gates_verdict: bool
     config_auto_mode: bool
     config_mock_mode: bool
+    #: #2573: how many independent initial drafts to generate and score by
+    #: the mechanical gates. 1 is the serial path and the default.
+    config_draft_candidates: int
 
     # Input - Issue workflow
     brief_file: str
@@ -303,6 +306,9 @@ def create_initial_state(
     gates_verdict: bool = True,
     auto_mode: bool = False,
     mock_mode: bool = False,
+    # #2573: 1 is the serial path exactly. Best-of-N is opt-in until
+    # live-roll data says otherwise.
+    draft_candidates: int = 1,
     max_iterations: int = 3,
     effort: str = "max",
     # Issue #1071: retry policy for transient LLM failures.
@@ -363,6 +369,7 @@ def create_initial_state(
         "config_gates_verdict": gates_verdict,
         "config_auto_mode": auto_mode,
         "config_mock_mode": mock_mode,
+        "config_draft_candidates": draft_candidates,
         # Workflow tracking
         "audit_dir": "",
         "file_counter": 0,
