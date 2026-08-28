@@ -41,6 +41,13 @@ from assemblyzero.workflows.requirements.audit import (
     next_file_number,
     save_audit_file,
 )
+from assemblyzero.workflows.requirements.best_of_n import (  # noqa: E402
+    SERIAL,
+    clamp_candidates,
+    render_score_table,
+    score_candidate,
+    select_winner,
+)
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 from assemblyzero.workflows.requirements.feedback_window import (
     build_feedback_block,
@@ -121,6 +128,151 @@ def _extract_open_questions(
     retained for signature compatibility; they are not used.
     """
     return scan_open_questions_section(response)
+
+
+def _generate_best_of_n(
+    *,
+    state: RequirementsWorkflowState,
+    drafter,
+    system_prompt: str,
+    prompt: str,
+    candidates: int,
+    audit_dir: Path,
+    draft_count: int,
+    cost_before: float,
+) -> dict[str, Any]:
+    """N independent drafts, scored by the real gates, best one forward (#2573).
+
+    Generation is SEQUENTIAL. The issue asks for parallel and the wall-clock
+    win is real, but cumulative cost accounting (`get_cumulative_cost`), the
+    prompt-failure telemetry and the provider's own retry state are process
+    globals that no test here can prove safe under concurrency. The COST
+    argument -- three drafter calls against loops that reached seven and
+    nine rounds -- holds either way, and it is the decisive one. Parallel
+    generation is filed as #2604.
+
+    Every candidate is preserved to lineage whether it wins or loses: the
+    losers are the evidence for whether best-of-N is worth keeping, and
+    discarding them would make that question unanswerable the same way the
+    serial loop's discarded drafts did.
+    """
+    from assemblyzero.workflows.requirements.nodes.validate_mechanical import (
+        validate_lld_mechanical,
+    )
+    from assemblyzero.workflows.requirements.nodes.validate_test_plan import (
+        validate_test_plan_node,
+    )
+
+    print(
+        f"    [BEST-OF-N] generating {candidates} independent candidate(s) "
+        f"(#2573; serial generation, see #2604)"
+    )
+
+    scores = []
+    file_num = state.get("file_counter", 0)
+    last_result = None
+    for index in range(1, candidates + 1):
+        result = drafter.invoke(system_prompt=system_prompt, content=prompt)
+        last_result = result
+        if not result.success:
+            # A failed candidate is scored unusable, not fatal: the point of
+            # N drafts is that one failing does not end the round.
+            scores.append(
+                _unusable(index, f"drafter failed: {result.error_message}")
+            )
+            continue
+
+        candidate = result.response or ""
+        score = score_candidate(
+            index, candidate, state,
+            mechanical=validate_lld_mechanical,
+            test_plan=validate_test_plan_node,
+        )
+        scores.append(score)
+
+        if audit_dir.exists():
+            file_num = next_file_number(audit_dir)
+            save_audit_file(
+                audit_dir, file_num, f"candidate-{index}-draft.md", candidate
+            )
+
+        if score.clears:
+            # A draft that passes every gate outright short-circuits: the
+            # remaining candidates cannot beat zero failures, and spending
+            # their calls to confirm that is the waste this replaces.
+            print(
+                f"    [BEST-OF-N] candidate {index} clears every gate; "
+                f"stopping early"
+            )
+            break
+
+    winner = select_winner(scores)
+    if winner is None:
+        return {
+            "error_message": (
+                f"BEST-OF-N: all {len(scores)} candidate(s) were unusable. "
+                + "; ".join(s.unusable for s in scores)
+            )
+        }
+
+    print(render_score_table(scores, winner.index))
+
+    draft_content = winner.draft
+    node_cost_usd = get_cumulative_cost() - cost_before
+    iteration_count = state.get("iteration_count", 0) + 1
+
+    draft_path = None
+    if audit_dir.exists():
+        file_num = next_file_number(audit_dir)
+        draft_path = save_audit_file(audit_dir, file_num, "draft.md", draft_content)
+
+    node_costs = accumulate_node_cost(
+        dict(state.get("node_costs", {})), "generate_draft", node_cost_usd,
+    )
+    node_tokens = accumulate_node_tokens(
+        dict(state.get("node_tokens", {})),
+        "generate_draft",
+        getattr(last_result, "input_tokens", 0) or 0,
+        getattr(last_result, "output_tokens", 0) or 0,
+    )
+
+    return {
+        "current_draft": draft_content,
+        "current_draft_path": str(draft_path) if draft_path else "",
+        "draft_count": draft_count,
+        "iteration_count": iteration_count,
+        "file_counter": file_num,
+        "user_feedback": "",
+        "previous_review_feedback": state.get("current_verdict", ""),
+        "previous_draft": state.get("current_draft", ""),
+        # The winner has NOT been through the gates as the live draft yet --
+        # it was scored on a probe copy. Clearing here matches the serial
+        # path, and N1.5 re-runs against the real state immediately after.
+        "validation_errors": [],
+        "finalize_repair_pending": False,
+        "error_message": "",
+        "node_costs": node_costs,
+        "node_tokens": node_tokens,
+        # #2573: the scored table, in state as well as the log, so a report
+        # can count best-of-N rounds without parsing prose.
+        "draft_candidate_scores": [
+            {
+                "index": s.index,
+                "failures": s.failure_count,
+                "summary": s.summary(),
+                "winner": s.index == winner.index,
+            }
+            for s in scores
+        ],
+    }
+
+
+def _unusable(index: int, reason: str):
+    from assemblyzero.workflows.requirements.best_of_n import CandidateScore
+
+    score = CandidateScore(index=index, draft="")
+    score.unusable = reason
+    return score
 
 
 def generate_draft(state: RequirementsWorkflowState) -> dict[str, Any]:
@@ -332,6 +484,32 @@ Use the template structure provided. Include all sections. Be specific about:
         and is_revision
         and not drafter_spec.startswith("mock:")
     )
+
+    # #2573: best-of-N. Only on the INITIAL draft of an lld run, and only
+    # when the operator asked for it -- the serial path stays the default.
+    # A revision is deliberately excluded: revisions travel as edit scripts
+    # (#2569) against a specific prior draft, so N independent revisions
+    # would be N different documents with no common parent to merge.
+    candidates_requested = clamp_candidates(
+        state.get("config_draft_candidates", SERIAL)
+    )
+    use_best_of_n = (
+        candidates_requested > SERIAL
+        and workflow_type == "lld"
+        and not is_revision
+    )
+
+    if use_best_of_n:
+        return _generate_best_of_n(
+            state=state,
+            drafter=drafter,
+            system_prompt=system_prompt,
+            prompt=prompt,
+            candidates=candidates_requested,
+            audit_dir=audit_dir,
+            draft_count=draft_count,
+            cost_before=cost_before,
+        )
 
     if use_edit_script:
         edit_context = build_revision_context(state)
