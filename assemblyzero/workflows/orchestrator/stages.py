@@ -32,6 +32,7 @@ from assemblyzero.workflows.orchestrator.state import (
     update_stage_result,
 )
 from assemblyzero.core.llm_provider import get_provider
+from assemblyzero.core import settlement as settlement_mod
 
 import logging
 
@@ -56,6 +57,74 @@ def mock_mode(state: OrchestrationState) -> bool:
     return bool((state.get("config", {}) or {}).get("mock_mode", False))
 
 
+def fetch_issue_body(target_repo: str, issue_number: int) -> str | None:
+    """The rolling issue's body text, or None when it cannot be read.
+
+    Indirected through a module-level function so a test can drive settlement
+    without `gh` and without a network. None is a real answer -- it reaches
+    `collect_inputs` as an unreadable input and unsettles, which drafts.
+    """
+    try:
+        from assemblyzero.workflows.requirements.precheck import fetch_issue
+
+        _title, body = fetch_issue(Path(target_repo), issue_number)
+        return body
+    except Exception:
+        # fail-open: only in shape -- None unsettles, and unsettled means the
+        # stage DRAFTS, which is the pre-#2609 behaviour and the safe
+        # direction. A settlement check must never be able to brick a roll.
+        return None
+
+
+def current_inputs(
+    state: OrchestrationState, stage: str, existing_artifacts: dict[str, str | None]
+) -> list[settlement_mod.SettledInput]:
+    """What this stage's derivation currently depends on, hashed (#2609)."""
+    target_repo = state.get("target_repo", "") or "."
+    issue_number = state["issue_number"]
+    upstream_stage = settlement_mod.UPSTREAM_OF.get(stage)
+    upstream = existing_artifacts.get(upstream_stage) if upstream_stage else None
+    return settlement_mod.collect_inputs(
+        target_repo,
+        issue_body=fetch_issue_body(target_repo, issue_number),
+        upstream_artifact=upstream,
+    )
+
+
+def settlement_status(
+    state: OrchestrationState,
+    stage: str,
+    artifact_path: str,
+    existing_artifacts: dict[str, str | None],
+) -> tuple[bool, list[str]]:
+    """(is_settled, lines). Lines are evidence when settled, mismatches when not.
+
+    A stage with no settlement record is NOT settled, and the caller falls back
+    to the pre-#2609 presence check rather than drafting -- an artifact written
+    before this feature existed has no record through no fault of its own, and
+    treating that as a reason to redraw would regress the very tax #2609 exists
+    to remove.
+    """
+    from assemblyzero.workflows.requirements.audit import load_settlement
+
+    target_repo = Path(state.get("target_repo", "") or ".")
+    record = load_settlement(state["issue_number"], stage, target_repo)
+    if record is None:
+        return (False, ["no settlement record"])
+
+    if not settlement_mod.artifact_matches(record, artifact_path):
+        return (False, [
+            f"the artifact at {artifact_path} is not the one that settled "
+            f"(recorded {str(record.get('artifact_sha256'))[:12]})"
+        ])
+
+    inputs = current_inputs(state, stage, existing_artifacts)
+    mismatches = settlement_mod.verify(record, inputs)
+    if mismatches:
+        return (False, mismatches)
+    return (True, settlement_mod.evidence_lines(record, inputs))
+
+
 def should_skip_stage(
     state: OrchestrationState,
     stage: str,
@@ -66,6 +135,13 @@ def should_skip_stage(
     Returns (should_skip, artifact_path).
 
     impl and pr stages are never skipped.
+
+    #2609: presence alone used to be the whole test, which failed in both
+    directions. An artifact whose source issue had since been edited was reused
+    silently, and an artifact whose file cleanup had deleted after its PR merged
+    was redrawn even though the ruling it embodied had not changed. Settlement
+    decides both: a settled artifact is reused with its hash evidence printed,
+    and an input change unsettles it by name.
     """
     if stage in ("impl", "pr"):
         return (False, None)
@@ -84,10 +160,63 @@ def should_skip_stage(
 
     # Validate the artifact actually exists and is valid
     path = Path(artifact_path)
-    if validate_artifact(path, stage):
-        return (True, artifact_path)
+    if not validate_artifact(path, stage):
+        return (False, None)
 
-    return (False, None)
+    if stage in settlement_mod.SETTLEABLE_STAGES:
+        settled, lines = settlement_status(
+            state, stage, artifact_path, existing_artifacts
+        )
+        if settled:
+            print(f"    [{stage}] settled and reused -- no drafter spend")
+            for line in lines:
+                print(f"    [{stage}] {line}")
+            return (True, artifact_path)
+        if lines != ["no settlement record"]:
+            print(f"    [{stage}] unsettled -- redrawing:")
+            for line in lines:
+                print(f"    [{stage}]   {line}")
+            return (False, None)
+
+    return (True, artifact_path)
+
+
+def settle_stage(
+    state: OrchestrationState, stage: str, artifact_path: str, verdict: str = ""
+) -> None:
+    """Record ``stage``'s artifact as settled, having just passed its gate.
+
+    Called only on a passed result. Best-effort by design: a settlement that
+    cannot be written costs the next launch a redraw, which is the pre-#2609
+    behaviour, and must never turn a stage that genuinely passed into a
+    failure.
+    """
+    if stage not in settlement_mod.SETTLEABLE_STAGES or not artifact_path:
+        return
+    try:
+        from assemblyzero.workflows.requirements.audit import save_settlement
+
+        target_repo = Path(state.get("target_repo", "") or ".")
+        existing = detect_existing_artifacts(
+            state["issue_number"], state.get("target_repo", "")
+        )
+        record = settlement_mod.build_settlement(
+            stage,
+            artifact_path,
+            current_inputs(state, stage, existing),
+            verdict=verdict,
+        )
+        save_settlement(state["issue_number"], stage, record, target_repo)
+        print(
+            f"    [{stage}] settled: artifact "
+            f"{str(record['artifact_sha256'])[:12]}, "
+            f"{len(record['inputs'])} input(s) fingerprinted"
+        )
+    except Exception as exc:
+        # fail-open: a stage that passed its gate stays passed. Losing the
+        # record costs one redraw next launch; failing the stage would discard
+        # work that was already certified.
+        print(f"    [{stage}] settlement not recorded ({exc})")
 
 
 def check_human_gate(
@@ -580,6 +709,9 @@ def run_lld_stage(state: OrchestrationState) -> OrchestrationState:
                     duration_seconds=time.monotonic() - start_time,
                     attempts=1,
                 )
+                # #2609: the artifact passed its gate. Settle it, so the next
+                # launch reuses this ruling instead of re-deriving it.
+                settle_stage(state, stage, lld_path, review_verdict)
             else:
                 result = _make_stage_result(
                     status="blocked",
@@ -1046,6 +1178,9 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                 attempts=1,
                 notes=_declared_fallthroughs(sub_result),
             )
+            # #2609: the spec passed its gate. Its inputs include the upstream
+            # settled LLD, so editing the LLD unsettles the spec derived from it.
+            settle_stage(state, stage, spec_path)
         else:
             error_msg = sub_result.get("error_message", "")
             if not error_msg:

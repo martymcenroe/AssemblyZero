@@ -195,6 +195,12 @@ WORKING_TREE = Artifact(
             "tools/speedrun_roll.py",
             "tools/speedrun_new_attempt.py",
         ),
+        # #2609. Declared by reading, not by the lint: settlement calls none
+        # of this artifact's signature symbols -- it decides what the reset
+        # may remove by NAMING files, which is the weak-scan hole #2602
+        # tracks. A mechanism that can veto a removal belongs here whether or
+        # not the scan can see it.
+        "settlement": ("assemblyzero/core/settlement.py",),
     },
     cells={
         key("leavings-janitor", "loaders"): Cell(
@@ -242,6 +248,46 @@ WORKING_TREE = Artifact(
                 "file is removed."
             ),
             fixture="tests/unit/test_restore_from_graveyard.py",
+        ),
+        key("settlement", "launch-sweep"): Cell(
+            invariant=(
+                "A settled artifact survives --fresh and is stated as "
+                "preserved; an unsettled one is archived and the mismatch "
+                "that unsettled it is stated too. Settledness decides, never "
+                "branch contents."
+            ),
+            fixture="tests/unit/test_stage_finality_launcher.py",
+        ),
+        key("settlement", "leavings-janitor"): Cell(
+            invariant=(
+                "Preservation is a named-file veto on the reset's archiving "
+                "step, never a widening of the janitor's input exemption -- "
+                "#2551's issue-scoping is untouched, and a preserved file is "
+                "still re-verified against its inputs at the next stage entry."
+            ),
+            fixture="tests/unit/test_stage_finality_launcher.py",
+        ),
+        key("settlement", "loaders"): Cell(
+            invariant=(
+                "A loader reads what settlement preserved: reuse requires the "
+                "artifact on disk to hash as the one that settled, so a file "
+                "edited after settling is redrawn rather than loaded."
+            ),
+            fixture="tests/unit/test_stage_finality_skip.py",
+        ),
+        key("settlement", "restore-machinery"): Cell(
+            invariant=(
+                "Non-interacting. Settlement never removes a file, so it "
+                "creates nothing for the restorer to recover; and the "
+                "restorer rebuilds working copies from refs without "
+                "consulting settledness, because a rebuilt file is checked "
+                "against its recorded artifact hash at stage entry like any "
+                "other. Neither reads the other's output."
+            ),
+            non_interacting=(
+                "settlement only ever declines a removal, and restore only "
+                "ever re-materialises content -- no shared write, no ordering"
+            ),
         ),
     },
 )

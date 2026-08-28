@@ -169,8 +169,9 @@ class TestEnsureBaseDecides:
         _git(repo, "branch", "issue-4")
         healed = {}
 
-        def fake_reset(repo_root, slug, issue):
+        def fake_reset(repo_root, slug, issue, preserve=None):
             healed["called"] = issue
+            healed["preserve"] = preserve
             _git(repo_root, "branch", "-d", "issue-4")
 
         with _no_network(), \
@@ -180,6 +181,9 @@ class TestEnsureBaseDecides:
 
         assert healed["called"] == 4
         assert base == "hardening-run-11"
+        # #2609: nothing is settled in this fixture, so the reset is told to
+        # preserve nothing and behaves exactly as it did before.
+        assert healed["preserve"] == set()
 
     def test_recoverable_debris_without_fresh_refuses(self, repo, log):
         """#2409: the same debris, no flag. Nothing is reset and the roll stops.

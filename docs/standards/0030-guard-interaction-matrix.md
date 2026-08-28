@@ -77,7 +77,7 @@ The draft the drafter emits and every gate reads.
 Untracked pipeline emissions on disk, and who may remove them.
 
 **Mechanisms:** `leavings-janitor`, `restore-machinery`, `loaders`,
-`launch-sweep`.
+`launch-sweep`, `settlement`.
 
 | pair | ruling | invariant |
 |---|---|---|
@@ -87,6 +87,10 @@ Untracked pipeline emissions on disk, and who may remove them.
 | launch-sweep × leavings-janitor | `test_leavings_janitor.py` | The exemption is applied at BOTH sweep sites, and it is issue-scoped at each. |
 | launch-sweep × loaders | `test_mock_roll.py` | A launch never clears the input the loader is about to read on entry. #2551's kill, replayed end to end against a real repo. |
 | launch-sweep × restore-machinery | `test_restore_from_graveyard.py` | Whatever a launch sweeps is recoverable: the ref is pushed before the file is removed. |
+| settlement × launch-sweep | `test_stage_finality_launcher.py` | A settled artifact survives `--fresh` and is stated as preserved; an unsettled one is archived and the mismatch that unsettled it is stated too. Settledness decides, never branch contents. |
+| settlement × leavings-janitor | `test_stage_finality_launcher.py` | Preservation is a named-file veto on the reset's archiving step, never a widening of the janitor's input exemption — #2551's issue-scoping is untouched, and a preserved file is still re-verified against its inputs at the next stage entry. |
+| settlement × loaders | `test_stage_finality_skip.py` | A loader reads what settlement preserved: reuse requires the artifact on disk to hash as the one that settled, so a file edited after settling is redrawn rather than loaded. |
+| settlement × restore-machinery | **non-interacting** | Settlement only ever declines a removal and restore only ever re-materialises content — no shared write and no ordering between them. A rebuilt working copy is checked against its recorded artifact hash at stage entry like any other file, so the restorer never needs to consult settledness. |
 
 ## Artifact: `halt-resume-state`
 

@@ -126,6 +126,11 @@ from assemblyzero.speedrun.must_resolve import (  # noqa: E402
     refusal_message,
 )
 from assemblyzero.speedrun.healing import record_heal  # noqa: E402
+from assemblyzero.core import settlement as settlement_mod  # noqa: E402  (#2609)
+from assemblyzero.workflows.requirements.audit import (  # noqa: E402  (#2609)
+    load_settlement,
+    settled_stages,
+)
 from assemblyzero.speedrun.leavings import (  # noqa: E402
     classify_dirt,
     is_machinery_owned,
@@ -388,6 +393,108 @@ def refuse_with_exits(
     )
 
 
+def settlement_inputs(repo_root: Path, issue: int, stage: str) -> list:
+    """Current inputs for ``stage``, as the launcher can see them (#2609).
+
+    The launcher hashes the same things the stage does, so the two agree on
+    whether an artifact is settled. A `gh` read that fails yields a None body,
+    which unsettles -- the launcher then behaves exactly as it did before.
+    """
+    try:
+        _title, body = fetch_issue(repo_root, issue)
+    except Exception:
+        # fail-open: only in shape -- a None body unsettles, which restores
+        # the pre-#2609 path. A settlement probe must not be able to stop a
+        # launch it was only advising.
+        body = None
+    upstream_stage = settlement_mod.UPSTREAM_OF.get(stage)
+    upstream = None
+    if upstream_stage:
+        record = load_settlement(issue, upstream_stage, repo_root)
+        if isinstance(record, dict):
+            upstream = record.get("artifact_path") or None
+    return settlement_mod.collect_inputs(
+        repo_root, issue_body=body, upstream_artifact=upstream
+    )
+
+
+def settled_artifact_names(repo_root: Path, issue: int, log: EventLog) -> set[str]:
+    """Basenames of this issue's SETTLED artifacts, for `--fresh` to preserve.
+
+    #2609: `--fresh` resets the RUN. A settled artifact embodies a ruling the
+    run being reset did not make, so it survives, and each decision is stated
+    -- preserved with its evidence, or archived with the mismatch that
+    unsettled it. Silence about either half is what made a reset feel
+    arbitrary.
+    """
+    names: set[str] = set()
+    for stage in settled_stages(issue, repo_root):
+        record = load_settlement(issue, stage, repo_root)
+        if not isinstance(record, dict):
+            continue
+        artifact = record.get("artifact_path") or ""
+        if not artifact:
+            continue
+        mismatches = settlement_mod.verify(
+            record, settlement_inputs(repo_root, issue, stage)
+        )
+        if mismatches:
+            log.write(f"FRESH archiving unsettled {stage}: {Path(artifact).name}")
+            for reason in mismatches:
+                log.write(f"  {reason}")
+            continue
+        if not settlement_mod.artifact_matches(record, artifact):
+            log.write(
+                f"FRESH archiving {stage}: {Path(artifact).name} is not the "
+                f"file that settled (edited since)"
+            )
+            continue
+        names.add(Path(artifact).name)
+        log.write(
+            f"FRESH preserving settled {stage}: {Path(artifact).name} "
+            f"(settled {record.get('settled_at', '?')})"
+        )
+    return names
+
+
+def partition_by_settledness(
+    repo_root: Path, issue: int, committed: list[str]
+) -> tuple[list[str], list[tuple[str, list[str]]]]:
+    """Split committed-artifact findings into (settled, [(finding, why-not)]).
+
+    #2609: the committed-artifact scan reads `docs/lld` only, so every finding
+    it can produce is an LLD or a spec -- never implementation code. When those
+    artifacts are settled, a base carrying them is the DESIRED state and not
+    contamination: it is the arc holding the ruling the pipeline just landed
+    there. Reading it as staleness is what made landing an approved artifact
+    the trigger for redrawing it.
+
+    #1959's founding case is untouched. That case was a base whose
+    implementations were already merged and green; this scan never saw those,
+    and does not see them now.
+    """
+    settled: list[str] = []
+    unsettled: list[tuple[str, list[str]]] = []
+    for finding in committed:
+        path = finding.split(":", 1)[1].strip() if ":" in finding else finding
+        stage = settlement_mod.stage_of_artifact_path(path, issue)
+        if stage is None:
+            unsettled.append((finding, ["not a recognised settleable artifact"]))
+            continue
+        record = load_settlement(issue, stage, repo_root)
+        if record is None:
+            unsettled.append((finding, ["no settlement record"]))
+            continue
+        mismatches = settlement_mod.verify(
+            record, settlement_inputs(repo_root, issue, stage)
+        )
+        if mismatches:
+            unsettled.append((finding, mismatches))
+        else:
+            settled.append(finding)
+    return settled, unsettled
+
+
 def ensure_base(
     repo_root: Path, issue: int, log: EventLog, fresh: bool = False
 ) -> str | None:
@@ -419,6 +526,46 @@ def ensure_base(
         return base
 
     committed = [d for d in debris if d.startswith("committed artifact:")]
+    if committed:
+        # #2609: settledness decides this, not branch contents. A committed
+        # artifact whose inputs still hash as they did when it passed its gate
+        # is the ruling this arc exists to carry -- replacing the base would
+        # redraw it, which is how landing an approved LLD became the thing
+        # that destroyed it.
+        settled, unsettled = partition_by_settledness(repo_root, issue, committed)
+        for finding in settled:
+            log.write(f"BASE settled, preserved: {finding}")
+        for finding, why in unsettled:
+            log.write(f"BASE unsettled: {finding}")
+            for reason in why:
+                log.write(f"  {reason}")
+        if settled and not unsettled:
+            log.write(
+                f"BASE '{base}' carries #{issue}'s SETTLED work "
+                f"({len(settled)} artifact(s)) -- keeping the base; the roll "
+                f"resumes from the settled frontier"
+            )
+            record_heal(
+                repo_root, "base-settled", base, "healed",
+                detail=f"{len(settled)} settled artifact(s) preserved on the base",
+            )
+            debris = [d for d in debris if d not in settled]
+            if not debris:
+                return base
+            committed = []
+        elif settled:
+            # Mixed: something on this base is settled and something is not.
+            # The base is replaced, which redraws the settled ones too. That is
+            # the conservative direction and it is chosen, not overlooked -- a
+            # partial reprieve would leave an unsettled artifact committed on a
+            # base the roll then treats as verified, which is #1959's shape.
+            # Both lists are logged above, so the cost is visible rather than
+            # silent.
+            log.write(
+                f"BASE mixed settledness for #{issue}: {len(settled)} settled, "
+                f"{len(unsettled)} not -- replacing the base redraws both"
+            )
+
     if committed:
         # The base already contains this issue's merged work. No amount of
         # debris cleanup fixes that -- it needs a base that predates it.
@@ -488,7 +635,8 @@ def ensure_base(
     except RuntimeError as err:
         log.write(f"RESET could not determine owner/repo: {err}")
         return None
-    reset.reset_one_issue(repo_root, repo_slug, issue)
+    preserve = settled_artifact_names(repo_root, issue, log)
+    reset.reset_one_issue(repo_root, repo_slug, issue, preserve)
 
     findings = gate.check_repo(repo_root, [issue], base)
     debris = [f for f in findings if not f.startswith("ERROR:")]
@@ -730,7 +878,10 @@ def _resolve_stage_artifact(
 # runs each paid a revision iteration for drafts that marked the phantom files
 # as Modify. Without this the fix would land on main and every future draw on
 # that arc would keep paying the iteration the fix was meant to end.
-BINDING_DOC_PATHS = ("docs/design", "docs/adrs", "CLAUDE.md")
+#: #2609: one definition, imported. `draft_is_stale` and the settlement check
+#: answer the same question about the same documents, and two literals would
+#: let them disagree -- at which point one of them is silently wrong.
+BINDING_DOC_PATHS = settlement_mod.BINDING_DOC_PATHS
 
 
 def _iso_to_epoch(value: str) -> float | None:

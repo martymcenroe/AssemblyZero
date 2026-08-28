@@ -870,6 +870,90 @@ def _reset_lld_status_entry(issue_number: int, target_repo: Path) -> None:
 
 
 # =============================================================================
+# Stage finality (#2609)
+# =============================================================================
+#
+# The settlement record rides INSIDE this cache's per-issue entry rather than
+# in a store of its own, because this file already has every property stage
+# finality needs and had been missing only a reader: it is repo-scoped (#1160),
+# lives in the repo's gitignored `data/` (#1970), survives arc rotation and
+# `--fresh` because no branch carries it, and cleanup is documented never to
+# delete it (`stages.py::_delete_landed_working_copies`).
+#
+# One consequence falls out for free and is correct: `_reset_lld_status_entry`
+# (#279) rewrites the entry from scratch, so an explicit LLD regeneration drops
+# the settlement for BOTH stages. Regenerating the LLD unsettles the spec
+# derived from it, which is the downstream-chain rule #2609 asks for.
+
+
+def load_settlement(
+    issue_number: int, stage: str, target_repo: Path
+) -> dict | None:
+    """This issue's settlement record for ``stage``, or None."""
+    tracking = load_lld_tracking(target_repo)
+    entry = tracking["issues"].get(str(issue_number))
+    if not isinstance(entry, dict):
+        return None
+    settlement = entry.get("settlement")
+    if not isinstance(settlement, dict):
+        return None
+    record = settlement.get(stage)
+    return record if isinstance(record, dict) else None
+
+
+def save_settlement(
+    issue_number: int, stage: str, record: dict, target_repo: Path
+) -> None:
+    """Record ``stage`` as settled, preserving every other field of the entry.
+
+    Read-modify-write of the issue's entry, not a replacement: the approval
+    fields this cache already carried are what a human reads, and a settlement
+    write must not quietly drop them.
+    """
+    tracking = load_lld_tracking(target_repo)
+    key = str(issue_number)
+    entry = tracking["issues"].get(key)
+    if not isinstance(entry, dict):
+        entry = {}
+    settlement = entry.get("settlement")
+    if not isinstance(settlement, dict):
+        settlement = {}
+    settlement[stage] = record
+    entry["settlement"] = settlement
+    tracking["issues"][key] = entry
+    save_lld_tracking(tracking, target_repo)
+
+
+def unsettle(issue_number: int, stage: str, target_repo: Path) -> bool:
+    """Drop ``stage``'s settlement. True when one was actually removed."""
+    tracking = load_lld_tracking(target_repo)
+    key = str(issue_number)
+    entry = tracking["issues"].get(key)
+    if not isinstance(entry, dict):
+        return False
+    settlement = entry.get("settlement")
+    if not isinstance(settlement, dict) or stage not in settlement:
+        return False
+    del settlement[stage]
+    entry["settlement"] = settlement
+    tracking["issues"][key] = entry
+    save_lld_tracking(tracking, target_repo)
+    return True
+
+
+def settled_stages(issue_number: int, target_repo: Path) -> list[str]:
+    """Stages this issue has a settlement record for, in a stable order."""
+    tracking = load_lld_tracking(target_repo)
+    entry = tracking["issues"].get(str(issue_number))
+    if not isinstance(entry, dict):
+        return []
+    settlement = entry.get("settlement")
+    if not isinstance(settlement, dict):
+        return []
+    return sorted(k for k, v in settlement.items() if isinstance(v, dict))
+
+
+# =============================================================================
 # LLD Finalization
 # =============================================================================
 
