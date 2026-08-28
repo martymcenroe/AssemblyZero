@@ -94,6 +94,16 @@ HUMAN_DELEGATION_PATTERNS = [
 # =============================================================================
 
 
+#: The Section 3 heading, matched against the heading TEXT (the hashes are
+#: consumed by the boundary scanner). Case-insensitive, period optional.
+_SECTION_3_TITLE_RE = re.compile(r"3\.?\s*Requirements\b", re.IGNORECASE)
+
+#: Section 10's heading, for the same level-aware boundary scanner.
+_SECTION_10_TITLE_RE = re.compile(
+    r"10\.?\s*(?:Verification|Test|Testing)\b", re.IGNORECASE
+)
+
+
 def extract_requirements(lld_content: str) -> list[Requirement]:
     """Extract requirements from LLD Section 3.
 
@@ -110,13 +120,18 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
     Returns:
         List of Requirement objects with id and text.
     """
-    # Find Section 3 — case-insensitive, H1-H3, optional period after "3"
-    section_pattern = re.compile(
-        r"^#{1,3}\s*3\.?\s*Requirements\b.*?\n(.*?)(?=^#{1,3}\s*\d|^#{1,3}\s*[A-Z]|\Z)",
-        re.MULTILINE | re.DOTALL | re.IGNORECASE,
+    # #2628: the section's extent is decided by heading LEVEL, so an injected
+    # `### 3.1` subsection is part of Section 3 rather than the end of it, and
+    # the machine-owned block is removed before parsing because requirements
+    # are what the DRAFTER wrote. Both rules live in `section_utils` -- one
+    # definition, shared with the testing workflow's extractor, because two
+    # readers of "where does Section 3 end" is the #1698 class.
+    from assemblyzero.core.section_utils import drafter_authored, section_body
+
+    section_content = section_body(
+        drafter_authored(lld_content), _SECTION_3_TITLE_RE
     )
-    match = section_pattern.search(lld_content)
-    if not match:
+    if section_content is None:
         import logging
         logging.getLogger(__name__).warning(
             "Section 3 (Requirements) heading not found in LLD content "
@@ -124,8 +139,6 @@ def extract_requirements(lld_content: str) -> list[Requirement]:
             len(lld_content),
         )
         return []
-
-    section_content = match.group(1)
 
     # Parse numbered list items (1., 2., etc.)
     # Each item starts with a number followed by a period
@@ -190,17 +203,24 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
     )
     match = section_pattern.search(lld_content)
 
-    # Fall back to entire Section 10 if 10.1 not found or has no tables
+    # Fall back to entire Section 10 if 10.1 not found or has no tables.
+    #
+    # #2628: through the same level-aware boundary as Section 3. This one was
+    # not broken -- its old lookahead ended at `### 11` or `### <Capital>`, so
+    # `### 10.1` slipped past it and the real draft yielded 13 scenarios --
+    # but it survived by the accident of a literal `11` in the pattern, not by
+    # a rule. The next injected subsection under Section 10 would have found
+    # the same edge Section 3 did. Converted while the lesson is in hand, with
+    # that 13-scenario measurement as the control.
+    section_10_body = None
     if not match or "|" not in match.group(1):
-        section_10_pattern = re.compile(
-            r"^#{1,3}\s*10\.?\s*(?:Verification|Test|Testing)\b.*?\n(.*?)(?=^#{1,3}\s*(?:11|[A-Z])|\Z)",
-            re.MULTILINE | re.DOTALL | re.IGNORECASE,
-        )
-        match_10 = section_10_pattern.search(lld_content)
-        if match_10 and "|" in match_10.group(1):
-            match = match_10
+        from assemblyzero.core.section_utils import section_body
 
-    if not match:
+        section_10_body = section_body(lld_content, _SECTION_10_TITLE_RE)
+        if section_10_body is not None and "|" not in section_10_body:
+            section_10_body = None
+
+    if match is None and section_10_body is None:
         import logging
         logging.getLogger(__name__).warning(
             "Section 10 / 10.1 (Test Scenarios) not found in LLD content "
@@ -209,7 +229,12 @@ def extract_test_scenarios(lld_content: str) -> list[LLDTestScenario]:
         )
         return []
 
-    section_content = match.group(1)
+    # The 10.1 match wins when it carried a table; otherwise the whole of
+    # Section 10, boundary-scanned.
+    if match is not None and "|" in match.group(1):
+        section_content = match.group(1)
+    else:
+        section_content = section_10_body or match.group(1)
     scenarios: list[LLDTestScenario] = []
 
     for line in section_content.splitlines():

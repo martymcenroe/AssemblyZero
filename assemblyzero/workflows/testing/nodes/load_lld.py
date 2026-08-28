@@ -451,14 +451,21 @@ def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
         requirements.append(f"{req_id}: {req_desc}")
 
     # Pattern 2: Numbered requirements in acceptance criteria
-    # Look for section 3 (Requirements) or acceptance criteria
-    req_section_pattern = re.compile(
-        r"##\s*\d*\.?\s*(?:Requirements|Acceptance Criteria)\s*\n(.*?)(?=\n##|\Z)",
-        re.DOTALL | re.IGNORECASE,
+    #
+    # #2628: the section boundary is LEVEL-AWARE and the machine-owned block
+    # is removed first, through the SAME `section_utils` helpers the test-plan
+    # validator uses. This extractor had the identical defect -- its old
+    # lookahead `(?=\n##|\Z)` fired on `### 3.1`, because `###` starts with
+    # `##` -- and measured 0 requirements on the same halted draft that broke
+    # the other one. Two readers of "where does Section 3 end" is the #1698
+    # class, so there is now one.
+    from assemblyzero.core.section_utils import drafter_authored, section_body
+
+    _req_title = re.compile(
+        r"\d*\.?\s*(?:Requirements|Acceptance Criteria)\b", re.IGNORECASE
     )
-    match = req_section_pattern.search(lld_content)
-    if match:
-        section = match.group(1)
+    section = section_body(drafter_authored(lld_content), _req_title)
+    if section is not None:
         # Extract numbered items
         numbered_pattern = re.compile(r"^\s*(\d+)\.\s+(.+)$", re.MULTILINE)
         for item_match in numbered_pattern.finditer(section):
@@ -474,13 +481,14 @@ def extract_requirements(lld_content: str) -> list[str]:  # pragma: no cover
     # Pattern 4: Spec format — extract Test IDs from Section 10 Test Mapping
     # | T010 | `run_pytest()` | `test_parser.py` | ... |
     if not requirements:
-        test_mapping_pattern = re.compile(
-            r"##\s*10\s*\.\s*Test Mapping[^\n]*\n(.*?)(?=\n##|\Z)",
-            re.DOTALL | re.IGNORECASE,
-        )
-        mapping_match = test_mapping_pattern.search(lld_content)
-        if mapping_match:
-            section = mapping_match.group(1)
+        # #2628: the same level-aware boundary. This one reads a SPEC's Test
+        # Mapping section, where #2618 injects `## 9.5 Binding Decision Table`
+        # -- a sibling, not a subsection, so it never truncated here. Converted
+        # anyway: leaving one hand-rolled boundary beside two shared ones is
+        # how the next injected heading finds an edge nobody swept.
+        _mapping_title = re.compile(r"10\s*\.\s*Test Mapping\b", re.IGNORECASE)
+        section = section_body(drafter_authored(lld_content), _mapping_title)
+        if section is not None:
             row_pattern = re.compile(
                 r"\|\s*(T\d+)\s*\|\s*`?([^`|]+)`?\s*\|"
             )

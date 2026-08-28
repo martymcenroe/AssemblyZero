@@ -224,12 +224,27 @@ def _build_validation_feedback(result: dict) -> str:
     lines.append("")
     lines.append("### Format Requirements (CRITICAL)")
     lines.append("")
-    lines.append("**Section 3 (Requirements):** MUST use numbered list format:")
+    # #2628: this text used to end "Do NOT use tables ... in Section 3", which
+    # contradicted the pipeline's own output -- #2607 injection puts a
+    # machine-owned table INSIDE Section 3 that no revision may remove. A
+    # drafter reading it had no compliant move, and the revision loop could
+    # not converge. Guidance that forbids what the pipeline itself emits is
+    # how this fired, so the rule now says where the numbered list goes
+    # RELATIVE to the block instead of denying the block exists.
+    lines.append("**Section 3 (Requirements):** your requirements MUST be a "
+                 "plain numbered list:")
     lines.append("```")
     lines.append("1. First requirement text")
     lines.append("2. Second requirement text")
     lines.append("```")
-    lines.append("Do NOT use tables, bullet points, or REQ-ID prefixes in Section 3.")
+    lines.append(
+        "Write that list AFTER any machine-owned block in Section 3. A block "
+        "fenced by `<!-- BEGIN MACHINE-OWNED ... -->` is injected by the "
+        "derivation, is restored verbatim on every revision, and is NOT one "
+        "of your requirements -- cite its row IDs, never restate its values. "
+        "Apart from that block: no tables, no bullet points, and no REQ-ID "
+        "prefixes on your own numbered items."
+    )
     lines.append("")
     lines.append("**Section 10.1 (Test Scenarios):** Each test scenario MUST reference "
                  "its requirement in the Scenario column using `(REQ-N)` suffix:")
