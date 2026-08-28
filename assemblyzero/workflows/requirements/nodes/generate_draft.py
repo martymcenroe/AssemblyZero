@@ -48,6 +48,11 @@ from assemblyzero.workflows.requirements.best_of_n import (  # noqa: E402
     score_candidate,
     select_winner,
 )
+from assemblyzero.workflows.requirements.table_injection import (  # noqa: E402
+    BEGIN_MARKER,
+    build_injection,
+    reassert,
+)
 from assemblyzero.workflows.requirements.state import RequirementsWorkflowState
 from assemblyzero.workflows.requirements.feedback_window import (
     build_feedback_block,
@@ -413,6 +418,25 @@ Use the template structure provided. Include all sections. Be specific about:
 - Data structures
 - Error handling approach"""
 
+    # #2607: when the source carries a decision table, the derivation injects
+    # it verbatim after this call returns. Telling the drafter so is not
+    # decoration -- a drafter that restates the table anyway produces a
+    # second, lossy copy of rows the document already holds correctly, and
+    # the reader cannot tell which is binding. It writes AROUND the block.
+    if workflow_type == "lld" and build_injection(state.get("issue_body", "")):
+        system_prompt += f"""
+
+DO NOT RESTATE THE SOURCE DECISION TABLE (#2607):
+- The source issue's decision table is carried into this document VERBATIM
+  by the derivation itself, in a machine-owned block beginning
+  `{BEGIN_MARKER}`. You are not writing those rows and must not reproduce,
+  paraphrase, summarise or "carry forward" their values anywhere.
+- Write AROUND that block. In Section 3 and Section 10, CITE the row IDs
+  (S1, S2, ...) and state what the requirement or test DOES; do not restate
+  the binding values, thresholds, colours, or sampling windows the rows
+  already carry. The row is the ruling; your prose points at it.
+- Anything you write inside the machine-owned markers is discarded."""
+
     # #1443: Revise-with-context — when the orchestrator's stage runner has
     # populated previous_draft_path and/or previous_verdict_text (set on retry
     # of a stage that previously failed), augment the system prompt so the
@@ -591,6 +615,22 @@ Use the template structure provided. Include all sections. Be specific about:
             f"{ratio:.0%} of prior draft preserved byte-identical (#2200)"
         )
         draft_content = patched
+
+    # #2607: the source decision table reaches the LLD by code, never through
+    # the drafter. Applied AFTER the draft is produced and before anything
+    # reads it, so an initial draft that omitted the table gets it and a
+    # revision that edited the machine-owned block has it reasserted. The
+    # #2563 conservation gate stays as the backstop; on injected rows it
+    # should now never fire, which is #2607's success metric.
+    if workflow_type == "lld":
+        draft_content, reasserted = reassert(
+            draft_content, state.get("issue_body", "")
+        )
+        if reasserted:
+            print(
+                "    [INJECT] source decision table carried into the LLD "
+                "verbatim; machine-owned block reasserted (#2607)"
+            )
 
     # Issue #775: Use structured parse for open questions extraction (REQ-1, REQ-2).
     # parse_structured_draft_questions tries JSON first, falls back to regex.
