@@ -133,6 +133,14 @@ from assemblyzero.speedrun.leavings import (  # noqa: E402
     preserve_and_clear,
     untracked_files,
 )
+# #2571: the ref-restore machinery moved to a shared module so the LOADER
+# can rebuild inputs too, not just this resume planner. Aliased to the old
+# private names so every call site reads unchanged.
+from assemblyzero.speedrun.restore import (  # noqa: E402
+    graveyard_issue_lld_refs as _graveyard_issue_lld_refs,
+    graveyard_leavings_refs as _graveyard_leavings_refs,
+    restore_artifact as _restore_artifact,
+)
 from assemblyzero.speedrun.worktrees import (  # noqa: E402
     sweep_pipeline_worktrees,
 )
@@ -708,115 +716,6 @@ def _resolve_stage_artifact(
         if found:
             return str(repo_root / found)
     return ""
-
-
-def _graveyard_leavings_refs(repo_root: Path) -> list[str]:
-    """Every `graveyard/leavings-*` ref, newest first.
-
-    These are where the file janitor PRESERVES what it clears. Nothing is
-    deleted -- preserve-then-clear is structural (standard 0027) -- so a
-    cleared artifact is always on one of these, and the newest is the one the
-    last run wrote.
-    """
-    result = _run(
-        [
-            "git", "for-each-ref", "--format=%(refname:short)",
-            "refs/heads/graveyard/leavings-*",
-            "refs/remotes/origin/graveyard/leavings-*",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        return []
-    refs = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-
-    # Sorted on the timestamp in the NAME, not on committerdate. Two leavings
-    # refs cut in the same second tie under `--sort=-committerdate` and git
-    # then falls back to refname ASCENDING -- oldest first, the wrong way
-    # round, which a fixture caught. The name carries `-YYYYMMDD-HHMMSS` by
-    # construction, so it orders these exactly and cannot be perturbed by a
-    # rewrite that changes commit times.
-    def _stamp(ref: str) -> str:
-        _, _, tail = ref.rpartition("leavings-")
-        return tail
-
-    return sorted(refs, key=_stamp, reverse=True)
-
-
-def _graveyard_issue_lld_refs(repo_root: Path, issue: int) -> list[str]:
-    """Every grafted copy of this issue's lld branch, newest first (#2516).
-
-    A HALT's RESTORE preserves the attempt branch by renaming it to
-    `graveyard/{issue}-lld-<UTC stamp>` (ADR 0217 keeps the commits; the
-    rename frees the name). The stamp is in the NAME, so name order is time
-    order -- same reasoning as `_graveyard_leavings_refs`, same immunity to
-    history rewrites perturbing committer dates.
-    """
-    result = _run(
-        [
-            "git", "for-each-ref", "--format=%(refname:short)",
-            f"refs/heads/graveyard/{issue}-lld-*",
-            f"refs/remotes/origin/graveyard/{issue}-lld-*",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        return []
-    refs = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-
-    def _stamp(ref: str) -> str:
-        _, _, tail = ref.rpartition("-lld-")
-        return tail
-
-    return sorted(refs, key=_stamp, reverse=True)
-
-
-def _restore_artifact(repo_root: Path, issue: int, artifact: str) -> bool:
-    """Materialize a passed stage's file so the next stage can read it.
-
-    The exit janitor clears pipeline-authored untracked files (standard 0027).
-    Two places hold what it cleared, and BOTH are searched:
-
-    * the issue's lld branch, when the draft was committed there;
-    * the `graveyard/leavings-*` refs the janitor preserves onto.
-
-    The second was missing, and it is the difference between a resume and a
-    redraw. Measured on boostgauge #1, 2026-08-15: neither `LLD-001.md` nor
-    `spec-0001-implementation-readiness.md` was on disk, and NEITHER was on
-    `1-lld` -- they were on `graveyard/leavings-20260815-161853` and
-    `...-161847`. `_restore_artifact` consulted only the lld branch, so it
-    returned False and the resume was abandoned for artifacts that were
-    preserved, pushed, and one `git show` away.
-
-    #2311 stopped the SPEC being lost in future runs by writing it somewhere
-    the janitor does not sweep. It could not un-clear what earlier runs had
-    already swept, and it does not cover the LLD, which still lives under
-    `docs/lld/active/` inside the janitor's allowlist. This closes that gap
-    from the other side: whatever was preserved can be restored.
-    """
-    path = Path(artifact)
-    if path.is_file():
-        return True
-    try:
-        rel = path.relative_to(repo_root)
-    except ValueError:
-        return False
-    refs = [f"{issue}-lld", f"origin/{issue}-lld"]
-    # #2516: the grafted copies of the lld branch rank right behind the live
-    # ones -- a HALT's RESTORE renames the branch to graveyard/{issue}-lld-*,
-    # and what it holds IS the lld branch's content under an archive name.
-    refs += _graveyard_issue_lld_refs(repo_root, issue)
-    # Newest leavings first: the last run's copy is the current one, and an
-    # older ref may hold a stale draft from a superseded attempt.
-    refs += _graveyard_leavings_refs(repo_root)
-
-    for ref in refs:
-        show = _run(["git", "show", f"{ref}:{rel.as_posix()}"], cwd=repo_root)
-        if show.returncode == 0 and show.stdout:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(show.stdout, encoding="utf-8")
-            return True
-    return False
 
 
 # Binding-input paths: a commit touching any of them invalidates a draft

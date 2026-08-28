@@ -231,20 +231,26 @@ def scenarios_from_spec_functions(
     return scenarios
 
 
-def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma: no cover
-    """Find the LLD file for an issue number.
+def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:
+    """Find the LLD file for an issue number, rebuilding from refs on a miss.
+
+    #2571: the working copy is a cache, not a source of record. Issue
+    #331's LLD was deleted from the working tree three times in one day
+    (see #2551) and survived only on refs; this loader used to conclude
+    absence from the cache alone, which is the path the #2552 near-miss
+    would have taken. On a miss it now asks the restore machinery to
+    materialize the canonical copy from the `{issue}-lld` branch, its
+    graveyard grafts, or the janitor's leavings refs — loudly — before
+    concluding the LLD genuinely does not exist anywhere.
 
     Args:
         issue_number: GitHub issue number.
         repo_root: Repository root path.
 
     Returns:
-        Path to LLD file if found, None otherwise.
+        Path to LLD file if found or rebuilt, None otherwise.
     """
     lld_dir = repo_root / LLD_ACTIVE_DIR
-
-    if not lld_dir.exists():
-        return None
 
     # Search patterns in priority order
     patterns = [
@@ -254,13 +260,42 @@ def find_lld_path(issue_number: int, repo_root: Path) -> Path | None:  # pragma:
         f"LLD-{issue_number}-*.md",  # LLD-86-desc.md
     ]
 
-    for pattern in patterns:
-        matches = list(lld_dir.glob(pattern))
-        if matches:
-            # Return most recently modified if multiple
-            if len(matches) > 1:
-                matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            return matches[0]
+    def _glob_once() -> Path | None:
+        if not lld_dir.exists():
+            return None
+        for pattern in patterns:
+            matches = list(lld_dir.glob(pattern))
+            if matches:
+                # Return most recently modified if multiple
+                if len(matches) > 1:
+                    matches.sort(
+                        key=lambda p: p.stat().st_mtime, reverse=True
+                    )
+                return matches[0]
+        return None
+
+    found = _glob_once()
+    if found is not None:
+        return found
+
+    # The cache missed. Rebuild the canonical copy from the refs before
+    # concluding absence — only in a git repo, and never raising: a loader
+    # that cannot rebuild must report the same absence it always did.
+    if (repo_root / ".git").exists():
+        try:
+            from assemblyzero.speedrun.restore import restore_artifact
+
+            canonical = lld_dir / f"LLD-{issue_number:03d}.md"
+            if restore_artifact(
+                repo_root, issue_number, str(canonical),
+                log=lambda m: print(f"    {m}"),
+            ):
+                return _glob_once()
+        except Exception as exc:  # noqa: BLE001
+            # fail-open: the rebuild is a recovery attempt on a path that
+            # previously always reported absence; a rebuild error must not
+            # turn a clean "not found" into a crash.
+            print(f"    [WARN] LLD rebuild from refs failed: {exc}")
 
     return None
 
