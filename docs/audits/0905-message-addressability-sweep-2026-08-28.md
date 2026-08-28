@@ -39,9 +39,14 @@ fallback rather than an equal alternative.
 
 Four of eleven checks swept. **All four classified unaddressable**, each filed.
 
+**Update 2026-08-28:** #2590 is **repaired** — the backticked span now carries
+the bare name, so the parameterised case addresses its target. The row below
+records the sweep's finding as measured; the verdict column carries the
+current state.
+
 | check | verdict | finding |
 |---|---|---|
-| `check_functions_have_io_examples` (parameterised fn) | unaddressable | #2590 |
+| `check_functions_have_io_examples` (parameterised fn) | ~~unaddressable~~ → **addressed** | #2590, fixed |
 | `check_functions_have_io_examples` (zero-arg fn) | addressed | — |
 | `check_modify_files_have_excerpts` | unaddressable | #2591 |
 | `check_change_instructions_specific` | unaddressable | #2592 |
@@ -62,6 +67,17 @@ The emitted message is byte-identical in both cases. Whether the complaint can
 be acted on depends on whether the function happens to take arguments — and
 the broken case is the ordinary one. This is #2555's deadlock shape on a check
 that fires on routine specs rather than on an exotic fence condition.
+
+**Repaired 2026-08-28.** The span now carries the bare name, which every `def`
+line contains verbatim. Verifying the fix sharpened the diagnosis: the
+deadlock is **shape-dependent**, because `enforce_pinning` passes insertions
+through by design. Driven against the real enforcement, a fix that inserted a
+line above `pass` always survived; only fixes that **replaced** existing lines
+(`pass` → example + `return`, or a docstring rewrite) were reverted. That is
+still the ordinary case — replacing `pass` is the natural way to give a stub
+an example — but a fixture built on the insertion shape would have passed
+before the repair and proved nothing. `test_completeness_pinning_deadlock.py`
+uses the replacement shape for exactly this reason.
 
 ### The vocabulary gap under #2591
 

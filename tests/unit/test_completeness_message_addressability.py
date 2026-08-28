@@ -169,24 +169,30 @@ class TestAddressableToday:
         )
         assert verdict.verdict == ADDRESSED
 
+    def test_functions_have_io_examples_addresses_a_parameterised_function(
+        self,
+    ):
+        """#2590, repaired. The message backticked `name()`, and a function
+        taking parameters never contains that literal -- so the identical
+        complaint addressed the draft only when the arg list happened to be
+        empty, and the common case was the broken one.
+
+        The fixture is unchanged from when this test lived in
+        TestUnaddressableToday; only the expected verdict moved. The bare
+        name is what a `def` line actually contains."""
+        verdict = _classify(
+            vc.check_functions_have_io_examples(FUNCTION_WITH_PARAMS),
+            FUNCTION_WITH_PARAMS,
+        )
+        assert verdict.tokens == ("compute_needle_angle",)
+        assert verdict.matched_lines != ()
+        assert verdict.verdict == ADDRESSED
+
 
 class TestUnaddressableToday:
     """The deadlock class, pinned. Each test asserts the CURRENT broken state
     against its filed issue. Repairing one flips its test, which is the
     signal to move it into TestAddressableToday."""
-
-    def test_functions_have_io_examples_loses_the_address_on_parameters(self):
-        """#2590. The message backticks `name()`; a function taking
-        parameters never contains the literal `name()`, so the identical
-        message addresses the draft only when the arg list happens to be
-        empty. The common case is the broken one."""
-        verdict = _classify(
-            vc.check_functions_have_io_examples(FUNCTION_WITH_PARAMS),
-            FUNCTION_WITH_PARAMS,
-        )
-        assert verdict.tokens == ("compute_needle_angle()",)
-        assert verdict.matched_lines == ()
-        assert verdict.verdict == UNADDRESSABLE
 
     def test_modify_files_have_excerpts_names_a_path_not_in_the_draft(self):
         """#2591. The complaint backticks a file path that is absent from the
