@@ -908,7 +908,24 @@ def check_functions_have_io_examples(spec: str) -> CompletenessCheck:
         missing_examples.append(func_name)
 
     if missing_examples:
-        func_list = ", ".join(f"`{f}()`" for f in missing_examples[:5])
+        # #2590: the backticked span carries the BARE name; the readable
+        # call form sits outside it. `named_tokens` parses what is inside
+        # backticks verbatim, so `compute_needle_angle()` -- parens included
+        # -- occurs in a draft only when the function happens to take no
+        # arguments. Two drafts differing solely in the parameter list drew
+        # a byte-identical complaint, one addressable and one not, and the
+        # broken case is the ordinary one. The bare name appears verbatim in
+        # every `def` line, so the token now lands and the demanded example
+        # survives enforcement instead of being reverted as content no
+        # verdict named (registry class 3, standard 0029).
+        #
+        # Dropping the parens rather than adding a second span: the sentence
+        # already says "Functions", so the call form earned nothing, and a
+        # second `name()` span would parse as a token that matches nothing.
+        # Loosening `named_tokens` to strip trailing parens was the other
+        # candidate and is rejected -- that vocabulary is shared by every
+        # complaint, and a looser token matches more than it should.
+        func_list = ", ".join(f"`{f}`" for f in missing_examples[:5])
         suffix = (
             f" (and {len(missing_examples) - 5} more)"
             if len(missing_examples) > 5

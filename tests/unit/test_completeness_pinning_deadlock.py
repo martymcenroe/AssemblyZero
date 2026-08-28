@@ -31,6 +31,7 @@ from assemblyzero.workflows.implementation_spec.nodes.generate_spec import (
 )
 from assemblyzero.workflows.implementation_spec.nodes.validate_completeness import (
     check_api_symbols_exist,
+    check_functions_have_io_examples,
     validate_completeness,
 )
 from assemblyzero.workflows.implementation_spec.revision_pinning import (
@@ -318,3 +319,162 @@ class TestTheHaltNamesEnforcement:
         message = out["error_message"]
         assert "reached the check unchanged" in message
         assert "pinning enforcement reverted" not in message
+
+
+# ---------------------------------------------------------------------------
+# The same class on a check that fires on ordinary specs (#2590)
+# ---------------------------------------------------------------------------
+#
+# The fence complaint above addressed its target in a scheme no token could
+# read. This one addressed it in a scheme that PARSES and matches nothing:
+# `check_functions_have_io_examples` backticked the name with a `()` suffix,
+# and `def compute_needle_angle(value, redline):` never contains the literal
+# `compute_needle_angle()`. Two drafts differing solely in the parameter list
+# drew a byte-identical complaint, one addressable and one not, and the
+# broken case is the ordinary one -- most functions take arguments.
+#
+# Registry class 3, standard 0029: the demanded change is never refusable.
+
+#: The issue's measured table, verbatim. These two differ ONLY in the
+#: parameter list, which is the whole point: the message is byte-identical
+#: and the old token addressed one and not the other.
+IO_DRAFT_WITH_PARAMS = """# Spec
+
+## Section 6
+
+def compute_needle_angle(value, redline):
+    pass
+"""
+
+IO_DRAFT_ZERO_ARG = """# Spec
+
+## Section 6
+
+def compute_needle_angle():
+    pass
+"""
+
+#: Two functions, so the inverse direction has an UNNAMED sibling to protect.
+IO_DRAFT_TWO_FUNCS = """# Spec
+
+## Section 6 Signatures
+
+```python
+def compute_needle_angle(value, redline):
+    pass
+
+
+def render_gauge(surface, values):
+    pass
+```
+"""
+
+
+def _io_complaint(draft: str) -> str:
+    """The real check's real message. Never a hand-written string: a reword
+    that drops the address must fail these tests, and it cannot if the test
+    supplies the text itself."""
+    result = check_functions_have_io_examples(draft)
+    assert result["passed"] is False, "fixture no longer trips the check"
+    return result["details"]
+
+
+def _with_example(draft: str) -> str:
+    """The fix the complaint demands, in the shape that used to be reverted.
+
+    Verified 2026-08-28: `enforce_pinning` passes INSERTIONS through by
+    design, so a fixture that merely adds a line above `pass` would have
+    survived before the repair and proved nothing. Replacing `pass` is both
+    the natural way to give a stub an example and the shape enforcement
+    actually refused.
+    """
+    return draft.replace(
+        "def compute_needle_angle(value, redline):\n    pass\n",
+        "def compute_needle_angle(value, redline):\n"
+        "    # example: compute_needle_angle(75, 60) -> 42.0\n"
+        "    return 42.0\n",
+    )
+
+
+class TestTheIoComplaintAddressesItsTarget:
+    """The issue's table, both directions, against the real producer."""
+
+    def test_the_parameterised_function_is_addressed(self):
+        """#2590's broken case. The token must occur in the draft, not
+        merely parse."""
+        tokens = named_tokens("", [_io_complaint(IO_DRAFT_WITH_PARAMS)])
+        assert "compute_needle_angle" in tokens
+        flags = named_line_flags(IO_DRAFT_WITH_PARAMS, tokens)
+        assert any(flags), (
+            "the complaint names a function the draft defines and still "
+            "addresses no line of it"
+        )
+
+    def test_the_zero_arg_function_stays_addressed(self):
+        """The case that worked by accident must keep working on purpose."""
+        tokens = named_tokens("", [_io_complaint(IO_DRAFT_ZERO_ARG)])
+        assert any(named_line_flags(IO_DRAFT_ZERO_ARG, tokens))
+
+    def test_both_drafts_draw_the_same_token(self):
+        """The messages differ only where the drafts do. If a future reword
+        makes addressability depend on the parameter list again, this is
+        the assertion that says so."""
+        with_params = named_tokens("", [_io_complaint(IO_DRAFT_WITH_PARAMS)])
+        zero_arg = named_tokens("", [_io_complaint(IO_DRAFT_ZERO_ARG)])
+        assert with_params == zero_arg == {"compute_needle_angle"}
+
+    def test_the_span_carries_no_call_parens(self):
+        """The specific regression guard. `name()` parses as a token and
+        occurs only in a zero-arg def, which is how this defect worked."""
+        details = _io_complaint(IO_DRAFT_WITH_PARAMS)
+        assert "`compute_needle_angle`" in details
+        assert "`compute_needle_angle()`" not in details
+
+
+class TestTheIoDeadlockIsBroken:
+    """Acceptance, both directions -- the class-3 end-to-end property."""
+
+    def test_the_demanded_example_survives_pinning_in_the_same_round(self):
+        details = _io_complaint(IO_DRAFT_WITH_PARAMS)
+        tokens = named_tokens("", [details])
+        revised = _with_example(IO_DRAFT_WITH_PARAMS)
+        assert revised != IO_DRAFT_WITH_PARAMS
+
+        result = enforce_pinning(
+            IO_DRAFT_WITH_PARAMS,
+            revised,
+            current_tokens=tokens,
+            ever_tokens=tokens,
+            current_ranges=named_line_ranges([details]),
+        )
+        assert result.refusals == (), (
+            "the change the completeness failure explicitly demands must "
+            "never be revertible by pinning in the same round"
+        )
+        assert result.regressions == ()
+        assert "example:" in result.text, "the demanded example was reverted"
+
+    def test_an_unnamed_sibling_function_is_still_locked(self):
+        """The inverse. Naming a function frees ITS block, not the fence.
+
+        Inside a fence `_blocks` splits per def, so this is where scoping is
+        testable at all -- outside one, the unit is the whole markdown
+        section and both functions share a block by design.
+        """
+        only_one = {"compute_needle_angle"}
+        revised = _with_example(IO_DRAFT_TWO_FUNCS).replace(
+            "def render_gauge(surface, values):\n    pass\n",
+            "def render_gauge(surface, values):\n    return None\n",
+        )
+        result = enforce_pinning(
+            IO_DRAFT_TWO_FUNCS,
+            revised,
+            current_tokens=only_one,
+            ever_tokens=only_one,
+        )
+        assert "example:" in result.text, "the named function's fix was lost"
+        assert "return None" not in result.text, (
+            "meddling with an unnamed function survived -- the bare-name "
+            "token unlocked more than the block it names"
+        )
+        assert result.refusals
