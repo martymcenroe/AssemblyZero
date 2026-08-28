@@ -230,6 +230,36 @@ def create_halt_node(workflow_name: str):
         # 5. Save plan to same directory as state
         plan_path = plan.save(state_path.parent)
 
+        # 5b. #2570: the halt writes the resume contract — every input the
+        # resume will need, hashed, plus the counters and the snapshot it
+        # seeds from. The resume verifies this FIRST and refuses by name
+        # on any mismatch. Written beside the plan, and copied into the
+        # run's audit dir when there is one, so the lineage carries the
+        # manifest. Best-effort: a contract that cannot be written must
+        # never mask the halt it describes.
+        try:
+            from assemblyzero.core.resume_contract import (
+                build_resume_contract,
+                save_resume_contract,
+            )
+
+            contract = build_resume_contract(
+                state, workflow_name, state_snapshot=state_path
+            )
+            save_resume_contract(contract)
+            audit_dir_str = str(state.get("audit_dir", "") or "")
+            if audit_dir_str and Path(audit_dir_str).is_dir():
+                save_resume_contract(contract, Path(audit_dir_str))
+            print(
+                f"  resume contract written: "
+                f"{len(contract['inputs'])} input(s) (#2570)"
+            )
+        except Exception as exc:  # noqa: BLE001
+            # fail-open: the contract is the resume's protection, not the
+            # halt's -- a halt that cannot write it still halts, loudly,
+            # and the resume simply has no contract to verify.
+            print(f"  [WARN] resume contract not written: {exc}")
+
         # 6. Print human-readable summary
         plan.print_summary()
 
