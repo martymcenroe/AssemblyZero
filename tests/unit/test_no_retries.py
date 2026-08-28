@@ -188,54 +188,119 @@ def test_a_storm_does_not_wait_or_redraw(monkeypatch, repo):
 # ---------------------------------------------------------------------------
 
 
-def test_doc_ruling_after_the_draft_is_stale(monkeypatch, repo, log):
-    """The live case: docs moved after the draft, issue text did not."""
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner(BEFORE_DRAFT, AFTER_DRAFT),
+#: The issue body the draft was derived from. Content, not a timestamp
+#: (#2615) -- so the fixtures below edit text rather than moving clocks.
+BODY = "# Dial\n\n| ID | Binding value |\n|----|---------------|\n| S1 | 250 ms |\n"
+
+
+def settled(repo: Path, issue: int = 1, body: str = BODY) -> None:
+    """Record the lld stage as settled against ``body`` and the repo's docs."""
+    from assemblyzero.core import settlement as s
+    from assemblyzero.workflows.requirements.audit import save_settlement
+
+    lld = repo / "docs" / "lld" / "active" / f"LLD-{issue}.md"
+    lld.parent.mkdir(parents=True, exist_ok=True)
+    lld.write_text("## 1. Context\n\n| S1 | 250 ms |\n", encoding="utf-8")
+    save_settlement(
+        issue, "lld",
+        s.build_settlement(
+            "lld", lld, s.collect_inputs(repo, issue_body=body),
+            verdict="APPROVED",
+        ),
+        repo,
     )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is True
 
 
-def test_issue_edit_after_the_draft_is_stale(monkeypatch, repo, log):
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner(AFTER_DRAFT, BEFORE_DRAFT),
-    )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is True
+@pytest.fixture
+def body_is(monkeypatch):
+    """Drive the issue body without `gh` and without a network."""
+
+    def _set(text: str | None):
+        def _fetch(_repo, _issue):
+            if text is None:
+                raise RuntimeError("gh unavailable")
+            return ("title", text)
+
+        monkeypatch.setattr(speedrun_roll, "fetch_issue", _fetch)
+
+    return _set
 
 
-def test_current_draft_is_not_stale(monkeypatch, repo, log):
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner(BEFORE_DRAFT, BEFORE_DRAFT),
-    )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is False
+def test_doc_ruling_after_the_draft_is_stale(repo, log, body_is):
+    """#2206's live case, measured by content: the binding doc moved and the
+    issue text did not."""
+    (repo / "docs" / "design").mkdir(parents=True)
+    (repo / "docs" / "design" / "dial.md").write_text("law\n", encoding="utf-8")
+    settled(repo)
+    body_is(BODY)
+
+    (repo / "docs" / "design" / "dial.md").write_text("law, amended\n", encoding="utf-8")
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is True
 
 
-def test_repo_with_no_doc_history_is_not_stale(monkeypatch, repo, log):
-    """An empty probe result means no binding doc has ever changed."""
-    monkeypatch.setattr(speedrun_roll, "_run", fake_runner(BEFORE_DRAFT, ""))
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is False
+def test_issue_body_edit_after_the_draft_is_stale(repo, log, body_is):
+    """A one-character edit to the binding value still unsettles."""
+    settled(repo)
+    body_is(BODY.replace("250 ms", "251 ms"))
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is True
 
 
-def test_unknowable_answers_are_stale(monkeypatch, repo, log):
-    """Every probe failure draws fresh, which is always safe."""
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner(BEFORE_DRAFT, BEFORE_DRAFT, issue_rc=1),
-    )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is True
+def test_current_draft_is_not_stale(repo, log, body_is):
+    settled(repo)
+    body_is(BODY)
 
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner(BEFORE_DRAFT, BEFORE_DRAFT, doc_rc=1),
-    )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is True
-
-    monkeypatch.setattr(
-        speedrun_roll, "_run", fake_runner("not-a-time", BEFORE_DRAFT),
-    )
-    assert speedrun_roll.draft_is_stale(repo, 1, DRAFTED, ARC, log) is True
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is False
 
 
-def test_missing_draft_time_is_stale(repo, log):
-    assert speedrun_roll.draft_is_stale(repo, 1, "", ARC, log) is True
+def test_a_comment_on_the_issue_does_not_unsettle(repo, log, body_is):
+    """#2615, the acceptance. GitHub bumps `updatedAt` when a comment is
+    posted, so the old timestamp probe fired on an event that changed no
+    input -- and the campaign's own method is to post a diagnosis to the
+    issue before fixing. The body is byte-identical here, which is exactly
+    what a comment leaves behind."""
+    settled(repo)
+    body_is(BODY)  # same bytes; only the timeline moved
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is False
+
+
+def test_a_label_or_reaction_does_not_unsettle(repo, log, body_is):
+    """Same shape as a comment: every timeline event that is not a body edit."""
+    settled(repo)
+    body_is(BODY)
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is False
+
+
+def test_no_settlement_record_is_stale(repo, log, body_is):
+    """Unknowable answers stay stale: with nothing to compare against, the
+    caller draws fresh, which is safe."""
+    body_is(BODY)
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is True
+
+
+def test_an_unreadable_issue_is_stale(repo, log, body_is):
+    """`gh` down must never read as 'nothing changed'."""
+    settled(repo)
+    body_is(None)
+
+    assert speedrun_roll.draft_is_stale(repo, 1, log) is True
+
+
+def test_the_mismatch_is_named_in_the_log(repo, log, body_is, tmp_path):
+    """A redraw states which input moved, so the operator is not left
+    guessing why a resume was declined."""
+    settled(repo)
+    body_is(BODY.replace("250 ms", "251 ms"))
+
+    speedrun_roll.draft_is_stale(repo, 1, log)
+
+    written = (tmp_path / "session-events.log").read_text(encoding="utf-8")
+    assert "a binding input changed" in written
+    assert "issue_body" in written
 
 
 def test_resume_plan_refuses_a_stale_draft(monkeypatch, repo, log, tmp_path):

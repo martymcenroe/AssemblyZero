@@ -292,75 +292,94 @@ def _drafted_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def test_a_claude_md_edit_makes_a_persisted_draft_stale(repo, log, monkeypatch):
-    """Acceptance 2. A draft older than the correction must redraw, not resume
-    onto a document the ruling has already invalidated."""
-    monkeypatch.setattr(
-        speedrun_roll, "_run",
-        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
-    )
-    drafted = _drafted_now()
+#: #2615: staleness is decided by CONTENT, so these fixtures edit the arc's
+#: working tree rather than moving commit dates. The arc IS the tree the roll
+#: reads -- `repo` is checked out on it below -- so a doc ruling landing on the
+#: arc is a doc changing under the draft, which is #2205's whole subject.
+BODY = "# Issue seven\n\nProse only.\n"
 
+
+def _settle_against_the_arc(repo: Path, issue: int = 7) -> None:
+    from assemblyzero.core import settlement as s
+    from assemblyzero.workflows.requirements.audit import save_settlement
+
+    lld = repo / "docs" / "lld" / "active" / f"LLD-{issue}.md"
+    lld.parent.mkdir(parents=True, exist_ok=True)
+    lld.write_text("## 1. Context\n\nDerived.\n", encoding="utf-8")
+    save_settlement(
+        issue, "lld",
+        s.build_settlement(
+            "lld", lld, s.collect_inputs(repo, issue_body=BODY),
+            verdict="APPROVED",
+        ),
+        repo,
+    )
+
+
+@pytest.fixture
+def body_unchanged(monkeypatch):
+    monkeypatch.setattr(
+        speedrun_roll, "fetch_issue", lambda _r, _i: ("title", BODY)
+    )
+
+
+def test_a_claude_md_edit_makes_a_persisted_draft_stale(
+    repo, log, body_unchanged
+):
+    """Acceptance 2. A draft made before the correction must redraw, not
+    resume onto a document the ruling has already invalidated."""
     git(repo, "checkout", "-q", ARC)
+    _settle_against_the_arc(repo)
+
     _commit_dated(
         repo, "CLAUDE.md", "Key modules: corrected\n",
         "docs: correct Key modules", "2099-01-01T00:00:00+0000",
     )
-    git(repo, "push", "-q", "origin", ARC)
-    git(repo, "fetch", "-q", "origin")
 
-    assert speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log), (
-        "the draft predates the CLAUDE.md correction, so resuming spends the "
-        "stage on a document already known to be wrong"
+    assert speedrun_roll.draft_is_stale(repo, 7, log), (
+        "the draft was derived before the CLAUDE.md correction, so resuming "
+        "spends the stage on a document already known to be wrong"
     )
-    assert "binding doc" in log.path.read_text(encoding="utf-8")
 
 
-def test_a_non_binding_edit_leaves_the_draft_current(repo, log, monkeypatch):
+def test_a_non_binding_edit_leaves_the_draft_current(repo, log, body_unchanged):
     """The control that makes the test above mean something: the SAME shape
     with a file outside the tuple must NOT invalidate the draft. Without this,
-    a staleness assertion proves only that some commit exists."""
-    monkeypatch.setattr(
-        speedrun_roll, "_run",
-        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
-    )
-    drafted = _drafted_now()
-
+    a staleness assertion proves only that some file changed."""
     git(repo, "checkout", "-q", ARC)
+    _settle_against_the_arc(repo)
+
     _commit_dated(
         repo, "README.md", "changed\n", "chore: readme",
         "2099-01-01T00:00:00+0000",
     )
-    git(repo, "push", "-q", "origin", ARC)
-    git(repo, "fetch", "-q", "origin")
 
-    assert not speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log), (
+    assert not speedrun_roll.draft_is_stale(repo, 7, log), (
         "code on the arc is not law; only the binding-doc paths invalidate a "
         "draft"
     )
 
 
-def test_the_staleness_message_reads_as_a_list_not_a_path(repo, log, monkeypatch):
-    """Three entries joined by '/' rendered 'docs/design/docs/adrs/CLAUDE.md',
-    which reads as one nonexistent path."""
-    monkeypatch.setattr(
-        speedrun_roll, "_run",
-        _issue_updated_at("2020-01-01T00:00:00Z", real=speedrun_roll._run),
-    )
-    drafted = _drafted_now()
-
+def test_the_staleness_message_names_the_document_that_moved(
+    repo, log, body_unchanged
+):
+    """The old message joined the whole BINDING_DOC_PATHS tuple with '/',
+    rendering `docs/design/docs/adrs/CLAUDE.md` -- one nonexistent path. The
+    content check names the single input that actually moved, which is both
+    unambiguous and more useful, and the run-together hazard is structurally
+    gone because no tuple is joined into prose any more."""
     git(repo, "checkout", "-q", ARC)
+    _settle_against_the_arc(repo)
+
     _commit_dated(
         repo, "CLAUDE.md", "changed\n", "docs: change",
         "2099-01-01T00:00:00+0000",
     )
-    git(repo, "push", "-q", "origin", ARC)
-    git(repo, "fetch", "-q", "origin")
 
-    speedrun_roll.draft_is_stale(repo, 7, drafted, ARC, log)
+    speedrun_roll.draft_is_stale(repo, 7, log)
 
     written = log.path.read_text(encoding="utf-8")
-    assert "docs/design, docs/adrs, CLAUDE.md" in written
+    assert "binding:CLAUDE.md" in written
     assert "docs/adrs/CLAUDE.md" not in written
 
 
