@@ -1114,9 +1114,16 @@ class TestValidateCompleteness:
             validate_completeness,
         )
 
+        # #2620: this fixture used to block via `functions_have_io_examples`,
+        # which is now a demoted proxy. It blocks on the structural check that
+        # inherited that gate instead: a `### 5.N` subsection carrying neither
+        # example block is a presence FACT about a bounded region.
         base_state["spec_draft"] = (
-            "# Implementation Spec\n\n## Overview\n\nChanges.\n\n"
-            "```python\ndef broken(:\n    pass\n```\n"
+            "# Implementation Spec\n\n## 1. Overview\n\nChanges.\n\n"
+            "## 5. Function Specifications\n\n"
+            "### 5.1 `render_face()`\n\n"
+            "**Signature:**\n\n```python\ndef render_face(w):\n    ...\n```\n\n"
+            "No example blocks here.\n\n"
             + ("filler content\n" * 20)
         )
         base_state["files_to_modify"] = []
