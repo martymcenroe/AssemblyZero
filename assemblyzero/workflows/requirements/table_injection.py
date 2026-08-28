@@ -66,8 +66,31 @@ from assemblyzero.workflows.requirements.form_check import RawTable, parse_table
 BEGIN_MARKER = "<!-- BEGIN MACHINE-OWNED: source decision table (#2607) -->"
 END_MARKER = "<!-- END MACHINE-OWNED -->"
 
+#: A machine-owned block: BEGIN, then anything that is NOT another BEGIN,
+#: then END.
+#:
+#: The "not another BEGIN" clause is load-bearing (#2628). A plain `.*?` lets a
+#: STRAY begin marker swallow the document down to the real block's end, and
+#: drafters emit stray markers: boostgauge's halted draw `run-issue331-152355`
+#: carries an empty pair at line 3 whose END reads
+#: `<!-- END MACHINE-OWNED: source decision table (#2607) -->` -- byte-exact
+#: BEGIN, near-miss END. With `.*?` the span ran from line 3 to line 126 and
+#: `strip_injection` deleted 125 lines including Sections 1, 2 and 3.
+#:
+#: That was one revision round from firing for real: `reassert` runs on every
+#: lld draft and `apply_injection` strips first, so the next round would have
+#: deleted Section 3, then failed to find `## 3.` to insert at, and appended
+#: the block to a gutted document. The format-war halt this issue reports is
+#: what stopped it.
+#:
+#: With the guard, the match starting at the stray BEGIN is rejected because a
+#: real BEGIN intervenes before any END, and the match starting at the real
+#: BEGIN is accepted. The stray pair is left alone: it is the drafter's own
+#: text, and removing it is not this rule's job.
 _BLOCK_RE = re.compile(
-    re.escape(BEGIN_MARKER) + r".*?" + re.escape(END_MARKER),
+    re.escape(BEGIN_MARKER)
+    + r"(?:(?!" + re.escape(BEGIN_MARKER) + r").)*?"
+    + re.escape(END_MARKER),
     re.DOTALL,
 )
 

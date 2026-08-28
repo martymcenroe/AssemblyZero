@@ -77,6 +77,80 @@ def extract_sections(markdown: str) -> list[Section]:
     return sections
 
 
+#: Any ATX heading, with its level. One notion of "heading" for the boundary
+#: rule below, so a section's extent is never a second opinion.
+_HEADING_RE = re.compile(r"^(#{1,6})[ \t]*(.*)$", re.MULTILINE)
+
+
+def section_body(markdown: str, title_pattern: re.Pattern) -> str | None:
+    """The body of the first heading matching ``title_pattern``, subsections
+    included. ``None`` when no heading matches.
+
+    **The boundary is LEVEL-AWARE, and that is the whole point (#2628).** A
+    section ends at the next heading of the same or higher level; a deeper
+    heading belongs to it.
+
+    The rule this replaces ended Section 3 at the next heading beginning with
+    a digit:
+
+        (?=^#{1,3}\\s*\\d|^#{1,3}\\s*[A-Z]|\\Z)
+
+    which was correct until #2607 injection began inserting
+    ``### 3.1 Source Decision Table (injected verbatim)`` INSIDE Section 3.
+    The lookahead then fired on the injected subheading, so Section 3 captured
+    the 62 characters before it -- a blank line and an HTML comment -- and the
+    drafter's numbered requirements below the block were invisible. Measured on
+    boostgauge's halted draw `run-issue331-152355`: 0 requirements extracted
+    from a document that carries 4.
+
+    Level, not first-character, is what separates "the next section" from "a
+    subsection of this one", and it is the only rule that stays correct as more
+    machine-owned subsections are injected.
+    """
+    for match in _HEADING_RE.finditer(markdown or ""):
+        level = len(match.group(1))
+        if not title_pattern.match(match.group(2).strip()):
+            continue
+        start = match.end()
+        for following in _HEADING_RE.finditer(markdown, start):
+            if len(following.group(1)) <= level:
+                return markdown[start:following.start()]
+        return markdown[start:]
+    return None
+
+
+def drafter_authored(markdown: str) -> str:
+    """``markdown`` with every machine-owned block removed (#2628).
+
+    Requirement extraction reads what the DRAFTER wrote. #2607's injected block
+    is authored by the derivation, is restored verbatim on every revision, and
+    its rows are a binding-value reference the requirements cite -- its own
+    preamble says so: *"Cite these IDs from the requirements and test-plan
+    sections; do not restate their values."*
+
+    Removing it before parsing is not cosmetic. The extractor accumulates
+    unnumbered lines as continuation text of the preceding requirement, so a
+    numbered item sitting above an injected block would silently swallow the
+    whole table into its text.
+
+    Imported lazily: `requirements.table_injection` reaches
+    `implementation_spec.assertion_manifest`, which pulls a package whose
+    `__init__` imports the spec graph. A module-level import here would build a
+    cycle for a three-line call. Same reasoning, and the same shape, as
+    `generate_spec._spec_injection` (#2611).
+    """
+    try:
+        from assemblyzero.workflows.requirements.table_injection import (
+            strip_injection,
+        )
+    except ImportError:
+        # fail-open: only in shape -- with no stripper available the caller
+        # parses the document as it stands, which is the pre-#2628 behaviour.
+        # A missing import must never make a valid LLD unreadable.
+        return markdown or ""
+    return strip_injection(markdown or "")
+
+
 def identify_changed_sections(
     feedback: str | dict,
     sections: list[Section],
