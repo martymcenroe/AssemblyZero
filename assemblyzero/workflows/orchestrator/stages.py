@@ -117,6 +117,7 @@ def _make_stage_result(
     duration_seconds: float = 0.0,
     attempts: int = 0,
     transient: bool | None = None,
+    notes: list[str] | None = None,
 ) -> StageResult:
     """Helper to create a StageResult.
 
@@ -134,7 +135,31 @@ def _make_stage_result(
     )
     if transient is not None:
         result["transient"] = transient
+    if notes:
+        # #2608: only when there is something to say. An empty key on every
+        # result would put a blank NOTES section under every run record and
+        # train the reader to skip the one that matters.
+        result["notes"] = list(notes)
     return result
+
+
+def _declared_fallthroughs(sub_result: dict) -> list[str]:
+    """Protections a sub-workflow deliberately sat out, for the run record.
+
+    #2608: run-issue331-093613 passed the spec stage with the #2533
+    assertion-manifest protection switched off, and the stage table said
+    only "passed". A declared fall-through is survivable by design -- that
+    is what makes it declared -- but it must reach the record, or a green
+    row means two different things and the reader cannot tell which.
+    """
+    notes: list[str] = []
+    if sub_result.get("assertion_manifest_abstained"):
+        reason = sub_result.get("assertion_manifest_absence_reason", "")
+        notes.append(
+            f"assertion manifest ABSTAINED ({reason}) — the #2533 "
+            f"protection did not run for this stage (#2608)"
+        )
+    return notes
 
 
 def _unresolved_test_failures(sub_result: dict) -> int:
@@ -1019,6 +1044,7 @@ def run_spec_stage(state: OrchestrationState) -> OrchestrationState:
                 artifact_path=spec_path,
                 duration_seconds=time.monotonic() - start_time,
                 attempts=1,
+                notes=_declared_fallthroughs(sub_result),
             )
         else:
             error_msg = sub_result.get("error_message", "")

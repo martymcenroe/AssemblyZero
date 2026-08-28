@@ -809,6 +809,78 @@ def validate_assertion_literal_conservation(
     return errors
 
 
+def validate_decision_table_survives(
+    issue_body: str, lld_content: str
+) -> list[ValidationError]:
+    """Reject a derivation that destroyed the source's table SHAPE (#2608).
+
+    #2563's sibling, and deliberately a separate check rather than an
+    extension of it. That gate conserves LITERALS -- every hex and number
+    from a source row must appear somewhere in the LLD -- and it is
+    shape-blind by construction. Measured on run-issue331-093613: the
+    source's nine-row `| ID | Element | Binding value | Assertion method |`
+    table became a seven-item bullet list, the gate fired five criticals for
+    genuinely-missing numbers, the drafter repaired by appending bullets
+    carrying those numbers, and the gate went green with the table still
+    gone. S7 and S9 never returned and every assertion method was lost.
+
+    The downstream cost is precise: `compile_manifest` looks for a criteria
+    decision table in the LLD, found none, and reported "not applicable" --
+    so the #2533 protection, which exists because drafters invent expected
+    values, switched off for the run that most needed it.
+
+    So: when the SOURCE carries a criteria decision table and the derived
+    LLD carries none, that is a structure a downstream stage consumes being
+    destroyed in derivation. It is an ERROR here, where the revision loop
+    can still fix it, rather than a silent abstain three stages later.
+
+    An issue with no criteria table yields no checks -- the ordinary case,
+    and not a failure.
+    """
+    from assemblyzero.workflows.implementation_spec.assertion_manifest import (
+        is_criteria_table,
+    )
+    from assemblyzero.workflows.requirements.form_check import parse_tables
+
+    errors: list[ValidationError] = []
+    if not issue_body or not lld_content:
+        return errors
+
+    source_tables = [
+        table for table in parse_tables(issue_body) if is_criteria_table(table)
+    ]
+    if not source_tables:
+        return errors
+
+    lld_tables = parse_tables(lld_content)
+    if any(is_criteria_table(table) for table in lld_tables):
+        return errors
+
+    source_ids = [
+        (row[0] or "?") for table in source_tables for row in table.rows if row
+    ]
+    errors.append(
+        ValidationError(
+            severity=ValidationSeverity.ERROR,
+            section="3 Requirements",
+            message=(
+                f"Critical: the source issue carries a criteria decision "
+                f"table ({len(source_ids)} row(s): "
+                f"{', '.join(source_ids[:9])}) and the LLD carries none. "
+                f"{len(lld_tables)} table(s) were parsed in the LLD and not "
+                f"one has an ID column and a binding column. Restating the "
+                f"rows as prose or bullets does not satisfy this: the "
+                f"assertion-manifest compiler reads the TABLE, and without "
+                f"it the #2533 protection silently does not run for this "
+                f"roll. Carry the decision table into the LLD as a table, "
+                f"one row per source row, keeping the ID and binding-value "
+                f"columns (#2608)"
+            ),
+        )
+    )
+    return errors
+
+
 def validate_mandatory_sections(lld_content: str) -> list[ValidationError]:
     """Verify that all mandatory LLD sections exist.
 
@@ -1654,6 +1726,18 @@ def _validate_lld_mechanical_inner(state: Dict[str, Any]) -> Dict[str, Any]:
     # survive into the LLD, or the row is named lossy.
     all_errors.extend(
         validate_assertion_literal_conservation(
+            state.get("issue_body", ""), lld_content
+        )
+    )
+
+    # Step 6d (#2608): #2563 conserves the row's LITERALS and is shape-blind.
+    # A derivation can satisfy it by restating the numbers as bullets while
+    # destroying the table, which is what run-issue331-093613 did -- and the
+    # manifest compiler three stages later then read "no table" as "not
+    # applicable" and switched the #2533 protection off. Checked here, where
+    # both documents are in hand and the revision loop can still repair it.
+    all_errors.extend(
+        validate_decision_table_survives(
             state.get("issue_body", ""), lld_content
         )
     )

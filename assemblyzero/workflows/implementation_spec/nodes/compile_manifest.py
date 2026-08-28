@@ -86,13 +86,35 @@ def compile_assertion_manifest(
     result = compile_manifest(lld_content, _contract_text(repo_root))
 
     if not result.applicable:
-        print(
-            "    [N1b] no criteria decision table in the LLD — "
-            "assertion manifest not applicable; drafting proceeds as before"
-        )
+        # fail-open: #2608. The compiler sits out an issue with no decision
+        # table, which is most of them, and that remains correct. What is
+        # NOT correct is sitting out silently: run-issue331-093613 abstained
+        # on an LLD holding fifteen tables because none carried the criteria
+        # shape, and the #2533 protection switched off with one log line and
+        # no downstream trace. Continuing is deliberate -- a repo with no
+        # decision tables must still roll -- so the abstain is declared here,
+        # carries the denominator it searched, and travels forward on state
+        # for the report and for every later stage, which is what makes it a
+        # declared fall-through rather than an accident.
+        detail = result.denominator()
+        if result.abstained:
+            print(
+                f"    [N1b] ABSTAIN: {detail}. The #2533 protection is OFF "
+                f"for this run and the absence travels forward (#2608). A "
+                f"document carrying tables but none in the criteria shape "
+                f"is a shape mismatch, not an empty document."
+            )
+        else:
+            print(
+                f"    [N1b] not applicable: {detail} — assertion manifest "
+                f"does not apply; drafting proceeds as before (#2608)"
+            )
         return {
             "assertion_manifest": "",
             "assertion_manifest_rows": [],
+            "assertion_manifest_absent": True,
+            "assertion_manifest_absence_reason": detail,
+            "assertion_manifest_abstained": result.abstained,
             "error_message": "",
         }
 
@@ -206,7 +228,21 @@ def manifest_gate(state: ImplementationSpecState) -> dict[str, Any]:
     manifest_text = state.get("assertion_manifest", "")
     rows = state.get("assertion_manifest_rows", [])
     if not manifest_text and not rows:
-        print("    [N1c] no manifest to gate — passing through")
+        # fail-open: #2608. Nothing to gate is a real state and passing
+        # through is correct, but the gate must repeat WHY rather than say
+        # only that it did — "no manifest to gate" alone gave the operator
+        # a second reassuring line about a protection that was off.
+        reason = state.get("assertion_manifest_absence_reason", "")
+        if state.get("assertion_manifest_abstained"):
+            print(
+                f"    [N1c] no manifest to gate — the compiler ABSTAINED "
+                f"({reason}); the #2533 protection is off for this run "
+                f"(#2608)"
+            )
+        elif reason:
+            print(f"    [N1c] no manifest to gate — {reason} (#2608)")
+        else:
+            print("    [N1c] no manifest to gate — passing through")
         return {"error_message": ""}
 
     from assemblyzero.workflows.implementation_spec.assertion_manifest import (
