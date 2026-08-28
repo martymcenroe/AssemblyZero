@@ -573,7 +573,9 @@ def _is_git_tracked(repo_root: Path, file_path: Path) -> bool:
     return result.returncode == 0
 
 
-def relocate_lld_artifacts(repo_root: Path, issue: int) -> int:
+def relocate_lld_artifacts(
+    repo_root: Path, issue: int, preserve: set[str] | None = None
+) -> int:
     """
     Move untracked LLD/spec artifacts out of the target repo's docs tree.
 
@@ -585,7 +587,18 @@ def relocate_lld_artifacts(repo_root: Path, issue: int) -> int:
     commits, so working copies are relocated (never deleted) to
     `data/speedrun/reset-artifacts/issue-{N}/` for inspection. Tracked
     files are deliberate repo content and are left alone.
+
+    #2609: ``preserve`` names files (by basename) that are SETTLED and must
+    survive the reset. A settled artifact embodies a ruling that was not made
+    by the run being reset, so resetting the run must not discard it. The
+    settledness decision is made by the caller, which is where the inputs can
+    be hashed; this function only honours it, and says so per file.
+
+    ``preserve`` deliberately does not weaken #1849: an artifact left in place
+    is only skipped by the next run if it is still settled THEN, which the
+    stage-entry check re-verifies against the inputs at that moment.
     """
+    preserve = preserve or set()
     active = repo_root / "docs" / "lld" / "active"
     drafts = repo_root / "docs" / "lld" / "drafts"
     candidates: list[Path] = []
@@ -601,6 +614,11 @@ def relocate_lld_artifacts(repo_root: Path, issue: int) -> int:
         if artifact in seen or not artifact.is_file():
             continue
         seen.add(artifact)
+        if artifact.name in preserve:
+            print(
+                f"  Preserved (settled): {artifact.relative_to(repo_root)}"
+            )
+            continue
         if _is_git_tracked(repo_root, artifact):
             continue
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -654,12 +672,16 @@ def reopen_issue(repo: str, issue: int) -> bool:
     return False
 
 
-def reset_one_issue(repo_root: Path, repo: str, issue: int) -> None:
+def reset_one_issue(
+    repo_root: Path, repo: str, issue: int, preserve: set[str] | None = None
+) -> None:
     """Run all reset steps for one issue.
 
     #2409: the checkpoint is pinned FIRST, before anything that could orphan
     it. Branch deletion is what unreferences a checkpoint commit, so the pin
     has to precede it or the ordering is the bug.
+
+    #2609: ``preserve`` names settled artifacts the reset must leave in place.
     """
     print(f"\nResetting issue #{issue}:")
     pin_checkpoint(repo_root, issue)
@@ -668,7 +690,7 @@ def reset_one_issue(repo_root: Path, repo: str, issue: int) -> None:
     delete_local_branches(repo_root, issue)
     delete_remote_branches(repo_root, issue)
     archive_lineage_dirs(repo_root, issue)
-    relocate_lld_artifacts(repo_root, issue)
+    relocate_lld_artifacts(repo_root, issue, preserve)
     reopen_issue(repo, issue)
 
 
