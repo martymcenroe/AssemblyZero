@@ -69,7 +69,12 @@ jobs:
           echo "PR #${PR_NUMBER} — waiting for required checks: ${REQUIRED_CHECKS}"
 
           IFS=',' read -ra CHECKS <<< "$REQUIRED_CHECKS"
-          MAX_ATTEMPTS=30   # 30 × 20s = 10 minutes max wait
+          # #2627: was 30 (10 minutes). With the terminal-state test below, the
+          # only path that still reaches this ceiling is "the check was never
+          # created at all" -- a name mismatch, or the reporting service being
+          # unreachable. Five minutes is far beyond normal reporting latency and
+          # halves what an outage costs in billed minutes.
+          MAX_ATTEMPTS=15   # 15 × 20s = 5 minutes max wait
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
@@ -84,13 +89,33 @@ jobs:
                 --jq ".check_runs[] | select(.name | contains(\"${check_name}\")) | .conclusion" \
                 2>/dev/null | head -1)
 
+              # #2627: ANY non-empty conclusion is terminal. GitHub populates
+              # `conclusion` only when a check run has COMPLETED -- while one is
+              # genuinely in flight the field is null -- so polling a non-empty
+              # conclusion cannot change the answer, it just spends minutes.
+              #
+              # This was previously an allowlist of `failure` and `cancelled`,
+              # which meant `action_required` (what the sentinel posts when its
+              # issue-reference regex extracts a ref it cannot validate) fell
+              # through to "pending" and was polled for the full ten minutes.
+              # Measured across the fleet in August: 29 runs died this way,
+              # ~300 billed minutes, roughly 10% of the monthly allowance.
+              #
+              # Deliberately a test for "completed and not success" rather than
+              # a longer allowlist. Enumerating states is how action_required
+              # was missed in the first place, and the next unlisted conclusion
+              # would be discovered the same way, in ten-minute increments.
+              #
+              # No outcome changes: every state that used to time out already
+              # ended in step failure. It now gets there in ~20s instead of
+              # ~600s.
               if [ "$STATUS" = "success" ]; then
                 echo "  ✅ ${check_name}: passed"
-              elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
-                echo "  ❌ ${check_name}: ${STATUS} — will NOT approve"
+              elif [ -n "$STATUS" ]; then
+                echo "  ❌ ${check_name}: ${STATUS} (completed, not success) — will NOT approve"
                 exit 1
               else
-                echo "  ⏳ ${check_name}: pending (attempt $((ATTEMPT+1))/${MAX_ATTEMPTS})"
+                echo "  ⏳ ${check_name}: no conclusion yet (attempt $((ATTEMPT+1))/${MAX_ATTEMPTS})"
                 ALL_PASSED=false
               fi
             done
@@ -105,7 +130,9 @@ jobs:
             sleep 20
           done
 
-          echo "❌ Timed out waiting for checks after $((MAX_ATTEMPTS * 20))s"
+          echo "❌ Timed out after $((MAX_ATTEMPTS * 20))s — required check never reported a conclusion."
+          echo "   Most likely the check was never created: verify the name in"
+          echo "   the required_checks input matches what the reporting service posts."
           exit 1
 
       - name: Approve PR
