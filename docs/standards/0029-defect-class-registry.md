@@ -102,13 +102,41 @@ first entry.
 **Instances.** #2555 (the fence complaint that deadlocked; dashed `lines N-M`
 citations added to the vocabulary), #2560 (demanded ADDITIONS land — a demand
 to add has no line to cite by construction), #2557 (the sweep that found three
-more unaddressable messages and the `()`-suffix hazard).
+more unaddressable messages and the `()`-suffix hazard), #2628 (the section
+boundary that ended at injection's own subheading, so a compliant draft read as
+empty), #2633 (the variant below).
 
 **The taxonomy is three-way, not two.** A complaint is *addressed* (it cites a
 line), *demands an addition* (there is no line to cite, and the #2560 exemption
 carries it), or *unaddressable* (it targets existing content in a scheme the
 enforcement cannot read). Only the third is a defect. Collapsing the middle case
 into the third produces false alarms on correct code.
+
+**Variant: the check's domain is narrower than the document's (#2633).** The
+sharpest form of this class is not a badly worded message — it is a check that
+sees only one of the identifier namespaces the document actually uses, and so
+reports correct work as absent while blaming the author.
+
+`check_manifest_traceability` demanded a manifest-row citation from every test.
+The manifest's domain is the injected criteria table alone, so five behavioural
+tests had no row to cite. The drafter traced them to LLD **test-scenario** ids
+instead — `row 010`, `row 020`, `row 030`, `row 100`, `row 110`, every one a
+real row of the LLD's own Test Scenarios table, and exactly the five non-visual
+scenarios — plus a valid `REQ-N` on every test. The halt then read *"test(s)
+citing no manifest row"* about five tests that visibly cited two identifiers
+each. Three revisions, cap.
+
+**Detection question for the variant.** *Does this check enumerate every
+namespace the upstream document defines, or only its own?* When the artifact
+carries identifiers the check cannot resolve, a "missing" verdict is a domain
+error rather than a finding.
+
+**Read the artifact before believing the halt.** #2633 was first diagnosed as
+counterfeit compliance — a drafter manufacturing plausible-looking near-misses
+under an impossible demand. That would have been a new and alarming claim about
+drafter behaviour, and it was wrong: every citation resolved against the LLD.
+A halt that blames the author is precisely when the author's output deserves
+checking first.
 
 ---
 

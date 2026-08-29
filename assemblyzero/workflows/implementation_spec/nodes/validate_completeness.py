@@ -210,10 +210,16 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     _log_check(check_error_paths)
 
     # Check 11: Manifest traceability — every manifest row in exactly one
-    # test, every test citing a row id (Issue #2533). A diff, not an LLM
-    # judgment; abstains where it cannot parse (#2526).
+    # test, every test tracing to a real identifier (Issue #2533). A diff, not
+    # an LLM judgment; abstains where it cannot parse (#2526).
+    #
+    # #2633: the LLD is passed because a test may legitimately trace to a
+    # requirement or a test-scenario id when the manifest holds no row for it
+    # -- the manifest's domain is the injected criteria table alone.
     check_manifest = check_manifest_traceability(
-        spec_draft, state.get("assertion_manifest_rows", [])
+        spec_draft,
+        state.get("assertion_manifest_rows", []),
+        state.get("lld_content", ""),
     )
     checks.append(check_manifest)
     _log_check(check_manifest)
@@ -1522,15 +1528,95 @@ def check_error_paths_have_tests(spec: str) -> CompletenessCheck:
     )
 
 
+#: An explicit traceability citation: ``# manifest: S1.1``, ``# manifest:
+#: REQ-3``, ``# manifest: row 010``. The trailing text is captured whole so an
+#: unrecognised citation can be QUOTED BACK (#2633) rather than reported as
+#: absent.
+_CITATION_RE = re.compile(r"#\s*manifest:\s*(.+)")
+
+
+def _citation_namespaces(lld_content: str) -> tuple[set[str], set[str]]:
+    """(requirement ids, LLD test-scenario ids) a citation may name (#2633).
+
+    Both come from readers this module already depends on -- a second parser
+    of either would be the #1698 class -- and both are checked against the
+    upstream LLD rather than accepted on faith.
+    """
+    if not lld_content:
+        return (set(), set())
+
+    from assemblyzero.core.validation.test_plan_validator import (
+        extract_requirements,
+    )
+    from assemblyzero.workflows.implementation_spec.criteria_coverage import (
+        lld_criteria,
+    )
+
+    reqs = {r["id"] for r in extract_requirements(lld_content) if r.get("id")}
+    scenarios = {c.row_id for c in lld_criteria(lld_content) if c.row_id}
+    return (reqs, scenarios)
+
+
+def _classify_citation(
+    cited: str, row_ids: set[str], reqs: set[str], scenarios: set[str]
+) -> str | None:
+    """Which namespace ``cited`` belongs to, or None when it belongs to none."""
+    text = cited.strip().rstrip(".,;")
+    # `row 010` and a bare `010` are the same citation.
+    bare = re.sub(r"^row\s+", "", text, flags=re.IGNORECASE).strip()
+    for candidate in (text, bare):
+        if candidate in row_ids:
+            return "manifest"
+        if candidate in reqs:
+            return "requirement"
+        if candidate in scenarios:
+            return "scenario"
+    return None
+
+
 def check_manifest_traceability(
-    spec: str, manifest_rows: list[dict]
+    spec: str, manifest_rows: list[dict], lld_content: str = ""
 ) -> CompletenessCheck:
-    """Every manifest row in exactly one test; every test cites a row (#2533).
+    """Every manifest row in a test; every test traced to a real identifier.
 
     Rows-to-tests bookkeeping as a mechanical diff — the two minutes of
-    per-round LLM traceability adjudication this check retires. Its whole
-    jurisdiction is the citation comment (``# manifest: N4.2``) or the bare
-    row id appearing inside a test function's source.
+    per-round LLM traceability adjudication this check retires.
+
+    ## Two domains, because the document has two (#2633)
+
+    The manifest compiles the injected criteria table only: visual assertions
+    with sample points and expected literals. A spec's test suite rightly
+    covers more — base generation, a size floor, cache persistence, constant
+    isolation, artifact emission — and no manifest row can ever exist for
+    "cache persistence", which has no sample point and never will. Demanding a
+    manifest citation from those tests demanded the impossible, and on
+    boostgauge's `run-issue331-182658` it cost three revisions and a cap.
+
+    The drafter's response was not sloppiness. It cited LLD **test-scenario**
+    ids -- `row 010`, `row 020`, `row 030`, `row 100`, `row 110`, every one a
+    real row of LLD-331's Test Scenarios table and exactly the five non-visual
+    scenarios -- plus a valid `REQ-N` on every test. It partitioned the LLD's
+    eleven scenarios perfectly: a manifest row where one existed, a scenario
+    id where none could. The check knew one namespace of three and reported
+    the other two as nothing, so the halt read *"test(s) citing no manifest
+    row"* about five tests that visibly cited two identifiers each.
+
+    Three namespaces are therefore legal, and all three are checkable against
+    artifacts already in hand: manifest row ids, the LLD's requirement ids,
+    the LLD's test-scenario ids.
+
+    ## Which way each direction fails
+
+    * **Row to test is unchanged** -- every manifest row must be cited, and a
+      row cited by more than one test still fails. That half catches real gaps
+      and nothing here loosens it.
+    * **Test to identifier** passes on at least ONE valid citation. An
+      unrecognised extra is REPORTED, never fatal on its own: failing a test
+      that has traced itself correctly because it also carries a redundant
+      annotation is the false-alarm disease #2540 removed.
+    * A test whose citations are **all** unrecognised fails, with each invalid
+      citation quoted and the namespaces enumerated, so the complaint names
+      something the draft actually contains (#2555).
 
     Abstention (#2526: unknown is not guilty): a fence that will not parse is
     not judged here — it is already a hard failure of the api-symbols check
@@ -1598,13 +1684,36 @@ def check_manifest_traceability(
             ),
         )
 
+    reqs, scenarios = _citation_namespaces(lld_content)
+    row_id_set = set(row_ids)
+
     cited_by: dict[str, list[str]] = {rid: [] for rid in row_ids}
     uncited_tests: list[str] = []
+    #: (test name, the citations it made that match no namespace)
+    invalid_only: list[tuple[str, list[str]]] = []
+    unrecognised_extras: list[str] = []
+
     for name, segment in tests:
         hits = [rid for rid, pat in id_patterns.items() if pat.search(segment)]
         for rid in hits:
             cited_by[rid].append(name)
-        if not hits:
+
+        # #2633: an explicit citation may name any of the three namespaces.
+        cited = [c.strip() for c in _CITATION_RE.findall(segment)]
+        good: list[str] = []
+        bad: list[str] = []
+        for citation in cited:
+            if _classify_citation(citation, row_id_set, reqs, scenarios):
+                good.append(citation)
+            else:
+                bad.append(citation)
+
+        if hits or good:
+            # Traced. An unrecognised extra is visible but not fatal.
+            unrecognised_extras.extend(f"{name}: `{b}`" for b in bad)
+        elif bad:
+            invalid_only.append((name, bad))
+        else:
             uncited_tests.append(name)
 
     problems: list[str] = []
@@ -1625,22 +1734,47 @@ def check_manifest_traceability(
         problems.append(f"manifest row(s) cited by MORE than one test: {listed}")
     if uncited_tests:
         problems.append(
-            f"test(s) citing no manifest row: "
+            f"test(s) tracing to nothing: "
             f"{', '.join(uncited_tests[:8])}"
             + (
                 f" (and {len(uncited_tests) - 8} more)"
                 if len(uncited_tests) > 8 else ""
             )
         )
+    if invalid_only:
+        # #2633: quote the citation back. Reporting "cites nothing" at a test
+        # that visibly cites something is the complaint that cost three
+        # revisions -- the drafter cannot act on a demand that contradicts the
+        # draft in front of it.
+        listed = "; ".join(
+            f"{name} cites {', '.join(repr(b) for b in bad)}"
+            for name, bad in invalid_only[:4]
+        )
+        problems.append(
+            f"test(s) whose every citation matches no known identifier: "
+            f"{listed}"
+            + (f" (and {len(invalid_only) - 4} more)"
+               if len(invalid_only) > 4 else "")
+        )
 
     if problems:
+        namespaces = [f"manifest rows are {', '.join(row_ids[:12])}"]
+        if reqs:
+            namespaces.append(
+                f"LLD requirements are {', '.join(sorted(reqs)[:12])}"
+            )
+        if scenarios:
+            namespaces.append(
+                f"LLD test-scenario ids are {', '.join(sorted(scenarios)[:12])}"
+            )
         return CompletenessCheck(
             check_name="manifest_traceability",
             passed=False,
             details=(
                 "Manifest traceability is a mechanical diff (#2533) and it "
                 "does not balance: " + " | ".join(problems)
-                + ". Cite rows with a `# manifest: <row-id>` comment."
+                + ". Cite with a `# manifest: <id>` comment; valid ids: "
+                + "; ".join(namespaces) + "."
                 + abstain_note
             ),
         )
@@ -1650,7 +1784,13 @@ def check_manifest_traceability(
         passed=True,
         details=(
             f"All {len(row_ids)} manifest row(s) are each cited by exactly "
-            f"one of {len(tests)} test(s), and every test cites a row."
+            f"one of {len(tests)} test(s), and every test traces to a "
+            f"manifest row, an LLD requirement, or an LLD test-scenario id."
+            + (
+                f" Unrecognised extra citation(s), not fatal: "
+                f"{'; '.join(unrecognised_extras[:6])}."
+                if unrecognised_extras else ""
+            )
             + abstain_note
         ),
     )
