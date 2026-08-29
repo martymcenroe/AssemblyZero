@@ -89,6 +89,38 @@ row reaches a scoped section at all is a fact, and that is
 rendering, Width and Highlights with no row naming them, against S9 for
 Bezel-to-dial transition: exactly boostgauge #375's list.
 
+## Every law is tracked, not only the ones a row happened to cite (#2651)
+
+`ContractSection.laws` was built for shape 2 and read in one place -- and only
+for a section a row's binding cell cites by ruling number or `§Name`. S7's cell
+happens to say `per #328's stops table`, so the chrome step law surfaces.
+Rewrite it as `chrome per the contract` -- same meaning, no citation token --
+and the sharpest evidence in the audit goes silent while the law stays exactly
+as binding. Shape 2 also cannot see a section that states a law and carries no
+table: it returns early when `table_values` is empty.
+
+So `law_ledger` tracks every law of every in-play section against the rows that
+reach its section, and a law no row reaches is UNDISCHARGED -- a fact. Whether
+a reaching row's assertion could actually fail under a violating render stays
+the reviewer's, exactly where the binding ledger leaves its own judgement.
+
+Three repairs the ledger's own acceptance required, each measured:
+
+* **`No overlays, ever` is a law and `MUST|NEVER|shall` could not see it.** The
+  vocabulary gained `X, ever` and nothing else -- on the real contract that is
+  one additional line, §Face's flat-fill rule, which #331's S1 discharges.
+  Lowercase widening would have taken the extractor from 3 lines to 21, most of
+  them the document narrating its own history.
+* **Two of three laws were quoted as fragments.** Sentence splitting fires on
+  the `.` of an ordered-list marker, so a law introducing a list came out as
+  its header plus a bare `1.`. Blocks are read before sentences now.
+* **`rows_referencing` matched on provenance.** A dated heading carries its own
+  citation, and rows citing a different ruling shared `ruling`, `2026`, `08` --
+  so a chrome section matched five of #331's nine rows on a date. That was the
+  false-coverage direction for `binding_ledger`, which scopes its row text by
+  the same function, and it was latent only because the sections carrying
+  sub-bindings have single-word names.
+
 The review half then adjudicates with the contract in hand -- the thing no
 current stage does. Report-only, for the reasons #2227 and #2387 give, and only
 for repos that declare a binding contract for the issue being rolled; every
@@ -145,7 +177,29 @@ _NAMED_RULE = re.compile(
 )
 
 #: A law the contract states as binding rather than describing.
-_MUST_LAW = re.compile(r"\b(?:MUST|NEVER|shall)\b")
+#:
+#: `X, ever` was added by #2651 and the addition is deliberately that narrow.
+#: Measured over the whole 301-line contract:
+#:
+#:     MUST|NEVER|shall                 3 lines
+#:     + lowercase must/never          21 lines
+#:     + `X, ever`                     22 lines  <- one more, and it is §Face
+#:     + is rejected/retired/forbidden 23 lines
+#:
+#: The one line `X, ever` adds is 198, §Face's `No overlays, ever` -- the
+#: flat-fill law from ruling #325, which #331's S1 discharges and which the
+#: uppercase-only vocabulary could not see at all. Lowercase widening takes
+#: the extractor from 3 lines to 21 and most of the additions are the document
+#: narrating its own history ("regen-dependency retired", "the operator
+#: approved the render", "Twelve spec review rounds tripped"). Deciding what
+#: counts as law in prose is a judgement, and this module's standing line is
+#: that judgements go to the reviewer rather than into a widened regex.
+_MUST_LAW = re.compile(r"\b(?:MUST|NEVER|shall)\b|\b\w+,\s*ever\b")
+
+#: A blank-line block boundary, and a sentence boundary within one block.
+#: Laws are found per block first -- see `ContractSection.laws` for why.
+_BLOCK = re.compile(r"\n\s*\n")
+_SENTENCE = re.compile(r"(?<=[.;])\s+")
 
 #: Provenance, not specification: a ruling reference, an ISO date, or a
 #: `(ruling ...)` parenthetical. Stripped BEFORE values are read.
@@ -233,12 +287,36 @@ class ContractSection:
 
     @property
     def laws(self) -> list[str]:
-        """Sentences the contract states as binding, quoted for the reviewer."""
-        return [
-            sentence.strip()
-            for sentence in re.split(r"(?<=[.;])\s+", self.body)
-            if _MUST_LAW.search(sentence)
-        ]
+        """What the contract states as binding, quoted whole for the reviewer.
+
+        Blocks first, sentences second (#2651). Splitting the body straight
+        into sentences fires on the `.` of an ordered-list marker, and two of
+        this contract's three laws came out as
+        `Code implementing #1 (core gauge renderer) MUST:` followed by a bare
+        `1.` -- a header with its three numbered obligations dropped, quoted
+        into the reviewer's brief as if it were the law.
+
+        So a block carrying the marker and ending in a colon absorbs the block
+        after it, which is where the obligations live. Everything else is
+        quoted at sentence granularity, unchanged: §Chrome environment strip's
+        block does not end in a colon, so the step law is still the single
+        sentence `signal_assertions_that_cannot_falsify` has always quoted.
+        """
+        found: list[str] = []
+        blocks = [b for b in _BLOCK.split(self.body) if b.strip()]
+        for i, block in enumerate(blocks):
+            if not _MUST_LAW.search(block):
+                continue
+            text = block.strip()
+            if text.endswith(":") and i + 1 < len(blocks):
+                found.append(f"{text}\n{blocks[i + 1].strip()}")
+                continue
+            found.extend(
+                sentence.strip()
+                for sentence in _SENTENCE.split(text)
+                if _MUST_LAW.search(sentence)
+            )
+        return found
 
     @property
     def table_values(self) -> set[str]:
@@ -401,8 +479,19 @@ def rows_referencing(section: ContractSection, rows: list[list[str]]) -> list[st
     coverage -- §Bezel is referenced by S9 ("Bezel seat"), §Redline arc by S2
     ("Redline band"). Whether S9 *discharges* §Bezel is exactly the judgement
     this module refuses to make.
+
+    **Provenance is stripped from the name first (#2651).** A dated heading
+    carries its own citation -- `Chrome environment strip (ruling 2026-08-15,
+    #328)` -- and rows citing `(ruling 2026-08-25)` share the tokens `ruling`,
+    `2026` and `08`, so a chrome section matched five of #331's nine rows on a
+    date. That was latent rather than harmless: `binding_ledger` scopes its
+    row text by this function, and a too-broad set marks MORE sub-bindings as
+    named by a row, which is the false-coverage direction. It did not bite on
+    #331 only because the sections carrying sub-bindings have single-word
+    names. `_PROVENANCE` already exists here for the sibling reason -- it is
+    what stops a ruling number reading as a bound value.
     """
-    wanted = _tokens(section.name) - {"the", "a", "and", "of"}
+    wanted = _tokens(_PROVENANCE.sub(" ", section.name)) - {"the", "a", "and", "of"}
     found: list[str] = []
     for row in rows:
         if not row:
@@ -450,6 +539,43 @@ def binding_ledger(
                 row_id for row_id in referencing if name and name in scoped
             ]
             ledger.append((section.name, binding.name, named_by))
+    return ledger
+
+
+def law_ledger(
+    sections: list[ContractSection], rows: list[list[str]]
+) -> list[tuple[str, str, list[str]]]:
+    """(section, law, row IDs that reference the section) (#2651).
+
+    `laws` was built for one signal and read in one place -- inside
+    `signal_assertions_that_cannot_falsify`, and only for a section a row's
+    binding cell cites by ruling number or `§Name`. S7's cell happens to say
+    `per #328's stops table`, so the chrome step law surfaces. Rewrite that
+    cell as `chrome per the contract` -- same meaning, no citation token --
+    and the sharpest evidence in the audit goes silent while the law stays
+    exactly as binding. Shape 2 also cannot see a section that states a law
+    and carries no table: it returns early when `table_values` is empty.
+
+    A law is binding because the contract states it, not because a table cell
+    referenced its section by number. So every law of every in-play section is
+    tracked here, with the rows that reach its section, and a law no row
+    reaches is undischarged.
+
+    **This tracks and surfaces; it does not judge.** Whether a referencing
+    row's assertion can actually falsify its law is the falsifiability
+    judgement, and #2646 put that with the reviewer. §Face's flat-fill law is
+    the worked case: #331's S1 tests equality of samples along one radial,
+    which a gradient fails, so it does discharge it -- and an S1 that asserted
+    only `#0A0A0C` at three points would not, while looking identical here.
+    """
+    ledger: list[tuple[str, str, list[str]]] = []
+    for section in sections:
+        laws = section.laws
+        if not laws:
+            continue
+        referencing = rows_referencing(section, rows)
+        for law in laws:
+            ledger.append((section.name, law, referencing))
     return ledger
 
 
@@ -616,6 +742,9 @@ class FidelityBrief:
     table: RawTable | None = None
     signals: list[Signal] = field(default_factory=list)
     ledger: list[tuple[str, str, list[str]]] = field(default_factory=list)
+    #: #2651: (section, law, rows referencing the section). A law with no
+    #: referencing row is undischarged and says so in the prompt.
+    laws: list[tuple[str, str, list[str]]] = field(default_factory=list)
     error: str = ""
 
     @property
@@ -635,10 +764,17 @@ class FidelityBrief:
                 f"contract fidelity: NOT CHECKED — no section of "
                 f"`{self.contract_path}` is put in play by this issue's scope."
             )
+        undischarged = [law for law in self.laws if not law[2]]
         return (
             f"contract fidelity: {len(self.sections)} contract section(s) from "
             f"`{self.contract_path}` against {len(self.table.rows)} table "
-            f"row(s) — {len(self.signals)} candidate(s) for review."
+            f"row(s) — {len(self.signals)} candidate(s) for review, "
+            f"{len(self.laws)} contract law(s) tracked"
+            + (
+                f", {len(undischarged)} reached by no row."
+                if undischarged
+                else ", all reached by at least one row."
+            )
         )
 
     def as_prompt(self) -> str:
@@ -673,6 +809,28 @@ class FidelityBrief:
             parts.append(f"- §{section_name} / {binding_name}: {mark}")
         if not self.ledger:
             parts.append("(no section in play carries bolded sub-bindings)")
+
+        parts += ["", "# Every law the in-play sections state, and who reaches it", ""]
+        parts.append(
+            "A law is binding because the contract states it, not because a "
+            "row cited its section. UNDISCHARGED below means no row of the "
+            "table reaches that law's section at all -- which is a fact. That "
+            "a row DOES reach it is not a verdict: the question you answer is "
+            "whether that row's assertion could fail under a render violating "
+            "the law. Name a wrong implementation that passes it; if you can, "
+            "it is a finding."
+        )
+        parts.append("")
+        for section_name, law, referencing in self.laws:
+            mark = (
+                f"rows reaching this section: {', '.join(referencing)}"
+                if referencing
+                else "UNDISCHARGED -- no row reaches this section"
+            )
+            parts.append(f"- §{section_name}: {mark}")
+            parts.append(f"    {law}")
+        if not self.laws:
+            parts.append("(no section in play states a MUST/NEVER/shall law)")
 
         parts += ["", "# Mechanical signals already computed", ""]
         if not self.signals:
@@ -722,6 +880,7 @@ def build_brief(repo_root: Path | str, issue: int, title: str, body: str) -> Fid
         + signal_sections_without_rows(brief.sections, rows)
     )
     brief.ledger = binding_ledger(brief.sections, rows)
+    brief.laws = law_ledger(brief.sections, rows)
     return brief
 
 

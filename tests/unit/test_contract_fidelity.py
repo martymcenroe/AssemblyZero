@@ -32,6 +32,7 @@ from assemblyzero.core.llm_provider import LLMCallResult
 from assemblyzero.workflows.requirements import contract_fidelity as cf
 from assemblyzero.workflows.requirements.contract_fidelity import (
     FIDELITY_MARKER,
+    ContractSection,
     build_brief,
     check_contract_fidelity_at_preflight,
     parse_contract,
@@ -112,6 +113,8 @@ result.
 - **Color:** One flat fill of the palette's matte black `#0A0A0C`, uniform
   across the entire dial face. Black as night (operator ruling 2026-08-15,
   #325).
+- **No overlays, ever:** no gradients, no glass sweep, no specular highlight,
+  no environmental or viewer reflection on the face.
 - **Texture:** Smooth. No grain, no print pattern, no fake weave.
 
 ### Tick marks
@@ -123,6 +126,15 @@ result.
 
 - **Color:** Luminescent candy-apple red.
 - **Position at rest:** Pointing to 0.
+
+## What this doc binds
+
+Code implementing #1 (core gauge renderer) MUST:
+
+1. Produce output satisfying the numeric render contract above — the palette
+   RGBs and the layout fractions — at any `size`.
+2. Structure the renderer so swapping skins requires changing only the skin
+   module.
 
 ## Out of scope
 
@@ -329,6 +341,185 @@ class TestTheBindingWithNoRow:
     def test_a_referenced_section_is_not_a_hard_finding(self, brief):
         """S9 reaches §Bezel, so whether it DISCHARGES it is a judgement."""
         assert [s for s in brief.signals if s.shape == "section-no-row"] == []
+
+
+# ---------------------------------------------------------------------------
+# Every law is tracked, not only the ones a row happened to cite (#2651)
+# ---------------------------------------------------------------------------
+
+
+def _law_for(brief, needle):
+    return next(
+        (entry for entry in brief.laws if needle in entry[1]), None
+    )
+
+
+class TestTheLawLedger:
+    """`laws` was read in one place, gated on a row citing the section by
+    ruling number or `§Name`. A citation-style edit silenced the sharpest
+    evidence in the audit while the law stayed exactly as binding.
+    """
+
+    def test_the_step_law_is_tracked_with_the_row_that_reaches_it(self, brief):
+        entry = _law_for(brief, "MUST remain a step, never a ramp")
+        assert entry is not None
+        section, _law, referencing = entry
+        assert "Chrome environment strip" in section
+        assert "S7" in referencing
+
+    def test_it_survives_a_binding_cell_that_cites_nothing(self, contract_repo):
+        """The whole point. `per #328's stops table` -> `chrome per the
+        contract`: same meaning, no citation token, and shape 2 goes silent."""
+        body = BODY_331.replace(
+            "environment-strip generation per #328's stops table",
+            "chrome per the contract",
+        ).replace("the #328 predicate: ", "the predicate: ")
+        assert "#328" not in body
+
+        quiet = build_brief(contract_repo, 331, TITLE_331, body)
+        assert [
+            s for s in quiet.signals if s.shape == "assertion-cannot-falsify"
+        ] == [], "shape 2 is expected to go silent -- that is the defect"
+
+        entry = _law_for(quiet, "MUST remain a step, never a ramp")
+        assert entry is not None
+        assert "S7" in entry[2]
+
+    def test_the_flat_fill_law_is_tracked_with_s1(self, brief):
+        """§Face states it as `No overlays, ever` -- no MUST, no NEVER.
+
+        The uppercase-only vocabulary found zero laws in §Face, so the ledger
+        would have listed nothing for the section boostgauge #325 rules.
+        """
+        entry = _law_for(brief, "No overlays, ever")
+        assert entry is not None
+        section, _law, referencing = entry
+        assert section == "Face"
+        assert "S1" in referencing
+
+    def test_a_law_no_row_reaches_is_undischarged(self, contract_repo):
+        """Both chrome-touching rows removed: S7 outright, and S9's assertion,
+        which compares against `chrome at 1.10 R` and so reaches the section
+        too."""
+        stripped_body = "\n".join(
+            line for line in BODY_331.splitlines()
+            if not line.startswith("| S7 ")
+        ).replace("chrome at 1.10 R", "housing at 1.10 R")
+        # Only the ROWS matter here; the scope prose still says "chrome
+        # housing", which is what keeps the section in play so its law can be
+        # reported undischarged rather than disappearing.
+        table_lines = [
+            ln for ln in stripped_body.splitlines() if ln.startswith("| S")
+        ]
+        assert not any("chrome" in ln.lower() for ln in table_lines)
+
+        stripped = build_brief(contract_repo, 331, TITLE_331, stripped_body)
+        entry = _law_for(stripped, "MUST remain a step, never a ramp")
+        assert entry is not None
+        assert entry[2] == [], "no row reaches §Chrome environment strip now"
+
+    def test_the_prompt_marks_it_undischarged_in_those_words(
+        self, contract_repo
+    ):
+        stripped_body = "\n".join(
+            line for line in BODY_331.splitlines()
+            if not line.startswith("| S7 ")
+        ).replace("chrome at 1.10 R", "housing at 1.10 R")
+        prompt = build_brief(
+            contract_repo, 331, TITLE_331, stripped_body
+        ).as_prompt()
+
+        assert "UNDISCHARGED -- no row reaches this section" in prompt
+        assert "MUST remain a step, never a ramp" in prompt
+
+    def test_a_law_introducing_a_list_carries_the_list(self):
+        """`re.split(r"(?<=[.;])\\s+")` fires on the `.` of `1.`, so this law
+        was quoted as its header plus a bare list number, its numbered
+        obligations dropped.
+
+        Asserted on the section rather than the brief: §What this doc binds is
+        not put in play by #331's scope, and the fragment is a property of the
+        extractor either way.
+        """
+        section = next(
+            s for s in parse_contract(CONTRACT) if s.name == "What this doc binds"
+        )
+        assert len(section.laws) == 1
+        law = section.laws[0]
+
+        assert law.startswith("Code implementing #1 (core gauge renderer) MUST:")
+        assert "Produce output satisfying the numeric render contract" in law
+        assert "Structure the renderer so swapping skins" in law
+        assert not law.strip().endswith("1.")
+
+    def test_no_law_is_a_bare_list_number(self, brief):
+        assert [law for _s, law, _r in brief.laws if law.strip().endswith("1.")] == []
+
+    def test_a_block_not_ending_in_a_colon_is_still_quoted_by_sentence(self):
+        """The step law is one sentence of a longer paragraph, and stays so --
+        `signal_assertions_that_cannot_falsify` has always quoted it that way.
+        """
+        section = next(
+            s for s in parse_contract(CONTRACT)
+            if s.name.startswith("Chrome environment strip")
+        )
+        assert len(section.laws) == 1
+        assert section.laws[0].startswith("The 0.485")
+        assert "Chrome is a mirror" not in section.laws[0]
+
+    def test_the_ledger_tracks_and_does_not_judge(self, brief):
+        """S1 reaches the flat-fill law. Whether its assertion could FAIL under
+        a gradient is the reviewer's call, and the prompt says so."""
+        prompt = brief.as_prompt()
+
+        assert "A law is binding because the contract states it" in prompt
+        assert "Name a wrong implementation that passes it" in prompt
+
+    def test_the_disclosure_counts_the_laws(self, brief):
+        assert "contract law(s) tracked" in brief.disclosure()
+
+
+class TestRowsReferencingIgnoresProvenance:
+    """A dated heading matched rows on its own citation (#2651).
+
+    `Chrome environment strip (ruling 2026-08-15, #328)` shares the tokens
+    `ruling`, `2026` and `08` with any row citing `(ruling 2026-08-25)`, so a
+    chrome section matched five of #331's nine rows on a date.
+    """
+
+    def test_the_chrome_section_matches_only_rows_about_chrome(self, brief):
+        section = next(
+            s for s in parse_contract(CONTRACT)
+            if s.name.startswith("Chrome environment strip")
+        )
+        referencing = rows_referencing(section, brief.table.rows)
+
+        assert "S7" in referencing
+        assert "S5" not in referencing
+        assert "S6" not in referencing
+
+    def test_a_dated_heading_no_longer_matches_a_dated_row(self):
+        section = ContractSection(
+            name="Widget housing (ruling 2026-08-15, #328)", body="", line_no=1
+        )
+        rows = [["S5", "Numerals", "cap height 0.11 R (ruling 2026-08-25)", "x"]]
+
+        assert rows_referencing(section, rows) == []
+
+    def test_the_binding_ledger_is_unaffected_on_331(self, brief):
+        """The sections carrying sub-bindings have single-word names, which is
+        the only reason this was latent rather than hiding a missing binding."""
+        bezel = {
+            binding: named
+            for section, binding, named in brief.ledger
+            if section == "Bezel"
+        }
+        assert bezel == {
+            "Material rendering": [],
+            "Width": [],
+            "Highlights": [],
+            "Bezel-to-dial transition": ["S9"],
+        }
 
 
 # ---------------------------------------------------------------------------
