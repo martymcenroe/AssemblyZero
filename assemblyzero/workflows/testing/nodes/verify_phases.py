@@ -394,14 +394,46 @@ _COV_SOURCE_ROOT_PREFIXES: tuple[str, ...] = (
 
 
 def _is_python_package_dir(d: Path) -> bool:
-    """True if `d` is a Python package — regular (`__init__.py`) or PEP 420
-    namespace (directory with `.py` files but no `__init__.py`)."""
+    """True if `d` is a Python package — regular (`__init__.py`), PEP 420
+    namespace (holds `.py` files), or a namespace whose modules all live in
+    SUBPACKAGES (#2636).
+
+    The third case is what broke boostgauge #331. The check used to ask only
+    whether `d` held a `.py` file at its own top level:
+
+        return any(f.suffix == ".py" for f in d.iterdir() if f.is_file())
+
+    `src/boostgauge/` held exactly one entry — the directory `skins/` — so
+    `is_file()` filtered it out, the answer was False, and
+    `_path_to_cov_target` fell through to its file-path form, which measures
+    nothing. A package whose modules all live one level deeper answered "not
+    a package".
+
+    State-sensitive, not a code regression: the same function returned module
+    form on 08-26, when that worktree still carried `src/boostgauge/__init__.py`
+    and several sibling modules. Nothing in the derivation changed between the
+    runs; the tree did.
+    """
     try:
         if not d.is_dir():
             return False
         if (d / "__init__.py").exists():
             return True
-        return any(f.suffix == ".py" for f in d.iterdir() if f.is_file())
+        entries = list(d.iterdir())
+        if any(f.suffix == ".py" for f in entries if f.is_file()):
+            return True
+        # A directory of directories is still a package root when one of them
+        # is itself a package. Bounded to a single level deliberately: this
+        # answers "is `d` importable as a package", and an unbounded walk would
+        # call any directory with a stray .py file anywhere beneath it one.
+        return any(
+            sub.is_dir()
+            and (
+                (sub / "__init__.py").exists()
+                or any(f.suffix == ".py" for f in sub.iterdir() if f.is_file())
+            )
+            for sub in entries
+        )
     except (OSError, PermissionError):
         return False
 
@@ -454,8 +486,36 @@ def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
                 break
         return module
 
-    # Return as a file path — pytest-cov accepts paths for non-package code
-    return str(rel).replace("\\", "/")
+    # #2636: NEVER a path ending in `.py`. `--cov` takes a module name or a
+    # directory; a file path is treated as a module name, is never imported,
+    # and collects nothing at all -- coverage warns `module-not-imported`,
+    # then `no-data-collected`, and pytest-cov emits no report. The target file
+    # is then ABSENT from the report rather than present at 0%, which is what
+    # N5 renders as "0.0%" while N4c finds no uncovered lines to name (#2637).
+    #
+    # Measured, with PYTHONPATH pointing at the very directory holding the
+    # measured file, so the import resolved to exactly it:
+    #
+    #     --cov=src/pkg/mod.py  -> "Module src/pkg/mod.py was never imported"
+    #     --cov=pkg.mod         -> src\pkg\mod.py   7   0   100%
+    #
+    # The same is true of the standalone-script case this branch was written
+    # for (#475): `--cov=tools/thing.py` collects nothing, while `--cov=tools`
+    # and `--cov=thing` both measure it. So the fallback degrades to the
+    # containing DIRECTORY, which pytest-cov does accept and does report.
+    # Normalise separators BEFORE splitting. On POSIX a backslash is an
+    # ordinary filename character, so `Path("tools\\x.py").parent` is `.` and
+    # the stem keeps the backslash -- the target then differs by platform for
+    # the same input. Caught by CI on Linux while Windows passed.
+    normalised = str(rel).replace("\\", "/")
+    if normalised.endswith(".py"):
+        normalised = normalised[:-3]
+    head, sep, _tail = normalised.rpartition("/")
+    if sep and head:
+        return head
+    # A script at the repo root has no directory to fall back to; its own stem
+    # is the importable module name.
+    return normalised
 
 
 def _pytest_env() -> dict[str, str]:
@@ -755,6 +815,42 @@ def _implementation_already_exists(state: TestingWorkflowState) -> bool:
     return any((repo_root / path).is_file() for path in targets)
 
 
+def _tests_are_an_implementation_target(state: TestingWorkflowState) -> bool:
+    """Will the implementation stage rewrite the test file(s)? (#2638)
+
+    When it will, "no implementation can make this suite green" is true of the
+    bodies in front of us and irrelevant to the run: the bodies are about to be
+    replaced. boostgauge `run-issue331-201554` printed the non-convergence
+    prediction and then listed `tests/visual/test_stingray_static.py` among its
+    implementation targets four lines later; 22 placeholders became 15 real
+    tests and the suite went green.
+
+    Read from the same state the stage itself uses, so the claim and the
+    evidence cannot disagree.
+    """
+    targets = state.get("files_to_implement") or state.get("implementation_files") or []
+    paths: list[str] = []
+    for entry in targets:
+        if isinstance(entry, dict):
+            candidate = entry.get("path", "")
+        else:
+            candidate = str(entry)
+        if candidate:
+            paths.append(candidate.replace("\\", "/").lower())
+    if not paths:
+        return False
+    test_files = [
+        str(t).replace("\\", "/").lower() for t in (state.get("test_files") or [])
+    ]
+    if test_files:
+        return any(
+            any(path.endswith(tf) or tf.endswith(path) for path in paths)
+            for tf in test_files
+        )
+    # No test-file list to match against: fall back to the shape of the target.
+    return any("test" in Path(p).name for p in paths)
+
+
 def _describe_hollow_suite(state: TestingWorkflowState) -> str:
     """Describe a scaffold that cannot pass, or '' when it might (#2322).
 
@@ -931,11 +1027,29 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
                         "scaffold_validation_errors": [hollow],
                         "error_message": "",
                     }
-                print(
-                    "    the spec supplies no test bodies, so re-scaffolding "
-                    "cannot improve on this -- continuing, but the "
-                    "implementation loop cannot converge against these tests"
-                )
+                # #2638: the non-convergence claim is a PREDICTION, and it was
+                # false on run-issue331-201554. The implementation stage lists
+                # the test file among its own targets and rewrites it: 22
+                # placeholders named `test_tNNN` became 15 real tests named
+                # `test_req_NNN_...`, and the suite went green two iterations
+                # later. The evidence that would have prevented the claim was
+                # in state -- `files_to_implement` -- and was printed four
+                # lines afterwards. Registry class 2: a message naming a cause
+                # it did not read evidence for.
+                if _tests_are_an_implementation_target(state):
+                    print(
+                        "    the spec supplies no test bodies, but the "
+                        "implementation stage owns the test file(s) and will "
+                        "rewrite them -- these placeholders are replaced, not "
+                        "satisfied"
+                    )
+                else:
+                    print(
+                        "    the spec supplies no test bodies, so "
+                        "re-scaffolding cannot improve on this -- continuing, "
+                        "but the implementation loop cannot converge against "
+                        "these tests"
+                    )
             print(
                 f"    [EXIT CODE {exit_code}] ImportError on expected module(s) "
                 f"-> valid red signal, routing to implementation"
@@ -1682,6 +1796,48 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     failed_count = parsed.get("failed", 0)
     error_count = parsed.get("errors", 0)
     coverage_achieved = parsed.get("coverage", 0)
+
+    # #2637: before any coverage arithmetic, establish that coverage was
+    # MEASURED. A target absent from the report yields no TOTAL row, the
+    # percent parser defaults to 0.0, and 0.0 is then indistinguishable from a
+    # genuinely untested module -- which is how 15 passing tests were routed to
+    # "test gap" while N4c, reading the same empty report, found nothing to
+    # target and bounced back. Absence is a measurement failure and halts as
+    # one, naming what was sought and what the report held. It never blames
+    # the LLD or the spec, which is what the stagnation halt did.
+    # Three conditions, each of them narrowing this to the case it is for.
+    #
+    # * Tests passing and none failing -- while tests fail the run routes on
+    #   the failures and never consults coverage.
+    # * At least one test ACTUALLY RAN. Zero collected belongs to #2548's
+    #   law, which names the collection error; that diagnosis is more specific
+    #   and must not be preempted by a coverage complaint.
+    # * The number is about to be read as a SHORTFALL. At or above target the
+    #   run succeeds either way, and second-guessing a report that harmed
+    #   nothing would fail runs over an unfamiliar layout.
+    from assemblyzero.workflows.testing.coverage_report import read_coverage
+
+    _reading = read_coverage(output, coverage_module or "")
+    _below_target = coverage_achieved < state.get("coverage_target", 90)
+    if (
+        failed_count == 0
+        and error_count == 0
+        and passed_count > 0
+        and _below_target
+        and not _reading.measured
+    ):
+        _msg = _reading.failure_message()
+        print(f"    [N5] {_msg}")
+        return {
+            "green_phase_output": output,
+            "coverage_achieved": 0.0,
+            "previous_passed": passed_count,
+            "file_counter": file_num,
+            "pytest_exit_code": exit_code,
+            "iteration_count": iteration_count + 1,
+            "next_node": "end",
+            "error_message": _msg,
+        }
 
     # Stagnation detection: coverage must improve by >=1% each iteration
     previous_coverage = state.get("previous_coverage", -1.0)

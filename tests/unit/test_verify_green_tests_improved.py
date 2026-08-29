@@ -41,9 +41,25 @@ def _state(**overrides):
 
 
 def _pytest(returncode, passed=0, failed=0, errors=0, coverage=0):
+    """#2637: the stdout carries a real coverage TABLE, not just counts.
+
+    These fixtures used to set `parsed["coverage"]` while leaving stdout as
+    `"15 passed, 0 failed"` -- a decoupling production never has, because
+    `parsed["coverage"]` is itself regex-extracted from that stdout. Under the
+    absence law a report with no TOTAL row is a measurement failure, and these
+    tests are about stagnation rather than about measurement failing, so the
+    fixture now emits what pytest-cov actually emits.
+    """
     return {
         "returncode": returncode,
-        "stdout": f"{passed} passed, {failed} failed",
+        "stdout": (
+            f"{passed} passed, {failed} failed\n"
+            "Name                      Stmts   Miss  Cover   Missing\n"
+            "---------------------------------------------------------\n"
+            f"assemblyzero/example.py      10      1    {coverage}%   7\n"
+            "---------------------------------------------------------\n"
+            f"TOTAL                        10      1    {coverage}%\n"
+        ),
         "stderr": "",
         "parsed": {
             "passed": passed, "failed": failed,
