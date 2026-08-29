@@ -92,6 +92,37 @@ INSTALL_PREAMBLE = (
     "install()\n"
 )
 
+#: Reports which encoding governs stdio and which governs `open()`, before and
+#: after the reconfigure. Two different knobs, and conflating them is what the
+#: first cut of this file got wrong.
+ENCODINGS_PROBE = (
+    "import locale, sys\n"
+    f"sys.path.insert(0, {str(ROOT)!r})\n"
+    "before = locale.getpreferredencoding(False)\n"
+    "from assemblyzero.core.utf8_console import install\n"
+    "install()\n"
+    "after = locale.getpreferredencoding(False)\n"
+    "print(f'preferred_before={before}')\n"
+    "print(f'preferred_after={after}')\n"
+    "print(f'stdout={sys.stdout.encoding}')\n"
+)
+
+
+def _default_encoding_handles_u2265() -> bool:
+    """Can a default-encoding `open()` on THIS host carry U+2265?
+
+    True on a UTF-8 locale (every CI runner), False on the cp1252 locale where
+    the defect lives. Used to skip rather than to weaken: the crash test is a
+    witness only where the crash is possible.
+    """
+    import locale
+
+    try:
+        "≥".encode(locale.getpreferredencoding(False))
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
+
 
 class TestTheKillReproduces:
     """The defect, before anything is claimed about the fix."""
@@ -197,9 +228,55 @@ class TestTheEnvironmentHalf:
         assert b"WROTE" in raw
         assert GE_UTF8 in (tmp_path / "written.txt").read_bytes()
 
-    def test_the_reconfigure_alone_does_not_reach_them(self, tmp_path):
-        """Stated as a test so the two halves are never collapsed into one."""
-        script = INSTALL_PREAMBLE + (
+    def test_utf8_mode_moves_the_encoding_that_governs_open(self, tmp_path):
+        raw = _run_child(tmp_path, ENCODINGS_PROBE, {"PYTHONUTF8": "1"})
+
+        assert b"preferred_after=utf-8" in raw
+
+    def test_the_reconfigure_leaves_that_encoding_alone(self, tmp_path):
+        """Stated as a test so the two halves are never collapsed into one.
+
+        Asserted on the ENCODINGS rather than on a crash. The first cut drove
+        a `Path.write_text` under `PYTHONIOENCODING=cp1252` and expected it to
+        raise -- true on Windows, false on CI, and the difference is the point:
+        `PYTHONIOENCODING` governs stdio only, while `open()` follows
+        `locale.getpreferredencoding(False)`. Simulating a cp1252 LOCALE with a
+        stdio variable is not the same thing, and a green Windows run was not
+        evidence of portability.
+
+        What is true everywhere: `install()` moves stdout and moves nothing
+        else, so it cannot be the file half no matter what the locale is.
+        """
+        raw = _run_child(
+            tmp_path, ENCODINGS_PROBE, {"PYTHONIOENCODING": "cp1252"},
+        )
+        reported = dict(
+            line.split(b"=", 1)
+            for line in raw.splitlines()
+            if b"=" in line
+        )
+
+        assert reported[b"stdout"] == b"utf-8", "stdio IS widened"
+        assert reported[b"preferred_before"] == reported[b"preferred_after"], (
+            "the encoding open() uses is untouched by the reconfigure"
+        )
+
+    @pytest.mark.skipif(
+        _default_encoding_handles_u2265(),
+        reason=(
+            "the ambient default encoding already carries U+2265, so a "
+            "default-encoding write cannot fail here -- this is the "
+            "cp1252-locale case, which is where the defect lives"
+        ),
+    )
+    def test_a_default_encoding_write_fails_without_it(self, tmp_path):
+        """The real crash on a real cp1252 locale, kept as evidence.
+
+        Skipped where the locale is UTF-8 rather than asserted around, because
+        a test that passes by construction on the platform CI runs is not a
+        witness to anything.
+        """
+        script = (
             "from pathlib import Path\n"
             "import sys\n"
             "try:\n"
@@ -209,9 +286,12 @@ class TestTheEnvironmentHalf:
             "except UnicodeEncodeError:\n"
             "    print('FAILED')\n"
         )
-        raw = _run_child(tmp_path, script, {"PYTHONIOENCODING": "cp1252"})
+        raw = _run_child(tmp_path, INSTALL_PREAMBLE + script, {})
 
-        assert b"FAILED" in raw
+        assert b"FAILED" in raw, (
+            "the reconfigure is installed and the write still fails -- this is "
+            "the half PYTHONUTF8 exists for"
+        )
 
 
 class TestBothHalvesAreWired:
