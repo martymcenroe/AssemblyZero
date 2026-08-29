@@ -59,6 +59,10 @@ from assemblyzero.workflows.requirements.form_check import (
     FormReport,
     check_form,
 )
+from assemblyzero.workflows.requirements.scope_coverage import (  # noqa: E402  (#2645)
+    ScopeReport,
+    check_scope_coverage,
+)
 
 #: Violations of the table's own shape: wrong row count for its condition
 #: count, or a repeated combination. These are what "malformed table" means.
@@ -85,6 +89,10 @@ class IssueForm:
     #: of the non-counting findings -- it reads intent from prose, so a refusal
     #: on it would block a roll over a phrasing choice.
     discrimination: DiscriminationReport | None = None
+    #: #2645: the scope-coverage extension. Report-only for the same reason
+    #: the form check is: no issue in the fleet declares a scope alias yet, so
+    #: a refusal would fire on the ordinary case and be waved through.
+    scope: ScopeReport | None = None
 
     @property
     def has_tables(self) -> bool:
@@ -125,7 +133,7 @@ def check_issue(repo_root, issue: int, fetch) -> IssueForm:
     """Run the form check for one issue. Never raises."""
     result = IssueForm(issue=issue)
     try:
-        _title, body = fetch(repo_root, issue)
+        title, body = fetch(repo_root, issue)
     except Exception as exc:  # noqa: BLE001 - a read failure is not a verdict
         result.error = str(exc)
         return result
@@ -141,6 +149,19 @@ def check_issue(repo_root, issue: int, fetch) -> IssueForm:
         result.discrimination = check_discrimination(body)
     except Exception:  # noqa: BLE001 - an extension is not the gate
         result.discrimination = None
+    # #2645: same containment. The scope check reads the TITLE as well, which
+    # is the witness that survived nineteen ruled conflicts on boostgauge #331
+    # while the table lost a row.
+    try:
+        result.scope = check_scope_coverage(title, body)
+    except Exception:  # noqa: BLE001
+        # fail-open: an extension that crashes must not cost the form check
+        # its verdict, and this one parses free-form prose from every issue in
+        # the fleet. None is NOT a clean bill -- `render` prints nothing at all
+        # for a None scope, so the operator sees the disclosure line missing
+        # rather than a passing one. Report-only either way, so nothing is
+        # gated on it.
+        result.scope = None
     return result
 
 
@@ -199,6 +220,14 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
         if item.discrimination is not None:
             lines.append(f"      {item.discrimination.disclosure()}")
             for violation in item.discrimination.violations:
+                lines.append(f"        {violation}")
+
+        # #2645: printed on every issue for the same reason. This is the only
+        # check in the stack that can see an element the table never carried,
+        # so its silence has to be distinguishable from it not having run.
+        if item.scope is not None:
+            lines.append(f"      {item.scope.disclosure()}")
+            for violation in item.scope.violations:
                 lines.append(f"        {violation}")
 
         if item.reporting and item.refusing:
