@@ -83,18 +83,21 @@ def test_src_layout_namespace_package(tmp_path: Path) -> None:
     assert result == "chiron.provenance"
 
 
-def test_src_layout_empty_subdir_falls_back_to_path(tmp_path: Path) -> None:
+def test_src_layout_empty_subdir_is_not_a_package(tmp_path: Path) -> None:
     """Closes #1506. Guard against accidental over-acceptance: when
-    src/<subdir>/ exists but is EMPTY (no __init__.py, no .py files),
-    do NOT treat it as a namespace package — fall through to file path
-    form. Keeps the existing tools/-style "non-package dir" semantics
-    intact when an empty placeholder happens to be under src/."""
+    src/<subdir>/ exists but is EMPTY (no __init__.py, no .py files, no
+    package subdirectory), do NOT treat it as a namespace package.
+
+    #2636 kept the non-acceptance and changed only what the fallback RETURNS:
+    the containing directory rather than a `.py` path, because a path ending
+    in `.py` measures nothing at all.
+    """
     (tmp_path / "src" / "data").mkdir(parents=True)
-    # Empty dir: no .py, no __init__.py.
+    # Empty dir: no .py, no __init__.py, no package subdir.
 
     result = _path_to_cov_target("src/data/example.py", tmp_path)
-    # The directory exists but isn't a package — file-path fallback.
-    assert result == "src/data/example.py"
+    # Still not a package — but a measurable fallback.
+    assert result == "src/data"
 
 
 def test_lib_layout_strips_prefix(tmp_path: Path) -> None:
@@ -121,35 +124,73 @@ def test_source_layout_strips_prefix(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_tools_path_returns_file_path(tmp_path: Path) -> None:
-    """tools/ script (no __init__.py) → file path format."""
+def test_tools_script_returns_its_directory(tmp_path: Path) -> None:
+    """tools/ script (no __init__.py) → the DIRECTORY, not the file (#2636).
+
+    #475 introduced the file-path form so "pytest-cov measures the right
+    file". Measured, it measures nothing:
+
+        --cov=tools/thing.py  ->  Module tools/thing.py was never imported
+                                  No data was collected
+        --cov=tools           ->  tools\\thing.py   4   1   75%
+
+    `--cov` takes a module name or a directory. A path ending in `.py` is
+    read as a module name, is never imported, and produces no report at all --
+    which N5 then renders as "0.0%" and N4c as "no uncovered lines" (#2637).
+    """
     (tmp_path / "tools").mkdir(exist_ok=True)
     # No __init__.py in tools/
 
     result = _path_to_cov_target("tools/consolidate_logs.py", tmp_path)
-    assert result == "tools/consolidate_logs.py"
+    assert result == "tools"
 
 
-def test_tools_nested_path(tmp_path: Path) -> None:
-    """Nested tools/ script → file path with forward slashes."""
+def test_tools_nested_script_returns_its_directory(tmp_path: Path) -> None:
+    """Nested tools/ script → its own directory, forward slashes."""
     (tmp_path / "tools").mkdir(exist_ok=True)
 
     result = _path_to_cov_target("tools/sub/my_script.py", tmp_path)
-    assert result == "tools/sub/my_script.py"
+    assert result == "tools/sub"
 
 
-def test_scripts_dir_returns_file_path(tmp_path: Path) -> None:
-    """scripts/ directory (no __init__.py) → file path format."""
+def test_scripts_dir_returns_its_directory(tmp_path: Path) -> None:
+    """scripts/ directory (no __init__.py) → the directory."""
     (tmp_path / "scripts").mkdir(exist_ok=True)
 
     result = _path_to_cov_target("scripts/deploy.py", tmp_path)
-    assert result == "scripts/deploy.py"
+    assert result == "scripts"
 
 
-def test_no_repo_root_returns_file_path() -> None:
-    """No repo_root → can't check __init__.py, returns file path."""
+def test_no_repo_root_returns_the_directory() -> None:
+    """No repo_root → cannot check for __init__.py, so not a package; the
+    directory is still measurable where the file path is not."""
     result = _path_to_cov_target("tools/foo.py", None)
-    assert result == "tools/foo.py"
+    assert result == "tools"
+
+
+def test_a_root_level_script_returns_its_module_name() -> None:
+    """No directory to fall back to, so the importable stem is the target.
+    `--cov=thing` measures `thing.py`; `--cov=thing.py` measures nothing."""
+    assert _path_to_cov_target("thing.py", None) == "thing"
+
+
+def test_the_target_never_ends_in_py(tmp_path: Path) -> None:
+    """The invariant behind all of the above, stated once (#2636).
+
+    Whatever branch runs, the returned target must never be a `.py` path --
+    that form collects no data for any input, package or script.
+    """
+    (tmp_path / "tools").mkdir(exist_ok=True)
+    (tmp_path / "src" / "data").mkdir(parents=True)
+    for candidate in (
+        "tools/consolidate_logs.py",
+        "tools/sub/my_script.py",
+        "src/data/example.py",
+        "thing.py",
+    ):
+        assert not _path_to_cov_target(candidate, tmp_path).endswith(".py"), (
+            candidate
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +206,13 @@ def test_backslash_normalized(tmp_path: Path) -> None:
     assert "/" in result or "\\" not in result  # No backslashes in output
 
 
-def test_non_py_file_keeps_extension(tmp_path: Path) -> None:
-    """Non-.py file → keeps its extension in path mode."""
+def test_non_py_file_falls_back_to_its_directory(tmp_path: Path) -> None:
+    """A non-.py target is not measurable at all, so the directory is the
+    only useful answer (#2636)."""
     (tmp_path / "tools").mkdir(exist_ok=True)
 
     result = _path_to_cov_target("tools/config.yml", tmp_path)
-    assert result == "tools/config.yml"
+    assert result == "tools"
 
 
 # ---------------------------------------------------------------------------

@@ -194,7 +194,19 @@ def augment_tests_for_coverage(state: TestingWorkflowState) -> dict[str, Any]:
         print("    [N4c] no test file to extend — returning to verification")
         return {"next_node": "N5_verify_green", "error_message": ""}
 
-    uncovered = parse_uncovered_lines(output)
+    # #2637: read the report ONCE, through the accessor N5 also uses. This
+    # branch used to render an ABSENT target as "no uncovered lines" -- an
+    # all-clear -- while N5 rendered the same empty report as "0.0%" and
+    # routed here. Neither had measured anything, and the two bounced until a
+    # stagnation halt blamed the LLD and spec.
+    from assemblyzero.workflows.testing.coverage_report import read_coverage
+
+    reading = read_coverage(output, state.get("coverage_module", "") or "")
+    if not reading.measured:
+        print(f"    [N4c] {reading.failure_message()}")
+        return {"next_node": "end", "error_message": reading.failure_message()}
+
+    uncovered = reading.uncovered
     if not uncovered:
         print(
             "    [N4c] coverage report named no uncovered lines; nothing "
