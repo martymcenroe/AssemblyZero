@@ -24,6 +24,25 @@ from assemblyzero.core.no_console import install as _install_no_console  # noqa:
 
 _install_no_console()
 
+# #2662: installed before anything can PRINT, for the same reason and in the
+# same place. #2367 built this installer and wired it into ten report tools;
+# the pipeline entry point -- the one process whose whole job is moving issue,
+# contract and model text -- never called it. boostgauge #379 died three
+# attempts out of three when N0c printed the conflict it had just found:
+# 'charmap' codec can't encode character U+2265, the gate killed by the text it
+# exists to process, sixth in the cp1252 class.
+#
+# Load-bearing over the PYTHONUTF8 the launcher also sets, and not redundant
+# with it. Measured both ways: an inherited PYTHONIOENCODING=cp1252 defeats
+# PYTHONUTF8=1 completely -- same crash, same position -- while a stream
+# reconfigure beats PYTHONIOENCODING because it is the last word. This also
+# covers every invocation that bypasses the launcher, and orchestrate.py is a
+# documented CLI that halt banners hand the operator directly. What it does NOT
+# cover is default-encoding `open()`, which is the env var's half.
+from assemblyzero.core.utf8_console import install as _install_utf8_console  # noqa: E402
+
+_install_utf8_console()
+
 from assemblyzero.workflows.orchestrator.graph import (  # noqa: E402
     ConcurrentOrchestrationError,
     OrchestrationResult,

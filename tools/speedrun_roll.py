@@ -1490,6 +1490,27 @@ def _child_env(tag: str = "", start: str = "") -> dict[str, str]:
     env = dict(os.environ)
     env["CLAUDECODE"] = ""         # nested Claude sessions fail without this
     env["PYTHONUNBUFFERED"] = "1"  # Python buffers stdout when not on a TTY
+    # #2662: the child's IO is UTF-8, so no stage can be killed by printing the
+    # text it exists to process. boostgauge #379 halted three attempts out of
+    # three when N0c printed the conflict it had just found -- the sixth kill in
+    # the cp1252 class, and the verdict never rendered, so the conflicts
+    # themselves were consumed by the crash.
+    #
+    # This is the half `utf8_console.install()` at orchestrate.py's entry cannot
+    # reach: UTF-8 mode also makes every default-encoding `open()` UTF-8, and
+    # the pipeline writes LLD and spec artifacts. Measured -- with a stream
+    # reconfigure in force, `Path.write_text` still raised on U+2265; with this,
+    # it wrote b'\xe2\x89\xa5'.
+    #
+    # It is NOT sufficient alone, which is why both ship. PYTHONIOENCODING takes
+    # precedence over UTF-8 mode for stdio, so an inherited
+    # PYTHONIOENCODING=cp1252 -- and a wrapper in this fleet is documented to
+    # set one, see dependabot_review's note on #2156 -- defeats this entirely,
+    # with the identical crash at the identical position, while the reconfigure
+    # holds. Set here rather than only relied upon from the ambient environment
+    # for the reason that docstring records: correctness that depends on the
+    # launcher leaves every other invocation unprotected.
+    env["PYTHONUTF8"] = "1"
     # #2423: --fail-fast rides the environment rather than argv. The pipeline
     # is three processes deep and has several independent retry gates; a flag
     # would have to be threaded through every one of them, which is exactly how
