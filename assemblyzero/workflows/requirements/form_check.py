@@ -167,6 +167,21 @@ class FormReport:
     def ok(self) -> bool:
         return not self.violations
 
+    @property
+    def vacuous_tables(self) -> bool:
+        """A table is present and NONE of them was examined (#2650).
+
+        Distinct from `not tables`, which is also true when the issue carries
+        no table at all. Those are different facts and the report renders them
+        differently -- the same distinction #2227 drew for vacuous EARS and
+        #2387 for discrimination coverage.
+
+        The measured case is boostgauge #331: a nine-row criteria table at
+        line 14, `is_decision_table` False for it per ADR 0226 section 3.2,
+        and a bare `RESULT: PASS` above a body line reading `0 found`.
+        """
+        return not self.tables and self.non_decision_tables > 0
+
 
 # ---------------------------------------------------------------------------
 # Document structure
@@ -722,7 +737,21 @@ def render_report(report: FormReport, label: str) -> str:
             )
 
     out.append("")
-    if not report.tables:
+    if not report.tables and report.non_decision_tables:
+        # #2650: "0 found" states a count of found tables that is not the
+        # number of tables found. On boostgauge #331 a nine-row table sits at
+        # line 14 and this line said 0, while the `Not verified` bullet below
+        # said 1 -- two lines of one report contradicting each other, and the
+        # operator reads the first. The vacuous sentence is `render_ownership`'s
+        # own, unchanged, because this is the same fact about a sibling branch.
+        out += [
+            f"Decision tables: {report.non_decision_tables} table(s) present, "
+            f"0 of them decision tables, so 0 checked.",
+            "  ADR 0226 section 3.2 requires plain yes/no in every non-outcome",
+            "  column. That is an honest vacuous result, not a pass: the",
+            "  table(s) this issue carries were not examined.",
+        ]
+    elif not report.tables:
         out.append("Decision tables: 0 found, so 0 checked.")
     else:
         out.append(f"Decision tables: {len(report.tables)}")
@@ -778,13 +807,38 @@ def render_report(report: FormReport, label: str) -> str:
         ]
 
     out += [""]
+    # #2650: the qualification rides ON the verdict line, because the verdict
+    # line is what an operator reads. A body disclosure eleven lines above a
+    # bare PASS is what this issue measured and is not enough.
+    #
+    # Scoped to the TABLE branch deliberately. Vacuous EARS and vacuous
+    # ownership state themselves in the body and do not qualify the verdict;
+    # making them do so would extend the fleet-wide vacuity invariant by
+    # implementation, and that invariant is a standing proposal for the
+    # operator to ratify rather than something to decree from a print
+    # statement.
     if report.ok:
-        out.append("RESULT: PASS -- 0 violations of the ADR 0226 form.")
+        out.append("RESULT: PASS -- 0 violations of the ADR 0226 form." + (
+            f" VACUOUS on tables: {report.non_decision_tables} present, "
+            f"0 examined."
+            if report.vacuous_tables else ""
+        ))
     else:
-        out.append(f"RESULT: FAIL -- {len(report.violations)} violation(s).")
+        out.append(f"RESULT: FAIL -- {len(report.violations)} violation(s)." + (
+            f" VACUOUS on tables: {report.non_decision_tables} present, "
+            f"0 examined."
+            if report.vacuous_tables else ""
+        ))
         out.append("")
         for violation in report.violations:
             out.append(f"  {violation}")
+
+    if report.vacuous_tables:
+        out += [
+            "",
+            "  This verdict reports what was CHECKED. No table was checked, so",
+            "  it says nothing about the table(s) this issue carries.",
+        ]
 
     out += ["", rule]
     return "\n".join(out) + "\n"

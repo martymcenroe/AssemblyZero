@@ -136,7 +136,10 @@ class TestTheRefusalCondition:
             tmp_path, [7], _fetch({7: PROSE_ISSUE})
         )
         assert not refuse
-        assert "no decision table" in text
+        # #2650: was "no decision table", which said the same thing about an
+        # issue carrying no table and an issue carrying one this check does
+        # not examine. This issue is the former, and now says so.
+        assert "no table in this issue, so none was checked" in text
 
     def test_a_well_formed_table_does_not_refuse(self, tmp_path):
         text, refuse = check_form_at_preflight(
@@ -267,6 +270,70 @@ class TestSilenceIsNotAPass:
     def test_the_report_says_it_cannot_report_correctness(self, tmp_path):
         text, _ = check_form_at_preflight(tmp_path, [7], _fetch({7: GOOD_ISSUE}))
         assert "CORRECTNESS" in text
+
+
+#: A criteria table -- `ID | Element | Binding value | Assertion method`, the
+#: shape boostgauge #331 carries and this campaign actually rolls. Not an
+#: ADR 0226 decision table, so the form check does not examine it.
+CRITERIA_TABLE_ISSUE = """\
+Render the static face.
+
+## Requirements
+
+- WHEN `render_face(size)` is called, the skin module shall return a `PIL.Image`.
+
+## Decision table
+
+| ID | Element | Binding value | Assertion method |
+|---|---|---|---|
+| S1 | Dial face | flat `#0A0A0C` | classification at 3 interior points |
+| S9 | Bezel seat | dial sits below the bezel plane | sample at 1.01 R is darker |
+"""
+
+
+class TestATablePresentButUnexaminedSaysSoAtLaunch:
+    """#2650. The launch path is the surface an operator reads before spending
+    a roll, and it said `no decision table, so none was checked` about an issue
+    carrying a nine-row table the rest of the pipeline treats as normative.
+
+    `has_tables` cannot tell those two states apart -- it is False for both --
+    so the note it drove reported the checked-nothing case in the words of the
+    nothing-to-check case.
+    """
+
+    def test_the_note_says_a_table_was_present(self, tmp_path):
+        text, refuse = check_form_at_preflight(
+            tmp_path, [331], _fetch({331: CRITERIA_TABLE_ISSUE})
+        )
+        assert not refuse
+        assert "1 table(s) present and NOT of the checked kind" in text
+        assert "NO table was checked" in text
+        assert "vacuous, not a clean bill" in text
+
+    def test_it_no_longer_claims_there_is_no_table(self, tmp_path):
+        text, _ = check_form_at_preflight(
+            tmp_path, [331], _fetch({331: CRITERIA_TABLE_ISSUE})
+        )
+        assert "no decision table, so none was checked" not in text
+        assert "no table in this issue" not in text
+
+    def test_an_issue_with_no_table_at_all_reads_differently(self, tmp_path):
+        """Nothing-to-check and checked-nothing stay different facts."""
+        text, _ = check_form_at_preflight(tmp_path, [7], _fetch({7: PROSE_ISSUE}))
+        assert "no table in this issue, so none was checked" in text
+        assert "NOT of the checked kind" not in text
+
+    def test_a_real_decision_table_carries_no_such_note(self, tmp_path):
+        text, _ = check_form_at_preflight(tmp_path, [7], _fetch({7: GOOD_ISSUE}))
+        assert "NOT of the checked kind" not in text
+        assert "no table in this issue" not in text
+
+    def test_it_still_does_not_refuse(self, tmp_path):
+        """Report-only. A criteria table is the ordinary case, not a defect."""
+        _text, refuse = check_form_at_preflight(
+            tmp_path, [331], _fetch({331: CRITERIA_TABLE_ISSUE})
+        )
+        assert refuse is False
 
 
 class TestPresentation:

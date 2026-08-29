@@ -102,6 +102,18 @@ class IssueForm:
     def vacuous_ears(self) -> bool:
         return bool(self.report and not self.report.ears_ran)
 
+    @property
+    def vacuous_tables(self) -> bool:
+        """A table is present and none of them was examined (#2650).
+
+        `has_tables` cannot answer this: it is False both for an issue with no
+        table and for one carrying a table this check does not examine, and
+        the note it drove said "no decision table, so none was checked" for
+        both. On boostgauge #331 that ran at every launch, over a nine-row
+        table the rest of the pipeline treats as normative.
+        """
+        return bool(self.report and self.report.vacuous_tables)
+
 
 def classify(report: FormReport) -> tuple[list, list]:
     """(refusing, reporting) violations, per the ruling.
@@ -192,8 +204,19 @@ def render(results: list[IssueForm]) -> tuple[str, bool]:
                 "no '## Requirements' section, so NO sentence in it was checked "
                 "-- this is a vacuous pass, not a clean bill"
             )
-        if not item.has_tables:
-            notes.append("no decision table, so none was checked")
+        if item.vacuous_tables:
+            # #2650: the launch path said "no decision table" about an issue
+            # carrying one. Load-bearing for the same reason the EARS note
+            # above is: this is the surface an operator reads before spending
+            # a roll, and it was reporting the checked-nothing case in the
+            # words of the nothing-to-check case.
+            notes.append(
+                f"{item.report.non_decision_tables} table(s) present and NOT "
+                f"of the checked kind (ADR 0226 3.2 wants plain yes/no "
+                f"columns), so NO table was checked -- vacuous, not a clean bill"
+            )
+        elif not item.has_tables:
+            notes.append("no table in this issue, so none was checked")
 
         if item.refusing:
             refuse = True

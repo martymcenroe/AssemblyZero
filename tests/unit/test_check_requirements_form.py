@@ -541,6 +541,150 @@ class TestReportHonesty:
 
 
 # ---------------------------------------------------------------------------
+# A table present and unexamined never reads as a table checked (#2650)
+# ---------------------------------------------------------------------------
+
+
+#: boostgauge #331's shape, and the shape this campaign actually rolls: an ID,
+#: an element, a binding value and an assertion method. ADR 0226 section 3.2
+#: defines a decision table by plain yes/no in every non-outcome column, so
+#: `is_decision_table` is False for this and `is_criteria_table` is True --
+#: the predicate `table_injection` and the manifest compiler already share.
+CRITERIA_TABLE_BODY = """\
+Render the complete static face.
+
+## Requirements
+
+- WHEN `render_face(size)` is called with `size >= 128`, the skin module shall return a `PIL.Image` of dimensions `size x size`.
+
+## Decision table — static elements and their binding values
+
+| ID | Element | Binding value | Assertion method |
+|---|---|---|---|
+| S1 | Dial face | flat `#0A0A0C`, radius R = 0.40 x size | classification at 3 interior points |
+| S7 | Chrome housing | square, chamfer radius 0.13 x size | the #328 predicate: >=3 achromatic samples |
+| S9 | Bezel seat | dial sits below the bezel plane | sample at 1.01 R is darker than chrome at 1.10 R |
+"""
+
+
+class TestAVacuousTableCheckDoesNotReadAsAPass:
+    """#2650. Measured on boostgauge #331: a nine-row table at line 14, and a
+    bare `RESULT: PASS` above a body line reading `Decision tables: 0 found`.
+
+    The two lines of one report contradicted each other -- the `Not verified`
+    bullet said 1 -- and the operator reads the first.
+    """
+
+    @pytest.fixture
+    def report(self):
+        return fc.check_form(CRITERIA_TABLE_BODY)
+
+    def test_the_table_is_present_and_is_not_a_decision_table(self, report):
+        tables = fc.parse_tables(CRITERIA_TABLE_BODY)
+        assert len(tables) == 1
+        assert not fc.is_decision_table(tables[0])
+        assert report.non_decision_tables == 1
+        assert report.tables == []
+
+    def test_the_state_has_a_name_of_its_own(self, report):
+        """`not tables` is true for two different facts. This separates them."""
+        assert report.vacuous_tables
+        assert not fc.check_form("# just a title\n").vacuous_tables
+
+    def test_the_count_of_found_tables_is_the_number_found(self, report):
+        rendered = fc.render_report(report, "boostgauge #331")
+
+        assert "1 table(s) present, 0 of them decision tables" in rendered
+        assert "Decision tables: 0 found" not in rendered
+
+    def test_it_says_the_vacuous_sentence_the_ownership_branch_says(
+        self, report
+    ):
+        """Same fact about a sibling branch, so the same words -- not new ones.
+
+        Compared on normalised whitespace: the two branches wrap the sentence
+        at different columns, and the claim is about the words.
+        """
+        flat = " ".join(fc.render_report(report, "x").split())
+
+        assert flat.count("That is an honest vacuous result, not a pass") == 2
+
+    def test_the_verdict_line_itself_carries_the_qualification(self, report):
+        """The acceptance: at the same prominence as the verdict.
+
+        A disclosure eleven lines above a bare PASS is what this issue
+        measured, so the qualification rides ON the verdict line.
+        """
+        verdict = next(
+            line for line in fc.render_report(report, "x").splitlines()
+            if line.startswith("RESULT:")
+        )
+        assert verdict == (
+            "RESULT: PASS -- 0 violations of the ADR 0226 form. "
+            "VACUOUS on tables: 1 present, 0 examined."
+        )
+
+    def test_it_says_what_the_verdict_does_not_cover(self, report):
+        rendered = fc.render_report(report, "x")
+
+        assert "This verdict reports what was CHECKED" in rendered
+        assert "says nothing about the table(s) this issue carries" in rendered
+
+    def test_a_failing_verdict_is_qualified_too(self):
+        """A FAIL that examined no table overstates in the same direction."""
+        body = CRITERIA_TABLE_BODY.replace(
+            "- WHEN `render_face(size)` is called with `size >= 128`, the skin "
+            "module shall return a `PIL.Image` of dimensions `size x size`.",
+            "- Config is saved on exit.",
+        )
+        report = fc.check_form(body)
+        assert not report.ok
+        assert report.vacuous_tables
+
+        verdict = next(
+            line for line in fc.render_report(report, "x").splitlines()
+            if line.startswith("RESULT:")
+        )
+        assert "RESULT: FAIL" in verdict
+        assert "VACUOUS on tables: 1 present, 0 examined." in verdict
+
+    def test_a_real_decision_table_is_never_called_vacuous(self, ids_body):
+        report = fc.check_form(ids_body)
+
+        assert report.tables
+        assert not report.vacuous_tables
+        rendered = fc.render_report(report, "cache")
+        assert "VACUOUS on tables" not in rendered
+        assert "This verdict reports what was CHECKED" not in rendered
+
+    def test_an_issue_with_no_table_at_all_is_unchanged(self):
+        """Nothing-to-check and checked-nothing stay different facts."""
+        report = fc.check_form("# just a title\n")
+        rendered = fc.render_report(report, "empty")
+
+        assert not report.vacuous_tables
+        assert "Decision tables: 0 found, so 0 checked." in rendered
+        assert "VACUOUS on tables" not in rendered
+
+    def test_the_ears_and_ownership_branches_are_left_alone(self, report):
+        """Scoped to tables deliberately.
+
+        Extending the qualification to every vacuous branch would decree the
+        fleet-wide vacuity invariant by implementation, and that invariant is
+        a standing proposal for the operator to ratify.
+        """
+        no_requirements = fc.check_form("# t\n\nsome prose\n")
+        rendered = fc.render_report(no_requirements, "x")
+
+        assert not no_requirements.ears_ran
+        assert not no_requirements.ownership.ran
+        verdict = next(
+            line for line in rendered.splitlines() if line.startswith("RESULT:")
+        )
+        assert verdict == "RESULT: PASS -- 0 violations of the ADR 0226 form."
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
