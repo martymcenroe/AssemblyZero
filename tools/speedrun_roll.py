@@ -113,6 +113,9 @@ from assemblyzero.speedrun.successes import (  # noqa: E402  (#2191)
     record_success,
     redraw_phrase,
 )
+from assemblyzero.workflows.requirements.contract_fidelity import (  # noqa: E402  (#2646)
+    check_contract_fidelity_at_preflight,
+)
 from assemblyzero.workflows.requirements.form_gate import (  # noqa: E402  (#2227)
     check_form_at_preflight,
 )
@@ -3442,6 +3445,26 @@ def main(argv: list[str] | None = None) -> int:
         print(form_text)
     if form_refuses:
         return 91
+
+    # #2646: the contract-to-issue compression, the pipeline's only ungated
+    # derivation. Runs here rather than at lld entry for one decisive reason:
+    # settlement already hashes the binding docs into every derived artifact,
+    # so a contract that CHANGES unsettles what it produced -- but an issue
+    # that was wrong against the contract from the start settles cleanly, and
+    # #2607's injection then carries the defective table byte-verbatim into
+    # the LLD. A finding raised after lld entry invalidates an injected
+    # artifact and every derivative; the same finding here is one issue edit.
+    # boostgauge #331 spent nineteen ruled conflicts hardening a table that
+    # was already missing a row.
+    #
+    # This is the first preflight check that spends a model call, so it is
+    # scoped: only a repo that declares a binding contract for THIS issue in
+    # docs/design/visual-gate.json is audited. Every other repo pays nothing.
+    fidelity_text, _ = check_contract_fidelity_at_preflight(
+        repo_root, args.issue or [], fetch_issue,
+    )
+    if fidelity_text:
+        print(fidelity_text)
 
     # #2191: refuse to redraw an issue this arc has already rolled to success.
     # Here, before the detach, while the operator's console can still answer.
