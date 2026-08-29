@@ -173,6 +173,20 @@ class TestTheDerivationSurvivesASubpackageOnlyTree:
             "src/boostgauge/skins/stingray.py", tmp_path
         ) == "boostgauge.skins.stingray"
 
+    def test_a_backslash_path_resolves_the_same_on_every_platform(
+        self, tmp_path: Path
+    ) -> None:
+        """CI caught this on Linux while Windows passed.
+
+        A backslash is an ordinary filename character on POSIX, so
+        `Path("tools\\\\x.py").parent` is `.` there and the fallback kept the
+        backslash in the target. Separators are normalised before splitting.
+        """
+        (tmp_path / "tools").mkdir()
+
+        assert _path_to_cov_target("tools\\my_script.py", tmp_path) == "tools"
+        assert _path_to_cov_target("tools/my_script.py", tmp_path) == "tools"
+
     def test_a_directory_of_plain_directories_is_not_a_package(
         self, tmp_path: Path
     ) -> None:

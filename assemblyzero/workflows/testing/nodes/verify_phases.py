@@ -503,12 +503,19 @@ def _path_to_cov_target(rel_path: str | Path, repo_root: Path | None) -> str:
     # for (#475): `--cov=tools/thing.py` collects nothing, while `--cov=tools`
     # and `--cov=thing` both measure it. So the fallback degrades to the
     # containing DIRECTORY, which pytest-cov does accept and does report.
-    parent = rel.parent
-    if str(parent) not in ("", "."):
-        return str(parent).replace("\\", "/")
+    # Normalise separators BEFORE splitting. On POSIX a backslash is an
+    # ordinary filename character, so `Path("tools\\x.py").parent` is `.` and
+    # the stem keeps the backslash -- the target then differs by platform for
+    # the same input. Caught by CI on Linux while Windows passed.
+    normalised = str(rel).replace("\\", "/")
+    if normalised.endswith(".py"):
+        normalised = normalised[:-3]
+    head, sep, _tail = normalised.rpartition("/")
+    if sep and head:
+        return head
     # A script at the repo root has no directory to fall back to; its own stem
     # is the importable module name.
-    return rel.stem
+    return normalised
 
 
 def _pytest_env() -> dict[str, str]:
