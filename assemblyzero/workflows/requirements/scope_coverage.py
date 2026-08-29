@@ -58,15 +58,19 @@ somebody write that claim down.
 
 ## It reads criteria tables, not ADR 0226 decision tables
 
-`check_form` on #331's preserved body reports `Decision tables: 0 found, so 0
-checked` and `RESULT: PASS`. `is_decision_table` requires yes/no condition
-columns per ADR 0226 section 3.2; #331's table is `ID | Element | Binding value
-| Assertion method`, which `is_criteria_table` recognises and that predicate
-does not. A check keyed on the wrong predicate would examine zero tables on the
-exact issue it was built for and report clean -- a vacuous pass wearing a
-gate's clothes. This module keys on `is_criteria_table`, the same predicate
-`table_injection` and the manifest compiler already share, and adds no third
-notion of what a table is.
+`check_form` examines no table on #331's preserved body. `is_decision_table`
+requires yes/no condition columns per ADR 0226 section 3.2; #331's table is
+`ID | Element | Binding value | Assertion method`, which `is_criteria_table`
+recognises and that predicate does not. A check keyed on the wrong predicate
+would examine zero tables on the exact issue it was built for and report clean
+-- a vacuous pass wearing a gate's clothes. This module keys on
+`is_criteria_table`, the same predicate `table_injection` and the manifest
+compiler already share, and adds no third notion of what a table is.
+
+(When this module landed, `check_form` rendered that as `Decision tables: 0
+found` under a bare `RESULT: PASS` -- the reporting defect filed as #2650 and
+since fixed. The predicate split it describes is unchanged; only the wording
+this paragraph used to quote is.)
 
 ## What it deliberately does not read
 

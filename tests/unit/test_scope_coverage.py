@@ -28,6 +28,7 @@ from assemblyzero.workflows.requirements.form_check import (
     check_form,
     is_decision_table,
     parse_tables,
+    render_report,
 )
 from assemblyzero.workflows.requirements.scope_coverage import (
     check_scope_coverage,
@@ -210,11 +211,26 @@ class TestItLooksAtTheTableThatIsActuallyThere:
         assert not is_decision_table(tables[0])
         assert is_criteria_table(tables[0])
 
-    def test_the_form_check_therefore_examines_nothing_and_passes(self) -> None:
-        """The vacuous pass this module exists beside, measured not assumed."""
+    def test_the_form_check_therefore_examines_nothing(self) -> None:
+        """The vacuous result this module exists beside, measured not assumed.
+
+        #2650 changed what this witnesses. The form check still examines no
+        table here and still finds no violation -- #2645's reason for keying
+        on `is_criteria_table` is unchanged and still pinned above. What it no
+        longer does is render that as a bare PASS, so the assertion moved from
+        "and passes silently" to "and says so".
+        """
         report = check_form(BODY_331)
         assert report.tables == []
         assert report.ok
+        assert report.vacuous_tables
+
+        rendered = render_report(report, "boostgauge #331")
+        verdict = next(
+            line for line in rendered.splitlines() if line.startswith("RESULT:")
+        )
+        assert "VACUOUS on tables" in verdict
+        assert "Decision tables: 0 found" not in rendered
         assert "bezel" not in "\n".join(str(v) for v in report.violations)
 
     def test_this_module_examines_all_nine_rows(self, report_331) -> None:
