@@ -32,7 +32,7 @@ dependencies = [
     "boto3 (>=1.43.78,<2.0.0)",
     "pywinpty (>=3.0.3,<4.0.0) ; sys_platform == \"win32\"",
     "psutil (>=7.0.0,<8.0.0)",
-    "matplotlib (>=3.10.0,<4.0.0)",
+    "matplotlib (>=3.11.1,<4.0.0)",
     # #2185: numpy arrives transitively through matplotlib, whose own
     # constraint (>=1.23) is wide open, so the resolver was bounded by THIS
     # project's floor instead. Named explicitly to keep the floor that broke
