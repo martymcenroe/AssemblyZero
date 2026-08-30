@@ -72,6 +72,20 @@ try:
 except ImportError:  # pragma: no cover - tool copied outside the package
     pass
 
+# #2673: installed before anything can PRINT, same reasoning and position as
+# orchestrate.py's #2662 block. This tool echoes the requirements-form check —
+# raw issue text — before any child process exists, and launching boostgauge
+# #384 it died at its own print() on U+2192 under a cp1252 stdout: the seventh
+# kill in the class, in the one process that prints first. The child-env
+# PYTHONUTF8 half of #2662 (line ~1499) never covered the launcher's own
+# streams.
+try:
+    from assemblyzero.core.utf8_console import install as _install_utf8_console
+
+    _install_utf8_console()
+except ImportError:  # pragma: no cover - tool copied outside the package
+    pass
+
 # Imported after the sys.path insert above -- the package root is not on the
 # path when this tool is run as a script from tools/ (#2077).
 from assemblyzero.core import retry_gate  # noqa: E402  (#2423)
