@@ -33,6 +33,10 @@ from assemblyzero.workflows.implementation_spec.state import (
     ImplementationSpecState,
     PatternRef,
 )
+from assemblyzero.workflows.implementation_spec.base_tree import (
+    base_ref,
+    exists_on_base,
+)
 from assemblyzero.workflows.implementation_spec.check_classification import (
     advisory_details,
     is_proxy,
@@ -115,6 +119,9 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     files_to_modify = state.get("files_to_modify", [])
     pattern_references = state.get("pattern_references", [])
     repo_root_str = state.get("repo_root", "")
+    # #2667: the tree the run builds on. The checkout is the default branch
+    # (#2012) and mid-arc has none of the arc; base_tree reads git instead.
+    base_branch = state.get("base_branch", "")
 
     # --------------------------------------------------------------------------
     # GUARD: Must have a spec draft to validate
@@ -176,9 +183,9 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_patterns)
     _log_check(check_patterns)
 
-    # Check 6: Import targets should exist (Issue #842)
+    # Check 6: Import targets should exist (Issue #842; base-aware per #2667)
     check_imports = check_import_targets_exist(
-        spec_draft, files_to_modify, repo_root_str
+        spec_draft, files_to_modify, repo_root_str, base_branch
     )
     checks.append(check_imports)
     _log_check(check_imports)
@@ -1285,6 +1292,7 @@ def check_import_targets_exist(
     spec: str,
     files: list[FileToModify],
     repo_root_str: str = "",
+    base_branch: str = "",
 ) -> CompletenessCheck:
     """Verify that imports referenced in the spec point to existing modules.
 
@@ -1293,10 +1301,19 @@ def check_import_targets_exist(
     when assemblyzero.core.metrics doesn't exist). Cross-references against
     the spec's Files Changed table for new files the spec itself creates.
 
+    #2667: a first-party import that fails filesystem resolution is probed
+    against the run's base ref before being declared missing. The checkout is
+    the default branch (#2012); mid-arc, a Modify file can ship only on the
+    base — run-issue379-002604 declared `boostgauge.skins.stingray`
+    nonexistent while `origin/hardening-run-19` carried it, and the false
+    complaint deadlocked with pinning for three revisions.
+
     Args:
         spec: Implementation Spec markdown content.
         files: List of FileToModify from the LLD.
         repo_root_str: Repository root path string.
+        base_branch: The branch the run builds on ("" preserves the
+            filesystem-only behaviour for standalone runs).
 
     Returns:
         CompletenessCheck with pass/fail result and details.
@@ -1309,6 +1326,10 @@ def check_import_targets_exist(
         )
 
     repo_root = Path(repo_root_str)
+
+    # #2667: resolve the base ref once; consulted only when the filesystem
+    # says no. Empty base_branch keeps today's behaviour exactly.
+    base_ref_name = base_ref(repo_root, base_branch) if base_branch else ""
 
     # Collect paths of files the spec is creating (new "Add" files)
     new_file_paths: set[str] = set()
@@ -1359,6 +1380,12 @@ def check_import_targets_exist(
                 continue
 
             if top_level in first_party_tops:
+                # #2667: absent from the checkout is not absent from the run —
+                # the base may ship it. Probe git before declaring it missing.
+                if base_ref_name and _resolves_on_base(
+                    module_path, repo_root, base_ref_name
+                ):
+                    continue
                 unresolvable.append(module_path)
             else:
                 third_party.setdefault(top_level, []).append(module_path)
@@ -1383,15 +1410,22 @@ def check_import_targets_exist(
     if unresolvable:
         mod_list = ", ".join(f"`{m}`" for m in unresolvable[:5])
         suffix = f" (and {len(unresolvable) - 5} more)" if len(unresolvable) > 5 else ""
+        # #2667: say what was actually consulted — a complaint that names the
+        # base it checked cannot be mistaken for one that never looked.
+        base_clause = (
+            f", nor exist on the run's base `{base_ref_name}`"
+            if base_ref_name
+            else ""
+        )
         return CompletenessCheck(
             check_name="import_targets_exist",
             passed=False,
             details=(
                 f"Imports in spec reference modules that neither exist, nor "
-                f"are created by this spec, nor import in the target repo's "
-                f"environment: {mod_list}{suffix}. For first-party modules, "
-                f"verify the path; for third-party, add the dependency to "
-                f"the target repo or fix the import."
+                f"are created by this spec{base_clause}, nor import in the "
+                f"target repo's environment: {mod_list}{suffix}. For "
+                f"first-party modules, verify the path; for third-party, add "
+                f"the dependency to the target repo or fix the import."
             ),
         )
 
@@ -2943,6 +2977,37 @@ def _import_resolves(
         if _candidate_matches_new_file(candidate, new_file_paths):
             return True
 
+    return False
+
+
+def _resolves_on_base(
+    module_path: str, repo_root: Path, base_ref_name: str
+) -> bool:
+    """Mirror of `_import_resolves` against the run's base ref (#2667).
+
+    Same candidate set (module and package forms, parent-forgiveness for the
+    attribute-import shape), same source-root prefixes — probed with
+    `git cat-file -e` instead of the filesystem, because the checkout is the
+    default branch and mid-arc the base carries files the checkout does not.
+    """
+    parts = [p for p in module_path.split(".") if p]
+    if not parts:
+        return False
+    candidates: list[Path] = [
+        Path(*parts).with_suffix(".py"),
+        Path(*parts) / "__init__.py",
+    ]
+    if len(parts) > 1:
+        candidates.extend([
+            Path(*parts[:-1]).with_suffix(".py"),
+            Path(*parts[:-1]) / "__init__.py",
+        ])
+    prefixes = _SOURCE_ROOT_PREFIXES + _discover_pyproject_source_roots(repo_root)
+    for candidate in candidates:
+        for prefix in prefixes:
+            rel = (Path(prefix) / candidate) if prefix else candidate
+            if exists_on_base(repo_root, base_ref_name, rel.as_posix()):
+                return True
     return False
 
 
