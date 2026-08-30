@@ -815,6 +815,37 @@ def _implementation_already_exists(state: TestingWorkflowState) -> bool:
     return any((repo_root / path).is_file() for path in targets)
 
 
+def _base_ships_the_implementation(state: TestingWorkflowState) -> bool:
+    """True when the PLAN says the implementation predates this run (#2670).
+
+    A Modify issue's base legitimately satisfies conjunction-partner and
+    regression-guard tests at a first-attempt red entry: boostgauge #379
+    plans `stingray.py` as Modify against an arc that ships it, and three of
+    eight tests passed on the pristine worktree — which IS the base, since a
+    first attempt has written nothing. That is the declared state of the
+    plan, not an anomaly.
+
+    Every planned .py must be change_type Modify AND present on disk. A
+    single Add among them means the tests import something this run is
+    supposed to create, so passing tests stay unexplained (fatal); a missing
+    change_type is treated the same way, never forgiven. An empty plan
+    explains nothing.
+    """
+    repo_root = Path(state.get("repo_root", "") or ".")
+    planned = [
+        f for f in (state.get("files_to_modify") or [])
+        if f.get("path", "").endswith(".py")
+    ]
+    if not planned:
+        return False
+    for f in planned:
+        if str(f.get("change_type", "")).lower() != "modify":
+            return False
+        if not (repo_root / f.get("path", "")).is_file():
+            return False
+    return True
+
+
 def _tests_are_an_implementation_target(state: TestingWorkflowState) -> bool:
     """Will the implementation stage rewrite the test file(s)? (#2638)
 
@@ -1181,6 +1212,42 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "pytest_exit_code": exit_code,
                 "error_message": "",
                 "next_node": "N5_verify_green",
+            }
+
+        if _base_ships_the_implementation(state) and total_red > 0:
+            # #2670: on a Modify issue the base predates the run BY PLAN —
+            # every planned file is change_type Modify and present in the
+            # pristine worktree. The passing tests are base-satisfied
+            # regression guards; the failing set is the red signal that
+            # drives the implementation, and the green phase's all-green
+            # requirement already guarantees the guards survive the change.
+            print(
+                f"    [N3] {passed_count} test(s) pass at entry on a Modify "
+                f"issue — the base ships every planned file, so they are "
+                f"base-satisfied regression guards, not an anomaly (#2670)."
+            )
+            print(
+                f"    Red signal: the {total_red} failing test(s) drive the "
+                f"implementation; the green phase holds all "
+                f"{passed_count + total_red} green."
+            )
+            log_workflow_execution(
+                target_repo=repo_root,
+                issue_number=state.get("issue_number", 0),
+                workflow_type="testing",
+                event="red_phase_base_satisfied",
+                details={
+                    "passed": passed_count,
+                    "failed": failed_count,
+                    "errors": error_count,
+                },
+            )
+            return {
+                "red_phase_output": output,
+                "file_counter": file_num,
+                "pytest_exit_code": exit_code,
+                "error_message": "",
+                "next_node": "N4_implement_code",
             }
 
         print(f"    [GUARD] WARNING: {passed_count} tests passed unexpectedly!")
