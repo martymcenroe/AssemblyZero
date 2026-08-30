@@ -122,11 +122,23 @@ def _blocks(draft: str) -> list[_Block]:
     Outside fences: one block per markdown section (heading to heading).
     Inside fences: one block per top-level ``def``/``class`` — the verdict's
     unit of naming is the test, and a fence routinely holds many.
+
+    An OPENING fence delimiter belongs to the region it opens, not to the
+    heading above it (#2681). It was attributed backward, so on a spec whose
+    §10.1 fence holds the named tests, the tests unlocked while the ```python
+    line stayed locked inside an unnamed heading block — and an insertion
+    inside the fence, which shifts that line, read as modifying locked
+    content. `manifest_traceability` demands a `# manifest:` comment that can
+    only live inside the fence, so the two were jointly unsatisfiable and
+    boostgauge #384 burned two caps with the drafter's fix written and
+    refused. A fence that holds no top-level def keeps its old attribution:
+    there is no region for it to open.
     """
     lines = draft.splitlines()
     blocks: list[_Block] = []
     current = _Block(name="(preamble)", start=0, end=0)
     in_fence = False
+    fence_open_at: int | None = None
 
     def close(at: int) -> None:
         nonlocal current
@@ -138,12 +150,18 @@ def _blocks(draft: str) -> list[_Block]:
     for index, line in enumerate(lines):
         if _FENCE_RE.match(line.strip()):
             in_fence = not in_fence
+            # Remember an opening delimiter so the first def inside can claim
+            # it; forget it on the close, and on an open whose fence turned
+            # out to hold no def (the delimiter then stays where it was).
+            fence_open_at = index if in_fence else None
             continue
         if in_fence:
             match = _DEF_RE.match(line)
             if match and not line[:1].isspace():
-                close(index)
-                current = _Block(name=match.group(1), start=index, end=index)
+                start = fence_open_at if fence_open_at is not None else index
+                close(start)
+                current = _Block(name=match.group(1), start=start, end=start)
+                fence_open_at = None
             continue
         match = _HEADING_RE.match(line)
         if match:
