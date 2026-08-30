@@ -123,3 +123,38 @@ class TestFallbackWithoutTheCarriedKey:
         assert should_regenerate(
             {"validation_result": {"is_valid": True}}
         ) == "continue"
+
+
+class TestTheCarriedKeySurvivesTheGraphMerge:
+    """#2679: the #2678 repair shipped inert because these tests merged node
+    result into state by hand (`{**state, **result}`), bypassing the graph's
+    TypedDict schema filter — which dropped the undeclared `scaffold_route`
+    between the node's return and the router's read. run-issue384-054226
+    replayed the silent fail-open with the fixed code present and ran the
+    fallback anyway, and the pipeline merged a second junk PR.
+
+    The schema IS the merge contract: every key the node carries for the
+    router must be declared in it."""
+
+    def test_scaffold_route_is_declared_in_the_state_schema(self) -> None:
+        from assemblyzero.workflows.testing.state import TestingWorkflowState
+
+        annotations = TestingWorkflowState.__annotations__
+        assert "scaffold_route" in annotations, (
+            "scaffold_route is not declared in TestingWorkflowState — the "
+            "graph merge drops undeclared keys, the router falls back to the "
+            "hash recompute, and the #2676 fail-open returns (#2679)"
+        )
+
+    def test_every_key_the_node_carries_is_declared(self) -> None:
+        """The general form: the node's result keys on the live failure shape
+        must all survive the schema, so a future carried key cannot repeat
+        this defect by omission."""
+        from assemblyzero.workflows.testing.state import TestingWorkflowState
+
+        result, _ = _after_node(_state())
+        undeclared = set(result) - set(TestingWorkflowState.__annotations__)
+        assert not undeclared, (
+            f"node result key(s) not declared in TestingWorkflowState — the "
+            f"graph merge will drop them silently: {sorted(undeclared)}"
+        )

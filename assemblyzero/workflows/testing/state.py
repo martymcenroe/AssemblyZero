@@ -282,6 +282,11 @@ class TestingWorkflowState(TypedDict, total=False):
     scaffold_attempts: int  # Number of scaffold regeneration attempts
     scaffold_validation_errors: list[str]  # Issue #500: errors from last validation
     previous_scaffold_hash: str  # Issue #502: SHA-256 of last scaffold output
+    # #2679: the routing decision the node computed and carried (#2676). Not
+    # declaring it here is why the #2678 repair shipped inert: the TypedDict
+    # is the graph's merge schema, and an undeclared key is dropped between
+    # the node's return and the router's read.
+    scaffold_route: str  # "continue" | "regenerate" | "escalate"
 
     # Issue #147: Completeness gate (N4b) - Anti-stub detection
     completeness_verdict: Literal["PASS", "WARN", "BLOCK", ""]
