@@ -443,10 +443,21 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # #2331: name the halt BEFORE the hash is overwritten. `exhausted_reason`
     # compares this attempt against the previous one, and the line below
     # replaces the previous with this one.
+    #
+    # #2676: the decision is computed HERE, once, and carried in
+    # `scaffold_route` — the router must not recompute it, because after this
+    # node returns, `previous_scaffold_hash` holds THIS attempt's hash and a
+    # recompute compares the attempt against itself: always byte-identical,
+    # spuriously exhausted, and the run ended silently as success
+    # (run-issue384-044442 merged a PR with an assertion-free stub and no
+    # code).
     if not is_valid:
-        _halt_if_exhausted(
+        reason = _halt_if_exhausted(
             state, result_dict, generated_tests, new_attempts, all_errors
         )
+        result_dict["scaffold_route"] = "escalate" if reason else "regenerate"
+    else:
+        result_dict["scaffold_route"] = "continue"
 
     # Issue #502: Store hash for stagnation detection
     if generated_tests:
@@ -489,6 +500,7 @@ def _validate_non_pytest(
                 "real_test_count": 0,
             },
             "scaffold_attempts": scaffold_attempts,
+            "scaffold_route": "continue",  # #2676
         }
 
     # Validate each test file using the runner
@@ -526,8 +538,14 @@ def _validate_non_pytest(
     # #2331: the non-pytest path escalates through the same routing, so it
     # owes the same named halt. Leaving it out would make the defect a
     # property of the framework the run happens to use.
+    # #2676: and it owes the same carried route, for the same reason.
     if not is_valid:
-        _halt_if_exhausted(state, result, generated_tests, new_attempts, all_errors)
+        reason = _halt_if_exhausted(
+            state, result, generated_tests, new_attempts, all_errors
+        )
+        result["scaffold_route"] = "escalate" if reason else "regenerate"
+    else:
+        result["scaffold_route"] = "continue"
     return result
 
 
@@ -571,7 +589,7 @@ def _halt_if_exhausted(
     generated_tests: str,
     attempts: int,
     errors: list[str],
-) -> None:
+) -> str:
     """Name the halt in state when regeneration cannot help, per #2331.
 
     Before this, an unusable suite routed to N4_implement_code and skipped the
@@ -579,10 +597,15 @@ def _halt_if_exhausted(
     reached implementation with one fewer check than a suite that passed. The
     run then burned its implementation budget against tests no code could
     satisfy. Now it stops, and says which side is wrong.
+
+    #2676: returns the reason ("" when not exhausted) so the node can carry
+    the routing decision it implies — the caller sets `scaffold_route` from
+    it, and the router reads the carried route instead of recomputing against
+    the by-then-overwritten hash.
     """
     reason = exhausted_reason(state, generated_tests, attempts)
     if not reason:
-        return
+        return ""
 
     shown = "; ".join(errors[:3]) if errors else "no specific error was recorded"
     result["error_message"] = (
@@ -593,6 +616,7 @@ def _halt_if_exhausted(
     )
     result["next_node"] = "end"
     print(f"    [HALT] {result['error_message']}")
+    return reason
 
 
 def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue", "escalate"]:
@@ -618,6 +642,27 @@ def should_regenerate(state: dict[str, Any]) -> Literal["regenerate", "continue"
     Returns:
         Routing decision string.
     """
+    # #2676: the node computed the decision BEFORE it overwrote
+    # `previous_scaffold_hash` with this attempt's own hash; recomputing here
+    # compares the attempt against itself — always byte-identical — and a
+    # first-attempt failure spuriously escalated to a silent end that read as
+    # success downstream (run-issue384-044442 merged a PR with an
+    # assertion-free stub and no code). Read the carried route.
+    carried = state.get("scaffold_route", "")
+    if carried in ("continue", "regenerate", "escalate"):
+        if carried == "escalate":
+            print("    [EXHAUSTED] per the validation node's carried route; "
+                  "the halt is named in error_message")
+        elif carried == "regenerate":
+            attempts = state.get("scaffold_attempts", 0)
+            print(f"    [REGENERATE] Attempt {attempts}/{MAX_SCAFFOLD_ATTEMPTS}, "
+                  f"returning to scaffold")
+        return carried  # type: ignore[return-value]
+
+    # Fallback for resumed state that predates the carried key. This path
+    # keeps the pre-#2676 behaviour, hash-timing wart included — it exists
+    # only so an in-flight resume does not crash, and the first fresh pass
+    # through the node replaces it.
     validation_result = state.get("validation_result", {})
     is_valid = validation_result.get("is_valid", False)
 
