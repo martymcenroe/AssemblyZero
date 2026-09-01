@@ -196,8 +196,11 @@ def _commit_and_push_files(state: Dict[str, Any]) -> Dict[str, Any]:
             base_branch = state.get("base_branch", "") or current_branch(
                 target_repo
             )
+            # #2684: cut from the arc, not HEAD. analyze_codebase normally cut it
+            # already (and is reused here); this is the cut when it did not.
             worktree_path, branch_name = setup_lld_worktree(
                 target_repo=target_repo, issue_number=issue_number,
+                base_branch=base_branch,
             )
             # Mirror each created_file from the target_repo working tree into
             # the worktree at its same relative path so the commit captures

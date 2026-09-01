@@ -119,6 +119,41 @@ def analyze_codebase(state: dict) -> dict:
     # Resolve to absolute to ensure consistent path handling
     repo_path = repo_path.resolve()
 
+    # ------------------------------------------------------------------
+    # #2684: the tree the LLD is designed against is the ARC's, not the
+    # checkout's. The checkout stands on the default branch (#2012); mid-arc
+    # that tree can carry code the arc does not have, and a drafter that reads
+    # it designs from the answer. Cut (or reuse) the LLD worktree from
+    # origin/<base_branch> now and read from it; finalize finds it present and
+    # rides it, so the LLD PR carries the base's tree rather than HEAD's.
+    # Fail closed: if the arc cannot be cut, halt — reading the checkout
+    # instead would be the leak this exists to stop, made silent.
+    # ------------------------------------------------------------------
+    base_branch = str(state.get("base_branch", "") or "")
+    issue_number = state.get("issue_number")
+    if base_branch and issue_number:
+        from assemblyzero.workflows.requirements.git_operations import (
+            GitOperationError,
+            setup_lld_worktree,
+        )
+
+        try:
+            worktree_path, _branch = setup_lld_worktree(
+                repo_path, int(issue_number), base_branch=base_branch,
+            )
+        except GitOperationError as exc:
+            logger.error("LLD analysis cannot read the arc: %s", exc)
+            return {
+                "codebase_context": _empty_codebase_context(),
+                "interface_map": {},
+                "error_message": (
+                    f"LLD analysis cannot read the arc: {exc}. Refusing to read "
+                    f"the checkout ({repo_path}) in its place (#2684)."
+                ),
+            }
+        print(f"    [BASE] LLD analysis reads origin/{base_branch} via {worktree_path}")
+        repo_path = Path(worktree_path).resolve()
+
     # Extract issue text – try several state keys
     issue_text: str = (
         state.get("issue_text", "")

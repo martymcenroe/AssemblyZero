@@ -66,22 +66,55 @@ def lld_worktree_path_for(target_repo: Path | str, issue_number: int) -> Path:
     return pipeline_worktree_path(target_repo, issue_number, lld=True)
 
 
-def setup_lld_worktree(target_repo: Path | str, issue_number: int) -> tuple[Path, str]:
+def lld_start_point(target_repo: Path | str, base_branch: str) -> str:
+    """The ref the LLD worktree is cut from: ``origin/<base>`` when origin has it,
+    else the local ``<base>`` (#2684). Fetches the branch first so the cut is
+    the arc as it is now, not as the checkout last saw it.
+
+    Raises:
+        GitOperationError: If neither ref resolves.
+    """
+    target_repo = Path(target_repo)
+    run_command(
+        ["git", "-C", str(target_repo), "fetch", "origin", base_branch],
+        capture_output=True, text=True,
+    )
+    for candidate in (f"origin/{base_branch}", base_branch):
+        probe = run_command(
+            ["git", "-C", str(target_repo), "rev-parse", "--verify", "--quiet",
+             f"{candidate}^{{commit}}"],
+            capture_output=True, text=True,
+        )
+        if probe.returncode == 0:
+            return candidate
+    raise GitOperationError(
+        f"base branch '{base_branch}' resolves neither as origin/{base_branch} nor "
+        f"locally in {target_repo}; the LLD worktree cannot be cut from the arc"
+    )
+
+
+def setup_lld_worktree(
+    target_repo: Path | str, issue_number: int, base_branch: str = "",
+) -> tuple[Path, str]:
     """Carve (or reuse) a worktree for the LLD workflow.
 
     Branch name is ``{issue_number}-lld``. If the worktree path already
     exists (e.g. a prior LLD run for the same issue), it is reused; we do
     not re-create. Closes #1459.
 
+    With ``base_branch`` the branch is cut from the arc (``origin/<base>``,
+    fetched first — #2684); without it, from the checkout's HEAD as before.
+
     Args:
         target_repo: Path to the target repository.
         issue_number: GitHub issue number.
+        base_branch: The attempt/integration branch the run declared, or "".
 
     Returns:
         (worktree_path, branch_name)
 
     Raises:
-        GitOperationError: If worktree creation fails.
+        GitOperationError: If worktree creation fails, or the base does not resolve.
     """
     target_repo = Path(target_repo)
     worktree_path = lld_worktree_path_for(target_repo, issue_number)
@@ -91,9 +124,18 @@ def setup_lld_worktree(target_repo: Path | str, issue_number: int) -> tuple[Path
         # Reuse existing worktree from a prior LLD run for the same issue.
         return worktree_path, branch_name
 
+    # #2684: cut from the ARC, never from the checkout's HEAD. The checkout stands
+    # on the default branch (#2012); mid-arc that tree can be ahead of the base in
+    # code the arc does not have, and a worktree cut from HEAD carries all of it
+    # onto the attempt branch through the LLD PR. Empty base_branch keeps the old
+    # behaviour exactly (callers that predate the attempt-branch model).
+    start_point: list[str] = []
+    if base_branch:
+        start_point = [lld_start_point(target_repo, base_branch)]
+
     result = run_command(
         ["git", "-C", str(target_repo), "worktree", "add",
-         str(worktree_path), "-b", branch_name],
+         str(worktree_path), "-b", branch_name, *start_point],
         capture_output=True,
         text=True,
     )
