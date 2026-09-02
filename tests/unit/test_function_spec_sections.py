@@ -25,6 +25,12 @@ from assemblyzero.workflows.implementation_spec.nodes.validate_completeness impo
     check_functions_have_io_examples,
     function_spec_sections,
 )
+from assemblyzero.workflows.implementation_spec.revision_pinning import (
+    enforce_pinning,
+    named_line_flags,
+    named_line_ranges,
+    named_tokens,
+)
 
 DOCUMENTED = """\
 ### 5.1 `render_face()`
@@ -168,7 +174,7 @@ class TestSectionBounds:
 
     def test_the_heading_line_is_reported(self) -> None:
         draft = spec(DOCUMENTED)
-        _heading, _body, line_no = function_spec_sections(draft)[0]
+        _heading, _body, line_no, _end = function_spec_sections(draft)[0]
         assert draft.splitlines()[line_no - 1].startswith("### 5.1")
 
 
@@ -208,15 +214,20 @@ class TestTheComplaintIsAddressable:
         assert heading in draft, "the cited heading must occur in the draft"
 
     def test_the_message_carries_a_dashed_line_citation(self) -> None:
-        """`named_line_ranges` requires the dash (#2555), so a bare line
-        number would address nothing."""
-        import re
+        """Asserted with the parser's OWN pattern, not a lookalike.
 
+        `named_line_ranges` requires the dash (#2555), so a bare line number
+        would address nothing. This used to assert `line \\d+-\\d+`, which is
+        narrower than what pinning accepts (`\\blines?\\s+...`) -- so widening
+        the citation to a span broke the test while the message stayed
+        perfectly addressable. Reading the real pattern removes the second,
+        drifting definition of what an address is.
+        """
         details = check_function_spec_sections_have_examples(
             spec(UNDOCUMENTED)
         )["details"]
 
-        assert re.search(r"line \d+-\d+", details), details
+        assert named_line_ranges([details]), details
 
 
 #: The shape that halted boostgauge #421's fifth launch: an Input Example
@@ -387,7 +398,7 @@ class TestTheDraftThatHaltedLaunchFive:
         sections = function_spec_sections(draft)
 
         assert len(sections) == 4
-        for heading, body, _line in sections:
+        for heading, body, _line, _end in sections:
             assert "**Input Example:**" in body, heading
             assert "**Output Example:**" in body, heading
 
@@ -409,3 +420,150 @@ class TestTheDraftThatHaltedLaunchFive:
         assert lines[131] == "**Output Example:**"
         assert lines[156].startswith("# Called on a Telltale instance")
         assert lines[159] == "**Output Example:**"
+
+
+def _delete_54s_output_example(draft: str) -> str:
+    """The preserved draft with §5.4's Output Example block removed.
+
+    1-based lines 160-164 — the `**Output Example:**` label, its blank, and
+    the three-line fence. Everything else is byte-identical, so the finding
+    the check then raises is TRUE and the deadlock it addresses is the real
+    one rather than #2687's false alarm wearing its clothes.
+    """
+    lines = draft.splitlines()
+    assert lines[159] == "**Output Example:**"
+    assert lines[163] == "```"
+    return "\n".join(lines[:159] + lines[164:]) + "\n"
+
+
+class TestTheCitationFreesTheInsertionPoint:
+    """#2686: a TRUE finding must be actionable, not merely correct.
+
+    Template 0701 opens every function subsection with a `**Signature:**`
+    fence holding a top-level `def`, and `_blocks` starts a new attribution
+    block at exactly that point (#2681). So a citation naming only the
+    heading line freed the handful of lines above the signature and locked
+    everything below it -- including the only place the demanded block can
+    go. The drafter wrote the edit, pinning refused it, and the stage halted.
+    """
+
+    def _flags(self, draft: str) -> tuple[list[bool], str]:
+        details = check_function_spec_sections_have_examples(draft)["details"]
+        flags = named_line_flags(
+            draft,
+            named_tokens("", [details]),
+            named_line_ranges([details]),
+        )
+        return flags, details
+
+    def test_the_span_covers_the_whole_subsection(self, draft: str) -> None:
+        holed = _delete_54s_output_example(draft)
+        _flags, details = self._flags(holed)
+
+        assert "(lines 142-163)" in details, details
+
+    def test_every_line_of_the_subsection_is_free(self, draft: str) -> None:
+        holed = _delete_54s_output_example(draft)
+        flags, details = self._flags(holed)
+
+        # 1-based 142..163 inclusive -> 0-based slice [141:163]
+        section = flags[141:163]
+        assert len(section) == 22
+        assert all(section), (
+            f"{section.count(False)} of 22 lines still locked; the drafter "
+            f"cannot write the block the check demands. {details}"
+        )
+
+    def test_the_insertion_point_itself_is_free(self, draft: str) -> None:
+        """The line after §5.4's Input Example fence — where the block goes."""
+        holed = _delete_54s_output_example(draft)
+        flags, _details = self._flags(holed)
+        lines = holed.splitlines()
+
+        assert lines[157] == "```", lines[157]
+        assert flags[158] is True, "the line after the Input Example fence"
+
+    def test_the_next_section_is_not_freed(self, draft: str) -> None:
+        """Generous to the subsection, and no further."""
+        holed = _delete_54s_output_example(draft)
+        flags, _details = self._flags(holed)
+        lines = holed.splitlines()
+
+        assert lines[163].startswith("## 6."), lines[163]
+        assert not any(flags[163:180]), (
+            "a passing neighbour must stay pinned"
+        )
+
+    def test_a_passing_subsection_stays_locked(self, draft: str) -> None:
+        """§5.1 is fully documented and no verdict named it."""
+        holed = _delete_54s_output_example(draft)
+        flags, _details = self._flags(holed)
+
+        assert not any(flags[54:83]), "§5.1 must remain pinned"
+
+
+class TestPinningAcceptsTheDemandedEdit:
+    """The acceptance, through the real enforcer (#2686).
+
+    Lock flags are the mechanism; this is the outcome. `enforce_pinning` is
+    the function that refused the drafter three times on
+    `run-issue41-184913`, so the fix is proven by feeding it the same
+    document and the edit it kept reverting.
+    """
+
+    OUTPUT_BLOCK = [
+        "**Output Example:**",
+        "",
+        "```python",
+        "None # History cleared, config intact",
+        "```",
+        "",
+    ]
+
+    def _enforce(self, previous: str, revised: str):
+        details = check_function_spec_sections_have_examples(previous)["details"]
+        return enforce_pinning(
+            previous,
+            revised,
+            current_tokens=named_tokens("", [details]),
+            ever_tokens=named_tokens("", [details]),
+            current_ranges=named_line_ranges([details]),
+        )
+
+    def test_the_block_the_drafter_kept_writing_is_accepted(
+        self, draft: str
+    ) -> None:
+        holed = _delete_54s_output_example(draft)
+        lines = holed.splitlines()
+        # Put it back where it was: after §5.4's Input Example fence.
+        assert lines[157] == "```"
+        revised = "\n".join(
+            lines[:159] + self.OUTPUT_BLOCK + lines[159:]
+        ) + "\n"
+
+        result = self._enforce(holed, revised)
+
+        assert result.refusals == (), result.refusals
+        assert "None # History cleared, config intact" in result.text
+        assert check_function_spec_sections_have_examples(
+            result.text
+        )["passed"] is True
+
+    def test_an_edit_to_an_unnamed_subsection_is_still_refused(
+        self, draft: str
+    ) -> None:
+        """Pinning is not turned off — §5.1 passed and stays protected."""
+        holed = _delete_54s_output_example(draft)
+        lines = holed.splitlines()
+        target = next(
+            i for i, ln in enumerate(lines)
+            if ln.startswith("### 5.1")
+        )
+        vandalised = list(lines)
+        vandalised[target + 2] = "**File:** `src/boostgauge/SOMETHING_ELSE.py`"
+        revised = "\n".join(vandalised) + "\n"
+
+        result = self._enforce(holed, revised)
+
+        assert result.refusals, "an unnamed subsection must stay locked"
+        assert "SOMETHING_ELSE" not in result.text

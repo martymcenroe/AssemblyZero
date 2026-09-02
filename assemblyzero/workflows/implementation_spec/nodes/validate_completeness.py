@@ -887,11 +887,22 @@ def _outside_fences(pos: int, spans: tuple[tuple[int, int], ...]) -> bool:
     return not any(start <= pos < end for start, end in spans)
 
 
-def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
-    """Every `### 5.N` subsection as (heading, body, 1-based heading line).
+def function_spec_sections(spec: str) -> list[tuple[str, str, int, int]]:
+    """Every `### 5.N` subsection as (heading, body, first line, last line).
+
+    Both line numbers are 1-based and inclusive, and the subsection owns every
+    line between them.
 
     Bounded by the NEXT heading of any level, so a subsection's body is its
     own -- which is the whole difference between this and a window scan.
+
+    **The end line is measured here, from the offsets (#2686), not derived by
+    a caller from `body`.** `_FUNC_SPEC_HEADING_RE` ends in `\\s*$`, and that
+    `\\s*` eats the heading's own newline before `$` settles, so `body` opens
+    somewhere inside the whitespace after the heading rather than at a
+    predictable place. A caller counting newlines in `body` is short by
+    however much the regex absorbed -- one line for every subsection whose
+    heading is followed by a blank, which is all of them under template 0701.
 
     **Fences are not prose (#2687).** A Python comment at column zero inside an
     example -- `# Called on a Telltale instance with active history` -- matches
@@ -918,7 +929,7 @@ def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
     if not matches:
         return []
     next_heading = re.compile(r"^#{1,6}\s", re.MULTILINE)
-    out: list[tuple[str, str, int]] = []
+    out: list[tuple[str, str, int, int]] = []
     for index, match in enumerate(matches):
         start = match.end()
         limit = (
@@ -933,7 +944,14 @@ def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
         )
         body_end = following.start() if following else limit
         line_no = text.count("\n", 0, match.start()) + 1
-        out.append((match.group(0).strip(), text[start:body_end], line_no))
+        # The line holding the last character the subsection owns. Counting to
+        # `body_end` itself would land on the terminating heading whenever the
+        # body ends in a newline, which is the ordinary case.
+        end_line = max(
+            line_no,
+            text.count("\n", 0, max(body_end - 1, 0)) + 1,
+        )
+        out.append((match.group(0).strip(), text[start:body_end], line_no, end_line))
     return out
 
 
@@ -959,6 +977,25 @@ def check_function_spec_sections_have_examples(spec: str) -> CompletenessCheck:
     The complaint names the subsection HEADING, which occurs verbatim in the
     draft, so revision pinning can read the address (#2555's lesson, swept by
     `test_completeness_message_addressability.py`).
+
+    **It cites the whole subsection, not the heading line (#2686.)** Naming
+    `(line 142-142)` addressed the heading and nothing else. `_blocks` splits a
+    draft at every top-level `def` inside a fence, and template 0701 opens each
+    subsection with a `**Signature:**` fence carrying exactly that -- so the
+    cited line named only the six lines from the heading down to `**Signature:**`
+    and the remaining sixteen, including the place the missing block has to go,
+    stayed locked. Measured on boostgauge run `run-issue41-184913`'s draft with
+    one block deleted: 6 of 22 lines free, the insertion point among the locked
+    ones. The drafter wrote the demanded edit three times and pinning refused it
+    three times, then the edit-script transport rejected the no-op revision and
+    the stage halted non-transient.
+
+    A demand to add has no existing line to name, which is the same bind #2560
+    found for demanded tests. The address that works is the region the complaint
+    already names in prose -- "Add the block inside that subsection" -- so the
+    citation now spans it. `named_line_flags` marks every block the range
+    overlaps, which is the generous direction it documents, and the span stops
+    at the subsection's own end so no neighbouring section is freed.
     """
     sections = function_spec_sections(spec)
     if not sections:
@@ -972,11 +1009,11 @@ def check_function_spec_sections_have_examples(spec: str) -> CompletenessCheck:
         )
 
     missing: list[str] = []
-    for heading, body, line_no in sections:
+    for heading, body, line_no, end_line in sections:
         absent = [b for b in _REQUIRED_EXAMPLE_BLOCKS if b not in body]
         if absent:
             missing.append(
-                f"{heading} (line {line_no}-{line_no}) lacks "
+                f"{heading} (lines {line_no}-{end_line}) lacks "
                 f"{' and '.join(absent)}"
             )
 
