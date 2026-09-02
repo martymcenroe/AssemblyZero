@@ -2520,6 +2520,13 @@ class _FenceFacts(NamedTuple):
     # seed the unresolved set directly — a method on one is a method on an
     # unknown type, and unknown is not guilty.
     opaque: frozenset[str] = frozenset()
+    # (name, root of its declared type) for annotated parameters and annotated
+    # assignments (#2713) -- #2399's rule one position over. `def start(self,
+    # q: queue.Queue)` records ("q", "queue"): whoever owns `queue` owns what
+    # `q` holds, so `q.put(...)` is the standard library's API to be right or
+    # wrong about. Only declared annotations are read; an unannotated name
+    # records nothing and stays judged.
+    annotated: tuple[tuple[str, str], ...] = ()
 
 
 class _FenceParseFailure(NamedTuple):
@@ -2592,6 +2599,35 @@ def _value_provenance(node: ast.expr) -> frozenset[str]:
     return frozenset(keys)
 
 
+#: Typing wrappers whose subscript names the type that matters: `Optional[X]`
+#: holds an X. A closed set. Anything else keeps its own root -- `list[X]` IS
+#: a list, whose methods the builtin allowlist already knows -- and `Union`
+#: is two declarations, which is none.
+_TYPING_WRAPPERS: frozenset[str] = frozenset({"Optional", "Annotated", "Final", "ClassVar"})
+_TYPING_UNDECIDED: frozenset[str] = frozenset({"Union"})
+
+
+def _annotation_root(node: ast.expr) -> str | None:
+    """Root name of a declared type, looking through `Optional[...]` (#2713).
+
+    `queue.Queue` -> "queue"; `Optional[queue.Queue]` -> "queue";
+    `list[Gauge]` -> "list". A string annotation, a `Union`, or anything
+    else unreadable yields None: nothing is recorded and the name stays
+    judged, which is the direction #2399 already chose for an unannotated
+    return.
+    """
+    if isinstance(node, ast.Subscript):
+        outer = _leftmost_name(node.value)
+        if outer in _TYPING_UNDECIDED:
+            return None
+        if outer in _TYPING_WRAPPERS:
+            inner = node.slice
+            if isinstance(inner, ast.Tuple) and inner.elts:  # Annotated[X, ...]
+                inner = inner.elts[0]
+            return _annotation_root(inner)
+    return _leftmost_name(node)
+
+
 def _leftmost_name(node: ast.expr) -> str | None:
     """Leftmost name an expression is rooted in: ``tk.Canvas(self.root)`` -> ``tk``."""
     while True:
@@ -2662,6 +2698,7 @@ class _FenceVisitor(ast.NodeVisitor):
         self.returns: dict[str, str] = {}
         self.classes: set[str] = set()
         self.opaque: set[str] = set()
+        self.annotated: list[tuple[str, str]] = []
 
     # ---- imports: receivers the target repo has no authority over (#1948) ----
 
@@ -2684,13 +2721,41 @@ class _FenceVisitor(ast.NodeVisitor):
         self.defined.add(node.name)
         self._record_framework_params(node)
         self._record_return(node)
+        self._record_annotated_params(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self.defined.add(node.name)
         self._record_framework_params(node)
         self._record_return(node)
+        self._record_annotated_params(node)
         self.generic_visit(node)
+
+    def _record_annotated_params(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
+        """What a spec-defined function declares its parameters hold (#2713).
+
+        `def start(self, q: queue.Queue)` records ("q", "queue") -- #2399's
+        rule for return annotations, applied to parameters. boostgauge
+        run-issue4-182119 lost a spec iteration to `result_queue.put(...)`
+        on exactly that signature, because the annotation was never read and
+        `put` is nowhere in the target repo's symbols.
+
+        An unannotated parameter records nothing and stays judged, which is
+        what keeps #1527's founding true positive (pydantic methods on a
+        plain dataclass) catchable; #2391's `state` in `def apply(state)` is
+        unchanged.
+        """
+        args = node.args
+        for arg in (
+            *args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg,
+        ):
+            if arg is None or arg.annotation is None:
+                continue
+            root = _annotation_root(arg.annotation)
+            if root is not None:
+                self.annotated.append((arg.arg, root))
 
     def _record_return(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef
@@ -2757,6 +2822,11 @@ class _FenceVisitor(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self._record_binding([node.target], node.value)
+        # #2713: `q: queue.Queue = ...` declares what `q` holds, value or not.
+        if isinstance(node.target, ast.Name):
+            root = _annotation_root(node.annotation)
+            if root is not None:
+                self.annotated.append((node.target.id, root))
         self.generic_visit(node)
 
     def visit_For(self, node: ast.For) -> None:
@@ -2885,6 +2955,7 @@ def _fence_facts_ast(block: str) -> _FenceFacts:
         returns=tuple(sorted(visitor.returns.items())),
         classes=frozenset(visitor.classes),
         opaque=frozenset(visitor.opaque),
+        annotated=tuple(visitor.annotated),
     )
 
 
@@ -3013,6 +3084,17 @@ def _flag_calls(
     assignments = [
         (bound, source) for fence in facts for bound, source in fence.assignments
     ]
+    # #2713: a declared parameter or variable annotation is a binding from its
+    # type's root -- #2399's rule for return annotations, one position over.
+    # `q: queue.Queue` joins the fixed point as `q <- queue`, so whoever owns
+    # `queue` owns `q`; a name annotated with a class the spec defines or the
+    # repo owns resolves to that class and stays judged, exactly as an
+    # assignment from it would.
+    assignments.extend(
+        (frozenset({name}), frozenset({root}))
+        for fence in facts
+        for name, root in fence.annotated
+    )
     # #2399: a spec-defined function's DECLARED return type answers what a
     # binding from it holds. `def render(...) -> Image.Image` means
     # `img = render(...)` holds a Pillow object, so `img.getpixel(...)` is
