@@ -42,6 +42,9 @@ from assemblyzero.workflows.implementation_spec.message_addressability import (
 vc = importlib.import_module(
     "assemblyzero.workflows.implementation_spec.nodes.validate_completeness"
 )
+rp = importlib.import_module(
+    "assemblyzero.workflows.implementation_spec.revision_pinning"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +210,49 @@ class TestAddressableToday:
         assert verdict.matched_lines != ()
         assert verdict.verdict == ADDRESSED
 
+    def test_manifest_traceability_names_the_rows_it_holds(self):
+        """#2593, repaired. The no-tests branch reported a COUNT ("binds 2
+        row(s)") while holding the ids, and a count addresses nothing --
+        `_ROW_ID_RE` reads `N4.1` exactly, so the one vocabulary pinning has
+        for this artifact was being withheld by the only check that has the
+        artifact.
+
+        **The fixture's key is corrected here, and that matters.** #2593 was
+        filed with `{"id": "N4.1"}`, but `check_manifest_traceability` reads
+        `row_id` -- the key `assertion_manifest.to_dicts` actually emits. With
+        the wrong key the row list came out EMPTY, which is why the issue
+        quotes "binds 0 row(s)" and frames the zero-bound branch as the
+        notable one. Measured against the real shape the message said "binds
+        2 row(s)" and still named neither id, so the defect was real and the
+        framing was an artifact of the fixture. A test carrying the wrong key
+        would have gone green on a message that names nothing.
+        """
+        rows = [
+            {"row_id": "N4.1", "criterion": "needle within arc"},
+            {"row_id": "N4.2", "criterion": "band background"},
+        ]
+        result = vc.check_manifest_traceability(NO_CITING_TESTS, rows)
+        verdict = _classify(result, NO_CITING_TESTS)
+
+        assert "N4.1" in result["details"]
+        assert "N4.2" in result["details"]
+        assert verdict.tokens == ("n4.1", "n4.2", "section 10")
+        assert verdict.verdict == ADDRESSED
+
+    def test_the_demand_to_add_tests_is_exempt_under_2560(self):
+        """Naming the rows is necessary and not sufficient.
+
+        This branch demands NEW tests, and #2560's rule is that a locked
+        region introducing one passes only when the round's failures carry
+        the addition vocabulary. Without it, pinning would refuse the very
+        tests the complaint asks for -- the #2686 deadlock shape, one check
+        over.
+        """
+        rows = [{"row_id": "N4.1", "criterion": "needle within arc"}]
+        details = vc.check_manifest_traceability(NO_CITING_TESTS, rows)["details"]
+
+        assert rp.demands_additions([details]) is True
+
 
 class TestUnaddressableToday:
     """The deadlock class, pinned. Each test asserts the CURRENT broken state
@@ -236,20 +282,6 @@ class TestUnaddressableToday:
         assert verdict.ranges == ()
         assert verdict.verdict == UNADDRESSABLE
 
-    def test_manifest_traceability_omits_the_row_ids_it_holds(self):
-        """#2593. Row ids are exactly what the vocabulary parses (`_ROW_ID_RE`
-        reads N4.1), and the check is holding them -- it just does not put
-        them in the message on this branch."""
-        rows = [
-            {"id": "N4.1", "criterion": "needle within arc"},
-            {"id": "N4.2", "criterion": "band background"},
-        ]
-        verdict = _classify(
-            vc.check_manifest_traceability(NO_CITING_TESTS, rows),
-            NO_CITING_TESTS,
-        )
-        assert verdict.tokens == ()
-        assert verdict.verdict == UNADDRESSABLE
 
 
 class TestTheSweepIsExhaustive:
