@@ -37,6 +37,8 @@ cover the wiring the unit test cannot see.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import importlib
 
 import pytest
@@ -140,6 +142,14 @@ class TestTheOrchestratorReadsAfterResolving:
             "issue_number": 331,
             "repo_root": str(repo),
             "worktree_path": str(repo),
+            # #2699: REQUIRED, not decorative. `implement_code` resolves this
+            # as `Path(state.get("audit_dir", ""))`, and `Path("")` is `.`,
+            # whose `.exists()` is always true -- so omitting it does not mean
+            # "no audit trail", it means "write the audit trail into whatever
+            # directory pytest was started from". This test left four prompt
+            # and response files in the AssemblyZero repo root the first time
+            # it ran.
+            "audit_dir": str(repo / "audit"),
             "lld_content": "# LLD\n\n## Files\n- src/boostgauge/skins/stingray.py\n",
             "spec_content": "# Spec\n",
             "files_to_modify": [
@@ -155,6 +165,7 @@ class TestTheOrchestratorReadsAfterResolving:
             "test_files": [],
             "completed_files": [],
         }
+        seen["state"] = state
         try:
             orch.implement_code(state)
         except Exception:  # noqa: BLE001 — the gate call is the subject
@@ -189,3 +200,44 @@ class TestTheOrchestratorReadsAfterResolving:
         seen = self._run(repo, monkeypatch, "Add")
 
         assert FAILURES.strip() in seen["failures"]
+
+    def test_the_run_writes_nothing_outside_its_tmp_repo(
+        self, repo, monkeypatch, tmp_path
+    ):
+        """#2699: this test drives the real loop, so it can litter.
+
+        `implement_code` resolves `Path(state.get("audit_dir", ""))`, and
+        `Path("")` is the current directory -- so a state dict missing
+        `audit_dir` writes its prompt and response artifacts wherever pytest
+        was started. That is the AssemblyZero repo root, and it happened: four
+        files, untracked, indistinguishable from somebody's work in progress.
+
+        Asserting on the process's own working directory is what catches a
+        recurrence, because the failure is a file appearing somewhere nobody
+        is looking.
+        """
+        cwd = Path.cwd()
+        before = {p.name for p in cwd.iterdir()}
+
+        self._run(repo, monkeypatch, "Add")
+
+        new = {p.name for p in cwd.iterdir()} - before
+        assert not new, f"the run wrote into the working directory: {sorted(new)}"
+
+    def test_the_driver_points_the_audit_trail_at_the_tmp_repo(
+        self, repo, monkeypatch
+    ):
+        """The containment itself, asserted directly.
+
+        The guard above is a net, not a proof: with both the edit-script and
+        the full-file paths stubbed, nothing writes an audit file at all, so
+        it would stay green even if `audit_dir` went missing again. What
+        actually prevents a recurrence is the field being SET to somewhere
+        disposable, and that is what this asserts. Said plainly, because a
+        test whose green light means nothing is worse than no test.
+        """
+        seen = self._run(repo, monkeypatch, "Add")
+        audit_dir = seen["state"]["audit_dir"]
+
+        assert audit_dir, "unset means Path('') means the working directory"
+        assert str(repo) in audit_dir
