@@ -131,10 +131,17 @@ class TestBothBranchesAgree:
         from assemblyzero.workflows.testing.nodes import verify_phases
 
         source = inspect.getsource(verify_phases.verify_green_phase)
-        assert source.count("coverage_has_stagnated(") == 2, (
+        # #2711: the strike count wraps the decision, and BOTH branches go
+        # through the wrapper; the wrapper is the only caller of the decision.
+        assert source.count("coverage_plateau_verdict(") == 2, (
             "both branches must route their coverage-stagnation decision "
-            "through the shared helper"
+            "through the shared strike-counting helper"
         )
+        assert source.count("coverage_has_stagnated(") == 0, (
+            "a branch is calling the bare decision, bypassing the strike count"
+        )
+        wrapper = inspect.getsource(verify_phases.coverage_plateau_verdict)
+        assert wrapper.count("coverage_has_stagnated(") == 1
         assert "previous_coverage + 1.0" not in source, (
             "an inline threshold comparison has reappeared; the two copies "
             "drift apart under exactly this kind of repair"

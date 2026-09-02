@@ -744,7 +744,7 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             target = repo_root / filepath
             if target.exists():
                 target.unlink()
-                print(f"        Deleted")
+                print("        Deleted")
             continue
 
         # Handle empty placeholder files (e.g. .gitkeep) without calling Claude
@@ -976,8 +976,9 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"\n    Implementation complete: {len(written_paths)} files written")
 
-    # Issue #460: Update test_files to point to real test files written by N4,
-    # replacing the scaffold stubs that N2 created.
+    # Issue #460 replaced the scaffold with the implementer's test files. Since
+    # #2316 the scaffold is the spec's own suite -- the contract -- and it
+    # stays (#2709). One helper decides, so the rule has one home.
     issue_number = state.get("issue_number", 0)
     real_test_files = [
         p for p in written_paths
@@ -985,13 +986,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         and Path(p).name.startswith("test_")
         and p.endswith(".py")
     ]
-
-    if real_test_files:
-        # Delete the scaffold file — it only has `assert False` stubs
-        scaffold_path = repo_root / "tests" / f"test_issue_{issue_number}.py"
-        if scaffold_path.exists():
-            scaffold_path.unlink()
-            print(f"    Deleted scaffold: {scaffold_path}")
+    test_files_after = merge_test_files(
+        scaffold_path=repo_root / "tests" / f"test_issue_{issue_number}.py",
+        scaffold_is_spec_suite=bool(
+            (state.get("spec_test_suite") or {}).get("functions")
+        ),
+        real_test_files=real_test_files,
+        prior_test_files=list(state.get("test_files", []) or []),
+    )
 
     # Log to audit
     log_workflow_execution(
@@ -1017,9 +1019,44 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         "completed_files": completed_files,
         "estimated_tokens_used": estimated_tokens_used,
         "error_message": "",
-        "test_files": real_test_files if real_test_files else state.get("test_files", []),
+        "test_files": test_files_after,
         "node_costs": node_costs,  # Issue #511
     }
+
+
+def merge_test_files(
+    scaffold_path: Path,
+    scaffold_is_spec_suite: bool,
+    real_test_files: list[str],
+    prior_test_files: list[str],
+) -> list[str]:
+    """What the green phase runs after N4 (#2709).
+
+    #460 deleted the scaffold and ran the implementer's test files instead,
+    because the scaffold was ``assert False`` stubs no implementation could
+    satisfy. #2316 changed what the scaffold is: the spec's own executable
+    functions, emitted verbatim, verified by #2706/#2707 before the spec was
+    approved. Measured on boostgauge run-issue4-172600: nine validated spec
+    tests were unlinked one node after validation and the green phase graded
+    three tests the implementer wrote for its own code -- the #2677 shape.
+
+    So: when the scaffold carries the spec's suite it stays and runs FIRST;
+    the implementer's files are additions after it. A stub scaffold (no spec
+    functions) is still replaced, exactly as #460 intended. With no
+    implementer test files at all, the prior list stands.
+    """
+    if not real_test_files:
+        return list(prior_test_files)
+
+    scaffold = str(scaffold_path)
+    if scaffold_is_spec_suite and scaffold_path.exists():
+        print(f"    Kept the spec's suite as the contract: {scaffold_path} (#2709)")
+        return [scaffold] + [p for p in real_test_files if Path(p) != scaffold_path]
+
+    if scaffold_path.exists():
+        scaffold_path.unlink()
+        print(f"    Deleted scaffold: {scaffold_path}")
+    return list(real_test_files)
 
 
 def _mock_implement_code(state: TestingWorkflowState) -> dict[str, Any]:
