@@ -77,10 +77,14 @@ class TestTheSweepIsExhaustive:
         twelfth is `python_fences_parse`, which reports under its own name
         since #2556 and appears in no issue list. The thirteenth is
         `function_spec_sections_have_examples`, built by #2620 as the path
-        back to a hard gate."""
+        back to a hard gate. The fourteenth and fifteenth grade Section 10's
+        test functions with the implementation stage's own validator, one
+        stage earlier (#2706, #2707)."""
         assert "python_fences_parse" in CLASSIFICATIONS
         assert "function_spec_sections_have_examples" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 13
+        assert "spec_test_functions_have_assertions" in CLASSIFICATIONS
+        assert "spec_test_fixtures_resolvable" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 15
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:

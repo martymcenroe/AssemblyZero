@@ -165,6 +165,36 @@ class TestAddressableToday:
     is a rewording guard: change the message so it drops its address and this
     fails."""
 
+    def test_spec_test_functions_have_assertions_addresses_each_stub(self):
+        """#2706, swept BEFORE its first live roll. The complaint backticks
+        the function and cites its `lines N-M` span -- both halves of the
+        vocabulary -- so the drafter's rewrite of the stub body lands."""
+        draft = (
+            "# Spec\n\n## 10. Test Mapping\n\n### 10.1 Per-criterion test "
+            "functions\n\n```python\nimport pytest\n\n\n"
+            "def test_req_1_value():\n    # expected: value == 1\n    pass\n```\n"
+        )
+        verdict = _classify(
+            vc.check_spec_test_functions_have_assertions(draft, 1, []), draft
+        )
+        assert "test_req_1_value" in verdict.tokens
+        assert verdict.verdict == ADDRESSED
+
+    def test_spec_test_fixtures_resolvable_addresses_the_function(self):
+        """#2707. The complaint names the function and the parameter, and
+        cites the function's span, so both the signature and the body that
+        uses the phantom fixture are open to the drafter."""
+        draft = (
+            "# Spec\n\n## 10. Test Mapping\n\n### 10.1 Per-criterion test "
+            "functions\n\n```python\n"
+            "def test_req_1_value(mocker):\n    assert mocker is not None\n```\n"
+        )
+        verdict = _classify(
+            vc.check_spec_test_fixtures_resolvable(draft, "", ""), draft
+        )
+        assert {"test_req_1_value", "mocker"} <= set(verdict.tokens)
+        assert verdict.verdict == ADDRESSED
+
     def test_function_spec_sections_addresses_its_subsection(self):
         """#2620's new hard gate, swept BEFORE it ships rather than discovered
         to deadlock on a live roll (#2617's discipline).
@@ -360,6 +390,8 @@ class TestTheSweepIsExhaustive:
             "check_modify_files_have_excerpts",
             "check_change_instructions_specific",
             "check_manifest_traceability",
+            "check_spec_test_functions_have_assertions",
+            "check_spec_test_fixtures_resolvable",
         }
         #: Checks this sweep does NOT drive, each with the reason. They need
         #: a real repo tree, a populated symbol table, or an LLD whose

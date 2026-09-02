@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -36,6 +37,7 @@ from assemblyzero.workflows.implementation_spec.state import (
 from assemblyzero.workflows.implementation_spec.base_tree import (
     base_ref,
     exists_on_base,
+    read_from_base,
 )
 from assemblyzero.workflows.implementation_spec.check_classification import (
     advisory_details,
@@ -215,6 +217,27 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     check_error_paths = check_error_paths_have_tests(spec_draft)
     checks.append(check_error_paths)
     _log_check(check_error_paths)
+
+    # Check 10b (#2706): Section 10's test functions must survive the
+    # scaffolder's validator. The scaffolder emits them verbatim (#2316) and
+    # the implementation stage refuses a suite that asserts nothing --
+    # run-issue4-163140 lost 605 s of approved spec work to that refusal
+    # 3.4 s into the next stage. Same extractor, same rule, one stage earlier.
+    check_spec_asserts = check_spec_test_functions_have_assertions(
+        spec_draft, state.get("issue_number", 0), files_to_modify
+    )
+    checks.append(check_spec_asserts)
+    _log_check(check_spec_asserts)
+
+    # Check 10c (#2707): every test-function parameter must name a fixture
+    # the run can resolve -- a pytest builtin, one defined in the block, or
+    # one from a plugin the target repo declares. The same spec took `mocker`
+    # with no pytest-mock declared and `live_environment` defined nowhere.
+    check_spec_fixtures = check_spec_test_fixtures_resolvable(
+        spec_draft, repo_root_str, base_branch
+    )
+    checks.append(check_spec_fixtures)
+    _log_check(check_spec_fixtures)
 
     # Check 11: Manifest traceability — every manifest row in exactly one
     # test, every test tracing to a real identifier (Issue #2533). A diff, not
@@ -1652,6 +1675,404 @@ def check_error_paths_have_tests(spec: str) -> CompletenessCheck:
         check_name="error_paths_have_tests",
         passed=report.ok,
         details=format_error_path_report(report),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section 10's test functions, graded by the stage that will run them
+# (#2706, #2707)
+# ---------------------------------------------------------------------------
+#
+# Since #2316 the scaffolder emits the spec's Section 10 test functions
+# verbatim, and `validate_tests_mechanical` then refuses a suite whose
+# functions assert nothing. Both were right on boostgauge run-issue4-163140
+# (2026-09-02): the spec passed twelve completeness checks and an APPROVED
+# review, and the implementation stage refused it 3.4 s later, deterministic
+# on regeneration, because eleven of its thirteen tests were a comment and
+# `pass`, and seven took `mocker` (no pytest-mock declared), `benchmark` (no
+# pytest-benchmark declared) or `live_environment` (defined nowhere).
+#
+# These two checks ask the same questions one stage earlier, where the drafter
+# can still respond -- with the SAME extractor and the SAME rule the testing
+# workflow uses, so the verdicts cannot drift (#1698). Each complaint names the
+# function in backticks and cites its `lines N-M` span, the #2686 shape, so
+# revision pinning opens exactly the function the drafter has to rewrite and
+# nothing beside it.
+
+#: Fixtures a pytest plugin injects by parameter name, keyed by the
+#: distribution the target repo would have to declare. A closed map, never a
+#: pattern: a name is added only with the plugin that provides it named
+#: beside it, and a plugin absent from this map is treated as providing
+#: nothing (#2707).
+_PLUGIN_FIXTURES: dict[str, frozenset[str]] = {
+    "pytest-mock": frozenset({
+        "mocker", "class_mocker", "module_mocker", "package_mocker",
+        "session_mocker",
+    }),
+    "pytest-asyncio": frozenset({
+        "event_loop", "unused_tcp_port", "unused_tcp_port_factory",
+        "unused_udp_port", "unused_udp_port_factory",
+    }),
+    "pytest-httpx": frozenset({"httpx_mock"}),
+    "pytest-benchmark": frozenset({"benchmark", "benchmark_weave"}),
+    "pytest-xdist": frozenset({"worker_id", "testrun_uid"}),
+    "pytest-cov": frozenset({"cov"}),
+}
+
+#: The leading distribution name of a PEP 508 requirement string
+#: (``pytest-mock>=3``, ``pytest_mock (>=3,<4)``, ``pytest-mock[extra]``).
+_REQUIREMENT_NAME_RE = re.compile(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+#: The validator's per-function complaint, ``Function 'test_x' <what>``.
+_VALIDATOR_FUNCTION_RE = re.compile(r"^Function '(test_\w+)' (.+)$")
+
+
+def _normalise_distribution(name: str) -> str:
+    """PEP 503 normalisation: case-insensitive, `_` and `.` read as `-`."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _declared_dependencies(pyproject_text: str) -> set[str]:
+    """Every distribution a pyproject declares, normalised.
+
+    Reads the three shapes in use: PEP 621 lists (``[project] dependencies``,
+    ``[project.optional-dependencies]``), Poetry tables
+    (``[tool.poetry.dependencies]``, ``[tool.poetry.group.*.dependencies]``)
+    and PEP 735 ``[dependency-groups]``. Under any key ending in
+    ``dependencies`` (or ``dependency-groups``), a table contributes the keys
+    whose values are a version string or a spec table, and a list contributes
+    the leading name of each string. Nothing else in the file is read.
+    """
+    if not pyproject_text:
+        return set()
+    try:
+        data = tomllib.loads(pyproject_text)
+    except tomllib.TOMLDecodeError:
+        return set()
+
+    names: set[str] = set()
+
+    def in_scope(path: tuple[str, ...]) -> bool:
+        return any(
+            part.endswith("dependencies") or part == "dependency-groups"
+            for part in path
+        )
+
+    def walk(node: Any, path: tuple[str, ...]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if in_scope(path) and isinstance(value, (str, dict)):
+                    names.add(_normalise_distribution(key))
+                    continue
+                walk(value, path + (key,))
+        elif isinstance(node, list):
+            for item in node:
+                if isinstance(item, str):
+                    if in_scope(path):
+                        match = _REQUIREMENT_NAME_RE.match(item)
+                        if match:
+                            names.add(_normalise_distribution(match.group(1)))
+                else:
+                    walk(item, path)
+
+    walk(data, ())
+    return names
+
+
+def _pyproject_for_run(repo_root_str: str, base_branch: str) -> str:
+    """The target repo's pyproject as the run's base ships it (#2684, #2668),
+    falling back to the checkout when the run names no base or the base has
+    none. Empty when there is no repo to read."""
+    if not repo_root_str:
+        return ""
+    repo_root = Path(repo_root_str)
+    if base_branch:
+        try:
+            text = read_from_base(
+                repo_root, base_ref(repo_root, base_branch), "pyproject.toml"
+            )
+        except (OSError, subprocess.SubprocessError):
+            text = ""
+        if text:
+            return text
+    try:
+        return (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _spec_test_functions(spec: str) -> dict[str, Any]:
+    """Section 10's executable test functions, by the testing workflow's own
+    extractor -- a second parser here would be the #1698 class."""
+    from assemblyzero.workflows.testing.nodes.load_lld import (
+        extract_spec_test_functions,
+    )
+
+    return extract_spec_test_functions(spec)
+
+
+def _test_function_spans(
+    spec: str, functions: list[dict[str, str]]
+) -> dict[str, tuple[int, int]]:
+    """1-based line span of each extracted function in the draft.
+
+    The extractor slices sources verbatim out of the draft, so each is found
+    by text; the cursor advances so two identical bodies map to their own
+    positions rather than both to the first.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    cursor = 0
+    for fn in functions:
+        source = fn["source"]
+        idx = spec.find(source, cursor)
+        if idx < 0:
+            idx = spec.find(source)
+        if idx < 0:
+            continue
+        start = spec.count("\n", 0, idx) + 1
+        spans[fn["name"]] = (start, start + source.count("\n"))
+        cursor = idx + len(source)
+    return spans
+
+
+def check_spec_test_functions_have_assertions(
+    spec: str,
+    issue_number: int = 0,
+    files_to_modify: list[dict] | None = None,
+) -> CompletenessCheck:
+    """Section 10's test functions must survive the scaffolder's validator (#2706).
+
+    Builds the file exactly as `scaffold_tests.generate_spec_test_file_content`
+    will and grades it with `validate_tests_mechanical.validate_test_structure`
+    -- the implementation stage's own transcription and its own rule -- so
+    this check and that stage cannot disagree. Not applicable when the spec
+    ships no executable functions (the table-derived path).
+
+    The complaint backticks nothing but function names: a backticked word is a
+    pinning token that unlocks every line carrying it, and `pass` or `assert`
+    as tokens would open half the draft.
+    """
+    suite = _spec_test_functions(spec)
+    functions = suite["functions"]
+    if not functions:
+        return CompletenessCheck(
+            check_name="spec_test_functions_have_assertions",
+            passed=True,
+            details=(
+                "Section 10 carries no executable test functions — check not "
+                "applicable (the scaffolder falls back to table-derived scenarios)."
+            ),
+        )
+
+    from assemblyzero.workflows.testing.nodes.load_lld import (
+        scenarios_from_spec_functions,
+    )
+    from assemblyzero.workflows.testing.nodes.scaffold_tests import (
+        generate_spec_test_file_content,
+    )
+    from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+        validate_test_structure,
+    )
+
+    content = generate_spec_test_file_content(
+        suite, issue_number, files_to_modify or []
+    )
+    errors = validate_test_structure(content, scenarios_from_spec_functions(functions))
+    if not errors:
+        return CompletenessCheck(
+            check_name="spec_test_functions_have_assertions",
+            passed=True,
+            details=(
+                f"All {len(functions)} Section 10 test function(s) carry an "
+                f"assertion; the scaffolder will emit them verbatim (#2316)."
+            ),
+        )
+
+    spans = _test_function_spans(spec, functions)
+    by_function: list[str] = []
+    other: list[str] = []
+    for error in errors:
+        match = _VALIDATOR_FUNCTION_RE.match(error)
+        if match and match.group(1) in spans:
+            start, end = spans[match.group(1)]
+            by_function.append(
+                f"`{match.group(1)}` (lines {start}-{end}) {match.group(2)}"
+            )
+        else:
+            other.append(error)
+
+    parts: list[str] = []
+    if by_function:
+        # Every refused function is cited, never a truncated list: the span
+        # is what pinning unlocks, and a function left off the list stays
+        # locked against the very edit this complaint demands.
+        listed = "; ".join(by_function)
+        parts.append(
+            f"{len(by_function)} of {len(functions)} §10 test function(s) "
+            f"would be refused by the implementation stage's scaffolder: {listed}. "
+            "Replace each pass body with the setup and at least one assert "
+            "statement (or a pytest.raises block) that checks the value its "
+            "comment states — the scaffolder emits these functions verbatim "
+            "(#2316) and the implementation stage refuses a suite that asserts "
+            "nothing."
+        )
+    if other:
+        parts.append("Also refused by that validator: " + "; ".join(other))
+    return CompletenessCheck(
+        check_name="spec_test_functions_have_assertions",
+        passed=False,
+        details=" ".join(parts),
+    )
+
+
+def _is_fixture_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name) and target.id == "fixture":
+            return True
+        if isinstance(target, ast.Attribute) and target.attr == "fixture":
+            return True
+    return False
+
+
+def _parametrized_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Names a ``@pytest.mark.parametrize`` decorator supplies as parameters."""
+    names: set[str] = set()
+    for decorator in node.decorator_list:
+        if not (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "parametrize"
+            and decorator.args
+        ):
+            continue
+        first = decorator.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            names.update(n.strip() for n in first.value.split(",") if n.strip())
+        elif isinstance(first, (ast.List, ast.Tuple)):
+            names.update(
+                element.value
+                for element in first.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            )
+    return names
+
+
+def check_spec_test_fixtures_resolvable(
+    spec: str, repo_root_str: str = "", base_branch: str = ""
+) -> CompletenessCheck:
+    """Every parameter of a Section 10 test function must name a fixture (#2707).
+
+    Three routes satisfy it: a pytest builtin, a ``@pytest.fixture`` function
+    in the same block, or a fixture from a plugin the target repo's pyproject
+    declares (`_PLUGIN_FIXTURES`, read from the run's base branch). A name
+    that takes none of them errors at setup one stage later, before any
+    assertion runs. Abstains when the block does not parse --
+    `python_fences_parse` reports that (#2526's unknown-is-not-guilty).
+    """
+    suite = _spec_test_functions(spec)
+    functions = suite["functions"]
+    if not functions:
+        return CompletenessCheck(
+            check_name="spec_test_fixtures_resolvable",
+            passed=True,
+            details=(
+                "Section 10 carries no executable test functions — check not "
+                "applicable."
+            ),
+        )
+
+    block = "\n\n".join([suite["imports"]] + [fn["source"] for fn in functions])
+    try:
+        tree = ast.parse(block)
+    except SyntaxError:
+        return CompletenessCheck(
+            check_name="spec_test_fixtures_resolvable",
+            passed=True,
+            details=(
+                "Section 10 test block does not parse — check not applicable; "
+                "python_fences_parse reports the syntax."
+            ),
+        )
+
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _is_fixture_decorated(node)
+    }
+    declared = _declared_dependencies(_pyproject_for_run(repo_root_str, base_branch))
+    from_declared_plugins: set[str] = set()
+    from_undeclared_plugins: dict[str, str] = {}
+    for distribution, fixtures in _PLUGIN_FIXTURES.items():
+        if distribution in declared:
+            from_declared_plugins |= fixtures
+        else:
+            for fixture in fixtures:
+                from_undeclared_plugins[fixture] = distribution
+
+    spans = _test_function_spans(spec, functions)
+    failures: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("test_"):
+            continue
+        supplied = _parametrized_names(node)
+        for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+            param = arg.arg
+            if (
+                param in _NON_RECEIVER_PARAMS
+                or param in _PYTEST_BUILTIN_FIXTURES
+                or param in defined
+                or param in from_declared_plugins
+                or param in supplied
+            ):
+                continue
+            start, end = spans.get(node.name, (0, 0))
+            where = f" (lines {start}-{end})" if start else ""
+            if param in from_undeclared_plugins:
+                why = (
+                    f" — provided by {from_undeclared_plugins[param]}, which the "
+                    "repo's pyproject does not declare"
+                )
+            else:
+                why = (
+                    " — not a pytest builtin, not decorated as a fixture in "
+                    "§10, and no declared plugin provides it"
+                )
+            failures.append(f"`{node.name}`{where} takes `{param}`{why}")
+
+    if not failures:
+        return CompletenessCheck(
+            check_name="spec_test_fixtures_resolvable",
+            passed=True,
+            details=(
+                f"Every parameter of the {len(functions)} Section 10 test "
+                "function(s) resolves to a fixture."
+            ),
+        )
+
+    # Every failure is cited, never a truncated list -- the span unlocks the
+    # function, and an uncited one stays locked against its own repair.
+    listed = "; ".join(failures)
+    declared_plugins = sorted(d for d in _PLUGIN_FIXTURES if d in declared)
+    declared_note = (
+        f" (declared: {', '.join(declared_plugins)})" if declared_plugins
+        else " (the repo declares none)"
+    )
+    return CompletenessCheck(
+        check_name="spec_test_fixtures_resolvable",
+        passed=False,
+        details=(
+            f"{len(failures)} test-function parameter(s) name no fixture and "
+            f"would error at setup in the implementation stage: {listed}. A "
+            "parameter must be a pytest builtin fixture (monkeypatch, tmp_path, "
+            "capsys, ...), a function decorated with pytest.fixture inside the "
+            "§10 test block, or a fixture from a plugin the repo's pyproject "
+            f"declares{declared_note}. Drop the parameter, define the fixture "
+            "in §10, or use monkeypatch or unittest.mock instead."
+        ),
     )
 
 
