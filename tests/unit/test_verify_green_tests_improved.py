@@ -110,9 +110,11 @@ class TestGenuineStagnationStillHalts:
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_flat_coverage_and_flat_tests_still_halts(self, mock_pytest):
+        """#2711: on the second consecutive strike; the state carries the first."""
         mock_pytest.return_value = _pytest(1, passed=15, failed=0, coverage=94)
         result = verify_green_phase(
-            _state(previous_passed=15, previous_coverage=94.0)
+            _state(previous_passed=15, previous_coverage=94.0,
+                   coverage_plateau_strikes=1)
         )
 
         assert result["next_node"] == "end"
@@ -120,14 +122,28 @@ class TestGenuineStagnationStillHalts:
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_fewer_passing_tests_is_not_progress(self, mock_pytest):
-        """Regression must never buy another iteration."""
+        """A regression is a strike, never progress; on the second strike it
+        halts (#2711 -- the first buys exactly one revision to revert it)."""
+        mock_pytest.return_value = _pytest(1, passed=13, failed=0, coverage=94)
+        result = verify_green_phase(
+            _state(previous_passed=15, previous_coverage=94.0,
+                   coverage_plateau_strikes=1)
+        )
+
+        assert result["next_node"] == "end"
+        assert "stagnant" in result.get("error_message", "").lower()
+
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
+    def test_a_regression_buys_one_revision_and_no_more(self, mock_pytest):
+        """The control for #2711: with no strike on the board, the same
+        regression routes onward with the strike recorded."""
         mock_pytest.return_value = _pytest(1, passed=13, failed=0, coverage=94)
         result = verify_green_phase(
             _state(previous_passed=15, previous_coverage=94.0)
         )
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result.get("error_message", "").lower()
+        assert result["next_node"] != "end", result.get("error_message")
+        assert result["coverage_plateau_strikes"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_max_iterations_still_wins_over_test_progress(self, mock_pytest):

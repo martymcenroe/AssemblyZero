@@ -98,11 +98,15 @@ class TestGreenPhaseTestCountStagnation:
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_nonzero_stagnation(self, mock_pytest):
-        """previous_passed=10, current passed=10 -> STAGNANT (non-zero case)."""
+        """previous_passed=10, current passed=10 -> STAGNANT (non-zero case).
+
+        #2711: a coverage plateau halts on its SECOND consecutive strike, so
+        the state carries the first one."""
         mock_pytest.return_value = _make_pytest_result(
             1, passed=10, failed=14, errors=0, coverage=50,
         )
-        state = _make_state(previous_passed=10, previous_coverage=50.0)
+        state = _make_state(previous_passed=10, previous_coverage=50.0,
+                            coverage_plateau_strikes=1)
         result = verify_green_phase(state)
 
         assert result["next_node"] == "end"
