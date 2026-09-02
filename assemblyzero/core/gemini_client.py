@@ -121,6 +121,62 @@ TRANSPORT_LABEL = "agy (Antigravity CLI)"
 #: alone long enough to be misread.
 PROVIDER_LOG_ID = "provider=gemini transport=agy"
 
+
+def roster_phrase(names: list[str]) -> str:
+    """Name the credential when there is one; COUNT them when there are more.
+
+    "All credentials failed" was written for the rotation design -- several
+    credentials, rotate on failure, report the roster. Two things changed
+    underneath it. #1605 removed API-key credentials, so `_load_credentials`
+    appends only `type == "oauth"` entries; and the deployed roster holds
+    exactly one, `oauth-primary`. The plural phrasing had a singular
+    denominator, and "all" of one is a strange thing to tell an operator at
+    the moment they are deciding whether their auth is broken (#2553).
+    """
+    if not names:
+        return "no credentials"
+    if len(names) == 1:
+        return names[0]
+    return f"all {len(names)} credentials"
+
+
+def failure_headline(error_type: GeminiErrorType, names: list[str]) -> str:
+    """Lead with the failure CLASS; the roster is a detail, not the news.
+
+    During a live 503 storm on 2026-08-27 the surface read `ERROR=All
+    credentials failed via agy (Antigravity CLI)`, and the operator's reading
+    was the obvious one: something is wrong with our credentials. Nothing was.
+    The credential connected on every attempt and the model had no capacity --
+    a Google-side `MODEL_CAPACITY_EXHAUSTED`, widely reported that day. The
+    per-credential detail line even said "riding 503/529 capacity storms", but
+    the headline is what gets read first, and it named the wrong class.
+
+    This module has form here: two prior incidents are recorded above, one
+    where the same phrase was read as a regression and one where it was
+    printed while preflight showed 4/4 healthy.
+
+    **The classification is unchanged and deliberately so.** `error_type` is
+    computed by the caller from the per-credential errors; this only renders
+    it. `halt_node.classify_error` keys on `CAPACITY_MESSAGE_MARKERS`
+    (`"capacity exhausted"`, `"503"`, `"529"`, `"overloaded"`) and on specific
+    auth phrases -- never on the old headline -- so the wording below is
+    chosen to keep the capacity and quota markers present and to contain no
+    auth phrase. `test_failure_headline.py` pins that, and pins that the
+    #2474 no-verdict retry path still sees what it saw.
+    """
+    who = roster_phrase(names)
+    if error_type == GeminiErrorType.CAPACITY_EXHAUSTED:
+        return (
+            f"Provider capacity exhausted (503/529) via {TRANSPORT_LABEL} -- "
+            f"an outage at the model, not a credential problem. Tried {who}:"
+        )
+    if error_type == GeminiErrorType.QUOTA_EXHAUSTED:
+        return (
+            f"Quota exhausted via {TRANSPORT_LABEL} -- the subscription's "
+            f"allowance is spent, not a credential problem. Tried {who}:"
+        )
+    return f"Call failed via {TRANSPORT_LABEL}. Tried {who}:"
+
 # #1872: Windows process-creation failures. A child that dies with one of
 # these never got to run — desktop-heap / DLL-init pressure on a busy
 # machine, not a credential problem. Twice in 30 minutes on 2026-07-28 these
@@ -800,9 +856,17 @@ class GeminiClient:
                 response=None,
                 raw_response=None,
                 error_type=GeminiErrorType.QUOTA_EXHAUSTED,
+                # #2553: same reword as the failure headline above, and the
+                # classification is unchanged by it. `halt_node` maps BOTH
+                # "quota exhausted" and "all credentials exhausted" to
+                # `quota_exhausted`, so leading with the class lands on the
+                # same verdict. The old pattern stays in the classifier
+                # because `tools/gemini-retry.py` still emits it.
                 error_message=(
-                    f"All credentials exhausted via {TRANSPORT_LABEL}: "
-                    f"{', '.join(exhausted_names)}. Wait for quota reset."
+                    f"Quota exhausted via {TRANSPORT_LABEL} -- the "
+                    f"subscription's allowance is spent, not a credential "
+                    f"problem. Spent: {roster_phrase(exhausted_names)}. "
+                    f"Wait for quota reset."
                 ),
                 credential_used="",
                 rotation_occurred=False,
@@ -1109,7 +1173,10 @@ class GeminiClient:
             raw_response=None,
             error_type=final_error_type,
             error_message=(
-                f"All credentials failed via {TRANSPORT_LABEL}:\n  - "
+                failure_headline(
+                    final_error_type, [c.name for c in available]
+                )
+                + "\n  - "
                 + "\n  - ".join(errors)
             ),
             credential_used="",
