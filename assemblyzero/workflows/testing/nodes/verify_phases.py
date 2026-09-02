@@ -564,7 +564,7 @@ def _summarize_collection_failure(output: str) -> str:
 
 def run_pytest(
     test_files: list[str],
-    coverage_module: str | None = None,
+    coverage_module: str | list[str] | None = None,
     coverage_target: int | None = None,
     repo_root: Path | None = None,
 ) -> dict:
@@ -572,7 +572,9 @@ def run_pytest(
 
     Args:
         test_files: List of test file paths.
-        coverage_module: Module to measure coverage for.
+        coverage_module: Module(s) to measure coverage for -- one ``--cov``
+            per entry, and pytest-cov reports their union (#2710). A string
+            is a one-entry list.
         coverage_target: Coverage threshold percentage.
         repo_root: Repository root for running pytest.
 
@@ -587,9 +589,14 @@ def run_pytest(
     # Without it, pytest returns exit code 4 ("unrecognized arguments")
     # which the workflow misclassifies as "collection/syntax error" and loops.
     if coverage_module:
+        targets = (
+            [coverage_module] if isinstance(coverage_module, str)
+            else [t for t in coverage_module if t]
+        )
         try:
             import pytest_cov  # noqa: F401
-            cmd.extend([f"--cov={coverage_module}", "--cov-report=term-missing"])
+            cmd.extend(f"--cov={target}" for target in targets)
+            cmd.append("--cov-report=term-missing")
             if coverage_target:
                 cmd.append(f"--cov-fail-under={coverage_target}")
         except ImportError:
@@ -1649,6 +1656,61 @@ def coverage_has_stagnated(
     return True
 
 
+#: A coverage plateau halts on this many CONSECUTIVE non-improving iterations
+#: (#2711). It was one, while the test-count guard beside it gave a nonzero
+#: plateau two (#2062). boostgauge run-issue4-172600 halted on its first
+#: comparison -- 72.0% -> 70.0% after a revision broke one test -- with four
+#: iterations unspent and a best-iteration snapshot in hand, which is exactly
+#: the state the next iteration exists to repair.
+COVERAGE_PLATEAU_STRIKES = 2
+
+
+def coverage_plateau_verdict(
+    state: dict,
+    coverage_achieved: float,
+    previous_coverage: float,
+    passed_count: int,
+    previous_passed: int,
+    current_green_failures: list[str],
+    previous_green_failures: list[str],
+) -> tuple[int, bool]:
+    """(strikes after this iteration, halt now?) -- #2711.
+
+    `coverage_has_stagnated` stays the ONE decision about whether an iteration
+    moved anything (#2029, #2030). This wraps it with the plateau count the
+    test-count guard already keeps: a stagnant iteration is a strike, an
+    improving one clears the count, and the loop halts only once the plateau
+    has persisted for COVERAGE_PLATEAU_STRIKES consecutive iterations. Both
+    branches of verify_green_phase call this and nothing else, so there is
+    still nowhere for the two to disagree.
+    """
+    strikes = int(state.get("coverage_plateau_strikes", 0) or 0)
+    if not coverage_has_stagnated(
+        coverage_achieved, previous_coverage, passed_count, previous_passed,
+        current_green_failures, previous_green_failures,
+    ):
+        return 0, False
+    strikes += 1
+    if strikes < COVERAGE_PLATEAU_STRIKES:
+        print(
+            f"    [PLATEAU] Coverage {previous_coverage:.1f}% -> "
+            f"{coverage_achieved:.1f}%: strike {strikes} of "
+            f"{COVERAGE_PLATEAU_STRIKES}; one more revision to move it"
+        )
+    return strikes, strikes >= COVERAGE_PLATEAU_STRIKES
+
+
+def _coverage_stagnant_message(
+    previous_coverage: float, coverage_achieved: float, strikes: int
+) -> str:
+    # 'stagnant' is what the halt classifier matches (#1939); keep the word.
+    return (
+        f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
+        f"(< 1% improvement across {strikes + 1} iterations). "
+        "Halting to prevent token waste."
+    )
+
+
 def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     """N5: Verify all tests pass with coverage target.
 
@@ -1684,29 +1746,34 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     print(f"    Running pytest with coverage target: {coverage_target}%")
 
-    # Determine coverage module from implementation files
-    # Filter out test files - we want to measure coverage of implementation, not tests
+    # Determine coverage scope from implementation files: EVERY non-test
+    # source file the run implements, never just the first (#2710).
+    # run-issue4-172600 added collector.py and collectors/windows.py and was
+    # graded on the abstract base alone; the sweep it existed to build was
+    # never in the report.
     impl_files = state.get("implementation_files", [])
-    coverage_module = None
+    coverage_targets: list[str] = []
+    coverage_module: str | list[str] | None = None
 
-    if impl_files:
-        # Find first non-test, non-init, Python implementation file for coverage
-        for impl_path in impl_files:
-            # Skip test files (in tests/ directory)
-            path_parts = Path(impl_path).parts
-            if any(part.lower() in ("tests", "test") for part in path_parts):
-                continue
-            # Issue #265: Skip __init__.py - pytest-cov doesn't work with it
-            if impl_path.endswith("__init__.py"):
-                continue
-            # Skip non-Python files (.gitkeep, .json, .yml, etc.)
-            if not impl_path.endswith(".py"):
-                print(f"    [N5] Skipping non-Python file for coverage: {impl_path}")
-                continue
-            rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
-            # Issue #474: Use helper that handles both packages and standalone scripts
-            coverage_module = _path_to_cov_target(rel_path, repo_root)
-            break
+    for impl_path in impl_files:
+        # Skip test files (in tests/ directory)
+        path_parts = Path(impl_path).parts
+        if any(part.lower() in ("tests", "test") for part in path_parts):
+            continue
+        # Issue #265: Skip __init__.py - pytest-cov doesn't work with it
+        if impl_path.endswith("__init__.py"):
+            continue
+        # Skip non-Python files (.gitkeep, .json, .yml, etc.)
+        if not impl_path.endswith(".py"):
+            print(f"    [N5] Skipping non-Python file for coverage: {impl_path}")
+            continue
+        rel_path = Path(impl_path).relative_to(repo_root) if repo_root else Path(impl_path)
+        # Issue #474: Use helper that handles both packages and standalone scripts
+        target = _path_to_cov_target(rel_path, repo_root)
+        if target and target not in coverage_targets:
+            coverage_targets.append(target)
+    if coverage_targets:
+        coverage_module = coverage_targets
 
     # Issue #462: When all impl files are test files (test-only issues),
     # fall back to files_to_modify from LLD to find the source module
@@ -1776,11 +1843,15 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             coverage_module = "assemblyzero"
             print(f"    [N5] Fallback: no file paths available, defaulting to: {coverage_module}")
 
-    print(f"    Coverage module: {coverage_module}")
+    coverage_targets = (
+        [coverage_module] if isinstance(coverage_module, str)
+        else list(coverage_module or [])
+    )
+    print(f"    Coverage module: {', '.join(coverage_targets) if coverage_targets else None}")
 
     result = run_pytest(
         test_files,
-        coverage_module=coverage_module,
+        coverage_module=coverage_targets or None,
         coverage_target=coverage_target,
         repo_root=repo_root,
     )
@@ -1889,14 +1960,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
     #   nothing would fail runs over an unfamiliar layout.
     from assemblyzero.workflows.testing.coverage_report import read_coverage
 
-    _reading = read_coverage(output, coverage_module or "")
+    # #2710: every target is measured or named absent. The first absent one
+    # carries the failure message, so a two-file feature whose second module
+    # never reached the report is refused for that module by name.
+    _readings = [read_coverage(output, target) for target in coverage_targets] or [
+        read_coverage(output, "")
+    ]
+    _absent = [reading for reading in _readings if not reading.measured]
+    _reading = _absent[0] if _absent else _readings[0]
     _below_target = coverage_achieved < state.get("coverage_target", 90)
     if (
         failed_count == 0
         and error_count == 0
         and passed_count > 0
         and _below_target
-        and not _reading.measured
+        and _absent
     ):
         _msg = _reading.failure_message()
         print(f"    [N5] {_msg}")
@@ -2168,31 +2246,35 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "freeze_tests": True,
             }
 
-        # Stagnation check: one shared decision, see coverage_has_stagnated.
+        # Stagnation check: one shared decision, see coverage_has_stagnated,
+        # counted as strikes by coverage_plateau_verdict (#2711).
         # Skip when passed_count == 0: coverage is vacuously 100% with no passing
         # tests, so the metric is meaningless. The test-count check above handles that case.
-        if passed_count > 0 and coverage_has_stagnated(
-            coverage_achieved, previous_coverage, passed_count, previous_passed,
-            current_green_failures, previous_green_failures,
-        ):
-            stagnant_msg = (
-                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
-                f"(< 1% improvement). Halting to prevent token waste."
+        coverage_strikes = int(state.get("coverage_plateau_strikes", 0) or 0)
+        if passed_count > 0:
+            coverage_strikes, coverage_halt = coverage_plateau_verdict(
+                state, coverage_achieved, previous_coverage, passed_count,
+                previous_passed, current_green_failures, previous_green_failures,
             )
-            print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed_count,
-                "previous_green_failures": current_green_failures,
-                "test_failure_summary": failure_summary,
-                "file_counter": file_num,
-                "pytest_exit_code": exit_code,
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
+            if coverage_halt:
+                stagnant_msg = _coverage_stagnant_message(
+                    previous_coverage, coverage_achieved, coverage_strikes
+                )
+                print(f"    [STAGNANT] {stagnant_msg}")
+                return {
+                    "green_phase_output": output,
+                    "coverage_achieved": coverage_achieved,
+                    "previous_coverage": coverage_achieved,
+                    "previous_passed": passed_count,
+                    "previous_green_failures": current_green_failures,
+                    "test_failure_summary": failure_summary,
+                    "file_counter": file_num,
+                    "pytest_exit_code": exit_code,
+                    "iteration_count": iteration_count + 1,
+                    "coverage_plateau_strikes": coverage_strikes,
+                    "next_node": "end",
+                    "error_message": stagnant_msg,
+                }
 
         # Circuit breaker check before looping
         should_trip, trip_reason = check_circuit_breaker(state)
@@ -2245,6 +2327,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "error_message": "",
             "count_plateau_strikes": plateau_strikes,
             "identity_plateau_strikes": identity_strikes,
+            "coverage_plateau_strikes": coverage_strikes,
             "freeze_tests": identity_stagnant,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
@@ -2270,16 +2353,17 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": f"Green phase failed after {max_iterations} iterations: coverage {coverage_achieved:.1f}% < target {coverage_target}%",
             }
 
-        # Stagnation check: one shared decision, see coverage_has_stagnated.
+        # Stagnation check: one shared decision, see coverage_has_stagnated,
+        # counted as strikes by coverage_plateau_verdict (#2711).
         previous_passed = state.get("previous_passed", -1)
         previous_green_failures = state.get("previous_green_failures", [])
-        if coverage_has_stagnated(
-            coverage_achieved, previous_coverage, passed_count, previous_passed,
-            current_green_failures, previous_green_failures,
-        ):
-            stagnant_msg = (
-                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
-                f"(< 1% improvement). Halting to prevent token waste."
+        coverage_strikes, coverage_halt = coverage_plateau_verdict(
+            state, coverage_achieved, previous_coverage, passed_count,
+            previous_passed, current_green_failures, previous_green_failures,
+        )
+        if coverage_halt:
+            stagnant_msg = _coverage_stagnant_message(
+                previous_coverage, coverage_achieved, coverage_strikes
             )
             print(f"    [STAGNANT] {stagnant_msg}")
             return {
@@ -2292,6 +2376,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "file_counter": file_num,
                 "pytest_exit_code": exit_code,
                 "iteration_count": iteration_count + 1,
+                "coverage_plateau_strikes": coverage_strikes,
                 "next_node": "end",
                 "error_message": stagnant_msg,
             }
@@ -2361,6 +2446,7 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             # All tests pass here; a count plateau is a failing-branch concept.
             "count_plateau_strikes": 0,
             "identity_plateau_strikes": 0,
+            "coverage_plateau_strikes": coverage_strikes,
             "freeze_tests": False,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,

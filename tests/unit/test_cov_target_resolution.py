@@ -10,8 +10,6 @@ that the fallback in verify_green_phase infers the right scope.
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from assemblyzero.workflows.testing.nodes.verify_phases import _path_to_cov_target
 
 
@@ -271,7 +269,9 @@ def test_fallback_infers_tools_from_impl_files(mock_root, mock_pytest, tmp_path:
         # Positional arg
         cov_module = call_args[0][1] if len(call_args[0]) > 1 else None
     assert cov_module is not None
-    assert cov_module.startswith("tools"), f"Expected 'tools' scope, got: {cov_module}"
+    # #2710: the scope is a list of targets; this feature has one.
+    assert isinstance(cov_module, list) and len(cov_module) == 1, cov_module
+    assert cov_module[0].startswith("tools"), f"Expected 'tools' scope, got: {cov_module}"
 
 
 @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
@@ -335,4 +335,5 @@ def test_package_impl_file_uses_dotted_module(mock_root, mock_pytest, tmp_path: 
     cov_module = call_args.kwargs.get("coverage_module") or call_args[1].get("coverage_module")
     if cov_module is None:
         cov_module = call_args[0][1] if len(call_args[0]) > 1 else None
-    assert cov_module == "assemblyzero.utils.file_type"
+    # #2710: the scope is a list of targets; this feature has one.
+    assert cov_module == ["assemblyzero.utils.file_type"]
