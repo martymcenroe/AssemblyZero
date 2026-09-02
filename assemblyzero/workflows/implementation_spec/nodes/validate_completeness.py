@@ -1732,8 +1732,8 @@ def _normalise_distribution(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _declared_dependencies(pyproject_text: str) -> set[str]:
-    """Every distribution a pyproject declares, normalised.
+def _declared_dependencies(pyproject_text: str) -> set[str] | None:
+    """Every distribution a pyproject declares, normalised; None if not TOML.
 
     Reads the three shapes in use: PEP 621 lists (``[project] dependencies``,
     ``[project.optional-dependencies]``), Poetry tables
@@ -1748,7 +1748,11 @@ def _declared_dependencies(pyproject_text: str) -> set[str]:
     try:
         data = tomllib.loads(pyproject_text)
     except tomllib.TOMLDecodeError:
-        return set()
+        # fail-open: an unparseable pyproject declares no plugins, which makes
+        # the fixture check STRICTER, never quieter -- every plugin fixture is
+        # then reported as undeclared -- and None lets the report say "could
+        # not be parsed" rather than "declares none".
+        return None
 
     names: set[str] = set()
 
@@ -1779,26 +1783,38 @@ def _declared_dependencies(pyproject_text: str) -> set[str]:
     return names
 
 
-def _pyproject_for_run(repo_root_str: str, base_branch: str) -> str:
+def _pyproject_for_run(repo_root_str: str, base_branch: str) -> tuple[str, str]:
     """The target repo's pyproject as the run's base ships it (#2684, #2668),
-    falling back to the checkout when the run names no base or the base has
-    none. Empty when there is no repo to read."""
+    and where it came from -- so a fallback is named in the report rather
+    than taken silently. Falls to the checkout when the run names no base or
+    the base has none; ``("", <why>)`` when nothing can be read."""
     if not repo_root_str:
-        return ""
+        return "", "no repo root given"
     repo_root = Path(repo_root_str)
     if base_branch:
+        ref = ""
         try:
-            text = read_from_base(
-                repo_root, base_ref(repo_root, base_branch), "pyproject.toml"
+            ref = base_ref(repo_root, base_branch)
+            text = read_from_base(repo_root, ref, "pyproject.toml")
+        except (OSError, subprocess.SubprocessError) as exc:
+            # fail-open: a base that cannot be read falls to the checkout's
+            # own pyproject, and the fallback is printed here and named in
+            # the report. The direction is stricter (fewer declared plugins),
+            # never quieter.
+            print(
+                f"    [FIXTURES] pyproject unreadable on base {base_branch!r} "
+                f"({exc}); reading the checkout's instead"
             )
-        except (OSError, subprocess.SubprocessError):
             text = ""
         if text:
-            return text
+            return text, f"read from {ref}"
     try:
-        return (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+        checkout = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
     except OSError:
-        return ""
+        # fail-open: no pyproject anywhere means no declared plugins, which
+        # the report states outright; the check gets stricter, not quieter.
+        return "", "no pyproject could be read"
+    return checkout, "read from the checkout"
 
 
 def _spec_test_functions(spec: str) -> dict[str, Any]:
@@ -1986,6 +2002,9 @@ def check_spec_test_fixtures_resolvable(
     try:
         tree = ast.parse(block)
     except SyntaxError:
+        # fail-open: abstains audibly -- the details say not applicable, the
+        # summary counts it as such, and python_fences_parse fails the same
+        # draft on the same syntax (#2526's unknown-is-not-guilty).
         return CompletenessCheck(
             check_name="spec_test_fixtures_resolvable",
             passed=True,
@@ -2001,7 +2020,11 @@ def check_spec_test_fixtures_resolvable(
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and _is_fixture_decorated(node)
     }
-    declared = _declared_dependencies(_pyproject_for_run(repo_root_str, base_branch))
+    pyproject_text, pyproject_source = _pyproject_for_run(repo_root_str, base_branch)
+    declared = _declared_dependencies(pyproject_text)
+    if declared is None:
+        pyproject_source = "the repo's pyproject could not be parsed"
+        declared = set()
     from_declared_plugins: set[str] = set()
     from_undeclared_plugins: dict[str, str] = {}
     for distribution, fixtures in _PLUGIN_FIXTURES.items():
@@ -2058,8 +2081,9 @@ def check_spec_test_fixtures_resolvable(
     listed = "; ".join(failures)
     declared_plugins = sorted(d for d in _PLUGIN_FIXTURES if d in declared)
     declared_note = (
-        f" (declared: {', '.join(declared_plugins)})" if declared_plugins
-        else " (the repo declares none)"
+        f" (declared: {', '.join(declared_plugins)}; {pyproject_source})"
+        if declared_plugins
+        else f" (the repo declares none; {pyproject_source})"
     )
     return CompletenessCheck(
         check_name="spec_test_fixtures_resolvable",

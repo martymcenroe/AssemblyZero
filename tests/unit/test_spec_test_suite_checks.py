@@ -321,6 +321,21 @@ class TestDeclaredDependencies:
             '[dependency-groups]\ntest = ["pytest-mock"]\n'
         )
 
-    def test_empty_and_unparseable(self) -> None:
+    def test_empty_declares_nothing_and_unparseable_says_so(self) -> None:
+        """None, not an empty set, so the report can say "could not be parsed"
+        rather than "declares none" -- the fail-open ruling on the site."""
         assert _declared_dependencies("") == set()
-        assert _declared_dependencies("not = [toml") == set()
+        assert _declared_dependencies("not = [toml") is None
+
+    def test_an_unparseable_pyproject_is_named_in_the_report(self, tmp_path: Path) -> None:
+        (tmp_path / "pyproject.toml").write_text("not = [toml", encoding="utf-8")
+        body = "def test_a(mocker):\n    assert mocker\n"
+        result = check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
+        assert result["passed"] is False
+        assert "could not be parsed" in result["details"]
+
+    def test_a_missing_pyproject_is_named_in_the_report(self, tmp_path: Path) -> None:
+        body = "def test_a(mocker):\n    assert mocker\n"
+        result = check_spec_test_fixtures_resolvable(_section_10(body), str(tmp_path), "")
+        assert result["passed"] is False
+        assert "no pyproject could be read" in result["details"]
