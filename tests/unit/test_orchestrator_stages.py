@@ -223,11 +223,104 @@ class TestImplCompletenessGateHonesty:
         assert "stub function detected" in impl["error_message"]
 
     def test_pass_verdict_still_passes(self, tmp_path):
+        # `workflow_status` is required since #2677: a sub-result that never
+        # says it reached N7 finalize is not a passed stage, so a stub
+        # standing in for a COMPLETED workflow has to say so too.
         result_state = self._run_impl(
-            {"error_message": "", "completeness_verdict": "PASS"},
+            {
+                "error_message": "",
+                "completeness_verdict": "PASS",
+                "workflow_status": "completed",
+            },
             tmp_path,
         )
         assert result_state["stage_results"]["impl"]["status"] == "passed"
+
+
+class TestCompletionMustBeAsExplicitAsFailure:
+    """#2677: the stage verdict is the workflow's own claim to have finished.
+
+    run-issue384-044442's testing workflow stopped at N2.5 on an exhausted
+    scaffolder, set no error, and the stage recorded `impl passed 3.5s` --
+    with the red phase, the implementation loop, the green phase and the
+    full-suite regression check all never run. A PR carrying an
+    assertion-free stub and no code was opened and merged from that verdict.
+
+    #1779 added the BLOCK check after one such escape and #2344 added the
+    unresolved-failures check after another. Enumerating failure modes cannot
+    terminate; this asks for the positive claim instead.
+    """
+
+    def _run_impl(self, sub_result: dict, tmp_path):
+        return TestImplCompletenessGateHonesty()._run_impl(sub_result, tmp_path)
+
+    def test_the_observed_shape_is_recorded_as_failed(self, tmp_path):
+        """N2.5 exhaustion: empty error, nothing else set. The exact case."""
+        result_state = self._run_impl({"error_message": ""}, tmp_path)
+        impl = result_state["stage_results"]["impl"]
+
+        assert impl["status"] == "failed"
+        assert "without reaching N7 finalize" in impl["error_message"]
+
+    def test_the_failure_names_the_phases_that_never_ran(self, tmp_path):
+        result_state = self._run_impl({"error_message": ""}, tmp_path)
+        message = result_state["stage_results"]["impl"]["error_message"]
+
+        assert "Never ran:" in message
+        for phase in ("red phase", "implementation", "green phase"):
+            assert phase in message, message
+
+    def test_a_completed_workflow_is_unaffected(self, tmp_path):
+        result_state = self._run_impl(
+            {"error_message": "", "workflow_status": "completed"}, tmp_path
+        )
+
+        assert result_state["stage_results"]["impl"]["status"] == "passed"
+
+    def test_a_completed_run_passes_whatever_its_phase_inventory(
+        self, tmp_path
+    ):
+        """Completion is the marker; the phase listing never gates."""
+        result_state = self._run_impl(
+            {
+                "error_message": "",
+                "workflow_status": "completed",
+                "red_phase_output": "1 failed",
+                "green_phase_output": "3 passed",
+                "implementation_files": ["src/x.py"],
+            },
+            tmp_path,
+        )
+
+        assert result_state["stage_results"]["impl"]["status"] == "passed"
+
+    def test_an_explicit_error_still_wins_and_keeps_its_own_words(
+        self, tmp_path
+    ):
+        """The new check must not overwrite a diagnosis that already exists."""
+        result_state = self._run_impl(
+            {"error_message": "LLD could not be loaded"}, tmp_path
+        )
+        impl = result_state["stage_results"]["impl"]
+
+        assert impl["status"] == "failed"
+        assert impl["error_message"] == "LLD could not be loaded"
+        assert "N7 finalize" not in impl["error_message"]
+
+    def test_a_block_verdict_keeps_its_own_message(self, tmp_path):
+        """#1779's check runs first and is more specific, so it survives."""
+        result_state = self._run_impl(
+            {
+                "error_message": "",
+                "completeness_verdict": "BLOCK",
+                "completeness_issues": ["stub function detected"],
+            },
+            tmp_path,
+        )
+        message = result_state["stage_results"]["impl"]["error_message"]
+
+        assert "Completeness gate BLOCK" in message
+        assert "N7 finalize" not in message
 
 
 class TestFormatStageTable:

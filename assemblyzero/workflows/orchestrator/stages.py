@@ -321,6 +321,29 @@ def _unresolved_test_failures(sub_result: dict) -> int:
     return total
 
 
+def _phases_not_run(sub_result: dict) -> str:
+    """Which TDD phases produced no output, named in the halt text (#2677).
+
+    "Ended without reaching finalize" says a route was not taken. This says
+    what was not DONE, which is the part an operator reading `impl passed
+    3.5s` needed and did not get: on run-issue384-044442 the red phase, the
+    implementation loop, the green phase and the regression check had all
+    never run, and nothing in the stage table showed it.
+
+    Reports only phases with NO recorded output. A phase that ran and failed
+    is a different fact and is already named by the checks above.
+    """
+    phases = (
+        ("red phase", "red_phase_output"),
+        ("implementation", "implementation_files"),
+        ("green phase", "green_phase_output"),
+    )
+    missing = [label for label, key in phases if not sub_result.get(key)]
+    if not missing:
+        return "Every phase produced output, so the workflow stopped after them."
+    return f"Never ran: {', '.join(missing)}."
+
+
 def _is_non_transient_halt(sub_result: dict) -> bool:
     """Sub-workflow halts write a recovery_plan_path. Non-transient by default
     since the resume command — not a 10-second retry — is the recovery path.
@@ -1580,6 +1603,32 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
                     f"green-phase measurement did not pass, so the stage did "
                     f"not pass."
                 )
+
+        # #2677: COMPLETION MUST BE AS EXPLICIT AS FAILURE.
+        #
+        # Every check above this line is a negative: it names one way the
+        # sub-workflow can end badly while leaving `error_message` empty.
+        # #1779 added the BLOCK verdict after one escape and #2344 added
+        # unresolved failures after another, and run-issue384-044442 found a
+        # third -- the testing workflow stopped at N2.5 on an exhausted
+        # scaffolder, said nothing, and the stage recorded `impl passed 3.5s`
+        # with the red phase, the implementation loop, the green phase and the
+        # regression check all never run. A PR carrying an assertion-free stub
+        # and no code was opened and merged from that verdict.
+        #
+        # Enumerating failures cannot terminate: any new END that forgets to
+        # set an error re-creates the class. So the stage asks the workflow to
+        # SAY it finished. `workflow_status` is set in exactly one place, N7
+        # finalize, which is reached only after the green phase has passed --
+        # every other route to END is a failure, a halt, or `scaffold_only`,
+        # which the orchestrator never sets. This is #2297's halted-is-
+        # authoritative reading in the positive direction.
+        if not error_msg and sub_result.get("workflow_status") != "completed":
+            error_msg = (
+                "Testing workflow ended without reaching N7 finalize, so the "
+                "implementation stage did not pass. "
+                + _phases_not_run(sub_result)
+            )
 
         if not error_msg:
             result = _make_stage_result(

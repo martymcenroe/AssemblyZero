@@ -256,6 +256,11 @@ def finalize(state: TestingWorkflowState) -> dict[str, Any]:
     return {
         "test_report_path": str(report_path),
         "archived_files": archived_files,
+        # #2677: the only place this is ever set. The line above prints
+        # "Testing workflow COMPLETE"; this is that same claim in a field the
+        # orchestrator can read, so a run that never reached N7 cannot be
+        # recorded as a passed impl stage however quietly it ended.
+        "workflow_status": "completed",
         "error_message": "",
     }
 
