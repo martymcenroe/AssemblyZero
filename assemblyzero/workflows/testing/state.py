@@ -236,6 +236,21 @@ class TestingWorkflowState(TypedDict, total=False):
     # Output
     test_report_path: str
     implementation_report_path: str
+    #: Explicit terminal verdict: "" while running, "completed" when N7
+    #: finalize ran. Set in exactly one place, and the orchestrator's impl
+    #: stage requires it (#2677).
+    #:
+    #: Completion must be as explicit as failure. The stage used to pass on
+    #: `not error_message`, so a workflow that ended anywhere without setting
+    #: an error read as one that had done its job -- run-issue384-044442
+    #: stopped at N2.5 on an exhausted scaffolder and was recorded `impl
+    #: passed 3.5s`, with the red phase, the implementation loop, the green
+    #: phase and the regression check all never run, and a PR of an
+    #: assertion-free stub opened and merged from it. #1779 and #2344 each
+    #: added one more negative check after one more escape; this asks the
+    #: workflow to say it finished, which is #2297's reading in the positive
+    #: direction.
+    workflow_status: str
 
     # Error handling
     error_message: str
