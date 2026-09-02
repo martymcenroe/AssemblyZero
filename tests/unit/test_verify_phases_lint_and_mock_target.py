@@ -18,6 +18,7 @@ substitute for this one file, deliberately not a fleet CI change.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -39,15 +40,25 @@ class TestThisFileIsClean:
         Scoped to this one file on purpose. A fleet-wide lint gate is a
         separate decision with a separate blast radius, and this issue does
         not license it.
+
+        The availability check asks whether the module is importable rather
+        than reading an exit code. The first version of this test guarded on
+        `returncode == 2`, reasoning that a missing module is a usage error;
+        `python -m ruff` with no ruff installed actually exits **1**, which is
+        also what "ruff ran and found violations" returns. It passed on this
+        machine, where ruff is installed, and failed on CI, where it is not --
+        the exact shape of a test asserting on a symptom instead of the
+        mechanism it means to test.
         """
+        if importlib.util.find_spec("ruff") is None:
+            pytest.skip("ruff is not installed in this environment")
+
         result = subprocess.run(
             [sys.executable, "-m", "ruff", "check", str(TARGET),
              "--output-format", "concise"],
             capture_output=True, text=True, cwd=str(REPO_ROOT),
         )
 
-        if result.returncode == 2 and "No module named" in result.stderr:
-            pytest.skip("ruff is not installed in this environment")
         assert result.returncode == 0, result.stdout or result.stderr
 
     def test_the_dead_router_import_is_gone(self) -> None:
