@@ -797,6 +797,54 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
             change_type, repo_root, filepath, target_path
         )
 
+        # #2644: the edit script's own view of the file, read AFTER the
+        # resolution above.
+        #
+        # `existing_content` is read ~60 lines up, guarded by
+        # `change_type.lower() == "modify"` -- and at that point change_type
+        # still says whatever the LLD said. For a file the LLD calls "Add"
+        # that the base already ships, it is "Add" there and "Modify" here, so
+        # `existing_content` stays "" and `should_use_edit_script` sees an
+        # empty file and declines. That is exactly the mid-arc case the edit
+        # script exists for, and the case every Phase 2 run is in.
+        #
+        # Measured on run-issue331-092220: iteration 0 wrote stingray.py whole
+        # in 67s; iteration 1, fixing 3 failing tests and a 3-point coverage
+        # gap, ran the full-file path for 1200s and was killed
+        # (ceiling_timeout). No `[EDIT-SCRIPT]` line appears anywhere in that
+        # log -- the machinery #2407 landed two weeks earlier never engaged.
+        #
+        # Deliberately a SEPARATE name rather than repairing `existing_content`
+        # in place. That value also reaches `validate_code_response`, where a
+        # non-empty existing file activates #587's drastic-shrink gate; making
+        # it non-empty here would add a refusal surface to the full-file path,
+        # on the campaign's own route, as a side effect of a timeout fix.
+        edit_script_content = existing_content
+        if (
+            not edit_script_content
+            and change_type.lower() == "modify"
+            and target_path.exists()
+        ):
+            try:
+                edit_script_content = target_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                # fail-open: an unreadable file leaves the edit script with
+                # nothing to SEARCH, which is precisely the condition
+                # `should_use_edit_script` declines on. Continuing lands on
+                # the full-file path, which reads the file itself through the
+                # prompt builder and will report its own failure -- so this is
+                # never worse than the behaviour before #2644. Halting here
+                # would turn a read hiccup into a dead stage.
+                #
+                # Audible on purpose: the silent version of this was what the
+                # fail-open gate objected to, and an edit script that quietly
+                # declines is exactly how run-issue331-092220 went unexplained.
+                edit_script_content = ""
+                print(
+                    f"        [EDIT-SCRIPT] could not read {filepath} "
+                    f"({exc}); falling through to the full-file path"
+                )
+
         # Validate change type
         if change_type.lower() == "modify" and not target_path.exists():
             emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
@@ -877,11 +925,11 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         # below, so this is never worse than the behavior it replaces.
         code = None
         if should_use_edit_script(
-            change_type, existing_content, revision_error_context
+            change_type, edit_script_content, revision_error_context
         ):
             outcome = try_edit_script_fix(
                 filepath=filepath,
-                existing_content=existing_content,
+                existing_content=edit_script_content,
                 failure_context=revision_error_context,
                 model=select_model_for_file(filepath, 0, False),
                 system_prompt=stable_system_prompt,
