@@ -484,7 +484,12 @@ class TestRotationLogic:
         assert result.success is False
         # When all credentials fail due to quota exhaustion, error type is QUOTA_EXHAUSTED
         assert result.error_type == GeminiErrorType.QUOTA_EXHAUSTED
-        assert "All credentials failed" in result.error_message
+        # #2553: the headline states the CLASS and counts the roster. It read
+        # "All credentials failed" -- plural over a denominator of one on the
+        # deployed roster, and naming the wrong failure class.
+        assert "Quota exhausted" in result.error_message
+        assert "all 3 credentials" in result.error_message
+        assert "All credentials failed" not in result.error_message
 
 
 class TestBackoffDelay:
@@ -671,7 +676,10 @@ class TestTheFailureTextNamesTheTransport:
         ):
             result = client.invoke("system", "content")
 
-        assert "All credentials failed" in result.error_message
+        # #2553: the property is unchanged -- transport AND reason both
+        # present. Only the headline's wording moved: it names the failure
+        # class instead of the roster.
+        assert "agy (Antigravity CLI)" in result.error_message
         assert "Quota exhausted" in result.error_message
         assert "key-1" in result.error_message
 
