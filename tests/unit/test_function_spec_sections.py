@@ -217,3 +217,195 @@ class TestTheComplaintIsAddressable:
         )["details"]
 
         assert re.search(r"line \d+-\d+", details), details
+
+
+#: The shape that halted boostgauge #421's fifth launch: an Input Example
+#: fence that OPENS with a Python comment. `# Called on ...` matches `^#\s`
+#: exactly as a markdown heading does, so the subsection ended at the comment
+#: and the `**Output Example:**` four lines below it fell outside the region
+#: the check measures (#2687).
+COMMENT_IN_FENCE = """\
+### 5.3 `Telltale.current_peak()`
+
+**Signature:**
+
+```python
+def current_peak(self) -> Optional[float]:
+    ...
+```
+
+**Input Example:**
+
+```python
+# Assuming instance history: Sample(0.0, 100.0) -> departed at 10.0
+# window = 10.0, decay_rate = 15.0
+```
+
+**Output Example:**
+
+```python
+70.0 # Evaluates: 100.0 - 15.0 * (12.0 - 10.0)
+```
+"""
+
+#: The same shape with the Output Example genuinely absent. The fix must not
+#: buy its silence by widening the region into a pass for everything.
+COMMENT_IN_FENCE_TRULY_MISSING = """\
+### 5.4 `Telltale.reset()`
+
+**Signature:**
+
+```python
+def reset(self) -> None:
+    ...
+```
+
+**Input Example:**
+
+```python
+# Called on a Telltale instance with active history
+```
+"""
+
+
+class TestAFenceIsNotProse:
+    """A `#` comment inside a code sample is not a heading (#2687).
+
+    The check's verdict turned on whether the model happened to open an
+    example with a comment -- the accident-of-phrasing dependence #2620
+    demoted the window scan for, inherited by its replacement in a different
+    place. `revision_pinning._blocks` already tracks fence state against the
+    same document (#2681); this is that rule in the one place that lacked it.
+    """
+
+    def test_a_comment_opening_the_example_fence_does_not_end_the_section(
+        self,
+    ) -> None:
+        sections = function_spec_sections(spec(COMMENT_IN_FENCE))
+
+        assert len(sections) == 1
+        body = sections[0][1]
+        assert "**Output Example:**" in body, (
+            "the block is four lines below the comment and inside the "
+            "subsection; a fence-blind bound hides it"
+        )
+
+    def test_the_check_passes_on_a_documented_section_that_uses_comments(
+        self,
+    ) -> None:
+        result = check_function_spec_sections_have_examples(
+            spec(COMMENT_IN_FENCE)
+        )
+
+        assert result["passed"] is True, result["details"]
+
+    def test_a_genuinely_missing_block_still_fails(self) -> None:
+        """The gate is not turned off -- same fence, same comment, no block."""
+        result = check_function_spec_sections_have_examples(
+            spec(COMMENT_IN_FENCE_TRULY_MISSING)
+        )
+
+        assert result["passed"] is False
+        assert "**Output Example:**" in result["details"]
+        assert "### 5.4 `Telltale.reset()`" in result["details"]
+
+    def test_the_verdict_no_longer_depends_on_whether_a_comment_was_written(
+        self,
+    ) -> None:
+        """The discriminating fact, stated as a test.
+
+        Before the fix these two drafts -- identical but for a comment line
+        inside the Input Example fence -- got opposite verdicts.
+        """
+        with_comment = check_function_spec_sections_have_examples(
+            spec(COMMENT_IN_FENCE)
+        )
+        without_comment = check_function_spec_sections_have_examples(
+            spec(COMMENT_IN_FENCE.replace(
+                "# Assuming instance history: Sample(0.0, 100.0) "
+                "-> departed at 10.0\n# window = 10.0, decay_rate = 15.0\n",
+                "history = [Sample(0.0, 100.0)]\n",
+            ))
+        )
+
+        assert with_comment["passed"] == without_comment["passed"] is True
+
+    def test_a_fenced_heading_does_not_open_a_phantom_subsection(self) -> None:
+        """A spec quoting template 0701 inside a fence adds no sections."""
+        quoting = (
+            "### 5.1 `render_face()`\n\n"
+            "**Signature:**\n\n"
+            "```markdown\n"
+            "### 5.9 `not_a_real_function()`\n"
+            "```\n\n"
+            "**Input Example:**\n\n```python\nwidth = 1024\n```\n\n"
+            "**Output Example:**\n\n```python\nb\"png\"\n```\n"
+        )
+        sections = function_spec_sections(spec(quoting))
+
+        assert [s[0] for s in sections] == ["### 5.1 `render_face()`"]
+
+    def test_an_unterminated_fence_swallows_the_remainder(self) -> None:
+        """The generous bound, chosen deliberately.
+
+        This check's failure direction is a false alarm that halts the stage,
+        so an over-wide region costs a missed complaint while an over-narrow
+        one costs a launch.
+        """
+        sections = function_spec_sections(
+            spec("### 5.1 `f()`\n\n```python\n# never closed\n")
+        )
+
+        assert len(sections) == 1
+        assert "never closed" in sections[0][1]
+
+
+@pytest.fixture(scope="module")
+def draft() -> str:
+    """The preserved draft, byte-for-byte."""
+    from pathlib import Path
+
+    path = (
+        Path(__file__).parent.parent
+        / "fixtures" / "boostgauge41_fenced_comment" / "001-spec-draft.md"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+class TestTheDraftThatHaltedLaunchFive:
+    """The preserved artifact, whole (#2687).
+
+    `001-spec-draft.md` from boostgauge run `run-issue41-184913`
+    (`data/speedrun/reset-artifacts/issue-41/lineage/
+    41-implspec-20260902T010133Z/2026-09-02T00-42-11Z/`), byte-for-byte. The
+    spec stage halted non-transient on it after three refused or no-op
+    revisions. All four of its subsections carry both blocks; two read as
+    missing because their example fences open with a comment.
+    """
+
+    def test_every_subsection_carries_both_blocks(self, draft: str) -> None:
+        sections = function_spec_sections(draft)
+
+        assert len(sections) == 4
+        for heading, body, _line in sections:
+            assert "**Input Example:**" in body, heading
+            assert "**Output Example:**" in body, heading
+
+    def test_the_check_passes_so_no_revision_is_demanded(
+        self, draft: str
+    ) -> None:
+        result = check_function_spec_sections_have_examples(draft)
+
+        assert result["passed"] is True, result["details"]
+        assert "All 4 function-specification" in result["details"]
+
+    def test_the_two_hidden_blocks_are_where_the_run_could_not_see_them(
+        self, draft: str
+    ) -> None:
+        """Named exactly, so a regression points at the same two lines."""
+        lines = draft.splitlines()
+
+        assert lines[127].startswith("# Assuming instance history:")
+        assert lines[131] == "**Output Example:**"
+        assert lines[156].startswith("# Called on a Telltale instance")
+        assert lines[159] == "**Output Example:**"

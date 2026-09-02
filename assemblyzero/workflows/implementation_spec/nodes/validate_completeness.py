@@ -856,15 +856,65 @@ _FUNC_SPEC_HEADING_RE = re.compile(
 #: The blocks template 0701 requires inside each such subsection.
 _REQUIRED_EXAMPLE_BLOCKS = ("**Input Example:**", "**Output Example:**")
 
+#: A fence delimiter. Same vocabulary `revision_pinning._FENCE_RE` uses, so the
+#: two modules agree about where a code block starts and stops (#2681).
+_FENCE_LINE_RE = re.compile(r"^```.*$", re.MULTILINE)
+
+
+def _fenced_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Character spans covered by fenced code blocks, delimiters included.
+
+    An UNTERMINATED fence swallows the remainder of the document. That is the
+    generous direction and it is chosen deliberately: this module's consumer
+    fails a spec when it cannot find a block, so an over-wide fence costs a
+    missed complaint while an over-narrow one costs a false alarm that halts
+    the stage (#2687).
+    """
+    spans: list[tuple[int, int]] = []
+    open_at: int | None = None
+    for match in _FENCE_LINE_RE.finditer(text):
+        if open_at is None:
+            open_at = match.start()
+        else:
+            spans.append((open_at, match.end()))
+            open_at = None
+    if open_at is not None:
+        spans.append((open_at, len(text)))
+    return tuple(spans)
+
+
+def _outside_fences(pos: int, spans: tuple[tuple[int, int], ...]) -> bool:
+    return not any(start <= pos < end for start, end in spans)
+
 
 def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
     """Every `### 5.N` subsection as (heading, body, 1-based heading line).
 
     Bounded by the NEXT heading of any level, so a subsection's body is its
     own -- which is the whole difference between this and a window scan.
+
+    **Fences are not prose (#2687).** A Python comment at column zero inside an
+    example -- `# Called on a Telltale instance with active history` -- matches
+    `^#\\s` exactly as a markdown heading does. Reading it as one ended the
+    subsection early and hid the `**Output Example:**` four lines below it, so
+    the check reported a block missing that was present; boostgauge #421's
+    fifth launch halted on a spec that was already correct. The verdict turned
+    on whether the model happened to open a code sample with a comment, which
+    is the accident-of-phrasing dependence #2620 demoted the window scan for.
+
+    `revision_pinning._blocks` already tracks fence state for the same reason
+    and against the same document. This is the same rule in the one place that
+    lacked it -- both for the headings that OPEN a subsection and the heading
+    that ENDS one, since a bound that ignored fences on one side only would
+    leave a fenced `### 5.N` opening a section nothing inside that fence could
+    close.
     """
     text = spec or ""
-    matches = list(_FUNC_SPEC_HEADING_RE.finditer(text))
+    fences = _fenced_spans(text)
+    matches = [
+        m for m in _FUNC_SPEC_HEADING_RE.finditer(text)
+        if _outside_fences(m.start(), fences)
+    ]
     if not matches:
         return []
     next_heading = re.compile(r"^#{1,6}\s", re.MULTILINE)
@@ -874,7 +924,13 @@ def function_spec_sections(spec: str) -> list[tuple[str, str, int]]:
         limit = (
             matches[index + 1].start() if index + 1 < len(matches) else len(text)
         )
-        following = next_heading.search(text, start, limit)
+        following = next(
+            (
+                m for m in next_heading.finditer(text, start, limit)
+                if _outside_fences(m.start(), fences)
+            ),
+            None,
+        )
         body_end = following.start() if following else limit
         line_no = text.count("\n", 0, match.start()) + 1
         out.append((match.group(0).strip(), text[start:body_end], line_no))
