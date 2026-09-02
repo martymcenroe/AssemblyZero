@@ -21,13 +21,67 @@ from typing import Any
 # Error types classified as transient (will resolve on their own)
 TRANSIENT_ERROR_TYPES = frozenset({"capacity_exhausted", "quota_exhausted"})
 
-# Workflow name → CLI tool for resume commands
+#: Workflow name -> the tool that resumes it, relative to the AssemblyZero
+#: checkout. Every path here is asserted to exist by
+#: `test_resume_commands_resolve.py`; a path string in a dict has no way to be
+#: wrong loudly, and two of these were wrong for an unknown length of time
+#: (#2663).
+#:
+#: `orchestrator` names the RELAUNCH rather than `orchestrate.py` directly.
+#: The two are not equivalent and the relaunch is the one to hand an operator:
+#: `speedrun_roll` computes the resume stage itself (`resume_plan`, and #2206's
+#: ruling that a failure halts for diagnosis and the relaunch resumes from the
+#: failed stage), so the operator does not have to name a stage; and it is what
+#: carries the child environment (#2662's `_child_env`), the kill watch and the
+#: run log. `orchestrate.py --resume-from <stage>` is the inner call it makes.
+#:
+#: All four accept `--issue` and `--repo`, which is what
+#: `build_resume_command` relies on.
 RESUME_COMMANDS = {
     "requirements": "tools/run_requirements_workflow.py",
     "implementation_spec": "tools/run_implementation_spec_workflow.py",
-    "testing": "tools/run_tdd_workflow.py",
-    "orchestrator": "tools/run_orchestrator.py",
+    "testing": "tools/run_implement_from_lld.py",
+    "orchestrator": "tools/speedrun_roll.py",
 }
+
+#: State keys that can name the repo the run was against, best first. The
+#: orchestrator carries `target_repo`; sub-workflows carry the impl worktree in
+#: `repo_root` and the real repo in `original_repo_root`, and a resume must be
+#: pointed at the repo, never at a worktree that the halt may have removed.
+_REPO_KEYS = ("target_repo", "original_repo_root", "repo_root")
+
+
+def build_resume_command(workflow: str, issue_number: int, state: dict) -> str:
+    """The one command that actually resumes this workflow (#2663).
+
+    Every orchestrator halt used to print `poetry run python
+    tools/run_orchestrator.py --issue N` -- a file that exists in neither
+    AssemblyZero nor any target repo -- and `testing` named a second file that
+    does not exist either. A halt is where an operator arrives with the least
+    context and the most urgency, and the resume line is the whole recovery
+    affordance; it is also the one line nobody exercises, because a halt
+    diagnosed by an agent never has its command typed. So it can be wrong
+    indefinitely, and it was.
+
+    Returns a command naming a file that exists, or -- when the workflow is
+    one this map does not know -- says so plainly. The old fallback invented
+    `tools/run_<workflow>_workflow.py` for any unknown name, which is the same
+    defect generalised: a guess that reads exactly like a fact.
+    """
+    tool = RESUME_COMMANDS.get(workflow)
+    if not tool:
+        return (
+            f"(no resume command is defined for workflow {workflow!r} -- "
+            f"see AssemblyZero RESUME_COMMANDS)"
+        )
+
+    parts = [f"poetry run python {tool}", f"--issue {issue_number}"]
+    repo = next(
+        (str(state.get(key)) for key in _REPO_KEYS if state.get(key)), ""
+    )
+    if repo:
+        parts.append(f"--repo {repo}")
+    return " ".join(parts)
 
 
 @dataclass
@@ -141,11 +195,7 @@ def generate_recovery_plan(
     is_transient = error_type in TRANSIENT_ERROR_TYPES
     halted_at = datetime.now(timezone.utc).isoformat()
 
-    # Build resume command
-    tool = RESUME_COMMANDS.get(workflow, f"tools/run_{workflow}_workflow.py")
-    resume_command = (
-        f"poetry run python {tool} --issue {issue_number}"
-    )
+    resume_command = build_resume_command(workflow, issue_number, state)
 
     # Earliest retry for transient errors
     earliest_retry = ""
