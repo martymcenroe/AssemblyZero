@@ -27,6 +27,12 @@ from assemblyzero.workflows.testing.audit import (
 )
 from assemblyzero.workflows.testing.circuit_breaker import check_circuit_breaker
 from assemblyzero.workflows.testing.nodes.e2e_validation import _extract_failed_test_names
+# `route_by_exit_code` is deliberately NOT imported here (#2671). It was, and
+# was never called: the exit-code branching that actually runs is inline below
+# on these same constants. Removing the import is the lint fix; the two
+# implementations of one decision are #2690, which must not be resolved as a
+# drive-by -- adopting the router would change routing on the path Phase 2 is
+# rolling through, and the mapping diff has not been measured.
 from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_INTERRUPTED,
     EXIT_INTERNALERROR,
@@ -34,7 +40,6 @@ from assemblyzero.workflows.testing.exit_code_router import (
     EXIT_NOTESTSCOLLECTED,
     describe_exit_code,
     describe_run_outcome,
-    route_by_exit_code,
 )
 from assemblyzero.workflows.testing.framework_detector import CoverageType, TestFramework
 from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
@@ -2934,11 +2939,28 @@ FAILED tests/test_issue_42.py::test_input_validation - AssertionError: TDD: Impl
 
 
 def _mock_verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
-    """Mock implementation for testing."""
+    """Mock implementation for testing.
+
+    `coverage_target` was read here and then ignored, which ruff flagged as an
+    unused local (#2671). Answering "was it meant to gate something" from the
+    code around it: yes. The second branch hardcodes 92.0% and routes onward
+    unconditionally, and the f-string it builds carries no placeholder --
+    someone began interpolating the measured number against the target and
+    stopped. Two of the three lint findings in this file are halves of that
+    one unfinished edit.
+
+    So it gates now, and the mock can rehearse a coverage shortfall. This
+    changes nothing at the default: `augment_tests` reads
+    `coverage_target` with a fallback of 90, 92.0 clears it, and every
+    existing caller keeps the old routing. A rehearsal that asks for 95 --
+    the boostgauge #331 configuration whose real 92.0%-vs-95% shortfall
+    killed a stage for 22 minutes (#2644) -- can now exercise that path
+    instead of reporting green.
+    """
     audit_dir_str = state.get("audit_dir", "")
     audit_dir = Path(audit_dir_str) if audit_dir_str else None
     iteration_count = state.get("iteration_count", 0)
-    coverage_target = state.get("coverage_target", 90)
+    coverage_target = float(state.get("coverage_target", 90) or 90)
 
     # First iteration: fail, second: pass
     if iteration_count <= 1:
@@ -2956,6 +2978,7 @@ FAILED tests/test_issue_42.py::test_login_failure - AssertionError
         coverage_achieved = 75.0
         next_node = "N4_implement_code"
     else:
+        coverage_achieved = 92.0
         mock_output = f"""============================= test session starts ==============================
 collected 3 items
 
@@ -2969,12 +2992,22 @@ Name                      Stmts   Miss  Cover
 assemblyzero/__init__.py          10      0   100%
 assemblyzero/module.py            50      5    90%
 ---------------------------------------------
-TOTAL                        60      5    92%
+TOTAL                        60      5    {coverage_achieved:.0f}%
 
 ============================== 3 passed in 0.18s ===============================
 """
-        coverage_achieved = 92.0
-        next_node = "N7_finalize" if state.get("skip_e2e") else "N6_e2e_validation"
+        # The f-string above now has a placeholder, which is what it was
+        # reaching for: the printed report and the recorded number are one
+        # fact, so a rehearsal cannot show 92% in the text while carrying
+        # something else in state.
+        if coverage_achieved < coverage_target:
+            # #2327: a coverage shortfall goes to test augmentation, never to
+            # implementation. Same destination the live path takes.
+            next_node = "N4c_augment_tests"
+        else:
+            next_node = (
+                "N7_finalize" if state.get("skip_e2e") else "N6_e2e_validation"
+            )
 
     if audit_dir and audit_dir.exists():
         file_num = next_file_number(audit_dir)
@@ -2982,13 +3015,22 @@ TOTAL                        60      5    92%
     else:
         file_num = state.get("file_counter", 0)
 
-    print(f"    [MOCK] Green phase: coverage {coverage_achieved}%")
+    print(
+        f"    [MOCK] Green phase: coverage {coverage_achieved}% "
+        f"vs {coverage_target}% target -> {next_node}"
+    )
+
+    # Every route that loops BACK for more work advances the counter, which is
+    # what lets the cap end the loop. The live shortfall branch increments on
+    # its way to N4c for exactly that reason; a mock that routed there without
+    # incrementing would rehearse an infinite loop rather than a shortfall.
+    loops_back = next_node in ("N4_implement_code", "N4c_augment_tests")
 
     return {
         "green_phase_output": mock_output,
         "coverage_achieved": coverage_achieved,
         "file_counter": file_num,
-        "iteration_count": iteration_count + 1 if next_node == "N4_implement_code" else iteration_count,
+        "iteration_count": iteration_count + 1 if loops_back else iteration_count,
         "next_node": next_node,
         "error_message": "",
     }
