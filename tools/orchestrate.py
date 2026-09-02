@@ -49,6 +49,9 @@ from assemblyzero.workflows.orchestrator.graph import (  # noqa: E402
     orchestrate,
 )
 from assemblyzero.core import provider_storm
+from assemblyzero.core.recovery_plan import (  # noqa: E402
+    build_resume_command,
+)
 from assemblyzero.workflows.orchestrator.state import (  # noqa: E402
     STAGE_ORDER,
     OrchestrationState,
@@ -99,8 +102,22 @@ def report_progress(state: OrchestrationState) -> None:
     print()
 
 
-def format_error_message(stage: str, stage_result: StageResult) -> str:
-    """Format actionable error message with context."""
+def format_error_message(
+    stage: str,
+    stage_result: StageResult,
+    issue_number: int = 0,
+    target_repo: str = "",
+) -> str:
+    """Format actionable error message with context.
+
+    #2663: the resume line comes from `recovery_plan.build_resume_command`,
+    the same producer the halt banner uses, so an operator reading one failure
+    gets one instruction. This function used to print `Resume: orchestrate
+    --issue N --resume-from <stage>` with a LITERAL `N` and a command name
+    (`orchestrate`) that is not runnable, while the halt banner printed a
+    different and also-broken command from a separate map -- two contradictory
+    lines, neither copy-pasteable.
+    """
     error = stage_result.get("error_message", "Unknown error")
     attempts = stage_result.get("attempts", 0)
     duration = stage_result.get("duration_seconds", 0)
@@ -125,12 +142,30 @@ def format_error_message(stage: str, stage_result: StageResult) -> str:
         f"  Error: {error}",
         attempts_line,
         "",
-        f"  Resume: orchestrate --issue N --resume-from {stage}",
+        f"  Resume: {_resume_line(issue_number, target_repo)}",
+        f"          (resumes from '{stage}', the failed stage, automatically)",
         "=" * 58,
         "",
     ]
 
     return "\n".join(lines)
+
+
+def _resume_line(issue_number: int, target_repo: str) -> str:
+    """The single resume instruction, from the single producer (#2663).
+
+    The relaunch works out which stage to resume from on its own
+    (`speedrun_roll.resume_plan`, per #2206) and takes no `--resume-from`, so
+    the command carries no stage. The line above it still NAMES the failed
+    stage, because the property #2372 pinned is that the operator is never
+    pointed past the failure -- told to resume from `impl` when `spec` was the
+    stage that died, straight back into the same wall. That protection is
+    preserved twice over: the banner states the stage, and `resume_plan`
+    derives it from the same recorded stage results the old string was built
+    from. What is gone is the literal `N` and the literal `<stage>`.
+    """
+    state = {"target_repo": target_repo} if target_repo else {}
+    return build_resume_command("orchestrator", issue_number, state)
 
 
 def main() -> None:
@@ -312,7 +347,9 @@ Examples:
             # Find the failed stage
             for stage_name, stage_result in result["stage_results"].items():
                 if stage_result.get("status") in ("failed", "blocked"):
-                    print(format_error_message(stage_name, stage_result))
+                    print(format_error_message(
+                        stage_name, stage_result, args.issue, target_repo,
+                    ))
                     break
 
             if result["error_summary"]:
@@ -345,7 +382,7 @@ Examples:
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n[ORCHESTRATOR] Interrupted by user. State has been saved.")
-        print(f"[ORCHESTRATOR] Resume with: orchestrate --issue {args.issue} --resume-from <stage>")
+        print(f"[ORCHESTRATOR] Resume with: {_resume_line(args.issue, target_repo)}")
         sys.exit(130)
 
 

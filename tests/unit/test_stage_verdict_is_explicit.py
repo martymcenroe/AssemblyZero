@@ -212,6 +212,19 @@ class TestTheResumeHintNamesTheFailedStage:
     verdict fixes the hint; this pins that it stays derived."""
 
     def test_the_hint_names_spec_when_spec_failed(self):
+        """The property, restated for the command that actually resumes (#2663).
+
+        This asserted `--resume-from spec` in the rendered banner. That flag
+        belonged to a hand-written line naming `orchestrate`, which is not a
+        runnable command, alongside a literal `N` for the issue number -- so
+        the assertion held on a string no operator could use. The banner now
+        prints the relaunch, which takes no `--resume-from` because
+        `speedrun_roll.resume_plan` derives the stage from the same recorded
+        stage results the old string was built from (#2206).
+
+        What #2372 pinned is unchanged and still asserted below: the operator
+        is never pointed PAST the failure. `spec` is named, `impl` is not.
+        """
         import sys
 
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
@@ -222,11 +235,32 @@ class TestTheResumeHintNamesTheFailedStage:
             "error_message": "Iteration cap: 3 revision(s) ended with 1 unresolved check",
             "attempts": 1,
             "duration_seconds": 287.5,
-        })
+        }, 305, "C:/x/boostgauge")
 
-        assert "--resume-from spec" in rendered
-        assert "--resume-from impl" not in rendered
+        assert "resumes from 'spec'" in rendered
+        assert "impl" not in rendered
         assert "ORCHESTRATION FAILED at stage: spec" in rendered
+
+    def test_the_command_it_prints_is_runnable(self):
+        """The half the old assertion could not see.
+
+        `--resume-from spec` was present and correct inside an instruction
+        naming a command that does not exist, for an issue called `N`.
+        """
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+        from orchestrate import format_error_message
+
+        rendered = format_error_message("spec", {
+            "status": "failed", "error_message": "cap", "attempts": 1,
+            "duration_seconds": 1.0,
+        }, 305, "C:/x/boostgauge")
+
+        assert "poetry run python tools/speedrun_roll.py" in rendered
+        assert "--issue 305" in rendered
+        assert "--repo C:/x/boostgauge" in rendered
+        assert "--issue N" not in rendered
 
 
 class TestGenerateSpecKeepsTheFieldsApart:
