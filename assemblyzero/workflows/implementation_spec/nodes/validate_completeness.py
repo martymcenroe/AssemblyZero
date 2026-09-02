@@ -1801,12 +1801,24 @@ def check_manifest_traceability(
     if not tests:
         # No parseable test functions at all: with a binding manifest this is
         # a real gap, not an abstention — every row is untested.
+        #
+        # #2593: NAME the rows. This branch reported a COUNT while holding the
+        # ids, and a count addresses nothing: `_ROW_ID_RE` (`\b[A-Z]\d{0,3}
+        # [a-z]?\.\d+\b`) reads `N4.1` exactly, so the one vocabulary pinning
+        # has for this artifact was being withheld by the only check that has
+        # the artifact. The `problems` branch below already lists them under
+        # `manifest rows are ...`; this branch was the odd one out. Truncated
+        # at twelve to match it.
+        listed = ", ".join(row_ids[:12]) if row_ids else "none"
+        more = f" (and {len(row_ids) - 12} more)" if len(row_ids) > 12 else ""
         return CompletenessCheck(
             check_name="manifest_traceability",
             passed=False,
             details=(
                 f"The assertion manifest binds {len(row_ids)} row(s) but the "
-                f"spec contains no parseable test functions citing them."
+                f"spec contains no parseable test functions citing them. "
+                f"Manifest rows are {listed}{more}. Section 10 owes each a "
+                f"test."
                 + abstain_note
             ),
         )
