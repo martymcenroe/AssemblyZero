@@ -236,22 +236,82 @@ _UNLOCK_RE = re.compile(r"^\s*UNLOCK:\s*(.+?)\s*$", re.MULTILINE)
 #: the artifact class completeness checks demand added (#2560).
 _TEST_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]+)\s*\(")
 
-#: The phrases our own completeness checks use when they demand ADDITIONS
-#: ("3 LLD pass criterion(s) have no test in the spec ... Add a test for
-#: each", "... have no test asserting them. Section 10 owes each a test").
-#: A demand to add has no line to cite and no existing content to name —
-#: the #2555/#2558 vocabulary addresses only content that exists (#2560).
+#: A fence delimiter. The second artifact class a completeness check demands
+#: added (#2591) — an excerpt, a data-structure example and an I/O example are
+#: all fenced code blocks, and none of them is a test definition.
+_FENCE_OPEN_RE = re.compile(r"^\s*```")
+
+#: EVERY addition-demanding phrase our completeness checks emit, enumerated
+#: from their own `details=` strings rather than guessed at (#2591). The set is
+#: closed and authored: five phrasings, four checks, all in
+#: `validate_completeness.py`, and a new one has to be added here deliberately.
+#:
+#: | phrase | check | artifact demanded |
+#: |---|---|---|
+#: | `have no test` / `add a test` / `owes each a test` | criteria, error paths, manifest | a test definition |
+#: | `MUST include a code block` | `modify_files_have_excerpts` | a fenced excerpt |
+#: | `MUST have at least one JSON/YAML/Python example` | `data_structures_have_examples` | a fenced example |
+#: | `MUST have at least one example` | `functions_have_io_examples` | a fenced example |
+#: | `Add the block inside that subsection` | `function_spec_sections_have_examples` | a fenced example |
+#:
+#: #2560 built this for tests because tests were the only demanded artifact
+#: then. They are not now, and the regex encoded "an addition means a test" as
+#: if it were a law. `check_modify_files_have_excerpts` fires on any spec
+#: missing an excerpt -- a routine condition, not an exotic one -- and its
+#: demand was covered by neither the named-content vocabulary (the path it
+#: cites is absent from the draft BY DEFINITION, which is what it is
+#: complaining about) nor this exemption.
 _ADDITION_DEMAND_RE = re.compile(
-    r"\bhave no test\b|\badd a test\b|\bowes each a test\b", re.IGNORECASE
+    r"\bhave no test\b"
+    r"|\badd a test\b"
+    r"|\bowes each a test\b"
+    r"|\bMUST include a code block\b"
+    r"|\bMUST have at least one\b"
+    r"|\bAdd the block inside that subsection\b",
+    re.IGNORECASE,
 )
 
 
 def demands_additions(completeness_issues: list[str] | None) -> bool:
-    """True when any current completeness failure demands new tests (#2560)."""
+    """True when any current completeness failure demands new content (#2560).
+
+    Widened past tests by #2591's operator ruling. Note this is only HALF the
+    gate: `enforce_pinning` also requires the revised region to introduce the
+    demanded artifact, and until #2591 that predicate was a test definition
+    alone -- so widening this regex on its own changed nothing, measured. Both
+    halves moved together.
+    """
     return any(
         _ADDITION_DEMAND_RE.search(str(issue))
         for issue in completeness_issues or []
     )
+
+
+def _introduces_demanded_artifact(
+    new_region: list[str], prev_test_names: set[str]
+) -> bool:
+    """Does this region carry content a completeness check asked to be added?
+
+    Two artifact classes, because our checks demand two (#2591):
+
+    * a test definition the previous draft lacked -- #2560's original case;
+    * an opening fence -- an excerpt, a data-structure example and an I/O
+      example are all fenced code blocks.
+
+    A fence is not name-checked against the previous draft the way a test is,
+    because a fence has no name. That is a deliberately weaker test and it is
+    bounded by the caller: this is consulted ONLY when the round's own
+    completeness failures demanded an addition, and only for a region that
+    would otherwise be refused outright. The alternative -- refusing the
+    demanded excerpt -- is the deadlock this repairs.
+    """
+    for line in new_region:
+        match = _TEST_DEF_RE.match(line)
+        if match and match.group(1) not in prev_test_names:
+            return True
+        if _FENCE_OPEN_RE.match(line):
+            return True
+    return False
 
 
 def _test_def_names(text: str) -> set[str]:
@@ -384,15 +444,14 @@ def enforce_pinning(
             not current_flags[i] for i in range(i1, i2)
         )
         if locked and not unlock_reason:
-            if additions_demanded and any(
-                (match := _TEST_DEF_RE.match(line))
-                and match.group(1) not in prev_test_names
-                for line in new_region
+            if additions_demanded and _introduces_demanded_artifact(
+                new_region, prev_test_names
             ):
                 # The demanded compliance: this round's completeness
-                # failures asked for new tests and this region carries one
-                # the previous draft lacks (#2560). The regression event
-                # above still fires — visibility without destruction.
+                # failures asked for an addition and this region carries one
+                # the previous draft lacks (#2560, widened past tests by
+                # #2591). The regression event above still fires —
+                # visibility without destruction.
                 out.extend(new_region)
                 additions.append(_preview(new_region, j2 - j1))
             else:

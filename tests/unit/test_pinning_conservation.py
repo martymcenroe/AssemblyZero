@@ -315,6 +315,107 @@ The notes block stays put.
         assert not demands_additions(None)
 
 
+class TestAnExcerptIsAlsoADemandedAddition:
+    """#2591: the demanded artifact is not always a test.
+
+    `check_modify_files_have_excerpts` fires on any spec missing a current-
+    state excerpt -- routine, not exotic -- and its complaint could be
+    satisfied by neither vocabulary. The path it backticks is absent from the
+    draft BY DEFINITION, which is what it is complaining about, so the
+    named-content route can never address it; and `MUST include a code block`
+    matched none of #2560's three test-specific phrases.
+
+    **Widening the vocabulary alone does not fix it, measured.** The exemption
+    has a second gate: the revised region must introduce the demanded
+    artifact, and that predicate was `def test_*`. An excerpt is a fenced code
+    block, so with the vocabulary widened and the predicate untouched the
+    region was still refused and the excerpt still discarded. Both halves
+    moved together.
+    """
+
+    PREVIOUS = """# Implementation Spec
+
+## 1. Overview
+
+We add a bezel ring to the gauge face.
+
+## 6. Change Instructions
+
+Update the renderer to draw the ring.
+
+## 10. Test Mapping
+
+| id | test |
+|----|------|
+| N1.1 | test_bezel |
+"""
+
+    #: The drafter adds the excerpt AND rewords the line above it, which is
+    #: the ordinary shape of an edit and what makes the differ emit a REPLACE
+    #: rather than an insert. A pure insert was never refused -- "adding is
+    #: not un-fixing" -- so the pure-insert fixture does not reproduce this.
+    BUNDLED = PREVIOUS.replace(
+        "Update the renderer to draw the ring.",
+        "Update `src/render.py` to draw the ring. Current state:\n\n"
+        "```python\n"
+        "def render(surface):\n"
+        "    surface.fill(BLACK)\n"
+        "```",
+    )
+
+    #: What the complaint names. It matches no line of the draft, which is the
+    #: whole problem.
+    TOKENS = {"src/render.py"}
+
+    def test_the_demanded_excerpt_lands(self):
+        result = enforce_pinning(
+            self.PREVIOUS, self.BUNDLED,
+            current_tokens=set(self.TOKENS),
+            additions_demanded=True,
+        )
+
+        assert "def render(surface):" in result.text
+        assert result.refusals == ()
+        assert result.additions, "the pass is an event, never silent"
+
+    def test_the_same_edit_is_refused_when_nothing_demanded_it(self):
+        """The inverse, unchanged: an unprompted excerpt stays refusable."""
+        result = enforce_pinning(
+            self.PREVIOUS, self.BUNDLED,
+            current_tokens=set(self.TOKENS),
+            additions_demanded=False,
+        )
+
+        assert "def render(surface):" not in result.text
+        assert result.refusals
+
+    def test_a_locked_rewording_gains_nothing_from_the_demand(self):
+        """The widened predicate frees ADDITIONS, not modifications.
+
+        The same shape as the test-flavoured case above it: a locked edit
+        carrying no new fence and no new test is refused either way.
+        """
+        reworded = self.PREVIOUS.replace(
+            "Update the renderer to draw the ring.",
+            "Update the renderer to draw the bezel.",
+        )
+        result = enforce_pinning(
+            self.PREVIOUS, reworded,
+            current_tokens=set(self.TOKENS),
+            additions_demanded=True,
+        )
+
+        assert "Update the renderer to draw the ring." in result.text
+        assert result.refusals
+
+    def test_the_real_excerpt_complaint_reads_as_a_demand(self):
+        assert demands_additions([
+            "Missing current state excerpts for Modify files: "
+            "`src/render.py`. Each Modify file MUST include a code block "
+            "showing the current code that will be changed."
+        ])
+
+
 class TestIsExpansion:
     def test_ordered_containment_is_an_expansion(self):
         assert _is_expansion(["a", "b"], ["x", "a", "y", "b", "z"])
