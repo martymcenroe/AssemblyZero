@@ -239,6 +239,79 @@ class TestAddressableToday:
         assert verdict.tokens == ("n4.1", "n4.2", "section 10")
         assert verdict.verdict == ADDRESSED
 
+    def test_modify_files_have_excerpts_demands_an_addition(self):
+        """#2591, repaired. The complaint backticks a file path that is absent
+        from the draft BY DEFINITION -- absence is what it is complaining
+        about -- so the named-content vocabulary can never address it. It is
+        the addition exemption's business, and `MUST include a code block` is
+        now in the addition vocabulary.
+
+        The fixture is unchanged from when this test lived in
+        `TestUnaddressableToday`; only the expected verdict moved.
+        """
+        verdict = _classify(
+            vc.check_modify_files_have_excerpts(NO_CITING_TESTS, MODIFY_FILES),
+            NO_CITING_TESTS,
+        )
+
+        assert "src/render.py" in verdict.tokens
+        assert verdict.demands_addition is True
+        assert verdict.verdict == DEMANDS_ADDITION
+
+    def test_a_complaint_about_existing_content_still_demands_nothing(self):
+        """The safety half of #2591's ruling, and the reason the vocabulary is
+        a closed enumeration rather than a general notion of "add".
+
+        A wider addition vocabulary frees more locked regions, so a complaint
+        about content that ALREADY EXISTS must not trip it. The density
+        heuristic (#2592) is the sharpest case: it names no target at all, so
+        if anything were going to over-match it would.
+
+        Note which checks are deliberately NOT in this list.
+        `functions_have_io_examples` and `data_structures_have_examples` read
+        like complaints about existing content and are not -- both say "MUST
+        have at least one example", which is a demand to ADD one. They are in
+        the vocabulary on purpose. Writing this test the other way round is
+        what surfaced that: the first draft asserted
+        `functions_have_io_examples` demands nothing, and it was wrong.
+        """
+        existing_content_complaints = [
+            vc.check_change_instructions_specific(SPARSE_SPEC),
+            vc.check_manifest_traceability(
+                NO_CITING_TESTS, [], lld_content=""
+            ),
+        ]
+        for check_result in existing_content_complaints:
+            assert rp.demands_additions([check_result["details"]]) is False, (
+                f"{check_result['check_name']}: {check_result['details']}"
+            )
+
+    def test_the_vocabulary_is_a_closed_set(self):
+        """Six phrasings, enumerated from the checks' own `details=` strings.
+
+        The rule that makes this regex legitimate is that its members can be
+        written down (`voice-analysis.md` §28a's closed-set test). If a new
+        demand phrasing appears, it is added here deliberately rather than
+        matched by a general notion of "add", which would free locked regions
+        nobody demanded.
+        """
+        import re as _re
+
+        members = rp._ADDITION_DEMAND_RE.pattern.split("|")
+
+        assert len(members) == 6
+        for phrase, should_match in (
+            ("3 criteria have no test in the spec", True),
+            ("Each Modify file MUST include a code block showing", True),
+            ("Each function MUST have at least one example", True),
+            ("Add the block inside that subsection", True),
+            ("Change instructions lack diff-level specificity", False),
+            ("test(s) tracing to nothing: test_a, test_b", False),
+        ):
+            assert bool(_re.search(rp._ADDITION_DEMAND_RE, phrase)) is should_match, (
+                phrase
+            )
+
     def test_the_demand_to_add_tests_is_exempt_under_2560(self):
         """Naming the rows is necessary and not sufficient.
 
@@ -258,19 +331,6 @@ class TestUnaddressableToday:
     """The deadlock class, pinned. Each test asserts the CURRENT broken state
     against its filed issue. Repairing one flips its test, which is the
     signal to move it into TestAddressableToday."""
-
-    def test_modify_files_have_excerpts_names_a_path_not_in_the_draft(self):
-        """#2591. The complaint backticks a file path that is absent from the
-        draft BY DEFINITION -- absence is what it is complaining about -- and
-        its 'MUST include a code block' phrasing does not trip the addition
-        vocabulary, which only knows three test-specific phrases."""
-        verdict = _classify(
-            vc.check_modify_files_have_excerpts(NO_CITING_TESTS, MODIFY_FILES),
-            NO_CITING_TESTS,
-        )
-        assert "src/render.py" in verdict.tokens
-        assert verdict.demands_addition is False
-        assert verdict.verdict == UNADDRESSABLE
 
     def test_change_instructions_specific_parses_nothing_at_all(self):
         """#2592. A density heuristic about EXISTING content that names no
