@@ -147,6 +147,33 @@ CLASSIFICATIONS: dict[str, Classification] = {
             "ValueError' is a fact (#2333)."
         ),
     ),
+    "spec_test_functions_have_assertions": Classification(
+        check="spec_test_functions_have_assertions",
+        kind=FACT,
+        reads=(
+            "Section 10's extracted test functions, assembled exactly as the "
+            "scaffolder emits them, under `validate_test_structure`'s AST rule"
+        ),
+        reason=(
+            "a function body is a lone pass/docstring or it carries an assert "
+            "-- the same fact the implementation stage's scaffolder validator "
+            "refuses on, asked one stage earlier with the same code (#2706)."
+        ),
+    ),
+    "spec_test_fixtures_resolvable": Classification(
+        check="spec_test_fixtures_resolvable",
+        kind=FACT,
+        reads=(
+            "each test-function parameter against pytest's builtin fixtures, "
+            "the block's own @pytest.fixture definitions, and the plugins the "
+            "target repo's pyproject declares"
+        ),
+        reason=(
+            "a parameter names a fixture one of those three routes provides or "
+            "it does not; pytest errors at setup on the latter, which is the "
+            "fact this check reports early (#2707)."
+        ),
+    ),
     "visual_baselines_not_self_referential": Classification(
         check="visual_baselines_not_self_referential",
         kind=FACT,
