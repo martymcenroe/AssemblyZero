@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from assemblyzero.core.recovery_plan import build_resume_command
+
 #: How many trailing preserved-branch records travel in the bundle. The
 #: record has no reliable run-id linkage (leavings refs carry run="" by
 #: construction), so the tail is the honest cut, said in the bundle.
@@ -122,13 +124,20 @@ def build_halt_evidence(
     if repo_root_str:
         preserved = _preserved_tail(Path(repo_root_str))
 
+    issue_number = int(state.get("issue_number", 0) or 0)
     return {
-        "bundle_version": 1,
+        "bundle_version": 2,
         "workflow": workflow,
-        "issue": int(state.get("issue_number", 0) or 0),
+        "issue": issue_number,
         "stage": stage,
         "halted_at": datetime.now(tz=timezone.utc).isoformat(),
         "error_message": error_message,
+        # #2725: the three things a reader needs and had to reconstruct by hand.
+        # When only a spending limit may end a run, a cap that fires and leaves
+        # no way to pick the work back up has turned a limit into a loss.
+        "gate_key": gate_key_for(error_message),
+        "outstanding": outstanding_items(state),
+        "resume_command": build_resume_command(workflow, issue_number, state),
         "counters": {
             "review_iteration": state.get("review_iteration", 0),
             "iteration_count": state.get("iteration_count", 0),
@@ -139,6 +148,56 @@ def build_halt_evidence(
         "artifacts": artifacts,
         "preserved_refs_tail": preserved,
     }
+
+
+def gate_key_for(error_message: str) -> str:
+    """The registry key this halt belongs to, by the two readings in use.
+
+    The `[gate:<key>]` tag a `halted()` site appends (#2719) is authoritative
+    where it exists. Retagging the 160 legacy sites is #2723's job, so most
+    halts still emit untagged prose and the cause classifier is the bridge --
+    the same pair of readings the terminal record uses (#2721), deliberately,
+    so a bundle and a record never disagree about which gate fired.
+    """
+    head = (error_message or "").strip().splitlines()
+    if not head:
+        return ""
+    from assemblyzero.core.gate_registry import gate_key_of
+    from assemblyzero.speedrun.factory_report import classify_cause
+
+    return gate_key_of(error_message) or classify_cause(head[0])
+
+
+def outstanding_items(state: dict[str, Any]) -> list[str]:
+    """What the run was still being asked for when the cap fired.
+
+    A review cap's whole content is the last verdict's items: run
+    run-issue4-183941 stopped at the ninth round with three assertions still
+    demanded, and nothing in the bundle said which three. `review_feedback`
+    holds the last verdict, and `review_feedback_history` is consulted only if
+    the last round left the field empty -- a cap can fire on a round whose
+    feedback never landed on the state.
+
+    Deliberately NOT merged with `completeness_issues`: those are the mechanical
+    validator's findings and already have their own field. Two different judges
+    with two different remedies do not belong in one list.
+    """
+    feedback = str(state.get("review_feedback", "") or "").strip()
+    if not feedback:
+        history = [
+            str(entry).strip()
+            for entry in (state.get("review_feedback_history") or [])
+            if str(entry).strip()
+        ]
+        feedback = history[-1] if history else ""
+    if not feedback:
+        return []
+    items = [
+        line.strip().lstrip("-").strip()
+        for line in feedback.splitlines()
+        if line.strip().startswith("-")
+    ]
+    return items or [feedback]
 
 
 def _md_events(title: str, lines: list[str]) -> list[str]:
@@ -175,6 +234,20 @@ def render_halt_evidence_md(evidence: dict[str, Any]) -> str:
         f"{evidence['counters']['iteration_count']} (loop).",
         "",
     ]
+    # #2725: gate, outstanding work, and the way back in -- above the artifact
+    # inventory, because a reader arriving at a cap needs those three first.
+    if evidence.get("gate_key"):
+        lines += [f"Gate: `{evidence['gate_key']}`", ""]
+    outstanding = evidence.get("outstanding") or []
+    if outstanding:
+        lines += [
+            f"## Still outstanding when the run stopped ({len(outstanding)})",
+            "",
+        ]
+        lines += [f"- {item}" for item in outstanding]
+        lines.append("")
+    if evidence.get("resume_command"):
+        lines += ["## Resume", "", f"```\n{evidence['resume_command']}\n```", ""]
     events = evidence["events"]
     lines += _md_events("Pinning events", events["pinning_events"])
     lines += _md_events("Completeness issues", events["completeness_issues"])

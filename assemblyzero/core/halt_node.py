@@ -32,7 +32,13 @@ from assemblyzero.core.errors import (
     is_capacity_message,
 )
 from assemblyzero.core.recovery_plan import generate_recovery_plan
-from assemblyzero.core.state_persistence import STATE_DIR, save_state_snapshot
+#: STATE_DIR looks unused and is not: `tests/unit/test_halt_node.py` patches it
+#: HERE, on this module, to redirect the snapshot away from the real state
+#: directory. Removing it makes eight tests fail with AttributeError.
+from assemblyzero.core.state_persistence import (  # noqa: F401
+    STATE_DIR,
+    save_state_snapshot,
+)
 
 
 def classify_error(error_message: str) -> str:
@@ -175,6 +181,32 @@ def describe_halt_from_state(state: dict, workflow_name: str) -> str:
     )
 
 
+def _halt_bundle_dirname(workflow_name: str, state: dict) -> str:
+    """A directory name unique to this halt, for the shared state directory.
+
+    Three parts, each earning its place. The WORKFLOW keeps a sub-workflow's
+    halt apart from the orchestrator's relay of the same halt -- run
+    run-issue4-183941 wrote a 2-artifact bundle and then a 0-artifact one over
+    the top of it. The ISSUE keeps two issues apart. The RUN TAG keeps two rolls
+    of one issue apart, and is empty outside a roll, which is honest rather than
+    invented: an unrolled halt lands in the `norun` slot and may be overwritten
+    by the next unrolled halt of the same workflow and issue.
+
+    Only characters known safe on every filesystem the fleet runs on -- the run
+    tag is machine-made (`run-issue4-183941`), but the workflow name reaches
+    here from a caller.
+    """
+    from assemblyzero.speedrun.convergence import current_run_tag
+
+    issue = state.get("issue_number", 0) if hasattr(state, "get") else 0
+    parts = [str(workflow_name), str(issue), current_run_tag() or "norun"]
+    cleaned = [
+        "".join(c if (c.isalnum() or c in "-_") else "-" for c in part) or "x"
+        for part in parts
+    ]
+    return "halt-" + "-".join(cleaned)
+
+
 def create_halt_node(workflow_name: str):
     """Factory: returns a LangGraph-compatible node function.
 
@@ -276,7 +308,21 @@ def create_halt_node(workflow_name: str):
                 state, workflow_name,
                 stage=stage, error_message=error_message,
             )
-            write_halt_evidence(evidence, state_path.parent)
+            # #2725: the copy beside the state snapshot goes in a directory
+            # named for the halt, not straight into the shared state dir.
+            # `write_halt_evidence` writes fixed filenames, and that directory
+            # is global across every repo the fleet has ever rolled -- so the
+            # old form left ONE `halt-evidence.json` on the whole machine,
+            # overwritten by every halt of every repo. Measured on boostgauge
+            # 2026-09-03: 39 bundles in the repo, exactly 1 in the state dir.
+            # It also clobbered within a single run, because a sub-workflow's
+            # halt and the orchestrator's relay of it are two halts: run
+            # run-issue4-183941 wrote 2 artifacts, then 0 over the top.
+            write_halt_evidence(
+                evidence, state_path.parent / _halt_bundle_dirname(
+                    workflow_name, state
+                )
+            )
             audit_dir_str = str(state.get("audit_dir", "") or "")
             if audit_dir_str and Path(audit_dir_str).is_dir():
                 write_halt_evidence(evidence, Path(audit_dir_str))
@@ -326,7 +372,7 @@ def _infer_stage(state: dict, workflow_name: str) -> str:
             return f"N3_review_iter{iteration}"
         if state.get("current_draft"):
             return f"N1_draft_iter{iteration}"
-        return f"N0_load"
+        return "N0_load"
     elif "next_node" in state:
         return state.get("next_node", "unknown")
     else:

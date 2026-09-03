@@ -55,9 +55,10 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from assemblyzero.core.gate_registry import JUDGES_BUDGET
 from assemblyzero.speedrun.convergence import (
     SOURCE_BANNER,
     SOURCE_RECORD,
@@ -504,6 +505,11 @@ class RunLogFacts:
     exit_label: str = ""
     #: stage -> verdict from the closing table, in table order.
     stage_verdicts: dict[str, str] = field(default_factory=dict)
+    #: The run's window in UTC, from the log file's creation and last write.
+    #: Used to join halt bundles to runs (#2725); None when the log could not
+    #: be stat'd, in which case the run takes part in no join.
+    started: datetime | None = None
+    ended: datetime | None = None
     #: Where `outcome`, `furthest_stage` and `cause` came from (#2721):
     #: `record` if the graph wrote one, `banner` if they were parsed out of the
     #: log's prose. Printed, because the two are different evidence and a reader
@@ -534,8 +540,17 @@ def scan_run_log(path: Path) -> RunLogFacts:
     issue = int(match.group("issue")) if match else None
     run_id = name[:-4] if name.endswith(".log") else name
 
+    started: datetime | None = None
+    ended: datetime | None = None
     try:
-        mtime = datetime.fromtimestamp(path.stat().st_mtime).strftime(_TS_FMT)
+        stat = path.stat()
+        mtime = datetime.fromtimestamp(stat.st_mtime).strftime(_TS_FMT)
+        # #2725: the run's window, in UTC, for joining halt bundles to runs. A
+        # bundle names no run tag, so the instant it was written is the only
+        # join the data supports. `st_ctime` is creation time on Windows, which
+        # is where every recorded run in the corpus was produced.
+        started = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc)
+        ended = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
     except OSError:
         # fail-open: an unstattable log keeps an empty mtime, and scan_run_logs
         # INCLUDES a log it cannot date rather than filtering it out. Excluding
@@ -543,7 +558,10 @@ def scan_run_log(path: Path) -> RunLogFacts:
         # only ever widen the count, which is visible in the printed total.
         mtime = ""
 
-    facts = RunLogFacts(run_id=run_id, issue=issue, path=str(path), mtime=mtime)
+    facts = RunLogFacts(
+        run_id=run_id, issue=issue, path=str(path), mtime=mtime,
+        started=started, ended=ended,
+    )
 
     try:
         # errors="replace": see the module docstring. Model output leaves
@@ -755,6 +773,80 @@ def _under(path: Path, root: Path) -> bool:
         return False
 
 
+#: Every place inside a target repo a halt bundle can come to rest. `docs/lineage`
+#: is where the halt writes it; the other two are where it is MOVED to, by
+#: `speedrun_reset` and by the run archiver. Counted on boostgauge 2026-09-03:
+#: 39 bundles exist, and scanning `docs/lineage` alone finds 8 of them. A report
+#: that says "7 bundles against 135 kills" while 31 sit in directories it never
+#: opens is not measuring coverage, it is measuring its own search path (#2725).
+HALT_BUNDLE_SUBDIRS: tuple[tuple[str, ...], ...] = (
+    ("docs", "lineage"),
+    ("data", "speedrun", "reset-artifacts"),
+    ("data", "speedrun", "archives"),
+)
+
+
+def halt_bundle_roots(repo_root: Path | str) -> list[Path]:
+    """The directories under one repo that can hold a halt bundle."""
+    repo = Path(repo_root)
+    return [repo.joinpath(*parts) for parts in HALT_BUNDLE_SUBDIRS]
+
+
+def attribute_bundles(
+    bundles: list[dict], runs: list[RunLogFacts]
+) -> tuple[dict[str, int], int]:
+    """Which run each bundle belongs to, by its `halted_at` instant.
+
+    A bundle names no run tag -- #2574 predates the run record (#2721) -- so the
+    join is built from the two things it does carry: the ISSUE it halted on, and
+    the INSTANT it halted at. Issue first, because rolls of different issues run
+    concurrently and their log windows overlap freely; within one issue's runs
+    the windows are effectively sequential.
+
+    Returns (bundles per run id, bundles that could not be placed). The second
+    number is returned rather than dropped: a coverage figure whose denominator
+    quietly excludes what it could not place is not a measurement. A bundle that
+    lands in two windows of the SAME issue is left unplaced rather than assigned
+    to the earlier one, because putting a real halt against the wrong run's name
+    is worse than admitting the join is ambiguous.
+    """
+    by_issue: dict[int, list[tuple[datetime, datetime, str]]] = defaultdict(list)
+    for run in runs:
+        if run.started and run.ended and run.issue is not None:
+            by_issue[run.issue].append((run.started, run.ended, run.run_id))
+    per_run: dict[str, int] = defaultdict(int)
+    unplaced = 0
+    for bundle in bundles:
+        when = _parse_halted_at(str(bundle.get("halted_at", "")))
+        issue = bundle.get("issue")
+        if when is None or not isinstance(issue, int):
+            unplaced += 1
+            continue
+        hit = [
+            tag for start, end, tag in by_issue.get(issue, ())
+            if start <= when <= end
+        ]
+        if len(hit) == 1:
+            per_run[hit[0]] += 1
+        else:
+            unplaced += 1
+    return dict(per_run), unplaced
+
+
+def _parse_halted_at(raw: str) -> datetime | None:
+    if not raw:
+        return None
+    text = raw.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        # fail-open: a bundle with an unreadable stamp cannot be placed against
+        # a run. It is COUNTED as unplaced by the caller and reported, never
+        # silently folded into the coverage figure.
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def read_halt_bundles(
     search_roots: list[Path],
     since: datetime | None = None,
@@ -859,7 +951,7 @@ def build_report(
 
     halt_roots = list(extra_halt_roots or [])
     halt_roots.append(Path.home() / ".assemblyzero" / "workflow_state")
-    halt_roots.append(repo / "docs" / "lineage")
+    halt_roots.extend(halt_bundle_roots(repo))
     # scope_repo: the state dir is shared across every repo the fleet rolls.
     # See read_halt_bundles -- counting it unscoped would attribute other
     # repos' halts to this one.
@@ -920,6 +1012,24 @@ def build_report(
         halts_by_stage[
             f"{bundle.get('workflow', '?')}:{bundle.get('stage', '?')}"
         ] += 1
+
+    # -- cap coverage (#2725) --------------------------------------------
+    # The question the launch gate actually needs answered: when a spending
+    # limit ends a run, is the work preserved? "N bundles exist" cannot answer
+    # it -- a bundle count against a kill count compares two different things,
+    # since most kills are gates rather than caps. This joins the two.
+    judges_by_cause = {cause.key: cause.judges for cause in CAUSE_TABLE}
+    bundles_per_run, bundles_unplaced = attribute_bundles(bundles, runs)
+    cap_runs = [
+        run for run in runs
+        if run.outcome == OUTCOME_FAILED
+        and judges_by_cause.get(run.cause) == JUDGES_BUDGET
+    ]
+    cap_covered = [run for run in cap_runs if bundles_per_run.get(run.run_id)]
+    cap_uncovered = sorted(
+        (run.mtime, run.run_id, run.cause)
+        for run in cap_runs if not bundles_per_run.get(run.run_id)
+    )
 
     # -- outcomes and cause of death (#2717) -----------------------------
     outcomes: dict[str, int] = defaultdict(int)
@@ -1049,6 +1159,10 @@ def build_report(
         "halts": {
             "by_stage": dict(halts_by_stage),
             "total": len(bundles),
+            "cap_runs": len(cap_runs),
+            "cap_covered": len(cap_covered),
+            "cap_uncovered": cap_uncovered,
+            "unplaced": bundles_unplaced,
         },
         "outcomes": {
             "counts": dict(outcomes),
@@ -1361,6 +1475,30 @@ def render_report(data: dict) -> str:
             "halts before it left no bundle; their count is not zero, it "
             "is unrecorded."
         )
+    if halts.get("unplaced"):
+        lines.append(
+            f"  ({halts['unplaced']} bundle(s) could not be placed against a "
+            f"run and are excluded from the coverage figure below.)"
+        )
+    lines.append("")
+
+    # #2725: the question a launch decision needs answered. A bundle count on
+    # its own cannot answer it -- most kills are gates, not caps -- so this
+    # joins bundles to the runs a spending limit actually ended.
+    lines.append("### When a cap ended a run, was the work preserved?")
+    lines.append("")
+    if halts["cap_runs"]:
+        lines.append(
+            f"{halts['cap_covered']} of {halts['cap_runs']} cap-ended run(s) "
+            f"left a halt bundle."
+        )
+        if halts["cap_uncovered"]:
+            lines.append("")
+            lines.append("Cap-ended runs with no bundle, oldest first:")
+            for when, run_id, cause in halts["cap_uncovered"]:
+                lines.append(f"  {when or '(undated)':<20}  {run_id:<24}  {cause}")
+    else:
+        lines.append("No run in this window was ended by a cap.")
     lines.append("")
 
     # The shortlist the report COMPUTES, not the reader.
