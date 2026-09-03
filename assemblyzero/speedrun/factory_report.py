@@ -238,8 +238,11 @@ CAUSE_TABLE: tuple[Cause, ...] = (
         "spec revision rejected after",
     ),
     Cause(
+        # Judges the LLD's test plan, an earlier stage's artifact this stage
+        # cannot revise (#2675 moves the check upstream).
         "impl.scenario_ratio_guard", r"GUARD: Mechanical pre-checks failed",
-        "assemblyzero/workflows/testing/nodes/review_test_plan.py", "model_output",
+        "assemblyzero/workflows/testing/nodes/review_test_plan.py",
+        "upstream_artifact",
         "GUARD: Mechanical pre-checks failed \u2014 Only 1 scenario(s) for "
         "2 requirement(s)",
         "Mechanical pre-checks failed",

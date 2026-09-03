@@ -1,0 +1,307 @@
+"""The gate registry and the walker that keeps it honest (#2719, #2720).
+
+Two halves, tested in both directions: every halt site the walker finds in the
+workflow tree names a registry row, and every row's sites exist. Plus the
+ratchet: the count of rows that halt may fall and may not rise.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+TOOLS = REPO_ROOT / "tools"
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
+
+import audit_halt_sites as cli  # noqa: E402
+
+from assemblyzero.core.gate_registry import (  # noqa: E402
+    ACTION_HALT,
+    ACTIONS,
+    GATE_REGISTRY,
+    JUDGES,
+    JUDGES_MODEL_OUTPUT,
+    KIND_RAISE,
+    KIND_RETURN,
+    KIND_STAGE_RESULT,
+    STAGES,
+    gate_key_of,
+    halt_counts,
+    halted,
+    phantoms,
+    registry_by_key,
+    scan_halt_sites,
+    unregistered,
+)
+from assemblyzero.speedrun.factory_report import (  # noqa: E402
+    CAUSE_KILLED,
+    CAUSE_TABLE,
+    CAUSE_UNCLASSIFIED,
+    CAUSE_UNRECORDED,
+)
+
+BASELINE_PATH = REPO_ROOT / "tests" / "fixtures" / "gate_registry_baseline.json"
+
+
+@pytest.fixture(scope="module")
+def walked():
+    sites, coverage = scan_halt_sites(REPO_ROOT)
+    assert coverage.files_scanned > 0, "the walker scanned nothing"
+    assert not coverage.files_unparseable, coverage.files_unparseable
+    return sites
+
+
+# ---------------------------------------------------------------------------
+# The table itself
+# ---------------------------------------------------------------------------
+
+
+class TestVocabulary:
+    def test_keys_are_unique(self):
+        keys = [gate.key for gate in GATE_REGISTRY]
+        assert len(keys) == len(set(keys)), sorted(
+            k for k in keys if keys.count(k) > 1
+        )
+
+    def test_every_row_uses_the_closed_vocabularies(self):
+        for gate in GATE_REGISTRY:
+            assert gate.stage in STAGES, gate.key
+            assert gate.judges in JUDGES, gate.key
+            assert gate.action in ACTIONS, gate.key
+            assert gate.emits.strip(), f"{gate.key} emits nothing"
+
+    def test_every_row_names_where_it_is_decided(self):
+        """Sites from the walker, or a decided_in for a gate whose halt is a
+        router edge or a core budget the walker does not see."""
+        for gate in GATE_REGISTRY:
+            assert gate.sites or gate.decided_in, (
+                f"{gate.key} names no site and no decided_in"
+            )
+
+    def test_no_site_belongs_to_two_rows(self):
+        seen: dict[str, str] = {}
+        for gate in GATE_REGISTRY:
+            for site in gate.sites:
+                assert site not in seen, (
+                    f"{site} is in both {seen[site]} and {gate.key}"
+                )
+                seen[site] = gate.key
+
+    def test_decided_in_names_a_real_file(self):
+        for gate in GATE_REGISTRY:
+            if not gate.decided_in:
+                continue
+            path = REPO_ROOT / gate.decided_in.split("::")[0]
+            assert path.is_file(), f"{gate.key}: {gate.decided_in} is not a file"
+
+
+# ---------------------------------------------------------------------------
+# The walker and the registry agree, both ways
+# ---------------------------------------------------------------------------
+
+
+class TestWalkerAgreesWithRegistry:
+    def test_every_walked_site_names_a_row(self, walked):
+        fresh = unregistered(walked)
+        assert not fresh, (
+            "halt sites no registry row names -- add each to a row, or a new "
+            "row with its issue and the run that justified it:\n  "
+            + "\n  ".join(f"{s.key}  line {s.line}  {s.head[:60]!r}" for s in fresh)
+        )
+
+    def test_no_row_names_a_site_the_walker_cannot_find(self, walked):
+        ghosts = phantoms(walked)
+        assert not ghosts, (
+            "registry sites the walker did not find (the code moved or the "
+            "index shifted):\n  "
+            + "\n  ".join(f"{g}: {s}" for g, s in ghosts)
+        )
+
+    def test_emits_is_a_true_statement_about_the_code(self, walked):
+        """A row's `emits` is the head the run log shows. It must be found at
+        one of the row's sites, or in the file the row says decides it."""
+        heads_by_key: dict[str, list[str]] = {}
+        for site in walked:
+            heads_by_key.setdefault(site.key, []).append(site.head)
+        for gate in GATE_REGISTRY:
+            heads = [h for s in gate.sites for h in heads_by_key.get(s, [])]
+            if any(gate.emits in head for head in heads):
+                continue
+            if gate.decided_in:
+                text = (REPO_ROOT / gate.decided_in.split("::")[0]).read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                if gate.emits in text:
+                    continue
+            pytest.fail(
+                f"{gate.key}: emits {gate.emits!r} but no covered site's head "
+                f"carries it (heads: {[h[:50] for h in heads]})"
+            )
+
+    def test_the_cli_check_passes(self, capsys):
+        assert cli.main(["--check"]) == 0
+        assert "PASS" in capsys.readouterr().out
+
+
+class TestWalkerCatchesANewSite:
+    """The zero needs a negative test: a fresh, unregistered gate is found."""
+
+    def _fixture_tree(self, tmp_path: Path) -> Path:
+        module = tmp_path / "assemblyzero" / "workflows" / "fresh" / "node.py"
+        module.parent.mkdir(parents=True)
+        module.write_text(
+            "\n".join(
+                [
+                    "def n1(state):",
+                    "    if state.get('bad'):",
+                    "        return {'error_message': 'NEW GATE: something', 'x': 1}",
+                    "    return {'error_message': ''}",
+                    "",
+                    "def n2(path):",
+                    "    raise ImplementationError(filepath=path, reason=f'Boom {path}')",
+                    "",
+                    "def n3():",
+                    "    msg = 'Stage failed: ' + 'x'",
+                    "    return _make_stage_result(status='failed', error_message=msg)",
+                    "",
+                    "def n4():",
+                    "    raise ValueError('a bug, not a gate')",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_finds_each_kind_and_reads_the_head(self, tmp_path):
+        sites, coverage = scan_halt_sites(self._fixture_tree(tmp_path))
+        assert coverage.files_scanned == 1
+        by_qual = {s.qualname: s for s in sites}
+        assert set(by_qual) == {"n1", "n2", "n3"}, [s.key for s in sites]
+        assert by_qual["n1"].kind == KIND_RETURN
+        assert by_qual["n1"].head == "NEW GATE: something"
+        assert by_qual["n2"].kind == KIND_RAISE
+        assert by_qual["n2"].head == "Boom {}"
+        assert by_qual["n3"].kind == KIND_STAGE_RESULT
+        # The name resolves to its nearest assignment; the concatenation
+        # reads its left side.
+        assert by_qual["n3"].head == "Stage failed: "
+        assert by_qual["n1"].key == (
+            "assemblyzero/workflows/fresh/node.py::n1::return::0"
+        )
+
+    def test_a_fresh_site_is_reported_unregistered(self, tmp_path):
+        sites, _ = scan_halt_sites(self._fixture_tree(tmp_path))
+        assert {s.qualname for s in unregistered(sites)} == {"n1", "n2", "n3"}
+
+    def test_an_empty_error_message_is_not_a_site(self, tmp_path):
+        sites, _ = scan_halt_sites(self._fixture_tree(tmp_path))
+        assert all(s.index == 0 for s in sites if s.qualname == "n1")
+
+
+# ---------------------------------------------------------------------------
+# The tag for new sites
+# ---------------------------------------------------------------------------
+
+
+class TestHaltedTag:
+    def test_tags_and_round_trips(self):
+        key = GATE_REGISTRY[0].key
+        tagged = halted(key, "something went wrong ")
+        assert tagged.endswith(f"[gate:{key}]")
+        assert gate_key_of(tagged) == key
+
+    def test_an_unregistered_key_is_refused(self):
+        with pytest.raises(KeyError):
+            halted("no.such.gate", "x")
+
+    def test_an_untagged_message_has_no_key(self):
+        assert gate_key_of("Iteration cap: 3 review rounds ended REVISE") == ""
+
+
+# ---------------------------------------------------------------------------
+# The join to the report's cause-of-death table
+# ---------------------------------------------------------------------------
+
+
+class TestCauseTableJoins:
+    def test_every_cause_key_is_a_registered_gate(self):
+        absences = {CAUSE_UNRECORDED, CAUSE_UNCLASSIFIED, CAUSE_KILLED}
+        keys = registry_by_key()
+        missing = sorted(
+            cause.key for cause in CAUSE_TABLE
+            if cause.key not in absences and cause.key not in keys
+        )
+        assert not missing, (
+            f"cause keys the report can print but the registry does not know: "
+            f"{missing}"
+        )
+
+    def test_the_judges_columns_agree(self):
+        keys = registry_by_key()
+        for cause in CAUSE_TABLE:
+            gate = keys.get(cause.key)
+            if gate is None:
+                continue
+            assert gate.judges == cause.judges, (
+                f"{cause.key}: report says {cause.judges}, registry says "
+                f"{gate.judges}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# The ratchet (#2720)
+# ---------------------------------------------------------------------------
+
+
+class TestRatchet:
+    """The expense-report rule as a test: the count of gates that halt may
+    fall, and may not rise without the baseline moving in the same PR."""
+
+    def test_baseline_exists(self):
+        assert BASELINE_PATH.is_file(), (
+            f"{BASELINE_PATH} missing -- write it with the current halt_counts()"
+        )
+
+    def test_halt_rows_did_not_rise_in_any_stage(self):
+        baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+        allowed = baseline["halt_rows_per_stage"]
+        counts = halt_counts()
+        risen = {
+            stage: (allowed.get(stage, 0), n)
+            for stage, n in counts.items()
+            if n > allowed.get(stage, 0)
+        }
+        assert not risen, (
+            f"halt-action rows rose (baseline, now): {risen}. A new gate that "
+            f"can end a run needs an operator ruling named in its row's "
+            f"created_by, and the baseline raised in the same PR so the "
+            f"increase is in the diff."
+        )
+
+    def test_a_fall_is_reported_so_the_baseline_gets_lowered(self, capsys):
+        baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+        allowed = baseline["halt_rows_per_stage"]
+        counts = halt_counts()
+        fallen = {
+            stage: (allowed.get(stage, 0), counts.get(stage, 0))
+            for stage in allowed
+            if counts.get(stage, 0) < allowed.get(stage, 0)
+        }
+        if fallen:
+            print(f"halt rows fell (baseline, now): {fallen} -- lower the baseline")
+
+    def test_model_output_gates_that_halt_are_counted_for_the_policy(self):
+        """Not a gate on the number -- #2723 brings it to zero -- but the
+        number must be visible: it is the maze."""
+        halting = [
+            g.key for g in GATE_REGISTRY
+            if g.action == ACTION_HALT and g.judges == JUDGES_MODEL_OUTPUT
+        ]
+        baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+        assert len(halting) <= baseline["model_output_halt_rows"], (
+            f"model-output gates that halt rose to {len(halting)}: {halting}"
+        )
