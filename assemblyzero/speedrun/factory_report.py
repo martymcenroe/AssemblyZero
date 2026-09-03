@@ -362,18 +362,21 @@ def classify_cause(error_head: str) -> str:
     return CAUSE_UNCLASSIFIED
 
 
+_NODE_RANKS: dict[str, int] = {n: i for i, n in enumerate(_IMPL_NODE_ORDER)}
+_STAGE_RANKS: dict[str, int] = {s: i for i, s in enumerate(_STAGE_ORDER)}
+
+
 def _node_rank(node: str) -> int:
-    try:
-        return _IMPL_NODE_ORDER.index(node)
-    except ValueError:
-        return -1
+    """-1 for "" and for a marker the order does not rank. An unranked
+    marker is a test failure (the order must cover every marker printed),
+    never a silent substitution here."""
+    return _NODE_RANKS.get(node, -1)
 
 
 def _stage_rank(stage: str) -> int:
-    try:
-        return _STAGE_ORDER.index(stage)
-    except ValueError:
-        return -1
+    """-1 for "": the closing table and the watchdog only ever name the
+    seven stages, so no other value reaches this."""
+    return _STAGE_RANKS.get(stage, -1)
 
 
 def _normalize_digits(text: str) -> str:
