@@ -317,24 +317,34 @@ class TestAddressableToday:
             )
 
     def test_the_vocabulary_is_a_closed_set(self):
-        """Six phrasings, enumerated from the checks' own `details=` strings.
+        """Seven phrasings, enumerated from the checks' own `details=` strings.
 
         The rule that makes this regex legitimate is that its members can be
         written down (`voice-analysis.md` §28a's closed-set test). If a new
         demand phrasing appears, it is added here deliberately rather than
         matched by a general notion of "add", which would free locked regions
         nobody demanded.
+
+        Six until #2740, which found the seventh already being emitted:
+        `check_error_path_coverage`'s platform branch says "no test varies the
+        platform" and nothing recognised it, so that complaint could be made
+        and never satisfied. Counting the members here is what makes the
+        addition deliberate; `test_addition_demands_are_recognised.py` is what
+        finds the next missing one, by rendering each check's real complaint
+        rather than trusting this list to agree with them.
         """
         import re as _re
 
         members = rp._ADDITION_DEMAND_RE.pattern.split("|")
 
-        assert len(members) == 6
+        assert len(members) == 7
         for phrase, should_match in (
             ("3 criteria have no test in the spec", True),
             ("Each Modify file MUST include a code block showing", True),
             ("Each function MUST have at least one example", True),
             ("Add the block inside that subsection", True),
+            ("2 platform branch(es) in the spec's code, and no test varies "
+             "the platform", True),
             ("Change instructions lack diff-level specificity", False),
             ("test(s) tracing to nothing: test_a, test_b", False),
         ):
