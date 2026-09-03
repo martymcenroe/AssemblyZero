@@ -399,7 +399,7 @@ def create_implementation_spec_graph() -> CompiledStateGraph:
     from assemblyzero.workflows.narration import narrated
 
     def _add(name, fn):
-        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS))
+        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS, stage="spec"))
 
     # Add nodes
     from assemblyzero.workflows.implementation_spec.nodes.compile_manifest import (

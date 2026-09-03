@@ -58,6 +58,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from assemblyzero.speedrun.convergence import (
+    SOURCE_BANNER,
+    SOURCE_RECORD,
+    furthest_by_run,
+    read_records,
+    terminals_by_run,
+)
+
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 
 #: Every (stage, check) pair a `record_failure`/`record_failures` call site
@@ -496,6 +504,11 @@ class RunLogFacts:
     exit_label: str = ""
     #: stage -> verdict from the closing table, in table order.
     stage_verdicts: dict[str, str] = field(default_factory=dict)
+    #: Where `outcome`, `furthest_stage` and `cause` came from (#2721):
+    #: `record` if the graph wrote one, `banner` if they were parsed out of the
+    #: log's prose. Printed, because the two are different evidence and a reader
+    #: deciding whether to launch is entitled to know which they have.
+    source: str = SOURCE_BANNER
 
     @property
     def furthest(self) -> str:
@@ -663,7 +676,64 @@ def scan_run_logs(
         ):
             continue
         facts.append(scanned)
+    facts = apply_records(facts, repo_root)
     return sorted(facts, key=lambda f: (f.mtime, f.run_id))
+
+
+def apply_records(
+    facts: list[RunLogFacts], repo_root: Path | str
+) -> list[RunLogFacts]:
+    """Let the graph's own terminal record override the banner parse (#2721).
+
+    The record wins wherever it exists, because it was written by the code that
+    knew, at the moment it knew, rather than recovered from prose afterwards.
+    Where it does not exist -- every run before this landed, and any run whose
+    write failed -- the banner parse stands and the run says `banner`, so the
+    two are never silently mixed into one number.
+
+    `furthest_stage` is deliberately NOT overwritten from the terminal record's
+    field alone: the entry records are the better source for it, since they are
+    written as the run advances and survive a run that died before it could
+    write anything terminal.
+    """
+    records, _ = read_records(repo_root)
+    if not records:
+        return facts
+    terminals = terminals_by_run(records)
+    furthest = furthest_by_run(records)
+    for run in facts:
+        entry = terminals.get(run.run_id)
+        reached = furthest.get(run.run_id)
+        if entry is None and reached is None:
+            continue
+        run.source = SOURCE_RECORD
+        if reached:
+            stage, node = reached
+            if stage:
+                run.furthest_stage = stage
+            if node:
+                run.furthest_node = node
+        if entry is None:
+            # Entries but no terminal: the run died before it could say how it
+            # ended. That is exactly the killed run the banner parse cannot
+            # describe, and the entries still say how far it got.
+            continue
+        outcome = str(entry.get("outcome") or "")
+        if outcome in (OUTCOME_PASSED, OUTCOME_FAILED):
+            run.outcome = outcome
+        key = str(entry.get("gate_key") or "")
+        if key and outcome == OUTCOME_FAILED:
+            run.cause = key
+            run.failed_stage = str(entry.get("furthest_stage") or run.failed_stage)
+    return facts
+
+
+def source_counts(facts: list[RunLogFacts]) -> dict[str, int]:
+    """How many runs each source accounts for. Counted, never estimated."""
+    counts = {SOURCE_RECORD: 0, SOURCE_BANNER: 0}
+    for run in facts:
+        counts[run.source] = counts.get(run.source, 0) + 1
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -988,6 +1058,7 @@ def build_report(
             "kills_by_judges": dict(kills_by_judges),
             "unclassified": unclassified,
             "killed_tails": dict(killed_tails),
+            "sources": source_counts(runs),
         },
         "convergence": {
             "by_day": convergence_rows,
@@ -1076,6 +1147,18 @@ def render_report(data: dict) -> str:
         )
     else:
         lines.append("No run logs in this window.")
+    sources = outcomes.get("sources") or {}
+    if total_runs:
+        # #2721: which evidence this section rests on, said rather than assumed.
+        # A record was written by the graph at the moment it knew; a banner was
+        # recovered from prose afterwards and cannot describe a run that died
+        # before printing one.
+        lines.append("")
+        lines.append(
+            f"Source: {sources.get(SOURCE_RECORD, 0)} run(s) from the graph's "
+            f"own terminal record, {sources.get(SOURCE_BANNER, 0)} parsed from "
+            f"the closing banner."
+        )
     lines.append("")
 
     lines.append(

@@ -425,6 +425,101 @@ class TestRollShape:
         provider.invoke("You review the draft", "")
         assert provider.stages_called == ["analyze", "draft", "review"]
 
+
+class TestTheGraphRecordsWhereItWent:
+    """The compiled spec graph, streamed for real, writing its own record.
+
+    #2721's acceptance asks a mock roll to produce the convergence record. The
+    full green-path roll is still #2596's increment -- it needs a fixture per
+    stage -- so what this drives is the real `create_implementation_spec_graph()`
+    with the real atlas, the real routers and the real halt node, and asserts the
+    records the nodes wrote as it went. Nothing here is a stand-in for the
+    graph: if a node stops narrating, or a graph stops naming its stage, these
+    assertions go red.
+    """
+
+    def _run(self, target_repo: Path, lld_text: str | None) -> list[dict]:
+        from assemblyzero.core.scripted_provider import ScriptedProvider, set_active
+        from assemblyzero.speedrun.convergence import read_records
+        from assemblyzero.workflows.implementation_spec.graph import (
+            create_implementation_spec_graph,
+        )
+
+        lld_path = target_repo / "docs" / "lld" / "active" / "LLD-004.md"
+        if lld_text is not None:
+            lld_path.parent.mkdir(parents=True, exist_ok=True)
+            lld_path.write_text(lld_text, encoding="utf-8")
+        audit = target_repo / "docs" / "lineage" / "active" / "4-implspec" / "r"
+        audit.mkdir(parents=True, exist_ok=True)
+
+        set_active(ScriptedProvider([], model="mock-roll"))
+        try:
+            graph = create_implementation_spec_graph()
+            for _ in graph.stream(
+                {
+                    "issue_number": 4,
+                    "lld_path": str(lld_path),
+                    "repo_root": str(target_repo),
+                    "audit_dir": str(audit),
+                    "max_iterations": 1,
+                    "human_gate_enabled": False,
+                    "config_drafter": "scripted:drafter",
+                    "config_reviewer": "scripted:reviewer",
+                    "review_iteration": 0,
+                    "error_message": "",
+                },
+                {"recursion_limit": 30},
+            ):
+                pass
+        finally:
+            set_active(None)
+        records, unreadable = read_records(target_repo)
+        assert unreadable == 0
+        return records
+
+    def test_a_run_through_the_real_graph_records_every_node_it_entered(
+        self, target_repo, monkeypatch, capsys
+    ):
+        monkeypatch.setenv("SPEEDRUN_RUN_TAG", "run-issue4-mockroll")
+        records = self._run(target_repo, None)
+        capsys.readouterr()
+        assert records, "the graph ran and recorded nothing"
+        assert {r["event"] for r in records} == {"node.enter"}
+        assert {r["stage"] for r in records} == {"spec"}
+        assert {r["run_tag"] for r in records} == {"run-issue4-mockroll"}
+        entered = [r["node"] for r in records]
+        assert entered[0] == "N0_load_lld", (
+            f"the graph's entry node changed: it went {entered}"
+        )
+        assert "HALT" in entered, (
+            "an absent LLD must reach the halt node, and the halt must record "
+            "itself like any other node"
+        )
+
+    def test_every_recorded_node_carries_its_atlas_position(
+        self, target_repo, monkeypatch, capsys
+    ):
+        """The ordinal is what "how far did it get" is measured from, so a node
+        recorded at a position the atlas does not agree with is a node the
+        convergence number reads wrongly.
+
+        `HALT` is deliberately unnumbered in the atlas -- it is not a step of
+        the document's construction -- and records as 0, which sorts it below
+        every real node. That is right: reaching the halt is not progress.
+        """
+        from assemblyzero.workflows.implementation_spec.atlas import (
+            ATLAS, TOTAL_STEPS,
+        )
+
+        monkeypatch.setenv("SPEEDRUN_RUN_TAG", "run-issue4-mockroll")
+        records = self._run(target_repo, None)
+        capsys.readouterr()
+        for record in records:
+            expected = (ATLAS.get(record["node"]) or {}).get("ordinal") or 0
+            assert record["ordinal"] == expected, record["node"]
+            assert record["total"] == TOTAL_STEPS
+        assert [r["ordinal"] for r in records if r["node"] == "HALT"] == [0]
+
     def test_a_halt_path_roll_carries_the_failure_message(self, scripted):
         provider = scripted([
             ScriptedRule("draft", system_pattern="draft",

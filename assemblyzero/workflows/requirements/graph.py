@@ -538,7 +538,7 @@ def create_requirements_graph() -> StateGraph:
     from assemblyzero.workflows.requirements.atlas import ATLAS, TOTAL_STEPS
 
     def _add(name, fn):
-        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS))
+        graph.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS, stage="lld"))
 
     # Add nodes
     _add(N0_LOAD_INPUT, load_input)

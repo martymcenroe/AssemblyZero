@@ -44,10 +44,10 @@ from assemblyzero.workflows.orchestrator.state import (
     StageResult,
     create_initial_state,
     default_assemblyzero_root,
-    get_next_stage,
     update_stage_result,
 )
 from assemblyzero.core.errors import is_capacity_message
+from assemblyzero.speedrun.convergence import KEY_FINALIZE
 from assemblyzero.core.halt_node import create_halt_node
 from assemblyzero.core.stage_watchdog import StageWatchdog
 
@@ -78,6 +78,30 @@ def _init_node(state: OrchestrationState) -> dict[str, Any]:
     return {
         "stage_started_at": now,
     }
+
+
+def _record_stage_entry(state: OrchestrationState, stage: str) -> None:
+    """Append this stage's entry to the convergence record (#2721).
+
+    Silent on failure: a run must not die because a diagnostic could not be
+    written, and a missing record is visible at the other end because the report
+    says which source it used.
+    """
+    try:
+        from assemblyzero.speedrun.convergence import record_stage_enter
+
+        repo = state.get("target_repo", "")
+        if not repo:
+            return
+        ordinal = (
+            STAGE_ORDER.index(stage) + 1 if stage in STAGE_ORDER else 0
+        )
+        record_stage_enter(repo, stage, ordinal, len(STAGE_ORDER))
+    except Exception:  # noqa: BLE001 - the record never costs a run
+        # fail-open: a stage must not fail to run because its diagnostic could
+        # not be written. The absence is reported at the other end: the factory
+        # report names the source it used for every run.
+        return
 
 
 def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
@@ -127,6 +151,12 @@ def _run_stage_node(state: OrchestrationState) -> dict[str, Any]:
 
     runner = STAGE_RUNNERS[current_stage]
     last_state = state
+
+    # #2721: the stage records where it is, once, before any attempt. At the
+    # dispatch point rather than inside each runner, for the same reason the
+    # mock guard above is here: a stage nobody remembers to instrument still
+    # records.
+    _record_stage_entry(state, current_stage)
 
     for attempt in range(1, max_retries + 1):
         # Update state with start time for this stage
@@ -411,6 +441,73 @@ def format_stage_table(stage_results: dict) -> str:
     return "\n".join(lines)
 
 
+def _furthest_recorded_stage(stage_results: dict) -> str:
+    """The last stage in `STAGE_ORDER` that produced any result.
+
+    `current_stage` is `done` on a success, which is a graph node and not a
+    pipeline stage; recording it as the furthest stage reached would make every
+    passed run sort below every failed one.
+    """
+    reached = [s for s in STAGE_ORDER if s in (stage_results or {})]
+    return reached[-1] if reached else ""
+
+
+def _terminal_gate_key(error_message: str) -> str:
+    """The registry key that ended the run, by the same two readings the report
+    uses -- the tag a `halted()` site appends, else the cause classifier.
+
+    Both are consulted because the retagging of legacy sites is #2723's job and
+    most sites still emit untagged prose. The classifier is the bridge; the tag
+    is what replaces it, one site at a time.
+    """
+    head = (error_message or "").strip().splitlines()
+    if not head:
+        return KEY_FINALIZE
+    from assemblyzero.core.gate_registry import gate_key_of
+    from assemblyzero.speedrun.factory_report import classify_cause
+
+    return gate_key_of(error_message) or classify_cause(head[0])
+
+
+def _record_terminal(
+    repo: str,
+    success: bool,
+    final_stage: str,
+    stage_results: dict,
+    error_message: str,
+) -> None:
+    """Write the one record per run that says how it ended (#2721).
+
+    Silent on failure, like the entry records: the console banner and the resume
+    state already carry the outcome for a human, and a diagnostic that can take
+    a run down is worse than a missing one.
+    """
+    try:
+        from assemblyzero.speedrun.convergence import (
+            OUTCOME_FAILED,
+            OUTCOME_PASSED,
+            record_terminal,
+        )
+
+        if not repo:
+            return
+        record_terminal(
+            repo,
+            outcome=OUTCOME_PASSED if success else OUTCOME_FAILED,
+            furthest_stage=(
+                _furthest_recorded_stage(stage_results) if success
+                else (final_stage or _furthest_recorded_stage(stage_results))
+            ),
+            gate_key=KEY_FINALIZE if success else _terminal_gate_key(error_message),
+        )
+    except Exception:  # noqa: BLE001 - the record never costs a run
+        # fail-open: the console banner and the resume state already carry the
+        # outcome for a human. A run that has finished must not be turned into a
+        # crash by the write that describes it, and a missing terminal record is
+        # visible -- the report falls back to the banner parse and says so.
+        return
+
+
 def _write_run_record(issue_number: int, table: str, success: bool) -> None:
     """Persist the per-run record next to the resume state (#1785)."""
     from assemblyzero.workflows.orchestrator.resume import STATE_DIR
@@ -601,6 +698,15 @@ def orchestrate(
         # #1785: every run leaves a readable record beside its resume state.
         _write_run_record(
             issue_number, format_stage_table(stage_results), success
+        )
+
+        # #2721: the run says how it ended, here, where the outcome is known --
+        # not where the banner is printed. A run whose banner never reached the
+        # log still leaves the fact behind, which is the whole difference
+        # between this and parsing prose after the fact.
+        _record_terminal(
+            state.get("target_repo", ""), success, final_stage,
+            stage_results, error_message,
         )
 
         return OrchestrationResult(
