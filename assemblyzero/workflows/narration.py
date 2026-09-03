@@ -87,8 +87,19 @@ def _line_for(node_id: str, atlas: dict, total: int, state=None) -> list[str]:
     return lines
 
 
-def narrated(node_id: str, fn, atlas: dict, total: int):
-    """Wrap a graph node so entering it narrates its position."""
+def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
+    """Wrap a graph node so entering it narrates and records its position.
+
+    Two outputs from one wrap, deliberately. The printed lines are for a human
+    watching the roll; the record is for the report (#2721), which must not have
+    to parse those lines back out of a log afterwards. Wrapping here means a
+    graph cannot grow a node that forgets to record, because this is already the
+    one place every node announces itself.
+
+    ``stage`` names the sub-workflow for the record. A caller that omits it
+    still narrates, and the record is skipped rather than filed under a blank
+    stage that would make two graphs' nodes indistinguishable.
+    """
 
     def _wrapped(state, *args, **kwargs):
         try:
@@ -96,7 +107,38 @@ def narrated(node_id: str, fn, atlas: dict, total: int):
                 print(line, flush=True)
         except Exception:  # noqa: BLE001 - narration never costs a run
             pass
+        if stage:
+            _record_entry(node_id, atlas, total, stage, state)
         return fn(state, *args, **kwargs)
 
     _wrapped.__name__ = getattr(fn, "__name__", node_id)
     return _wrapped
+
+
+def _record_entry(node_id: str, atlas: dict, total: int, stage: str, state) -> None:
+    """Append this node's entry to the convergence record (#2721).
+
+    Silent on every failure, for the same reason narration is: a run must not
+    die because a diagnostic could not be written. The absence is visible at the
+    other end -- the report says which source it used, so a run with no records
+    reads as a run with no records and never as a run that passed.
+    """
+    try:
+        from assemblyzero.speedrun.convergence import record_node_enter
+
+        repo_root = state.get("repo_root", "") if hasattr(state, "get") else ""
+        if not repo_root:
+            return
+        record_node_enter(
+            repo_root,
+            stage,
+            node_id,
+            int((atlas.get(node_id) or {}).get("ordinal", 0) or 0),
+            total,
+        )
+    except Exception:  # noqa: BLE001 - the record never costs a run
+        # fail-open: a diagnostic that can take a roll down is worse than a
+        # missing diagnostic, and the missing one is reported -- the factory
+        # report names its source, so a run with no records reads as a run with
+        # no records rather than as a run that passed.
+        return
