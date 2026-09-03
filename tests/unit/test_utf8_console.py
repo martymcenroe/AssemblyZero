@@ -247,6 +247,7 @@ class TestEveryReportRendererInstallsIt:
         fails rather than the guard below silently checking a shorter list."""
         assert {p.name for p in self.renderers()} == {
             "audit_fail_open.py",
+            "audit_halt_sites.py",
             "check_requirements.py",
             "check_requirements_form.py",
             "golden_disasters.py",
@@ -261,6 +262,7 @@ class TestEveryReportRendererInstallsIt:
         "name",
         [
             "audit_fail_open.py",
+            "audit_halt_sites.py",
             "check_requirements.py",
             "check_requirements_form.py",
             "golden_disasters.py",
