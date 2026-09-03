@@ -6,6 +6,7 @@ Runs E2E tests in a sandbox environment:
 - Auto-cleanup after each E2E run
 """
 
+from assemblyzero.core.gate_registry import advised
 from assemblyzero.utils.shell import run_command
 import re
 import subprocess
@@ -372,19 +373,13 @@ def e2e_validation(state: TestingWorkflowState) -> dict[str, Any]:
 
         if count_stagnant or identity_stagnant:
             reason = "same failures persisting" if identity_stagnant else "no improvement"
-            stagnant_msg = (
+            # #2723: advisory. The circuit breaker below and the e2e cap are
+            # budgets and remain the only things that end this loop.
+            print("    [STAGNANT] " + advised(
+                "impl.stagnation.e2e",
                 f"E2E stagnant: {previous_e2e_passed} -> {e2e_passed} passed "
-                f"({reason}). Halting to prevent token waste."
-            )
-            print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "e2e_output": output,
-                "file_counter": file_num,
-                "previous_e2e_passed": e2e_passed,
-                "previous_e2e_failures": current_failures,
-                "e2e_failure_summary": e2e_failure_summary,
-                "error_message": stagnant_msg,
-            }
+                f"({reason}).",
+            ))
 
         # Circuit breaker check before looping
         should_trip, trip_reason = check_circuit_breaker(state)

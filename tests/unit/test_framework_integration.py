@@ -452,8 +452,10 @@ class TestN5GreenPhaseNonPytest:
         assert result["iteration_count"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.get_runner")
-    def test_stagnation_detection_halts(self, mock_get_runner):
-        """Stagnation detection halts when passed count is unchanged."""
+    def test_stagnation_detection_reports(self, mock_get_runner, capsys):
+        """Stagnation is detected when the passed count is unchanged. #2723:
+        the non-pytest branch reports it and lets the cap decide, exactly as
+        the pytest branch does."""
         mock_runner = MagicMock()
         mock_runner.run_tests.return_value = {
             "passed": 2,
@@ -490,8 +492,10 @@ class TestN5GreenPhaseNonPytest:
                 TestFramework.JEST,
             )
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result["error_message"].lower()
+        assert result["error_message"] == ""
+        printed = capsys.readouterr().out
+        assert "stagnant" in printed.lower()
+        assert "[gate:impl.stagnation.test_count]" in printed
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.get_runner")
     def test_max_iterations_reached(self, mock_get_runner):

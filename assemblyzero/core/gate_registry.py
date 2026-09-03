@@ -525,21 +525,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 1),
     ),
     Gate(
-        "impl.stagnation.e2e", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.stagnation.e2e", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "E2E stagnant",
-        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 2),
+        decided_in=f"{_TS}/nodes/e2e_validation.py::e2e_validation (advisory)",
+        created_by="#2723",
+        notes="advises via advised(); the e2e cap and circuit breaker end this loop",
     ),
     Gate(
         "impl.e2e_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "E2E failed after",
-        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 4),
+        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 3),
     ),
     Gate(
         "impl.circuit_breaker", "impl", JUDGES_BUDGET, ACTION_HALT,
         "[CIRCUIT]",
-        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 3)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 8, 11)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 3, 6),
+        _s(f"{_TS}/nodes/e2e_validation.py::e2e_validation::return", 2)
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 5, 7)
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 2, 4),
         decided_in=f"{_TS}/circuit_breaker.py::check_circuit_breaker",
     ),
     Gate(
@@ -563,7 +565,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "impl.deterministic_failure", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
         "DETERMINISTIC FAILURE",
         _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 4)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 5),
+        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 4),
         decided_in=f"{_TS}/nodes/validate_tests_mechanical.py",
         notes=(
             "tests passed before the code existed, or fail for a platform reason no "
@@ -597,37 +599,50 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.green.iteration_cap", "impl", JUDGES_BUDGET, ACTION_HALT,
         "Green phase failed after",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 3, 9)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 4),
+        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 3, 6)
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 1, 3),
     ),
     Gate(
-        "impl.stagnation.test_count", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.stagnation.test_count", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Test count stagnant",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 4)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 2),
-        notes="11 of 135 banner kills on boostgauge",
+        decided_in=(
+            f"{_TS}/nodes/verify_phases.py::verify_green_phase and "
+            f"::_verify_green_non_pytest (advisory)"
+        ),
+        created_by="#2723",
+        notes=(
+            "11 of 135 banner kills on boostgauge before it became advisory; "
+            "the iteration cap and circuit breaker end this loop"
+        ),
     ),
     Gate(
-        "impl.stagnation.test_identity", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.stagnation.test_identity", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Test identity stagnant",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 6),
+        decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase (advisory)",
+        created_by="#2723",
+        notes="the frozen-tests symmetry break below it still routes to N4",
     ),
     Gate(
-        "impl.stagnation.coverage", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.stagnation.coverage", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Coverage stagnant",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 7, 10)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_green_non_pytest::return", 5),
+        decided_in=(
+            f"{_TS}/nodes/verify_phases.py::verify_green_phase and "
+            f"::_verify_green_non_pytest (advisory)"
+        ),
         created_by="#2711",
         justified_by="run-issue4-172600",
         notes=(
             "11 of 135 banner kills on boostgauge. Killed run 9, the furthest run "
-            "in the record (green, 3 passed, 72%), with four iterations unspent"
+            "in the record (green, 3 passed, 72%), with four iterations unspent. "
+            "Advisory since #2723"
         ),
     ),
     Gate(
-        "impl.stagnation.full_suite", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.stagnation.full_suite", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Full suite regression stagnant",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 12),
+        decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase (advisory)",
+        created_by="#2723",
+        notes="the route below it already sends the named regressions back to N4",
     ),
     Gate(
         "impl.runner_unavailable", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -1016,3 +1031,29 @@ def gate_key_of(message: str) -> str:
     """The key `halted()` tagged onto a message, or ""."""
     match = _TAG_RE.search(message or "")
     return match.group(1) if match else ""
+
+
+def advised(key: str, message: str) -> str:
+    """What an `advise` gate prints instead of ending the run (#2723).
+
+    An advisory says the same sentence a halt used to say and does not route.
+    It carries the gate key for the same reason `halted()` does -- so the log
+    line can be counted against the registry rather than matched as prose --
+    and it says plainly that the run continues, because the identical sentence
+    was a terminal message for as long as these guards have existed and a
+    reader will remember it that way.
+
+    Refuses a key whose row still halts. An advisory printed by a gate that
+    then ends the run anyway would be the worst of both: a log that says the
+    run continued and a run that did not.
+    """
+    row = registry_by_key().get(key)
+    if row is None:
+        raise KeyError(f"{key!r} is not a registered gate")
+    if row.action == ACTION_HALT:
+        raise ValueError(
+            f"{key!r} is a halt row; advised() is for a gate that does not end "
+            f"the run. Change the row's action first, and lower the ratchet "
+            f"baseline in the same PR (#2720)."
+        )
+    return f"{message.rstrip()} Continuing; the budget decides. [gate:{key}]"
