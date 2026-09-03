@@ -128,11 +128,40 @@ class TestTheHaltEmitsIt:
 
         assert result["workflow_status"] == "halted"
         assert "halt evidence written" in out
-        assert (store / "halt-evidence.md").exists()
-        assert (store / "halt-evidence.json").exists()
+        # #2725: the state-side copy is scoped to this halt. The state
+        # directory is shared across every repo the fleet rolls, and
+        # `write_halt_evidence` writes fixed filenames, so the old unscoped
+        # form left ONE bundle on the whole machine -- overwritten by the next
+        # halt of any repo, and by the orchestrator's own relay of this one.
+        scoped = [p for p in store.iterdir() if p.is_dir()]
+        assert len(scoped) == 1, f"expected one scoped bundle dir, got {scoped}"
+        assert scoped[0].name.startswith("halt-implementation_spec-331-")
+        assert (scoped[0] / "halt-evidence.md").exists()
+        assert (scoped[0] / "halt-evidence.json").exists()
+        assert not (store / "halt-evidence.json").exists(), (
+            "the unscoped path is what every halt of every repo overwrote"
+        )
         lineage_md = Path(state["audit_dir"]) / "halt-evidence.md"
         assert lineage_md.exists(), "the lineage carries the bundle"
         assert REFUSAL in lineage_md.read_text(encoding="utf-8")
+
+    def test_two_workflows_halting_in_one_run_do_not_overwrite_each_other(
+        self, store, tmp_path, capsys, monkeypatch
+    ):
+        """The measured case: run-issue4-183941's spec halt wrote a bundle with
+        2 artifacts, and the orchestrator's relay of the same halt wrote one
+        with 0 artifacts straight over the top of it."""
+        monkeypatch.setenv("SPEEDRUN_RUN_TAG", "run-issue4-183941")
+        state = _state(tmp_path)
+        state["error_message"] = "Iteration cap: 3 revision(s) ended"
+        create_halt_node("implementation_spec")(state)
+        create_halt_node("orchestrator")(state)
+        capsys.readouterr()
+        names = sorted(p.name for p in store.iterdir() if p.is_dir())
+        assert names == [
+            "halt-implementation_spec-331-run-issue4-183941",
+            "halt-orchestrator-331-run-issue4-183941",
+        ]
 
     def test_a_bundle_failure_never_masks_the_halt(
         self, store, tmp_path, monkeypatch, capsys
