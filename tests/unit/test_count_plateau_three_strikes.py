@@ -58,10 +58,13 @@ class TestNonzeroPlateau:
         assert out["next_node"] == "N4_implement_code", out.get("error_message")
         assert out["count_plateau_strikes"] == 1
 
-    def test_the_second_identical_count_halts(self):
+    def test_the_second_identical_count_is_reported(self, capsys):
+        """#2723: the second strike used to end the run. The strike counting is
+        unchanged and the sentence still says "3 iterations"; what changed is
+        that saying it no longer stops the loop."""
         out = _run(_state(previous_passed=44, count_plateau_strikes=1), 44, 50)
-        assert out["next_node"] == "end"
-        assert "3 iterations" in out["error_message"]
+        assert out["error_message"] == ""
+        assert "3 iterations" in capsys.readouterr().out
 
     def test_progress_resets_the_strikes(self):
         out = _run(_state(previous_passed=44, count_plateau_strikes=1), 45, 49)
@@ -69,11 +72,14 @@ class TestNonzeroPlateau:
         assert out["count_plateau_strikes"] == 0
 
 
-class TestImportDeathKeepsItsFastHalt:
-    def test_zero_to_zero_still_halts_at_two(self):
+class TestImportDeathIsStillCalledOutFast:
+    def test_zero_to_zero_is_reported_at_two(self, capsys):
+        """#2062's fast detection is intact -- zero passing twice is
+        structural, not variance -- and #2723 made the consequence the
+        iteration cap's rather than this guard's."""
         out = _run(_state(previous_passed=0), 0, 50)
-        assert out["next_node"] == "end"
-        assert "stagnant" in out.get("error_message", "").lower()
+        assert out["error_message"] == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
 
 
 class TestTheFieldIsDeclared:

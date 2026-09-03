@@ -8,6 +8,7 @@ errors) route back to N2_scaffold_tests instead of endlessly looping through
 N4_implement_code. Exit codes 2/3 (interrupt/internal error) stop the workflow.
 """
 
+from assemblyzero.core.gate_registry import advised
 from assemblyzero.utils.shell import run_command
 import json
 import re
@@ -2118,25 +2119,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
         if previous_passed >= 0 and passed_count == previous_passed and (
             plateau_strikes >= strikes_needed
         ):
-            stagnant_msg = (
-                f"Test count stagnant: {passed_count}/{passed_count + failed_count} passed "
-                f"(unchanged across {plateau_strikes + 1} iterations). "
-                f"Halting to prevent token waste."
+            # #2723: advisory. It says what it sees and does not route. The
+            # iteration cap checked above and the circuit breaker below are
+            # what end this loop, and both are budgets.
+            stagnant_msg = advised(
+                "impl.stagnation.test_count",
+                f"Test count stagnant: "
+                f"{passed_count}/{passed_count + failed_count} passed "
+                f"(unchanged across {plateau_strikes + 1} iterations).",
             )
             print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed_count,
-                "previous_green_failures": current_green_failures,
-                "test_failure_summary": failure_summary,
-                "file_counter": file_num,
-                "pytest_exit_code": exit_code,
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
 
         # Issue #501: Identity-based stagnation — same tests failing across iterations.
         # Catches cases where pass count fluctuates but the SAME tests keep failing.
@@ -2197,25 +2189,14 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "error_message": f"{DETERMINISTIC_FAILURE}: {message}",
             }
         if identity_stagnant and identity_strikes >= 2:
-            stagnant_msg = (
-                f"Test identity stagnant: same {len(current_green_failures)} test(s) failing "
-                f"across {identity_strikes + 1} iterations (tests were frozen for the "
-                f"retry). Halting to prevent token waste."
+            # #2723: advisory. Same sentence, no routing.
+            stagnant_msg = advised(
+                "impl.stagnation.test_identity",
+                f"Test identity stagnant: same {len(current_green_failures)} "
+                f"test(s) failing across {identity_strikes + 1} iterations "
+                f"(tests were frozen for the retry).",
             )
             print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed_count,
-                "previous_green_failures": current_green_failures,
-                "test_failure_summary": failure_summary,
-                "file_counter": file_num,
-                "pytest_exit_code": exit_code,
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
         if identity_stagnant:
             # #2066: the armed break LOOPS BACK HERE, before any further guard.
             # The first version printed this and fell through -- the coverage
@@ -2257,24 +2238,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 previous_passed, current_green_failures, previous_green_failures,
             )
             if coverage_halt:
-                stagnant_msg = _coverage_stagnant_message(
-                    previous_coverage, coverage_achieved, coverage_strikes
-                )
-                print(f"    [STAGNANT] {stagnant_msg}")
-                return {
-                    "green_phase_output": output,
-                    "coverage_achieved": coverage_achieved,
-                    "previous_coverage": coverage_achieved,
-                    "previous_passed": passed_count,
-                    "previous_green_failures": current_green_failures,
-                    "test_failure_summary": failure_summary,
-                    "file_counter": file_num,
-                    "pytest_exit_code": exit_code,
-                    "iteration_count": iteration_count + 1,
-                    "coverage_plateau_strikes": coverage_strikes,
-                    "next_node": "end",
-                    "error_message": stagnant_msg,
-                }
+                # #2723: advisory. This is the guard that ended run
+                # run-issue4-172600 -- the furthest any run has reached, green
+                # phase with three passing at 72% -- with four iterations
+                # unspent. It now says so and lets the iteration cap decide.
+                print("    [STAGNANT] " + advised(
+                    "impl.stagnation.coverage",
+                    _coverage_stagnant_message(
+                        previous_coverage, coverage_achieved, coverage_strikes
+                    ),
+                ))
 
         # Circuit breaker check before looping
         should_trip, trip_reason = check_circuit_breaker(state)
@@ -2362,24 +2335,13 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             previous_passed, current_green_failures, previous_green_failures,
         )
         if coverage_halt:
-            stagnant_msg = _coverage_stagnant_message(
-                previous_coverage, coverage_achieved, coverage_strikes
-            )
-            print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed_count,
-                "previous_green_failures": current_green_failures,
-                "test_failure_summary": failure_summary,
-                "file_counter": file_num,
-                "pytest_exit_code": exit_code,
-                "iteration_count": iteration_count + 1,
-                "coverage_plateau_strikes": coverage_strikes,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
+            # #2723: advisory, same as the sibling above.
+            print("    [STAGNANT] " + advised(
+                "impl.stagnation.coverage",
+                _coverage_stagnant_message(
+                    previous_coverage, coverage_achieved, coverage_strikes
+                ),
+            ))
 
         # Circuit breaker check before looping
         should_trip, trip_reason = check_circuit_breaker(state)
@@ -2497,26 +2459,16 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 named = ", ".join(regression_names[:4])
                 if len(regression_names) > 4:
                     named += f" (and {len(regression_names) - 4} more)"
-                stagnant_msg = (
-                    f"Full suite regression stagnant: same {len(regression_names)} test(s) "
-                    f"failing across iterations: {named}. Halting."
-                )
-                print(f"    [STAGNANT] {stagnant_msg}")
-                return {
-                    "green_phase_output": output,
-                    "coverage_achieved": coverage_achieved,
-                    "previous_coverage": coverage_achieved,
-                    "previous_passed": passed_count,
-                    "previous_green_failures": [],
-                    "test_failure_summary": regression_summary,
-                    "full_suite_validated": False,
-                    "full_suite_regressions": regression_names,
-                    "file_counter": file_num,
-                    "pytest_exit_code": exit_code,
-                    "iteration_count": iteration_count + 1,
-                    "next_node": "end",
-                    "error_message": stagnant_msg,
-                }
+                # #2723: advisory. The route below already sends the same
+                # regressions back to N4 with their names; halting here only
+                # decided that a second look was not worth paying for, which
+                # is a budget's decision and not this gate's.
+                print("    [STAGNANT] " + advised(
+                    "impl.stagnation.full_suite",
+                    f"Full suite regression stagnant: same "
+                    f"{len(regression_names)} test(s) failing across "
+                    f"iterations: {named}.",
+                ))
 
             print(f"    [N5] Full suite: {full_failed + full_errors} regression(s) detected "
                   f"({full_passed} passed) — routing back to N4")
@@ -2833,22 +2785,12 @@ def _verify_green_non_pytest(
 
         # Stagnation: passed count unchanged
         if previous_passed >= 0 and passed == previous_passed:
-            stagnant_msg = (
+            # #2723: advisory, the non-pytest sibling of the guard above.
+            print("    [STAGNANT] " + advised(
+                "impl.stagnation.test_count",
                 f"Test count stagnant: {passed}/{passed + failed} passed "
-                f"(unchanged from previous iteration). Halting."
-            )
-            print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed,
-                "file_counter": file_num,
-                "test_run_result": dict(result),
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
+                f"(unchanged from previous iteration).",
+            ))
 
         # Circuit breaker
         should_trip, trip_reason = check_circuit_breaker(state)
@@ -2903,22 +2845,12 @@ def _verify_green_non_pytest(
 
         # Stagnation on coverage
         if previous_coverage >= 0 and coverage_achieved <= previous_coverage + 1.0:
-            stagnant_msg = (
-                f"Coverage stagnant: {previous_coverage:.1f}% -> {coverage_achieved:.1f}% "
-                f"(< 1% improvement). Halting."
-            )
-            print(f"    [STAGNANT] {stagnant_msg}")
-            return {
-                "green_phase_output": output,
-                "coverage_achieved": coverage_achieved,
-                "previous_coverage": coverage_achieved,
-                "previous_passed": passed,
-                "file_counter": file_num,
-                "test_run_result": dict(result),
-                "iteration_count": iteration_count + 1,
-                "next_node": "end",
-                "error_message": stagnant_msg,
-            }
+            # #2723: advisory, the non-pytest sibling of the coverage guard.
+            print("    [STAGNANT] " + advised(
+                "impl.stagnation.coverage",
+                f"Coverage stagnant: {previous_coverage:.1f}% -> "
+                f"{coverage_achieved:.1f}% (< 1% improvement).",
+            ))
 
         # Circuit breaker
         should_trip, trip_reason = check_circuit_breaker(state)

@@ -72,16 +72,19 @@ class TestTheFirstRepeatBreaksSymmetryInsteadOfHalting:
         assert out["freeze_tests"] is True
         assert out["identity_plateau_strikes"] == 1
 
-    def test_the_third_identical_set_halts(self):
+    def test_the_third_identical_set_is_reported(self, capsys):
         """count_plateau_strikes seeded 0 so the count guard (strike 1 of 2)
-        defers and the IDENTITY path is what halts here."""
+        defers and the IDENTITY path is what speaks here.
+
+        #2723: it says the tests were frozen and the set repeated anyway, and
+        the loop carries on to its iteration cap instead of ending."""
         out = _run(
             _state(previous_passed=5, previous_green_failures=PREV,
                    identity_plateau_strikes=2, count_plateau_strikes=0),
             5, 2, FAILS,
         )
-        assert out["next_node"] == "end"
-        assert "frozen" in out["error_message"]
+        assert out["error_message"] == ""
+        assert "frozen" in capsys.readouterr().out
 
     def test_a_changed_failing_set_resets_the_strikes_and_unfreezes(self):
         out = _run(

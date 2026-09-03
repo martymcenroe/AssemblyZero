@@ -75,18 +75,22 @@ class TestTheTestsFailingBranch:
         assert "stagnant" not in result.get("error_message", "").lower()
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_no_progress_at_all_still_halts(self, mock_pytest):
+    def test_no_progress_at_all_is_still_reported(self, mock_pytest, capsys):
         """Same pass count, same failing set, flat coverage. The test-count
-        guard reaches this one first, which is correct -- what matters is that
-        a genuinely stuck loop still stops."""
+        guard reaches this one first, which is correct.
+
+        #2723: a genuinely stuck loop still STOPS, but the iteration cap is
+        what stops it -- this guard now only says what it sees. The stopping is
+        covered by the cap's own tests; what is pinned here is that the
+        observation is not lost when the guard stopped being terminal."""
         mock_pytest.return_value = _pytest(1, passed=20, failed=3, coverage=94)
         result = verify_green_phase(
             _state(previous_passed=20, previous_coverage=94.0,
                    previous_green_failures=["t_a", "t_b", "t_c"],
                    count_plateau_strikes=1)  # #2062: third identical count
         )
-        assert result["next_node"] == "end"
-        assert "stagnant" in result.get("error_message", "").lower()
+        assert result.get("error_message", "") == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
 
 
 class TestTheThresholdBoundary:

@@ -189,8 +189,12 @@ FAILED tests/test_foo.py::test_bar - AssertionError: 446 != 143
         assert result["test_failure_summary"] == ""
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_failure_summary_on_stagnation_halt(self, mock_pytest):
-        """Even on stagnation halt, failure summary is populated."""
+    def test_failure_summary_survives_a_stagnation_advisory(
+        self, mock_pytest, capsys
+    ):
+        """#2723 made stagnation advisory, which makes the summary matter more
+        rather than less: the loop now continues, and the drafter needs the
+        failures it is continuing from."""
         summary = """=========================== short test summary info ============================
 FAILED tests/test_x.py::test_a - AssertionError
 ============================== 1 failed in 0.10s ==============================="""
@@ -200,8 +204,8 @@ FAILED tests/test_x.py::test_a - AssertionError
         state = _make_state(previous_passed=0, previous_coverage=0.0)
         result = verify_green_phase(state)
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result["error_message"].lower()
+        assert result["error_message"] == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
         assert "test_failure_summary" in result
         assert result["test_failure_summary"] != ""
 
@@ -215,8 +219,11 @@ class TestGreenPhaseIdentityStagnation:
     """Tests for identity-based stagnation detection in verify_green_phase."""
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_same_failures_triggers_identity_stagnation(self, mock_pytest):
-        """Same test names failing across iterations → identity stagnant → halt."""
+    def test_same_failures_are_reported_as_identity_stagnation(
+        self, mock_pytest, capsys
+    ):
+        """Same test names failing across iterations is identity stagnation.
+        #2723: it is now said, not obeyed -- the loop continues to its cap."""
         summary = """=========================== short test summary info ============================
 FAILED tests/test_foo.py::test_bar - AssertionError
 FAILED tests/test_foo.py::test_baz - TypeError
@@ -239,8 +246,8 @@ FAILED tests/test_foo.py::test_baz - TypeError
         )
         result = verify_green_phase(state)
 
-        assert result["next_node"] == "end"
-        assert "identity stagnant" in result["error_message"].lower()
+        assert result["error_message"] == ""
+        assert "identity stagnant" in capsys.readouterr().out.lower()
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.log_workflow_execution")

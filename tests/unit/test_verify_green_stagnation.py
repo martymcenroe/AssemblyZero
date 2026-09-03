@@ -51,17 +51,19 @@ class TestGreenPhaseTestCountStagnation:
     """Test that verify_green_phase detects test-count stagnation."""
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_zero_to_zero_is_stagnant(self, mock_pytest):
-        """previous_passed=0, current passed=0 -> STAGNANT, next_node=end."""
+    def test_zero_to_zero_is_reported_as_stagnant(self, mock_pytest, capsys):
+        """previous_passed=0, current passed=0 is stagnation. #2723: it is
+        reported and the loop continues to its iteration cap."""
         mock_pytest.return_value = _make_pytest_result(
             1, passed=0, failed=24, errors=0, coverage=26,
         )
         state = _make_state(previous_passed=0, previous_coverage=26.0)
         result = verify_green_phase(state)
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result["error_message"].lower()
-        assert "Test count stagnant" in result["error_message"]
+        assert result["error_message"] == ""
+        printed = capsys.readouterr().out
+        assert "Test count stagnant" in printed
+        assert "[gate:impl.stagnation.test_count]" in printed
         assert result["previous_passed"] == 0
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
@@ -97,11 +99,12 @@ class TestGreenPhaseTestCountStagnation:
         assert result["previous_passed"] == 0
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_nonzero_stagnation(self, mock_pytest):
-        """previous_passed=10, current passed=10 -> STAGNANT (non-zero case).
+    def test_nonzero_stagnation(self, mock_pytest, capsys):
+        """previous_passed=10, current passed=10 is stagnation (non-zero case).
 
-        #2711: a coverage plateau halts on its SECOND consecutive strike, so
-        the state carries the first one."""
+        #2711: a coverage plateau counted its SECOND consecutive strike, so the
+        state carries the first one. #2723: the strike is now reported rather
+        than obeyed."""
         mock_pytest.return_value = _make_pytest_result(
             1, passed=10, failed=14, errors=0, coverage=50,
         )
@@ -109,8 +112,8 @@ class TestGreenPhaseTestCountStagnation:
                             coverage_plateau_strikes=1)
         result = verify_green_phase(state)
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result["error_message"].lower()
+        assert result["error_message"] == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
         assert result["previous_passed"] == 10
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")

@@ -307,9 +307,11 @@ class TestAPlateauGetsTwoStrikes:
         assert result["coverage_plateau_strikes"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_the_failing_branch_halts_on_the_second_strike(
-        self, mock_pytest, tmp_path: Path
+    def test_the_failing_branch_advises_on_the_second_strike_and_keeps_going(
+        self, mock_pytest, tmp_path: Path, capsys
     ) -> None:
+        """#2723: the second strike used to end the run. It now says what it
+        sees and routes back to the implementer; the iteration cap decides."""
         mock_pytest.return_value = _pytest(1, passed=2, failed=1, coverage=70)
 
         result = verify_green_phase(_state(
@@ -317,9 +319,12 @@ class TestAPlateauGetsTwoStrikes:
             previous_green_failures=[], coverage_plateau_strikes=1,
         ))
 
-        assert result["next_node"] == "end"
-        assert "Coverage stagnant" in result["error_message"]
-        assert "across 3 iterations" in result["error_message"]
+        assert result["next_node"] == "N4_implement_code"
+        assert result["error_message"] == ""
+        printed = capsys.readouterr().out
+        assert "Coverage stagnant" in printed
+        assert "across 3 iterations" in printed
+        assert "[gate:impl.stagnation.coverage]" in printed
         assert result["coverage_plateau_strikes"] == 2
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
@@ -338,8 +343,8 @@ class TestAPlateauGetsTwoStrikes:
         assert result["coverage_plateau_strikes"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_the_all_pass_branch_halts_on_the_second_strike(
-        self, mock_pytest, tmp_path: Path
+    def test_the_all_pass_branch_advises_on_the_second_strike(
+        self, mock_pytest, tmp_path: Path, capsys
     ) -> None:
         thing = _one_module(tmp_path)
         mock_pytest.return_value = _pytest(1, passed=3, coverage=72, report=REPORT_72)
@@ -350,21 +355,25 @@ class TestAPlateauGetsTwoStrikes:
             coverage_plateau_strikes=1,
         ))
 
-        assert result["next_node"] == "end"
-        assert "Coverage stagnant" in result["error_message"]
+        assert result["error_message"] == ""
+        assert result["next_node"] != "end"
+        assert "Coverage stagnant" in capsys.readouterr().out
         assert result["coverage_plateau_strikes"] == 2
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_the_halt_message_still_says_stagnant_for_the_classifier(
-        self, mock_pytest, tmp_path: Path
+    def test_the_advisory_still_says_stagnant_for_the_classifier(
+        self, mock_pytest, tmp_path: Path, capsys
     ) -> None:
-        """#1939: the halt classifier matches the word; a reword that drops it
-        would file the halt under the wrong class."""
+        """#1939: the classifier matches the word, so a reword that drops it
+        would file the event under the wrong class. #2723 moved the sentence
+        from the halt message to the log, and it keeps the word."""
         thing = _one_module(tmp_path)
         mock_pytest.return_value = _pytest(1, passed=3, coverage=72, report=REPORT_72)
-        result = verify_green_phase(_state(
+        verify_green_phase(_state(
             tmp_path, implementation_files=[thing],
             previous_passed=3, previous_coverage=72.0,
             coverage_plateau_strikes=1,
         ))
-        assert "stagnant" in result["error_message"].lower()
+        printed = capsys.readouterr().out
+        assert "stagnant" in printed.lower()
+        assert "Continuing; the budget decides." in printed

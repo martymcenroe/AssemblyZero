@@ -105,11 +105,15 @@ class TestProgressTheGuardCouldNotSee:
         assert "tests improved" in capsys.readouterr().out
 
 
-class TestGenuineStagnationStillHalts:
-    """The guard's purpose is intact: no progress of any kind still stops."""
+class TestGenuineStagnationIsStillDetected:
+    """The guard's judgement is intact: no progress of any kind is still called
+    stagnation. #2723 changed only what follows from that — it is said, and the
+    iteration cap decides when to stop paying."""
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_flat_coverage_and_flat_tests_still_halts(self, mock_pytest):
+    def test_flat_coverage_and_flat_tests_is_still_stagnation(
+        self, mock_pytest, capsys
+    ):
         """#2711: on the second consecutive strike; the state carries the first."""
         mock_pytest.return_value = _pytest(1, passed=15, failed=0, coverage=94)
         result = verify_green_phase(
@@ -117,21 +121,21 @@ class TestGenuineStagnationStillHalts:
                    coverage_plateau_strikes=1)
         )
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result.get("error_message", "").lower()
+        assert result.get("error_message", "") == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_fewer_passing_tests_is_not_progress(self, mock_pytest):
-        """A regression is a strike, never progress; on the second strike it
-        halts (#2711 -- the first buys exactly one revision to revert it)."""
+    def test_fewer_passing_tests_is_not_progress(self, mock_pytest, capsys):
+        """A regression is a strike, never progress; the second strike is
+        reported (#2711 -- the first buys exactly one revision to revert it)."""
         mock_pytest.return_value = _pytest(1, passed=13, failed=0, coverage=94)
         result = verify_green_phase(
             _state(previous_passed=15, previous_coverage=94.0,
                    coverage_plateau_strikes=1)
         )
 
-        assert result["next_node"] == "end"
-        assert "stagnant" in result.get("error_message", "").lower()
+        assert result.get("error_message", "") == ""
+        assert "stagnant" in capsys.readouterr().out.lower()
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
     def test_a_regression_buys_one_revision_and_no_more(self, mock_pytest):
