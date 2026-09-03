@@ -437,3 +437,294 @@ class TestCli:
         )
         assert path.name == "0904-factory-report-boostgauge-2026-08-28.md"
         assert path.parent.name == "audits"
+
+
+# ---------------------------------------------------------------------------
+# How a run ended (#2717) and how far it got (#2718)
+# ---------------------------------------------------------------------------
+
+import os  # noqa: E402
+
+from assemblyzero.speedrun.factory_report import (  # noqa: E402
+    CAUSE_TABLE,
+    CAUSE_UNCLASSIFIED,
+    CAUSE_UNRECORDED,
+    _IMPL_NODE_ORDER,
+    _STAGE_ORDER,
+    classify_cause,
+)
+
+_TABLE_HEADER = [
+    "STAGE     VERDICT      TIME  ARTIFACT / ERROR",
+    "----------------------------------------------------------------------",
+]
+
+#: The closing lines of a run that finished: `run-issue1-*` merged PR #200.
+PASSED_TAIL = "\n".join(
+    _TABLE_HEADER
+    + [
+        "triage    skipped      0.0s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lineage\\1\\issue-brie",
+        "lld       passed      87.7s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lld\\active\\LLD-001.m",
+        "spec      passed      84.7s  C:\\Users\\mcwiz\\Projects\\boostgauge\\docs\\lld\\drafts\\spec-0001",
+        "impl      passed     179.4s  C:\\Users\\mcwiz\\Projects\\boostgauge-1",
+        "pr        passed       2.2s  https://github.com/martymcenroe/boostgauge/pull/200",
+        "cleanup   passed      66.6s  https://github.com/martymcenroe/boostgauge/pull/200",
+        "",
+        "[ORCHESTRATOR] All stages passed.",
+        "[ORCHESTRATOR] PR: https://github.com/martymcenroe/boostgauge/pull/200",
+        "[ORCHESTRATOR] Duration: 420.7s",
+    ]
+)
+
+#: run-issue4-183941, 2026-09-02: nine review rounds, the hard ceiling.
+FAILED_SPEC_TAIL = "\n".join(
+    _TABLE_HEADER
+    + [
+        "triage    skipped      0.0s  C:\\...\\issue-brie",
+        "lld       passed     299.7s  C:\\...\\LLD-004.m",
+        "visual    skipped      0.0s  no visual deliverable declared for this issue",
+        "spec      failed    2341.5s  Iteration cap: 3 review rounds ended REVISE, so the run stop",
+        "impl      -               -",
+        "pr        -               -",
+        "cleanup   -               -",
+        "",
+        "==========================================================",
+        "  ORCHESTRATION FAILED at stage: spec",
+        "==========================================================",
+        "  Error: Iteration cap: 3 review rounds ended REVISE, so the run stopped rather than spend another round on the same objection. Last feedback: ...",
+        "  exit: hard-ceiling",
+        "  the loop was still converging at round 8, and stopped only because it reached the hard ceiling of 9 (3x the base cap of 3).",
+        "  Attempts: 3 | Duration: 39m 1s",
+    ]
+)
+
+#: The shape of run-issue4-172600: green reached, then the coverage guard.
+#: The untimestamped `[N2] Generating Implementation Spec` line is the SPEC
+#: workflow's marker and must not count as an implementation node.
+FAILED_IMPL_TAIL = "\n".join(
+    [
+        "[N2] Generating Implementation Spec revision (iteration 2)...",
+        "[09:24:13] [N3] Verifying red phase (all tests should fail)...",
+        "[09:24:31] [N4] Implementing code file-by-file (iteration 0)...",
+        "[09:31:02] [N5] Verifying green phase (all tests should pass)...",
+        "[09:31:40] [N4] Implementing code file-by-file (iteration 1)...",
+        "[09:40:12] [N5] Verifying green phase (all tests should pass)...",
+    ]
+    + _TABLE_HEADER
+    + [
+        "triage    skipped      0.0s  C:\\...\\issue-brie",
+        "lld       skipped      0.0s  C:\\...\\LLD-004.m",
+        "spec      passed     605.0s  C:\\...\\spec-0004",
+        "impl      failed    2518.4s  Coverage stagnant: 97.0% -> 97.0% (< 1% improvement). Haltin",
+        "pr        -               -",
+        "cleanup   -               -",
+        "",
+        "==========================================================",
+        "  ORCHESTRATION FAILED at stage: impl",
+        "==========================================================",
+        "  Error: Coverage stagnant: 97.0% -> 97.0% (< 1% improvement). Halting to prevent token waste.",
+        "  Attempts: 3 | Duration: 41m 58s",
+    ]
+)
+
+#: A run killed mid-call: no table, no banner, the log just stops.
+KILLED_TAIL = "\n".join(
+    [
+        "NODE [5/9] generate spec -- The drafter model writes the implementation spec.",
+        "[N2] Generating Implementation Spec revision (iteration 2)...",
+        "    [PREFLIGHT] Gemini: 4/4 credentials",
+        "    Drafter: gemini:3.1-pro",
+        "    [STAGE] spec running 240s (nominal ~90s)",
+        "        Calling Claude... (585s)",
+        "        Calling Claude... (600s)",
+    ]
+)
+
+#: Fifteen of the 135 banners on disk carry an empty Error line.
+EMPTY_ERROR_TAIL = "\n".join(
+    _TABLE_HEADER
+    + [
+        "lld       failed     86.1s  ",
+        "==========================================================",
+        "  ORCHESTRATION FAILED at stage: lld",
+        "==========================================================",
+        "  Error: ",
+        "  Attempts: 3 | Duration: 3m 58s",
+    ]
+)
+
+
+class TestTerminalParse:
+    def test_a_passed_run(self, tmp_path):
+        facts = scan_run_log(
+            _write_run_log(tmp_path, "run-issue1-010101.log", PASSED_TAIL)
+        )
+        assert facts.outcome == "passed"
+        assert facts.furthest == "cleanup"
+        assert facts.cause == ""
+        assert facts.stage_verdicts["triage"] == "skipped"
+
+    def test_a_run_that_failed_at_spec_on_the_review_ceiling(self, tmp_path):
+        facts = scan_run_log(
+            _write_run_log(tmp_path, "run-issue4-183941.log", FAILED_SPEC_TAIL)
+        )
+        assert facts.outcome == "failed"
+        assert facts.failed_stage == "spec"
+        assert facts.furthest == "spec"
+        assert facts.cause == "spec.review_cap"
+        assert facts.exit_label == "hard-ceiling"
+        assert facts.error_head.startswith(
+            "Iteration cap: 3 review rounds ended REVISE"
+        )
+
+    def test_a_run_that_failed_at_impl_names_its_furthest_node(self, tmp_path):
+        facts = scan_run_log(
+            _write_run_log(tmp_path, "run-issue4-172600.log", FAILED_IMPL_TAIL)
+        )
+        assert facts.outcome == "failed"
+        assert facts.failed_stage == "impl"
+        # N5 (green) was the highest node reached; the loop back to N4 does
+        # not lower it, and the spec workflow's [N2] never counted.
+        assert facts.furthest == "impl:N5"
+        assert facts.cause == "impl.stagnation.coverage"
+
+    def test_a_killed_run_has_no_banner_and_carries_its_last_line(self, tmp_path):
+        facts = scan_run_log(
+            _write_run_log(tmp_path, "run-issue7-180539.log", KILLED_TAIL)
+        )
+        assert facts.outcome == "killed"
+        assert facts.cause == "killed"
+        # No table: the watchdog is the only witness to the stage.
+        assert facts.furthest == "spec"
+        assert facts.error_head == "Calling Claude... (600s)"
+
+    def test_an_empty_error_line_is_unrecorded_not_unclassified(self, tmp_path):
+        facts = scan_run_log(
+            _write_run_log(tmp_path, "run-issue2-133746.log", EMPTY_ERROR_TAIL)
+        )
+        assert facts.outcome == "failed"
+        assert facts.furthest == "lld"
+        assert facts.cause == CAUSE_UNRECORDED
+
+    def test_an_unknown_message_is_unclassified_never_the_nearest_bucket(self):
+        assert (
+            classify_cause("Something the pipeline never said before")
+            == CAUSE_UNCLASSIFIED
+        )
+
+    def test_a_passed_run_outranks_a_failed_one(self, tmp_path):
+        passed = scan_run_log(
+            _write_run_log(tmp_path, "run-issue1-000001.log", PASSED_TAIL)
+        )
+        failed = scan_run_log(
+            _write_run_log(tmp_path, "run-issue1-000002.log", FAILED_IMPL_TAIL)
+        )
+        assert passed.furthest_key > failed.furthest_key
+
+
+class TestCauseTable:
+    """The table is authored from real banners, and it stays true to both
+    the logs it was read from and the code that emits the messages."""
+
+    def test_every_row_matches_its_own_example(self):
+        for cause in CAUSE_TABLE:
+            assert classify_cause(cause.example) == cause.key, cause.key
+
+    def test_keys_are_unique(self):
+        keys = [cause.key for cause in CAUSE_TABLE]
+        assert len(keys) == len(set(keys))
+
+    def test_every_row_names_code_that_says_what_the_row_claims(self):
+        for cause in CAUSE_TABLE:
+            path = REPO_ROOT / cause.emitted_by
+            assert path.is_file(), f"{cause.key}: {cause.emitted_by} is not a file"
+            text = path.read_text(encoding="utf-8", errors="replace")
+            assert cause.source_literal in text, (
+                f"{cause.key}: {cause.emitted_by} does not contain "
+                f"{cause.source_literal!r}; the row names the wrong code"
+            )
+
+    def test_stage_order_mirrors_the_orchestrator(self):
+        from assemblyzero.workflows.orchestrator.state import STAGE_ORDER
+
+        assert list(_STAGE_ORDER) == list(STAGE_ORDER)
+
+    def test_impl_node_order_covers_every_marker_the_workflow_prints(self):
+        printed: set[str] = set()
+        testing = REPO_ROOT / "assemblyzero" / "workflows" / "testing"
+        marker = re.compile(r"\[(N\d+(?:\.\d+)?[a-z]?)\]")
+        for path in testing.rglob("*.py"):
+            printed.update(
+                marker.findall(path.read_text(encoding="utf-8", errors="replace"))
+            )
+        assert printed, "found no [N..] markers in the testing workflow"
+        missing = printed - set(_IMPL_NODE_ORDER)
+        assert not missing, f"markers printed but not ranked: {sorted(missing)}"
+
+
+class TestConvergence:
+    def _seed(self, tmp_path) -> Path:
+        """Three days: lld only, then green reached, then back to spec."""
+        runs = tmp_path / "data" / "speedrun" / "runs"
+        day1 = _write_run_log(runs, "run-issue4-090000.log", EMPTY_ERROR_TAIL)
+        day2 = _write_run_log(runs, "run-issue4-100000.log", FAILED_IMPL_TAIL)
+        day2b = _write_run_log(runs, "run-issue4-110000.log", FAILED_SPEC_TAIL)
+        day3 = _write_run_log(runs, "run-issue4-120000.log", FAILED_SPEC_TAIL)
+        base = datetime(2026, 9, 1, 12, 0, 0).timestamp()
+        for path, offset in (
+            (day1, 0),
+            (day2, 86400),
+            (day2b, 86400 + 3600),
+            (day3, 2 * 86400),
+        ):
+            os.utime(path, (base + offset, base + offset))
+        return tmp_path
+
+    def test_per_day_furthest_and_trend(self, tmp_path):
+        data = build_report(self._seed(tmp_path))
+        rows = data["convergence"]["by_day"]
+        assert [
+            (r["day"], r["launches"], r["furthest"], r["trend"]) for r in rows
+        ] == [
+            ("2026-09-01", 1, "lld", "first"),
+            ("2026-09-02", 2, "impl:N5", "up"),
+            ("2026-09-03", 1, "spec", "down"),
+        ]
+        assert rows[1]["run_id"] == "run-issue4-100000"
+        assert data["convergence"]["best"]["run_id"] == "run-issue4-100000"
+
+    def test_outcomes_and_causes_are_counted(self, tmp_path):
+        data = build_report(self._seed(tmp_path))
+        assert data["outcomes"]["counts"] == {"failed": 4}
+        assert data["outcomes"]["failed_by_stage"] == {
+            "lld": 1, "impl": 1, "spec": 2,
+        }
+        assert data["outcomes"]["kills_by_cause"]["spec.review_cap"] == 2
+        assert data["outcomes"]["kills_by_cause"][CAUSE_UNRECORDED] == 1
+        assert data["outcomes"]["kills_by_judges"]["budget"] == 2
+
+    def test_render_puts_convergence_first_and_prints_unclassified(
+        self, tmp_path
+    ):
+        repo = self._seed(tmp_path)
+        _write_run_log(
+            repo / "data" / "speedrun" / "runs",
+            "run-issue4-130000.log",
+            EMPTY_ERROR_TAIL.replace("  Error: ", "  Error: A message no row knows"),
+        )
+        text = render_report(build_report(repo))
+        assert text.index("## Convergence") < text.index("## Stores read")
+        assert (
+            "| 2026-09-02 | 2 | impl:N5 | up | run-issue4-100000 | "
+            "impl.stagnation.coverage |"
+        ) in text
+        assert "run-issue4-130000: A message no row knows" in text
+        assert "Top cause of death: spec.review_cap (2)" in text
+
+    def test_an_empty_window_places_nothing(self, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        data = build_report(empty)
+        assert data["convergence"]["by_day"] == []
+        assert data["convergence"]["best"] is None
+        assert "nothing to place" in render_report(data)
