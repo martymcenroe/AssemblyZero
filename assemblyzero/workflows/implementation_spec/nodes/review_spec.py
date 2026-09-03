@@ -29,11 +29,9 @@ from assemblyzero.core.halt_node import describe_iteration_cap  # #2197
 from assemblyzero.core.llm_provider import get_cumulative_cost, get_provider
 from assemblyzero.utils.cost_tracker import accumulate_node_cost, accumulate_node_tokens
 from assemblyzero.core.verdict_schema import (
-    VERDICT_SCHEMA,
     REVIEW_SPEC_SCHEMA,
     ReviewSpecResult,
     StructuredContractError,
-    parse_structured_verdict,
     parse_structured_review_spec,
 )
 from assemblyzero.workflows.requirements.audit import (
@@ -361,9 +359,9 @@ def review_spec(state: ImplementationSpecState) -> dict[str, Any]:
         msg = "Spec review response yielded no extractable verdict"
         print(f"    ERROR: {msg}")
         return {"error_message": msg}
-    feedback = spec_result["rationale"]
-    if not feedback and spec_result["feedback_items"]:
-        feedback = "\n".join(f"- {item}" for item in spec_result["feedback_items"])
+    feedback = review_feedback_text(
+        spec_result["rationale"], spec_result["feedback_items"]
+    )
 
     # -------------------------------------------------------------------------
     # Save verdict to audit trail
@@ -555,7 +553,7 @@ def _build_review_content(
     sections: list[str] = []
 
     # Context header
-    context = f"## Review Context\n\n"
+    context = "## Review Context\n\n"
     context += f"- **Issue:** #{issue_number}\n"
     context += f"- **Review Iteration:** {review_iteration}\n"
     if review_iteration > 0:
@@ -731,10 +729,33 @@ def parse_review_verdict(response: str) -> tuple[str, str]:
         return "BLOCKED", ""
     result = parse_structured_review_spec(response)
     verdict = result["verdict"]
-    feedback = result["rationale"]
-    if not feedback and result["feedback_items"]:
-        feedback = "\n".join(f"- {item}" for item in result["feedback_items"])
+    feedback = review_feedback_text(result["rationale"], result["feedback_items"])
     return verdict, feedback
+
+
+def review_feedback_text(rationale: str, feedback_items: list[str] | None) -> str:
+    """The reviewer's verdict as the drafter and the revision lock read it (#2715).
+
+    Rationale first, then every feedback item on its own line -- the shape the
+    verdict file on disk has always had. Until #2715 the items were appended
+    only when the rationale was EMPTY, and a structured verdict always has
+    one, so both consumers of `review_feedback` saw a summary: the drafter
+    revised against "adhere to the precise tolerances defined in the LLD"
+    without ever being shown the number, and guessed four rounds running on
+    boostgauge run-issue4-183941; the lock opened only what the summary
+    happened to backtick, and on the round whose summary quoted nothing it
+    refused the fix every item had demanded.
+
+    One helper, both assembly sites, so the next repair lands on both.
+    """
+    parts: list[str] = []
+    text = (rationale or "").strip()
+    if text:
+        parts.append(text)
+    items = [str(item).strip() for item in (feedback_items or []) if str(item).strip()]
+    if items:
+        parts.append("\n".join(f"- {item}" for item in items))
+    return "\n\n".join(parts)
 
 
 def _extract_feedback(response: str, verdict: str) -> str:
