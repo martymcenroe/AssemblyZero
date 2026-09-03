@@ -99,6 +99,287 @@ _RE_REVIEW_ROUND = re.compile(
 #: rather than silently attributed.
 _RE_RUN_NAME = re.compile(r"^run-issue(?P<issue>\d+)-(?P<stamp>\d+)\.log$")
 
+# ---------------------------------------------------------------------------
+# How a run ended (#2717) and how far it got (#2718)
+# ---------------------------------------------------------------------------
+#
+# The report counted what fired INSIDE a run and never said how the run
+# ended. Counted over boostgauge's 180 logs on 2026-09-02: 135 carry an
+# `ORCHESTRATION FAILED at stage:` banner (lld 49, impl 45, spec 40, pr 1),
+# 26 carry `[ORCHESTRATOR] All stages passed.`, and 19 carry neither -- the
+# process was killed mid-call. The `Error:` line under a failure banner is a
+# closed set of prefixes the pipeline's own code emits, so a run's cause of
+# death is a table lookup, not a judgment.
+
+#: The orchestrator's stage order, mirrored so this module stays free of
+#: workflow imports. test_factory_report.py asserts it equals
+#: `assemblyzero.workflows.orchestrator.state.STAGE_ORDER`.
+_STAGE_ORDER: tuple[str, ...] = (
+    "triage", "lld", "visual", "spec", "impl", "pr", "cleanup",
+)
+
+#: The implementation workflow's node markers in graph order. The run log
+#: prints them as `[HH:MM:SS] [N5] ...`; the timestamp prefix is what
+#: separates them from the spec workflow's untimestamped `[N2] Generating`.
+#: Kept honest by test_factory_report.py, which greps the testing workflow
+#: for every `[N..]` literal it prints.
+_IMPL_NODE_ORDER: tuple[str, ...] = (
+    "N0", "N1", "N1.5", "N2", "N2.5", "N3", "N4", "N4b", "N4c",
+    "N5", "N6", "N7", "N8", "N9",
+)
+
+#: One row of the closing STAGE / VERDICT / TIME table the orchestrator
+#: prints: `{stage:<9} {status:<9} {secs:>6.1f}s  {detail}`, or
+#: `{stage:<9} -         -` for a stage never reached.
+_RE_STAGE_ROW = re.compile(
+    r"^(?P<stage>triage|lld|visual|spec|impl|pr|cleanup)\s+"
+    r"(?P<verdict>passed|failed|blocked|skipped|-)\s+"
+    r"(?P<secs>\d+\.\d+s|-)(?:\s+(?P<detail>.*))?$"
+)
+_RE_FAILED_BANNER = re.compile(
+    r"^\s*ORCHESTRATION FAILED at stage:\s*(?P<stage>\S+)"
+)
+#: The first `  Error:` line AFTER the failure banner. Fifteen of the 135
+#: banners carry an empty one; that is `unrecorded`, not `unclassified`.
+_RE_BANNER_ERROR = re.compile(r"^\s{2}Error:\s?(?P<msg>.*)$")
+_RE_ALL_PASSED = re.compile(r"\[ORCHESTRATOR\] All stages passed\.")
+#: The exit classifier label the spec stage prints since #2383. Eight of
+#: 180 logs carry one, so it is recorded when present and never required.
+_RE_EXIT_LABEL = re.compile(r"^\s{2}exit:\s*(?P<label>\S+)")
+_RE_IMPL_NODE = re.compile(
+    r"^\[\d\d:\d\d:\d\d\]\s+\[(?P<node>N\d+(?:\.\d+)?[a-z]?)\]"
+)
+
+OUTCOME_PASSED = "passed"
+OUTCOME_FAILED = "failed"
+OUTCOME_KILLED = "killed"
+
+CAUSE_UNRECORDED = "unrecorded"
+CAUSE_UNCLASSIFIED = "unclassified"
+CAUSE_KILLED = "killed"
+
+
+@dataclass(frozen=True)
+class Cause:
+    """One authored row of the cause-of-death table.
+
+    `pattern` is anchored at the start of the banner's Error line. `example`
+    is a real Error line from the boostgauge logs, and the test suite asserts
+    every row matches its own example and no earlier row's. `source_literal`
+    is a static fragment of the message that must appear in `emitted_by`, so
+    a row cannot name code that does not say what the row claims.
+    """
+
+    key: str
+    pattern: str
+    emitted_by: str
+    judges: str
+    example: str
+    source_literal: str
+
+
+#: Authored from the 135 banners on disk, most frequent first within a stage.
+#: A message matching no row is `unclassified` and the report prints it
+#: verbatim, so this table grows deliberately rather than by guessing.
+#: `judges` is what the gate reads: the drafter's output, the issue body,
+#: a spending limit, or the environment. That column is the seed of the gate
+#: registry (#2719) and of the routing policy (#2723).
+CAUSE_TABLE: tuple[Cause, ...] = (
+    Cause(
+        "lld.mechanical_validation", r"MECHANICAL VALIDATION FAILED",
+        "assemblyzero/workflows/requirements/nodes/validate_mechanical.py", "model_output",
+        "MECHANICAL VALIDATION FAILED:", "MECHANICAL VALIDATION FAILED:",
+    ),
+    Cause(
+        "spec.requirements_conflict",
+        r"Spec review BLOCKED: REQUIREMENTS CONFLICT",
+        "assemblyzero/workflows/implementation_spec/nodes/review_spec.py", "issue_body",
+        "Spec review BLOCKED: REQUIREMENTS CONFLICT: The LLD contains an "
+        "unresolvable contradiction",
+        "REQUIREMENTS CONFLICT:",
+    ),
+    Cause(
+        "lld.requirements_conflict", r"REQUIREMENTS CONFLICT",
+        "assemblyzero/workflows/requirements/nodes/analyze_requirements.py", "issue_body",
+        "REQUIREMENTS CONFLICT: the issue's requirements are internally "
+        "inconsistent",
+        "REQUIREMENTS CONFLICT:",
+    ),
+    Cause(
+        "lld.test_plan_validation", r"test plan validation failed",
+        "assemblyzero/workflows/requirements/nodes/validate_test_plan.py", "model_output",
+        "test plan validation failed after 6 revision(s): Requirement REQ-1 "
+        "has no test coverage",
+        "test plan validation failed after",
+    ),
+    Cause(
+        "spec.completeness_cap", r"Iteration cap: \d+ revision\(s\) ended with",
+        "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py",
+        "budget",
+        "Iteration cap: 3 revision(s) ended with 1 unresolved completeness "
+        "check(s).",
+        "Iteration cap:",
+    ),
+    Cause(
+        # The verdict word varies: REVISE on the ordinary ceiling, BLOCKED
+        # when the reviewer blocked on the round that hit it. Same emitter,
+        # same spending limit, one row.
+        "spec.review_cap", r"Iteration cap: \d+ review rounds ended \w+",
+        "assemblyzero/core/halt_node.py", "budget",
+        "Iteration cap: 3 review rounds ended REVISE, so the run stopped "
+        "rather than spend another round on the same objection.",
+        "Iteration cap:",
+    ),
+    Cause(
+        "spec.edit_script_rejected", r"\[EDIT-SCRIPT\] spec revision rejected",
+        "assemblyzero/workflows/implementation_spec/nodes/generate_spec.py", "model_output",
+        "[EDIT-SCRIPT] spec revision rejected after 3 attempt(s): block 1: "
+        "SEARCH text not found",
+        "spec revision rejected after",
+    ),
+    Cause(
+        "impl.scenario_ratio_guard", r"GUARD: Mechanical pre-checks failed",
+        "assemblyzero/workflows/testing/nodes/review_test_plan.py", "model_output",
+        "GUARD: Mechanical pre-checks failed \u2014 Only 1 scenario(s) for "
+        "2 requirement(s)",
+        "Mechanical pre-checks failed",
+    ),
+    Cause(
+        "impl.stagnation.coverage", r"Coverage stagnant",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "Coverage stagnant: 97.0% -> 97.0% (< 1% improvement). Halting to "
+        "prevent token waste.",
+        "Coverage stagnant:",
+    ),
+    Cause(
+        "impl.stagnation.test_count", r"Test count stagnant",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "Test count stagnant: 44/94 passed (unchanged from previous "
+        "iteration). Halting to prevent token waste.",
+        "Test count stagnant:",
+    ),
+    Cause(
+        "impl.stagnation.test_identity", r"Test identity stagnant",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "Test identity stagnant: same 47 test(s) failing across iterations. "
+        "Halting to prevent token waste.",
+        "Test identity stagnant:",
+    ),
+    Cause(
+        "impl.stagnation.full_suite", r"Full suite regression stagnant",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "Full suite regression stagnant: same 4 test(s) failing across "
+        "iterations. Halting.",
+        "Full suite regression stagnant:",
+    ),
+    Cause(
+        "impl.file_generation_failed",
+        r"Implementation stage error: FATAL: Failed to implement",
+        "assemblyzero/workflows/testing/nodes/implementation/claude_client.py",
+        "model_output",
+        "Implementation stage error: FATAL: Failed to implement "
+        "src/boostgauge/skins/stingray.py",
+        "FATAL: Failed to implement",
+    ),
+    Cause(
+        "impl.branch_exists",
+        r"Implementation stage error: branch '[^']+' already exists",
+        "assemblyzero/workflows/orchestrator/stages.py", "infrastructure",
+        "Implementation stage error: branch 'issue-384' already exists and "
+        "carries 1 commit(s)",
+        "already exists and carries",
+    ),
+    Cause(
+        "impl.deterministic_failure", r"DETERMINISTIC FAILURE",
+        "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py", "model_output",
+        "DETERMINISTIC FAILURE: the generated test suite cannot be validated "
+        "and the scaffolder",
+        "DETERMINISTIC FAILURE",
+    ),
+    Cause(
+        "impl.red_phase_failed", r"Red phase failed",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "Red phase failed: 23 tests passed unexpectedly. Tests should fail "
+        "before implementation",
+        "Red phase failed:",
+    ),
+    Cause(
+        "impl.green_phase_stopped", r"Green phase stopped",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "infrastructure",
+        "Green phase stopped: pytest test execution interrupted (exit code 2)",
+        "Green phase stopped:",
+    ),
+    Cause(
+        "infra.worktree", r"Git worktree error",
+        "assemblyzero/workflows/orchestrator/stages.py", "infrastructure",
+        "Git worktree error (exit 255): Preparing worktree (new branch "
+        "'issue-7')",
+        "Git worktree error",
+    ),
+    Cause(
+        "infra.pr_creation", r"PR creation error",
+        "assemblyzero/workflows/orchestrator/stages.py", "infrastructure",
+        "PR creation error: To https://github.com/martymcenroe/boostgauge.git",
+        "PR creation error:",
+    ),
+    Cause(
+        "infra.lld_stage_exception", r"LLD stage error",
+        "assemblyzero/workflows/orchestrator/stages.py", "infrastructure",
+        "LLD stage error: 'charmap' codec can't encode character '\\u2265' "
+        "in position 239",
+        "LLD stage error:",
+    ),
+    Cause(
+        # The 2026-08 logs carry the bare form; load_lld.py now prefixes it
+        # with MISSING REQUIRED INPUT. Both are the same precondition.
+        "infra.missing_spec",
+        r"(?:MISSING REQUIRED INPUT: )?[Nn]o implementation spec found",
+        "assemblyzero/workflows/testing/nodes/load_lld.py", "infrastructure",
+        "No implementation spec found for issue #7. Run: poetry run python "
+        "tools/run_implementation",
+        "no implementation spec found",
+    ),
+)
+
+_COMPILED_CAUSES: tuple[tuple[Cause, re.Pattern[str]], ...] = tuple(
+    (cause, re.compile(cause.pattern)) for cause in CAUSE_TABLE
+)
+
+
+def classify_cause(error_head: str) -> str:
+    """The cause key for a banner's first Error line, or a named absence.
+
+    An empty line is `unrecorded`: the banner printed and carried nothing,
+    which is a fact about the halt path, not about the run. A line no row
+    matches is `unclassified`, never the nearest bucket.
+    """
+    head = (error_head or "").strip()
+    if not head:
+        return CAUSE_UNRECORDED
+    for cause, pattern in _COMPILED_CAUSES:
+        if pattern.match(head):
+            return cause.key
+    return CAUSE_UNCLASSIFIED
+
+
+def _node_rank(node: str) -> int:
+    try:
+        return _IMPL_NODE_ORDER.index(node)
+    except ValueError:
+        return -1
+
+
+def _stage_rank(stage: str) -> int:
+    try:
+        return _STAGE_ORDER.index(stage)
+    except ValueError:
+        return -1
+
+
+def _normalize_digits(text: str) -> str:
+    """`Calling Claude... (645s)` and `(15s)` are one event for a tally."""
+    return re.sub(r"\d+", "N", text)
+
 
 def parse_since(spec: str, *, now: datetime | None = None) -> datetime | None:
     """`7d` / `24h` / `2026-08-27` / `2026-08-27 09:00:00` -> a lower bound.
@@ -190,6 +471,41 @@ class RunLogFacts:
     #: and the report says so rather than presenting it as a measurement.
     stage_elapsed: dict[str, tuple[int, int]] = field(default_factory=dict)
     unreadable: bool = False
+    # -- how the run ended (#2717) and how far it got (#2718) --------------
+    #: `passed` (the all-stages banner), `failed` (a failure banner), or
+    #: `killed` (neither: the process died mid-call and the log just stops).
+    outcome: str = OUTCOME_KILLED
+    #: The stage the failure banner names; "" unless outcome is `failed`.
+    failed_stage: str = ""
+    #: The last stage with any verdict in the closing table, or for a killed
+    #: run the last stage a watchdog line saw running.
+    furthest_stage: str = ""
+    #: For a run that reached impl, the highest node marker printed.
+    furthest_node: str = ""
+    #: The first line of the banner's Error, or a killed run's last line.
+    error_head: str = ""
+    #: A CAUSE_TABLE key, or unrecorded / unclassified / killed.
+    cause: str = CAUSE_KILLED
+    #: The exit classifier label when the log printed one (#2383).
+    exit_label: str = ""
+    #: stage -> verdict from the closing table, in table order.
+    stage_verdicts: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def furthest(self) -> str:
+        """`impl:N5`, `spec`, `cleanup` -- one token for the reader."""
+        if self.furthest_stage == "impl" and self.furthest_node:
+            return f"impl:{self.furthest_node}"
+        return self.furthest_stage or "(none)"
+
+    @property
+    def furthest_key(self) -> tuple[int, int, int]:
+        """Sortable: a passed run beats any failed one at the same stage."""
+        return (
+            _stage_rank(self.furthest_stage),
+            _node_rank(self.furthest_node) if self.furthest_stage == "impl" else -1,
+            1 if self.outcome == OUTCOME_PASSED else 0,
+        )
 
 
 def scan_run_log(path: Path) -> RunLogFacts:
@@ -222,6 +538,9 @@ def scan_run_log(path: Path) -> RunLogFacts:
         facts.unreadable = True
         return facts
 
+    last_stage_running = ""
+    last_nonblank = ""
+    awaiting_error = False
     for line in text.splitlines():
         if _RE_PINNING_REFUSED.search(line):
             facts.pinning_refusals += 1
@@ -252,6 +571,55 @@ def scan_run_log(path: Path) -> RunLogFacts:
             nominal = int(watchdog.group("nominal"))
             prior = facts.stage_elapsed.get(stage, (0, nominal))
             facts.stage_elapsed[stage] = (max(prior[0], elapsed), nominal)
+            last_stage_running = stage
+        # -- terminal parse (#2717 / #2718) --------------------------------
+        row = _RE_STAGE_ROW.match(line)
+        if row:
+            facts.stage_verdicts[row.group("stage")] = row.group("verdict")
+        node = _RE_IMPL_NODE.match(line)
+        if node and _node_rank(node.group("node")) > _node_rank(
+            facts.furthest_node
+        ):
+            facts.furthest_node = node.group("node")
+        banner = _RE_FAILED_BANNER.match(line)
+        if banner:
+            facts.outcome = OUTCOME_FAILED
+            facts.failed_stage = banner.group("stage")
+            awaiting_error = True
+        elif awaiting_error:
+            error = _RE_BANNER_ERROR.match(line)
+            if error:
+                facts.error_head = error.group("msg").strip()[:200]
+                awaiting_error = False
+        if _RE_ALL_PASSED.search(line):
+            facts.outcome = OUTCOME_PASSED
+        exit_label = _RE_EXIT_LABEL.match(line)
+        if exit_label:
+            facts.exit_label = exit_label.group("label")
+        if line.strip():
+            last_nonblank = line.strip()
+
+    # The furthest stage is the last row of the closing table that carries a
+    # verdict. A run that resumed at spec shows lld as `skipped`, which still
+    # counts as reached: the pipeline stood on that artifact.
+    reached = [s for s, v in facts.stage_verdicts.items() if v != "-"]
+    if reached:
+        facts.furthest_stage = max(reached, key=_stage_rank)
+    elif last_stage_running:
+        facts.furthest_stage = last_stage_running
+    if facts.furthest_stage != "impl":
+        facts.furthest_node = ""
+
+    if facts.outcome == OUTCOME_FAILED:
+        facts.cause = classify_cause(facts.error_head)
+    elif facts.outcome == OUTCOME_PASSED:
+        facts.cause = ""
+        facts.error_head = ""
+    else:
+        # Killed: no banner at all. The last line is the only evidence of
+        # where it died, and it is carried verbatim rather than guessed at.
+        facts.cause = CAUSE_KILLED
+        facts.error_head = last_nonblank[:120]
 
     return facts
 
@@ -477,6 +845,66 @@ def build_report(
             f"{bundle.get('workflow', '?')}:{bundle.get('stage', '?')}"
         ] += 1
 
+    # -- outcomes and cause of death (#2717) -----------------------------
+    outcomes: dict[str, int] = defaultdict(int)
+    failed_by_stage: dict[str, int] = defaultdict(int)
+    kills_by_cause: dict[str, int] = defaultdict(int)
+    kills_by_stage_cause: dict[str, int] = defaultdict(int)
+    unclassified: list[tuple[str, str]] = []
+    killed_tails: dict[str, int] = defaultdict(int)
+    for run in runs:
+        outcomes[run.outcome] += 1
+        if run.outcome == OUTCOME_FAILED:
+            stage = run.failed_stage or "?"
+            failed_by_stage[stage] += 1
+            kills_by_cause[run.cause] += 1
+            kills_by_stage_cause[f"{stage}:{run.cause}"] += 1
+            if run.cause == CAUSE_UNCLASSIFIED:
+                unclassified.append((run.run_id, run.error_head))
+        elif run.outcome == OUTCOME_KILLED:
+            killed_tails[
+                _normalize_digits(run.error_head) or "(empty log)"
+            ] += 1
+    judges_by_key = {cause.key: cause.judges for cause in CAUSE_TABLE}
+    kills_by_judges: dict[str, int] = defaultdict(int)
+    for key, count in kills_by_cause.items():
+        kills_by_judges[judges_by_key.get(key, key)] += count
+
+    # -- convergence (#2718): how far the furthest run got, per day -------
+    # Days are by run-log mtime: the only date the filesystem knows. The
+    # best run of a day is the furthest one; ties go to the later stamp.
+    by_day: dict[str, list[RunLogFacts]] = defaultdict(list)
+    for run in runs:
+        by_day[run.mtime[:10] if run.mtime else "(undated)"].append(run)
+    convergence_rows: list[dict] = []
+    previous_key: tuple[int, int, int] | None = None
+    for day in sorted(by_day):
+        day_runs = by_day[day]
+        best = max(day_runs, key=lambda r: (r.furthest_key, r.run_id))
+        if previous_key is None:
+            trend = "first"
+        elif best.furthest_key > previous_key:
+            trend = "up"
+        elif best.furthest_key == previous_key:
+            trend = "same"
+        else:
+            trend = "down"
+        convergence_rows.append(
+            {
+                "day": day,
+                "launches": len(day_runs),
+                "furthest": best.furthest,
+                "run_id": best.run_id,
+                "outcome": best.outcome,
+                "cause": best.cause,
+                "trend": trend,
+            }
+        )
+        previous_key = best.furthest_key
+    best_run = (
+        max(runs, key=lambda r: (r.furthest_key, r.run_id)) if runs else None
+    )
+
     return {
         "repo": str(repo),
         "since": since.strftime(_TS_FMT) if since else "",
@@ -546,6 +974,28 @@ def build_report(
             "by_stage": dict(halts_by_stage),
             "total": len(bundles),
         },
+        "outcomes": {
+            "counts": dict(outcomes),
+            "failed_by_stage": dict(failed_by_stage),
+            "kills_by_cause": dict(kills_by_cause),
+            "kills_by_stage_cause": dict(kills_by_stage_cause),
+            "kills_by_judges": dict(kills_by_judges),
+            "unclassified": unclassified,
+            "killed_tails": dict(killed_tails),
+        },
+        "convergence": {
+            "by_day": convergence_rows,
+            "best": (
+                {
+                    "run_id": best_run.run_id,
+                    "furthest": best_run.furthest,
+                    "outcome": best_run.outcome,
+                    "cause": best_run.cause,
+                }
+                if best_run
+                else None
+            ),
+        },
     }
 
 
@@ -560,6 +1010,107 @@ def render_report(data: dict) -> str:
     lines.append(f"# Factory report — {data['repo']}")
     lines.append("")
     lines.append(f"Window: since {window}. Generated {data['generated_at']}.")
+    lines.append("")
+
+    # Convergence first: it is the number the operator reads (#2718). A
+    # session's report card is this table, not its count of closed issues.
+    conv = data["convergence"]
+    lines.append("## Convergence: how far the furthest run got, per day")
+    lines.append("")
+    if conv["by_day"]:
+        lines.append(
+            "Days are by run-log mtime. `furthest` is the last stage with a "
+            "verdict; for impl, the highest node marker printed."
+        )
+        lines.append("")
+        lines.append("| day | launches | furthest | trend | run | ended by |")
+        lines.append("|---|---|---|---|---|---|")
+        for row in conv["by_day"]:
+            ended = (
+                row["cause"] if row["outcome"] == OUTCOME_FAILED
+                else row["outcome"]
+            )
+            lines.append(
+                f"| {row['day']} | {row['launches']} | {row['furthest']} | "
+                f"{row['trend']} | {row['run_id']} | {ended} |"
+            )
+        lines.append("")
+        best = conv["best"]
+        ended = (
+            best["cause"] if best["outcome"] == OUTCOME_FAILED
+            else best["outcome"]
+        )
+        lines.append(
+            f"Furthest run in window: {best['run_id']} reached "
+            f"{best['furthest']} ({ended})."
+        )
+    else:
+        lines.append("No run logs in this window, so nothing to place.")
+    lines.append("")
+
+    outcomes = data["outcomes"]
+    lines.append("## Outcomes")
+    lines.append("")
+    counts = outcomes["counts"]
+    total_runs = sum(counts.values())
+    if total_runs:
+        failed_split = ", ".join(
+            f"{stage} {n}"
+            for stage, n in sorted(
+                outcomes["failed_by_stage"].items(),
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+        )
+        lines.append(
+            f"{total_runs} run(s): passed {counts.get(OUTCOME_PASSED, 0)}, "
+            f"failed {counts.get(OUTCOME_FAILED, 0)}"
+            + (f" ({failed_split})" if failed_split else "")
+            + f", killed {counts.get(OUTCOME_KILLED, 0)} (no terminal "
+            f"banner: the process died mid-call)."
+        )
+    else:
+        lines.append("No run logs in this window.")
+    lines.append("")
+
+    lines.append(
+        "## Cause of death (failed runs, by the Error line under the banner)"
+    )
+    lines.append("")
+    if outcomes["kills_by_cause"]:
+        width = max(len(k) for k in outcomes["kills_by_cause"])
+        judges = {cause.key: cause.judges for cause in CAUSE_TABLE}
+        for key, count in sorted(
+            outcomes["kills_by_cause"].items(), key=lambda kv: (-kv[1], kv[0])
+        ):
+            lines.append(f"  {count:>4}  {key.ljust(width)}  {judges.get(key, '-')}")
+        lines.append("")
+        lines.append(
+            "By what the gate judges: "
+            + ", ".join(
+                f"{k} {v}"
+                for k, v in sorted(
+                    outcomes["kills_by_judges"].items(),
+                    key=lambda kv: (-kv[1], kv[0]),
+                )
+            )
+        )
+    else:
+        lines.append("No failed runs in this window.")
+    if outcomes["unclassified"]:
+        lines.append("")
+        lines.append(
+            "Unclassified Error lines -- add a CAUSE_TABLE row deliberately, "
+            "never by guessing:"
+        )
+        for run_id, head in outcomes["unclassified"]:
+            lines.append(f"  {run_id}: {head}")
+    if outcomes["killed_tails"]:
+        lines.append("")
+        lines.append("Killed runs end on (digits normalized to N):")
+        for tail, count in sorted(
+            outcomes["killed_tails"].items(), key=lambda kv: (-kv[1], kv[0])
+        ):
+            lines.append(f"  {count:>4}  {tail}")
     lines.append("")
 
     # Stores read, with their denominators. A store that does not exist is
@@ -735,6 +1286,13 @@ def render_report(data: dict) -> str:
             "No store carried records in this window -- every zero below is "
             "an absence of data, not an absence of events."
         )
+    if conv["best"]:
+        shortlist.append(
+            f"Furthest run in window: {conv['best']['run_id']} reached "
+            f"{conv['best']['furthest']}"
+        )
+    for key, count in _top(outcomes["kills_by_cause"], 1):
+        shortlist.append(f"Top cause of death: {key} ({count})")
     for key, count in _top(gates["per_check"]):
         shortlist.append(f"Top check by failure volume: {key} ({count})")
     if fell_back and total:
