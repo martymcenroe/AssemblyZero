@@ -249,6 +249,7 @@ _FENCE_OPEN_RE = re.compile(r"^\s*```")
 #: | phrase | check | artifact demanded |
 #: |---|---|---|
 #: | `have no test` / `add a test` / `owes each a test` | criteria, error paths, manifest | a test definition |
+#: | `no test varies the platform` | error paths, platform branch | a test definition |
 #: | `MUST include a code block` | `modify_files_have_excerpts` | a fenced excerpt |
 #: | `MUST have at least one JSON/YAML/Python example` | `data_structures_have_examples` | a fenced example |
 #: | `MUST have at least one example` | `functions_have_io_examples` | a fenced example |
@@ -261,10 +262,26 @@ _FENCE_OPEN_RE = re.compile(r"^\s*```")
 #: demand was covered by neither the named-content vocabulary (the path it
 #: cites is absent from the draft BY DEFINITION, which is what it is
 #: complaining about) nor this exemption.
+#:
+#: #2740 added the platform row. `check_error_path_coverage` has two branches
+#: worded differently -- the exception branch says "owes each a test" and was
+#: covered, the platform branch says "no test varies the platform" and was not,
+#: and no other phrase here matches it incidentally. So the drafter could be
+#: told to add a platform test, add one, and have the addition refused because
+#: nothing in the round was recognised as demanding it: a complaint that could
+#: be made and never satisfied.
+#:
+#: Enumerating phrasings by hand is what made that hole, and adding one more
+#: phrase by hand would only postpone the next one.
+#: `tests/unit/test_addition_demands_are_recognised.py` renders each check's
+#: REAL complaint from the check's own code and asserts this pattern matches
+#: it, so the list is now derived from the checks rather than trusted to agree
+#: with them.
 _ADDITION_DEMAND_RE = re.compile(
     r"\bhave no test\b"
     r"|\badd a test\b"
     r"|\bowes each a test\b"
+    r"|\bno test varies the platform\b"
     r"|\bMUST include a code block\b"
     r"|\bMUST have at least one\b"
     r"|\bAdd the block inside that subsection\b",
