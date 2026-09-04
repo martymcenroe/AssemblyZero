@@ -297,9 +297,19 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         created_by="#2533",
     ),
     Gate(
-        "spec.finalize.draft_guard", "spec", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "spec.finalize.draft_guard", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Cannot finalize empty spec draft",
         _s(f"{_IS}/nodes/finalize_spec.py::finalize_spec::return", 0, 1),
+        justified_by="#2723",
+        notes=(
+            "infrastructure since #2772 (operator ruling 2026-09-04 on "
+            "#2723): a guard against an impossible state, not a gate on the "
+            "drafter. By this node the draft has passed completeness "
+            "validation and earned an APPROVED verdict, so an empty draft "
+            "means something upstream lied -- and an empty draft has no span "
+            "for a revision to cite. Sibling of spec.finalize.precondition "
+            "in the same node, which was already infrastructure"
+        ),
     ),
     Gate(
         "spec.finalize.precondition", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -359,9 +369,18 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         ),
     ),
     Gate(
-        "spec.review.empty_draft", "spec", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "spec.review.empty_draft", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "GUARD: Spec draft is empty",
         _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 1),
+        justified_by="#2723",
+        notes=(
+            "infrastructure since #2773 (operator ruling 2026-09-04 on "
+            "#2723): a guard against an impossible state. An empty draft has "
+            "no span for a revision to cite, and asking the drafter to revise "
+            "nothing is regeneration, which #2569 removed from the revision "
+            "path. Also saves the paid reviewer call on a draft with no "
+            "content"
+        ),
     ),
     Gate(
         "spec.reviewer_failed", "spec", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -655,10 +674,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2, 3),
     ),
     Gate(
-        "impl.green.collection_broken", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "collected 0 tests",
         _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 2),
-        created_by="#2546",
+        created_by="#2546", justified_by="#2723",
+        notes=(
+            "infrastructure since #2765 (operator ruling 2026-09-04 on "
+            "#2723): pytest collecting nothing is a broken suite -- an import "
+            "error, a syntax error, a file pytest cannot see -- not a failing "
+            "one. Worth keeping either way: a suite that collects zero tests "
+            "trivially passes and would otherwise read as green"
+        ),
     ),
     Gate(
         "impl.green.iteration_cap", "impl", JUDGES_BUDGET, ACTION_HALT,

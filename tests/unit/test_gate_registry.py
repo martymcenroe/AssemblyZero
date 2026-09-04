@@ -445,3 +445,70 @@ class TestRulingTwoOutputNobodyCanRevise:
             == keys["spec.requirements_conflict"].judges
             == JUDGES_ISSUE_BODY
         )
+
+
+class TestRulingThreeImpossibleStates:
+    """Question 3, answered yes: a guard against an impossible state is an
+    `infrastructure` check, not a gate on the drafter.
+
+    Each of these asserts an invariant the pipeline is supposed to maintain,
+    rather than judging content the drafter chose to produce. Two catch an
+    empty draft at a point where the draft has already been validated and
+    approved, so emptiness means something upstream lied; the third catches
+    pytest collecting nothing, which is a broken suite and not a failing one.
+
+    The reason this is a reclassification and not a convenience: an empty
+    draft has no span for a revision to cite. The policy's permitted action
+    for a model-output gate is to ask for a revision citing what it objects
+    to, and there is nothing to cite. Asking the drafter to revise nothing is
+    regeneration, which #2569 removed from the revision path deliberately.
+    """
+
+    RECLASSIFIED = {
+        "impl.green.collection_broken": "#2765",
+        "spec.finalize.draft_guard": "#2772",
+        "spec.review.empty_draft": "#2773",
+    }
+
+    def test_every_ruled_row_is_infrastructure(self):
+        keys = registry_by_key()
+        for key in self.RECLASSIFIED:
+            gate = keys.get(key)
+            assert gate is not None, f"{key} is not in the registry"
+            assert gate.judges == JUDGES_INFRASTRUCTURE, (
+                f"{key}: operator ruled infrastructure on #2723, registry "
+                f"says {gate.judges}"
+            )
+
+    def test_the_ruling_is_named_in_the_row(self):
+        keys = registry_by_key()
+        for key, issue in self.RECLASSIFIED.items():
+            gate = keys[key]
+            assert gate.justified_by == "#2723", (
+                f"{key}: justified_by is {gate.justified_by!r}, expected "
+                f"'#2723' -- the ruling that reclassified it"
+            )
+            assert issue in gate.notes, (
+                f"{key}: notes do not name {issue}, the issue that stated the "
+                f"question this row's ruling answered"
+            )
+
+    def test_halting_stays_legal(self):
+        keys = registry_by_key()
+        for key in self.RECLASSIFIED:
+            assert keys[key].action == ACTION_HALT, (
+                f"{key}: the ruling permitted the halt, it did not remove it"
+            )
+
+    def test_both_finalize_guards_agree(self):
+        """`spec.finalize.draft_guard` and `spec.finalize.precondition` are
+        two last-line assertions in the same node, both firing when something
+        upstream has already gone wrong. `precondition` was infrastructure
+        before this ruling and `draft_guard` was not, which was the split the
+        ruling closed."""
+        keys = registry_by_key()
+        assert (
+            keys["spec.finalize.draft_guard"].judges
+            == keys["spec.finalize.precondition"].judges
+            == JUDGES_INFRASTRUCTURE
+        )
