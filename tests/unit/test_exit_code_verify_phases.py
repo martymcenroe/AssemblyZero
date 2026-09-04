@@ -339,9 +339,9 @@ class TestGraphRoutingWithExitCodes:
         assert route_after_red(state) == "N4_implement_code"
 
     def test_route_after_red_error(self):
-        """route_after_red returns end on error."""
+        """route_after_red returns HALT on a recorded reason (#2756)."""
         state = {"error_message": "some error", "next_node": "N4_implement_code"}
-        assert route_after_red(state) == "end"
+        assert route_after_red(state) == "HALT"
 
     def test_route_after_green_scaffold(self):
         """route_after_green returns N2_scaffold_tests when next_node says so."""
@@ -369,6 +369,6 @@ class TestGraphRoutingWithExitCodes:
         assert route_after_green(state) == "N7_finalize"
 
     def test_route_after_green_error(self):
-        """route_after_green returns end on error."""
+        """route_after_green returns HALT on a recorded reason (#2756)."""
         state = {"error_message": "boom", "next_node": "N4_implement_code"}
-        assert route_after_green(state) == "end"
+        assert route_after_green(state) == "HALT"

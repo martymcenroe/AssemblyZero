@@ -782,14 +782,14 @@ class TestCompletenessGateRouting:
         assert result == "end"
 
     def test_error_message_routes_to_end(self, mock_state) -> None:
-        """Error message in state routes to end regardless of verdict."""
+        """A recorded reason routes to HALT regardless of verdict (#2756)."""
         state = mock_state(
             completeness_verdict="PASS",
             iteration_count=0,
             error_message="Something went wrong",
         )
         result = route_after_completeness_gate(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_max_iterations_constant_is_three(self) -> None:
         """Verify MAX_COMPLETENESS_ITERATIONS is 3 per LLD spec."""

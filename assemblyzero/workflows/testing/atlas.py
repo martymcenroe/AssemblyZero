@@ -40,7 +40,7 @@ ATLAS: dict[str, dict] = {
         ),
         "successors": {
             "N1_review_test_plan": "the LLD and spec loaded",
-            "END": "neither document could be loaded",
+            "HALT": "neither document could be loaded",
         },
     },
     "N1_review_test_plan": {
@@ -55,7 +55,8 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N2_scaffold_tests": "the plan is usable",
             "N1_5_revise_test_plan": "blocked; revise the plan once",
-            "END": "the reviewer failed, or the plan cannot be revised",
+            "HALT": "the reviewer failed and left a reason",
+            "END": "blocked under a strict policy, or out of revisions",
         },
     },
     "N1_5_revise_test_plan": {
@@ -82,7 +83,8 @@ ATLAS: dict[str, dict] = {
         ),
         "successors": {
             "N2_5_validate_tests": "tests were generated",
-            "END": "scaffolding failed, or this was a scaffold-only run",
+            "HALT": "scaffolding failed",
+            "END": "this was a scaffold-only run, which is a finish",
         },
     },
     "N2_5_validate_tests": {
@@ -104,7 +106,8 @@ ATLAS: dict[str, dict] = {
             # having skipped the red phase. The edge is in the compiled graph
             # and is named here so the drift guard stays honest about it.
             "N4_implement_code": "never taken; the edge #2331 stopped using",
-            "END": "still unusable when the attempt budget is spent",
+            "HALT": "still unusable when the attempt budget is spent",
+            "END": "the node returned no reason to record",
         },
     },
     "N3_verify_red": {
@@ -120,7 +123,8 @@ ATLAS: dict[str, dict] = {
             "N4_implement_code": "the tests fail, as they must",
             "N5_verify_green": "the work is already done (#2337)",
             "N2_scaffold_tests": "the suite is broken; scaffold again",
-            "END": "the tests pass without code, or the runner is unusable",
+            "HALT": "the tests pass without code, or the runner is unusable",
+            "END": "the node returned no reason to record",
         },
     },
     "N4_implement_code": {
@@ -134,7 +138,7 @@ ATLAS: dict[str, dict] = {
         ),
         "successors": {
             "N4b_completeness_gate": "the files were written",
-            "END": "the implementer could not produce usable code",
+            "HALT": "the implementer could not produce usable code",
         },
     },
     "N4b_completeness_gate": {
@@ -149,7 +153,9 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N5_verify_green": "every requirement has code",
             "N4_implement_code": "something is missing; implement it",
-            "END": "still incomplete at the iteration cap",
+            "HALT": "the gate itself failed and left a reason",
+            "END": "still incomplete at the iteration cap; the orchestrator "
+                   "reads the BLOCK verdict (#1779)",
         },
     },
     "N4c_augment_tests": {
@@ -181,7 +187,8 @@ ATLAS: dict[str, dict] = {
             "N4_implement_code": "still failing; implement again",
             "N4c_augment_tests": "green but under-covered; add tests (#2327)",
             "N2_scaffold_tests": "the suite itself is the problem",
-            "END": "the iteration cap, the circuit breaker, or a dead runner",
+            "HALT": "the iteration cap, the circuit breaker, or a dead runner",
+            "END": "the node returned no reason to record",
         },
     },
     "N6_e2e_validation": {
@@ -196,7 +203,8 @@ ATLAS: dict[str, dict] = {
         "successors": {
             "N7_finalize": "validated, or not applicable",
             "N4_implement_code": "the feature does not work; implement again",
-            "END": "the e2e cap, the circuit breaker, or an e2e error",
+            "HALT": "the circuit breaker, or an e2e error with a reason",
+            "END": "the e2e iteration cap, which records no reason",
         },
     },
     "N7_finalize": {
@@ -211,7 +219,8 @@ ATLAS: dict[str, dict] = {
         ),
         "successors": {
             "N7_5_adversarial": "finalized",
-            "END": "finalizing failed, or documentation is being skipped",
+            "HALT": "finalizing failed",
+            "END": "documentation is being skipped, which is a finish",
         },
     },
     "N7_5_adversarial": {
@@ -259,14 +268,16 @@ ATLAS: dict[str, dict] = {
         "ordinal": None,
         "goal": "Record why the run stopped, then end it cleanly.",
         "teach": (
-            "Declared but unreachable in THIS graph, unlike its counterparts "
-            "in the requirements and implementation-spec workflows. No router "
-            "here returns HALT: every stop routes straight to END carrying an "
-            "`error_message`, which the orchestrator relays. The node and its "
-            "outbound edge are dead code, and `successors` is empty because "
-            "the compiled graph has no edge out of it. Filed as its own issue "
-            "rather than deleted here, since removing a node is a ruling."
+            "Reachable since #2756, from all ten routers that can carry an "
+            "`error_message`. Before that it was declared and stranded: every "
+            "stop routed straight to END and the orchestrator relayed the "
+            "message, so implementation-stage halts never passed through the "
+            "node that writes the halt bundle -- the artifact carrying the "
+            "gate key, the outstanding work and the resume line. An exit, "
+            "never a step, so it takes no ordinal."
         ),
-        "successors": {},
+        "successors": {
+            "END": "always -- the reason is recorded, the run is over",
+        },
     },
 }

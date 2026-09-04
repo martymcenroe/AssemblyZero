@@ -132,24 +132,24 @@ def _wrap_with_checkpoint(node_fn: Callable[..., dict[str, Any]],
 
 def route_after_load(
     state: TestingWorkflowState,
-) -> Literal["N1_review_test_plan", "end"]:
+) -> Literal["N1_review_test_plan", "HALT"]:
     """Route after N0 (load_lld).
 
     Args:
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT when the node recorded a reason (#2756).
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
     return "N1_review_test_plan"
 
 
 def route_after_review(
     state: TestingWorkflowState,
-) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "end"]:
+) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "end", "HALT"]:
     """Route after N1 (review_test_plan).
 
     Issue #1072: BLOCKED no longer terminates by default. The
@@ -181,7 +181,7 @@ def route_after_review(
     revision_count = state.get("test_plan_revision_count", 0)
 
     if error and not auto_mode:
-        return "end"
+        return "HALT"
 
     if test_plan_status == "BLOCKED":
         # Legacy auto_mode flag OR policy=auto bypasses the gate.
@@ -215,7 +215,7 @@ def route_after_review(
 
 def route_after_scaffold(
     state: TestingWorkflowState,
-) -> Literal["N2_5_validate_tests", "end"]:
+) -> Literal["N2_5_validate_tests", "end", "HALT"]:
     """Route after N2 (scaffold_tests).
 
     Issue #335: Updated to route to validation node instead of verify_red.
@@ -224,13 +224,15 @@ def route_after_scaffold(
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, END for a scaffold-only run, or HALT when the node
+        recorded a reason (#2756).
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
 
-    # scaffold_only mode - stop after scaffolding
+    # scaffold_only mode - stop after scaffolding. A finish, not a halt:
+    # nothing failed and there is no reason to record (#2756).
     if state.get("scaffold_only"):
         return "end"
 
@@ -239,7 +241,7 @@ def route_after_scaffold(
 
 def route_after_validate(
     state: TestingWorkflowState,
-) -> Literal["N3_verify_red", "N2_scaffold_tests", "end"]:
+) -> Literal["N3_verify_red", "N2_scaffold_tests", "end", "HALT"]:
     """Route after N2.5 (validate_tests_mechanical).
 
     Issue #335: Routes based on test validation results.
@@ -269,7 +271,7 @@ def route_after_validate(
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
 
     # Use the should_regenerate function from validate_tests_mechanical
     decision = should_regenerate(state)
@@ -285,7 +287,7 @@ def route_after_validate(
 def route_after_red(
     state: TestingWorkflowState,
 ) -> Literal[
-    "N4_implement_code", "N2_scaffold_tests", "N5_verify_green", "end",
+    "N4_implement_code", "N2_scaffold_tests", "N5_verify_green", "end", "HALT",
 ]:
     """Route after N3 (verify_red_phase).
 
@@ -295,13 +297,13 @@ def route_after_red(
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT when the node recorded a reason (#2756).
     """
     error = state.get("error_message", "")
     next_node = state.get("next_node", "")
 
     if error:
-        return "end"
+        return "HALT"
 
     if next_node == "N4_implement_code":
         return "N4_implement_code"
@@ -321,7 +323,7 @@ def route_after_red(
 
 def route_after_implement(
     state: TestingWorkflowState,
-) -> Literal["N4b_completeness_gate", "end"]:
+) -> Literal["N4b_completeness_gate", "HALT"]:
     """Route after N4 (implement_code).
 
     Issue #147: Routes to N4b completeness gate instead of directly to N5.
@@ -330,11 +332,11 @@ def route_after_implement(
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT when the node recorded a reason (#2756).
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
     return "N4b_completeness_gate"
 
 
@@ -349,7 +351,7 @@ def route_after_green(
     state: TestingWorkflowState,
 ) -> Literal[
     "N6_e2e_validation", "N7_finalize", "N4_implement_code",
-    "N4c_augment_tests", "N2_scaffold_tests", "end",
+    "N4c_augment_tests", "N2_scaffold_tests", "end", "HALT",
 ]:
     """Route after N5 (verify_green_phase).
 
@@ -359,13 +361,13 @@ def route_after_green(
         state: Current workflow state.
 
     Returns:
-        Next node name or END.
+        Next node name, or HALT when the node recorded a reason (#2756).
     """
     error = state.get("error_message", "")
     next_node = state.get("next_node", "")
 
     if error:
-        return "end"
+        return "HALT"
 
     # Issue #292: Exit code 4/5 routes back to scaffold
     if next_node == "N2_scaffold_tests":
@@ -434,7 +436,7 @@ def route_after_green(
 
 def route_after_e2e(
     state: TestingWorkflowState,
-) -> Literal["N7_finalize", "N4_implement_code", "end"]:
+) -> Literal["N7_finalize", "N4_implement_code", "end", "HALT"]:
     """Route after N6 (e2e_validation).
 
     Args:
@@ -447,7 +449,7 @@ def route_after_e2e(
     next_node = state.get("next_node", "")
 
     if error:
-        return "end"
+        return "HALT"
 
     # E2E failure may loop back to implement
     if next_node == "N4_implement_code":
@@ -462,7 +464,7 @@ def route_after_e2e(
 
 def route_after_finalize(
     state: TestingWorkflowState,
-) -> Literal["N7_5_adversarial", "end"]:
+) -> Literal["N7_5_adversarial", "end", "HALT"]:
     """Route after N7 (finalize).
 
     Issue #352: Now routes to adversarial node instead of directly to N8.
@@ -475,9 +477,9 @@ def route_after_finalize(
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
 
-    # Skip documentation if flag is set
+    # Skip documentation if flag is set. A finish, not a halt (#2756).
     if state.get("skip_docs"):
         return "end"
 
@@ -564,7 +566,10 @@ def build_testing_workflow() -> StateGraph:
         route_after_load,
         {
             "N1_review_test_plan": "N1_review_test_plan",
-            "end": END,
+            # #2756: no "end" -- this router's only stop is an error, and it
+            # now goes to HALT. Leaving the entry would declare an edge
+            # nothing can take, which is the defect this issue is about.
+            "HALT": "HALT",
         },
     )
 
@@ -576,6 +581,7 @@ def build_testing_workflow() -> StateGraph:
             "N2_scaffold_tests": "N2_scaffold_tests",
             "N1_5_revise_test_plan": "N1_5_revise_test_plan",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -589,6 +595,7 @@ def build_testing_workflow() -> StateGraph:
         {
             "N2_5_validate_tests": "N2_5_validate_tests",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -601,6 +608,7 @@ def build_testing_workflow() -> StateGraph:
             "N2_scaffold_tests": "N2_scaffold_tests",
             "N4_implement_code": "N4_implement_code",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -613,6 +621,7 @@ def build_testing_workflow() -> StateGraph:
             "N5_verify_green": "N5_verify_green",  # #2337
             "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -622,7 +631,8 @@ def build_testing_workflow() -> StateGraph:
         route_after_implement,
         {
             "N4b_completeness_gate": "N4b_completeness_gate",
-            "end": END,
+            # #2756: no "end" -- see route_after_load.
+            "HALT": "HALT",
         },
     )
 
@@ -634,6 +644,7 @@ def build_testing_workflow() -> StateGraph:
             "N5_verify_green": "N5_verify_green",
             "N4_implement_code": "N4_implement_code",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -648,6 +659,7 @@ def build_testing_workflow() -> StateGraph:
             "N4c_augment_tests": "N4c_augment_tests",  # #2327
             "N2_scaffold_tests": "N2_scaffold_tests",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -664,6 +676,7 @@ def build_testing_workflow() -> StateGraph:
             "N7_finalize": "N7_finalize",
             "N4_implement_code": "N4_implement_code",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 
@@ -674,6 +687,7 @@ def build_testing_workflow() -> StateGraph:
         {
             "N7_5_adversarial": "N7_5_adversarial",
             "end": END,
+            "HALT": "HALT",  # #2756
         },
     )
 

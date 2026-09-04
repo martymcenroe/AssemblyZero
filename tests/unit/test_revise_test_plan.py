@@ -86,14 +86,19 @@ def test_route_approved_goes_straight_to_scaffold_regardless_of_policy():
         assert route_after_review(state) == "N2_scaffold_tests"
 
 
-def test_route_error_with_no_auto_mode_ends():
-    """error_message + auto_mode=False → end (preserves prior behavior)."""
+def test_route_error_with_no_auto_mode_halts():
+    """error_message + auto_mode=False → HALT (#2756).
+
+    Still a stop; the destination changed so the reason is written down by
+    the node that owns halting. The two policy stops above keep going to END:
+    they carry no error_message, so there is nothing to record.
+    """
     state: dict[str, Any] = {
         "error_message": "something blew up",
         "test_plan_status": "PENDING",
         "auto_mode": False,
     }
-    assert route_after_review(state) == "end"
+    assert route_after_review(state) == "HALT"
 
 
 # ---------------------------------------------------------------------------
