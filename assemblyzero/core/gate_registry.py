@@ -655,16 +655,56 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3),
         notes="the tests import modules the codebase does not have",
     ),
+    # #2761 (operator ruling 2026-09-04): one row named two different things,
+    # and the report could not say which of its kills was which. Split, and
+    # the code's own message decides each half's owner.
+    #
+    # This split is the authorised rise: `halt_rows_per_stage['impl']` goes
+    # 34 -> 35. No new place can stop a run -- halt SITES are unchanged,
+    # both returns already existed -- and the model-output count is unchanged
+    # too, because one half leaves the category as the other keeps it.
+    Gate(
+        "impl.red.preexisting_implementation", "impl", JUDGES_INFRASTRUCTURE,
+        ACTION_HALT,
+        # Found in the site's own static head, not by the `decided_in`
+        # file-wide fallback: the old row's emits was the bare token, which
+        # lives in validate_tests_mechanical.py and so matched a file rather
+        # than a return. That is the weakness #2776 is about.
+        "tests passed unexpectedly, and neither a red-entry marker",
+        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 4),
+        decided_in=f"{_TS}/nodes/verify_phases.py::verify_red_phase",
+        created_by="#2337", justified_by="#2761",
+        notes=(
+            "infrastructure by the #2761 ruling, and the message says why: "
+            "'neither a red-entry marker nor this run's own prior writes "
+            "explain them -- the implementation existed before this stage "
+            "entered'. That is the state of the worktree the stage was "
+            "handed, not something the drafter wrote. Deterministic on an "
+            "unchanged tree, which is why it carries the token and is not "
+            "retried. Both recorded kills are here: run-issue331 on the "
+            "pre-#2337 message, run-issue379 on this one"
+        ),
+    ),
     Gate(
         "impl.deterministic_failure", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
-        "DETERMINISTIC FAILURE",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 4)
-        + _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 4),
-        decided_in=f"{_TS}/nodes/validate_tests_mechanical.py",
+        # This one still needs the `decided_in` fallback, and it is worth
+        # saying why: the return is `f"{DETERMINISTIC_FAILURE}: {message}"`,
+        # so its static head is literally "{}: {}" and carries no text at
+        # all. `decided_in` now names the function that composes the message
+        # rather than the module that defines the token, which is the honest
+        # pointer and the narrowest the check can currently be given.
+        "Test(s) failing for a reason no implementation can fix",
+        _s(f"{_TS}/nodes/verify_phases.py::verify_green_phase::return", 4),
+        decided_in=f"{_TS}/nodes/verify_phases.py::verify_green_phase",
+        justified_by="#2761",
         notes=(
-            "tests passed before the code existed, or fail for a platform reason no "
-            "implementation can fix; the scaffolder's suite-invalid halt shares the "
-            "prefix and is impl.scaffold_suite_invalid"
+            "model_output by the #2761 ruling, and the message says that too "
+            "-- 'The TEST is the wrong side here, fix or remove it'. N4c "
+            "generated the test; a platform error is how the defect shows, "
+            "not whose it is. Zero kills in the 180-run window. Keeps the "
+            "key because the answer-key audit's stub count reports under it, "
+            "and a hollow test and an unsatisfiable one are one family: a "
+            "test no implementation can make pass"
         ),
     ),
     Gate(

@@ -322,13 +322,30 @@ CAUSE_TABLE: tuple[Cause, ...] = (
         "and the scaffolder",
         "the generated test suite cannot be",
     ),
+    # #2761 split the last of the three in two, because it also named two
+    # things: the worktree already held the implementation (the pipeline's
+    # fault) and a generated test cannot pass anywhere (the drafter's). Both
+    # rows are specific -- there is deliberately no generic
+    # `DETERMINISTIC FAILURE` catch-all left, so a fourth emitter of the token
+    # lands in `unclassified` and gets printed verbatim rather than absorbed
+    # by a neighbour, which is how the first three came to share one row.
     Cause(
-        "impl.deterministic_failure", r"DETERMINISTIC FAILURE",
-        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "impl.red.preexisting_implementation",
+        r"DETERMINISTIC FAILURE: Red phase failed",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py",
+        "infrastructure",
         "DETERMINISTIC FAILURE: Red phase failed: 3 tests passed "
         "unexpectedly, and neither a red-entry marker nor this run's own "
         "prior writes explain them",
         "tests passed unexpectedly, and neither a red-entry marker",
+    ),
+    Cause(
+        "impl.deterministic_failure",
+        r"DETERMINISTIC FAILURE: Test\(s\) failing for a reason",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "DETERMINISTIC FAILURE: Test(s) failing for a reason no "
+        "implementation can fix: test_dynamic_256_matches_baseline",
+        "Test(s) failing for a reason no implementation can fix",
     ),
     Cause(
         "impl.red_phase_failed", r"Red phase failed",
