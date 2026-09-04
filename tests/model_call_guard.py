@@ -62,6 +62,12 @@ def model_cli_name(cmd) -> str:
     text = str(head or "").strip()
     if not text:
         return ""
+    # Backslashes are separators here whatever platform this runs on. The fleet
+    # runs Windows and CI runs Linux, where `Path(r"C:\...\claude.cmd").stem` is
+    # the WHOLE string -- so a guard that used the native path rules would pass
+    # a Windows transport straight through on the runner. Caught by CI on this
+    # PR's own first push, which is the test doing its job.
+    text = text.replace("\\", "/")
     if " " in text and not Path(text).exists():
         text = text.split(" ", 1)[0]
     stem = Path(text).stem.lower()

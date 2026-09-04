@@ -32,7 +32,10 @@ class TestWhichCommandsAreModelCalls:
             (["claude", "-p", "hello"], "claude"),
             (["agy", "--model", "gemini-3.1-pro-high"], "agy"),
             (["gemini", "-p", "x"], "gemini"),
-            # The transports invoke a resolved path, not a bare name.
+            # The transports invoke a resolved path, not a bare name. Both
+            # separators, on both platforms: the fleet runs Windows and CI runs
+            # Linux, where the native path rules do not treat a backslash as a
+            # separator at all. CI caught this on its first push.
             ([r"C:\Users\x\AppData\Roaming\npm\claude.cmd", "-p"], "claude"),
             (["/usr/local/bin/claude", "-p"], "claude"),
             (["CLAUDE.EXE", "-p"], "claude"),
@@ -40,6 +43,14 @@ class TestWhichCommandsAreModelCalls:
     )
     def test_a_model_cli_is_recognised_however_it_is_spelled(self, cmd, expected):
         assert model_cli_name(cmd) == expected
+
+    def test_a_windows_path_is_read_the_same_way_on_every_platform(self):
+        """Pinned separately from the table because the failure it prevents is
+        platform-shaped: on Linux this string has no path separators, so the
+        stem is the whole thing and the guard would let a Windows transport
+        through on the runner."""
+        assert model_cli_name([r"C:\npm\claude.cmd"]) == "claude"
+        assert model_cli_name([r"C:\Program Files\Git\bin\git.exe"]) == ""
 
     @pytest.mark.parametrize(
         "cmd",
