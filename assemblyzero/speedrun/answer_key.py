@@ -107,7 +107,10 @@ NOT_RUNNABLE_HERE: tuple[tuple[str, str], ...] = (
     ("impl.stagnation.test_identity", "needs two iterations of a live green loop"),
     ("impl.stagnation.full_suite", "needs a live full-suite run"),
     ("impl.stagnation.e2e", "needs a live e2e loop"),
-    ("impl.red_phase_failed", "needs pytest run against the pre-implementation tree"),
+    # #2796 retired `impl.red_phase_failed`. Its one site moved to
+    # `impl.red.preexisting_implementation`, which is absent from this list
+    # because that row judges the state of the worktree -- infrastructure --
+    # rather than model output, and this list is about model-output rows.
     ("impl.red.import_errors", "needs pytest run against the pre-implementation tree"),
     ("impl.green.collection_broken", "needs a pytest collection run"),
     ("spec.pinning_refusal", "needs a previous draft and a revision"),

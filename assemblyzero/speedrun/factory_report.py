@@ -329,9 +329,20 @@ CAUSE_TABLE: tuple[Cause, ...] = (
     # `DETERMINISTIC FAILURE` catch-all left, so a fourth emitter of the token
     # lands in `unclassified` and gets printed verbatim rather than absorbed
     # by a neighbour, which is how the first three came to share one row.
+    # #2796 widened this pattern to make the token optional, and deleted the
+    # `impl.red_phase_failed` row that used to catch the untokened form.
+    # Three messages now land here and all three are the same finding: the
+    # pre-#2337 pytest text (run-issue331's banner, which has no token),
+    # today's pytest text, and the non-pytest text #2796 gave the token to.
+    #
+    # The prefix must be optional rather than absent: `classify_cause`
+    # matches from the START of the banner's Error line, so a bare
+    # `Red phase failed` pattern silently stops matching the two tokened
+    # forms -- which is what a first cut of this did, and what the parametrised
+    # test in tests/unit/test_non_pytest_red_is_deterministic.py caught.
     Cause(
         "impl.red.preexisting_implementation",
-        r"DETERMINISTIC FAILURE: Red phase failed",
+        r"(?:DETERMINISTIC FAILURE: )?Red phase failed",
         "assemblyzero/workflows/testing/nodes/verify_phases.py",
         "infrastructure",
         "DETERMINISTIC FAILURE: Red phase failed: 3 tests passed "
@@ -346,13 +357,6 @@ CAUSE_TABLE: tuple[Cause, ...] = (
         "DETERMINISTIC FAILURE: Test(s) failing for a reason no "
         "implementation can fix: test_dynamic_256_matches_baseline",
         "Test(s) failing for a reason no implementation can fix",
-    ),
-    Cause(
-        "impl.red_phase_failed", r"Red phase failed",
-        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
-        "Red phase failed: 23 tests passed unexpectedly. Tests should fail "
-        "before implementation",
-        "Red phase failed:",
     ),
     Cause(
         "impl.green_phase_stopped", r"Green phase stopped",
