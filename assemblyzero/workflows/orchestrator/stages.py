@@ -1524,6 +1524,13 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
 
         # Run implementation workflow
         from assemblyzero.workflows.testing.graph import build_testing_workflow as create_impl_graph
+        # #2790: this stage spent no step budget, so its ceiling was
+        # LangGraph's default of 10007 -- ten thousand super-steps, in a stage
+        # where a super-step can be a model call, ending on an exception with
+        # no gate key. The budget is derived from the stage's own caps.
+        from assemblyzero.workflows.testing.step_budget import (
+            recursion_limit as impl_recursion_limit,
+        )
         from assemblyzero.workflows.testing.state import DEFAULT_MAX_ITERATIONS
 
         spec_path = state.get("spec_path", "")
@@ -1561,7 +1568,7 @@ def run_impl_stage(state: OrchestrationState) -> OrchestrationState:
             # without a word.
             "max_iterations": DEFAULT_MAX_ITERATIONS,
             "config_mock_mode": mock_mode(state),
-        })
+        }, config={"recursion_limit": impl_recursion_limit(DEFAULT_MAX_ITERATIONS)})
 
         error_msg = sub_result.get("error_message", "")
         # #1779: the completeness gate's verdict must survive to the stage
