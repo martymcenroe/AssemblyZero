@@ -984,34 +984,150 @@ def scan_halt_sites(
 # ---------------------------------------------------------------------------
 
 
-def registry_by_key() -> dict[str, Gate]:
-    return {gate.key: gate for gate in GATE_REGISTRY}
+def registry_by_key(registry: tuple[Gate, ...] = ()) -> dict[str, Gate]:
+    return {gate.key: gate for gate in (registry or GATE_REGISTRY)}
 
 
-def site_to_gate() -> dict[str, str]:
+def site_to_gate(registry: tuple[Gate, ...] = ()) -> dict[str, str]:
     """site key -> gate key, over the whole registry."""
     mapping: dict[str, str] = {}
-    for gate in GATE_REGISTRY:
+    for gate in (registry or GATE_REGISTRY):
         for site in gate.sites:
             mapping[site] = gate.key
     return mapping
 
 
-def unregistered(sites: list[HaltSite]) -> list[HaltSite]:
+def unregistered(
+    sites: list[HaltSite], registry: tuple[Gate, ...] = ()
+) -> list[HaltSite]:
     """Walked sites no row names. The gate the ratchet exists to catch."""
-    known = site_to_gate()
+    known = site_to_gate(registry)
     return [site for site in sites if site.key not in known]
 
 
-def phantoms(sites: list[HaltSite]) -> list[tuple[str, str]]:
+def phantoms(
+    sites: list[HaltSite], registry: tuple[Gate, ...] = ()
+) -> list[tuple[str, str]]:
     """(gate key, site key) for registry sites the walker did not find."""
     walked = {site.key for site in sites}
     return [
         (gate.key, site)
-        for gate in GATE_REGISTRY
+        for gate in (registry or GATE_REGISTRY)
         for site in gate.sites
         if site not in walked
     ]
+
+
+@dataclass(frozen=True)
+class Renumbering:
+    """A registry site that moved because a sibling above it was removed.
+
+    Not a new gate and not a missing one: the same return, at a new index,
+    because `index` is positional within a function (#2738).
+    """
+
+    gate_key: str
+    named: str
+    found: str
+    head: str
+
+    def describe(self) -> str:
+        return (
+            f"{self.gate_key} names {self.named}, and the return that prints "
+            f"{self.head[:60]!r} is now at {self.found} -- a sibling return "
+            f"was removed above it. Remap the row to the new index."
+        )
+
+
+def _site_parts(key: str) -> tuple[str, str, str]:
+    """(path, qualname, kind) of a site key, dropping its positional index."""
+    path, qualname, kind, _index = key.rsplit("::", 3)
+    return path, qualname, kind
+
+
+def renumberings(
+    sites: list[HaltSite], registry: tuple[Gate, ...] = ()
+) -> tuple[list[Renumbering], list[HaltSite], list[tuple[str, str]]]:
+    """Tell a renumbered site apart from a new one and a deleted one (#2738).
+
+    Returns (renumbered, still_unregistered, still_phantom).
+
+    A site key is ``path::qualname::kind::index`` and the index is the
+    position of the return among its siblings, so retiring one halt site
+    shifts every later site of the same kind in the same function. The
+    two-way check then reports the NEIGHBOURS as unregistered and phantom
+    and says nothing about the gate that actually moved -- in #2723 it named
+    four gates that had not been touched, which is the wrong first hypothesis
+    to hand a reader in the middle of a gate change.
+
+    A phantom and an unregistered site are the same return when they share a
+    path, a qualname, a kind AND the static message head the walker already
+    computes. Anything unmatched stays in its original list, so a genuinely
+    new gate is still reported as a new gate: this narrows the report, it does
+    not weaken the check.
+
+    Pairing is one-to-one and taken in index order, which matters when several
+    siblings share a head: two returns printing the same text shift by the
+    same amount and in the same order, so the Nth phantom is the Nth found.
+    """
+    fresh = unregistered(sites, registry)
+    ghosts = phantoms(sites, registry)
+
+    #: Unregistered sites, grouped by everything except their index.
+    available: dict[tuple[str, str, str, str], list[HaltSite]] = defaultdict(list)
+    for site in fresh:
+        available[(site.path, site.qualname, site.kind, site.head)].append(site)
+    for group in available.values():
+        group.sort(key=lambda s: s.index)
+
+    matched_sites: set[str] = set()
+    matched_ghosts: set[tuple[str, str]] = set()
+    found: list[Renumbering] = []
+
+    for gate_key, named in sorted(ghosts, key=lambda g: g[1]):
+        try:
+            path, qualname, kind = _site_parts(named)
+        except ValueError:
+            # fail-open: a row naming something that is not a site key at all
+            # is a real defect, and it is REPORTED rather than raised -- this
+            # entry stays in the returned phantom list, where the audit prints
+            # it and the CI gate fails on it. Raising here would replace a
+            # named finding with a traceback and would stop the other rows
+            # being examined at all.
+            continue
+        # The head the registry row expects is not stored on the row -- only
+        # `emits` is, and that is prose for humans. So the head comes from the
+        # candidates themselves, and a group is claimable only if exactly one
+        # head is on offer for this (path, qualname, kind), or one of them
+        # matches the row's `emits`.
+        heads = [
+            key for key in available
+            if key[:3] == (path, qualname, kind) and available[key]
+        ]
+        if not heads:
+            continue
+        chosen = heads[0]
+        if len(heads) > 1:
+            row = registry_by_key(registry).get(gate_key)
+            emits = (row.emits if row else "") or ""
+            preferred = [key for key in heads if emits and emits in key[3]]
+            if len(preferred) != 1:
+                # Ambiguous: several returns in this function moved and their
+                # message heads do not tell them apart. Reported as phantom and
+                # unregistered, unchanged, because a guessed remap is worse
+                # than an honest "work these out by hand".
+                continue
+            chosen = preferred[0]
+        site = available[chosen].pop(0)
+        matched_sites.add(site.key)
+        matched_ghosts.add((gate_key, named))
+        found.append(Renumbering(gate_key, named, site.key, site.head))
+
+    return (
+        sorted(found, key=lambda r: r.named),
+        [site for site in fresh if site.key not in matched_sites],
+        [ghost for ghost in ghosts if ghost not in matched_ghosts],
+    )
 
 
 def halt_counts() -> dict[str, int]:

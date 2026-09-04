@@ -37,7 +37,7 @@ from assemblyzero.core.gate_registry import (  # noqa: E402
     HaltSite,
     WalkCoverage,
     halt_counts,
-    phantoms,
+    renumberings,
     scan_halt_sites,
     site_to_gate,
     unregistered,
@@ -95,8 +95,7 @@ def render_tsv(sites: list[HaltSite]) -> str:
 
 
 def render_report(sites: list[HaltSite], coverage: WalkCoverage) -> str:
-    fresh = unregistered(sites)
-    ghosts = phantoms(sites)
+    moved, fresh, ghosts = renumberings(sites)
     by_gate: dict[str, int] = defaultdict(int)
     known = site_to_gate()
     for site in sites:
@@ -116,6 +115,7 @@ def render_report(sites: list[HaltSite], coverage: WalkCoverage) -> str:
         "",
         f"Registry: {len(GATE_REGISTRY)} gate(s); halt-action rows per stage: "
         + ", ".join(f"{s} {n}" for s, n in halt_counts().items()),
+        f"  Renumbered sites (a sibling was retired above them): {len(moved)}",
         f"  Unregistered sites (no row names them): {len(fresh)}",
         f"  Phantom sites (row names, walker cannot find): {len(ghosts)}",
         "",
@@ -128,6 +128,12 @@ def render_report(sites: list[HaltSite], coverage: WalkCoverage) -> str:
             f"{gate.action:<7} {by_gate.get(gate.key, 0)}"
             + ("  (decided in " + gate.decided_in + ")" if gate.decided_in else "")
         )
+    if moved:
+        lines += ["", "RENUMBERED -- the same return, at a new index (#2738):"]
+        for rename in moved:
+            lines.append(f"  {rename.describe()}")
+            lines.append(f"    {rename.named}")
+            lines.append(f"    -> {rename.found}")
     if fresh:
         lines += ["", "UNREGISTERED -- every one must name a row:"]
         for site in fresh:
@@ -163,24 +169,44 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.check:
-        fresh = unregistered(sites)
-        ghosts = phantoms(sites)
-        if not fresh and not ghosts:
+        # #2738: separate a renumbering from a real finding BEFORE printing.
+        # A site index is positional, so retiring one halt site shifts every
+        # later site of the same kind in the same function -- and the two-way
+        # check then reports the neighbours while saying nothing about the gate
+        # that moved. In #2723 it named four gates that had not been touched.
+        moved, fresh, ghosts = renumberings(sites)
+        if not fresh and not ghosts and not moved:
             print(
                 f"PASS -- {coverage.files_scanned} files, {len(sites)} halt "
                 f"sites, every one registered; {len(GATE_REGISTRY)} gates, "
                 f"halt rows: {halt_counts()}"
             )
             return 0
-        print(f"FAIL -- {len(fresh)} unregistered site(s), {len(ghosts)} phantom(s)")
+        parts = []
+        if moved:
+            parts.append(f"{len(moved)} renumbered site(s)")
+        if fresh:
+            parts.append(f"{len(fresh)} unregistered site(s)")
+        if ghosts:
+            parts.append(f"{len(ghosts)} phantom(s)")
+        print(f"FAIL -- {', '.join(parts)}")
+        if moved:
+            print()
+            print("RENUMBERED -- the same return, at a new index. A sibling was")
+            print("retired above it; remap the row rather than hunting a new gate:")
+            for rename in moved:
+                print(f"  {rename.describe()}")
+                print(f"    {rename.named}")
+                print(f"    -> {rename.found}")
         for site in fresh:
             print(f"  unregistered: {site.key}  line {site.line}  {site.head[:70]!r}")
         for gate_key, site in ghosts:
             print(f"  phantom: {gate_key} names {site}")
         print()
-        print("Add the site to a GATE_REGISTRY row (or a new row with its issue")
-        print("and the run that justified it); a halt-action row also moves the")
-        print("ratchet baseline. Remove a stale site key from its row.")
+        if fresh or ghosts:
+            print("Add the site to a GATE_REGISTRY row (or a new row with its issue")
+            print("and the run that justified it); a halt-action row also moves the")
+            print("ratchet baseline. Remove a stale site key from its row.")
         return 1
 
     if args.unregistered:
