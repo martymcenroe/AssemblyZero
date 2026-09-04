@@ -186,9 +186,16 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
         - On success (parseable revision): clears test_plan_status to
           PENDING, replaces test_scenarios + test_plan_section,
           increments revision count, clears error / feedback.
-        - On failure (LLM error or no scenarios parsed): increments
-          revision count + sets error_message so the router routes
-          the workflow to END after the next pass.
+        - On a SHORT revision (fewer scenarios than requirements) below
+          `MAX_REVISION_CYCLES`: increments the count, hands back the
+          short table and records NO reason, so N1 re-reviews and the
+          N1 <-> N1.5 loop runs. At the cap it records a reason naming
+          the budget, which is what ends the run (#2775).
+        - On failure (LLM error, bad revisor spec, no requirements):
+          increments revision count + sets error_message so the router
+          routes the workflow to END after the next pass. These are not
+          bounded by the revision cap -- asking again cannot fix a
+          missing credential or an absent requirements list.
     """
     revision_count = state.get("test_plan_revision_count", 0) + 1
     print(f"\n[N1.5] Revising test plan (cycle {revision_count}/{MAX_REVISION_CYCLES})")
@@ -251,14 +258,43 @@ def revise_test_plan(state: TestingWorkflowState) -> dict[str, Any]:
     scenarios = _parse_scenarios_from_table(revised_table)
 
     if len(scenarios) < len(requirements):
-        # Couldn't produce enough scenarios — increment count and let
-        # the router decide whether to retry or END.
+        shortfall = f"{len(scenarios)}/{len(requirements)}"
+        if revision_count < MAX_REVISION_CYCLES:
+            # #2775: the comment that stood here promised a router decision
+            # the `error_message` beneath it prevented. Since #2793 a
+            # recorded reason routes to HALT, so a reason set on the FIRST
+            # short revision ended the run before `route_after_review` could
+            # send it back here, and MAX_REVISION_CYCLES was unreachable in
+            # this branch -- the cap was dead code for as long as it existed.
+            #
+            # Under the cap the revision is incomplete but the allowance is
+            # not spent. Hand back the short table with NO reason recorded;
+            # N1 re-reviews it, and BLOCKED there routes to N1.5 again. That
+            # cycle is what MAX_REVISION_CYCLES was written to bound.
+            print(
+                f"    [REVISE] Revised plan covers only {shortfall} "
+                f"requirements after cycle {revision_count}/"
+                f"{MAX_REVISION_CYCLES} -- asking again"
+            )
+            return {
+                "test_plan_revision_count": revision_count,
+                "test_plan_section": revised_table,
+                "error_message": "",
+            }
+
+        # At the cap. What ends the run here is the allowance running out,
+        # not a verdict on the drafter's output, so the message names the
+        # budget and the row judges `budget` (#2723 ruling 1). The count is
+        # still reported, because the shortfall is what a reader needs to
+        # know which side to repair.
         return {
             "test_plan_revision_count": revision_count,
             "test_plan_section": revised_table,
             "error_message": (
-                f"Revised plan covers only {len(scenarios)}/{len(requirements)} "
-                "requirements — needs another revision cycle"
+                f"Test plan revision budget spent: {MAX_REVISION_CYCLES} "
+                f"revisions produced a plan covering only {shortfall} "
+                f"requirements. Repair the LLD's requirements list or its "
+                f"Test Scenarios table, then resume."
             ),
         }
 
