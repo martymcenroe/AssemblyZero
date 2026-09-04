@@ -190,12 +190,26 @@ class TestWaitForMergeable:
     where cerberus-az took longer than POLL_INTERVAL_S to arrive)."""
 
     def _stub_state(self, monkeypatch, states):
-        """Make `run` return a sequence of mergeable_state values."""
+        """Make `run` return a sequence of mergeable_state values.
+
+        #2702: the call now asks for three fields and parses JSON, because a
+        merged PR reports `mergeable_state` as `unknown` and a poll reading
+        that one field cannot tell "not ready yet" from "finished without me".
+        A bare-string stub parses as `{}`, reads as `wait`, and sits here for
+        the whole 900-second budget -- which is how this stub announced the
+        change: by hanging rather than failing.
+
+        A dict entry passes through, for a case that needs `merged` or `state`.
+        """
         it = iter(states)
 
         def _capture(cmd, *args, **kwargs):
+            state = next(it)
+            payload = state if isinstance(state, dict) else {
+                "mergeable_state": state, "merged": False, "state": "open",
+            }
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0, stdout=next(it), stderr=""
+                args=cmd, returncode=0, stdout=json.dumps(payload), stderr=""
             )
 
         monkeypatch.setattr(dependabot_review, "run", mock.Mock(side_effect=_capture))
@@ -216,6 +230,42 @@ class TestWaitForMergeable:
         self._stub_state(monkeypatch, ["dirty"])
         assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
 
+    def test_a_pr_merged_by_another_route_stops_the_wait(self, monkeypatch):
+        """#2702: `mergeable_state` is `unknown` on a merged PR and never
+        `clean`, so before this the poll sat out its whole 900-second budget on
+        a PR that had already landed. Two shell loops with the same condition
+        and no budget polled for twelve hours."""
+        self._stub_state(monkeypatch, [
+            {"mergeable_state": "blocked", "merged": False, "state": "open"},
+            {"mergeable_state": "unknown", "merged": True, "state": "closed"},
+        ])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+
+    def test_a_closed_pr_stops_the_wait(self, monkeypatch):
+        self._stub_state(monkeypatch, [
+            {"mergeable_state": "unknown", "merged": False, "state": "closed"},
+        ])
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+
+    def test_an_unreadable_answer_says_so_on_the_first_poll(
+        self, monkeypatch, capsys
+    ):
+        """An answer this loop cannot read is indistinguishable from 'not
+        ready yet', so it waits out the whole budget in silence. It cost 900
+        real seconds in this very test file when a stub still returned the
+        single-field shape."""
+        monkeypatch.setattr(dependabot_review, "MERGEABLE_TIMEOUT_S", 0.01)
+        monkeypatch.setattr(
+            dependabot_review, "run",
+            lambda *a, **kw: subprocess.CompletedProcess(
+                args=[], returncode=0, stdout='"behind"', stderr=""),
+        )
+        monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
+        assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
+        out = capsys.readouterr().out
+        assert "cannot read" in out
+        assert "behind" in out
+
     def test_persistent_blocked_returns_false_at_timeout(self, monkeypatch):
         """#1399: persistent blocked polls until the full timeout, then
         returns False. Pre-#1399 it bailed after poll #2 (~10s), which
@@ -226,7 +276,12 @@ class TestWaitForMergeable:
         monkeypatch.setattr(
             dependabot_review, "run",
             lambda *a, **kw: subprocess.CompletedProcess(
-                args=[], returncode=0, stdout="blocked", stderr=""),
+                args=[], returncode=0,
+                stdout=json.dumps({
+                    "mergeable_state": "blocked", "merged": False,
+                    "state": "open",
+                }),
+                stderr=""),
         )
         monkeypatch.setattr(dependabot_review.time, "sleep", lambda s: None)
         assert dependabot_review.wait_for_mergeable(1, "owner/repo") is False
@@ -702,8 +757,18 @@ class TestWaitForMergeableTimeoutDeferred:
 
         def _fake(cmd, *a, **kw):
             polls.append(cmd)
+            # #2702: the poll asks for three fields now. A bare `"behind"`
+            # parses to a string, not an object, so it reads as no information
+            # -- and this test then spun for the whole real 900-second budget,
+            # because `time.time` is not stubbed here. That hang is what a
+            # single-field stub looks like after the field count changed.
             return subprocess.CompletedProcess(
-                args=cmd, returncode=0, stdout='"behind"', stderr="")
+                args=cmd, returncode=0,
+                stdout=json.dumps({
+                    "mergeable_state": "behind", "merged": False,
+                    "state": "open",
+                }),
+                stderr="")
         monkeypatch.setattr(dependabot_review, "run", _fake)
         monkeypatch.setattr(dependabot_review.time, "sleep",
                             lambda s: sleeps.append(s))

@@ -81,6 +81,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from assemblyzero.core.pr_poll import (  # noqa: E402
+    VERDICT_GONE,
+    VERDICT_READY,
+    VERDICT_STUCK,
+    poll_verdict,
+)
+
 GITHUB_USER = "martymcenroe"
 DEFAULT_REPO = f"{GITHUB_USER}/AssemblyZero"
 
@@ -914,14 +923,42 @@ def wait_for_mergeable(pr_number: int, repo: str) -> bool:
     start = time.time()
     deadline = start + MERGEABLE_TIMEOUT_S
     while time.time() < deadline:
+        # #2702: three fields, not one. A merged PR reports `mergeable_state`
+        # as `unknown` and never as `clean`, so a poll reading that field alone
+        # cannot tell "not ready yet" from "finished without me", and waits out
+        # its whole budget on a PR that landed by another route.
         result = run(["gh", "api", f"repos/{repo}/pulls/{pr_number}",
-                      "--jq", ".mergeable_state"])
-        state = (result.stdout or "").strip().strip('"')
+                      "--jq", "{mergeable_state:.mergeable_state,"
+                              "merged:.merged,state:.state}"])
+        raw = (result.stdout or "").strip()
+        try:
+            payload = json.loads(raw or "{}")
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            # Said out loud on the FIRST poll, not discovered after 900
+            # seconds. An answer this loop cannot read reads as "no
+            # information", which is indistinguishable from "not ready yet" --
+            # so without this line the tool waits out its entire budget in
+            # silence. That is exactly what happened when a test stub still
+            # returned the single-field shape after the field count changed.
+            print(
+                f"  WARNING: the mergeable query returned something this poll "
+                f"cannot read ({raw[:120]!r}). Treating it as no information; "
+                f"the poll will run to its {MERGEABLE_TIMEOUT_S}s bound unless "
+                f"it clears."
+            )
+            payload = {}
+        state = str(payload.get("mergeable_state") or "")
         elapsed = int(time.time() - start)
         print(f"  mergeable_state: {state} (elapsed {elapsed}s)")
-        if state in ("clean", "unstable"):
+        verdict = poll_verdict(payload, accept_unstable=True)
+        if verdict == VERDICT_READY:
             return True
-        if state in ("dirty", "behind"):
+        if verdict == VERDICT_GONE:
+            print("  already merged or closed -- nothing left to wait for")
+            return False
+        if verdict == VERDICT_STUCK:
             # #1975: neither resolves by waiting. 'dirty' is a merge
             # conflict; 'behind' means the head is behind base and clears
             # only when the branch is rebased. Measured on the 2026-07-30
