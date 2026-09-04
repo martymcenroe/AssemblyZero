@@ -110,11 +110,35 @@ ARC = (
 
 class TestTheGateListIsHonest:
     def test_every_runnable_gate_is_registered_and_judges_a_draft(self):
+        """What this audit needs is a gate whose CHECK reads a shipped
+        artifact. Until #2723 that was the same set as `judges in
+        (model_output, upstream_artifact)`, and the test read the column as
+        "what the check inspects".
+
+        The 2026-09-04 ruling separated the two. `judges` now records who owns
+        the HALT: for a gate that revises to its cap, the cap owns it, so
+        `lld.mechanical_validation` and `impl.file_generation_failed` are
+        `budget` while still inspecting exactly the drafts and files they
+        always did. Reading the column the old way would have retired two
+        runnable gates -- 18 of the audit's 50 verdicts -- to keep a test
+        green, which is the audit losing coverage to make a number tidy.
+
+        So a #2723-reclassified row is admitted BY THAT RULING and nothing
+        else. A gate that merely judges a budget -- a cost cap, a wall clock --
+        has no `justified_by` of #2723 and is still rejected, because an
+        answer key genuinely cannot speak to it.
+        """
         keys = registry_by_key()
         for gate, _ in RUNNABLE_GATES:
             assert gate in keys, gate
-            assert keys[gate].judges in (JUDGES_MODEL_OUTPUT, JUDGES_UPSTREAM), (
-                f"{gate} judges {keys[gate].judges}; an answer key cannot speak to that"
+            row = keys[gate]
+            reclassified_by_ruling = row.justified_by == "#2723"
+            assert (
+                row.judges in (JUDGES_MODEL_OUTPUT, JUDGES_UPSTREAM)
+                or reclassified_by_ruling
+            ), (
+                f"{gate} judges {row.judges} and carries no #2723 ruling; an "
+                f"answer key cannot speak to that"
             )
 
     def test_every_not_runnable_gate_is_registered(self):

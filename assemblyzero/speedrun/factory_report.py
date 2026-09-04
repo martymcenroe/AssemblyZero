@@ -196,7 +196,7 @@ class Cause:
 CAUSE_TABLE: tuple[Cause, ...] = (
     Cause(
         "lld.mechanical_validation", r"MECHANICAL VALIDATION FAILED",
-        "assemblyzero/workflows/requirements/nodes/validate_mechanical.py", "model_output",
+        "assemblyzero/workflows/requirements/nodes/validate_mechanical.py", "budget",
         "MECHANICAL VALIDATION FAILED:", "MECHANICAL VALIDATION FAILED:",
     ),
     Cause(
@@ -216,7 +216,7 @@ CAUSE_TABLE: tuple[Cause, ...] = (
     ),
     Cause(
         "lld.test_plan_validation", r"test plan validation failed",
-        "assemblyzero/workflows/requirements/nodes/validate_test_plan.py", "model_output",
+        "assemblyzero/workflows/requirements/nodes/validate_test_plan.py", "budget",
         "test plan validation failed after 6 revision(s): Requirement REQ-1 "
         "has no test coverage",
         "test plan validation failed after",
@@ -241,7 +241,7 @@ CAUSE_TABLE: tuple[Cause, ...] = (
     ),
     Cause(
         "spec.edit_script_rejected", r"\[EDIT-SCRIPT\] spec revision rejected",
-        "assemblyzero/workflows/implementation_spec/nodes/generate_spec.py", "model_output",
+        "assemblyzero/workflows/implementation_spec/nodes/generate_spec.py", "budget",
         "[EDIT-SCRIPT] spec revision rejected after 3 attempt(s): block 1: "
         "SEARCH text not found",
         "spec revision rejected after",
@@ -288,7 +288,7 @@ CAUSE_TABLE: tuple[Cause, ...] = (
         "impl.file_generation_failed",
         r"Implementation stage error: FATAL: Failed to implement",
         "assemblyzero/workflows/testing/nodes/implementation/claude_client.py",
-        "model_output",
+        "budget",
         "Implementation stage error: FATAL: Failed to implement "
         "src/boostgauge/skins/stingray.py",
         "FATAL: Failed to implement",

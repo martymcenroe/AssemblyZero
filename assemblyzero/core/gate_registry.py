@@ -215,16 +215,26 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         decided_in=f"{_RQ}/step_budget.py::describe_budget_exhaustion",
     ),
     Gate(
-        "lld.best_of_n_unusable", "lld", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "lld.best_of_n_unusable", "lld", JUDGES_BUDGET, ACTION_HALT,
         "BEST-OF-N: all",
         _s(f"{_RQ}/nodes/generate_draft.py::_generate_best_of_n::return", 0),
-        created_by="#2573",
+        created_by="#2573", justified_by="#2723",
+        notes=(
+            "budget since #2774 (operator ruling 2026-09-04 on #2723): N "
+            "drafts were bought and all N were spent. An (N+1)th draft is the "
+            "request that just failed N times, at N drafts per retry"
+        ),
     ),
     Gate(
-        "lld.edit_script_rejected", "lld", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "lld.edit_script_rejected", "lld", JUDGES_BUDGET, ACTION_HALT,
         "SEARCH/REPLACE",
         _s(f"{_RQ}/nodes/generate_draft.py::generate_draft::return", 5, 6, 7, 8),
-        notes="a revision that was not a usable edit script, or that changed nothing",
+        justified_by="#2723",
+        notes=(
+            "a revision that was not a usable edit script, or that changed "
+            "nothing; budget since #2763 (operator ruling 2026-09-04 on "
+            "#2723) -- the draft loop re-prompts and the cap is what stops it"
+        ),
     ),
     Gate(
         "lld.reviewer_failed", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -232,16 +242,28 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_RQ}/nodes/review.py::review::return", 0, 2),
     ),
     Gate(
-        "lld.mechanical_validation", "lld", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "lld.mechanical_validation", "lld", JUDGES_BUDGET, ACTION_HALT,
         "MECHANICAL VALIDATION FAILED",
         _s(f"{_RQ}/nodes/validate_mechanical.py::_validate_lld_mechanical_inner::return",
            0, 1, 2, 3, 4),
-        notes="15 of 135 banner kills on boostgauge",
+        justified_by="#2723",
+        notes=(
+            "15 of 135 banner kills on boostgauge; budget since #2759 "
+            "(operator ruling 2026-09-04 on #2723) -- the graph carries "
+            "N1_5_validate_mechanical -> N1_generate_draft and the halt is "
+            "that loop running out"
+        ),
     ),
     Gate(
-        "lld.test_plan_validation", "lld", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "lld.test_plan_validation", "lld", JUDGES_BUDGET, ACTION_HALT,
         "Test plan validation failed after",
         _s(f"{_RQ}/nodes/validate_test_plan.py::validate_test_plan_node::return", 0),
+        justified_by="#2723",
+        notes=(
+            "budget since #2764 (operator ruling 2026-09-04 on #2723) -- the "
+            "message's own 'failed after N revision(s)' is the count of "
+            "revisions the cap allowed and the drafter spent"
+        ),
     ),
     Gate(
         "lld.finalize.issue_creation", "lld", JUDGES_INFRASTRUCTURE, ACTION_HALT,
@@ -301,11 +323,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         + _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 2),
     ),
     Gate(
-        "spec.edit_script_rejected", "spec", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "spec.edit_script_rejected", "spec", JUDGES_BUDGET, ACTION_HALT,
         "[EDIT-SCRIPT] spec revision rejected",
         _s(f"{_IS}/nodes/generate_spec.py::generate_spec::return", 3),
         decided_in=f"{_IS}/nodes/generate_spec.py::_spec_edit_halt",
-        notes="the revision's edit blocks did not apply, or pinning refused every one",
+        justified_by="#2723",
+        notes=(
+            "the revision's edit blocks did not apply, or pinning refused "
+            "every one; budget since #2762 (operator ruling 2026-09-04 on "
+            "#2723) -- build_edit_script_prompt re-prompts with the apply "
+            "failure before the retry is spent"
+        ),
     ),
     Gate(
         "spec.budget.cost", "spec", JUDGES_BUDGET, ACTION_HALT,
@@ -415,12 +443,18 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         created_by="#2423",
     ),
     Gate(
-        "impl.file_generation_failed", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.file_generation_failed", "impl", JUDGES_BUDGET, ACTION_HALT,
         "FATAL: Failed to implement",
         _s(f"{_TS}/nodes/implementation/orchestrator.py::generate_file_with_retry::raise",
            2, 3, 4, 5),
         decided_in=f"{_TS}/nodes/implementation/claude_client.py::ImplementationError",
-        notes="a summary instead of code, no code block, or validation failed, N times",
+        justified_by="#2723",
+        notes=(
+            "a summary instead of code, no code block, or validation failed, "
+            "N times; budget since #2760 (operator ruling 2026-09-04 on "
+            "#2723) -- generate_file_with_retry re-prompts with the "
+            "validation error up to MAX_FILE_RETRIES and raises only after"
+        ),
     ),
     Gate(
         "impl.modify_target_missing", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,

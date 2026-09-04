@@ -66,9 +66,13 @@ def write_baseline(sites: list[HaltSite], coverage: WalkCoverage,
     payload = {
         "_comment": (
             "The ratchet (#2720). tests/unit/test_gate_registry.py fails when "
-            "halt_rows_per_stage or model_output_halt_rows rises above this. "
-            "Lower it when a gate stops halting; raise it only with an operator "
-            "ruling named in the new row's created_by, in the same PR."
+            "halt_rows_per_stage rises above this, and when "
+            "model_output_halt_rows differs from it in EITHER direction "
+            "(#2759). A row that stops halting, or that leaves the "
+            "model-output category, lowers the number in the same PR -- so "
+            "the denominator is never stale. Raise either only with an "
+            "operator ruling named in the row's created_by or justified_by, "
+            "in the same PR."
         ),
         "measured_against": {
             "files_scanned": coverage.files_scanned,
