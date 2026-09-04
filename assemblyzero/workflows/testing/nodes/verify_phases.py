@@ -57,6 +57,15 @@ from assemblyzero.workflows.testing.state import (
 # Timeout for pytest execution
 PYTEST_TIMEOUT_SECONDS = 300
 
+# #2766: what `impl.red.import_errors` says about the run's fate now that it
+# advises. The default sentence -- "Continuing; the budget decides" -- is
+# true of a guard inside a bounded loop, and this one sits before the loop
+# rather than inside it, so it says where the run actually goes instead.
+RED_IMPORT_ADVISORY_CONTINUES = (
+    "The red phase is satisfied by these errors either way; continuing to "
+    "implementation, which is where this guard's own dead route pointed."
+)
+
 # Issue #498: Max chars for failure summary fed back to N4
 # #2058: was 2000 -- roughly the first 16 lines of a 100-failure suite. With
 # root-cause grouping in _build_failure_summary, 12000 comfortably holds every
@@ -1139,15 +1148,39 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
     )
 
     if unexpected_import_count > 0:
-        # Issue #842: Unexpected ImportErrors are code defects, not valid red.
-        # Route back to N4 with specific feedback about broken imports.
+        # Issue #842 wrote this to "route back to N4 with specific feedback
+        # about broken imports", and the return below said so -- it set
+        # `next_node="N4_implement_code"`. It also set `error_message`, and
+        # `route_after_red` reads the error first, so the route was dead code
+        # and the run ended here instead. #2766 (operator pre-authorised:
+        # retire the site or make it advise).
+        #
+        # Advise, for two reasons.
+        #
+        # The judgement underneath it was overturned. `expected_modules` is
+        # built from the LLD's Section 2.1 file plan, so "unexpected" means
+        # "not in the plan" -- and #2736 ruled that the plan is a plan, not a
+        # contract. `impl.path_enforcement` became advisory on exactly that
+        # reading; a gate that ends the run on the same inference cannot
+        # stand while the other one advises.
+        #
+        # And the state it fires on is close to the red phase's normal one.
+        # In the red phase the module under test does not exist yet, so
+        # ImportError is what SHOULD happen. The line this gate draws is
+        # between an import the plan accounts for and one it does not, which
+        # is worth SAYING and is not worth stopping a run over: the import
+        # errors satisfy the red phase either way, and falling through sends
+        # the run to N4 -- the destination the dead route already named.
         bad_modules_str = ", ".join(unexpected_modules[:5])
-        error_msg = (
-            f"Red phase detected {unexpected_import_count} unexpected ImportError(s): "
-            f"{bad_modules_str}. These modules do not exist in the codebase. "
-            f"Fix the imports in the generated code."
+        advisory = advised(
+            "impl.red.import_errors",
+            f"Red phase detected {unexpected_import_count} unexpected "
+            f"ImportError(s): {bad_modules_str}. These modules are not in "
+            f"the LLD's Section 2.1 file plan, so nothing in this run is "
+            f"scheduled to create them.",
+            continues=RED_IMPORT_ADVISORY_CONTINUES,
         )
-        print(f"    [GUARD] {error_msg}")
+        print(f"    [ADVISORY] {advisory}")
 
         log_workflow_execution(
             target_repo=repo_root,
@@ -1159,14 +1192,6 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
                 "expected_import_count": expected_import_count,
             },
         )
-
-        return {
-            "red_phase_output": output,
-            "file_counter": file_num,
-            "pytest_exit_code": exit_code,
-            "error_message": error_msg,
-            "next_node": "N4_implement_code",
-        }
 
     # Issue #263: Expected import errors are valid RED phase behavior.
     # With import-based TDD scaffolding, ImportError on the module-under-test

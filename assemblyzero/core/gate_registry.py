@@ -661,10 +661,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 2),
     ),
     Gate(
-        "impl.red.import_errors", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.red.import_errors", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
         "Red phase detected",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3),
-        notes="the tests import modules the codebase does not have",
+        decided_in=f"{_TS}/nodes/verify_phases.py::verify_red_phase",
+        created_by="#842", justified_by="#2766",
+        notes=(
+            "advisory since #2766. It never fired in the 180-run window, and "
+            "it could have: with no parseable Section 2.1 the expected set is "
+            "empty and EVERY red-phase import error is 'unexpected', which is "
+            "the phase's normal state. Two reasons it advises. Its inference "
+            "is #2736's overturned one -- 'unexpected' means 'not in the LLD "
+            "file plan', and the plan is a plan, not a contract, which is why "
+            "impl.path_enforcement already advises. And its own halt was "
+            "unintended: the return set next_node='N4_implement_code' beside "
+            "error_message, route_after_red reads the error first, so the "
+            "route was dead. Falling through reaches N4 anyway, because the "
+            "import errors satisfy the red phase"
+        ),
     ),
     # #2761 (operator ruling 2026-09-04): one row named two different things,
     # and the report could not say which of its kills was which. Split, and
@@ -682,7 +695,9 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         # lives in validate_tests_mechanical.py and so matched a file rather
         # than a return. That is the weakness #2776 is about.
         "tests passed unexpectedly, and neither a red-entry marker",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 4),
+        # Index 3 since #2766, which was 4 until the import-errors return
+        # above it stopped recording a reason and left the walker's count.
+        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_red_phase",
         created_by="#2337", justified_by="#2761",
         notes=(
