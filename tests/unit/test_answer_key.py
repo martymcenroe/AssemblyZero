@@ -160,13 +160,15 @@ class TestAudit:
     def test_good_code_passes_every_gate(self, answer_repo):
         verdicts, coverage = audit(answer_repo, ARC[:1])
         assert coverage.files_examined == 2
-        assert coverage.commits_examined == 1
         refused = [v for v in verdicts if v.refused]
         assert not refused, [(v.gate, v.message) for v in refused]
         gates = {v.gate for v in verdicts}
+        # `pr.commit_message_guard` was the fourth member here until #2787
+        # retired it: no graph runs the function its sites lived in, so the
+        # verdicts it contributed measured a check no run performs.
         assert gates == {
             "impl.file_generation_failed", "impl.scaffold_suite_invalid",
-            "impl.deterministic_failure", "pr.commit_message_guard",
+            "impl.deterministic_failure",
         }
 
     def test_stub_tests_are_refused_by_the_scaffolder_gates(self, answer_repo):
@@ -177,27 +179,18 @@ class TestAudit:
         stub = next(v for v in verdicts if v.gate == "impl.deterministic_failure")
         assert "2 of 2" in stub.message
 
-    def test_a_commit_without_the_close_is_refused(self, answer_repo):
-        verdicts, coverage = audit(answer_repo, ARC[1:2])
-        # No commit on main carries "Closes #10", so the guard never ran.
-        assert coverage.commits_examined == 0
-        assert not [v for v in verdicts if v.gate == "pr.commit_message_guard"]
+    # #2787 removed `test_a_commit_without_the_close_is_refused` and
+    # `test_a_target_that_is_not_a_git_checkout_is_counted`. Both exercised
+    # the merged-commit-subject arm, which was read only to score
+    # `pr.commit_message_guard`. That gate is retired -- no graph runs it --
+    # so the reader, its two coverage counters and the report line for them
+    # went with it, and there is nothing left for either test to assert.
 
     def test_missing_files_are_counted_not_skipped_silently(self, answer_repo):
         _, coverage = audit(answer_repo, ARC[2:3])
         assert coverage.files_missing == ["src/widget/nope.py"]
         assert coverage.files_examined == 0
 
-    def test_a_target_that_is_not_a_git_checkout_is_counted(self, tmp_path):
-        plain = tmp_path / "plain"
-        (plain / "src" / "widget").mkdir(parents=True)
-        (plain / "src" / "widget" / "core.py").write_text(GOOD_SOURCE, encoding="utf-8")
-        verdicts, coverage = audit(plain, ARC[:1])
-        assert coverage.git_unreadable == 1
-        assert coverage.commits_examined == 0
-        assert not [v for v in verdicts if v.gate == "pr.commit_message_guard"]
-        text = render(plain, verdicts, coverage, generated_at="x")
-        assert "git unreadable for 1 feature(s)" in text
 
 
 class TestRender:

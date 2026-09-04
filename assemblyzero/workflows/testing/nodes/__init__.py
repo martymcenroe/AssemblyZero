@@ -34,9 +34,13 @@ from assemblyzero.workflows.testing.nodes.implement_code import implement_code
 from assemblyzero.workflows.testing.nodes.load_lld import load_lld
 from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
 from assemblyzero.workflows.testing.nodes.scaffold_tests import scaffold_tests
-from assemblyzero.workflows.testing.nodes.validate_commit_message import (
-    validate_commit_message,
-)
+# #2787: `validate_commit_message` was re-exported here from #190 until
+# 2026-09-04. No graph ever declared it as a node -- all four were built and
+# their nodes enumerated -- and the code that actually opens the PR
+# (orchestrator/stages.py:1814) computes `Closes #N` from `issue_number`
+# itself, which is the repair #2787 asked for. This re-export is why the
+# reachability probe counted the module live: it measures whether a module is
+# IMPORTABLE from a built graph, not whether any node calls it. See #2791.
 from assemblyzero.workflows.testing.nodes.verify_phases import (
     verify_green_phase,
     verify_red_phase,
@@ -53,7 +57,6 @@ __all__ = [
     "e2e_validation",
     "finalize",
     "document",
-    "validate_commit_message",
     "cleanup",
     "route_after_document",
 ]
