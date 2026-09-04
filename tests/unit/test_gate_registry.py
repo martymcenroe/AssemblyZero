@@ -24,6 +24,7 @@ from assemblyzero.core.gate_registry import (  # noqa: E402
     ACTIONS,
     GATE_REGISTRY,
     JUDGES,
+    JUDGES_BUDGET,
     JUDGES_MODEL_OUTPUT,
     KIND_RAISE,
     KIND_RETURN,
@@ -296,12 +297,83 @@ class TestRatchet:
 
     def test_model_output_gates_that_halt_are_counted_for_the_policy(self):
         """Not a gate on the number -- #2723 brings it to zero -- but the
-        number must be visible: it is the maze."""
+        number must be visible: it is the maze.
+
+        Exact, not `<=` (#2759): the operator's rule for #2723 is that a row
+        leaving the model-output category lowers the baseline IN THE SAME PR.
+        Under `<=` a reclassification that forgot the baseline still passed,
+        and the ratchet then read as the old number for as long as nobody
+        looked -- a stale denominator that reads as evidence, which is the
+        #2780 finding in a different column.
+        """
         halting = [
             g.key for g in GATE_REGISTRY
             if g.action == ACTION_HALT and g.judges == JUDGES_MODEL_OUTPUT
         ]
         baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-        assert len(halting) <= baseline["model_output_halt_rows"], (
-            f"model-output gates that halt rose to {len(halting)}: {halting}"
+        assert len(halting) == baseline["model_output_halt_rows"], (
+            f"model-output gates that halt: {len(halting)}, baseline says "
+            f"{baseline['model_output_halt_rows']}. Rows: {sorted(halting)}. "
+            f"Rerun tools/audit_halt_sites.py --write-baseline in this PR."
         )
+
+
+# ---------------------------------------------------------------------------
+# The #2723 routing-policy rulings (operator, 2026-09-04)
+# ---------------------------------------------------------------------------
+
+
+class TestRulingOneRetryBudgets:
+    """Question 1, answered yes: a retry budget's exhaustion is a `budget`
+    gate, not a `model_output` gate.
+
+    Each of these six already revises what it judges and already stops when a
+    cap is spent. What ended the run is the cap, so that is whose gate it is.
+    The rows are named here rather than counted, because the count alone
+    cannot tell a reclassification the operator ruled on from one that drifted.
+    """
+
+    #: gate key -> the issue carrying that row's statement of the question.
+    RECLASSIFIED = {
+        "lld.mechanical_validation": "#2759",
+        "impl.file_generation_failed": "#2760",
+        "spec.edit_script_rejected": "#2762",
+        "lld.edit_script_rejected": "#2763",
+        "lld.test_plan_validation": "#2764",
+        "lld.best_of_n_unusable": "#2774",
+    }
+
+    def test_every_ruled_row_now_judges_a_budget(self):
+        keys = registry_by_key()
+        for key in self.RECLASSIFIED:
+            gate = keys.get(key)
+            assert gate is not None, f"{key} is not in the registry"
+            assert gate.judges == JUDGES_BUDGET, (
+                f"{key}: operator ruled budget on #2723, registry says "
+                f"{gate.judges}"
+            )
+
+    def test_the_ruling_is_named_in_the_row(self):
+        """A reclassification with no ruling named is indistinguishable from
+        drift, which is how 189 places to say no accumulated unremarked."""
+        keys = registry_by_key()
+        for key, issue in self.RECLASSIFIED.items():
+            gate = keys[key]
+            assert gate.justified_by == "#2723", (
+                f"{key}: justified_by is {gate.justified_by!r}, expected "
+                f"'#2723' -- the ruling that reclassified it"
+            )
+            assert issue in gate.notes, (
+                f"{key}: notes do not name {issue}, the issue that stated the "
+                f"question this row's ruling answered"
+            )
+
+    def test_behaviour_did_not_change(self):
+        """The ruling reclassified; it did not soften. Every one still halts,
+        and still on the same message -- so no run's outcome moves."""
+        keys = registry_by_key()
+        for key in self.RECLASSIFIED:
+            assert keys[key].action == ACTION_HALT, (
+                f"{key}: the ruling changed judges, not action"
+            )
+            assert keys[key].emits, f"{key}: lost its message head"
