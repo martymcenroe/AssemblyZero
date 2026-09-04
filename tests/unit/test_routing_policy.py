@@ -116,6 +116,36 @@ class TestTheRatchet:
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
         assert halt_counts() == baseline["halt_rows_per_stage"]
 
+    def test_the_denominator_matches_what_it_was_measured_against(self):
+        """`measured_against` exists so a reader can see the denominator
+        without re-running anything, which only works while it is true (#2780).
+
+        The enforced counts were asserted and this block was not, so it could
+        only be right by accident of who last regenerated the baseline: #2736
+        wrote it against 184 walked files, #2733 then added
+        `workflows/testing/atlas.py` -- walked, no halt site in it -- and the
+        stated denominator quietly became wrong while every enforced number
+        stayed right.
+
+        Asserted by re-walking rather than against a literal, or this becomes
+        one more number nobody updates.
+        """
+        from pathlib import Path
+
+        from assemblyzero.core.gate_registry import GATE_REGISTRY, scan_halt_sites
+
+        baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
+        sites, coverage = scan_halt_sites(Path(__file__).resolve().parents[2])
+        assert baseline["measured_against"] == {
+            "files_scanned": coverage.files_scanned,
+            "halt_sites": len(sites),
+            "gates": len(GATE_REGISTRY),
+        }, (
+            "the baseline's stated denominator no longer matches the tree it "
+            "claims to describe; regenerate with "
+            "`tools/audit_halt_sites.py --write-baseline`"
+        )
+
     def test_the_ratchet_records_what_is_left(self):
         """18 model-output rows still halt. The number is pinned so it can only
         fall: #2723 took it from 24 to 19 by retiring the five stagnation
