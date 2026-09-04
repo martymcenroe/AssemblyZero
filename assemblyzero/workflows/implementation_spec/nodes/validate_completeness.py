@@ -218,6 +218,15 @@ def validate_completeness(state: ImplementationSpecState) -> dict[str, Any]:
     checks.append(check_error_paths)
     _log_check(check_error_paths)
 
+    # Check 10a (#2741): Section 10 must actually HOLD the test functions.
+    # It runs before 10b and 10c because both of those read Section 10 and
+    # report "not applicable" when it is empty -- which is what run 12
+    # (run-issue4-192453) produced when it left Section 10.1 as a pointer to
+    # Section 6. Two gates and a contract mechanism, all silent, all green.
+    check_section_ten = check_section_ten_carries_test_functions(spec_draft)
+    checks.append(check_section_ten)
+    _log_check(check_section_ten)
+
     # Check 10b (#2706): Section 10's test functions must survive the
     # scaffolder's validator. The scaffolder emits them verbatim (#2316) and
     # the implementation stage refuses a suite that asserts nothing --
@@ -1849,6 +1858,184 @@ def _test_function_spans(
         spans[fn["name"]] = (start, start + source.count("\n"))
         cursor = idx + len(source)
     return spans
+
+
+#: The Section 10 heading, matched as `extract_test_plan_section` matches it so
+#: the two cannot disagree about where the section starts.
+_SECTION_TEN_HEADING_RE = re.compile(
+    r"^##\s*10\s*\.\s*(?:Test Mapping|Verification\s*(?:&|and)?\s*Testing|"
+    r"Test\s*Plan|Testing)[^\n]*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+#: A fenced Python block, and a test definition inside one. Both are closed,
+#: authored shapes over a document format, which is a parser question rather
+#: than a judgement about content (standard 0028a).
+_PY_FENCE_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL)
+_TEST_DEF_RE = re.compile(r"^def\s+test_\w+\s*\(", re.MULTILINE)
+
+#: A cross-reference to somewhere else in the document or the tree. What run 12
+#: put in Section 10.1 instead of its tests. Deliberately NOT a bare "see":
+#: an explicit address is the signal, and a loose one would describe half the
+#: prose in every draft as a pointer.
+_POINTER_RE = re.compile(r"\bSection\s+\d|\btests?/[\w./-]+\.py\b", re.IGNORECASE)
+
+#: A markdown table row. Section 10 legitimately carries a scenario table
+#: alongside its functions, so this is descriptive, never a finding on its own.
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)
+
+
+def _section_ten_span(spec: str) -> tuple[int, int] | None:
+    """1-based (first, last) line of Section 10, or None when it is absent.
+
+    The span covers the heading through the line before the next H2, which is
+    the region a complaint must cite: a demand to ADD has no existing line to
+    name, and #2686 measured what happens when such a complaint addresses only
+    its heading -- the insertion point stays locked and pinning refuses the very
+    edit the complaint asked for, three times running.
+    """
+    match = _SECTION_TEN_HEADING_RE.search(spec)
+    if match is None:
+        return None
+    first = spec.count("\n", 0, match.start()) + 1
+    rest = spec[match.end():]
+    next_h2 = re.search(r"^##\s", rest, re.MULTILINE)
+    if next_h2 is None:
+        return first, spec.count("\n") + 1
+    return first, first + rest.count("\n", 0, next_h2.start())
+
+
+def _what_section_ten_holds(section: str) -> str:
+    """What is in Section 10 instead of test functions. A closed vocabulary.
+
+    Every member is listed here and the list needs no "etc.", which is the test
+    for whether a closed set is the right tool (standard 0028a, §28a).
+
+    All of them that apply are reported rather than the first one, because the
+    two real examples in the corpus each hold two of these at once and picking
+    one describes the draft wrongly: run 12 of boostgauge #4 has a scenario
+    table AND the pointer that replaced its functions, and the #331 run has a
+    table with a file path in it. Naming only "a pointer" for the second would
+    be a small lie in a message whose whole job is to say what it saw.
+    """
+    found: list[str] = []
+    if _PY_FENCE_RE.findall(section):
+        found.append("a fenced code block with no `def test_` in it")
+    if _TABLE_ROW_RE.search(section):
+        found.append("a table of scenarios")
+    if _POINTER_RE.search(section):
+        found.append("a pointer to test files or another section")
+    if not found:
+        return "prose only" if section.strip() else "nothing"
+    if len(found) == 1:
+        return f"{found[0]}, but no code block defining a test"
+    return (
+        f"{', '.join(found[:-1])} and {found[-1]}, but no code block defining "
+        f"a test"
+    )
+
+
+def check_section_ten_carries_test_functions(spec: str) -> CompletenessCheck:
+    """Section 10 must actually hold the executable test functions (#2741).
+
+    #1870 established Section 10.1 as where they live and #2316 made the
+    scaffolder emit them verbatim. Nothing checked they were there.
+
+    Run 12 of boostgauge #4 (`run-issue4-192453`) put its test functions in
+    Section 6 and left Section 10.1 as one sentence: "See
+    `tests/unit/test_collector.py` ... in Section 6". Section 10 is where the
+    checks look, so `check_spec_test_functions_have_assertions` (#2706) and
+    `check_spec_test_fixtures_resolvable` (#2707) both reported NOT APPLICABLE,
+    and the contract mechanism (#2709) never engaged because it engages on what
+    those checks find. Three pieces of machinery, all landed within a day of
+    that run, all silent -- and the log showed green lines.
+
+    This is a `revise` check by construction and not by choice: a failing
+    completeness check routes the draft back to the drafter, bounded by the
+    review iteration cap, and adds no halt site. The ratchet forbids a new
+    halting gate (#2720), and this one has no business halting anyway -- a
+    drafter that filed its tests one section away has written the content and
+    put it in the wrong drawer, which is the most revisable defect there is.
+
+    **Not applicable stays possible and stays visible.** A spec with no Section
+    10 at all is a different defect with its own check, and this one says it did
+    not run rather than inventing a pass. Losing that distinction is exactly
+    what run 12 did.
+    """
+    span = _section_ten_span(spec)
+    if span is None:
+        return CompletenessCheck(
+            check_name="section_ten_carries_test_functions",
+            passed=True,
+            details=(
+                "No Section 10 heading found — check did not run. A spec with "
+                "no test section is `criteria_have_tests`'s finding, not this "
+                "one's."
+            ),
+        )
+
+    functions = _spec_test_functions(spec)["functions"]
+    if functions:
+        return CompletenessCheck(
+            check_name="section_ten_carries_test_functions",
+            passed=True,
+            details=(
+                f"Section 10 carries {len(functions)} executable test "
+                f"function(s); the scaffolder will emit them verbatim (#2316)."
+            ),
+        )
+
+    from assemblyzero.workflows.testing.nodes.load_lld import (
+        extract_test_plan_section,
+    )
+
+    try:
+        section = extract_test_plan_section(spec)
+    except Exception:  # noqa: BLE001
+        # fail-open: the heading was found above, so the section exists; only
+        # its body could not be sliced. The check still reports the defect and
+        # only loses the detail of what it found instead, which makes the
+        # complaint vaguer rather than absent.
+        section = ""
+
+    first, last = span
+    holds = _what_section_ten_holds(section)
+
+    # Are the functions somewhere else in the draft? That decides whether this
+    # asks for a MOVE or for new content -- and #2560/#2740 showed that a
+    # complaint asking for new content must be recognisable as such, or pinning
+    # refuses the edit it demanded. "Add the block inside that subsection" is
+    # already in `_ADDITION_DEMAND_RE`; the move wording deliberately is not.
+    found_elsewhere = sum(
+        1 for fence in _PY_FENCE_RE.findall(spec)
+        if _TEST_DEF_RE.search(fence)
+    )
+
+    if found_elsewhere:
+        instruction = (
+            f"The draft has {found_elsewhere} fenced block(s) elsewhere that "
+            f"define test functions. Move them into Section 10, in a ```python "
+            f"block, so the stage that runs them can read them."
+        )
+    else:
+        instruction = (
+            "No fenced block anywhere in the draft defines a test function. "
+            "Add the block inside that subsection, in a ```python fence, with "
+            "one runnable function per pass criterion."
+        )
+
+    return CompletenessCheck(
+        check_name="section_ten_carries_test_functions",
+        passed=False,
+        details=(
+            f"Section 10 (lines {first}-{last}) carries no executable test "
+            f"function: it holds {holds}. The implementation stage reads its "
+            f"suite from Section 10 alone (#1870, #2316), so a draft that files "
+            f"the functions elsewhere leaves the checks that grade them with "
+            f"nothing to read — which is how run-issue4-192453 passed two "
+            f"gates that had never looked at anything. {instruction}"
+        ),
+    )
 
 
 def check_spec_test_functions_have_assertions(
