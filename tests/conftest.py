@@ -91,6 +91,29 @@ def gate_backoff_waits(monkeypatch):
     yield waits
 
 
+@pytest.fixture(autouse=True)
+def no_live_model_calls(request, monkeypatch):
+    """A unit test that reaches a real model call fails instantly (#2703).
+
+    Scoped to `tests/unit/` by path. The integration and e2e tiers exist to call
+    real services and are left alone; a unit test that genuinely needs a model
+    belongs in one of them, and the refusal says so.
+
+    Autouse and unconditional inside that directory, because the incident it
+    guards is a test whose author believed the transport was stubbed. A guard
+    you have to remember to ask for protects the cases you already thought
+    about.
+    """
+    path = Path(str(request.node.fspath))
+    if path.parent.name != "unit":
+        yield
+        return
+    from tests.model_call_guard import install
+
+    install(monkeypatch, request.node.nodeid)
+    yield
+
+
 @pytest.fixture
 def mock_file_size(monkeypatch):
     """Factory fixture that patches os.path.getsize to return specified sizes for given paths.
