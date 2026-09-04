@@ -369,17 +369,32 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 4),
     ),
     Gate(
-        "spec.reviewer_verdict_unreadable", "spec", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "spec.reviewer_verdict_unreadable", "spec", JUDGES_INFRASTRUCTURE,
+        ACTION_HALT,
         "Spec review response yielded no extractable verdict",
         _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 5),
-        notes="the reviewer's output, not the drafter's",
+        justified_by="#2723",
+        notes=(
+            "the reviewer's output, not the drafter's; infrastructure since "
+            "#2769 (operator ruling 2026-09-04 on #2723) -- the reviewer did "
+            "not answer in the shape it was asked to, which is a transport or "
+            "parse failure and not a judgement about the spec"
+        ),
     ),
     Gate(
-        "spec.review_blocked", "spec", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "spec.review_blocked", "spec", JUDGES_ISSUE_BODY, ACTION_HALT,
         "Spec review BLOCKED",
         _s(f"{_IS}/nodes/review_spec.py::review_spec::return", 6),
         decided_in=f"{_IS}/nodes/review_spec.py::review_spec",
-        notes="a BLOCKED verdict; carries the requirements-conflict escalation too",
+        justified_by="#2723",
+        notes=(
+            "a BLOCKED verdict; carries the requirements-conflict escalation "
+            "too, which is why the report files this row's 5 kills under "
+            "spec.requirements_conflict and this key shows 0. issue_body "
+            "since #2770 (operator ruling 2026-09-04 on #2723) -- a BLOCKED "
+            "verdict is a requirements conflict for the operator to rule on, "
+            "and no amount of redrafting fixes a contradiction in the issue"
+        ),
     ),
     Gate(
         "spec.requirements_conflict", "spec", JUDGES_ISSUE_BODY, ACTION_HALT,
@@ -503,10 +518,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/review_test_plan.py::review_test_plan::return", 2, 3),
     ),
     Gate(
-        "impl.reviewer_verdict_unreadable", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "impl.reviewer_verdict_unreadable", "impl", JUDGES_INFRASTRUCTURE,
+        ACTION_HALT,
         "Test-plan reviewer response rejected",
         _s(f"{_TS}/nodes/review_test_plan.py::review_test_plan::return", 4),
-        notes="the reviewer's output, not the drafter's",
+        justified_by="#2723",
+        notes=(
+            "the reviewer's output, not the drafter's; infrastructure since "
+            "#2768 (operator ruling 2026-09-04 on #2723) -- there is nobody "
+            "to ask for a revision, because the drafter did not write the "
+            "verdict that could not be read"
+        ),
     ),
     Gate(
         "impl.test_plan_no_requirements", "impl", JUDGES_UPSTREAM, ACTION_HALT,
@@ -700,9 +722,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     ),
     # ---- pr ----------------------------------------------------------------
     Gate(
-        "pr.commit_message_guard", "pr", JUDGES_MODEL_OUTPUT, ACTION_HALT,
+        "pr.commit_message_guard", "pr", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "BLOCKED:",
         _s(f"{_TS}/nodes/validate_commit_message.py::validate_commit_message::return", 0, 1),
+        justified_by="#2723",
+        notes=(
+            "the only halt row in the whole pr stage. infrastructure since "
+            "#2771 (operator ruling 2026-09-04 on #2723) -- the pipeline "
+            "writes its own commit message, and by the time it is validated "
+            "the graph is past every loop, so a revision request has nowhere "
+            "to go. Answer-key audit: ran 6, refused 0"
+        ),
     ),
     # ---- orchestrator ------------------------------------------------------
     Gate(
