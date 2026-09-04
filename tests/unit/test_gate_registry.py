@@ -512,3 +512,101 @@ class TestRulingThreeImpossibleStates:
             == keys["spec.finalize.precondition"].judges
             == JUDGES_INFRASTRUCTURE
         )
+
+
+class TestEveryRegisteredGateLivesInANodeSomeGraphRuns:
+    """#2753: a row whose code no graph can reach is not protection.
+
+    Two rows -- `impl.test_file_validation` and `impl.test_execution_failed`
+    -- named sites only in `testing/nodes/run_tests.py`, a node added by
+    52992973 (#381) and never declared by any graph. They were counted in the
+    ratchet's halt-site total and in the per-stage halt-row counts for six
+    months, and the registry's `action` column, documented as "what the gate
+    DOES today", described code that never ran.
+
+    This is the general form, so the next unwired node is caught when it is
+    added rather than six months later.
+    """
+
+    #: Every module reachable by import from a compiled graph, as the import
+    #: system resolves it rather than as a regex guesses.
+    #:
+    #: The graphs are BUILT, not merely imported, and two wrong versions of
+    #: this check are the reason.
+    #:
+    #: Reading `from ...nodes import X` out of each graph.py with a regex
+    #: reported `nodes/implementation/orchestrator` and
+    #: `validate_commit_message` as unreachable; both are reached, one through
+    #: a subpackage and one indirectly. Importing the graph modules instead
+    #: then reported `compile_manifest`, which `implementation_spec/graph.py`
+    #: imports INSIDE the builder function -- a lazy import that only happens
+    #: when the graph is built. Each version was a check crying wolf on live
+    #: code on its first run.
+    #:
+    #: Building executes those deferred imports, which is what makes this the
+    #: real reachability set rather than an approximation of it.
+    #:
+    #: In a SUBPROCESS, because `sys.modules` is shared interpreter state and
+    #: the third wrong version of this check read it in-process: under the
+    #: suite's random ordering it reported `review_test_plan` unreachable,
+    #: which is node N1. Whatever else the session had imported or discarded
+    #: decided the answer, so the check was a coin-flip on a live node. A
+    #: fresh interpreter sees exactly what the graphs pull in and nothing else.
+    def _reachable_modules(self) -> set[str]:
+        import subprocess
+
+        probe = (
+            "import sys, json;"
+            "sys.path.insert(0, r'" + str(REPO_ROOT) + "');"
+            "from assemblyzero.workflows.testing.graph import"
+            " build_testing_workflow as b;"
+            "from assemblyzero.workflows.implementation_spec.graph import"
+            " create_implementation_spec_graph as c;"
+            "from assemblyzero.workflows.requirements.graph import"
+            " create_requirements_graph as r;"
+            "[f() for f in (b, c, r)];"
+            "print(json.dumps(sorted({"
+            "n.rsplit('.', 1)[-1] for n in list(sys.modules)"
+            " if n.startswith('assemblyzero.')})))"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", probe],
+            capture_output=True, text=True, cwd=REPO_ROOT, timeout=300,
+        )
+        assert done.returncode == 0, (
+            f"the reachability probe could not build the graphs:\n{done.stderr}"
+        )
+        return set(json.loads(done.stdout.strip().splitlines()[-1]))
+
+    def test_no_registry_row_names_a_site_in_an_unreachable_node(self):
+        reachable = self._reachable_modules()
+        orphans: dict[str, set[str]] = {}
+        for gate in GATE_REGISTRY:
+            for site in gate.sites:
+                path = site.split("::", 1)[0]
+                if "/nodes/" not in path or not path.endswith(".py"):
+                    continue
+                module = Path(path).stem
+                if module not in reachable:
+                    orphans.setdefault(module, set()).add(gate.key)
+        assert not orphans, (
+            "registry rows name halt sites in node modules no graph imports: "
+            + "; ".join(
+                f"{module} ({', '.join(sorted(keys))})"
+                for module, keys in sorted(orphans.items())
+            )
+            + ". Wire the node, or retire it and its rows (#2753)."
+        )
+
+    def test_the_retired_node_is_gone(self):
+        """Named explicitly as well as caught generally: the general check
+        passes trivially if someone re-adds the file without a registry row,
+        and the file itself is what should not come back unwired."""
+        assert not (
+            REPO_ROOT / "assemblyzero" / "workflows" / "testing" / "nodes"
+            / "run_tests.py"
+        ).exists(), (
+            "run_tests.py is back. If it was wired into the testing graph, "
+            "delete this assertion and register its halt sites; if not, it is "
+            "the same dead node #2753 retired."
+        )

@@ -567,22 +567,33 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "No test",
-        _s(f"{_TS}/nodes/run_tests.py::run_tests::return", 0)
-        + _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
+        _s(f"{_TS}/nodes/scaffold_tests.py::scaffold_tests::return", 0)
         + _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 0, 1)
         + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 0),
-        notes="no scenarios, no test files, or the named file is not on disk",
+        notes=(
+            "no scenarios, no test files, or the named file is not on disk. "
+            "Lost a fifth site in #2753 when the unreachable run_tests node "
+            "was retired; the four here are live"
+        ),
     ),
-    Gate(
-        "impl.test_file_validation", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
-        "Test file validation failed",
-        _s(f"{_TS}/nodes/run_tests.py::run_tests::return", 2),
-    ),
-    Gate(
-        "impl.test_execution_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
-        "Test execution failed",
-        _s(f"{_TS}/nodes/run_tests.py::run_tests::return", 1, 3),
-    ),
+    # #2753: `impl.test_file_validation` and `impl.test_execution_failed`
+    # stood here until 2026-09-04. Every site either row named lived in
+    # `testing/nodes/run_tests.py`, a node no graph ever declared. `git log`
+    # gives one commit for that file, 52992973 (#381, the multi-framework
+    # runner), which added `run_tests` and `check_coverage` as nodes and
+    # wired neither; `git log -S run_tests -- testing/graph.py` is empty, so
+    # it was never wired rather than unwired later. The runner abstraction
+    # those nodes were meant to sit on shipped and is live -- called directly
+    # from `verify_red_phase` and `verify_green_phase`.
+    #
+    # Retired with the node. A row whose `action` column describes code that
+    # cannot execute is a promise about nothing, and these two were counted
+    # as protection for six months.
+    #
+    # The structural check the first row was NAMED for is alive at N2.5,
+    # `validate_tests_mechanical.validate_test_structure`. Its live
+    # consequence is `impl.scaffold_suite_invalid`, which is what the
+    # answer-key audit labels those verdicts as of this change.
     Gate(
         "impl.completeness_gate_zero_requirements", "impl", JUDGES_UPSTREAM, ACTION_HALT,
         "Completeness gate: cannot certify",

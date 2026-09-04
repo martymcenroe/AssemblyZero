@@ -165,14 +165,14 @@ class TestAudit:
         assert not refused, [(v.gate, v.message) for v in refused]
         gates = {v.gate for v in verdicts}
         assert gates == {
-            "impl.file_generation_failed", "impl.test_file_validation",
+            "impl.file_generation_failed", "impl.scaffold_suite_invalid",
             "impl.deterministic_failure", "pr.commit_message_guard",
         }
 
     def test_stub_tests_are_refused_by_the_scaffolder_gates(self, answer_repo):
         verdicts, _ = audit(answer_repo, ARC[1:2])
         refused = {v.gate for v in verdicts if v.refused}
-        assert "impl.test_file_validation" in refused
+        assert "impl.scaffold_suite_invalid" in refused
         assert "impl.deterministic_failure" in refused
         stub = next(v for v in verdicts if v.gate == "impl.deterministic_failure")
         assert "2 of 2" in stub.message
