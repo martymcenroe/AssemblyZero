@@ -147,6 +147,22 @@ CLASSIFICATIONS: dict[str, Classification] = {
             "ValueError' is a fact (#2333)."
         ),
     ),
+    "section_ten_carries_test_functions": Classification(
+        check="section_ten_carries_test_functions",
+        kind=FACT,
+        reads=(
+            "Section 10 of the draft, for a fenced block defining at least one "
+            "`def test_`, through the same extractor the implementation stage "
+            "reads its suite with"
+        ),
+        reason=(
+            "the section holds a test definition or it does not -- a parser "
+            "question over a known document shape, not a judgement about "
+            "whether the tests are any good. `run-issue4-192453` left Section "
+            "10.1 as a pointer to Section 6, and the two checks that grade "
+            "those functions both reported not-applicable (#2741)."
+        ),
+    ),
     "spec_test_functions_have_assertions": Classification(
         check="spec_test_functions_have_assertions",
         kind=FACT,

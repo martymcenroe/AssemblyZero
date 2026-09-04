@@ -79,12 +79,16 @@ class TestTheSweepIsExhaustive:
         `function_spec_sections_have_examples`, built by #2620 as the path
         back to a hard gate. The fourteenth and fifteenth grade Section 10's
         test functions with the implementation stage's own validator, one
-        stage earlier (#2706, #2707)."""
+        stage earlier (#2706, #2707). The sixteenth checks that Section 10 is
+        holding those functions at all, which is what run-issue4-192453 made
+        necessary by leaving 10.1 as a pointer and sending both of the previous
+        two to not-applicable (#2741)."""
         assert "python_fences_parse" in CLASSIFICATIONS
         assert "function_spec_sections_have_examples" in CLASSIFICATIONS
         assert "spec_test_functions_have_assertions" in CLASSIFICATIONS
         assert "spec_test_fixtures_resolvable" in CLASSIFICATIONS
-        assert len(CLASSIFICATIONS) == 15
+        assert "section_ten_carries_test_functions" in CLASSIFICATIONS
+        assert len(CLASSIFICATIONS) == 16
 
     @pytest.mark.parametrize("name", sorted(CLASSIFICATIONS))
     def test_each_entry_states_what_it_reads_and_why(self, name: str) -> None:

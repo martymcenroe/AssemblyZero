@@ -195,6 +195,26 @@ class TestAddressableToday:
         assert {"test_req_1_value", "mocker"} <= set(verdict.tokens)
         assert verdict.verdict == ADDRESSED
 
+    def test_section_ten_carries_test_functions_addresses_the_section(self):
+        """#2741, swept before its first live roll.
+
+        A demand to ADD has no existing line to name, so the complaint cites
+        the whole of Section 10 -- heading through the line before the next
+        H2 -- which is the region the missing block goes in. #2686 measured
+        what a heading-only citation does: the insertion point stays locked and
+        pinning refuses the very edit the complaint asked for, three times.
+        """
+        draft = (
+            "# Spec\n\n## 6. Change Instructions\n\nWrite it.\n\n"
+            "## 10. Test Mapping\n\n### 10.1 Per-criterion test functions\n\n"
+            "See `tests/unit/test_collector.py` in Section 6.\n\n"
+            "## 11. Implementation Notes\n\nNothing.\n"
+        )
+        result = vc.check_section_ten_carries_test_functions(draft)
+        assert result["passed"] is False
+        verdict = _classify(result, draft)
+        assert verdict.verdict == ADDRESSED
+
     def test_function_spec_sections_addresses_its_subsection(self):
         """#2620's new hard gate, swept BEFORE it ships rather than discovered
         to deadlock on a live roll (#2617's discipline).
@@ -402,6 +422,7 @@ class TestTheSweepIsExhaustive:
             "check_manifest_traceability",
             "check_spec_test_functions_have_assertions",
             "check_spec_test_fixtures_resolvable",
+            "check_section_ten_carries_test_functions",
         }
         #: Checks this sweep does NOT drive, each with the reason. They need
         #: a real repo tree, a populated symbol table, or an LLD whose
