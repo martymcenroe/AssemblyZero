@@ -13,6 +13,7 @@ import ast
 import hashlib
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any, Literal
 
@@ -230,6 +231,117 @@ def _called_names(func: ast.AST) -> list[str]:
     return names
 
 
+#: Test-framework roots whose names are never "the code under test" (#2754).
+#: A closed, enumerable set, as §28a asks of any list a decision reads: every
+#: member is written here, and the stdlib half is the interpreter's own
+#: `sys.stdlib_module_names` rather than a list anyone has to maintain.
+FRAMEWORK_MODULE_ROOTS: frozenset[str] = frozenset({
+    "pytest", "_pytest", "unittest", "mock", "hypothesis", "freezegun",
+})
+
+
+def _code_under_test_names(tree: ast.AST) -> set[str]:
+    """Names this test file imports from the module it TARGETS (#2754).
+
+    Answered the way a resolver would answer it, not by judgement. Three
+    conditions, and the third is the one that took a red suite to find.
+
+    Not the standard library, and not a test framework -- `sys.stdlib_module_names`
+    and `FRAMEWORK_MODULE_ROOTS`.
+
+    And imported by a DOTTED package path. That is what separates the code
+    under test from a test helper, and the separation is structural rather
+    than stylistic: the code under test lives in the package being built and
+    is imported as `from boostgauge.telltale import Telltale`, while a helper
+    sits beside the test file and is imported bare -- `from helpers import
+    assert_accepted` -- or relatively. A first cut of this treated every
+    first-party import as a target, and it accepted a test whose only call
+    was to a `pass`-bodied helper, because the helper's name looked like
+    production code.
+
+    Erring bare-is-a-helper errs toward REFUSING, which is the safe direction
+    for a gate whose job is to keep hollow suites out. A genuinely flat
+    single-module package would be read as a helper and its test refused;
+    nothing in the corpus imports that way, and a false refusal costs a round
+    while a false acceptance ships a suite that tests nothing.
+
+    `import boostgauge.telltale` binds the ROOT, so `boostgauge` is what a
+    call site writes and what goes in the set.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            # A relative import is a sibling: a helper by position.
+            if node.level:
+                continue
+            module = node.module or ""
+            if "." not in module:
+                continue
+            root = module.split(".")[0]
+            if root in sys.stdlib_module_names or root in FRAMEWORK_MODULE_ROOTS:
+                continue
+            names.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if "." not in alias.name:
+                    continue
+                root = alias.name.split(".")[0]
+                if root in sys.stdlib_module_names or root in FRAMEWORK_MODULE_ROOTS:
+                    continue
+                names.add(alias.asname or root)
+    return names
+
+
+def _exercises_code_under_test(
+    func: ast.AST,
+    targets: set[str],
+    functions: dict[str, ast.AST],
+    depth: int = 0,
+) -> bool:
+    """Whether ``func`` calls into the code under test, directly or one down.
+
+    Operator ruling, 2026-09-04 (#2754): a test body that calls into the code
+    under test and carries no `assert` is a test whose assertion is "does not
+    raise" -- accepted. A body with no such call and no assertion is a stub --
+    refused.
+
+    Following one level through a same-module helper matches #2737's reading
+    and is what the shipped case needs: boostgauge's
+    `test_V4_equal_timestamp_is_accepted` calls `_fed(...)`, and it is `_fed`
+    that constructs the `Telltale` the test is about.
+
+    An attribute call counts when the ROOT of its value chain is a target, so
+    `sk.render(...)` after `from boostgauge.skins import stingray as sk` is a
+    call into the code under test. A method on a local (`t.update(...)`) is
+    NOT resolved -- that needs type inference -- which is exactly why
+    following the helper is load-bearing rather than a convenience.
+    """
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if isinstance(target, ast.Name):
+            if target.id in targets:
+                return True
+        elif isinstance(target, ast.Attribute):
+            root = target.value
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and root.id in targets:
+                return True
+
+    if depth >= ASSERTION_FOLLOW_DEPTH:
+        return False
+
+    for name in _called_names(func):
+        helper = functions.get(name)
+        if helper is None or helper is func:
+            continue
+        if _exercises_code_under_test(helper, targets, functions, depth + 1):
+            return True
+    return False
+
+
 def _carries_an_assertion(
     func: ast.AST,
     functions: dict[str, ast.AST],
@@ -317,11 +429,25 @@ def validate_test_structure(
         errors.append("No import statements found - tests need imports")
 
     functions = _module_functions(tree)
+    #: #2754: what "the code under test" means for this file, computed once.
+    #: A name defined in this file is a helper whatever it was imported as,
+    #: so it is never a target -- a local definition shadows the import, and
+    #: a `pass`-bodied local must not be read as production code.
+    targets = _code_under_test_names(tree) - set(functions)
 
     # Check each test function
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('test_'):
             if _carries_an_assertion(node, functions, imported_sources):
+                continue
+
+            # #2754, operator ruling 2026-09-04: no assertion, but it calls
+            # into the code under test -- the assertion is "does not raise",
+            # and boostgauge's shipped `test_V4_equal_timestamp_is_accepted`
+            # says so in a trailing comment. A stub is the other case: no
+            # assertion AND no call into the code under test, which is what
+            # the checks below still refuse.
+            if _exercises_code_under_test(node, targets, functions):
                 continue
 
             # Check if function only has pass
