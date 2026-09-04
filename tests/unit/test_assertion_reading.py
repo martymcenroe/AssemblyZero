@@ -71,16 +71,20 @@ class TestTheShippedArtifacts:
         failing a test was invisible to it."""
         assert messages(STINGRAY_SHAPE) == []
 
-    def test_the_must_not_raise_test_is_still_refused(self):
-        """Deliberately pinned as still-refused rather than quietly accepted.
-        There is no assertion in the body and none one level down: `_fed`
-        constructs and calls, and `t.update` is an attribute on a local that no
-        parser resolves. The ruling on whether absence-of-exception counts is
-        #2754; until it lands, this test records the honest state rather than a
-        number massaged to look finished."""
-        errors = messages(MUST_NOT_RAISE_SHAPE)
-        assert len(errors) == 1
-        assert "test_V4_equal_timestamp_is_accepted" in errors[0]
+    def test_the_must_not_raise_test_is_now_accepted(self):
+        """#2754 landed, and this is the test that was waiting for it.
+
+        It was pinned as still-refused while the ruling was open --
+        deliberately, so the count recorded the honest state rather than a
+        number massaged to look finished. The operator ruled on 2026-09-04:
+        a body that calls into the code under test and carries no `assert` is
+        a test whose assertion is "does not raise".
+
+        Accepted through the helper, not the body: the body never names
+        `Telltale`, `_fed` constructs one. `t.update` is still an attribute on
+        a local that no parser resolves, and still does not need to be.
+        """
+        assert messages(MUST_NOT_RAISE_SHAPE) == []
 
 
 class TestFollowingTheCallOneLevel:
