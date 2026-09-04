@@ -1296,14 +1296,24 @@ def verify_red_phase(state: TestingWorkflowState) -> dict[str, Any]:
         }
 
     if total_red == 0:
-        print("    [GUARD] WARNING: No tests ran!")
-
+        # #2767 (operator ruling 2026-09-04): a suite that collects nothing is
+        # a suite to write again, not a run to end. The route back to the
+        # scaffolder already existed; what it lacked was a bound, and the same
+        # ruling gave it one -- the scaffold budget now counts every
+        # regeneration, so the third pass through N2.5 spends the cap and
+        # halts on `impl.scaffold_suite_invalid`, which is registered, halting
+        # and `upstream_artifact`.
+        #
+        # No `error_message`: since #2756 a recorded reason routes to HALT, so
+        # leaving one here would end the run instead of rerouting it.
+        print("    [GUARD] No tests ran -- rerouting to the scaffolder; "
+              "the scaffold cap decides when to stop (#2767)")
         return {
             "red_phase_output": output,
             "file_counter": file_num,
             "pytest_exit_code": exit_code,
-            "error_message": "Red phase failed: No tests were collected/run",
-            "next_node": "END",
+            "error_message": "",
+            "next_node": "N2_scaffold_tests",
         }
 
     # Success: all tests failed or errored as expected
@@ -2666,13 +2676,17 @@ def _verify_red_non_pytest(
 
     total_red = failed + errors
     if total_red == 0:
-        print("    [GUARD] WARNING: No tests ran!")
+        # #2767: same reroute as the pytest path above, and bounded by the
+        # same cap. Leaving the non-pytest path halting would make the fix a
+        # property of the framework the run happens to use.
+        print("    [GUARD] No tests ran -- rerouting to the scaffolder; "
+              "the scaffold cap decides when to stop (#2767)")
         return {
             "red_phase_output": output,
             "file_counter": file_num,
             "test_run_result": dict(result),
-            "error_message": "Red phase failed: No tests were collected/run",
-            "next_node": "END",
+            "error_message": "",
+            "next_node": "N2_scaffold_tests",
         }
 
     print(f"    Red phase PASSED: {total_red} tests failed as expected ({framework.value})")

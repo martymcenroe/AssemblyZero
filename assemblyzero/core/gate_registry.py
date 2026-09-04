@@ -681,8 +681,17 @@ GATE_REGISTRY: tuple[Gate, ...] = (
     Gate(
         "impl.red_phase_failed", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
         "Red phase failed",
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 5)
-        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2, 3),
+        _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2),
+        justified_by="#2767",
+        notes=(
+            "one site left. #2767 (operator ruling 2026-09-04) turned the two "
+            "'no tests collected' sites -- one per framework path -- into a "
+            "bounded reroute to the scaffolder, so they record no reason and "
+            "are no longer halt sites. What remains is the non-pytest "
+            "unexpected-pass case, which #2337 fixed for pytest and never "
+            "ported; it is why this row still halts and the model-output "
+            "count is still 4 rather than 3"
+        ),
     ),
     Gate(
         "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,

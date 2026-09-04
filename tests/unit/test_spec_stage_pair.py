@@ -121,7 +121,56 @@ class TestEscalationHalts:
         assert DETERMINISTIC_FAILURE in result["error_message"]
         assert "byte for byte" in result["error_message"]
 
-    def test_a_valid_suite_is_never_halted(self):
+    def test_a_valid_suite_is_never_halted_for_being_invalid(self):
+        """Renamed and narrowed by #2767 (operator ruling 2026-09-04).
+
+        This asserted that a valid suite is never halted, full stop, with
+        `scaffold_attempts` already at the cap. That invariant is what the
+        ruling overturned: the scaffold budget now counts every regeneration,
+        because a budget that counts only failures is not a budget, and a
+        suite arriving after the allowance is spent stops the loop.
+
+        What is still true, and is what this now pins: a valid suite is never
+        halted for failing validation, and one that arrives with budget
+        remaining proceeds. The regression that would matter -- a run whose
+        third scaffold finally validates being killed at the moment it
+        succeeded -- is pinned by the test below.
+        """
+        real = "import pytest\n\ndef test_a():\n    assert 1 == 1\n"
+        state = {
+            "generated_tests": real,
+            "parsed_scenarios": {"scenarios": []},
+            "scaffold_attempts": 0,
+        }
+        result = validate_tests_mechanical_node(state)
+        assert "error_message" not in result
+        assert result["scaffold_route"] == "continue"
+
+    def test_the_scaffold_that_finally_validates_is_allowed_through(self):
+        """The no-regression case for #2767, and the reason the valid path's
+        threshold is `>` rather than `>=`.
+
+        Two scaffolds failed validation; the third passed. That run produced
+        exactly what was asked for, and the retry budget exists to allow the
+        retry that got there.
+        """
+        real = "import pytest\n\ndef test_a():\n    assert 1 == 1\n"
+        state = {
+            "generated_tests": real,
+            "parsed_scenarios": {"scenarios": []},
+            "scaffold_attempts": MAX_SCAFFOLD_ATTEMPTS - 1,
+        }
+        result = validate_tests_mechanical_node(state)
+
+        assert result["scaffold_attempts"] == MAX_SCAFFOLD_ATTEMPTS
+        assert "error_message" not in result, (
+            "the third scaffold validated and was halted anyway"
+        )
+        assert result["scaffold_route"] == "continue"
+
+    def test_a_valid_suite_past_the_cap_stops_the_loop(self):
+        """#2767's other half: once the allowance is spent, a suite that
+        validates and still cannot be used ends the run on the budget."""
         real = "import pytest\n\ndef test_a():\n    assert 1 == 1\n"
         state = {
             "generated_tests": real,
@@ -129,7 +178,12 @@ class TestEscalationHalts:
             "scaffold_attempts": MAX_SCAFFOLD_ATTEMPTS,
         }
         result = validate_tests_mechanical_node(state)
-        assert "error_message" not in result
+
+        assert result["scaffold_route"] == "escalate"
+        assert "scaffold budget is spent" in result["error_message"]
+        assert "cannot be validated" not in result["error_message"], (
+            "the halt says a suite that validated could not be validated"
+        )
 
     def test_one_condition_serves_both_callers(self):
         """The route and the halt message must never disagree.
