@@ -1,7 +1,7 @@
 {
   "_comment": "The ratchet (#2720). tests/unit/test_gate_registry.py fails when halt_rows_per_stage or model_output_halt_rows rises above this. Lower it when a gate stops halting; raise it only with an operator ruling named in the new row's created_by, in the same PR.",
   "measured_against": {
-    "files_scanned": 184,
+    "files_scanned": 185,
     "halt_sites": 151,
     "gates": 96
   },
