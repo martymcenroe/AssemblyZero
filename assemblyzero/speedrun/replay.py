@@ -57,6 +57,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from assemblyzero.core.call_recording import (
+    SOURCE_RECONSTRUCTION,
+    SOURCE_RECORDING,
+    summarize,
+)
 from assemblyzero.core.scripted_provider import ScriptedRule
 
 # ---------------------------------------------------------------------------
@@ -577,6 +582,14 @@ class ReplayResult:
     #: that reaches the right end state by the wrong route is a defect an
     #: end-state assertion does not catch.
     path: list[str] = field(default_factory=list)
+    #: Which transport answered: a recording of the actual calls (#2731), or
+    #: rules reconstructed from the drafts and verdicts. The report prints it,
+    #: because "the recording said so" and "a draft was reconstructed into a
+    #: rule" are different evidence and a reader deciding whether to launch is
+    #: entitled to know which they have.
+    source: str = SOURCE_RECONSTRUCTION
+    #: Calls the recording held, when one answered. 0 under reconstruction.
+    recorded_calls: int = 0
 
 
 def classify(
@@ -615,8 +628,8 @@ def render_table(results: list[ReplayResult]) -> str:
     table travels into PR bodies read by people who will not open the doc.
     """
     lines = [
-        "| run | stage | recorded ended at | replay ended at | verdict |",
-        "|---|---|---|---|---|",
+        "| run | stage | answered by | recorded ended at | replay ended at | verdict |",
+        "|---|---|---|---|---|---|",
     ]
     for r in results:
         recorded = f"`{r.recorded_cause}` at round {r.recorded_progress}"
@@ -626,9 +639,53 @@ def render_table(results: list[ReplayResult]) -> str:
             reached = "finished the stage"
         else:
             reached = f"`{r.replay_cause}` at round {r.replay_progress}"
+        # #2731: which transport answered is part of the verdict's weight, not
+        # a footnote. A recording is the calls the run actually made; a
+        # reconstruction is rules derived from the artifacts, exact for about
+        # five rounds. The table says which, on every row.
+        source = (
+            f"{r.source} ({r.recorded_calls} calls)"
+            if r.source == SOURCE_RECORDING else r.source
+        )
         lines.append(
-            f"| {r.tag} | {r.stage} | {recorded} | {reached} | **{r.verdict}** |"
+            f"| {r.tag} | {r.stage} | {source} | {recorded} | {reached} | "
+            f"**{r.verdict}** |"
         )
     shown = [name for name in VERDICTS if any(r.verdict == name for r in results)]
     legend = [f"- **{name}** — {VERDICT_MEANING[name]}" for name in shown]
+    if any(r.source == SOURCE_RECONSTRUCTION for r in results):
+        legend.append(
+            f"- **{SOURCE_RECONSTRUCTION}** — the run recorded no model calls, "
+            "so its responses were rebuilt from the drafts and verdicts it left "
+            "behind. Exact for about five rounds (#2731)."
+        )
+    if any(r.source == SOURCE_RECORDING for r in results):
+        legend.append(
+            f"- **{SOURCE_RECORDING}** — answered from the run's own calls, "
+            "prompt for prompt; a divergence names the call and the diff."
+        )
     return "\n".join([*lines, "", *legend])
+
+
+def recording_for(spec_dir: Path) -> tuple[bool, int, str]:
+    """Whether this run recorded its calls, how many, and what to say about it.
+
+    Returns (usable, calls, note). The note is carried into the result's notes
+    so a reader can tell "this run predates the recorder" from "this run's
+    recording is unreadable" -- two very different reasons for falling back.
+    """
+    summary = summarize(spec_dir)
+    if summary.usable:
+        note = f"answered from {summary.calls} recorded call(s)"
+        if summary.unreadable:
+            note += f"; {summary.unreadable} unreadable line(s) in the recording"
+        return True, summary.calls, note
+    if summary.unreadable:
+        return False, 0, (
+            f"the recording holds {summary.unreadable} unreadable line(s) and "
+            f"no usable call; fell back to reconstruction"
+        )
+    return False, 0, (
+        "this run recorded no model calls (it predates #2731); its responses "
+        "were reconstructed from the drafts and verdicts it left behind"
+    )
