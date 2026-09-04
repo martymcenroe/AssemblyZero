@@ -647,29 +647,71 @@ class TestCauseTable:
         The tell was inside the table: that row's `example` was the
         scaffolder's message, so the row was documented -- and
         `test_every_row_matches_its_own_example` pinned -- against a gate it
-        is not. Both of these are real banner heads from the run logs.
+        is not.
+
+        #2761's ruling then split the last of the three, because it also
+        named two things. Four now, each with its own key, and the first
+        three are real banner heads from the run logs. The green-phase one
+        has never fired, so its text comes from the code that composes it.
         """
         scaffolder = (
             "DETERMINISTIC FAILURE: the generated test suite cannot be "
             "validated and the scaffolder reproduced its previous output"
         )
-        red_phase = (
+        red_preexisting = (
             "DETERMINISTIC FAILURE: Red phase failed: 3 tests passed "
             "unexpectedly, and neither a red-entry marker nor this run's own "
             "prior writes explain them"
         )
+        red_old_message = (
+            "DETERMINISTIC FAILURE: Red phase failed: 8 tests passed "
+            "unexpectedly. Tests should fail before implementation exists."
+        )
+        green_unsatisfiable = (
+            "DETERMINISTIC FAILURE: Test(s) failing for a reason no "
+            "implementation can fix: test_dynamic_256_matches_baseline"
+        )
         assert classify_cause(scaffolder) == "impl.scaffold_suite_invalid"
-        assert classify_cause(red_phase) == "impl.deterministic_failure"
+        assert classify_cause(red_preexisting) == "impl.red.preexisting_implementation"
+        assert classify_cause(green_unsatisfiable) == "impl.deterministic_failure"
+
+        # run-issue331 died on the pre-#2337 wording. It has to keep landing
+        # on the red row, or a historical kill silently becomes unclassified.
+        assert classify_cause(red_old_message) == "impl.red.preexisting_implementation"
+
+    def test_no_generic_deterministic_row_absorbs_a_fourth_emitter(self):
+        """#2761: there is deliberately no catch-all left.
+
+        A fifth thing that prepends the token should land in `unclassified`
+        and be printed verbatim, which is how the table grows deliberately.
+        Absorbing it into the nearest row is what produced the original
+        defect.
+        """
+        invented = "DETERMINISTIC FAILURE: something nobody has written yet"
+        assert classify_cause(invented) == CAUSE_UNCLASSIFIED
 
     def test_a_specific_cause_row_precedes_the_generic_one_it_shares_a_prefix_with(
         self,
     ):
         """Order is load-bearing: `classify_cause` takes the FIRST match, so a
-        specific row placed after its generic sibling can never fire."""
+        specific row placed after its generic sibling can never fire.
+
+        After #2761 all four token-sharing rows are specific and none is a
+        prefix of another, so ordering among them no longer decides anything.
+        What still must hold is that every one of them precedes
+        `impl.red_phase_failed`, whose bare `Red phase failed` pattern would
+        otherwise claim the red-phase deterministic messages.
+        """
         keys = [cause.key for cause in CAUSE_TABLE]
-        assert keys.index("impl.scaffold_suite_invalid") < keys.index(
-            "impl.deterministic_failure"
-        )
+        for specific in (
+            "impl.scaffold_suite_invalid",
+            "impl.red.preexisting_implementation",
+            "impl.deterministic_failure",
+        ):
+            assert keys.index(specific) < keys.index("impl.red_phase_failed"), (
+                f"{specific} is ordered after impl.red_phase_failed, whose "
+                f"broader pattern will match first"
+            )
 
     def test_every_row_names_code_that_says_what_the_row_claims(self):
         for cause in CAUSE_TABLE:
