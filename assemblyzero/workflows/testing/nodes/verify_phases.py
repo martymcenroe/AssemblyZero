@@ -2690,12 +2690,47 @@ def _verify_red_non_pytest(
 
     # Red phase: ALL tests must fail
     if passed > 0:
+        # #2796. The pytest path (#2337, #2542, #2670) tells three situations
+        # apart here: this run's own prior writes or a red-entry marker
+        # explain the passes; the plan says every file is Modify and the base
+        # ships them; or nothing explains them. This path tells none of them
+        # apart, and saying otherwise would be a sentence about work it did
+        # not do -- so it says what is true instead.
+        #
+        # The two helpers that decide it, `_implementation_already_exists`
+        # and `_base_ships_the_implementation`, both select planned files
+        # with `endswith(".py")`. On a Playwright, Jest or Vitest target the
+        # planned files are .ts/.tsx/.js/.jsx, so both select nothing and
+        # return False. Porting them needs a framework-to-source-extension
+        # table this repo does not have -- `framework_detector` carries
+        # `test_file_extension`, which is the extension of the TEST file and
+        # says nothing about the implementation's. Authoring one for a path
+        # no recorded run has executed would be policy invented against zero
+        # evidence, so the port is filed rather than guessed.
+        #
+        # What IS true on every framework: an unchanged worktree reproduces
+        # this exactly, so it is deterministic under the #2298 rule and
+        # carries the token. Without it the orchestrator retried a
+        # reproducible result -- the twelve-second, three-attempt loop
+        # #2337 removed from the pytest path and left live on this one.
         print(f"    [GUARD] WARNING: {passed} tests passed unexpectedly!")
+        print(
+            "    This path cannot tell whether this run's own earlier writes "
+            "explain them, so it treats both readings as deterministic."
+        )
         return {
             "red_phase_output": output,
             "file_counter": file_num,
             "test_run_result": dict(result),
-            "error_message": f"Red phase failed: {passed} tests passed unexpectedly.",
+            "error_message": (
+                f"{DETERMINISTIC_FAILURE}: Red phase failed: {passed} tests "
+                f"passed unexpectedly. The {framework.value} red phase cannot "
+                f"tell this run's own prior writes from an implementation "
+                f"that predates the stage, so it treats the result as "
+                f"deterministic: the same stage against an unchanged worktree "
+                f"reproduces it. Tests should fail before implementation "
+                f"exists (#2542)."
+            ),
             "next_node": "END",
         }
 

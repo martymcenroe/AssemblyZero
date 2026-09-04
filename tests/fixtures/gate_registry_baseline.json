@@ -3,14 +3,14 @@
   "measured_against": {
     "files_scanned": 185,
     "halt_sites": 144,
-    "gates": 95
+    "gates": 94
   },
   "halt_rows_per_stage": {
-    "impl": 34,
+    "impl": 33,
     "lld": 15,
     "orchestrator": 16,
     "pr": 1,
     "spec": 19
   },
-  "model_output_halt_rows": 2
+  "model_output_halt_rows": 1
 }

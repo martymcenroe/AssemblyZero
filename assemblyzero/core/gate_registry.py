@@ -697,7 +697,16 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         "tests passed unexpectedly, and neither a red-entry marker",
         # Index 3 since #2766, which was 4 until the import-errors return
         # above it stopped recording a reason and left the walker's count.
-        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3),
+        #
+        # The non-pytest site joined in #2796, and `emits` above is carried
+        # by the PYTEST site's own head rather than by the file-wide
+        # `decided_in` fallback. That matters: the non-pytest message says
+        # something deliberately different, because that path does not
+        # perform the marker-and-prior-writes check this text describes. It
+        # is registered here for what it concludes -- the worktree's state,
+        # deterministic on an unchanged tree -- not for how it got there.
+        _s(f"{_TS}/nodes/verify_phases.py::verify_red_phase::return", 3)
+        + _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2),
         decided_in=f"{_TS}/nodes/verify_phases.py::verify_red_phase",
         created_by="#2337", justified_by="#2761",
         notes=(
@@ -744,21 +753,24 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "into the spec stage where it is revisable"
         ),
     ),
-    Gate(
-        "impl.red_phase_failed", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
-        "Red phase failed",
-        _s(f"{_TS}/nodes/verify_phases.py::_verify_red_non_pytest::return", 2),
-        justified_by="#2767",
-        notes=(
-            "one site left. #2767 (operator ruling 2026-09-04) turned the two "
-            "'no tests collected' sites -- one per framework path -- into a "
-            "bounded reroute to the scaffolder, so they record no reason and "
-            "are no longer halt sites. What remains is the non-pytest "
-            "unexpected-pass case, which #2337 fixed for pytest and never "
-            "ported; it is why this row still halts and the model-output "
-            "count is still 4 rather than 3"
-        ),
-    ),
+    # #2796: `impl.red_phase_failed` stood here until 2026-09-04. It ended
+    # with one site, the non-pytest unexpected-pass return, after #2767 turned
+    # the two 'no tests collected' returns into a bounded reroute. That site
+    # now carries the DETERMINISTIC_FAILURE token and is registered under
+    # `impl.red.preexisting_implementation` above, beside the pytest return
+    # that reaches the same conclusion -- so the row has no site left and is
+    # retired rather than kept as a name for nothing.
+    #
+    # The retirement is a fall the ratchet should read carefully. No gate
+    # softened: the site still halts, and it halts for the same reason. What
+    # changed is which row owns it and what the run log says about it, and
+    # the model-output count drops because the owning row judges the state of
+    # the worktree the stage was handed -- infrastructure -- rather than
+    # anything the drafter wrote.
+    #
+    # What this does NOT do is teach that path to tell a resumable case from
+    # a fatal one; the port that would is filed as its own issue, blocked on
+    # a framework-to-source-extension table this repo does not have.
     Gate(
         "impl.green.collection_broken", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "collected 0 tests",

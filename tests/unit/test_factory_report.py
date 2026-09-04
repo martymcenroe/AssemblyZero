@@ -698,20 +698,23 @@ class TestCauseTable:
 
         After #2761 all four token-sharing rows are specific and none is a
         prefix of another, so ordering among them no longer decides anything.
-        What still must hold is that every one of them precedes
-        `impl.red_phase_failed`, whose bare `Red phase failed` pattern would
-        otherwise claim the red-phase deterministic messages.
+
+        #2796 removed the generic row this test used to name.
+        `impl.red_phase_failed` is retired, and the bare `Red phase failed`
+        pattern it carried now belongs to
+        `impl.red.preexisting_implementation` -- the row that was already
+        the specific reading of that message. The claim to guard is
+        therefore no longer an ordering between two rows but the absence of
+        a generic one: nothing in the table may hold a pattern that another
+        row's example also matches, or the second row is unreachable.
         """
-        keys = [cause.key for cause in CAUSE_TABLE]
-        for specific in (
-            "impl.scaffold_suite_invalid",
-            "impl.red.preexisting_implementation",
-            "impl.deterministic_failure",
-        ):
-            assert keys.index(specific) < keys.index("impl.red_phase_failed"), (
-                f"{specific} is ordered after impl.red_phase_failed, whose "
-                f"broader pattern will match first"
-            )
+        for index, cause in enumerate(CAUSE_TABLE):
+            for earlier in CAUSE_TABLE[:index]:
+                assert not re.search(earlier.pattern, cause.example), (
+                    f"{cause.key}'s example is claimed first by "
+                    f"{earlier.key} (pattern {earlier.pattern!r}), so "
+                    f"{cause.key} can never fire"
+                )
 
     def test_every_row_names_code_that_says_what_the_row_claims(self):
         for cause in CAUSE_TABLE:
