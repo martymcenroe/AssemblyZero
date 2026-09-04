@@ -190,7 +190,7 @@ class TestTheRatchet:
             gate for gate in GATE_REGISTRY
             if gate.action == ACTION_HALT and gate.judges == JUDGES_MODEL_OUTPUT
         ]
-        assert len(remaining) == baseline["model_output_halt_rows"] == 3
+        assert len(remaining) == baseline["model_output_halt_rows"] == 2
 
     def test_no_stagnation_row_is_among_them(self):
         remaining = {
