@@ -634,6 +634,43 @@ class TestCauseTable:
         keys = [cause.key for cause in CAUSE_TABLE]
         assert len(keys) == len(set(keys))
 
+    def test_the_three_deterministic_failures_are_told_apart(self):
+        """#2761: one generic row swallowed three gates.
+
+        `DETERMINISTIC_FAILURE` is a token three different halts prepend, and
+        a single `r"DETERMINISTIC FAILURE"` row claimed every one. Measured on
+        boostgauge before this split, `impl.deterministic_failure` was
+        credited with 5 kills; 3 of them were the scaffolder's suite-invalid
+        halt, which the gate registry's own note already called a different
+        gate.
+
+        The tell was inside the table: that row's `example` was the
+        scaffolder's message, so the row was documented -- and
+        `test_every_row_matches_its_own_example` pinned -- against a gate it
+        is not. Both of these are real banner heads from the run logs.
+        """
+        scaffolder = (
+            "DETERMINISTIC FAILURE: the generated test suite cannot be "
+            "validated and the scaffolder reproduced its previous output"
+        )
+        red_phase = (
+            "DETERMINISTIC FAILURE: Red phase failed: 3 tests passed "
+            "unexpectedly, and neither a red-entry marker nor this run's own "
+            "prior writes explain them"
+        )
+        assert classify_cause(scaffolder) == "impl.scaffold_suite_invalid"
+        assert classify_cause(red_phase) == "impl.deterministic_failure"
+
+    def test_a_specific_cause_row_precedes_the_generic_one_it_shares_a_prefix_with(
+        self,
+    ):
+        """Order is load-bearing: `classify_cause` takes the FIRST match, so a
+        specific row placed after its generic sibling can never fire."""
+        keys = [cause.key for cause in CAUSE_TABLE]
+        assert keys.index("impl.scaffold_suite_invalid") < keys.index(
+            "impl.deterministic_failure"
+        )
+
     def test_every_row_names_code_that_says_what_the_row_claims(self):
         for cause in CAUSE_TABLE:
             path = REPO_ROOT / cause.emitted_by

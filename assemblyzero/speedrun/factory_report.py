@@ -301,12 +301,34 @@ CAUSE_TABLE: tuple[Cause, ...] = (
         "carries 1 commit(s)",
         "already exists and carries",
     ),
+    # #2761: three gates emit the DETERMINISTIC_FAILURE token, and until
+    # 2026-09-04 one generic row swallowed all of them. Measured over
+    # boostgauge's runs/, the four runs that died carrying it were:
+    # run-issue384 and run-issue4 on the scaffolder's suite-invalid halt, and
+    # run-issue331 and run-issue379 on the red phase -- so HALF of
+    # `impl.deterministic_failure`'s recorded kills belonged to a different
+    # row, which the registry's own note already said was a different gate.
+    #
+    # The tell was in the table itself: the generic row's `example` was the
+    # scaffolder's message, so the row was documented, and its own test
+    # pinned, against a gate it is not. Specific rows first -- `classify_cause`
+    # takes the first match.
     Cause(
-        "impl.deterministic_failure", r"DETERMINISTIC FAILURE",
-        "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py", "model_output",
+        "impl.scaffold_suite_invalid",
+        r"DETERMINISTIC FAILURE: the generated test suite cannot be",
+        "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py",
+        "upstream_artifact",
         "DETERMINISTIC FAILURE: the generated test suite cannot be validated "
         "and the scaffolder",
-        "DETERMINISTIC FAILURE",
+        "the generated test suite cannot be",
+    ),
+    Cause(
+        "impl.deterministic_failure", r"DETERMINISTIC FAILURE",
+        "assemblyzero/workflows/testing/nodes/verify_phases.py", "model_output",
+        "DETERMINISTIC FAILURE: Red phase failed: 3 tests passed "
+        "unexpectedly, and neither a red-entry marker nor this run's own "
+        "prior writes explain them",
+        "tests passed unexpectedly, and neither a red-entry marker",
     ),
     Cause(
         "impl.red_phase_failed", r"Red phase failed",
