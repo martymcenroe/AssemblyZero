@@ -25,6 +25,8 @@ from assemblyzero.core.gate_registry import (  # noqa: E402
     GATE_REGISTRY,
     JUDGES,
     JUDGES_BUDGET,
+    JUDGES_INFRASTRUCTURE,
+    JUDGES_ISSUE_BODY,
     JUDGES_MODEL_OUTPUT,
     KIND_RAISE,
     KIND_RETURN,
@@ -377,3 +379,69 @@ class TestRulingOneRetryBudgets:
                 f"{key}: the ruling changed judges, not action"
             )
             assert keys[key].emits, f"{key}: lost its message head"
+
+
+class TestRulingTwoOutputNobodyCanRevise:
+    """Question 2, answered yes: a gate that judges output nobody in the loop
+    can revise is not a `model_output` gate.
+
+    Three of these judge the REVIEWER's output, and the reviewer is not the
+    drafter -- sending the drafter back to fix a verdict it did not write asks
+    it to repair someone else's mistake. The fourth has no drafter at all: by
+    the time a commit message is validated the graph is past every loop.
+
+    Halting stays legal for all four. The ruling says what the halt is ABOUT,
+    which is what `judges` records; it does not say the run should continue.
+    """
+
+    #: gate key -> (new judges, the issue that stated the question).
+    RECLASSIFIED = {
+        "impl.reviewer_verdict_unreadable": (JUDGES_INFRASTRUCTURE, "#2768"),
+        "spec.reviewer_verdict_unreadable": (JUDGES_INFRASTRUCTURE, "#2769"),
+        "spec.review_blocked": (JUDGES_ISSUE_BODY, "#2770"),
+        "pr.commit_message_guard": (JUDGES_INFRASTRUCTURE, "#2771"),
+    }
+
+    def test_every_ruled_row_carries_its_new_category(self):
+        keys = registry_by_key()
+        for key, (judges, _) in self.RECLASSIFIED.items():
+            gate = keys.get(key)
+            assert gate is not None, f"{key} is not in the registry"
+            assert gate.judges == judges, (
+                f"{key}: operator ruled {judges} on #2723, registry says "
+                f"{gate.judges}"
+            )
+
+    def test_the_ruling_is_named_in_the_row(self):
+        keys = registry_by_key()
+        for key, (_, issue) in self.RECLASSIFIED.items():
+            gate = keys[key]
+            assert gate.justified_by == "#2723", (
+                f"{key}: justified_by is {gate.justified_by!r}, expected "
+                f"'#2723' -- the ruling that reclassified it"
+            )
+            assert issue in gate.notes, (
+                f"{key}: notes do not name {issue}, the issue that stated the "
+                f"question this row's ruling answered"
+            )
+
+    def test_halting_stays_legal(self):
+        keys = registry_by_key()
+        for key in self.RECLASSIFIED:
+            assert keys[key].action == ACTION_HALT, (
+                f"{key}: the ruling permitted the halt, it did not remove it"
+            )
+
+    def test_blocked_and_its_escalation_agree(self):
+        """#2770's finding, pinned. `spec.review_blocked` shows 0 kills and
+        ended five runs: the report files them under the escalation marker
+        carried INSIDE a BLOCKED verdict. The two keys are one code path, so
+        they must not sit in different categories -- a reader comparing the
+        counts would otherwise be told the same five deaths were about two
+        different things."""
+        keys = registry_by_key()
+        assert (
+            keys["spec.review_blocked"].judges
+            == keys["spec.requirements_conflict"].judges
+            == JUDGES_ISSUE_BODY
+        )
