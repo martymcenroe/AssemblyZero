@@ -325,7 +325,7 @@ def _completeness_issue_identity(issue: dict) -> tuple:
 
 def route_after_completeness_gate(
     state: TestingWorkflowState,
-) -> Literal["N5_verify_green", "N4_implement_code", "end"]:
+) -> Literal["N5_verify_green", "N4_implement_code", "end", "HALT"]:
     """Route based on completeness verdict and iteration count.
 
     Issue #147, Requirements 7, 8, 12:
@@ -336,15 +336,21 @@ def route_after_completeness_gate(
     Issue #505: AST stagnation detection — identical issues across
     2 consecutive iterations routes to end immediately.
 
+    #2756: a node that recorded a reason routes to HALT, so the stop is
+    written down by the node that owns halting. The verdict-driven stops
+    below keep going to END: they carry no `error_message`, and the
+    orchestrator reads the BLOCK verdict itself (#1779).
+
     Args:
         state: Current workflow state with completeness_verdict set.
 
     Returns:
-        Next node name: "N5_verify_green", "N4_implement_code", or "end".
+        Next node name: "N5_verify_green", "N4_implement_code", "end", or
+        "HALT".
     """
     error = state.get("error_message", "")
     if error:
-        return "end"
+        return "HALT"
 
     verdict = state.get("completeness_verdict", "")
     iteration_count = state.get("iteration_count", 0)

@@ -2387,14 +2387,14 @@ class TestGraphRoutingFunctions:
     """Tests for graph.py routing functions."""
 
     def test_route_after_load_error(self, tmp_path):
-        """route_after_load returns end on error."""
+        """route_after_load returns HALT on a recorded reason (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_load
 
         state: TestingWorkflowState = {
             "error_message": "Some error",
         }
         result = route_after_load(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_load_success(self, tmp_path):
         """route_after_load continues on success."""
@@ -2418,14 +2418,14 @@ class TestGraphRoutingFunctions:
         assert result == "end"
 
     def test_route_after_red_error(self, tmp_path):
-        """route_after_red returns end on error."""
+        """route_after_red returns HALT on a recorded reason (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_red
 
         state: TestingWorkflowState = {
             "error_message": "Tests failed",
         }
         result = route_after_red(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_red_success(self, tmp_path):
         """route_after_red continues to implement."""
@@ -2450,14 +2450,14 @@ class TestGraphRoutingFunctions:
         assert result == "end"
 
     def test_route_after_implement_error(self, tmp_path):
-        """route_after_implement returns end on error."""
+        """route_after_implement returns HALT on a recorded reason (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_implement
 
         state: TestingWorkflowState = {
             "error_message": "Implementation failed",
         }
         result = route_after_implement(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_green_iteration_max(self, tmp_path):
         """route_after_green returns end at max iterations."""
@@ -3409,7 +3409,7 @@ class TestGraphRoutingEdgeCases:
     """Additional tests for graph.py routing edge cases."""
 
     def test_route_after_review_error_without_auto(self):
-        """route_after_review returns end on error without auto mode."""
+        """route_after_review returns HALT on a reason, no auto mode (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_review
 
         state: TestingWorkflowState = {
@@ -3418,7 +3418,7 @@ class TestGraphRoutingEdgeCases:
             "test_plan_status": "APPROVED",
         }
         result = route_after_review(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_green_no_next_node(self):
         """route_after_green returns end when no next_node."""
@@ -3432,24 +3432,24 @@ class TestGraphRoutingEdgeCases:
         assert result == "end"
 
     def test_route_after_e2e_error(self):
-        """route_after_e2e returns end on error."""
+        """route_after_e2e returns HALT on a recorded reason (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_e2e
 
         state: TestingWorkflowState = {
             "error_message": "E2E failed",
         }
         result = route_after_e2e(state)
-        assert result == "end"
+        assert result == "HALT"
 
     def test_route_after_finalize_error(self):
-        """route_after_finalize returns end on error."""
+        """route_after_finalize returns HALT on a recorded reason (#2756)."""
         from assemblyzero.workflows.testing.graph import route_after_finalize
 
         state: TestingWorkflowState = {
             "error_message": "Finalize error",
         }
         result = route_after_finalize(state)
-        assert result == "end"
+        assert result == "HALT"
 
 
 class TestTemplatesFullCoverage:

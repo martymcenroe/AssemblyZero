@@ -182,4 +182,4 @@ def test_existing_routes_are_unchanged(next_node: str, expected: str) -> None:
 def test_an_error_still_ends_regardless() -> None:
     assert route_after_red(
         {"error_message": "boom", "next_node": "N5_verify_green"}
-    ) == "end"
+    ) == "HALT"  # #2756: the stop is recorded, not just taken
