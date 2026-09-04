@@ -19,7 +19,7 @@ from assemblyzero.workflows.testing.nodes.implementation.edit_script_fix import 
     response_is_a_regeneration,
     should_use_edit_script,
 )
-from assemblyzero.hooks.file_write_validator import validate_file_write
+from assemblyzero.hooks.file_write_validator import path_advisory
 from assemblyzero.telemetry import emit
 from assemblyzero.utils.cost_tracker import accumulate_node_cost
 from assemblyzero.utils.lld_path_enforcer import (
@@ -869,17 +869,14 @@ def implement_code(state: TestingWorkflowState) -> dict[str, Any]:
         if token_estimate > 150000:
             print(f"        [WARN] Context approaching limit ({token_estimate} tokens)")
 
-        # Issue #188: Validate file path against LLD
-        if path_spec["all_allowed_paths"]:
-            validation = validate_file_write(filepath, path_spec["all_allowed_paths"])
-            if not validation["allowed"]:
-                print(f"        [PATH] REJECTED: {validation['reason']}")
-                emit("workflow.halt_and_plan", repo="", metadata={"filepath": filepath, "reason": "max_retries_exceeded"})
-                raise ImplementationError(
-                    filepath=filepath,
-                    reason=f"Path not in LLD: {validation['reason']}",
-                    response_preview=None,
-                )
+        # Issue #188, softened by #2736: say what the plan did not name, then
+        # write the file anyway. The operator ruled on 2026-09-04 that the
+        # LLD's file list is a plan, not a contract. As a refusal this gate
+        # rejected four of the seventeen files boostgauge's hand build shipped
+        # for issue #4 -- three of them tests the design had not thought of.
+        notice = path_advisory(filepath, path_spec["all_allowed_paths"])
+        if notice:
+            print(f"        [PATH] {notice}")
 
         # Build prompt for this single file
         prompt = build_single_file_prompt(

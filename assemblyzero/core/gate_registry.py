@@ -433,15 +433,23 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/implementation/orchestrator.py::implement_code::raise", 1),
     ),
     Gate(
-        "impl.path_enforcement", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
-        "Path not in LLD",
-        _s(f"{_TS}/nodes/implementation/orchestrator.py::implement_code::raise", 2),
+        "impl.path_enforcement", "impl", JUDGES_MODEL_OUTPUT, ACTION_ADVISE,
+        "is not in the LLD's Section 2.1 list",
+        decided_in="assemblyzero/hooks/file_write_validator.py::path_advisory",
         created_by="#188",
+        justified_by="#2736",
+        notes=(
+            "advisory since #2736 (operator ruling 2026-09-04): the LLD's file "
+            "list is a plan, not a contract. It refused four of issue #4's "
+            "seventeen shipped files on boostgauge main, three of them tests"
+        ),
     ),
     Gate(
         "impl.write_failed", "impl", JUDGES_INFRASTRUCTURE, ACTION_HALT,
         "Failed to write file",
-        _s(f"{_TS}/nodes/implementation/orchestrator.py::implement_code::raise", 3),
+        # Index 2, not 3: #2736 retired the path-enforcement raise above this
+        # one in the same function, and a site index is positional (#2738).
+        _s(f"{_TS}/nodes/implementation/orchestrator.py::implement_code::raise", 2),
     ),
     Gate(
         "impl.scenario_ratio_guard", "impl", JUDGES_UPSTREAM, ACTION_HALT,
@@ -1033,7 +1041,12 @@ def gate_key_of(message: str) -> str:
     return match.group(1) if match else ""
 
 
-def advised(key: str, message: str) -> str:
+#: What an advisory says about the run's fate when the caller does not say.
+#: True of every guard inside a bounded loop, which is what #2723 softened.
+ADVISORY_CONTINUES_DEFAULT = "Continuing; the budget decides."
+
+
+def advised(key: str, message: str, *, continues: str = "") -> str:
     """What an `advise` gate prints instead of ending the run (#2723).
 
     An advisory says the same sentence a halt used to say and does not route.
@@ -1042,6 +1055,14 @@ def advised(key: str, message: str) -> str:
     and it says plainly that the run continues, because the identical sentence
     was a terminal message for as long as these guards have existed and a
     reader will remember it that way.
+
+    ``continues`` is that plain statement. It defaults to the stagnation
+    guards' sentence, which is true of a guard inside a bounded loop: the run
+    goes on and a budget above it decides when to stop. A gate outside such a
+    loop must say something else rather than inherit a sentence that is not
+    true of it -- `impl.path_enforcement` (#2736) writes the file and no budget
+    is involved, so an inherited "the budget decides" would be prose nobody
+    could act on.
 
     Refuses a key whose row still halts. An advisory printed by a gate that
     then ends the run anyway would be the worst of both: a log that says the
@@ -1056,4 +1077,5 @@ def advised(key: str, message: str) -> str:
             f"the run. Change the row's action first, and lower the ratchet "
             f"baseline in the same PR (#2720)."
         )
-    return f"{message.rstrip()} Continuing; the budget decides. [gate:{key}]"
+    tail = (continues or ADVISORY_CONTINUES_DEFAULT).strip()
+    return f"{message.rstrip()} {tail} [gate:{key}]"

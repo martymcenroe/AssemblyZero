@@ -196,10 +196,11 @@ def test_generate_file_with_retry_passes_routed_model():
             "assemblyzero.workflows.testing.nodes.implementation.orchestrator.save_audit_file",
         ), patch(
             "assemblyzero.workflows.testing.nodes.implementation.orchestrator.emit",
-        ), patch(
-            "assemblyzero.workflows.testing.nodes.implementation.orchestrator.validate_file_write",
-            return_value=(True, None),
         ):
+            # #2736 removed the orchestrator's `validate_file_write` import
+            # along with the raise it guarded, so there is nothing left to
+            # patch here. The call under test is `generate_file_with_retry`,
+            # which never consulted it in the first place.
             generate_file_with_retry(
                 filepath="tests/__init__.py",
                 base_prompt="generate init",
