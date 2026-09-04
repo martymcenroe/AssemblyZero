@@ -169,13 +169,22 @@ def _gate_code_response(code: str, rel: str, repo: Path) -> tuple[bool, str]:
     return (not valid), message
 
 
-def _gate_test_structure(content: str) -> tuple[bool, str]:
-    """impl.test_file_validation: the scaffolder's structural validator."""
+def _gate_test_structure(content: str, path: Path | None = None) -> tuple[bool, str]:
+    """impl.test_file_validation: the scaffolder's structural validator.
+
+    ``path`` is the shipped file's own location, so the checker can resolve an
+    assertion helper imported from a neighbouring module exactly as the
+    pipeline does at N2.5 (#2737). Without it only same-module helpers are
+    followed, which is the weaker reading and would let this audit pass while
+    the shipped gate still refused.
+    """
     from assemblyzero.workflows.testing.nodes.validate_tests_mechanical import (
+        imported_helper_sources,
         validate_test_structure,
     )
 
-    errors = validate_test_structure(content, [])
+    imported = imported_helper_sources(content, path.parent) if path else {}
+    errors = validate_test_structure(content, [], imported)
     return bool(errors), "; ".join(errors)[:400]
 
 
@@ -329,7 +338,7 @@ def audit_feature(
             verdicts.append(Verdict(feature.issue, "impl.file_generation_failed",
                                     rel, refused, message))
         if rel in feature.tests and rel.endswith(".py"):
-            refused, message = _gate_test_structure(content)
+            refused, message = _gate_test_structure(content, path)
             verdicts.append(Verdict(feature.issue, "impl.test_file_validation",
                                     rel, refused, message))
             refused, message = _gate_stub_count(content)
