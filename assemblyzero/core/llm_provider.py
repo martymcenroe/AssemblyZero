@@ -1870,6 +1870,38 @@ def get_provider(spec: str, effort: str | None = None) -> LLMProvider:
         >>> reviewer = get_provider("gemini:3.1-pro")
         >>> mock = get_provider("mock:test")
     """
+    return _recorded(_build_provider(spec, effort))
+
+
+def _recorded(provider: "LLMProvider") -> "LLMProvider":
+    """Wrap a transport so its calls are written down, when there is a run.
+
+    #2731. This is the single place every stage asks for a transport, so it is
+    the single place a recording can be attached without every caller having to
+    remember to. The wrap happens ONLY when a graph node has said where the
+    run-scoped lineage directory is; outside a run -- a unit test, a one-off
+    script -- `get_provider` returns exactly what it always returned, which is
+    what keeps the scripted-provider identity contract intact.
+    """
+    try:
+        from assemblyzero.core.call_recording import (
+            RecordingProvider,
+            recording_is_armed,
+        )
+
+        if recording_is_armed():
+            return RecordingProvider(provider)
+    except Exception:  # noqa: BLE001 - a recording never costs a roll
+        # fail-open: if the recorder cannot be reached, the run proceeds on the
+        # bare transport. A missing recording is reported by the replay, which
+        # says it fell back to reconstruction; a roll that dies because it could
+        # not set up a diagnostic is unrecoverable.
+        pass
+    return provider
+
+
+def _build_provider(spec: str, effort: str | None = None) -> "LLMProvider":
+    """The transport itself, before #2731's recording wrap."""
     provider, model = parse_provider_spec(spec)
 
     if provider == "claude":

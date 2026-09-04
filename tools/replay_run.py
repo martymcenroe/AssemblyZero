@@ -45,6 +45,12 @@ from assemblyzero.speedrun.factory_report import (  # noqa: E402
     runs_dir,
     scan_run_log,
 )
+from assemblyzero.core.call_recording import (  # noqa: E402
+    SOURCE_RECONSTRUCTION,
+    SOURCE_RECORDING,
+    ReplayProvider,
+    read_calls,
+)
 from assemblyzero.speedrun.replay import (  # noqa: E402
     CALLER_REVIEWER,
     KIND_LLD,
@@ -54,6 +60,7 @@ from assemblyzero.speedrun.replay import (  # noqa: E402
     build_spec_rules,
     classify,
     discover_audit_dirs,
+    recording_for,
     render_table,
     responses_in,
     run_window,
@@ -63,6 +70,33 @@ from assemblyzero.speedrun.replay import (  # noqa: E402
 #: told apart from a gate: a gate is the pipeline saying no to content, and this
 #: is the recording no longer fitting the prompt the code now sends.
 DIVERGENCE_MARK = "ScriptedProvider:"
+
+#: The same distinction for a run answered from its own recorded calls (#2731).
+#: Two marks rather than one, because the two transports fail for genuinely
+#: different reasons and a reader should be able to tell them apart: the
+#: scripted one ran out of matching rules, this one was sent a prompt the
+#: recording does not hold.
+REPLAY_DIVERGENCE_MARK = "ReplayProvider:"
+
+
+def _path_of(provider) -> list[str]:
+    """The stage labels the transport was asked for, in order.
+
+    Both transports keep a path; they spell it differently. `ScriptedProvider`
+    stores a stage label per call, `ReplayProvider` a (stage, node, round)
+    triple taken from the recording. The caller only wants the stage labels, so
+    the shapes are reconciled here rather than at every use.
+    """
+    if hasattr(provider, "stages_called"):
+        return list(provider.stages_called)
+    return [stage for stage, _node, _round in getattr(provider, "path", [])]
+
+
+def _unanswered(provider) -> int:
+    """How many calls the transport could not answer."""
+    if hasattr(provider, "calls"):
+        return sum(1 for c in provider.calls if not c.answered)
+    return 1 if getattr(provider, "divergence", None) else 0
 
 #: The stage this tool can replay today. Runs that died in `impl` need the
 #: testing graph, whose responses the recordings do not carry in call order;
@@ -111,6 +145,17 @@ def replay_spec_stage(
         reconstruction=recon,
     )
 
+    # #2731: prefer the run's own calls when it recorded them. A recording
+    # answers on the prompt, byte for byte, so a divergence names the call and
+    # shows the diff; reconstruction answers on rules derived from the drafts,
+    # which is exact for about five rounds and then stops for a reason that has
+    # nothing to do with the gate under test. Which one answered is reported on
+    # every row rather than assumed.
+    has_recording, recorded_calls, source_note = recording_for(spec_dir)
+    result.source = SOURCE_RECORDING if has_recording else SOURCE_RECONSTRUCTION
+    result.recorded_calls = recorded_calls
+    result.notes.append(source_note)
+
     lld_text = _final_lld(lld_dir)
     if not lld_text.strip():
         result.divergence = (
@@ -132,7 +177,11 @@ def replay_spec_stage(
     audit_dir = out_dir / "lineage"
     audit_dir.mkdir(parents=True, exist_ok=True)
 
-    provider = ScriptedProvider(rules, model="replay")
+    if has_recording:
+        calls, _ = read_calls(spec_dir)
+        provider = ReplayProvider(calls, model="replay")
+    else:
+        provider = ScriptedProvider(rules, model="replay")
     set_active(provider)
     state = {
         "issue_number": issue,
@@ -180,29 +229,29 @@ def replay_spec_stage(
         # rather than continuing with a state that never finished. A silent
         # handler here would let a crashed replay be read as a clean one.
         result.divergence = f"the graph raised {type(exc).__name__}: {exc}"
-        result.path = list(provider.stages_called)
+        result.path = _path_of(provider)
         set_active(None)
         return result
     finally:
         set_active(None)
 
-    result.path = list(provider.stages_called)
+    result.path = _path_of(provider)
     # Counted from the calls the reviewer actually received, not from
     # `review_iteration`: the state key is a node's write, and a run that dies
     # inside the drafter never gets to update it, which reads as round 0 for a
     # loop that plainly ran. The recording's side of this comparison is counted
     # the same way, from the review rounds the log shows.
     result.replay_progress = max(
-        provider.stages_called.count(CALLER_REVIEWER),
+        result.path.count(CALLER_REVIEWER),
         int(final.get("review_iteration", 0) or 0),
     )
     error = str(final.get("error_message", "") or "")
 
-    unmatched = [c for c in provider.calls if not c.answered]
-    if DIVERGENCE_MARK in error or unmatched:
-        result.divergence = error if DIVERGENCE_MARK in error else (
-            f"{len(unmatched)} call(s) the recording could not answer"
-        )
+    unanswered = _unanswered(provider)
+    if DIVERGENCE_MARK in error or REPLAY_DIVERGENCE_MARK in error or unanswered:
+        result.divergence = error if (
+            DIVERGENCE_MARK in error or REPLAY_DIVERGENCE_MARK in error
+        ) else f"{unanswered} call(s) the recording could not answer"
     elif error:
         result.replay_cause = classify_cause(error.splitlines()[0])
         result.notes.append(error.splitlines()[0][:200])

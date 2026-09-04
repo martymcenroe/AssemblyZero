@@ -99,6 +99,12 @@ def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
     ``stage`` names the sub-workflow for the record. A caller that omits it
     still narrates, and the record is skipped rather than filed under a blank
     stage that would make two graphs' nodes indistinguishable.
+
+    #2731 adds a third output from the same wrap: the call context every model
+    call made inside this node is recorded against. Here for the same reason
+    the position record is -- this is the one place every node announces
+    itself, so a graph cannot grow a node whose calls are recorded with no
+    stage, no node name and no round.
     """
 
     def _wrapped(state, *args, **kwargs):
@@ -109,6 +115,7 @@ def narrated(node_id: str, fn, atlas: dict, total: int, stage: str = ""):
             pass
         if stage:
             _record_entry(node_id, atlas, total, stage, state)
+            _set_call_context(node_id, stage, state)
         return fn(state, *args, **kwargs)
 
     _wrapped.__name__ = getattr(fn, "__name__", node_id)
@@ -141,4 +148,26 @@ def _record_entry(node_id: str, atlas: dict, total: int, stage: str, state) -> N
         # missing diagnostic, and the missing one is reported -- the factory
         # report names its source, so a run with no records reads as a run with
         # no records rather than as a run that passed.
+        return
+
+
+def _set_call_context(node_id: str, stage: str, state) -> None:
+    """Tell the call recorder which node the next model calls belong to (#2731).
+
+    The audit directory comes from the state key all three workflows already
+    carry, so the recording lands beside the lineage the run writes rather than
+    in a new store. A node with no audit directory in state records nothing,
+    which is the honest outcome: there is no run-scoped place to put it.
+    """
+    try:
+        from assemblyzero.core.call_recording import set_context
+
+        audit_dir = state.get("audit_dir", "") if hasattr(state, "get") else ""
+        set_context(stage, node_id, str(audit_dir or ""))
+    except Exception:  # noqa: BLE001 - the recording never costs a run
+        # fail-open: this runs BEFORE the node does, so an exception here would
+        # take down a node that had not started, to protect a diagnostic. The
+        # cost of continuing is bounded and visible: calls made in this node
+        # are recorded against whichever node was entered last, and the replay
+        # reports the recording it read rather than assuming one exists.
         return
