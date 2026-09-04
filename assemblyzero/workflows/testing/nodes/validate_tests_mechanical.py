@@ -615,8 +615,14 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
         if len(all_errors) > 5:
             print(f"      ... and {len(all_errors) - 5} more")
 
-    # Increment attempts if validation failed
-    new_attempts = scaffold_attempts + 1 if not is_valid else scaffold_attempts
+    # #2767 (operator ruling 2026-09-04): every pass through the scaffolder
+    # spends budget, not only the ones that fail validation. A budget that
+    # counts only failures is not a budget -- and it was the reason the
+    # `N3 -> N2` reroute (#292) had no bound of its own: a regenerated suite
+    # that passed validation incremented nothing, so the loop was held up
+    # only by LangGraph's default recursion limit, which has no gate key and
+    # no halt bundle.
+    new_attempts = scaffold_attempts + 1
 
     # Issue #500: Pass validation errors back so scaffold node can use them
     result_dict: dict[str, Any] = {
@@ -639,13 +645,18 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
     # spuriously exhausted, and the run ended silently as success
     # (run-issue384-044442 merged a PR with an assertion-free stub and no
     # code).
-    if not is_valid:
-        reason = _halt_if_exhausted(
-            state, result_dict, generated_tests, new_attempts, all_errors
-        )
-        result_dict["scaffold_route"] = "escalate" if reason else "regenerate"
+    #
+    # #2767: consulted on the VALID path too. A suite that validates and then
+    # collects nothing sends the red phase back here, and without this the
+    # cap it is supposedly bounded by was never read.
+    reason = _halt_if_exhausted(
+        state, result_dict, generated_tests, new_attempts, all_errors,
+        is_valid=is_valid,
+    )
+    if reason:
+        result_dict["scaffold_route"] = "escalate"
     else:
-        result_dict["scaffold_route"] = "continue"
+        result_dict["scaffold_route"] = "regenerate" if not is_valid else "continue"
 
     # Issue #502: Store hash for stagnation detection
     if generated_tests:
@@ -710,7 +721,7 @@ def _validate_non_pytest(
         for error in all_errors[:5]:
             print(f"      - {error}")
 
-    new_attempts = scaffold_attempts + 1 if not is_valid else scaffold_attempts
+    new_attempts = scaffold_attempts + 1  # #2767: every pass spends budget
 
     result: dict[str, Any] = {
         "validation_result": {
@@ -727,13 +738,15 @@ def _validate_non_pytest(
     # owes the same named halt. Leaving it out would make the defect a
     # property of the framework the run happens to use.
     # #2676: and it owes the same carried route, for the same reason.
-    if not is_valid:
-        reason = _halt_if_exhausted(
-            state, result, generated_tests, new_attempts, all_errors
-        )
-        result["scaffold_route"] = "escalate" if reason else "regenerate"
+    # #2767: and the same budget, consulted on the valid path too.
+    reason = _halt_if_exhausted(
+        state, result, generated_tests, new_attempts, all_errors,
+        is_valid=is_valid,
+    )
+    if reason:
+        result["scaffold_route"] = "escalate"
     else:
-        result["scaffold_route"] = "continue"
+        result["scaffold_route"] = "regenerate" if not is_valid else "continue"
     return result
 
 
@@ -743,7 +756,8 @@ def _validate_non_pytest(
 
 
 def exhausted_reason(
-    state: dict[str, Any], generated_tests: str, attempts: int
+    state: dict[str, Any], generated_tests: str, attempts: int,
+    *, is_valid: bool = False,
 ) -> str:
     """Why mechanical generation is out of moves, or "" while it is not.
 
@@ -752,6 +766,19 @@ def exhausted_reason(
     writes the halt message from it. When the two computed it separately they
     could disagree, and a route that ends a run whose state says nothing went
     wrong is the silent degradation this issue is about.
+
+    #2767: the threshold differs by path, and the asymmetry is deliberate.
+
+    An INVALID suite AT the cap is definitive -- three scaffolds, none of them
+    usable, and a fourth will not be different. That is `>=`, and it is the
+    behaviour that shipped.
+
+    A VALID suite at the cap is not. A run whose first two scaffolds failed
+    validation and whose third finally passed has produced exactly what was
+    asked for, and halting it at the moment it succeeded would make the retry
+    budget punish the retry it exists to allow. The valid path therefore stops
+    only once the count EXCEEDS the cap: the loop has already been round the
+    allowed number of times and is asking for one more.
     """
     if generated_tests:
         current = hashlib.sha256(generated_tests.encode()).hexdigest()
@@ -761,6 +788,15 @@ def exhausted_reason(
                 "the scaffolder reproduced its previous output byte for byte, "
                 "so regenerating again produces the same suite"
             )
+
+    if is_valid:
+        if attempts > MAX_SCAFFOLD_ATTEMPTS:
+            return (
+                f"the scaffolder has produced {attempts} suites, more than "
+                f"the limit of {MAX_SCAFFOLD_ATTEMPTS}, and the red phase "
+                f"still cannot use one"
+            )
+        return ""
 
     if attempts >= MAX_SCAFFOLD_ATTEMPTS:
         return (
@@ -777,6 +813,8 @@ def _halt_if_exhausted(
     generated_tests: str,
     attempts: int,
     errors: list[str],
+    *,
+    is_valid: bool = False,
 ) -> str:
     """Name the halt in state when regeneration cannot help, per #2331.
 
@@ -791,9 +829,25 @@ def _halt_if_exhausted(
     it, and the router reads the carried route instead of recomputing against
     the by-then-overwritten hash.
     """
-    reason = exhausted_reason(state, generated_tests, attempts)
+    reason = exhausted_reason(state, generated_tests, attempts, is_valid=is_valid)
     if not reason:
         return ""
+
+    if is_valid:
+        # #2767: the suite validated. Saying it "cannot be validated" would
+        # be false in the artifact a human reads to diagnose the halt -- the
+        # budget is what ran out, on a suite that passed every check this
+        # node makes and still sent the red phase back here.
+        result["error_message"] = (
+            f"{DETERMINISTIC_FAILURE}: the scaffold budget is spent and "
+            f"{reason}. The suite passed mechanical validation each time and "
+            f"the red phase still could not use it, so regenerating again "
+            f"asks the same question. Repair the spec's Section 10 test "
+            f"functions, then resume."
+        )
+        result["next_node"] = "end"
+        print(f"    [HALT] {result['error_message']}")
+        return reason
 
     shown = "; ".join(errors[:3]) if errors else "no specific error was recorded"
     result["error_message"] = (
