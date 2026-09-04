@@ -514,34 +514,46 @@ def build_testing_workflow() -> StateGraph:
     # Create graph with state type
     workflow = StateGraph(TestingWorkflowState)
 
+    # #2158/#2733: every node narrates its graph position on entry and writes
+    # its entry to the convergence record, sourced from the atlas (#2157) so
+    # neither can drift from the real graph. This stage was the last of the
+    # three without one, which is why the report still had to grep node
+    # markers out of a prose log to say how far into implementation a run got
+    # -- in the stage where runs get furthest and most often die.
+    from assemblyzero.workflows.narration import narrated
+    from assemblyzero.workflows.testing.atlas import ATLAS, TOTAL_STEPS
+
+    def _add(name, fn):
+        workflow.add_node(name, narrated(name, fn, ATLAS, TOTAL_STEPS, stage="impl"))
+
     # Add nodes
-    workflow.add_node("N0_load_lld", load_lld)
-    workflow.add_node("N1_review_test_plan", review_test_plan)
-    workflow.add_node("N1_5_revise_test_plan", revise_test_plan)  # Issue #1072
+    _add("N0_load_lld", load_lld)
+    _add("N1_review_test_plan", review_test_plan)
+    _add("N1_5_revise_test_plan", revise_test_plan)  # Issue #1072
     # Issue #689: checkpoint after N2/N4/N5 so a crash between phases
     # doesn't lose generated tests / implementation code.
-    workflow.add_node("N2_scaffold_tests", _wrap_with_checkpoint(scaffold_tests, "post-scaffold"))
-    workflow.add_node("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
-    workflow.add_node("N3_verify_red", verify_red_phase)
-    workflow.add_node("N4_implement_code", _wrap_with_checkpoint(implement_code, "post-impl"))
-    workflow.add_node("N4b_completeness_gate", completeness_gate)  # Issue #147
-    workflow.add_node("N4c_augment_tests", augment_tests_for_coverage)  # #2327
-    workflow.add_node("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
-    workflow.add_node("N6_e2e_validation", e2e_validation)
+    _add("N2_scaffold_tests", _wrap_with_checkpoint(scaffold_tests, "post-scaffold"))
+    _add("N2_5_validate_tests", validate_tests_mechanical_node)  # Issue #335
+    _add("N3_verify_red", verify_red_phase)
+    _add("N4_implement_code", _wrap_with_checkpoint(implement_code, "post-impl"))
+    _add("N4b_completeness_gate", completeness_gate)  # Issue #147
+    _add("N4c_augment_tests", augment_tests_for_coverage)  # #2327
+    _add("N5_verify_green", _wrap_with_checkpoint(verify_green_phase, "post-green"))
+    _add("N6_e2e_validation", e2e_validation)
     # Issue #1626: checkpoint after N7 so the test/implementation reports written
     # and archived by finalize() are committed to the impl worktree (and thus
     # land on target main when the impl PR squash-merges) instead of being left
     # untracked. Mirrors the N2/N4/N5 checkpoint pattern.
-    workflow.add_node("N7_finalize", _wrap_with_checkpoint(finalize, "post-finalize"))
-    workflow.add_node("N7_5_adversarial", run_adversarial_node)  # Issue #352
+    _add("N7_finalize", _wrap_with_checkpoint(finalize, "post-finalize"))
+    _add("N7_5_adversarial", run_adversarial_node)  # Issue #352
     # Issue #1631: checkpoint after N8 so the wiki/runbook/README the document
     # node generates are committed to the impl worktree (and land on target main
     # via the impl PR) instead of being left untracked. The 907/908 c/p docs are
     # suppressed for external repos upstream (#1627), so this stages only the
     # keeper docs there.
-    workflow.add_node("N8_document", _wrap_with_checkpoint(document, "post-document"))
-    workflow.add_node("N9_cleanup", cleanup)  # Issue #180
-    workflow.add_node("HALT", create_halt_node("testing"))  # Issue #486
+    _add("N8_document", _wrap_with_checkpoint(document, "post-document"))
+    _add("N9_cleanup", cleanup)  # Issue #180
+    _add("HALT", create_halt_node("testing"))  # Issue #486
 
     # Set entry point
     workflow.set_entry_point("N0_load_lld")

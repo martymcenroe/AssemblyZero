@@ -23,6 +23,11 @@ from assemblyzero.workflows.requirements.atlas import (
     TOTAL_STEPS as REQ_TOTAL,
 )
 from assemblyzero.workflows.requirements.graph import create_requirements_graph
+from assemblyzero.workflows.testing.atlas import (
+    ATLAS as IMPL_ATLAS,
+    TOTAL_STEPS as IMPL_TOTAL,
+)
+from assemblyzero.workflows.testing.graph import build_testing_workflow
 
 _BOUNDARY = {"__start__", "__end__"}
 
@@ -49,6 +54,10 @@ CASES = [
     ("requirements", create_requirements_graph, REQ_ATLAS, REQ_TOTAL),
     ("implementation_spec", create_implementation_spec_graph, SPEC_ATLAS,
      SPEC_TOTAL),
+    # #2733: the third graph, and the last to get an atlas. It is the stage
+    # where runs get furthest, so its node positions are the ones the report
+    # most needs from a record rather than from a log grep.
+    ("testing", build_testing_workflow, IMPL_ATLAS, IMPL_TOTAL),
 ]
 
 
