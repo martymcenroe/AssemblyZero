@@ -560,9 +560,20 @@ GATE_REGISTRY: tuple[Gate, ...] = (
         _s(f"{_TS}/nodes/revise_test_plan.py::revise_test_plan::return", 2),
     ),
     Gate(
-        "impl.test_plan_revision_incomplete", "impl", JUDGES_MODEL_OUTPUT, ACTION_HALT,
-        "Revised plan covers only",
+        "impl.test_plan_revision_incomplete", "impl", JUDGES_BUDGET, ACTION_HALT,
+        "Test plan revision budget spent",
         _s(f"{_TS}/nodes/revise_test_plan.py::revise_test_plan::return", 3),
+        justified_by="#2775",
+        notes=(
+            "budget since #2775 (ruling 1 of #2723). It judged model output "
+            "only because it fired on the FIRST short revision: the return "
+            "recorded a reason, and since #2793 a recorded reason routes to "
+            "HALT, so route_after_review never reached its revise branch and "
+            "MAX_REVISION_CYCLES = 2 was unreachable from this site -- the "
+            "cap was dead code. The site now records no reason under the cap "
+            "and the N1 <-> N1.5 loop runs; what is left here is the "
+            "allowance running out, which is a budget"
+        ),
     ),
     Gate(
         "impl.no_test_files", "impl", JUDGES_UPSTREAM, ACTION_HALT,

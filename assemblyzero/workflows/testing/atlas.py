@@ -64,12 +64,18 @@ ATLAS: dict[str, dict] = {
         "ordinal": None,
         "goal": "Rewrite the test plan against the reviewer's objection.",
         "teach": (
-            "A loop, not a step: the revised plan always goes back for "
-            "re-review rather than forward, so no plan reaches the scaffolder "
-            "without having been judged in the state it is in."
+            "A loop, not a step: a revised plan goes back for re-review "
+            "rather than forward, so no plan reaches the scaffolder without "
+            "having been judged in the state it is in. What ends the loop is "
+            "the revision budget, and when it is spent the run stops here "
+            "rather than sending the same short plan round again."
         ),
         "successors": {
-            "N1_review_test_plan": "always",
+            "N1_review_test_plan": "the plan was revised; judge it again",
+            "HALT": (
+                "the revision left a reason: the budget is spent, or the "
+                "revision could not be attempted at all"
+            ),
         },
     },
     "N2_scaffold_tests": {

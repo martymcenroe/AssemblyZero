@@ -59,9 +59,16 @@ class TestTheGraphReachesHalt:
             "is stranded again (#2756)"
         )
         # Every router that can carry an error_message reaches it.
+        # `N1_5_revise_test_plan` joined this list in #2775. Its edge out was
+        # unconditional and N1 clears `error_message` on the very next node
+        # (#1490, deliberately, so a BLOCKED plan is revised rather than
+        # ending the run), so every reason the revision node recorded was
+        # erased before any router could read it -- three registered halt
+        # rows that named a halt which could not happen.
         assert set(inbound) == {
             "N0_load_lld",
             "N1_review_test_plan",
+            "N1_5_revise_test_plan",
             "N2_scaffold_tests",
             "N2_5_validate_tests",
             "N3_verify_red",

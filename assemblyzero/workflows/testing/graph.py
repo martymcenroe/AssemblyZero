@@ -147,6 +147,30 @@ def route_after_load(
     return "N1_review_test_plan"
 
 
+def route_after_revision(
+    state: TestingWorkflowState,
+) -> Literal["N1_review_test_plan", "HALT"]:
+    """Route after N1.5 (revise_test_plan). #2775.
+
+    This edge was unconditional, and N1's BLOCKED return sets
+    `error_message` to "" -- deliberately, per #1490, so that a blocked plan
+    is revised rather than ending the run. Between the two, every reason
+    N1.5 recorded was erased by the next node before `route_after_review`
+    could read it. All three of N1.5's registered halt rows --
+    `impl.test_plan_no_requirements`, `impl.revisor_failed` and
+    `impl.test_plan_revision_incomplete` -- named a halt that could not
+    happen: the run spent its remaining revision cycles asking a question
+    that had already failed, then ended at `end` with no bundle.
+
+    #2793's rule applies here as it does at every other node: a recorded
+    reason routes to HALT. Nothing else about the loop changes -- a
+    revision that records no reason still always goes back to N1.
+    """
+    if (state.get("error_message") or "").strip():
+        return "HALT"
+    return "N1_review_test_plan"
+
+
 def route_after_review(
     state: TestingWorkflowState,
 ) -> Literal["N2_scaffold_tests", "N1_5_revise_test_plan", "end", "HALT"]:
@@ -585,8 +609,15 @@ def build_testing_workflow() -> StateGraph:
         },
     )
 
-    # N1.5 -> N1 (revisions always loop back for re-review; Issue #1072)
-    workflow.add_edge("N1_5_revise_test_plan", "N1_review_test_plan")
+    # N1.5 -> N1, or HALT when the revision recorded a reason (#2775)
+    workflow.add_conditional_edges(
+        "N1_5_revise_test_plan",
+        route_after_revision,
+        {
+            "N1_review_test_plan": "N1_review_test_plan",
+            "HALT": "HALT",
+        },
+    )
 
     # N2 -> N2.5 (with scaffold_only check) - Issue #335
     workflow.add_conditional_edges(
