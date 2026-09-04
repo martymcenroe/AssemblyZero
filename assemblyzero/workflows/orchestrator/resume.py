@@ -152,3 +152,31 @@ def release_orchestration_lock(issue_number: int) -> None:
     """Release lock file for an issue. No-op if lock doesn't exist."""
     lock_path = LOCK_DIR / f"{issue_number}.lock"
     lock_path.unlink(missing_ok=True)
+
+
+def live_orchestrator_pid(issue_number: int) -> int | None:
+    """The pid of an orchestrator currently holding this issue's lock, or None.
+
+    The same two facts `acquire_orchestration_lock` reads, exposed so a
+    DESTRUCTIVE tool can read them too. `speedrun_reset.py` could not, and on
+    2026-09-02 at 19:20 it ran against a live orchestrator: it closed the run's
+    LLD PR, deleted the branch locally and on origin, and archived the lineage
+    out from under a process that was still writing into it (#2510).
+
+    A missing, corrupt or stale lock returns None -- there is no live run to
+    protect. A lock naming a live pid returns that pid, and the caller refuses.
+    """
+    lock_path = LOCK_DIR / f"{issue_number}.lock"
+    if not lock_path.exists():
+        return None
+    try:
+        pid = int(json.loads(lock_path.read_text(encoding="utf-8"))["pid"])
+    except (json.JSONDecodeError, OSError, KeyError, TypeError, ValueError):
+        # fail-open: a lock nobody can read is not evidence of a live run. The
+        # caller then behaves exactly as it did before this existed, so an
+        # unreadable lock can only lose the new protection rather than invent a
+        # refusal that blocks a legitimate reset -- and a stale or corrupt lock
+        # is the ordinary case after any crash, which is when a reset is most
+        # needed.
+        return None
+    return pid if _is_pid_alive(pid) else None

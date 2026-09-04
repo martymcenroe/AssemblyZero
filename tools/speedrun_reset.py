@@ -672,6 +672,50 @@ def reopen_issue(repo: str, issue: int) -> bool:
     return False
 
 
+class LiveOrchestratorError(RuntimeError):
+    """Raised when a reset is asked to run under a live orchestrator (#2510)."""
+
+
+def refuse_if_orchestrator_is_live(repo_root: Path, issue: int) -> None:
+    """Refuse -- not warn -- while this issue's lock names a live process.
+
+    On 2026-09-02 at 19:20 the follower announced `The roll is done: FAILED`
+    because the WRAPPER had been killed, and the orchestrator was still working.
+    A reset run on that verdict closed the run's LLD PR (#431), removed its
+    worktree, deleted branch `4-lld` locally and on origin, and archived the
+    lineage out from under a process that was still writing into it. The run had
+    no path to approval, so nothing that could have shipped was lost; that is
+    luck and not a defence.
+
+    A reset that can run under a live orchestrator is the same class as a
+    `git clean` in someone else's checkout, so this raises rather than printing.
+    The lock has carried the pid the whole time -- nothing needed to be recorded
+    that was not already there, only read.
+    """
+    from assemblyzero.workflows.orchestrator.resume import live_orchestrator_pid
+
+    previous = Path.cwd()
+    try:
+        # The lock directory is repo-relative, so it is read from the repo the
+        # reset is about rather than from wherever the operator invoked this.
+        os.chdir(repo_root)
+        pid = live_orchestrator_pid(issue)
+    finally:
+        os.chdir(previous)
+    if pid is None:
+        return
+    raise LiveOrchestratorError(
+        f"issue #{issue} has a live orchestrator: the lock at "
+        f"{repo_root / '.assemblyzero' / 'orchestrator' / 'locks' / f'{issue}.lock'} "
+        f"names pid {pid}, and that process is running. Refusing to reset.\n"
+        f"A reset here closes the run's PRs, deletes its branches locally and "
+        f"on origin, and archives the lineage the run is still writing (#2510).\n"
+        f"The wrapper's own pid file can name a DEAD process while the "
+        f"orchestrator lives, so a follower saying the roll is done is not "
+        f"evidence. Stop the run first, or wait for the lock to clear."
+    )
+
+
 def reset_one_issue(
     repo_root: Path, repo: str, issue: int, preserve: set[str] | None = None
 ) -> None:
@@ -682,7 +726,11 @@ def reset_one_issue(
     has to precede it or the ordering is the bug.
 
     #2609: ``preserve`` names settled artifacts the reset must leave in place.
+
+    #2510: the live-orchestrator refusal comes before the pin, because the pin
+    is already a write and everything after it is destructive.
     """
+    refuse_if_orchestrator_is_live(repo_root, issue)
     print(f"\nResetting issue #{issue}:")
     pin_checkpoint(repo_root, issue)
     close_open_prs(repo, issue)
@@ -741,18 +789,27 @@ def main() -> int:
         print(f"ERROR: {e}")
         return 1
 
-    if args.issue:
-        reset_issues = [args.issue]
-        reset_one_issue(repo_root, repo, args.issue)
-    else:
-        issues = all_logged_issues(repo_root)
-        if not issues:
-            print("No issues in run-log.jsonl — nothing to reset.")
-            return 0
-        print(f"Resetting {len(issues)} issue(s) from run-log: {issues}")
-        for issue in issues:
-            reset_one_issue(repo_root, repo, issue)
-        reset_issues = issues
+    # #2510: a live orchestrator stops the whole reset, not just its own issue.
+    # A sweep that reset four issues and then refused the fifth would have done
+    # four issues' worth of irreversible work before saying so.
+    try:
+        if args.issue:
+            reset_issues = [args.issue]
+            reset_one_issue(repo_root, repo, args.issue)
+        else:
+            issues = all_logged_issues(repo_root)
+            if not issues:
+                print("No issues in run-log.jsonl — nothing to reset.")
+                return 0
+            for issue in issues:
+                refuse_if_orchestrator_is_live(repo_root, issue)
+            print(f"Resetting {len(issues)} issue(s) from run-log: {issues}")
+            for issue in issues:
+                reset_one_issue(repo_root, repo, issue)
+            reset_issues = issues
+    except LiveOrchestratorError as exc:
+        print(f"\nREFUSED: {exc}")
+        return 1
 
     # #1918: a reset that cannot prove it finished did not finish. The
     # clean-check enumerates every debris class this tool is supposed to

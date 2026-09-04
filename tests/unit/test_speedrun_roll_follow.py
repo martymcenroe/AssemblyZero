@@ -254,6 +254,11 @@ class TestFollowLoop:
         def _flip():
             with roll.open("ab") as fh:
                 fh.write(b"NODE [3/11] requirements consistency gate\n")
+                # #2510: a roll that has actually ended says so in its own log.
+                # Without the banner this fixture describes an ORPHANED roll --
+                # fresh log, task gone, no last words -- and the follower is
+                # now required to keep watching rather than call that done.
+                fh.write(b"[ORCHESTRATOR] All stages passed.\n")
             return "Ready"
 
         statuses = iter([lambda: "Running", _flip])
@@ -278,7 +283,12 @@ class TestFollowLoop:
             with first.open("ab") as fh:
                 fh.write(b"attempt 1 tail\n")
             second = runs / "run-issue1-202020.log"
-            second.write_bytes(b"attempt 2 begins\n")
+            # #2510: the banner is what tells the follower the run ended. This
+            # test is about the newest-file race, so the second attempt has to
+            # look finished or the follower correctly keeps watching it.
+            second.write_bytes(
+                b"attempt 2 begins\n[ORCHESTRATOR] All stages passed.\n"
+            )
             # Same-tick writes tie on mtime granularity; the new attempt
             # must win the newest-file race deterministically.
             newer = first.stat().st_mtime + 10

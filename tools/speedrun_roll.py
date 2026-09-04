@@ -1999,6 +1999,81 @@ def _newest_roll_log(log_dir: Path) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
+#: A heartbeat lands every 15 seconds, so four missed beats is the line between
+#: "between beats" and "stopped". Long enough that ordinary scheduling jitter
+#: does not read as death; short enough that an operator is not told to keep
+#: waiting on a run that ended a minute ago.
+HEARTBEAT_FRESH_SECONDS = 60
+
+#: The run's OWN last words, in the orchestrator's wording. A log carrying
+#: either has ended and is not coming back, whatever its mtime says -- which is
+#: what stops a freshly-finished roll being read as a live one for a minute.
+_RE_RUN_ENDED = re.compile(
+    r"ORCHESTRATION FAILED at stage:|\[ORCHESTRATOR\] All stages passed\."
+)
+
+
+def run_still_writing(
+    log_dir: Path, *, now: float | None = None,
+    fresh_seconds: float = HEARTBEAT_FRESH_SECONDS,
+) -> tuple[bool, str]:
+    """Is anything still being written for this roll? (still writing, why).
+
+    #2510: three detached rolls in ten days had their WRAPPER killed while the
+    orchestrator carried on working. The follower reads the scheduled task's
+    state, so all three times it announced `The roll is done: FAILED` while the
+    run was mid-stage -- and on 2026-09-02 at 19:20 an operator believed it and
+    ran `speedrun_reset.py` against a live orchestrator, which closed the run's
+    LLD PR, deleted its branch locally and on origin, and archived the lineage
+    out from under a process still writing into it.
+
+    The task's state is a fact about the WRAPPER. These are the facts about the
+    RUN, and both are on disk the whole time.
+
+    Freshness alone is not enough, and getting that wrong costs every roll. A
+    run that has just finished normally wrote its closing banner seconds before
+    the task flipped to Ready, so an mtime test on its own would hold the
+    follower silent for a minute after every successful roll. So the run log's
+    own terminal banner wins over its mtime: a log that says how it ended has
+    ended. What remains -- fresh, and no banner -- is exactly the orphan.
+
+    Silent on a stat failure by design. A follower that cannot stat a log has
+    no evidence the run is alive, and "no evidence" is the answer that lets the
+    caller print the verdict it printed before this existed.
+    """
+    moment = time.time() if now is None else now
+    newest_name, newest_age, newest_path = "", None, None
+    for pattern in ("*-heartbeat.log", "run-*.log"):
+        for path in log_dir.glob(pattern):
+            if path.name.endswith("-events.log"):
+                continue
+            try:
+                age = moment - path.stat().st_mtime
+            except OSError:
+                # fail-open: an unstattable log is no evidence of life. The
+                # caller then prints the verdict it would have printed anyway,
+                # so this can only lose the new protection, never invent it.
+                continue
+            if newest_age is None or age < newest_age:
+                newest_age, newest_name, newest_path = age, path.name, path
+    if newest_age is None or newest_age >= fresh_seconds:
+        return False, ""
+    if newest_path is not None and not newest_path.name.endswith(
+        "-heartbeat.log"
+    ):
+        try:
+            if _RE_RUN_ENDED.search(
+                newest_path.read_text(encoding="utf-8", errors="replace")
+            ):
+                return False, ""
+        except OSError:
+            # fail-open, same direction as the stat above: an unreadable log
+            # cannot be shown to have ended, so freshness decides and the
+            # follower keeps watching. Erring toward watching is the safe half.
+            pass
+    return True, f"{newest_name} was written {int(newest_age)}s ago"
+
+
 def _newest_heartbeat(log_dir: Path) -> str:
     """`<file>: <last line>` for the freshest heartbeat, or "" without one."""
     beats = sorted(
@@ -2392,6 +2467,9 @@ def follow_roll(
     unknown_streak = 0
     start_deadline = time.time() + _START_GRACE_SECONDS
     last_line_at = time.time()
+    #: #2510: set when the scheduled task has ended but the run is still
+    #: writing, so the notice is printed once rather than every poll.
+    wrapper_ended_at = ""
     try:
         while True:
             _poll_view_keys(view)
@@ -2436,17 +2514,44 @@ def follow_roll(
                 _drain_roll_log()
                 if seen_running or wait_for_start:
                     code = _task_last_result() or 0
+                    # #2510: the task's state is a fact about the WRAPPER. Three
+                    # times in ten days the wrapper was killed and the
+                    # orchestrator carried on, and this line said FAILED while
+                    # the run was two stages from a PR. Say what actually
+                    # happened and keep following.
+                    still, why = run_still_writing(log_dir)
+                    if still:
+                        if not wrapper_ended_at:
+                            wrapper_ended_at = time.strftime("%H:%M:%S")
+                            print(
+                                f"\nWrapper ended at {wrapper_ended_at} "
+                                f"(task status: {status}, exit {code}), but the "
+                                f"run is still writing -- {why}.\n"
+                                f"Still following. Do NOT reset or relaunch "
+                                f"this issue: the orchestrator is alive and "
+                                f"--kill names the dead wrapper (#2510).",
+                                flush=True,
+                            )
+                        time.sleep(FOLLOW_POLL_SECONDS)
+                        continue
                     # #2165: the word, not just the number. The full verdict
                     # block streams above this from the narration; this line
                     # is the follower's own sign-off.
                     if quiz is not None:
                         print(f"\n{quiz.tally()}", flush=True)
                     word = "SUCCEEDED" if code == 0 else "FAILED"
-                    print(
+                    tail = (
                         f"\nThe roll is done: {word} "
-                        f"(task status: {status}, exit {code}).",
-                        flush=True,
+                        f"(task status: {status}, exit {code})."
                     )
+                    if wrapper_ended_at:
+                        tail += (
+                            f"\nThe wrapper had ended at {wrapper_ended_at}; "
+                            f"the run kept writing until now, so the exit code "
+                            f"above is the wrapper's and not the run's -- read "
+                            f"the run log's own closing banner."
+                        )
+                    print(tail, flush=True)
                     return code
                 print(f"\nNo roll is running (task status: {status}).", flush=True)
                 return 0

@@ -136,6 +136,10 @@ class TestFollowIntegration:
                     b"NODE [4/11] generate draft -- "
                     b"The drafter model writes the document.\n"
                 )
+                # #2510: a fresh log with no closing banner is what an ORPHANED
+                # roll looks like, and the follower now keeps watching one.
+                # This test is about the quiz, so the roll finishes properly.
+                fh.write(b"[ORCHESTRATOR] All stages passed.\n")
             return "Ready"
 
         statuses = iter([lambda: "Running", _flip])
