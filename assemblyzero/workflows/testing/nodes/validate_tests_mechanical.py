@@ -13,6 +13,7 @@ import ast
 import hashlib
 import logging
 import re
+from pathlib import Path
 from typing import Any, Literal
 
 from assemblyzero.workflows.testing.audit import gate_log
@@ -143,9 +144,136 @@ def count_stub_tests(test_content: str) -> tuple[int, int, list[str]]:
 # =============================================================================
 
 
+#: Calls that fail a test outright. `assert` and `pytest.raises` were the only
+#: two forms this checker recognised, and a test that reaches its verdict by
+#: calling `pytest.fail` was read as having no assertion at all -- which is how
+#: boostgauge's shipped `test_dynamic_256_matches_baseline` was refused (#2737).
+#: `unittest`'s vocabulary is here for the same reason: a `TestCase` method
+#: asserts through `self.assertEqual`, never through the `assert` keyword.
+EXPLICIT_FAILURE_CALLS: frozenset[str] = frozenset({"fail", "xfail"})
+
+#: How far a call is followed out of a test body when looking for the
+#: assertion. One level, per the operator's ruling of 2026-09-04: enough for a
+#: shared assertion helper, and bounded so the analysis cannot wander.
+ASSERTION_FOLLOW_DEPTH = 1
+
+
+def _is_real_assert(node: ast.AST) -> bool:
+    """An `assert` that is not a bare `assert False` (issue #386).
+
+    The TDD scaffold deliberately writes `assert False, 'TDD RED: ...'`, so a
+    failing assertion with a message counts; a bare `assert False` does not.
+    """
+    if not isinstance(node, ast.Assert):
+        return False
+    if isinstance(node.test, ast.Constant):
+        return not (node.test.value is False and node.msg is None)
+    return True
+
+
+def _is_failure_call(node: ast.AST) -> bool:
+    """A call that ends the test in a verdict: `pytest.fail`, `self.assertX`."""
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        if func.attr in EXPLICIT_FAILURE_CALLS:
+            return True
+        # unittest: self.assertEqual, self.assertRaises, self.failUnless...
+        if func.attr.startswith("assert") and isinstance(func.value, ast.Name):
+            return True
+    if isinstance(func, ast.Name) and func.id in EXPLICIT_FAILURE_CALLS:
+        return True
+    return False
+
+
+def _is_raises_block(node: ast.AST) -> bool:
+    """`with pytest.raises(...)` -- an assertion written as a context."""
+    if not isinstance(node, (ast.With, ast.AsyncWith)):
+        return False
+    for item in node.items:
+        expr = item.context_expr
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
+            if expr.func.attr == "raises":
+                return True
+    return False
+
+
+def _module_functions(tree: ast.AST) -> dict[str, ast.AST]:
+    """Every function defined in this module, by the name a call would use.
+
+    Methods are keyed by their bare name too, because a call written
+    `self._assert_accepted(...)` resolves to a method and the attribute is what
+    the caller sees. A duplicate name maps to the first definition; ambiguity
+    here can only make the checker more permissive, never less, and a
+    permissive assertion check costs a round while a strict one refuses correct
+    code (#2737).
+    """
+    functions: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            functions.setdefault(node.name, node)
+    return functions
+
+
+def _called_names(func: ast.AST) -> list[str]:
+    """The names of everything ``func`` calls, as a resolver would see them."""
+    names: list[str] = []
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        target = node.func
+        if isinstance(target, ast.Name):
+            names.append(target.id)
+        elif isinstance(target, ast.Attribute):
+            names.append(target.attr)
+    return names
+
+
+def _carries_an_assertion(
+    func: ast.AST,
+    functions: dict[str, ast.AST],
+    imported_sources: dict[str, ast.AST] | None = None,
+    depth: int = 0,
+) -> bool:
+    """Whether ``func`` asserts, in its own body or one level down.
+
+    Operator ruling, 2026-09-04 (#2737): a test whose assertion lives in a
+    helper it calls counts as having an assertion. Resolve a call to a function
+    in the same module or an imported one and look there.
+
+    The recursion is bounded by `ASSERTION_FOLLOW_DEPTH`, so the analysis
+    terminates on a helper that calls itself and never wanders into the code
+    under test. Following further was rejected deliberately: one level covers a
+    shared assertion helper, and every level past it makes "this test asserts"
+    depend on production code's contents, which is a different claim.
+    """
+    for node in ast.walk(func):
+        if _is_real_assert(node) or _is_raises_block(node) or _is_failure_call(node):
+            return True
+
+    if depth >= ASSERTION_FOLLOW_DEPTH:
+        return False
+
+    pool = dict(functions)
+    if imported_sources:
+        # Same-module definitions win: a local helper shadows an import.
+        for name, node in imported_sources.items():
+            pool.setdefault(name, node)
+
+    for name in _called_names(func):
+        helper = pool.get(name)
+        if helper is None or helper is func:
+            continue
+        if _carries_an_assertion(helper, functions, imported_sources, depth + 1):
+            return True
+    return False
+
+
 def validate_test_structure(
     test_content: str,
     scenarios: list[dict],
+    imported_sources: dict[str, ast.AST] | None = None,
 ) -> list[str]:
     """AST validation: verify imports, calls, and assertions exist.
 
@@ -154,9 +282,19 @@ def validate_test_structure(
     - Each test function has at least one real assertion
     - Assertions aren't just `assert False`
 
+    #2737, operator ruling 2026-09-04: "has an assertion" is answered by
+    reading the test body AND one level down into any function it calls, in
+    this module or in an imported one. A shared assertion helper is ordinary
+    and good practice in exactly the table-driven tests the pipeline is asked
+    to write, and reading only the body refused code the operator shipped.
+
     Args:
         test_content: The generated test file content.
         scenarios: List of test scenario dicts with test_id and test_name.
+        imported_sources: Functions this module imports, by the name the call
+            site uses, already parsed. Supplied by callers that can reach the
+            files on disk; when it is None, only same-module helpers are
+            followed and an imported helper's assertion cannot be seen.
 
     Returns:
         List of error messages for structural issues.
@@ -178,59 +316,95 @@ def validate_test_structure(
     if not has_import:
         errors.append("No import statements found - tests need imports")
 
+    functions = _module_functions(tree)
+
     # Check each test function
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name.startswith('test_'):
-            # Check for assertions in this function
-            has_real_assertion = False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith('test_'):
+            if _carries_an_assertion(node, functions, imported_sources):
+                continue
 
-            for child in ast.walk(node):
-                if isinstance(child, ast.Assert):
-                    # Issue #386: Accept `assert False, 'TDD RED: ...'` as valid
-                    # TDD scaffold intentionally generates failing assertions.
-                    # Only reject bare `assert False` without a message.
-                    if isinstance(child.test, ast.Constant):
-                        if child.test.value is False and child.msg is None:
-                            continue  # Skip bare assert False (no message)
-                    has_real_assertion = True
-                    break
+            # Check if function only has pass
+            func_has_only_pass = (
+                len(node.body) == 1 and
+                isinstance(node.body[0], (ast.Pass, ast.Expr)) and
+                (isinstance(node.body[0], ast.Pass) or
+                 (isinstance(node.body[0], ast.Expr) and
+                  isinstance(node.body[0].value, ast.Constant)))
+            )
 
-                # Also accept pytest.raises as valid
-                if isinstance(child, ast.With):
-                    for item in child.items:
-                        if isinstance(item.context_expr, ast.Call):
-                            call = item.context_expr
-                            if isinstance(call.func, ast.Attribute):
-                                if call.func.attr == 'raises':
-                                    has_real_assertion = True
-                                    break
-
-            if not has_real_assertion:
-                # Check if function only has pass
-                func_has_only_pass = (
-                    len(node.body) == 1 and
-                    isinstance(node.body[0], (ast.Pass, ast.Expr)) and
-                    (isinstance(node.body[0], ast.Pass) or
-                     (isinstance(node.body[0], ast.Expr) and
-                      isinstance(node.body[0].value, ast.Constant)))
+            if func_has_only_pass:
+                errors.append(
+                    f"Function '{node.name}' has no assertions - only pass/docstring"
                 )
-
-                if func_has_only_pass:
+            else:
+                # Check if any assert exists (even assert False)
+                any_assert = any(
+                    isinstance(child, ast.Assert)
+                    for child in ast.walk(node)
+                )
+                if not any_assert:
                     errors.append(
-                        f"Function '{node.name}' has no assertions - only pass/docstring"
+                        f"Function '{node.name}' has no assertion the checker can "
+                        f"see, in its body or one level down; assert in the body "
+                        f"or call a helper that does"
                     )
-                else:
-                    # Check if any assert exists (even assert False)
-                    any_assert = any(
-                        isinstance(child, ast.Assert)
-                        for child in ast.walk(node)
-                    )
-                    if not any_assert:
-                        errors.append(
-                            f"Function '{node.name}' has no assertion statements"
-                        )
 
     return errors
+
+
+def imported_helper_sources(
+    test_content: str, module_dir: Path | str
+) -> dict[str, ast.AST]:
+    """Functions ``test_content`` imports from files beside it, parsed.
+
+    The "or an imported one" half of #2737's ruling. Only same-directory and
+    `conftest` imports are resolved, which is where a test's shared assertion
+    helpers actually live; a name imported from the package under test is
+    deliberately NOT followed, because production code's `raise` is not the
+    test's assertion.
+
+    Every failure is silent and returns fewer entries, never an exception: an
+    unreadable neighbour must cost the checker a helper, not cost the run.
+    """
+    directory = Path(module_dir)
+    try:
+        tree = ast.parse(test_content)
+    except SyntaxError:
+        # fail-open: returning no helpers is strictly more conservative than
+        # returning some -- fewer helpers can only make the assertion check
+        # REFUSE more, never accept more, so an unreadable file cannot be used
+        # to sneak a stub past the gate. The caller has already parsed this
+        # same text and reported the syntax error itself, so the halt is not
+        # lost; it is raised once, by the check that owns it.
+        return {}
+
+    wanted: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level >= 0:
+            head = node.module.split(".")[0]
+            for alias in node.names:
+                wanted[alias.asname or alias.name] = head
+
+    found: dict[str, ast.AST] = {}
+    for local_name, module_head in wanted.items():
+        candidate = directory / f"{module_head}.py"
+        if not candidate.is_file():
+            continue
+        try:
+            helper_tree = ast.parse(candidate.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, SyntaxError):
+            # fail-open: one unreadable neighbour drops one helper and the loop
+            # continues, in the same direction as the handler above -- a shorter
+            # helper list makes the check stricter, never laxer. Halting here
+            # would let any unrelated broken file in the test directory end a
+            # run, which is a far worse failure than declining to follow one
+            # call into it.
+            continue
+        for name, node in _module_functions(helper_tree).items():
+            if name == local_name:
+                found[local_name] = node
+    return found
 
 
 def validate_scenario_coverage(
@@ -386,7 +560,21 @@ def validate_tests_mechanical_node(state: dict[str, Any]) -> dict[str, Any]:
             )
 
     # Step 2: Validate structure with AST (imports, test functions exist)
-    structure_errors = validate_test_structure(generated_tests, scenarios)
+    #
+    # #2737: an assertion helper beside the test file counts. The test files
+    # are on disk by now, so the directory they sit in is where an imported
+    # helper is looked for; when there is no such file the checker falls back
+    # to same-module helpers and says nothing, because a missing neighbour must
+    # cost a helper and never cost the run.
+    test_files_on_disk = [str(p) for p in (state.get("test_files") or [])]
+    imported_sources: dict[str, ast.AST] = {}
+    if test_files_on_disk:
+        imported_sources = imported_helper_sources(
+            generated_tests, Path(test_files_on_disk[0]).parent
+        )
+    structure_errors = validate_test_structure(
+        generated_tests, scenarios, imported_sources
+    )
     all_errors.extend(structure_errors)
 
     # Step 3: Validate scenario coverage
