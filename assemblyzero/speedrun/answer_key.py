@@ -90,7 +90,7 @@ BOOSTGAUGE_ARC: tuple[Feature, ...] = (
 #: Gates this audit can run, by registry key, and what artifact each reads.
 RUNNABLE_GATES: tuple[tuple[str, str], ...] = (
     ("impl.file_generation_failed", "every shipped .py file, as the implementer validates a file it wrote"),
-    ("impl.test_file_validation", "every shipped test file, as the scaffolder's structural validator"),
+    ("impl.scaffold_suite_invalid", "every shipped test file, as the scaffolder's structural validator"),
     ("impl.deterministic_failure", "every shipped test file, as the scaffolder's stub count"),
     ("impl.path_enforcement", "every shipped file against the LLD's allowed paths"),
     ("lld.mechanical_validation", "the LLD, where one survives on main"),
@@ -170,7 +170,7 @@ def _gate_code_response(code: str, rel: str, repo: Path) -> tuple[bool, str]:
 
 
 def _gate_test_structure(content: str, path: Path | None = None) -> tuple[bool, str]:
-    """impl.test_file_validation: the scaffolder's structural validator.
+    """impl.scaffold_suite_invalid: the scaffolder's structural validator.
 
     ``path`` is the shipped file's own location, so the checker can resolve an
     assertion helper imported from a neighbouring module exactly as the
@@ -339,7 +339,12 @@ def audit_feature(
                                     rel, refused, message))
         if rel in feature.tests and rel.endswith(".py"):
             refused, message = _gate_test_structure(content, path)
-            verdicts.append(Verdict(feature.issue, "impl.test_file_validation",
+            # #2753: labelled `impl.test_file_validation` until 2026-09-04,
+            # which named a row whose only code was the unreachable
+            # `run_tests` node. The check below is the LIVE one at N2.5, and
+            # its live consequence is this row -- so a refusal here now names
+            # the gate that would actually have ended the run.
+            verdicts.append(Verdict(feature.issue, "impl.scaffold_suite_invalid",
                                     rel, refused, message))
             refused, message = _gate_stub_count(content)
             verdicts.append(Verdict(feature.issue, "impl.deterministic_failure",

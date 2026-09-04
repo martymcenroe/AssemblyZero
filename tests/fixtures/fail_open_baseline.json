@@ -1,9 +1,9 @@
 {
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
-    "files_scanned": 282,
-    "sites_examined": 7392,
-    "findings_total": 471
+    "files_scanned": 309,
+    "sites_examined": 8792,
+    "findings_total": 534
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -436,7 +436,6 @@
     "assemblyzero/workflows/testing/nodes/load_lld.py::load_lld::except_handler::0",
     "assemblyzero/workflows/testing/nodes/load_lld.py::load_lld::except_handler::1",
     "assemblyzero/workflows/testing/nodes/review_test_plan.py::review_test_plan::warned_return::0",
-    "assemblyzero/workflows/testing/nodes/run_tests.py::run_tests::except_handler::0",
     "assemblyzero/workflows/testing/nodes/scaffold_tests.py::scaffold_tests::warned_return::0",
     "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py::_validate_non_pytest::except_handler::0",
     "assemblyzero/workflows/testing/nodes/validate_tests_mechanical.py::count_stub_tests::except_handler::0",

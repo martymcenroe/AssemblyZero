@@ -596,6 +596,31 @@ class TestTheRepoGate:
             + "\n  ".join(stale[:20])
         )
 
+    def test_the_denominator_matches_what_it_was_measured_against(self, repo_scan):
+        """#2780's assertion, which this baseline was missing (#2753).
+
+        The `undeclared` list is enforced and `measured_against` was not, so
+        it could only be right by accident of who last regenerated the file.
+        It was not right: the committed block read 282 files / 7392 sites /
+        471 findings while the walker on the same tree saw 310 / 8803 / 535 --
+        drifted by 28 files and 64 findings. A denominator that wrong is worse
+        than none, because it reads as evidence.
+
+        Re-derived from the same scan the gate uses, not compared to a
+        literal, or this becomes one more number nobody updates.
+        """
+        findings, coverage = repo_scan
+        baseline = json.loads(cli.BASELINE_PATH.read_text(encoding="utf-8"))
+        assert baseline["measured_against"] == {
+            "files_scanned": coverage.files_scanned,
+            "sites_examined": coverage.sites_examined,
+            "findings_total": len(findings),
+        }, (
+            "the baseline's stated denominator no longer matches the tree it "
+            "claims to describe; regenerate with "
+            "`tools/audit_fail_open.py --write-baseline`"
+        )
+
     def test_a_new_fail_open_actually_trips_the_gate(self, repo_scan):
         """The gate's own regression test.
 
