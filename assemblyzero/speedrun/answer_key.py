@@ -192,16 +192,26 @@ def _gate_stub_count(content: str) -> tuple[bool, str]:
 
 
 def _gate_path_enforcement(rel: str, lld_content: str) -> tuple[bool, str]:
-    """impl.path_enforcement: the file is one the LLD allows the run to write."""
-    from assemblyzero.hooks.file_write_validator import validate_file_write
+    """impl.path_enforcement: what the gate says about a file it did not plan.
+
+    Advisory since #2736, so this can no longer report a refusal: the gate says
+    its sentence and the implementer writes the file. The sentence is still
+    carried into the report, because "the plan did not name this and it was
+    written anyway" is worth reading -- it is the refusal's evidence, minus the
+    consequence.
+
+    It calls `path_advisory`, the same function the implementation stage calls,
+    so the audit cannot pass while the shipped gate would still object.
+    """
+    from assemblyzero.hooks.file_write_validator import path_advisory
     from assemblyzero.utils.lld_path_enforcer import extract_paths_from_lld
 
     spec = extract_paths_from_lld(lld_content)
     allowed = set(spec.get("all_allowed_paths") or ())
     if not allowed:
         return False, "LLD declares no paths; the gate is inert"
-    result = validate_file_write(rel, allowed)
-    return (not result.get("allowed", True)), str(result.get("reason", ""))
+    notice = path_advisory(rel, allowed)
+    return False, notice or "Path matches LLD specification"
 
 
 def _gate_lld_mechanical(lld_content: str, repo: Path, issue: int) -> tuple[bool, str]:
@@ -365,11 +375,14 @@ def render(repo: Path, verdicts: list[Verdict], coverage: AuditCoverage,
         f"Generated {stamp}. The shipped code on main is the answer key; a "
         "refusal below is a gate rejecting content the operator shipped.",
         "",
-        "A refusal on `impl.path_enforcement` means the LLD's file plan and "
-        "the shipped file names disagree: the gate holds the drafter to a "
-        "plan the hand build did not follow. A refusal on the test-file gates "
-        "means a hand-written test delegates its assertion to a helper the "
-        "gate cannot see.",
+        "`impl.path_enforcement` can no longer refuse anything (#2736, "
+        "operator ruling 2026-09-04: the LLD's file list is a plan, not a "
+        "contract). Where it once refused, its row now carries the advisory "
+        "the implementation stage prints while writing the file anyway, so "
+        "the disagreement between plan and build stays visible without a "
+        "consequence attached. A refusal on the test-file gates means a "
+        "hand-written test states its expectation in a way the gate does not "
+        "recognise.",
         "",
         "## Coverage — counted, not estimated",
         "",

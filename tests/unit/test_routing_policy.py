@@ -117,15 +117,18 @@ class TestTheRatchet:
         assert halt_counts() == baseline["halt_rows_per_stage"]
 
     def test_the_ratchet_records_what_is_left(self):
-        """19 model-output rows still halt. The number is pinned so it can only
-        fall: this PR took it from 24, and the remaining fourteen impl rows,
-        four lld, five spec and one pr row are the rest of #2723."""
+        """18 model-output rows still halt. The number is pinned so it can only
+        fall: #2723 took it from 24 to 19 by retiring the five stagnation
+        guards, and #2736 took it to 18 by making `impl.path_enforcement`
+        advisory on the operator's ruling of 2026-09-04. The remaining thirteen
+        impl rows, four lld, five spec and one pr row are the rest of the
+        routing policy's scope."""
         baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
         remaining = [
             gate for gate in GATE_REGISTRY
             if gate.action == ACTION_HALT and gate.judges == JUDGES_MODEL_OUTPUT
         ]
-        assert len(remaining) == baseline["model_output_halt_rows"] == 19
+        assert len(remaining) == baseline["model_output_halt_rows"] == 18
 
     def test_no_stagnation_row_is_among_them(self):
         remaining = {
