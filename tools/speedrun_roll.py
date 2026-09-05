@@ -1918,6 +1918,20 @@ def kill_roll(repo_root: Path, log_dir: Path, issue: int | None) -> int:
         _ended, outcome = _end_task_for(repo_root)
         print(f"  {outcome}")
 
+    # #2859: a tree-kill skips RESTORE's `finally`, so the attempt branch
+    # `issue-N` was left standing at its last checkpoint -- and the next
+    # launch's impl stage refuses a leftover branch that carries commits
+    # (#2310), while #2845's recovery looks only under graveyard/. On
+    # 2026-09-05 the stop below promised "the next launch resumes from where
+    # this one stopped" and the launch that followed halted in three seconds
+    # on the leftover name. The RESTORE tail this kill prevented runs here
+    # instead: the worktree is removed when git will let it go, and the branch
+    # is disposed by the #2310 rule -- renamed under graveyard/ when it holds
+    # work, safe-deleted when it holds nothing -- so the resume finds it.
+    disposed = _dispose_after_kill(repo_root, issue) if killed else []
+    for line in disposed:
+        print(f"  {line}")
+
     if stamped:
         print(f"Stamped '{KILLED_MARKER}' into {len(stamped)} run log(s).")
     print(
@@ -1925,6 +1939,41 @@ def kill_roll(repo_root: Path, log_dir: Path, issue: int | None) -> int:
         "are preserved;\n  the next launch resumes from where this one stopped."
     )
     return 0
+
+
+def _dispose_after_kill(repo_root: Path, issue: int | None) -> list[str]:
+    """RESTORE's worktree-and-branch tail, for a stop that skipped RESTORE.
+
+    Returns the lines to print. Never raises: the kill has already happened,
+    and a cleanup that cannot run is reported, not turned into a failed stop.
+    """
+    if issue is None:
+        return ["no issue named; attempt branches left as they are"]
+    lines: list[str] = []
+    try:
+        if reset.remove_worktree(repo_root, issue):
+            lines.append(f"Removed the worktree for #{issue}.")
+        base = attempt.default_branch(repo_root)
+        failures = reset.dispose_pipeline_branches(repo_root, issue, base)
+        for failure in failures:
+            lines.append(f"branch not disposed: {failure}")
+        if not failures:
+            lines.append(
+                f"Attempt branch for #{issue} disposed (preserved under "
+                f"graveyard/ if it held work); the next launch recovers it."
+            )
+    except Exception as exc:  # noqa: BLE001 - the stop has happened; report
+        # fail-open: the operator's order -- stop the roll -- is already
+        # carried out above. A failure in the tidy-up that follows is named
+        # here so the operator knows the branch may still be standing; turning
+        # it into a non-zero exit would report a stop that succeeded as one
+        # that failed, which is the confusion #2422's stamp exists to prevent.
+        lines.append(
+            f"could not dispose #{issue}'s worktree/branch ({exc}); if "
+            f"`issue-{issue}` is still standing, rename it under graveyard/ "
+            f"before relaunching"
+        )
+    return lines
 
 
 # =============================================================================
