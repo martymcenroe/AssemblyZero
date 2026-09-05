@@ -199,7 +199,7 @@ def _attributed_blocks(
     tokens = _file_tokens(filepath)
     if not tokens:
         return []
-    defined: set[str] | None = None  # parsed lazily, once per file
+    defined: tuple[set[str], dict[str, set[str]]] | None = None  # parsed once per file
     kept: list[str] = []
     for block in _blocks(failure_summary):
         haystack = block.replace("\\", "/").lower()
@@ -213,10 +213,17 @@ def _attributed_blocks(
             continue
         if defined is None:
             defined = _names_defined_in(repo_root / filepath)
-        if not defined:
+        top, methods = defined
+        if not top and not methods:
             continue
         used = _names_used_by_test(repo_root / test_ref[0], test_ref[1])
-        if used & defined:
+        # #2865: a top-level name the test uses is enough. A method name
+        # counts only when the test also uses a class that defines it -- so
+        # `collect` attributes the file whose WindowsCollector defines it,
+        # and not a file whose `collect` hangs off a DummyCollector double.
+        if used & top or any(
+            methods[m] & used for m in used if m in methods
+        ):
             kept.append(block)
     return kept
 
@@ -245,8 +252,16 @@ _FRAME = re.compile(r"^(\S+?\.py):\d+: in (\S+)")
 _MIN_NAME_LEN = 4
 
 
-def _names_defined_in(path: Path) -> set[str]:
-    """Top-level classes and functions, and the methods of top-level classes."""
+def _names_defined_in(path: Path) -> tuple[set[str], dict[str, set[str]]]:
+    """(top-level classes and functions, {method name: classes defining it}).
+
+    #2865: the two are kept apart because they are different strengths of
+    evidence. A top-level name the test uses says which file it exercises.
+    A method name says so only together with its class: on run-issue4-151141
+    the failing tests' `collector.collect()` matched the `collect` method of a
+    `DummyCollector` test double in two planned test files, and both were
+    sent for a fix that was not theirs.
+    """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except (OSError, SyntaxError, ValueError):
@@ -254,20 +269,26 @@ def _names_defined_in(path: Path) -> set[str]:
         # this rule can see, so the block stays unattributed to it and the
         # frame rule and the whole-corpus fallback decide -- which is exactly
         # the behaviour before #2861. Attributing on a guess is the failure.
-        return set()
-    names: set[str] = set()
+        return set(), {}
+
+    def _ok(name: str) -> bool:
+        return len(name) >= _MIN_NAME_LEN and not (
+            name.startswith("__") and name.endswith("__")
+        )
+
+    top: set[str] = set()
+    methods: dict[str, set[str]] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            names.add(node.name)
+            if _ok(node.name):
+                top.add(node.name)
         elif isinstance(node, ast.ClassDef):
-            names.add(node.name)
+            if _ok(node.name):
+                top.add(node.name)
             for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    names.add(item.name)
-    return {
-        n for n in names
-        if len(n) >= _MIN_NAME_LEN and not (n.startswith("__") and n.endswith("__"))
-    }
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and _ok(item.name):
+                    methods.setdefault(item.name, set()).add(node.name)
+    return top, methods
 
 
 def _names_used_by_test(path: Path, func: str) -> set[str]:
