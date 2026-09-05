@@ -575,30 +575,9 @@ class TestEveryRegisteredGateLivesInANodeSomeGraphRuns:
     #: decided the answer, so the check was a coin-flip on a live node. A
     #: fresh interpreter sees exactly what the graphs pull in and nothing else.
     def _reachable_modules(self) -> set[str]:
-        import subprocess
-
-        probe = (
-            "import sys, json;"
-            "sys.path.insert(0, r'" + str(REPO_ROOT) + "');"
-            "from assemblyzero.workflows.testing.graph import"
-            " build_testing_workflow as b;"
-            "from assemblyzero.workflows.implementation_spec.graph import"
-            " create_implementation_spec_graph as c;"
-            "from assemblyzero.workflows.requirements.graph import"
-            " create_requirements_graph as r;"
-            "[f() for f in (b, c, r)];"
-            "print(json.dumps(sorted({"
-            "n.rsplit('.', 1)[-1] for n in list(sys.modules)"
-            " if n.startswith('assemblyzero.')})))"
-        )
-        done = subprocess.run(
-            [sys.executable, "-c", probe],
-            capture_output=True, text=True, cwd=REPO_ROOT, timeout=300,
-        )
-        assert done.returncode == 0, (
-            f"the reachability probe could not build the graphs:\n{done.stderr}"
-        )
-        return set(json.loads(done.stdout.strip().splitlines()[-1]))
+        # #2791 lifted the body to a module-level helper so a second check can
+        # use the same measurement rather than a second copy of it.
+        return reachable_modules()
 
     def test_no_registry_row_names_a_site_in_an_unreachable_node(self):
         reachable = self._reachable_modules()
@@ -631,4 +610,195 @@ class TestEveryRegisteredGateLivesInANodeSomeGraphRuns:
             "run_tests.py is back. If it was wired into the testing graph, "
             "delete this assertion and register its halt sites; if not, it is "
             "the same dead node #2753 retired."
+        )
+
+
+def reachable_modules() -> set[str]:
+    """Every `assemblyzero.*` module the three compiled graphs pull in.
+
+    The docstring above `TestEveryRegisteredGateLivesInANodeSomeGraphRuns`
+    records why this builds the graphs in a subprocess rather than reading
+    imports statically; three earlier versions of the check were wrong in
+    three different ways.
+    """
+    import subprocess
+
+    probe = (
+        "import sys, json;"
+        "sys.path.insert(0, r'" + str(REPO_ROOT) + "');"
+        "from assemblyzero.workflows.testing.graph import"
+        " build_testing_workflow as b;"
+        "from assemblyzero.workflows.implementation_spec.graph import"
+        " create_implementation_spec_graph as c;"
+        "from assemblyzero.workflows.requirements.graph import"
+        " create_requirements_graph as r;"
+        "[f() for f in (b, c, r)];"
+        "print(json.dumps(sorted({"
+        "n.rsplit('.', 1)[-1] for n in list(sys.modules)"
+        " if n.startswith('assemblyzero.')})))"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True, text=True, cwd=REPO_ROOT, timeout=300,
+    )
+    assert done.returncode == 0, (
+        f"the reachability probe could not build the graphs:\n{done.stderr}"
+    )
+    return set(json.loads(done.stdout.strip().splitlines()[-1]))
+
+
+#: Modules under a `nodes/` package that the graph-build import closure does
+#: not reach. Closed and authored, never discovered: an entry is a decision to
+#: exempt one file and it has to say why, so the table shrinks as the reasons
+#: are resolved rather than becoming a place things go to be forgotten.
+#:
+#: Two kinds of entry, and they are not the same kind of debt.
+NODE_MODULE_EXEMPTIONS: dict[str, str] = {
+    # Reachable at RUN time, invisible at BUILD time. `parsers.py:108` does
+    # `from .import_validator import validate_imports` inside a function, so
+    # the import happens when a parse runs and never when a graph is built.
+    # This is the lazy-import hazard the docstring above records -- it fooled
+    # an earlier version of the reachability check with `compile_manifest`,
+    # and it is why this check needs an exemption table at all rather than
+    # being a straight assertion.
+    "import_validator": (
+        "lazily imported by testing/nodes/implementation/parsers.py at call "
+        "time; live code a build-time closure cannot see"
+    ),
+    # Genuinely unreachable, tracked in #2811. `workflows/lld/` has no
+    # graph.py at all and nothing outside the package imports it; six node
+    # modules with no builder to declare them. Retiring a whole workflow
+    # package is its own decision with its own evidence, so #2791 names them
+    # here and #2811 owns the work. Every one of these entries should
+    # disappear when it lands.
+    "assembly_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "gemini_review_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "lld_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "lld_tracker_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "lld_writer_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "spec_node": "workflows/lld/ has no graph; dead, tracked in #2811",
+    "issue_node": (
+        "requirements/nodes/issue_node.py has no importer anywhere; dead, "
+        "tracked in #2811"
+    ),
+}
+
+
+def unreachable_node_modules(
+    node_modules: set[str], reachable: set[str],
+    exemptions: dict[str, str] | None = None,
+) -> set[str]:
+    """Node modules no compiled graph pulls in (#2791).
+
+    Pure, and separated from the measurement on purpose: the discrimination
+    test below feeds it a synthetic unreachable module to prove the check
+    can fail. A guard nobody has watched fail is a guard nobody should trust.
+    """
+    exempt = set(exemptions if exemptions is not None else NODE_MODULE_EXEMPTIONS)
+    return {m for m in node_modules if m not in reachable and m not in exempt}
+
+
+def node_modules_on_disk() -> set[str]:
+    """Every module under any `nodes/` package in the workflow tree."""
+    found: set[str] = set()
+    for path in (REPO_ROOT / "assemblyzero" / "workflows").rglob("*.py"):
+        parts = path.parts
+        if "nodes" not in parts or "__pycache__" in parts:
+            continue
+        if path.stem == "__init__":
+            continue
+        found.add(path.stem)
+    return found
+
+
+class TestEveryNodeModuleIsReachable:
+    """#2791: the general form, which registry rows are not needed to trip.
+
+    `TestEveryRegisteredGateLivesInANodeSomeGraphRuns` only fires on an
+    unreachable module that a REGISTRY ROW points at. `run_tests.py` had four
+    halt sites, so it did. `check_coverage.py` -- added by the same commit,
+    52992973 (#381), and wired by nobody -- had none, so it sat in the tree
+    for six months invisible to every check in the suite.
+
+    This one needs no rows: a module under a `nodes/` package that no
+    compiled graph imports is dead, whether or not anything names it.
+
+    **Its known blind spot, measured on 2026-09-04.** Import-reachability is
+    satisfied by a re-export. `validate_commit_message` was imported by
+    `testing/nodes/__init__.py` and by nothing else, so it counted as
+    reachable while no graph declared it as a node -- dead code this check
+    would have passed. #2787 retired it and filed the stronger check, which
+    asks whether a module supplies a node rather than whether it is imported.
+    """
+
+    def test_every_node_module_is_pulled_in_by_some_graph(self):
+        orphans = unreachable_node_modules(
+            node_modules_on_disk(), reachable_modules()
+        )
+        assert not orphans, (
+            "node modules no compiled graph imports: "
+            + ", ".join(sorted(orphans))
+            + ". Wire the node, retire it (#2753, #2791), or add it to "
+            "NODE_MODULE_EXEMPTIONS with the reason."
+        )
+
+    def test_the_check_fails_when_an_unreachable_module_is_present(self):
+        """Proof it discriminates, which the assertion above cannot give.
+
+        A check that has only ever passed is indistinguishable from a check
+        that cannot fail -- the defect #2753 found in two registry rows and
+        #2787 found in a third.
+        """
+        reachable = {"verify_phases", "scaffold_tests"}
+        on_disk = reachable | {"a_node_nobody_wired"}
+        assert unreachable_node_modules(on_disk, reachable) == {
+            "a_node_nobody_wired"
+        }
+
+    def test_an_exemption_silences_it_and_nothing_else_does(self):
+        reachable = {"verify_phases"}
+        on_disk = reachable | {"deliberately_unwired"}
+        exempt = {"deliberately_unwired": "kept for a documented reason"}
+        assert unreachable_node_modules(on_disk, reachable, exempt) == set()
+        assert unreachable_node_modules(
+            on_disk | {"another"}, reachable, exempt
+        ) == {"another"}
+
+    def test_every_exemption_says_why(self):
+        """An exemption with no reason is a silenced check.
+
+        The table is the only way this guard can be made quiet, so the bar
+        for an entry is a sentence a reader can act on -- which module, and
+        what makes it either live-but-invisible or dead-but-tracked.
+        """
+        for module, reason in NODE_MODULE_EXEMPTIONS.items():
+            assert len(reason.strip()) > 20, (
+                f"{module}'s exemption does not say why: {reason!r}"
+            )
+
+    def test_no_exemption_outlives_the_file_it_names(self):
+        """When #2811 retires those modules, this fails until the entries go.
+
+        Otherwise the table keeps names of files that no longer exist, and
+        the next reader cannot tell a live exemption from a fossil.
+        """
+        on_disk = node_modules_on_disk()
+        stale = sorted(set(NODE_MODULE_EXEMPTIONS) - on_disk)
+        assert not stale, (
+            "NODE_MODULE_EXEMPTIONS names modules that are no longer on "
+            f"disk: {', '.join(stale)}. Remove the entries."
+        )
+
+    def test_the_retired_node_is_gone(self):
+        """Named as well as caught generally, for the same reason #2753 named
+        its sibling: the general check passes trivially if the file comes
+        back wired to nothing that imports it."""
+        assert not (
+            REPO_ROOT / "assemblyzero" / "workflows" / "testing" / "nodes"
+            / "check_coverage.py"
+        ).exists(), (
+            "check_coverage.py is back. `verify_green_phase` already computes "
+            "and gates on coverage through the live runner protocol, so a "
+            "second coverage node duplicates rather than adds; if it was "
+            "wired deliberately, delete this assertion and say so."
         )
