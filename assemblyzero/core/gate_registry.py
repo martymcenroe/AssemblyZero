@@ -1003,13 +1003,29 @@ class WalkCoverage:
     functions_scanned: int = 0
 
 
-def _static_head(node: ast.AST | None, resolve) -> str:
+def _static_head(node: ast.AST | None, resolve, module=None, depth: int = 0) -> str:
     """The literal prefix of a message expression, or ``<...>`` when none.
 
     Reads constants, f-strings (dynamic parts become ``{}``), the left side of
-    a concatenation, a name (through `resolve`), and the first literal
-    argument of a call. Anything else is reported as its node type so the
-    inventory says what it could not read rather than guessing.
+    a concatenation, a name (through `resolve`), and calls. Anything else is
+    reported as its node type so the inventory says what it could not read
+    rather than guessing.
+
+    #2814 gave it module context, which fixed two readings that were wrong
+    rather than merely absent, and #2776's pairing check is what found them:
+
+    * **A call reads its CALLEE**, when that callee is a function in the same
+      module, before falling back to the first literal argument. Without it
+      `_spec_edit_halt(halt_reason)` read as the *reason* -- "every edit
+      touched locked content..." -- while the run prints
+      "[EDIT-SCRIPT] spec revision rejected after N attempt(s): ...", which
+      the callee supplies. The row was right and the head was wrong.
+    * **A name resolves through module-level constants** when it has no local
+      assignment, so `f"{DETERMINISTIC_FAILURE}: {message}"` no longer reads
+      as the textless `'{}: {}'`.
+
+    `depth` bounds the callee walk; a function whose return is another call
+    is followed, a cycle is not.
     """
     if node is None:
         return "<none>"
@@ -1020,30 +1036,63 @@ def _static_head(node: ast.AST | None, resolve) -> str:
         for value in node.values:
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
                 parts.append(value.value)
+            elif (
+                # #2814: an interpolated module-level string constant is text,
+                # not a hole. `f"{DETERMINISTIC_FAILURE}: {message}"` read as
+                # '{}: {}' and could be compared to nothing.
+                isinstance(value, ast.FormattedValue)
+                and isinstance(value.value, ast.Name)
+                and module
+                and value.value.id in module["constants"]
+            ):
+                parts.append(module["constants"][value.value.id])
             else:
                 parts.append("{}")
         return "".join(parts)
     if isinstance(node, ast.BinOp):
-        return _static_head(node.left, resolve)
+        return _static_head(node.left, resolve, module, depth)
     if isinstance(node, ast.Name):
-        return resolve(node.id, node.lineno)
+        head = resolve(node.id, node.lineno)
+        # #2814: fall through to the module's constants when the name has no
+        # local assignment, which is what `<var NAME>` means.
+        if head.startswith("<var ") and module and node.id in module["constants"]:
+            return module["constants"][node.id]
+        return head
     if isinstance(node, ast.Call):
+        # #2814: read the CALLEE first. A halt composed by a helper --
+        # `_spec_edit_halt(reason)` -- otherwise read as its argument, which
+        # is a different message from the one the run prints.
+        if (
+            module
+            and depth < 3
+            and isinstance(node.func, ast.Name)
+            and node.func.id in module["functions"]
+        ):
+            callee = module["functions"][node.func.id]
+            for inner in ast.walk(callee):
+                if isinstance(inner, ast.Return) and inner.value is not None:
+                    head = _static_head(
+                        inner.value, _make_resolver(callee, module), module,
+                        depth + 1,
+                    )
+                    if not head.startswith("<"):
+                        return head
         for arg in node.args:
-            head = _static_head(arg, resolve)
+            head = _static_head(arg, resolve, module, depth)
             if not head.startswith("<"):
                 return head
         for keyword in node.keywords:
             if keyword.arg in ("reason", "message", "msg"):
-                return _static_head(keyword.value, resolve)
+                return _static_head(keyword.value, resolve, module, depth)
         return f"<call {ast.unparse(node.func)[:40]}>"
     if isinstance(node, ast.IfExp):
-        return _static_head(node.body, resolve)
+        return _static_head(node.body, resolve, module, depth)
     if isinstance(node, ast.Subscript):
-        return _static_head(node.value, resolve)
+        return _static_head(node.value, resolve, module, depth)
     return f"<{type(node).__name__}>"
 
 
-def _make_resolver(func: ast.AST):
+def _make_resolver(func: ast.AST, module=None):
     """Resolve a name at a line to the head of its nearest prior assignment."""
     assigns: dict[str, list[ast.Assign]] = defaultdict(list)
     for node in ast.walk(func):
@@ -1065,11 +1114,13 @@ def _make_resolver(func: ast.AST):
         def inner(name_: str, line: int) -> str:
             return resolve(name_, line, depth + 1)
 
-        head = _static_head(nearest.value, inner)
+        head = _static_head(nearest.value, inner, module)
         if head == "" and len(before) > 1:
             # An initializer (`message = ""`); the real text is the one before.
             others = [a for a in before if a is not nearest]
-            head = _static_head(max(others, key=lambda a: a.lineno).value, inner)
+            head = _static_head(
+                max(others, key=lambda a: a.lineno).value, inner, module
+            )
         return head
 
     return resolve
@@ -1088,9 +1139,9 @@ def _is_empty_string(node: ast.AST) -> bool:
     return isinstance(node, ast.Constant) and node.value == ""
 
 
-def _sites_in_function(func: ast.AST, rel: str) -> list[tuple[str, int, str]]:
+def _sites_in_function(func: ast.AST, rel: str, module=None) -> list[tuple[str, int, str]]:
     """(kind, line, head) for every halt site in one function body."""
-    resolve = _make_resolver(func)
+    resolve = _make_resolver(func, module)
     found: list[tuple[str, int, str]] = []
     for node in ast.walk(func):
         if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
@@ -1098,7 +1149,7 @@ def _sites_in_function(func: ast.AST, rel: str) -> list[tuple[str, int, str]]:
                 head = "<none>"
                 for keyword in node.exc.keywords:
                     if keyword.arg == "reason":
-                        head = _static_head(keyword.value, resolve)
+                        head = _static_head(keyword.value, resolve, module)
                 found.append((KIND_RAISE, node.lineno, head))
         if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict):
             for key, value in zip(node.value.keys, node.value.values):
@@ -1108,7 +1159,7 @@ def _sites_in_function(func: ast.AST, rel: str) -> list[tuple[str, int, str]]:
                     and not _is_empty_string(value)
                 ):
                     found.append(
-                        (KIND_RETURN, node.lineno, _static_head(value, resolve))
+                        (KIND_RETURN, node.lineno, _static_head(value, resolve, module))
                     )
         if isinstance(node, ast.Call):
             name = _call_name(node)
@@ -1121,7 +1172,7 @@ def _sites_in_function(func: ast.AST, rel: str) -> list[tuple[str, int, str]]:
                             (
                                 KIND_STAGE_RESULT,
                                 node.lineno,
-                                _static_head(keyword.value, resolve),
+                                _static_head(keyword.value, resolve, module),
                             )
                         )
             if (
@@ -1139,7 +1190,7 @@ def _sites_in_function(func: ast.AST, rel: str) -> list[tuple[str, int, str]]:
                         (
                             KIND_CONSERVATION,
                             node.lineno,
-                            _static_head(keyword.value, resolve),
+                            _static_head(keyword.value, resolve, module),
                         )
                     )
     return found
@@ -1169,11 +1220,30 @@ def scan_halt_sites(
             coverage.files_unparseable.append(rel)
             continue
         coverage.files_scanned += 1
+        # #2814: the module's own string constants and top-level functions,
+        # so a head held in a constant or composed by a helper reads as text
+        # rather than as `{}` or `<call ...>`.
+        module_ctx = {
+            "constants": {
+                t.targets[0].id: t.value.value
+                for t in tree.body
+                if isinstance(t, ast.Assign)
+                and len(t.targets) == 1
+                and isinstance(t.targets[0], ast.Name)
+                and isinstance(t.value, ast.Constant)
+                and isinstance(t.value.value, str)
+            },
+            "functions": {
+                f.name: f
+                for f in tree.body
+                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+            },
+        }
         per_function: dict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 coverage.functions_scanned += 1
-                for kind, line, head in _sites_in_function(node, rel):
+                for kind, line, head in _sites_in_function(node, rel, module_ctx):
                     per_function[(node.name, kind)].append((line, head))
         for (qualname, kind), found in sorted(per_function.items()):
             for index, (line, head) in enumerate(sorted(found)):
@@ -1218,19 +1288,16 @@ _SYNTHETIC_HEAD_KINDS: frozenset[str] = frozenset({KIND_REFUSAL, KIND_CONSERVATI
 #: registry, and #2814 is where they get fixed; every one should disappear.
 EMITS_HEAD_EXEMPTIONS: dict[str, str] = {
     "impl.deterministic_failure": (
-        "the return is f\"{DETERMINISTIC_FAILURE}: {message}\", so the static "
-        "head is literally '{}: {}' and carries no text to compare"
+        "the return is f\"{DETERMINISTIC_FAILURE}: {message}\" and the "
+        "constant is IMPORTED from validate_tests_mechanical, so #2814's "
+        "module-constant resolution -- which reads only the module's own "
+        "top-level assignments -- cannot reach it. Resolving a constant "
+        "across an import is the next step and is not taken here"
     ),
     "spec.review_blocked": (
-        "the return interpolates three values and no literal words survive; "
-        "head is '{}\\n  exit: {}\\n  {}'"
-    ),
-    "spec.edit_script_rejected": (
-        "the return is _spec_edit_halt(halt_reason), and _static_head takes a "
-        "call's first literal ARGUMENT rather than following into the callee, "
-        "so it reads the reason ('every edit touched locked content...') "
-        "instead of the wrapper's '[EDIT-SCRIPT] spec revision rejected' "
-        "prefix. The row is right and the head is wrong"
+        "the return interpolates three LOCAL values and no literal words "
+        "survive; head is '{}\\n  exit: {}\\n  {}'. Nothing static to compare "
+        "at this site -- this one wants a per-site head, not a better reader"
     ),
 }
 
