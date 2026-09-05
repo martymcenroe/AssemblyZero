@@ -22,6 +22,39 @@ class TestFramework(Enum):
     VITEST = "vitest"
 
 
+#: The extensions each framework's IMPLEMENTATION is written in (#2805).
+#:
+#: Distinct from `test_file_extension`, which is the extension of the TEST
+#: file: `.spec.ts` says nothing about whether the implementation is `.ts`,
+#: `.tsx` or `.js`. #2796 could not port #2337's red-phase check to the
+#: non-pytest path because this fact existed nowhere in the repo, and the two
+#: helpers that decide it filter on `.py` -- so on a Playwright, Jest or
+#: Vitest target they select nothing and can never return True.
+#:
+#: Closed and enumerated, one entry per `TestFramework` member, which
+#: `test_every_framework_declares_its_source_extensions` enforces: adding a
+#: framework without saying what its implementation looks like fails the
+#: suite rather than quietly making that path undecidable again.
+SOURCE_EXTENSIONS: dict[TestFramework, tuple[str, ...]] = {
+    TestFramework.PYTEST: (".py",),
+    TestFramework.PLAYWRIGHT: (".ts", ".tsx", ".js", ".jsx"),
+    TestFramework.JEST: (".ts", ".tsx", ".js", ".jsx"),
+    TestFramework.VITEST: (".ts", ".tsx", ".js", ".jsx"),
+}
+
+
+def source_extensions(framework: TestFramework | None) -> tuple[str, ...]:
+    """What an implementation file looks like for this framework (#2805).
+
+    Falls back to `.py` for an unknown or absent framework, which is the
+    behaviour every caller had before this table existed -- so a caller that
+    cannot say which framework it is under is no worse off than it was.
+    """
+    if framework is None:
+        return (".py",)
+    return SOURCE_EXTENSIONS.get(framework, (".py",))
+
+
 class CoverageType(Enum):
     """How coverage is measured for this framework."""
     LINE = "line"
