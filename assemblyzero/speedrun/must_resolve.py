@@ -440,9 +440,9 @@ def file_must_resolve(
             f"A live roll would have raised must-resolve fingerprint {fingerprint} "
             f"against #{source_issue}."
         )
-        record_suppressed(
-            repo_root, title=build_title(source_issue, conflict),
-            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts, reason=inert,
+        record_filed(
+            repo_root, number=None, title=build_title(source_issue, conflict),
+            fingerprint=fingerprint, run_id=run_id, ts=conflict_ts, suppressed=inert,
         )
         return FilingResult(True, "suppressed", None, fingerprint, detail=inert)
 
@@ -581,61 +581,38 @@ def record_filed(
     fingerprint: str | None = None,
     run_id: str = "",
     ts: str | None = None,
+    suppressed: str = "",
 ) -> bool:
     """Append one filed question to the local ledger. Never raises.
 
     Append-only JSONL so two rolls writing at once cannot lose each other's
     line, and so a corrupt line costs one entry rather than the file.
+
+    ``suppressed`` (#2826) records a filing that was NOT made because GitHub
+    writes were inert -- a replay reaching a question. Such a line carries no
+    number, and ``read_filed`` keys on the number, so the launcher never
+    counts it while the record that the replay got there survives.
     """
-    if not number:
+    if not number and not suppressed:
         return False
+    row: dict = {
+        "number": int(number) if number else None,
+        "title": title or "",
+        "fingerprint": fingerprint or "",
+        "run_id": run_id or "",
+        "ts": ts or datetime.now().strftime(_TS_FMT),
+    }
+    if suppressed:
+        row["suppressed"] = suppressed
     try:
         path = filed_ledger_path(repo_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "number": int(number),
-                "title": title or "",
-                "fingerprint": fingerprint or "",
-                "run_id": run_id or "",
-                "ts": ts or datetime.now().strftime(_TS_FMT),
-            }) + "\n")
+            fh.write(json.dumps(row) + "\n")
         return True
     except OSError:
         # The roll is already halting. Losing the ledger line costs the
         # summary a number; raising here would cost the halt.
-        return False
-
-
-def record_suppressed(
-    repo_root: Path | str,
-    *,
-    title: str,
-    fingerprint: str | None = None,
-    run_id: str = "",
-    ts: str | None = None,
-    reason: str,
-) -> bool:
-    """Append one filing that was NOT made because writes were inert (#2826).
-
-    Same file, same append-only discipline, no number: ``read_filed`` keys on
-    the number and so never surfaces these to the launcher, while the line
-    itself keeps the record that a replay reached a question.
-    """
-    try:
-        path = filed_ledger_path(repo_root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
-                "number": None,
-                "suppressed": reason,
-                "title": title or "",
-                "fingerprint": fingerprint or "",
-                "run_id": run_id or "",
-                "ts": ts or datetime.now().strftime(_TS_FMT),
-            }) + "\n")
-        return True
-    except OSError:
         return False
 
 
