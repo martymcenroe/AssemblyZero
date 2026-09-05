@@ -36,6 +36,7 @@ from assemblyzero.core.utf8_console import install as _install_utf8_console  # n
 
 _install_utf8_console()
 
+from assemblyzero.core.github_writes import inert_github_writes  # noqa: E402
 from assemblyzero.core.scripted_provider import (  # noqa: E402
     ScriptedProvider,
     set_active,
@@ -219,11 +220,15 @@ def replay_spec_stage(
     try:
         graph = create_implementation_spec_graph()
         config = {"recursion_limit": recursion_limit(max_iterations)}
-        for event in graph.stream(state, config):
-            for node_name, node_output in event.items():
-                if node_name == "__end__" or not node_output:
-                    continue
-                final.update(node_output)
+        # #2826: the clone's origin is the real repository. Every GitHub
+        # write the graph can make -- a must-resolve issue, a push, a PR --
+        # is inert for the duration of the replay, and says so in the log.
+        with inert_github_writes("replay"):
+            for event in graph.stream(state, config):
+                for node_name, node_output in event.items():
+                    if node_name == "__end__" or not node_output:
+                        continue
+                    final.update(node_output)
     except Exception as exc:  # noqa: BLE001
         # Loud, not swallowed: the replay reports the exception as its outcome
         # rather than continuing with a state that never finished. A silent
@@ -355,7 +360,10 @@ def main(argv: list[str] | None = None) -> int:
             f"checkout is never the right base for a replay."
         )
 
-    results, skipped = collect(args)
+    # #2826: belt and braces -- the whole collection runs inert, so a write
+    # made outside the graph (a future stage, a helper) is covered too.
+    with inert_github_writes("replay"):
+        results, skipped = collect(args)
     if not results and not skipped:
         print("No recorded runs matched.")
         return 1
