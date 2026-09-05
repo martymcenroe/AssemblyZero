@@ -30,8 +30,15 @@ CLI_TIMEOUT = 600  # 10 minutes base (historical; no longer the floor)
 # floor now starts where the cap was, and both are environment-overridable so
 # that the next time the distribution outgrows a constant, the remedy is a
 # variable rather than a merge.
-FILE_TIMEOUT_FLOOR = 1200
-FILE_TIMEOUT_CAP = 1200
+#
+# #2843: at 1200 this "backstop for silence" killed two calls in one green
+# iteration of boostgauge run 15 that were still streaming (1,674 and 1,804
+# events), each costing the twenty minutes spent plus a whole-file
+# regeneration. The idle timeout is the guard against a dead call; a call
+# still producing output is not stuck, and the wall clock protects nothing
+# the cost budget does not. An hour is the outer bound for one file.
+FILE_TIMEOUT_FLOOR = 3600
+FILE_TIMEOUT_CAP = 3600
 
 #: Override names. Values are whole seconds. A missing, unparseable, or
 #: non-positive value falls back to the default rather than failing the call:
