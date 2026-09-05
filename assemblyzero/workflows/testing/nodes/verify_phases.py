@@ -705,6 +705,53 @@ def restore_best_on_failure(state: TestingWorkflowState) -> str:
     return description
 
 
+def _cap_grace(
+    state: dict,
+    iteration_count: int,
+    max_iterations: int,
+    passed_count: int,
+    coverage_achieved: float,
+) -> int | None:
+    """One more iteration past the cap when this one improved (#2841).
+
+    The base cap is a budget and stays one. But a loop that gains passing
+    tests every iteration is converging, not stagnating, and a fixed number
+    that ends it there is the coverage guard that killed run 9 wearing a
+    budget's clothes. So at the cap: if the iteration that just finished
+    passed more tests than the one before it -- or the same tests at higher
+    coverage -- the cap grows by one, up to ``GREEN_ITERATION_CEILING``. An
+    iteration that did not improve gets nothing, and the cap ends the loop
+    exactly as before.
+
+    Returns the new cap, or None when no grace applies. The caller writes the
+    new cap into state so the graph's routers, which read ``max_iterations``
+    from state, honour it too.
+    """
+    from assemblyzero.workflows.testing.state import GREEN_ITERATION_CEILING
+
+    if max_iterations >= GREEN_ITERATION_CEILING:
+        print(
+            f"    [N5] iteration cap {max_iterations} is the ceiling; no further "
+            f"grace (#2841)"
+        )
+        return None
+    previous_passed = int(state.get("previous_passed", -1) or -1)
+    previous_coverage = float(state.get("previous_coverage", -1.0) or -1.0)
+    improved = passed_count > previous_passed or (
+        passed_count == previous_passed and coverage_achieved > previous_coverage
+    )
+    if not improved:
+        return None
+    new_cap = max_iterations + 1
+    print(
+        f"    [N5] cap grace (#2841): iteration {iteration_count + 1} improved on "
+        f"the last ({previous_passed} -> {passed_count} passing, "
+        f"{previous_coverage:.1f}% -> {coverage_achieved:.1f}%); one more "
+        f"iteration, cap now {new_cap} of a ceiling of {GREEN_ITERATION_CEILING}"
+    )
+    return new_cap
+
+
 #: #2347: exception types that mean the TEST is wrong, not the code. Each one
 #: names a condition no implementation choice can satisfy on the host running
 #: it -- a platform-specific pathlib operation, a module that is not
@@ -2130,6 +2177,14 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
 
     # Check for failures
     if failed_count > 0 or error_count > 0:
+        # #2841: at the cap, an iteration that improved on the last earns one
+        # more, up to the ceiling. The grant travels in state (below).
+        if iteration_count + 1 >= max_iterations:
+            granted = _cap_grace(
+                state, iteration_count, max_iterations, passed_count, coverage_achieved
+            )
+            if granted is not None:
+                max_iterations = granted
         # Check if we've exhausted iterations
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {failed_count} failures")
@@ -2352,12 +2407,21 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "coverage_plateau_strikes": coverage_strikes,
             "freeze_tests": identity_stagnant,
         }
+        # #2841: a granted cap must reach the routers, which read it from state.
+        updates["max_iterations"] = max_iterations
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)
         return updates
 
     # Check coverage
     if coverage_achieved < coverage_target:
+        # #2841: the same grace for a loop still gaining coverage.
+        if iteration_count + 1 >= max_iterations:
+            granted = _cap_grace(
+                state, iteration_count, max_iterations, passed_count, coverage_achieved
+            )
+            if granted is not None:
+                max_iterations = granted
         # Check if we've exhausted iterations
         if iteration_count + 1 >= max_iterations:
             print(f"    [ERROR] Max iterations ({max_iterations}) reached with {coverage_achieved:.1f}% coverage")
@@ -2459,6 +2523,8 @@ def verify_green_phase(state: TestingWorkflowState) -> dict[str, Any]:
             "identity_plateau_strikes": 0,
             "coverage_plateau_strikes": coverage_strikes,
             "freeze_tests": False,
+            # #2841: a granted cap must reach the routers.
+            "max_iterations": max_iterations,
         }
         _hill_climb(state, repo_root, passed_count, coverage_achieved,
                     current_green_failures, updates)

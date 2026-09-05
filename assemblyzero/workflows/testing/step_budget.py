@@ -78,6 +78,13 @@ def recursion_limit(max_iterations: int | None = None) -> int:
     # N5 -> N4 -> N4b -> N5, once per green iteration.
     total += iterations * 3
 
+    # #2841: the iterations the cap may be granted past the base, one per
+    # improving iteration, up to the ceiling. Budgeted whether or not they are
+    # granted, so a granted iteration never runs into the recursion limit.
+    from assemblyzero.workflows.testing.state import GREEN_ITERATION_CEILING
+
+    total += max(0, GREEN_ITERATION_CEILING - DEFAULT_MAX_ITERATIONS) * 3
+
     # N5 -> N4c -> N5, once per coverage-augment attempt.
     total += MAX_COVERAGE_AUGMENT_ATTEMPTS * 2
 
