@@ -569,7 +569,7 @@ GATE_REGISTRY: tuple[Gate, ...] = (
             "only because it fired on the FIRST short revision: the return "
             "recorded a reason, and since #2793 a recorded reason routes to "
             "HALT, so route_after_review never reached its revise branch and "
-            "MAX_REVISION_CYCLES = 2 was unreachable from this site -- the "
+            "MAX_REVISION_CYCLES was unreachable from this site -- the "
             "cap was dead code. The site now records no reason under the cap "
             "and the N1 <-> N1.5 loop runs; what is left here is the "
             "allowance running out, which is a budget"
