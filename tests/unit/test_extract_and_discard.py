@@ -8,8 +8,6 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from assemblyzero.workflows.testing.nodes.review_test_plan import (
     review_test_plan,
     _mock_review_test_plan,
@@ -47,8 +45,6 @@ class TestBlockedVerdictExtraction:
         """Gemini BLOCKED → test_plan_verdict is short summary, not full response."""
         mock_root.return_value = Path("/tmp/test-repo")
         mock_prompt.return_value = "review prompt"
-
-        raw_prose = "A" * 500  # Long raw prose that should NOT appear in state
 
         mock_result = MagicMock()
         mock_result.success = True
@@ -117,16 +113,17 @@ class TestApprovedVerdictExtraction:
     @patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
     @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
     def test_markdown_verdict_rejected_not_scraped(self, mock_root, mock_prompt, mock_log):
-        """Standard 0028: the old regex fallback scraped APPROVED from this
-        markdown; now a response with no schema-valid verdict is rejected
-        with an error the stage retry acts on — nothing is stored."""
+        """Standard 0028: the old regex fallback scraped APPROVED out of prose
+        like this; a response that is neither the JSON contract nor the
+        review's own template (#2837) is rejected with an error the stage
+        retry acts on — nothing is stored."""
         mock_root.return_value = Path("/tmp/test-repo")
         mock_prompt.return_value = "review prompt"
 
         mock_result = MagicMock()
         mock_result.success = True
         mock_result.content = ""
-        mock_result.response = "## Verdict\n[x] **APPROVED** - Test plan is ready.\n\nLong explanation here..." + ("x" * 500)
+        mock_result.response = "APPROVED. The test plan is ready.\n\nLong explanation here..." + ("x" * 500)
         mock_result.input_tokens = 100
         mock_result.output_tokens = 50
 
@@ -142,6 +139,40 @@ class TestApprovedVerdictExtraction:
 
         assert "rejected" in result.get("error_message", "")
         assert "test_plan_status" not in result
+
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+    @patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+    def test_the_reviews_own_template_is_read_not_rejected(self, mock_root, mock_prompt, mock_log):
+        """#2837: the prompt's own Output Format is a markdown template with
+        one box to mark; a reviewer that follows it has given a verdict, and
+        the node reads it (standard 0028 §3) rather than ending the run."""
+        mock_root.return_value = Path("/tmp/test-repo")
+        mock_prompt.return_value = "review prompt"
+
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.content = ""
+        mock_result.response = (
+            "## Coverage Analysis\n- Requirements covered: 2/2 (100%)\n\n"
+            "## Verdict\n[X] **APPROVED** - Test plan is ready for implementation\n"
+            "[ ] **BLOCKED** - Test plan needs revision\n"
+        )
+        mock_result.input_tokens = 100
+        mock_result.output_tokens = 50
+
+        mock_provider = MagicMock()
+        mock_provider.invoke.return_value = mock_result
+        with patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider", return_value=mock_provider), \
+             patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost", return_value=0.0), \
+             patch("assemblyzero.workflows.testing.nodes.review_test_plan.check_requirement_coverage") as mock_cov:
+            mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
+
+            state = _make_state()
+            result = review_test_plan(state)
+
+        assert not result.get("error_message")
+        assert result["test_plan_status"] == "APPROVED"
 
 
 class TestFastPathCompliance:
@@ -223,7 +254,7 @@ class TestAuditFilePreservation:
                 mock_cov.return_value = {"passed": False, "total": 2, "covered": 1, "coverage_pct": 50.0, "missing": ["REQ-2"]}
 
                 state = _make_state(audit_dir=tmpdir)
-                result = review_test_plan(state)
+                review_test_plan(state)
 
             # Verify save_audit_file was called with the FULL raw response
             verdict_calls = [

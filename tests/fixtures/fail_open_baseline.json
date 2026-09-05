@@ -2,8 +2,8 @@
   "_comment": "Undeclared fail-open sites known at the time this was written (#2475). CI fails on any key not listed here. To clear one, either make the site fail closed or write '# fail-open: <reason>' on it, then regenerate with tools/audit_fail_open.py --write-baseline. Do not add keys by hand: the point is that each removal is a decision somebody made in the code.",
   "measured_against": {
     "files_scanned": 303,
-    "sites_examined": 8886,
-    "findings_total": 533
+    "sites_examined": 8917,
+    "findings_total": 534
   },
   "undeclared": [
     "assemblyzero/core/audit.py::ReviewAuditLog._read_jsonl_safe::except_handler::0",
@@ -232,7 +232,6 @@
     "assemblyzero/workflows/implementation_spec/nodes/finalize_spec.py::finalize_spec::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/retry_prompt_builder.py::_estimate_tokens::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/review_spec.py::_file_conflict_if_any::except_handler::0",
-    "assemblyzero/workflows/implementation_spec/nodes/review_spec.py::_invoke_reviewer_with_spec_schema::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/review_spec.py::review_spec::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_discover_pyproject_source_roots::except_handler::0",
     "assemblyzero/workflows/implementation_spec/nodes/validate_completeness.py::_first_party_tops::except_handler::0",
