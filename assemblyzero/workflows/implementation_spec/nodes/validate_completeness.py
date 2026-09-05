@@ -19,6 +19,7 @@ This node populates:
 """
 
 import ast
+import importlib
 import json
 import re
 import subprocess
@@ -2680,6 +2681,11 @@ class _CallSite(NamedTuple):
     #: attribute. None when the chain bottoms out in a call, subscript, or
     #: literal rather than a name.
     root: str | None
+    #: The spec-defined class whose body this call sits in, when the receiver
+    #: is ``self`` or ``cls`` (#2839). ``self.generic_visit(node)`` inside
+    #: ``class V(ast.NodeVisitor)`` is judged against V's surface, and V's
+    #: surface includes what it inherits.
+    owner: str | None = None
 
 
 class _FenceFacts(NamedTuple):
@@ -2714,6 +2720,16 @@ class _FenceFacts(NamedTuple):
     # wrong about. Only declared annotations are read; an unannotated name
     # records nothing and stays judged.
     annotated: tuple[tuple[str, str], ...] = ()
+    # (class name, base as written) for every base of every class the spec
+    # defines (#2839). `class UNICODE_STRING(ctypes.Structure)` records
+    # ("UNICODE_STRING", "ctypes.Structure"): the class's surface includes
+    # what it inherits, and `from_buffer_copy` is the standard library's to be
+    # right or wrong about, not the target repo's.
+    bases: tuple[tuple[str, str], ...] = ()
+    # (bound name, dotted module path it came from) for imports (#2839), so a
+    # bare base name resolves: `from ctypes import Structure` records
+    # ("Structure", "ctypes.Structure").
+    import_modules: tuple[tuple[str, str], ...] = ()
 
 
 class _FenceParseFailure(NamedTuple):
@@ -2886,12 +2902,20 @@ class _FenceVisitor(ast.NodeVisitor):
         self.classes: set[str] = set()
         self.opaque: set[str] = set()
         self.annotated: list[tuple[str, str]] = []
+        self.bases: list[tuple[str, str]] = []
+        self.import_modules: dict[str, str] = {}
+        self._class_stack: list[str] = []
 
     # ---- imports: receivers the target repo has no authority over (#1948) ----
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             self.imported.add(alias.asname or alias.name.split(".")[0])
+            # #2839: `import ctypes as c` binds c to ctypes; a dotted import
+            # binds its top name to itself.
+            self.import_modules[alias.asname or alias.name.split(".")[0]] = (
+                alias.name if alias.asname else alias.name.split(".")[0]
+            )
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
@@ -2900,6 +2924,10 @@ class _FenceVisitor(ast.NodeVisitor):
         for alias in node.names:
             if alias.name != "*":
                 self.imported.add(alias.asname or alias.name)
+                if node.module:
+                    self.import_modules[alias.asname or alias.name] = (
+                        f"{node.module}.{alias.name}"
+                    )
         self.generic_visit(node)
 
     # ---- definitions the spec itself supplies ----
@@ -2999,7 +3027,13 @@ class _FenceVisitor(ast.NodeVisitor):
         # annotation — `Gauge()` is a Gauge. Recorded separately from `defined`,
         # which mixes classes, functions and self-attributes.
         self.classes.add(node.name)
+        # #2839: the bases, as written, so the class's inherited surface can be
+        # resolved once every fence has been read.
+        for base in node.bases:
+            self.bases.append((node.name, ast.unparse(base)))
+        self._class_stack.append(node.name)
         self.generic_visit(node)
+        self._class_stack.pop()
 
     # ---- bindings: what each name actually holds ----
 
@@ -3105,12 +3139,23 @@ class _FenceVisitor(ast.NodeVisitor):
         if isinstance(node.func, ast.Attribute):
             receiver = _receiver_key(node.func.value)
             if receiver is not None:
+                # #2839: `self.x()` / `cls.x()` directly on the instance belongs
+                # to the enclosing class; `self.root.x()` keys on `root` and is
+                # somebody else's.
+                owner = None
+                if (
+                    self._class_stack
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in ("self", "cls")
+                ):
+                    owner = self._class_stack[-1]
                 self.calls.append(
                     _CallSite(
                         receiver,
                         node.func.attr,
                         self._site(node),
                         _leftmost_name(node.func.value),
+                        owner,
                     )
                 )
         self.generic_visit(node)
@@ -3143,7 +3188,84 @@ def _fence_facts_ast(block: str) -> _FenceFacts:
         classes=frozenset(visitor.classes),
         opaque=frozenset(visitor.opaque),
         annotated=tuple(visitor.annotated),
+        bases=tuple(visitor.bases),
+        import_modules=tuple(sorted(visitor.import_modules.items())),
     )
+
+
+def _resolve_stdlib_class(dotted: str) -> type | None:
+    """The standard-library class a dotted name denotes, or None (#2839).
+
+    Only standard-library modules are ever imported here: they are already
+    loaded or loadable without side effects, and ``sys.stdlib_module_names``
+    is a closed set. A third-party base (pydantic, Pillow) is never imported
+    and resolves to None, which the caller reads as "cannot say", not "wrong".
+    """
+    root, *rest = dotted.split(".")
+    if root not in _STDLIB_MODULE_NAMES:
+        return None
+    try:
+        obj: Any = importlib.import_module(root)
+        for part in rest:
+            obj = getattr(obj, part)
+    except (ImportError, AttributeError, ValueError):
+        # fail-open: a name the standard library does not have resolves to
+        # nothing, and nothing abstains -- unresolved is not hallucinated.
+        return None
+    return obj if isinstance(obj, type) else None
+
+
+def _inherited_surfaces(
+    class_bases: dict[str, list[str]],
+    import_modules: dict[str, str],
+    spec_classes: set[str],
+) -> dict[str, set[str] | None]:
+    """What each spec-defined class inherits from bases the target repo does
+    not own (#2839).
+
+    For every class: an empty set when its bases are all its own (spec- or
+    repo-defined) -- judged exactly as before; the union of ``dir()`` over
+    every base that resolves to a standard-library class; or None when some
+    base is a foreign import the checker cannot resolve, in which case methods
+    on the class abstain. Spec-defined bases contribute their own surface, to
+    a fixed point, so ``class B(A)`` with ``class A(ast.NodeVisitor)`` inherits
+    the visitor's methods too.
+    """
+    surfaces: dict[str, set[str] | None] = {}
+
+    def surface_of(cls: str, seen: frozenset[str]) -> set[str] | None:
+        if cls in surfaces:
+            return surfaces[cls]
+        result: set[str] | None = set()
+        for base in class_bases.get(cls, []):
+            root = base.split(".", 1)[0]
+            if root in spec_classes:
+                if root in seen:
+                    continue
+                inherited = surface_of(root, seen | {cls})
+                if inherited is None:
+                    result = None
+                    break
+                result |= inherited
+                continue
+            dotted = base
+            if root in import_modules:
+                dotted = import_modules[root] + base[len(root):]
+            resolved = _resolve_stdlib_class(dotted)
+            if resolved is None:
+                result = None
+                break
+            # The class's own attributes, plus its metaclass's: ctypes puts
+            # `from_buffer_copy` on `_ctypes.PyCStructType`, so it answers to
+            # `hasattr(ctypes.Structure, ...)` but is absent from `dir()` of
+            # the class. Run 15's exhibit was exactly that call.
+            result |= set(dir(resolved)) | set(dir(type(resolved)))
+        surfaces[cls] = result
+        return result
+
+    for cls in class_bases:
+        surface_of(cls, frozenset())
+    return surfaces
 
 
 def _scan_fences(text: str) -> _ScanResult:
@@ -3363,6 +3485,24 @@ def _flag_calls(
                 unresolved |= bound
                 changed = True
 
+    # #2839: a spec-defined class's surface includes its bases'. Resolve what
+    # each class inherits from bases the target repo does not own, and which
+    # bound names hold an instance of which class.
+    class_bases: dict[str, list[str]] = {}
+    import_modules: dict[str, str] = {}
+    for fence in facts:
+        for cls, base in fence.bases:
+            class_bases.setdefault(cls, []).append(base)
+        import_modules.update(dict(fence.import_modules))
+    inherited = _inherited_surfaces(class_bases, import_modules, spec_classes)
+    instance_class: dict[str, str] = {}
+    for bound, source in assignments:
+        if len(source) == 1 and len(bound) == 1:
+            (src,) = source
+            if src in spec_classes:
+                (name,) = bound
+                instance_class[name] = src
+
     flagged: dict[str, list[str]] = {}  # method_name -> list of call sites
     for fence in facts:
         for call in fence.calls:
@@ -3398,6 +3538,18 @@ def _flag_calls(
                 continue
             if call.method in symbol_set or call.method in spec_defined:
                 continue
+            # #2839: the receiver is a spec-defined class -- the class itself,
+            # an instance bound from its constructor, or `self` in its body --
+            # and the method is one the class inherits from a standard-library
+            # base, or the class has a foreign base the checker cannot resolve.
+            owner = call.owner or (
+                call.receiver if call.receiver in spec_classes
+                else instance_class.get(call.receiver)
+            )
+            if owner is not None and owner in inherited:
+                surface = inherited[owner]
+                if surface is None or call.method in surface:
+                    continue
             # #2526: a method every Python object of a builtin type carries is
             # never a hallucinated PROJECT API, whoever the receiver is.
             # `str.isupper` on an AST walk killed a run that had passed the
