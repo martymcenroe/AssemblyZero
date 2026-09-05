@@ -1,0 +1,22 @@
+```json
+{
+  "issues": [
+    {
+      "category": "CONFLICTING CRITERIA",
+      "quote_1": "Collector returns accurate memory %, process count, handle count — process count equals psutil's row count ±1; handle count within 1 % of psutil's `num_handles` sum. Measured the same way as the ConPTY count: up to three back-to-back pairs",
+      "quote_2": "Memory % is the one direct `psutil.virtual_memory().percent` read taken on the tick; it is not cross-checked against a second live read and carries no tolerance, because there is no second reading to compare — a test asserts the field is that call's value on a mocked or injected `virtual_memory()`",
+      "divergence": "These statements specify mutually exclusive test implementations for the Memory % metric within the exact same acceptance criterion. Quote 1 groups Memory % with process and handle counts, requiring a live integration test that takes 'up to three back-to-back pairs' against live OS state. Quote 2 explicitly forbids a live cross-check and dictates a unit test against a mocked `virtual_memory()`. A developer must guess which test strategy to build, and choosing the live cross-check will result in flaky failures (as noted in ruling #433), wasting the run."
+    },
+    {
+      "category": "UNDEFINED OR MULTIPLY-DEFINED TERMS",
+      "term": "Python interpreter",
+      "description": "The requirements dictate counting rows whose 'process name is a Python interpreter', but never define the concrete set of process names this entails. It is ambiguous whether this strictly means 'python.exe', or should also include 'pythonw.exe', 'python3.exe', 'py.exe', etc. Guessing the wrong set of executable names will cause valid sessions to be missed or the wrong processes to be counted."
+    },
+    {
+      "category": "NON-DISCRIMINATING TESTS",
+      "test_case": "Unleashed session detection works: a row counts only when its process name ... is a Python interpreter AND its cmdline ... matches the unleashed-c-*.py signature",
+      "description": "Because the target set of 'Python interpreter' process names is undefined, a test case that simply asserts a mocked 'python.exe' row is counted will pass under all plausible readings (since everyone agrees 'python.exe' is an interpreter). The test fails to discriminate or reveal whether the implementation correctly supports other intended interpreter names (like 'pythonw.exe'), leaving the ambiguity unresolved."
+    }
+  ]
+}
+```

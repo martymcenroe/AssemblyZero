@@ -114,7 +114,8 @@ class TestN0cGate:
 
     def test_fenced_json_is_tolerated(self):
         parsed = _parse_analysis(f"```json\n{CONSISTENT_JSON}\n```")
-        assert parsed == {"is_consistent": True, "conflicts": []}
+        # #2830: the parser always returns the canonical shape, notes included.
+        assert parsed == {"is_consistent": True, "conflicts": [], "notes": []}
 
     def test_route_halts_on_error_message(self):
         assert (

@@ -1,0 +1,10 @@
+[
+  {
+    "type": "CONFLICTING CRITERIA",
+    "quotes": [
+      "< 1% CPU overhead at 2s polling interval",
+      "the sweep's mean process_time over 8 ticks is < 20 ms"
+    ],
+    "explanation": "The requirement demands the CPU overhead of the entire 2-second polling interval be under 1% (< 20 ms per tick). However, the benchmark test intended to assert this explicitly measures only 'the sweep\\'s mean process_time'. The Implementation section strictly defines 'the sweep' as solely the NtQuerySystemInformation call, explicitly excluding the psutil calls for memory and per-row cmdline ('It is a dependency, not the sweep'). These statements specify different outcomes for an implementation where the sweep takes 2 ms but the psutil cmdline reads take 50 ms: the requirement dictates it fails the < 1% overhead limit, but the prescribed test dictates it passes."
+  }
+]
