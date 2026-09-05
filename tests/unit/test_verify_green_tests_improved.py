@@ -150,18 +150,35 @@ class TestGenuineStagnationIsStillDetected:
         assert result["coverage_plateau_strikes"] == 1
 
     @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
-    def test_max_iterations_still_wins_over_test_progress(self, mock_pytest):
-        """The iteration budget is the outer bound; improving tests must not
-        let a run spend past it."""
+    def test_the_base_cap_grants_one_more_to_test_progress(self, mock_pytest):
+        """#2841: at the base cap, an iteration that passed more tests than the
+        last earns one more iteration; the cap in state grows by one."""
         mock_pytest.return_value = _pytest(1, passed=15, failed=0, coverage=94)
         result = verify_green_phase(
             _state(previous_passed=14, previous_coverage=94.0, iteration_count=4,
                    max_iterations=5, previous_green_failures=["test_decay"])
         )
 
+        assert result["next_node"] != "end", result.get("error_message")
+        assert result["max_iterations"] == 6
+
+    @patch("assemblyzero.workflows.testing.nodes.verify_phases.run_pytest")
+    def test_the_ceiling_still_wins_over_test_progress(self, mock_pytest):
+        """The ceiling is the outer bound; improving tests must not let a run
+        spend past it (#2841)."""
+        from assemblyzero.workflows.testing.state import GREEN_ITERATION_CEILING
+
+        mock_pytest.return_value = _pytest(1, passed=15, failed=0, coverage=94)
+        result = verify_green_phase(
+            _state(previous_passed=14, previous_coverage=94.0,
+                   iteration_count=GREEN_ITERATION_CEILING - 1,
+                   max_iterations=GREEN_ITERATION_CEILING,
+                   previous_green_failures=["test_decay"])
+        )
+
         assert result["next_node"] == "end"
         assert "Max iterations" in result.get("error_message", "") or \
-               "after 5 iterations" in result.get("error_message", "")
+               f"after {GREEN_ITERATION_CEILING} iterations" in result.get("error_message", "")
 
 
 class TestReachingTargetIsUnaffected:
