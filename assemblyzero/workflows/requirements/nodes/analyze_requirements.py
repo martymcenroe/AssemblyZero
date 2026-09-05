@@ -66,6 +66,7 @@ report.
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -470,6 +471,45 @@ def _halt_unverified(state: dict, answered_by: str, reason: str) -> dict[str, An
     return {"error_message": message, "requirements_unverified": reason}
 
 
+#: A heading that opens the issue's provenance section -- the dated log of
+#: rulings and the superseded text each one replaced. Any heading level,
+#: case-insensitive, matched on a whole line outside fenced code (#2870).
+_HISTORY_HEADING = re.compile(
+    r"^\s{0,3}#{1,6}\s*(revision history|revision log|changelog|change log|"
+    r"history|rulings|log of rulings)\b",
+    re.IGNORECASE,
+)
+
+
+def requirements_text(issue_body: str) -> tuple[str, int]:
+    """The body above its revision history, and how many lines were set aside.
+
+    #2870: boostgauge #4's launches 21 and 22 halted at this gate on
+    requirements that had passed it six times that day. The second halt's
+    reasoning said why -- "the historical recommendation mentioned in the
+    revision history." The history is a dated log of rulings; each entry
+    quotes the superseded sentence it replaced, because that is what a ruling
+    record does. Handed to the model as part of the requirements, every one
+    of those sentences reads as a live contradiction of the criterion that
+    replaced it, and the log grows by one entry per ruling. The gate was
+    being fed the record of its own past false positives.
+
+    A body with no history heading is returned whole with zero excluded. A
+    heading inside a fenced code block is text, not structure, and is not a
+    cut point.
+    """
+    lines = issue_body.splitlines()
+    in_fence = False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and _HISTORY_HEADING.match(line):
+            kept = "\n".join(lines[:index]).rstrip()
+            return kept, len(lines) - index
+    return issue_body, 0
+
+
 def analyze_requirements(state: dict) -> dict[str, Any]:
     """N0c node body.
 
@@ -505,7 +545,16 @@ def analyze_requirements(state: dict) -> dict[str, Any]:
             state, drafter_spec, f"invalid provider '{drafter_spec}': {e}"
         )
 
-    content = f"# Issue: {issue_title}\n\n{issue_body}"
+    # #2870: the gate judges the requirements. The revision history below
+    # them is provenance -- superseded text, quoted on purpose -- and is not
+    # handed to the model as something to find contradictions in.
+    judged, excluded = requirements_text(issue_body)
+    if excluded:
+        print(
+            f"  [N0c] judging {len(judged.splitlines())} lines of requirements; "
+            f"revision history ({excluded} lines) excluded as provenance (#2870)"
+        )
+    content = f"# Issue: {issue_title}\n\n{judged}"
 
     def _invoke(active_provider):
         schema_kwargs: dict[str, Any] = {}
