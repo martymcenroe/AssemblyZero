@@ -80,8 +80,9 @@ def test_schema_valid_verdict_proceeds(
 def test_markdown_verdict_is_rejected_loudly(
     mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
 ):
-    """The old regex fallback would have scraped APPROVED out of this
-    markdown; under standard 0028 the review is rejected with an error the
+    """The old regex fallback would have scraped APPROVED out of prose like
+    this; under standard 0028 a response that is neither the JSON contract
+    nor the review's own template (#2837) is rejected with an error the
     stage retry machinery acts on."""
     from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
     from assemblyzero.core.llm_provider import GeminiProvider
@@ -91,13 +92,44 @@ def test_markdown_verdict_is_rejected_loudly(
     mock_cost.return_value = 0.0
     mock_provider.return_value = MagicMock(spec=GeminiProvider)
     mock_with_retry.return_value = _llm_result(
-        "## Verdict\n[X] **APPROVED** — all good"
+        "APPROVED — all good, ship it."
     )
 
     result = review_test_plan(_state_forcing_llm_path())
     assert result.get("error_message"), "unparseable verdict must reject, not proceed"
     assert "rejected" in result["error_message"]
     assert "test_plan_status" not in result
+
+
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.load_review_prompt")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_repo_root")
+@patch("assemblyzero.utils.retry.with_retry")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_provider")
+@patch("assemblyzero.workflows.testing.nodes.review_test_plan.get_cumulative_cost")
+def test_the_reviews_own_template_is_a_verdict(
+    mock_cost, mock_provider, mock_with_retry, mock_root, mock_prompt, mock_log,
+):
+    """#2837: the prompt's own Output Format is a markdown template with one
+    box to mark; a reviewer that follows it has answered, and the node reads
+    it as our own format (standard 0028 §3) instead of ending the run."""
+    from assemblyzero.workflows.testing.nodes.review_test_plan import review_test_plan
+    from assemblyzero.core.llm_provider import GeminiProvider
+
+    mock_root.return_value = Path("/tmp/test-repo")
+    mock_prompt.return_value = "review prompt"
+    mock_cost.return_value = 0.0
+    mock_provider.return_value = MagicMock(spec=GeminiProvider)
+    mock_with_retry.return_value = _llm_result(
+        "## Coverage Analysis\n- Requirements covered: 2/2 (100%)\n\n"
+        "## Verdict\n[ ] **APPROVED** - Test plan is ready for implementation\n"
+        "[X] **BLOCKED** - Test plan needs revision\n\n"
+        "## Required Changes (if BLOCKED)\n1. T030 must assert on a mocked virtual_memory().\n"
+    )
+
+    result = review_test_plan(_state_forcing_llm_path())
+    assert not result.get("error_message")
+    assert result["test_plan_status"] == "BLOCKED"
 
 
 @patch("assemblyzero.workflows.testing.nodes.review_test_plan.log_workflow_execution")

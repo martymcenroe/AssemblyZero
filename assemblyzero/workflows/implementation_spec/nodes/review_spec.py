@@ -214,7 +214,8 @@ def _invoke_reviewer_with_spec_schema(
                 )
                 return template, ""
             return None, (
-                f"unreadable twice -- first: {first.reason}; re-ask: {second.reason}"
+                "structured contract violated in review_spec: unreadable twice -- "
+                f"first: {first.reason}; re-ask: {second.reason}"
                 f" | response begins: {second.excerpt!r}"
             )
 
